@@ -1,0 +1,16 @@
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+a {
+  color: var(--color-primary);
+}
+
+/* Opt-in reading measure for form-heavy pages inside the now full-bleed admin shell. */
+.u-measure {
+  max-width: var(--content-measure);
+  margin-inline: auto;
+}

@@ -1,0 +1,30 @@
+packages:
+  - playground
+  # Opt-in extension layers (own packages, NOT bundled with `kestrel`): a consumer composes them after the
+  # core, e.g. extends: ['@thielemann/kestrel', 'kestrel-secure-gallery']. The core's `files` whitelist excludes this dir.
+  - extensions/*
+
+overrides:
+  # Security audit fixes for transitive deps (see audit.log / pnpm audit). NOTE: these are pnpm-workspace
+  # overrides — they harden THIS repo's install; they are NOT published to (nor inherited by) consumers of
+  # the `kestrel` package, who get their own transitive resolutions.
+  # undici comes in via jsdom, which is a RUNTIME dependency (server-side SVG sanitisation, sanitize-svg.ts) —
+  # NOT dev/test-only. 7 advisories incl. 3 high; jsdom@29 wants ^7.25.0.
+  undici: ^7.28.0
+  # esbuild: forces the vite chain (0.27.x/0.28.0 → 0.28.1, fixes the low) and the
+  # deprecated drizzle-kit > @esbuild-kit > esbuild@0.18.20 (fixes the moderate).
+  # Both are dev-server advisories; non-exploitable here. Smoke-test drizzle-kit after install.
+  esbuild: ^0.28.1
+  # brace-expansion (GHSA-mh99-v99m-4gvg) has NO override and stays red in `pnpm audit` on purpose: the
+  # fix exists only on the 5.x line, and forcing it onto the 2.x copy breaks its consumers — minimatch 5/9
+  # call the module as a callable default export, which 5.x no longer provides (named `expand` only).
+  # It reaches the tree via nitropack's archiver (Azure preset — no `nitro.preset` is set here, so it never
+  # runs) and @vue/test-utils' html() pretty-printer, both fed developer-written brace patterns. Revisit when
+  # @vue/test-utils publishes its js-beautify v2 bump or nitropack moves to archiver ^8.
+
+allowBuilds:
+  '@parcel/watcher': true
+  better-sqlite3: true
+  esbuild: true
+  sharp: true
+  vue-demi: true

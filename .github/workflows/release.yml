@@ -1,0 +1,59 @@
+name: Release
+
+# Publishes the engine and both extensions to npm when a v* tag is pushed.
+#
+# Authentication is npm **trusted publishing** (OIDC): npm verifies this workflow's identity against the
+# trusted publisher configured on each package, so no npm token exists in the repository, in the org, or
+# on any machine. It also produces a provenance attestation linking the tarball to this commit and
+# workflow run — which is why `id-token: write` is required.
+#
+# One-time setup per package on npmjs.com → Settings → Trusted publishers:
+#   repository thielemann/kestrel · workflow .github/workflows/release.yml · environment (leave empty)
+# The scope must exist first; publish the first version manually (`npm publish --access public`) or create
+# the package placeholder, since a trusted publisher cannot be configured for a package that does not exist.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC trusted publishing + provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Never publish a red tree. These are the same gates CI runs, minus e2e — a tag is cut from a commit
+      # that already passed CI on main, and re-running the browser suite here would only add flake surface.
+      - run: pnpm test
+      - run: pnpm test:nuxt
+      - run: pnpm typecheck
+      - run: pnpm build
+
+      - name: Verify the tag matches the manifest version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          test "$tag" = "$pkg" || { echo "tag v$tag does not match package.json $pkg"; exit 1; }
+
+      # npm >= 11.5.1 is required for trusted publishing; the runner's bundled npm may be older.
+      - run: npm install -g npm@latest
+
+      - name: Publish engine
+        run: npm publish
+      - name: Publish galleries-secure
+        run: npm publish
+        working-directory: extensions/galleries-secure
+      - name: Publish galleries-secure-proofing
+        run: npm publish
+        working-directory: extensions/galleries-secure-proofing

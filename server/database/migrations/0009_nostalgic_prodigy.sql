@@ -1,0 +1,1 @@
+ALTER TABLE `settings` DROP COLUMN `og_image_id`;

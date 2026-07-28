@@ -1,0 +1,34 @@
+# Dependencies
+node_modules
+
+# Nuxt / Nitro build output
+.nuxt
+.nuxtrc
+.output
+.nitro
+.cache
+dist
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Runtime database (migrations under server/database/migrations are committed)
+.data
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+
+# Packaged tarballs (npm pack / release artifacts)
+*.tgz

@@ -1,0 +1,82 @@
+@use 'mixins' as *;
+
+// Shared chrome for the date pickers. The calendar popover is teleported to <body> by Reka, so these
+// must stay GLOBAL (non-scoped) — a `scoped` block would silently drop them. Both DatePicker and
+// DateRangePicker @include this so neither silently borrows the other's styles (`__sep` is only used
+// by the range variant, the rest by both).
+@mixin ui-datepicker {
+  .ui-datepicker {
+    &__field {
+      display: inline-flex;
+      align-items: center;
+      gap: 1px;
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--color-control-border, var(--color-border));
+      border-radius: var(--radius-md);
+      background: var(--color-surface);
+
+      &[aria-invalid='true'] { border-color: var(--color-danger); }
+    }
+    &__segment {
+      @include focus-ring;
+      padding: 0 1px;
+      border-radius: var(--radius-sm);
+
+      &[data-placeholder] { color: var(--color-text-muted); }
+      // The fill alone can't tell a keyboard user which segment the arrow keys will change (reka hides
+      // the caret), so the ring has to survive it — only pointer focus drops the outline.
+      &:focus { background: var(--color-active); color: var(--color-text); }
+      &:focus:not(:focus-visible) { outline: none; }
+    }
+    &__sep { margin: 0 var(--space-2); color: var(--color-text-muted); }
+    &__trigger {
+      @include focus-ring;
+      margin-inline-start: var(--space-2);
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+    &__content {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-md);
+      padding: var(--space-3);
+      z-index: var(--z-dropdown);
+    }
+    &__header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-2);
+    }
+    &__nav {
+      @include focus-ring;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      font-size: var(--text-lg);
+      padding: 0 var(--space-2);
+    }
+    &__heading { font-weight: var(--weight-medium); font-size: var(--text-sm); }
+    &__weekday { font-size: var(--text-sm); color: var(--color-text-muted); padding: var(--space-1); font-weight: var(--weight-normal); }
+    &__cell {
+      @include focus-ring;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2rem;
+      height: 2rem;
+      border: 0;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--color-text);
+      cursor: pointer;
+
+      &[data-today] { font-weight: var(--weight-bold); }
+      &[data-selected] { background: var(--color-primary); color: var(--color-on-primary); }
+      &[data-outside-view] { color: var(--color-text-muted); }
+      &[data-disabled] { opacity: 0.4; cursor: not-allowed; }
+    }
+  }
+}

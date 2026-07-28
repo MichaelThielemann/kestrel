@@ -1,0 +1,83 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1780439720666,
+      "tag": "0000_purple_iron_patriot",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1780601888757,
+      "tag": "0001_strange_vertigo",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1780784834007,
+      "tag": "0002_curvy_ultragirl",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1782193944640,
+      "tag": "0003_settings_seo_menu",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1782314919075,
+      "tag": "0004_durable_publish_deps",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1782317281634,
+      "tag": "0005_record_refs",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1782417087357,
+      "tag": "0006_posts_path",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1782418385001,
+      "tag": "0007_publish_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1783502732998,
+      "tag": "0008_jazzy_owl",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1783709507319,
+      "tag": "0009_nostalgic_prodigy",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1783713436149,
+      "tag": "0010_neat_sauron",
+      "breakpoints": true
+    }
+  ]
+}

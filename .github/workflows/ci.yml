@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Unit + DOM
+        run: pnpm test
+      - name: Nuxt environment
+        run: pnpm test:nuxt
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Build
+        run: pnpm build
+      - name: Static generate
+        run: pnpm generate
+
+      # The e2e suite boots a real dev server and drives Chromium; each spec file starts its own server on
+      # the shared .nuxt dir, which is why the config pins fileParallelism: false. Keep it last: it is by
+      # far the slowest step, and a failure here is more useful once the cheaper gates are known green.
+      - name: Install Chromium for e2e
+        run: node node_modules/playwright-core/cli.js install --with-deps chromium
+      - name: End-to-end
+        run: pnpm test:e2e

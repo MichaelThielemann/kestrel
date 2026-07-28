@@ -1,0 +1,1 @@
+CREATE INDEX `media_folder` ON `media` (`folder`);

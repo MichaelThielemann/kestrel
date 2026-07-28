@@ -1,0 +1,41 @@
+{
+  "name": "@thielemann/kestrel-galleries-secure",
+  "version": "1.0.0",
+  "description": "Opt-in Kestrel extension: a zero-knowledge encrypted gallery (images + folder names encrypted client-side with a password; the server only ever stores ciphertext).",
+  "type": "module",
+  "main": "./nuxt.config.ts",
+  "//publish": "An opt-in extension LAYER — never bundled with `kestrel`. A consumer composes it AFTER the core: extends: ['kestrel', 'kestrel-galleries-secure']. `main` points at the layer's nuxt.config so the bare specifier resolves (same rule as the core). To publish: drop `private`, then `npm publish`; `files` ships the layer entry + server/ + app/, minus tests.",
+  "files": [
+    "NOTICE",
+    "nuxt.config.ts",
+    "server",
+    "app",
+    "!**/*.test.ts",
+    "!**/*.dom.test.ts",
+    "!**/*.nuxt.test.ts"
+  ],
+  "peerDependencies": {
+    "drizzle-orm": "^0.45.0",
+    "vue": "^3.5.0",
+    "zod": "^4.0.0",
+    "@thielemann/kestrel": "*"
+  },
+  "devDependencies": {
+    "@thielemann/kestrel": "workspace:*",
+    "drizzle-orm": "^0.45.0",
+    "vue": "3.5.35",
+    "zod": "^4.0.0"
+  },
+  "license": "Apache-2.0",
+  "author": "Michael Thielemann <283621694+MichaelThielemann@users.noreply.github.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thielemann/kestrel.git",
+    "directory": "extensions/galleries-secure"
+  },
+  "bugs": "https://github.com/thielemann/kestrel/issues",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

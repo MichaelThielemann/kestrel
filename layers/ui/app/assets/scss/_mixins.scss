@@ -1,0 +1,50 @@
+// Focus ring is INSET (negative offset, drawn within the border-box) so a scrolling/overflow ancestor
+// can never clip it at an edge — and so the ring looks identical across every component, whether it
+// @includes this mixin or mirrors it inline.
+@mixin focus-ring {
+  &:focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: -2px;
+  }
+}
+
+@mixin sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+// Shared chrome for text-like form controls (input/textarea/select/time). Per-component extras
+// (width, ::placeholder, resize, …) stay in the component.
+@mixin input-base {
+  @include focus-ring;
+  padding: var(--space-2) var(--space-3);
+  // Interactive control boundary needs 3:1 (WCAG 1.4.11). Admin themes define --color-control-border;
+  // the public SSG site has no such token, so it falls back to --color-border (unchanged there).
+  border: 1px solid var(--color-control-border, var(--color-border));
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-base);
+
+  &[aria-invalid='true'] {
+    border-color: var(--color-danger);
+  }
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+// Slim variant of `input-base`'s box, for dense chrome (e.g. the preview toolbar's W×H fields). ONLY the
+// padding shrinks: at the unchanged --text-base the control still measures ~29px tall, clearing the 24×24
+// minimum target size (WCAG 2.2 SC 2.5.8, AA). Do not also shrink the font — that would drop under it.
+@mixin input-slim {
+  padding: var(--space-1) var(--space-2);
+}

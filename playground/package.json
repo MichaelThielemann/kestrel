@@ -1,0 +1,17 @@
+{
+  "name": "kestrel-playground",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxi dev --dotenv ../.env",
+    "build": "nuxi build --dotenv ../.env"
+  },
+  "dependencies": {
+    "@thielemann/kestrel": "workspace:*",
+    "@thielemann/kestrel-galleries-secure": "workspace:*",
+    "@thielemann/kestrel-galleries-secure-proofing": "workspace:*"
+  },
+  "devDependencies": {
+    "nuxt": "^4.4.7"
+  }
+}
