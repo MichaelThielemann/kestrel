@@ -1,0 +1,22 @@
+{
+  "name": "{{name}}",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "preview": "nuxt preview",
+    "generate": "nuxt generate",
+    "typecheck": "nuxt prepare && nuxt typecheck && tsc -p .nuxt/tsconfig.server.json --noEmit",
+    "hash-password": "kestrel hash-password",
+    "doctor": "kestrel doctor"
+  },
+  "dependencies": {
+    "@michaelthielemann/kestrel": "{{version}}"
+  },
+  "devDependencies": {
+    "nuxt": "{{nuxtVersion}}",
+    "typescript": "{{typescriptVersion}}",
+    "vue-tsc": "{{vueTscVersion}}"
+  }
+}

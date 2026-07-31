@@ -52,7 +52,7 @@ export interface SessionSettings {
   cookieName: string
 }
 
-export function sessionSettings(): SessionSettings {
+export function sessionSettings({ prerender = import.meta.prerender === true } = {}): SessionSettings {
   // Treat anything that isn't an EXPLICIT dev signal as production for these safeguards, so a deployment
   // that simply omits NODE_ENV (a common slip when launching `.output/server/index.mjs`) is hardened —
   // not silently downgraded to dev, which would tolerate a missing secret + non-Secure cookies. Vitest
@@ -60,7 +60,10 @@ export function sessionSettings(): SessionSettings {
   const explicitDev = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test' || process.env.KESTREL_DEV === '1'
   const isProd = !explicitDev
   const secureCookies = process.env.KESTREL_SECURE_COOKIES !== 'false'
-  if (isProd && !secureCookies) {
+  // `nuxt generate` prerenders every page through `/api/route`, which passes the access guard and lands
+  // here with NODE_ENV=production. A prerender request never issues a cookie, so enforcing the flag there
+  // only means a dev `.env` silently drops pages from the static output.
+  if (isProd && !secureCookies && !prerender) {
     throw new Error('KESTREL_SECURE_COOKIES=false is not allowed in production')
   }
   const rawMaxAge = Number(process.env.KESTREL_SESSION_MAX_AGE)

@@ -1,0 +1,45 @@
+{
+  "name": "create-kestrel",
+  "version": "1.3.0",
+  "description": "Scaffold a Kestrel site: `pnpm create kestrel my-site`.",
+  "license": "Apache-2.0",
+  "author": "Michael Thielemann <283621694+MichaelThielemann@users.noreply.github.com>",
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
+    "directory": "packages/create-kestrel"
+  },
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues",
+  "keywords": [
+    "cms",
+    "nuxt",
+    "kestrel",
+    "create",
+    "scaffold"
+  ],
+  "type": "module",
+  "bin": {
+    "create-kestrel": "./index.mjs"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "//payload": "`templates` and `lib` are NOT in git — `prepack` copies them from the engine at the repo root so there is exactly one source and drift is impossible, and `postpack` removes them again. From a checkout the bin falls back to the engine's own paths, so it runs without packing. `version` must be bumped together with the engine's: release.yml's tag guard reads only the root manifest, and prepack CANNOT fix a mismatch because npm reads this manifest before running it. test/create-kestrel.test.ts pins the two equal, and prepack refuses to pack a mismatch.",
+  "files": [
+    "index.mjs",
+    "lib",
+    "templates",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "prepack": "node ../../scripts/copy-create-payload.mjs",
+    "postpack": "node ../../scripts/copy-create-payload.mjs --clean"
+  }
+}

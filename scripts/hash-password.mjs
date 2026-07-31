@@ -1,26 +1,17 @@
-import { scryptSync, randomBytes } from 'node:crypto'
 import { createInterface } from 'node:readline'
+import { hashPassword } from './lib/password.mjs'
 
-const N = 2 ** 17
-const r = 8
-const p = 1
-const KEYLEN = 64
-const MAXMEM = 256 * 1024 * 1024
-
-function make(password) {
-  const salt = randomBytes(16)
-  const hash = scryptSync(password, salt, KEYLEN, { N, r, p, maxmem: MAXMEM })
-  return `scrypt$${N}$${r}$${p}$${salt.toString('base64url')}$${hash.toString('base64url')}`
-}
-
+// Not used at runtime: this prints a value an operator pastes into KESTREL_ADMIN_PASSWORD_HASH. Kept as a
+// standalone entry point because docs/consuming-kestrel.md tells consumers to run it straight out of
+// node_modules, which must keep working whether or not the `kestrel` bin is on PATH.
 const arg = process.argv[2]
 if (arg) {
-  process.stdout.write(make(arg) + '\n')
+  process.stdout.write(hashPassword(arg) + '\n')
 } else {
   const rl = createInterface({ input: process.stdin, terminal: false })
   process.stderr.write('Enter password, then press Enter:\n')
   rl.on('line', (line) => {
-    process.stdout.write(make(line) + '\n')
+    process.stdout.write(hashPassword(line) + '\n')
     rl.close()
   })
 }

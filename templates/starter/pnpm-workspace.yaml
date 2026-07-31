@@ -1,0 +1,8 @@
+# pnpm blocks dependency build scripts unless they are listed here, and Kestrel's SQLite driver and image
+# pipeline are native — without this `pnpm install` completes but the app cannot start. Delete this file
+# if you use npm or yarn. (`pnpm.onlyBuiltDependencies` in package.json is silently ignored on pnpm 11.)
+allowBuilds:
+  '@parcel/watcher': true
+  better-sqlite3: true
+  esbuild: true
+  sharp: true

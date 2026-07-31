@@ -6,7 +6,7 @@ and a full admin UI from those definitions, and renders published content to sta
 `nuxt generate` — there is **no live public SSR**.
 
 Built on **Nuxt 4 layers + Drizzle/SQLite + Zod**. The whole CMS is a stack of swappable Nuxt layers, so
-a consumer extends it (`extends: ['@thielemann/kestrel']`) and drops in their own collection/field/block definitions.
+a consumer extends it (`extends: ['@michaelthielemann/kestrel']`) and drops in their own collection/field/block definitions.
 
 ## What Kestrel is — and isn't
 
@@ -35,6 +35,9 @@ static host. It is deliberately **not**:
 
 ## Features
 
+- **Runnable in one command** — `pnpm create kestrel` scaffolds a project that boots with a working
+  `/admin`, prompting for the admin password and writing its hash; `kestrel init` does the same to an
+  existing project without clobbering it, and `kestrel doctor` names whatever is still missing.
 - **Collection-driven** — declare collections + fields in TypeScript; Kestrel derives the SQLite tables, a
   typed CRUD REST API, and the full admin UI. The schema **migrates itself** (additive in dev; explicit
   `db:migrate` in prod).
@@ -59,13 +62,29 @@ static host. It is deliberately **not**:
 ## Quickstart (consumer)
 
 ```bash
-pnpm add @thielemann/kestrel
+pnpm create kestrel my-site
+cd my-site && pnpm install && pnpm dev
 ```
+
+It asks for an admin password and writes a project that runs as-is: `nuxt.config.ts` extending the
+meta-layer, an `app.vue` that renders, a `.env` holding a fresh session secret and the scrypt hash of
+your password, and one example block. Sign in at <http://localhost:3000/admin>.
+
+Already have a project? Run it in place — existing files are kept, `package.json` and `.env` are merged:
+
+```bash
+pnpm add @michaelthielemann/kestrel
+pnpm kestrel init      # completes the project
+pnpm kestrel doctor    # or just diagnose one that misbehaves
+```
+
+Installing the package **alone does nothing**: Nuxt only loads Kestrel once a config extends it. If you
+would rather wire it up by hand, that is two files:
 
 ```ts
 // nuxt.config.ts
 export default defineNuxtConfig({
-  extends: ['@thielemann/kestrel'],
+  extends: ['@michaelthielemann/kestrel'],
   kestrel: {
     db: '.data/site.sqlite',
     siteUrl: 'https://example.com',
@@ -88,8 +107,13 @@ export default defineCollection({
 
 Set the auth env (`KESTREL_SESSION_SECRET`, `KESTREL_ADMIN_PASSWORD_HASH`), start the app, and manage
 content at `/admin`. You bring your own **public layout** and **block SFCs**
-(`app/blocks/Hero.vue` — one file for schema + display — is the `hero` block). Full guide:
-**[consuming-kestrel.md](docs/consuming-kestrel.md)**.
+(`app/blocks/Hero.vue` — one file for schema + display — is the `hero` block).
+
+> **Do not add an `app/app.vue` that omits `<NuxtPage />`.** A project-owned one shadows the layer's, and
+> the file `nuxi init` writes renders `<NuxtWelcome />` instead of your routes — the admin then appears to
+> be missing rather than blank. Kestrel reports this at build time; `kestrel doctor` catches it earlier.
+
+Full guide: **[consuming-kestrel.md](docs/consuming-kestrel.md)**.
 
 ## Documentation
 
@@ -125,7 +149,10 @@ The CMS is split into Nuxt layers under `layers/`:
 - **`admin`** — the editor SPA: collection list, record editor, the 3-pane block editor.
 - **`public`** — the SSG render path: the catch-all page, `BlockRenderer`, sitemap / robots / llms.txt, deploy.
 
-`playground/` is a small consuming example.
+`playground/` is a small consuming example. `templates/starter/` is what the scaffolder writes out;
+`scripts/kestrel.mjs` is the engine's CLI and `packages/create-kestrel/` the standalone
+`pnpm create kestrel` front end, which copies the same templates in at pack time rather than keeping
+its own.
 
 ## Development
 
@@ -144,6 +171,9 @@ pnpm test:e2e       # end-to-end tests (real dev server)
 pnpm db:generate    # drizzle-kit: generate a migration
 pnpm db:migrate     # drizzle-kit: apply migrations
 pnpm hash-password  # produce a KESTREL_ADMIN_PASSWORD_HASH
+
+node scripts/kestrel.mjs init <dir>   # the consumer scaffolder, from a checkout
+node scripts/kestrel.mjs doctor <dir> # diagnose a consumer project
 ```
 
 In dev, the schema auto-syncs from the collection definitions (additive changes only); production applies

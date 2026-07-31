@@ -1,15 +1,15 @@
 {
-  "name": "@thielemann/kestrel",
-  "version": "1.2.1",
-  "description": "A slim, collection-driven Nuxt 4 CMS meta-layer with a runtime schema engine. Add `extends: ['@thielemann/kestrel']`, define collections, and the database migrates itself.",
+  "name": "@michaelthielemann/kestrel",
+  "version": "1.3.0",
+  "description": "A slim, collection-driven Nuxt 4 CMS meta-layer with a runtime schema engine. Add `extends: ['@michaelthielemann/kestrel']`, define collections, and the database migrates itself.",
   "license": "Apache-2.0",
   "author": "Michael Thielemann <283621694+MichaelThielemann@users.noreply.github.com>",
-  "homepage": "https://github.com/thielemann/kestrel#readme",
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/thielemann/kestrel.git"
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git"
   },
-  "bugs": "https://github.com/thielemann/kestrel/issues",
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues",
   "keywords": [
     "cms",
     "nuxt",
@@ -21,18 +21,22 @@
   ],
   "type": "module",
   "main": "./nuxt.config.ts",
+  "bin": {
+    "kestrel": "./scripts/kestrel.mjs"
+  },
   "packageManager": "pnpm@11.9.0",
   "publishConfig": {
     "access": "public",
     "provenance": true
   },
-  "//publish": "Consumed as a meta-layer: `extends: ['@thielemann/kestrel']`. `main` points at the layer's nuxt.config so the BARE specifier resolves — without it c12 can't resolve the package, silently drops the whole layer (\"Cannot extend config from …\"), and every auto-import/component vanishes. Use `main`, NOT `exports` (exports would gate subpaths like `@thielemann/kestrel/scripts/hash-password.mjs` + the deep config-type import). `files` ships the entry + sub-layers + operator scripts; the `!**/*.test.ts` globs strip tests. Releases run from the tag workflow via npm trusted publishing (OIDC), so no npm token exists anywhere.",
+  "//publish": "Consumed as a meta-layer: `extends: ['@michaelthielemann/kestrel']`. `main` points at the layer's nuxt.config so the BARE specifier resolves — without it c12 can't resolve the package, silently drops the whole layer (\"Cannot extend config from …\"), and every auto-import/component vanishes. Use `main`, NOT `exports` (exports would gate subpaths like `@michaelthielemann/kestrel/scripts/hash-password.mjs` + the deep config-type import); `bin` resolves by path from the package root, so it coexists with `main` untouched. `files` ships the entry + sub-layers + operator scripts + the `kestrel init` templates; the `!**/*.test.ts` globs strip tests — they are GLOBAL, so nothing under `templates/` may be named `*.test.ts` or it vanishes from the tarball. Template dotfiles are `_`-prefixed for the same class of reason: npm strips a literal `.gitignore` from a tarball and then applies it, taking its listed siblings with it. Releases run from the tag workflow via npm trusted publishing (OIDC), so no npm token exists anywhere.",
   "files": [
     "NOTICE",
     "nuxt.config.ts",
     "kestrel.config.ts",
     "layers",
     "scripts",
+    "templates",
     "!**/*.test.ts",
     "!**/*.dom.test.ts",
     "!**/*.nuxt.test.ts"

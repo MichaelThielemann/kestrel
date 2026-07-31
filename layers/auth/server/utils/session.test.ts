@@ -126,6 +126,22 @@ describe('sessionSettings production guards', () => {
     expect(() => sessionSettings()).not.toThrow()
   })
 
+  // `nuxt generate` runs with NODE_ENV=production and prerenders every page through `/api/route`, which
+  // goes through the access guard and therefore `sessionSettings()`. A dev `.env` carrying
+  // KESTREL_SECURE_COOKIES=false made that throw, so each page 500'd, was dropped from the static output,
+  // and generate still exited 0. A prerender request never sets a cookie, so the assertion is moot there.
+  it('does not reject KESTREL_SECURE_COOKIES=false while prerendering', () => {
+    process.env.NODE_ENV = 'production'
+    process.env.KESTREL_SESSION_SECRET = 's'.repeat(40)
+    process.env.KESTREL_SECURE_COOKIES = 'false'
+    expect(() => sessionSettings({ prerender: true })).not.toThrow()
+  })
+  it('still requires a real secret while prerendering', () => {
+    process.env.NODE_ENV = 'production'
+    delete process.env.KESTREL_SESSION_SECRET
+    expect(() => sessionSettings({ prerender: true })).toThrowError(/KESTREL_SESSION_SECRET/)
+  })
+
   it('treats UNSET NODE_ENV as production — refuses to boot on a missing secret', () => {
     delete process.env.NODE_ENV
     delete process.env.KESTREL_DEV

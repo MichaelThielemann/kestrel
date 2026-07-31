@@ -1,5 +1,5 @@
 {
-  "name": "@thielemann/kestrel-galleries-secure",
+  "name": "@michaelthielemann/kestrel-galleries-secure",
   "version": "1.0.0",
   "description": "Opt-in Kestrel extension: a zero-knowledge encrypted gallery (images + folder names encrypted client-side with a password; the server only ever stores ciphertext).",
   "type": "module",
@@ -18,10 +18,10 @@
     "drizzle-orm": "^0.45.0",
     "vue": "^3.5.0",
     "zod": "^4.0.0",
-    "@thielemann/kestrel": "*"
+    "@michaelthielemann/kestrel": "*"
   },
   "devDependencies": {
-    "@thielemann/kestrel": "workspace:*",
+    "@michaelthielemann/kestrel": "workspace:*",
     "drizzle-orm": "^0.45.0",
     "vue": "3.5.35",
     "zod": "^4.0.0"
@@ -30,10 +30,10 @@
   "author": "Michael Thielemann <283621694+MichaelThielemann@users.noreply.github.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/thielemann/kestrel.git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
     "directory": "extensions/galleries-secure"
   },
-  "bugs": "https://github.com/thielemann/kestrel/issues",
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues",
   "publishConfig": {
     "access": "public",
     "provenance": true

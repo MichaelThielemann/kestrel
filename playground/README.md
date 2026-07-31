@@ -1,6 +1,6 @@
 # Kestrel playground
 
-A minimal example site that consumes Kestrel as a meta-layer (`extends: ['@thielemann/kestrel']`) and defines its own
+A minimal example site that consumes Kestrel as a meta-layer (`extends: ['@michaelthielemann/kestrel']`) and defines its own
 `products` collection. Doubles as a manual fixture for the meta-layer + consumer-collection path.
 
 ```bash

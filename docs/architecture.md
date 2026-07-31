@@ -38,7 +38,7 @@ compose those.
 > **The numeric prefixes sort plugins WITHIN a layer only.** Nitro orders server plugins by **layer
 > first, then filename**, so the absolute cross-layer order is build-context-dependent: in-repo it's the
 > reverse-alphabetical auto-scan (`public, media, core, collections`), while a consumer's
-> `extends: ['@thielemann/kestrel']` is core-first (`core, media, collections, public`). In particular
+> `extends: ['@michaelthielemann/kestrel']` is core-first (`core, media, collections, public`). In particular
 > `collections/01.register` actually runs **last** in-repo, *after* `00.migrate`/`02.schema-sync`/
 > `03.record-refs`. The list below describes **what each plugin does**, NOT a guaranteed sequence.
 >

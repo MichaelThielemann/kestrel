@@ -6,13 +6,54 @@ defining its own collections — the database migrates itself.
 ## Install
 
 ```bash
-pnpm add @thielemann/kestrel
+pnpm create kestrel my-site
+cd my-site && pnpm install && pnpm dev
 ```
+
+The scaffolder writes a project that runs as-is, prompting once for an admin password:
+
+| File | Why |
+| --- | --- |
+| `package.json` | `dev`/`build`/`generate` scripts, `@michaelthielemann/kestrel`, **and `nuxt` as a direct devDependency** — under a strict `node_modules` layout (pnpm) a transitive package's `nuxt` binary is not linked, so `pnpm dev` would not resolve |
+| `pnpm-workspace.yaml` | `allowBuilds:` for `better-sqlite3`/`sharp`/`esbuild`/`@parcel/watcher`, so `pnpm install` builds them instead of you having to run `pnpm approve-builds`. It must be this file: pnpm 11 **ignores** `pnpm.onlyBuiltDependencies` in `package.json`. Delete it if you use npm or yarn |
+| `nuxt.config.ts` | The `extends` that actually loads Kestrel, plus every `kestrel: {}` default made explicit |
+| `.env` | A fresh `KESTREL_SESSION_SECRET` and the scrypt hash of the password you entered. Gitignored; `.env.example` is the committed copy |
+| `app/app.vue`, `app/layouts/default.vue` | The app root and your public frame (see the warning below) |
+| `app/blocks/Prose.vue` | One block type, so the page builder is not empty on first run |
+| `tsconfig.json`, `.gitignore` | `noUncheckedIndexedAccess` is not inherited from a layer, and `.data`/`.env` must not be committed |
+
+There are **two** entry points, and which one you want depends on whether the directory is empty:
+
+| | Command | Behaviour |
+| --- | --- | --- |
+| **New project** | `pnpm create kestrel my-site` | Zero dependencies, downloads in a second. **Refuses** a directory that already holds a project — it will not merge into someone else's app |
+| **Existing project** | `pnpm add @michaelthielemann/kestrel` then `pnpm kestrel init` | Keeps every file that exists, merges `package.json` key-wise (your values win) and fills only the `.env` keys that are absent or empty |
+
+Both prompt for a password, are safe to re-run, and end by naming anything still broken — a re-run never
+rotates a live session secret. The engine's CLI has three more commands:
+
+```bash
+pnpm kestrel doctor          # diagnose without changing anything
+pnpm kestrel hash-password   # a KESTREL_ADMIN_PASSWORD_HASH value
+pnpm kestrel secret          # a KESTREL_SESSION_SECRET value
+```
+
+Flags on both: `--name`, `--password`, `--yes` (never prompt), `--force` (overwrite / ignore a non-empty
+directory). `kestrel init` and `create-kestrel` exit **non-zero** while the project still cannot serve
+`/admin`, so they are safe to chain in a script.
+
+> **`pnpm add` on its own does nothing.** Nuxt does not auto-load an installed package as a layer — until
+> a config extends Kestrel, every route including `/admin` serves the default Nuxt welcome page. This is
+> the single most common "the admin is missing" report.
+
+### Wiring it by hand
 
 ```ts
 // nuxt.config.ts
 export default defineNuxtConfig({
-  extends: ['@thielemann/kestrel'],
+  compatibilityDate: '2026-06-02',
+  future: { compatibilityVersion: 4 },
+  extends: ['@michaelthielemann/kestrel'],
   kestrel: {
     db: '.data/site.sqlite',
     siteUrl: 'https://example.com',
@@ -24,20 +65,57 @@ export default defineNuxtConfig({
 })
 ```
 
-> Nuxt resolves `extends: ['@thielemann/kestrel']` to the package's `nuxt.config`, which composes Kestrel's sub-layers
+> Nuxt resolves `extends: ['@michaelthielemann/kestrel']` to the package's `nuxt.config`, which composes Kestrel's sub-layers
 > (access, admin, auth, collections, core, fields, media, public, ui). Nuxt does **not** transitively auto-scan a
 > dependency's `layers/` dir, which is why Kestrel composes them explicitly.
+>
+> Extend it by **package name**, not by a relative path of two levels or more. c12 decides whether an
+> `extends` entry is a directory from its file extension, via `pathe` — and `pathe` reports
+> `extname('../..')` as `'.'`, so it resolves the layer one directory too shallow and every `./layers/*`
+> sub-extend misses. The symptom is nine `Cannot extend config from ./layers/core` warnings and a project
+> where the whole CMS silently vanished. A single `'..'` is unaffected (which is why `playground/` works).
+
+### The app shell — the one file that can hide the admin
+
+Kestrel ships `app.vue`, `error.vue` and a `default` layout in its `public` layer, and a **project-owned
+copy shadows them**: Nuxt resolves the app root with `app.mainComponent ||= findPath(layerDirs…)`, and the
+consumer's layer is first in that list. Two failure modes follow, both silent:
+
+- **`app/app.vue` without `<NuxtPage />`** — nothing renders on any route. This is exactly what `nuxi init`
+  writes (`<NuxtRouteAnnouncer /><NuxtWelcome />`), so a project started that way shows the Nuxt welcome
+  screen at `/admin`. The router still runs — the URL even rewrites to `/admin/login?redirect=/admin` —
+  which is why it reads as a missing route rather than a missing shell.
+- **`<NuxtPage />` without `<NuxtLayout>`** — pages render, but `definePageMeta({ layout })` is ignored and
+  the admin loses its entire navigation shell.
+
+So either delete the file and let the layer's take over, or make it:
+
+```vue
+<template>
+  <NuxtLayout>
+    <NuxtPage />
+  </NuxtLayout>
+</template>
+```
+
+Kestrel checks this at build time and prints the fix; `kestrel doctor` reports it without a build. The same
+shadowing applies to `app/error.vue` and `app/layouts/default.vue` — overriding those is normal and
+expected, it is only `app.vue` that is load-bearing.
 
 ### Auth (env-only)
 
-Secrets stay out of committed config:
+Secrets stay out of committed config. `kestrel init` writes both of these for you; by hand:
 
 ```bash
 KESTREL_SESSION_SECRET=$(openssl rand -base64 32)
-KESTREL_ADMIN_PASSWORD_HASH=$(node node_modules/@thielemann/kestrel/scripts/hash-password.mjs "your-password")
+KESTREL_ADMIN_PASSWORD_HASH=$(node node_modules/@michaelthielemann/kestrel/scripts/hash-password.mjs "your-password")
 # plain-HTTP localhost only:
 KESTREL_SECURE_COOKIES=false
 ```
+
+Without `KESTREL_ADMIN_PASSWORD_HASH` the login page still renders — signing in is what fails, with a
+**503** naming the missing variable rather than a 401, so a forgotten setup step is never mistaken for a
+wrong password.
 
 Every non-auth setting also accepts a `KESTREL_*` env var (precedence: `KESTREL_*` env → `kestrel: {}` → default).
 
@@ -371,7 +449,7 @@ collections and blocks:
 
 ```ts
 // nuxt.config.ts
-export default defineNuxtConfig({ extends: ['@thielemann/kestrel', '@thielemann/kestrel-galleries-secure'] })
+export default defineNuxtConfig({ extends: ['@michaelthielemann/kestrel', '@michaelthielemann/kestrel-galleries-secure'] })
 ```
 
 - **`kestrel-galleries-secure`** — the foundation for **zero-knowledge encrypted galleries** (images + folder

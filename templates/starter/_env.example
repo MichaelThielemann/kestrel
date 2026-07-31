@@ -1,0 +1,17 @@
+# Auth/session is env-only — secrets never belong in a committed config file. `.env.example` is the
+# committed copy of this template; `.env` holds the real values and is gitignored.
+#
+# The two below are read per request. Every other KESTREL_* var is read once when the app is BUILT
+# (dev start / build / generate) and frozen into runtimeConfig — see docs/configuration.md.
+
+# Session signing secret, >= 32 bytes. Required in production. Generate: kestrel secret
+KESTREL_SESSION_SECRET=
+
+# Admin password hash. Without it /admin renders but sign-in answers 503. Generate: kestrel hash-password
+KESTREL_ADMIN_PASSWORD_HASH=
+
+# Drops the __Host- cookie prefix and the Secure flag. Plain-HTTP localhost ONLY; rejected in production.
+KESTREL_SECURE_COOKIES=false
+
+# Optional: session lifetime in seconds (default 604800 = 7 days)
+# KESTREL_SESSION_MAX_AGE=604800

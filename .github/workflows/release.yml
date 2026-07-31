@@ -1,16 +1,18 @@
 name: Release
 
-# Publishes the engine and both extensions to npm when a v* tag is pushed.
+# Publishes the engine, both extensions and the scaffolder to npm when a v* tag is pushed.
 #
 # Authentication is npm **trusted publishing** (OIDC): npm verifies this workflow's identity against the
 # trusted publisher configured on each package, so no npm token exists in the repository, in the org, or
 # on any machine. It also produces a provenance attestation linking the tarball to this commit and
 # workflow run — which is why `id-token: write` is required.
 #
-# One-time setup per package on npmjs.com → Settings → Trusted publishers:
-#   repository thielemann/kestrel · workflow .github/workflows/release.yml · environment (leave empty)
-# The scope must exist first; publish the first version manually (`npm publish --access public`) or create
-# the package placeholder, since a trusted publisher cannot be configured for a package that does not exist.
+# One-time setup per package. A trusted publisher cannot be configured for a package that does not exist,
+# so each one needs a manual `npm publish --access public --no-provenance` first — `--no-provenance`
+# because every manifest here sets `publishConfig.provenance`, which only works inside CI. Then, from npm 11.15:
+#   npm trust github <package> --file release.yml --repo MichaelThielemann/kestrel
+# `--file` is the workflow FILENAME, not its path — the same field the npmjs.com UI asks for. The account
+# needs 2FA; a granular token with "bypass 2FA" is rejected for trust operations.
 
 on:
   push:
@@ -49,11 +51,21 @@ jobs:
       # npm >= 11.5.1 is required for trusted publishing; the runner's bundled npm may be older.
       - run: npm install -g npm@latest
 
+      # Each publish is skipped when that exact version is already on the registry. Four packages go out
+      # per tag, so a failure in one leaves the earlier ones published — without this, re-running the job
+      # to finish the release dies on the first already-published package and the rest never ship. It also
+      # lets a package that had to be published by hand (the one-time trusted-publisher bootstrap) pass
+      # through a tag run cleanly.
       - name: Publish engine
-        run: npm publish
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
       - name: Publish galleries-secure
-        run: npm publish
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
         working-directory: extensions/galleries-secure
       - name: Publish galleries-secure-proofing
-        run: npm publish
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
         working-directory: extensions/galleries-secure-proofing
+      # `prepack`/`postpack` copy the engine's templates + scaffold lib in and out, and prepack refuses a
+      # version that differs from the root manifest.
+      - name: Publish create-kestrel
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
+        working-directory: packages/create-kestrel

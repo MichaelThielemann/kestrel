@@ -35,7 +35,7 @@ export default defineNuxtConfig({
   // Exclude tests from the typecheck (vitest covers them at runtime). The generated config's `include` uses
   // parent-traversing paths (`../layers/…`), so the exclude globs must too — a bare `**/*.test.ts` won't match.
   typescript: { tsConfig: { compilerOptions: { noUncheckedIndexedAccess: false }, exclude: ['../**/*.test.ts', '../../**/*.test.ts'] } },
-  // Explicit sub-layer composition so Kestrel works as an installable meta-layer (`extends: ['@thielemann/kestrel']`):
+  // Explicit sub-layer composition so Kestrel works as an installable meta-layer (`extends: ['@michaelthielemann/kestrel']`):
   // Nuxt does NOT transitively auto-scan an extended package's `layers/` dir, but it DOES follow its
   // `extends` chain — so for a consumer this list is the ONLY thing that drives sub-layer order (core first).
   // In-repo it is effectively inert: Nuxt also auto-scans the local `layers/` dir (resolved before the

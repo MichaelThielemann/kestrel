@@ -32,3 +32,9 @@ yarn-error.log*
 
 # Packaged tarballs (npm pack / release artifacts)
 *.tgz
+
+# create-kestrel's payload — generated from the engine's own copies at pack time
+packages/create-kestrel/templates
+packages/create-kestrel/lib
+packages/create-kestrel/LICENSE
+packages/create-kestrel/NOTICE

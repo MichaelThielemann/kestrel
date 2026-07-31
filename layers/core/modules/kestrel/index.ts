@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { defineNuxtModule } from '@nuxt/kit'
 import { resolveKestrel, type KestrelConfig } from '../../server/utils/kestrel-config'
+import { diagnoseAppShell } from './app-shell'
 
 /**
  * The `kestrel` config namespace (`kestrel: { … }` in nuxt.config, sourced from `kestrel.config.ts`).
@@ -12,6 +14,21 @@ export default defineNuxtModule<KestrelConfig>({
   meta: { name: 'kestrel', configKey: 'kestrel' },
   setup(options, nuxt) {
     const c = resolveKestrel(options, process.env, nuxt.options.rootDir)
+
+    // `app:resolve` is the first hook where `mainComponent` is settled across all layers. In dev it fires
+    // on every watched change, so an unfixed problem would repaint the whole message on each keystroke.
+    const reported = new Set<string>()
+    nuxt.hook('app:resolve', (app) => {
+      for (const d of diagnoseAppShell({
+        mainComponent: app.mainComponent,
+        pagesEnabled: nuxt.options.pages !== false,
+        read: (file) => readFileSync(file, 'utf8'),
+      })) {
+        if (reported.has(d.message)) continue
+        reported.add(d.message)
+        console[d.level === 'error' ? 'error' : 'warn'](`[kestrel] ${d.message}`)
+      }
+    })
 
     const rc = nuxt.options.runtimeConfig
     rc.media = {

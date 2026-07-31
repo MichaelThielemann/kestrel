@@ -8,6 +8,7 @@ const root = process.cwd()
 const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
   name?: string
   main?: string
+  bin?: Record<string, string>
   files?: string[]
   exports?: unknown
   license?: string
@@ -46,12 +47,36 @@ describe('package.json — publishable', () => {
       expect(meta.license).toBe('Apache-2.0')
       // The engine peer must track the published scope; a stale bare `kestrel` would resolve to an
       // unrelated package on the registry rather than failing loudly.
-      expect(Object.keys(meta.peerDependencies ?? {})).toContain('@thielemann/kestrel')
+      expect(Object.keys(meta.peerDependencies ?? {})).toContain('@michaelthielemann/kestrel')
     })
   }
 })
 
-describe('package.json — installable as a Nuxt meta-layer (`extends: ["@thielemann/kestrel"]`)', () => {
+describe('release workflow', () => {
+  const workflow = readFileSync(resolve(root, '.github/workflows/release.yml'), 'utf8')
+
+  // The tag guard only compares the tag against the ROOT manifest, so every other publishable package
+  // rides on being versioned in lockstep. A package with no publish step would silently stop shipping.
+  it.each(['.', 'extensions/galleries-secure', 'extensions/galleries-secure-proofing', 'packages/create-kestrel'])(
+    'publishes %s',
+    (dir) => {
+      const meta = JSON.parse(readFileSync(resolve(root, dir, 'package.json'), 'utf8')) as { name: string }
+      expect(meta.name).toBeTruthy()
+      if (dir !== '.') expect(workflow, `${dir} has no publish step`).toContain(`working-directory: ${dir}`)
+    },
+  )
+
+  it('skips a version already on the registry so a half-finished release can be re-run', () => {
+    const script = resolve(root, '.github/publish-if-new.sh')
+    expect(existsSync(script)).toBe(true)
+    const src = readFileSync(script, 'utf8')
+    expect(src).toContain('npm view')
+    expect(src).toContain('npm publish')
+    expect(workflow).not.toMatch(/^\s+run: npm publish$/m)
+  })
+})
+
+describe('package.json — installable as a Nuxt meta-layer (`extends: ["@michaelthielemann/kestrel"]`)', () => {
   it('declares a `main` entry point so the BARE specifier resolves', () => {
     // Without an entry point, c12/Node resolution of the bare `kestrel` specifier fails; Nuxt then treats
     // it as a relative folder, silently drops the whole layer ("Cannot extend config from kestrel"), and
@@ -62,6 +87,27 @@ describe('package.json — installable as a Nuxt meta-layer (`extends: ["@thiele
 
   it('ships that entry point in the files whitelist', () => {
     expect(pkg.files).toContain('nuxt.config.ts')
+  })
+
+  it('exposes the `kestrel` bin and ships everything it reads at runtime', () => {
+    // `bin` resolves by path from the package root, so it coexists with `main` — but the CLI reads its
+    // own templates out of the installed tarball, so `templates` must be whitelisted or `kestrel init`
+    // works from a checkout and fails for every real consumer.
+    expect(pkg.bin?.kestrel).toBe('./scripts/kestrel.mjs')
+    expect(existsSync(resolve(root, pkg.bin!.kestrel!))).toBe(true)
+    for (const dir of ['scripts', 'templates']) expect(pkg.files).toContain(dir)
+  })
+
+  it('ships no template file npm would strip from the tarball', () => {
+    // The `files` negations are global, and npm both removes a literal `.gitignore` and then APPLIES it,
+    // silently taking its listed siblings with it. Template dotfiles are `_`-prefixed and renamed on the
+    // way out (see scripts/lib/scaffold.mjs); a stray real dotfile here fails silently at publish time.
+    const templates = resolve(root, 'templates')
+    for (const rel of readdirSync(templates, { recursive: true }) as string[]) {
+      const name = rel.split(/[\\/]/).pop()!
+      expect(name.startsWith('.'), `templates/${rel} would not survive npm pack`).toBe(false)
+      expect(name.endsWith('.test.ts'), `templates/${rel} is stripped by the files negations`).toBe(false)
+    }
   })
 
   it('does not use `exports` (it would gate the published subpaths consumers rely on)', () => {

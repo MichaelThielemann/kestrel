@@ -136,7 +136,7 @@ importers:
 
   extensions/galleries-secure:
     devDependencies:
-      '@thielemann/kestrel':
+      '@michaelthielemann/kestrel':
         specifier: workspace:*
         version: link:../..
       drizzle-orm:
@@ -151,10 +151,10 @@ importers:
 
   extensions/galleries-secure-proofing:
     devDependencies:
-      '@thielemann/kestrel':
+      '@michaelthielemann/kestrel':
         specifier: workspace:*
         version: link:../..
-      '@thielemann/kestrel-galleries-secure':
+      '@michaelthielemann/kestrel-galleries-secure':
         specifier: workspace:*
         version: link:../galleries-secure
       drizzle-orm:
@@ -164,15 +164,17 @@ importers:
         specifier: 3.5.35
         version: 3.5.35(typescript@6.0.3)
 
+  packages/create-kestrel: {}
+
   playground:
     dependencies:
-      '@thielemann/kestrel':
+      '@michaelthielemann/kestrel':
         specifier: workspace:*
         version: link:..
-      '@thielemann/kestrel-galleries-secure':
+      '@michaelthielemann/kestrel-galleries-secure':
         specifier: workspace:*
         version: link:../extensions/galleries-secure
-      '@thielemann/kestrel-galleries-secure-proofing':
+      '@michaelthielemann/kestrel-galleries-secure-proofing':
         specifier: workspace:*
         version: link:../extensions/galleries-secure-proofing
     devDependencies:

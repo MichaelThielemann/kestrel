@@ -10,12 +10,12 @@ This is **not** part of the core `kestrel` package. A consumer opts in by compos
 ```ts
 // nuxt.config.ts
 export default defineNuxtConfig({
-  extends: ['@thielemann/kestrel', '@thielemann/kestrel-galleries-secure'], // core first, then the extension
+  extends: ['@michaelthielemann/kestrel', '@michaelthielemann/kestrel-galleries-secure'], // core first, then the extension
 })
 ```
 
 - In this monorepo it is a workspace package (the `playground` links it via `workspace:*`).
-- An external project installs it: `pnpm add @thielemann/kestrel kestrel-galleries-secure`.
+- An external project installs it: `pnpm add @michaelthielemann/kestrel kestrel-galleries-secure`.
 
 ## Primitives-only — you assemble the collection & block
 

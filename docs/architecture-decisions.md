@@ -2,6 +2,80 @@
 
 Lightweight ADR log — newest first. Each entry: **Context · Decision · Consequences · Future**.
 
+## ADR-0005 — Two scaffolder entry points over one template, and a build-time app-shell guard
+
+**Status:** accepted.
+
+**Context.** `pnpm add @michaelthielemann/kestrel` produces a project that does nothing. Nuxt does not
+auto-load an installed package as a layer, so without a `nuxt.config.ts` that extends it, every route —
+`/admin` included — serves the default Nuxt welcome page. Starting instead from `nuxi init` fails more
+quietly: its `app/app.vue` renders `<NuxtWelcome />` and no `<NuxtPage />`, and because Nuxt resolves the
+app root as `app.mainComponent ||= findPath(layerDirs…)` with the consumer's layer first, that file
+shadows `layers/public/app/app.vue`. The router still runs (the URL rewrites to
+`/admin/login?redirect=/admin`) but nothing renders, which reads as a missing admin route. A third step
+then blocks anyone who gets past those two: sign-in answers 503 until `KESTREL_ADMIN_PASSWORD_HASH` is
+set. Three independent, silent gaps between installing the package and reaching the admin — all
+documented, none enforced or automated.
+
+**Decision.**
+- Ship a scaffolder as a `bin` on the **engine package** (`kestrel` → `scripts/kestrel.mjs`) with the
+  template in `templates/starter/`. `bin` resolves by path from the package root, so it coexists with
+  `main: './nuxt.config.ts'` and needs no `exports` map (which packaging forbids for unrelated reasons).
+- Add a second, unscoped `create-kestrel` package for `pnpm create kestrel my-site`, because that is the
+  command people already know from Nuxt and Vite. It carries **no dependencies**: its `templates/` and
+  `lib/` are copied in from the engine by `prepack` and removed again by `postpack`, so there is exactly
+  one source and drift is structurally impossible rather than merely tested for. From a checkout the bin
+  falls back to the engine's paths, so it runs unpacked. Depending on the engine instead would pull the
+  ~800-package tree the instant download exists to avoid.
+- The two entry points do **not** behave the same, and that is the point: `create-kestrel` refuses a
+  non-empty directory and names `kestrel init` as the tool for that case, while `kestrel init` merges.
+  A `create-*` command that silently rewrote an existing project would be a footgun.
+- The version is **not** rewritten at pack time. npm reads a manifest before running `prepack`, so a
+  rewrite reaches the tarball contents but not the registry metadata — verified: the tarball is named
+  from the pre-`prepack` version. Instead the two manifests are committed in lockstep, a test asserts it,
+  and `prepack` refuses to pack a mismatch. This also keeps release.yml's tag guard meaningful, since it
+  only ever reads the root manifest.
+- `init` is **idempotent and additive**, because the most common caller is a project that already ran
+  `pnpm add`: existing files are kept, `package.json` is merged key-wise with the project's own values
+  winning, and `.env` is filled only where a key is absent or empty — re-running never rotates a live
+  session secret. It prompts once for an admin password and writes the scrypt hash itself, so the
+  documented three-command dance disappears.
+- Keeping a file cannot mean declaring success. `init` ends with the `doctor` pass and exits non-zero
+  while anything still breaks `/admin` — the `nuxi init` `app.vue` is precisely the case that survives a
+  non-destructive scaffold.
+- The engine reports the app-shell failure itself, at build time, from the `app:resolve` hook: an error
+  when the resolved `app.vue` has no `<NuxtPage />`, a warning when it has no `<NuxtLayout>`. It only ever
+  reports — assigning `mainComponent` here would defeat a legitimate consumer override, and the `||=`
+  means a module-set value beats even the consumer's own file.
+- The template emits `app/app.vue` rather than omitting it. Omitting it is what the layer already handles;
+  emitting a *correct* one puts the trap in front of the operator with a comment explaining why both
+  wrappers are load-bearing.
+- Prerendering is exempt from the `KESTREL_SECURE_COOKIES=false is not allowed in production` assertion.
+  `nuxt generate` runs at `NODE_ENV=production` and renders every page through `/api/route`, which passes
+  the access guard and so calls `sessionSettings()`; a dev `.env` therefore made each page throw, dropped
+  it from the static output, and still exited 0. A prerender request never issues a cookie, so the flag
+  has nothing to protect there — the secret requirement still applies.
+- Build-time approval of the native dependencies ships as `pnpm-workspace.yaml` with `allowBuilds:`, not
+  as `pnpm.onlyBuiltDependencies` in the manifest. Verified: pnpm 11 ignores the manifest form outright
+  (`ERR_PNPM_IGNORED_BUILDS`), so `better-sqlite3` and `sharp` never build and the scaffolded app cannot
+  start; the workspace-file form is honoured by both pnpm 10 and 11.
+
+**Consequences.** A consumer reaches a working admin in one command, and a broken project gets a named
+cause instead of a blank page. The costs are real and permanent. A second publishable package means
+another trusted-publisher registration on npmjs.com, a manual first publish (a trusted publisher cannot
+be configured for a package that does not exist), a fourth `npm publish` step, and a release that can now
+fail between packages. Releases must bump two manifests. And the `app.vue` rule has a second home: the
+CLI is plain `.mjs` with no build step, so it cannot import the TypeScript guard, and the check exists in
+both `scripts/lib/scaffold.mjs` and `layers/core/modules/kestrel/app-shell.ts` — a test drives both over
+the same fixtures so they cannot drift. Two packaging traps are now load-bearing and pinned by tests: the
+`files` whitelist's `!**/*.test.ts` negations are global, so nothing under `templates/` may be named that
+way, and npm strips a literal `.gitignore` from a tarball *and then applies it*, taking its listed
+siblings with it — template dotfiles are therefore `_`-prefixed and renamed on the way out.
+
+**Future.** `kestrel db migrate` — referenced by ADR-0002 but never implemented — now has an obvious home
+on this bin. Further template variants (`--template blog`, an extension-composing one) fit the same
+`templates/<name>/` layout with no change to the copy mechanism.
+
 ## ADR-0004 — A real typecheck gate (`pnpm typecheck`)
 
 **Status:** accepted.
@@ -26,7 +100,7 @@ typed `Record<string, never>`, breaking every Drizzle call — plus a wave of no
   runs two passes — `vue-tsc` over the app/`.vue`/config aggregator, `tsc` over the Nitro server project.
 
 **Consequences.** Type regressions across app, `.vue`, and server now fail one gate. `typescript.tsConfig`
-is not inherited from an extended layer, so a consumer composing `extends: ['@thielemann/kestrel', …]`
+is not inherited from an extended layer, so a consumer composing `extends: ['@michaelthielemann/kestrel', …]`
 repeats the `noUncheckedIndexedAccess: false` override in their own config. A few intentional `as`-casts
 remain at the Drizzle dynamic-table seam (`crud.ts`, `buildCollection.ts`) — the honest price of a
 runtime-built schema.

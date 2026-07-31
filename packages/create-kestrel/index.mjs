@@ -1,0 +1,154 @@
+#!/usr/bin/env node
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { dirname, join, resolve, basename, relative } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { createInterface } from 'node:readline/promises'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+// `templates`/`lib` exist only in a packed tarball (see the manifest's //payload note); from a checkout
+// the engine's own copies are two levels up.
+const ENGINE = resolve(HERE, '../..')
+const pick = (local, engine) => [join(HERE, local), join(ENGINE, engine)].find((p) => existsSync(p))
+const TEMPLATES = pick('templates', 'templates')
+const LIB = pick('lib', 'scripts/lib')
+
+if (!TEMPLATES || !LIB || !existsSync(join(TEMPLATES, 'starter'))) {
+  process.stderr.write('error create-kestrel is missing its template payload — reinstall it (`pnpm dlx create-kestrel@latest`).\n')
+  process.exit(1)
+}
+
+const { hashPassword, sessionSecret } = await import(pathToFileURL(join(LIB, 'password.mjs')).href)
+const { diagnoseProject, mergeEnv, renderTemplate, targetName, toPackageName } = await import(
+  pathToFileURL(join(LIB, 'scaffold.mjs')).href
+)
+const { Cancelled, MIN_PASSWORD_LENGTH, makePaint, out, parseArgs, promptPassword, readIf, walk, write } = await import(
+  pathToFileURL(join(LIB, 'cli.mjs')).href
+)
+
+const meta = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8'))
+const ENGINE_VERSION = meta.version
+// Stamped in by scripts/copy-create-payload.mjs so the emitted manifest cannot pin a Nuxt range the
+// engine has moved off; the literal is only the checkout fallback.
+const NUXT_VERSION = meta['//engine']?.nuxt ?? '^4.4.8'
+const TS_VERSION = meta['//engine']?.typescript ?? '^6.0.3'
+const VUE_TSC_VERSION = meta['//engine']?.['vue-tsc'] ?? '^3.3.7'
+
+const { dim, bold, red, yellow, green } = makePaint()
+const fail = (s) => {
+  process.stderr.write(`${red('error')} ${s}\n`)
+  process.exit(1)
+}
+
+function help() {
+  out(`
+${bold('create-kestrel')} ${dim(`v${ENGINE_VERSION}`)}
+
+  ${bold('pnpm create kestrel')} [dir]   scaffold a new Kestrel site
+
+  --name <name>      package name (default: the directory name, slugified)
+  --password <pw>    set the admin password without prompting
+  --yes              never prompt; leaves KESTREL_ADMIN_PASSWORD_HASH for you to fill in
+  --force            scaffold into a directory that is not empty
+
+${dim('To add Kestrel to an EXISTING project use the engine\'s own CLI: `pnpm kestrel init`.')}
+`)
+}
+
+const { flags, positional } = parseArgs(process.argv.slice(2), ['yes', 'force', 'help', 'version'])
+if (flags.help) {
+  help()
+  process.exit(0)
+}
+if (flags.version) {
+  out(ENGINE_VERSION)
+  process.exit(0)
+}
+if (positional[0]?.startsWith('-')) fail(`unknown option "${positional[0]}" — run \`create-kestrel --help\`.`)
+
+let password = typeof flags.password === 'string' ? flags.password : undefined
+if (password !== undefined && password.length < MIN_PASSWORD_LENGTH) {
+  fail(`--password must be at least ${MIN_PASSWORD_LENGTH} characters (an empty one would leave /admin open).`)
+}
+
+const target = resolve(positional[0] ?? '.')
+// Refuse rather than merge: completing someone else's project is the engine CLI's job, and it is named
+// here so the user is not left guessing. `.git`/editor dotfiles are not a project; a `.env` is.
+const OCCUPIED = ['.env', '.env.example', '.gitignore']
+const occupied = existsSync(target)
+  ? readdirSync(target).filter((e) => !e.startsWith('.') || OCCUPIED.includes(e))
+  : []
+if (!flags.force && occupied.length) {
+  fail(
+    `${relative(process.cwd(), target) || 'the current directory'} is not empty (${occupied.slice(0, 3).join(', ')}). ` +
+      'Use `pnpm kestrel init` to add Kestrel to an existing project, or pass --force.',
+  )
+}
+
+mkdirSync(target, { recursive: true })
+const name = toPackageName(typeof flags.name === 'string' ? flags.name : basename(target))
+
+out()
+out(`${bold('Kestrel')} ${dim(`v${ENGINE_VERSION}`)} — creating ${bold(relative(process.cwd(), target) || '.')}`)
+out()
+
+if (password === undefined && !flags.yes && process.stdin.isTTY) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  try {
+    password = await promptPassword(rl, { warn: (m) => out(yellow(m)) })
+  } catch (err) {
+    rl.close()
+    if (err instanceof Cancelled) fail('cancelled')
+    throw err
+  }
+  rl.close()
+  out()
+}
+
+const vars = {
+  name,
+  version: `^${ENGINE_VERSION}`,
+  nuxtVersion: NUXT_VERSION,
+  typescriptVersion: TS_VERSION,
+  vueTscVersion: VUE_TSC_VERSION,
+}
+const starter = join(TEMPLATES, 'starter')
+for (const rel of walk(starter).sort()) {
+  write(join(target, targetName(rel)), renderTemplate(readFileSync(join(starter, rel), 'utf8'), vars))
+  out(`  ${green('created')} ${targetName(rel)}`)
+}
+
+const envPath = join(target, '.env')
+const envEntries = { KESTREL_SESSION_SECRET: sessionSecret(), KESTREL_SECURE_COOKIES: 'false' }
+if (password !== undefined) envEntries.KESTREL_ADMIN_PASSWORD_HASH = hashPassword(password)
+const seed = readIf(envPath) ?? readIf(join(target, '.env.example')) ?? ''
+const { text, written } = mergeEnv(seed, envEntries)
+write(envPath, text, 0o600)
+out(`  ${green('created')} .env ${dim(`(${written.join(', ')})`)}`)
+
+const remaining = diagnoseProject({
+  packageJson: readIf(join(target, 'package.json')),
+  nuxtConfig: readIf(join(target, 'nuxt.config.ts')),
+  appVue: readIf(join(target, 'app/app.vue')),
+  env: readIf(envPath),
+})
+if (remaining.length) {
+  out()
+  out(bold('Still to fix:'))
+  out()
+  for (const d of remaining) {
+    out(`${d.level === 'error' ? red('✖ error') : yellow('▲ warn ')} ${d.message}`)
+    out()
+  }
+}
+
+out()
+out(bold('Next:'))
+const rel = relative(process.cwd(), target)
+if (rel) out(`  cd ${rel}`)
+out('  pnpm install')
+out('  pnpm dev')
+out()
+out(`  Admin: ${bold('http://localhost:3000/admin')}`)
+out()
+
+process.exitCode = remaining.some((d) => d.level === 'error') ? 1 : 0

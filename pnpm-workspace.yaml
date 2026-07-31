@@ -1,7 +1,10 @@
 packages:
   - playground
+  # The scaffolder (`pnpm create kestrel`). Dependency-free and published separately; its templates/lib
+  # are generated from the engine's own copies at pack time, so nothing here is a workspace link.
+  - packages/create-kestrel
   # Opt-in extension layers (own packages, NOT bundled with `kestrel`): a consumer composes them after the
-  # core, e.g. extends: ['@thielemann/kestrel', 'kestrel-secure-gallery']. The core's `files` whitelist excludes this dir.
+  # core, e.g. extends: ['@michaelthielemann/kestrel', 'kestrel-secure-gallery']. The core's `files` whitelist excludes this dir.
   - extensions/*
 
 overrides:

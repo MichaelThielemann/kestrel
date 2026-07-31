@@ -14,7 +14,7 @@ import type { BuiltCollection } from '../../../core/server/utils/collection-type
 // NOTE on ordering: the `01.` prefix sorts only WITHIN this (collections) layer. Nitro runs plugins by
 // layer-then-filename, so this plugin does NOT run second — in-repo it runs LAST (after core's
 // 00.migrate/02.schema-sync/03.record-refs), and the cross-layer order differs again for an
-// `extends: ['@thielemann/kestrel']` consumer. That is safe ONLY because nothing reads the registry at plugin init:
+// `extends: ['@michaelthielemann/kestrel']` consumer. That is safe ONLY because nothing reads the registry at plugin init:
 // migrate/schema-sync read the `#kestrel/collections` virtual directly, and the ref/cleanup/publish
 // plugins register deferred listeners. Keep that invariant — do not add an init-time allCollections() read.
 export default defineNitroPlugin(() => {

@@ -21,7 +21,7 @@ Only the **latest released minor** receives security fixes. There are no long-te
 
 ## Scope
 
-In scope: the published packages (`@thielemann/kestrel` and the `@thielemann/kestrel-galleries-*`
+In scope: the published packages (`@michaelthielemann/kestrel` and the `@michaelthielemann/kestrel-galleries-*`
 extensions) as used according to the documentation.
 
 Out of scope, because they are documented design decisions rather than defects — see

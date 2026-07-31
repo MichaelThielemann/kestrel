@@ -1,0 +1,26 @@
+# Dependencies
+node_modules
+
+# Nuxt / Nitro build output
+.nuxt
+.nitro
+.cache
+.output
+dist
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Runtime database, uploads and published output
+.data
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
