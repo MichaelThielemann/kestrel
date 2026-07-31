@@ -19,8 +19,23 @@ function eventFor(remoteAddress: string | undefined, headers: Record<string, str
   return createEvent({ method: 'GET', url: '/about', headers, socket: { remoteAddress } } as never, { setHeader() {} } as never)
 }
 
+/**
+ * A fresh gate AND a fresh stage-gate storage, so a mark set by an earlier scenario cannot be visible to
+ * this one. `enterWith` mutates the current async frame; under Node 22 inside vitest's runner that
+ * mutation reaches the root and no `setImmediate` or unrelated `run()` can shed it, so every peerless
+ * request after the first admitted one was wrongly exempted. Re-binding the auto-imports to the
+ * re-imported module gives each scenario its own `AsyncLocalStorage` instance, which nothing can outlive.
+ * A real listener never had this problem — replaying the same sequence outside vitest blocks correctly on
+ * both Node 22 and 24.
+ */
 async function loadGate(): Promise<(event: H3Event) => unknown> {
   vi.resetModules()
+  const ctx = await import('../utils/render-context')
+  Object.assign(globalThis, {
+    isRendererContext: ctx.isRendererContext,
+    isStageGatePassedContext: ctx.isStageGatePassedContext,
+    markStageGatePassed: ctx.markStageGatePassed,
+  })
   return (await import('./00.ip-allowlist')).default
 }
 
