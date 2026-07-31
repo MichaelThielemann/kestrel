@@ -11,12 +11,20 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Both ends of what `engines.node` promises: 22 is the floor (Maintenance LTS) and 24 is Active LTS.
+    # Testing only the newer one hid a real defect — an AsyncLocalStorage mark that leaked between tests on
+    # 22 but not on 24 — until the first release attempt. Raise the floor here whenever `engines` changes.
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    name: test (node ${{ matrix.node }})
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
@@ -34,7 +42,10 @@ jobs:
       # The e2e suite boots a real dev server and drives Chromium; each spec file starts its own server on
       # the shared .nuxt dir, which is why the config pins fileParallelism: false. Keep it last: it is by
       # far the slowest step, and a failure here is more useful once the cheaper gates are known green.
+      # Only on the Active LTS — it is the slowest gate by far and its failure modes are browser-side.
       - name: Install Chromium for e2e
+        if: matrix.node == 24
         run: node node_modules/playwright-core/cli.js install --with-deps chromium
       - name: End-to-end
+        if: matrix.node == 24
         run: pnpm test:e2e

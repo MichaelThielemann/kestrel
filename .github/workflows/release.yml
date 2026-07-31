@@ -10,8 +10,10 @@ name: Release
 # One-time setup per package. A trusted publisher cannot be configured for a package that does not exist,
 # so each one needs a manual `npm publish --access public --no-provenance` first — `--no-provenance`
 # because every manifest here sets `publishConfig.provenance`, which only works inside CI. Then, from npm 11.15:
-#   npm trust github <package> --file release.yml --repo MichaelThielemann/kestrel
-# `--file` is the workflow FILENAME, not its path — the same field the npmjs.com UI asks for. The account
+#   npm trust github <package> --file release.yml --repo MichaelThielemann/kestrel --allow-publish
+# `--file` is the workflow FILENAME of THIS repo — not a path, and not the `publish.yml` from npm's own
+# example. A wrong value is accepted silently and only surfaces at the next release, as a 404 on PUT that
+# reads like a permissions problem. `npm trust list <package>` shows what is actually stored. The account
 # needs 2FA; a granular token with "bypass 2FA" is rejected for trust operations.
 
 on:
@@ -26,11 +28,11 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
           cache: pnpm
       - run: pnpm install --frozen-lockfile

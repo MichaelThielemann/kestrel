@@ -90,7 +90,7 @@ describe('the payload copy', () => {
           readFileSync(resolve(root, 'templates', rel), 'utf8'),
         )
       }
-      for (const rel of ['scaffold.mjs', 'password.mjs']) {
+      for (const rel of ['scaffold.mjs', 'password.mjs', 'cli.mjs']) {
         expect(readFileSync(join(pkgDir, 'lib', rel), 'utf8')).toBe(
           readFileSync(resolve(root, 'scripts/lib', rel), 'utf8'),
         )
@@ -98,6 +98,26 @@ describe('the payload copy', () => {
     } finally {
       for (const dir of ['templates', 'lib']) rmSync(join(pkgDir, dir), { recursive: true, force: true })
     }
+  })
+
+  // postpack is not guaranteed to run (a failed publish skips it), so anything prepack writes must be a
+  // generated file that `--clean` deletes — never a key in the committed manifest, which would be
+  // committed and then silently pin stale ranges.
+  it('stamps the engine ranges into a generated file, leaving the manifest untouched', () => {
+    const before = readFileSync(join(pkgDir, 'package.json'), 'utf8')
+    expect(spawnSync(process.execPath, [copy], { cwd: root, encoding: 'utf8' }).status).toBe(0)
+    try {
+      expect(readFileSync(join(pkgDir, 'package.json'), 'utf8'), 'prepack must not touch the manifest').toBe(before)
+      const meta = readFileSync(join(pkgDir, 'lib/engine-meta.mjs'), 'utf8')
+      const engine = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
+      expect(meta).toContain(engine.dependencies.nuxt)
+    } finally {
+      spawnSync(process.execPath, [copy, '--clean'], { cwd: root })
+    }
+  })
+
+  it('keeps no generated stamp in the committed manifest', () => {
+    expect(JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'))).not.toHaveProperty('//engine')
   })
 
   // npm reads a manifest BEFORE running prepack, so a version rewrite there reaches the tarball contents

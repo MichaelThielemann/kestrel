@@ -13,11 +13,6 @@ const manifestPath = join(PKG, 'package.json')
 
 const clean = () => {
   for (const entry of GENERATED) rmSync(join(PKG, entry), { recursive: true, force: true })
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-  if (manifest['//engine']) {
-    delete manifest['//engine']
-    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
-  }
 }
 
 if (process.argv.includes('--clean')) {
@@ -42,11 +37,13 @@ if (process.argv.includes('--clean')) {
     if (existsSync(join(ROOT, file))) cpSync(join(ROOT, file), join(PKG, file))
   }
 
-  // Stamped so the scaffolded manifest pins the ranges the engine actually resolves.
-  manifest['//engine'] = {
+  // A generated file, not a key in the committed manifest: `postpack` is not guaranteed to run (a failed
+  // publish skips it), and a stamp left behind in package.json would be committed and then silently pin
+  // stale ranges. Deleting `lib/` removes this with everything else.
+  const stamp = {
     nuxt: engine.dependencies?.nuxt,
     typescript: engine.dependencies?.typescript,
     'vue-tsc': engine.devDependencies?.['vue-tsc'],
   }
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  writeFileSync(join(PKG, 'lib', 'engine-meta.mjs'), `export default ${JSON.stringify(stamp, null, 2)}\n`)
 }
