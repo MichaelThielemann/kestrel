@@ -13,6 +13,14 @@ export default defineEventHandler((event) => {
   const locale = typeof q.locale === 'string' ? q.locale : undefined
   const isStaticRender = import.meta.prerender === true || isRendererContext()
   const publishedOnly = isStaticRender || event.context.readScope !== 'all'
-  const resolved = resolvePage(useDb(), allCollections(), path, locale, publishedOnly)
-  return { collection: resolved?.collection ?? null, page: resolved?.page ?? null, alternates: resolved?.alternates ?? [] }
+  const db = useDb()
+  const resolved = resolvePage(db, allCollections(), path, locale, publishedOnly)
+  // The site-wide head tier rides along on the fetch the page already awaits, so it reaches SSR and the
+  // prerender on a path that is known to work. Looked up through the registry, not imported, so a consumer
+  // that disables the collection gets `null` instead of a query against a table the schema never created.
+  // `depth: 1` resolves the sharing image into `$media`; `getSingleton` captures the read, so an edit
+  // re-publishes every route that embedded it.
+  const siteCollection = getCollection('site')
+  const site = siteCollection ? getSingleton(db, siteCollection, locale, false, 1) : null
+  return { collection: resolved?.collection ?? null, page: resolved?.page ?? null, alternates: resolved?.alternates ?? [], site }
 })

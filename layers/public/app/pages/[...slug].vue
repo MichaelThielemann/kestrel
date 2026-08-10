@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { LayoutKey } from 'nuxt/app'
+import type { SiteHead } from '../utils/site-head'
 
 // The record decides its own layout, so route-meta resolution is opted out of and this page renders the
 // `<NuxtLayout>` itself. Side effect worth knowing: the layout becomes a CHILD of the page, so it can read
@@ -41,6 +42,7 @@ const { data: resolved } = await useAsyncData(`page:${locale}:${path}`, () =>
     collection: string | null
     page: (RenderedPage & Record<string, unknown>) | null
     alternates?: Array<{ locale: string; path: string }>
+    site?: SiteHead | null
   }),
 )
 const page = computed(() => resolved.value?.page ?? null)
@@ -86,6 +88,11 @@ if (!page.value && path !== '/') throw createError({ statusCode: 404, statusMess
 // og:image) require a configured siteUrl and degrade away without one.
 const publicRc = useRuntimeConfig().public as { siteUrl?: string; siteName?: string }
 const seo = page.value?.seo ?? {}
+const siteHead = resolved.value?.site ?? null
+const fallbacks = siteHeadFallbacks(seo, siteHead)
+// og:title stays the bare page title (og:site_name already carries the site); only <title> is composed.
+const pageTitle = seo.title || page.value?.title
+const documentTitle = composeTitle(pageTitle, siteHead)
 const head = buildPageHead({
   siteUrl: typeof publicRc.siteUrl === 'string' ? publicRc.siteUrl : '',
   siteName: typeof publicRc.siteName === 'string' ? publicRc.siteName : '',
@@ -93,9 +100,9 @@ const head = buildPageHead({
   locale,
   primary,
   prefixPrimary,
-  title: seo.title || page.value?.title,
-  description: seo.description || undefined,
-  image: seo.$media?.image ?? null,
+  title: pageTitle,
+  description: fallbacks.description,
+  image: fallbacks.image,
   alternates: resolved.value?.alternates ?? [],
 })
 
@@ -111,8 +118,8 @@ useHead({
   ],
 })
 useSeoMeta({
-  title: seo.title || page.value?.title,
-  description: seo.description || undefined,
+  title: documentTitle,
+  description: fallbacks.description,
   robots: seo.noindex ? 'noindex, nofollow' : undefined,
   ogTitle: head.meta.ogTitle,
   ogDescription: head.meta.ogDescription,

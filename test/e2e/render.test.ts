@@ -56,6 +56,36 @@ describe('public rendering (e2e)', async () => {
     try { rmSync(uploads, { recursive: true, force: true }) } catch {}
   })
 
+  it('composes the title from the site singleton and falls back to its description', async () => {
+    await $fetch('/api/site?locale=en', {
+      method: 'PUT',
+      headers: { cookie },
+      body: { baseTitle: 'Acme Docs', titleSeparator: '·', titlePosition: 'after', description: 'Site-wide blurb' },
+    })
+    await $fetch('/api/pages', { method: 'POST', headers: { cookie }, body: { title: 'Pricing', path: '/pricing', status: 'published' } })
+
+    const html = await $fetch('/pricing') as string
+    expect(html).toContain('<title>Pricing · Acme Docs</title>')
+    expect(html).toContain('content="Site-wide blurb"')
+    // og:title stays the bare page title — og:site_name already carries the site.
+    expect(html).toMatch(/property="og:title"[^>]*content="Pricing"|content="Pricing"[^>]*property="og:title"/)
+  })
+
+  it('lets a page override the site description without losing the composed title', async () => {
+    await $fetch('/api/pages', {
+      method: 'POST',
+      headers: { cookie },
+      body: { title: 'Own', path: '/own-seo', status: 'published', seo: { description: 'Page blurb' } },
+    })
+    const html = await $fetch('/own-seo') as string
+    expect(html).toContain('<title>Own · Acme Docs</title>')
+    // The meta tag is the assertion, not the document: the site row rides along in the hydration payload,
+    // so its description is present in the HTML either way.
+    const meta = html.match(/<meta[^>]*name="description"[^>]*>/)?.[0] ?? ''
+    expect(meta).toContain('Page blurb')
+    expect(meta).not.toContain('Site-wide blurb')
+  })
+
   it('renders a page in the layout it selects, and the default when it selects none', async () => {
     // `app/layouts/alt.vue` marks itself with data-layout; the default layout does not. Exactly one <main>
     // per page also proves `layout: false` stopped the route-meta layout from wrapping it a second time.
