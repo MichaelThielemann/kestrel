@@ -266,6 +266,11 @@ gracefully; richtext internal links (`kestrel:<col>:<id>` markers) are a separat
   `*.nuxt.test.ts` → `vitest.nuxt.config.ts`; `test/e2e/*.test.ts` → `vitest.e2e.config.ts`.
 - happy-dom does **not** render teleported widgets → smoke-test presence, test load-bearing logic in
   pure utils.
+- `mockNuxtImport` applies **before** Nuxt boots, so a mock that replaces a composable Nuxt itself uses
+  also starves Nuxt's own plugins (replacing `useRuntimeConfig` wholesale costs the router `app.baseURL`,
+  and every later `useRouter()` in the file is then `undefined`). Take the original the factory is handed
+  and override only the keys under test. For the same reason a Nuxt composable called eagerly — at module
+  scope or in a `describe` body — throws `[nuxt] instance unavailable`; call it inside the test or a hook.
 
 See [`configuration.md`](configuration.md) for the single config source (`kestrel.config.ts`) and the
 `KESTREL_* env → config → default` precedence; the per-topic docs for the flagship subsystems.

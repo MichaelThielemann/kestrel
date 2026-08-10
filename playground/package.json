@@ -12,6 +12,6 @@
     "@michaelthielemann/kestrel-galleries-secure-proofing": "workspace:*"
   },
   "devDependencies": {
-    "nuxt": "^4.4.7"
+    "nuxt": "^4.5.2"
   }
 }

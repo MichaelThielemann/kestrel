@@ -112,9 +112,11 @@ const head = buildPageHead({
 useHead({
   htmlAttrs: { lang: locale },
   link: [
-    ...(head.canonical ? [{ rel: 'canonical', href: head.canonical }] : []),
+    // `rel` needs the literal type: unhead keys its link union on it, and inside an array literal that
+    // reaches `link:` through a spread there is no contextual type to stop TS widening it to `string`.
+    ...(head.canonical ? [{ rel: 'canonical' as const, href: head.canonical }] : []),
     ...head.links,
-    { rel: 'alternate', type: 'text/markdown', href: '/llms.txt', title: 'llms.txt' },
+    { rel: 'alternate' as const, type: 'text/markdown', href: '/llms.txt', title: 'llms.txt' },
   ],
 })
 useSeoMeta({

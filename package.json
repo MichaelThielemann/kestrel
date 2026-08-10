@@ -76,7 +76,7 @@
     "file-type": "^22.0.1",
     "jsdom": "^29.1.1",
     "nanoid": "^5.1.16",
-    "nuxt": "^4.4.8",
+    "nuxt": "^4.5.2",
     "reka-ui": "^2.10.1",
     "sanitize-html": "^2.17.6",
     "sass": "^1.102.0",
@@ -107,8 +107,8 @@
     }
   },
   "devDependencies": {
-    "@nuxt/kit": "^4.4.8",
-    "@nuxt/test-utils": "^3.23.0",
+    "@nuxt/kit": "^4.5.2",
+    "@nuxt/test-utils": "^4.1.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/jsdom": "^28.0.3",
     "@types/sanitize-html": "^2.16.1",
@@ -118,7 +118,7 @@
     "h3": "^1.15.11",
     "happy-dom": "^20.11.2",
     "playwright-core": "^1.62.1",
-    "vitest": "^3.2.7",
+    "vitest": "^4.1.10",
     "vue": "3.5.35",
     "vue-router": "^5.2.0",
     "vue-tsc": "^3.3.9"
