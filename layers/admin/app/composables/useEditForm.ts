@@ -135,6 +135,8 @@ export function useEditForm(opts: UseEditFormOptions) {
     if (blocksEnabled.value) next.content = (source?.content as unknown[]) ?? []
     // `path` (the page slug) is a pageLike system column, likewise round-tripped explicitly.
     if (pageLike.value) next.path = (source?.path as string | null | undefined) ?? ''
+    // `layout` is a pageLike system column too; '' is the "no override" form the select binds to.
+    if (pageLike.value) next.layout = (source?.layout as string | null | undefined) ?? ''
     // `seo` is a JSON system column; default to an empty object so the editor can fill it in.
     if (hasSeo.value) next.seo = (source?.seo as Record<string, unknown> | undefined) ?? {}
     // `status` is a system column; a new record defaults to 'draft' (unpublished) — matches the DB default.
@@ -261,6 +263,9 @@ export function useEditForm(opts: UseEditFormOptions) {
     if (blocksEnabled.value) body.content = values.content
     // Send the slug as the routable path; a blank slug clears the route (stored as null, not "").
     if (pageLike.value) body.path = (values.path as string) ? values.path : null
+    // An unset layout is stored as NULL, never '': the render coalesces NULL to `default`, and a stored ''
+    // would be indistinguishable from a name that failed to save.
+    if (pageLike.value) body.layout = (values.layout as string) || null
     if (hasSeo.value) body.seo = values.seo ?? {}
     if (hasStatus.value) body.status = (values.status as string) ?? 'draft'
     // A new translatable multi record carries its locale, and links to a translation group when it is

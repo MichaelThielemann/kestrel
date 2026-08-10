@@ -320,6 +320,28 @@ describe('useEditForm', () => {
     expect(lastPagesBody).toMatchObject({ path: '/about-us' })
   })
 
+  it('pageLike: round-trips the layout, and sends null rather than "" for the fallback', async () => {
+    const f = useEditForm({ collection: 'pages', id: '7' })
+    await f.ready
+    // '' is the select's "no override" form; the stored value is NULL, so the two must not be confused.
+    expect(f.values.layout).toBe('')
+    f.setField('layout', 'alt')
+    expect(f.dirty.value).toBe(true)
+    await f.submit()
+    expect(lastPagesBody).toMatchObject({ layout: 'alt' })
+    f.setField('layout', '')
+    await f.submit()
+    expect(lastPagesBody).toHaveProperty('layout', null)
+  })
+
+  it('does not add a layout to a non-pageLike collection', async () => {
+    const f = useEditForm({ collection: 'posts', id: 'new' })
+    await f.ready
+    f.setField('title', 'X')
+    await f.submit()
+    expect(lastPostBody).not.toHaveProperty('layout')
+  })
+
   it('pageLike: a new page initializes an empty path and sends null when left blank', async () => {
     const f = useEditForm({ collection: 'pages', id: 'new' })
     await f.ready

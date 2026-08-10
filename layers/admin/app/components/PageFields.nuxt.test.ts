@@ -1,8 +1,12 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
-import { mountSuspended } from '@nuxt/test-utils/runtime'
+import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import type { FieldDef } from '../../../core/server/utils/defineCollection'
 import PageFields from './PageFields.vue'
+
+// The offerable set is a build-time constant; drive it from the test so the ≤1 case is reachable.
+const layoutsMock = vi.hoisted(() => ({ names: ['default'] as string[] }))
+mockNuxtImport('useOfferableLayouts', () => () => layoutsMock.names)
 
 const fields = {
   format: { type: 'text' },
@@ -69,5 +73,45 @@ describe('PageFields', () => {
     await flushPromises()
     const slug = w.findAll('input').at(-1)!
     expect(slug.attributes('placeholder')).toBe('/acme-widget')
+  })
+})
+
+describe('PageFields — the page layout select', () => {
+  const base = { fields: {} as Record<string, FieldDef>, errors: {}, locale: 'en' }
+  const find = (w: Awaited<ReturnType<typeof mountSuspended>>) =>
+    w.findAll('.page-settings__layout')
+
+  it('offers the discovered layouts, with the fallback as the empty-valued first entry', async () => {
+    layoutsMock.names = ['alt', 'default']
+    const w = await mountSuspended(PageFields, { props: { ...base, values: { layout: null }, pageLike: true } })
+    await flushPromises()
+    expect(find(w).length).toBe(1)
+    const opts = w.find('.page-settings__layout').findAll('option').map((o) => o.attributes('value'))
+    expect(opts).toEqual(['', 'alt'])
+  })
+
+  it('emits the chosen layout, and an empty string for the fallback', async () => {
+    layoutsMock.names = ['alt', 'default']
+    const w = await mountSuspended(PageFields, { props: { ...base, values: { layout: null }, pageLike: true } })
+    await flushPromises()
+    const select = w.find('.page-settings__layout select')
+    await select.setValue('alt')
+    expect(w.emitted('update')).toContainEqual(['layout', 'alt'])
+    await select.setValue('')
+    expect(w.emitted('update')).toContainEqual(['layout', ''])
+  })
+
+  it('stays hidden when the project ships a single layout — there is nothing to choose', async () => {
+    layoutsMock.names = ['default']
+    const w = await mountSuspended(PageFields, { props: { ...base, values: {}, pageLike: true } })
+    await flushPromises()
+    expect(find(w).length).toBe(0)
+  })
+
+  it('stays hidden for a collection that is not pageLike', async () => {
+    layoutsMock.names = ['alt', 'default']
+    const w = await mountSuspended(PageFields, { props: { ...base, values: {} } })
+    await flushPromises()
+    expect(find(w).length).toBe(0)
   })
 })

@@ -133,6 +133,9 @@ export const de: Catalog = {
 
   'pageSettings.slugLabel': 'Slug',
   'pageSettings.slugHint': 'URL-Pfad, z. B. /about (leer = automatisch aus dem Titel)',
+  'pageSettings.layoutLabel': 'Layout',
+  'pageSettings.layoutHint': 'Mit welchem Layout diese Seite gerendert wird.',
+  'pageSettings.layoutDefault': 'Standard (default)',
   'pageSettings.statusLabel': 'Status',
   'pageSettings.statusHint': 'Entwurf bleibt offline; Veröffentlicht rendert die Seite.',
   'pageSettings.statusDraft': 'Entwurf',

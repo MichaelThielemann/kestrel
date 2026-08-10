@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { addComponentsDir, addTypeTemplate, createResolver, defineNuxtModule } from '@nuxt/kit'
+import { addComponentsDir, addTemplate, addTypeTemplate, createResolver, defineNuxtModule } from '@nuxt/kit'
 import { collectBlockSfcs, collectDefinitions, renderRegistry } from './scan'
 import { renderBlockRegistry } from './extract-block'
+import { offerableLayouts, renderLayoutRegistry } from '../../app/utils/layouts'
 
 export default defineNuxtModule({
   meta: { name: 'kestrel-auto-discovery' },
@@ -21,6 +22,15 @@ export default defineNuxtModule({
       const dir = join(root, 'app/blocks')
       if (existsSync(dir)) addComponentsDir({ path: dir, prefix: 'Blocks', global: true, pathPrefix: false })
     }
+
+    // Layouts need no scan of our own: Nuxt already resolves `app/layouts/*.vue` across the layers with the
+    // same name-first, consumer-wins dedup, and fills `app.layouts` just before `app:resolve` — which runs
+    // inside `generateApp`, ahead of the templates being written, so the closure below is filled in time.
+    let layoutNames: string[] = []
+    nuxt.hook('app:resolve', (app) => { layoutNames = offerableLayouts(app.layouts ?? {}) })
+    // `write` so the resolved list is inspectable in `.nuxt/` — a virtual-only template makes "which layouts
+    // did the build actually find" unanswerable without a debugger.
+    addTemplate({ filename: 'kestrel-layouts.mjs', write: true, getContents: () => renderLayoutRegistry(layoutNames) })
 
     nuxt.hook('nitro:config', (nitro) => {
       nitro.virtual ||= {}

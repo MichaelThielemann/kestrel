@@ -10,3 +10,6 @@ declare module '#kestrel/schema-tables' {
   const tables: unknown[]
   export default tables
 }
+declare module '#build/kestrel-layouts.mjs' {
+  export const kestrelLayouts: string[]
+}

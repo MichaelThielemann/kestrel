@@ -17,3 +17,23 @@ export function offerableLayouts(layouts: Record<string, ResolvedLayout | undefi
     .filter((name) => name !== ADMIN_LAYOUT)
     .sort()
 }
+
+/** The discovered names as a module body, so the admin bundle can import a build-time constant. */
+export function renderLayoutRegistry(names: string[]): string {
+  return `export const kestrelLayouts = ${JSON.stringify(names)}\n`
+}
+
+/**
+ * Options for the page-layout select. The fallback is one entry with an EMPTY value — an unset column
+ * already renders `default`, so offering `default` as its own value would give the editor two controls for
+ * one outcome and pin the row to a name the consumer may later rename.
+ */
+export function layoutSelectOptions(names: string[], fallbackLabel: string): { label: string, value: string }[] {
+  return [
+    { label: fallbackLabel, value: '' },
+    ...names.filter((n) => n !== DEFAULT_LAYOUT_NAME).map((n) => ({ label: n, value: n })),
+  ]
+}
+
+/** Mirrors `DEFAULT_LAYOUT` in the public layer; kept local so this util stays dependency-free. */
+const DEFAULT_LAYOUT_NAME = 'default'

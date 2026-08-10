@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { offerableLayouts, ADMIN_LAYOUT } from './layouts'
+import { offerableLayouts, layoutSelectOptions, renderLayoutRegistry, ADMIN_LAYOUT } from './layouts'
 
 // Shape of Nuxt's resolved `app.layouts` (name → { name, file }).
 const map = (...entries: [string, string][]) =>
@@ -35,5 +35,36 @@ describe('offerableLayouts', () => {
   it('tolerates a malformed entry instead of throwing during a build', () => {
     const dirty = { default: { name: 'default', file: '/p/app/layouts/default.vue' }, broken: undefined }
     expect(offerableLayouts(dirty as never)).toEqual(['default'])
+  })
+})
+
+describe('renderLayoutRegistry', () => {
+  it('renders a module body the client bundle can import', () => {
+    expect(renderLayoutRegistry(['bare', 'default'])).toBe('export const kestrelLayouts = ["bare","default"]\n')
+  })
+  it('renders an empty list without emitting `undefined`', () => {
+    expect(renderLayoutRegistry([])).toBe('export const kestrelLayouts = []\n')
+  })
+})
+
+describe('layoutSelectOptions', () => {
+  const label = 'Standard (default)'
+
+  it('offers the fallback as one empty-valued entry, and never a duplicate `default`', () => {
+    // An unset column already means `default`, so listing `default` as its own value would give the editor
+    // two controls for one outcome — and pin the row to a name a consumer may later rename.
+    expect(layoutSelectOptions(['bare', 'default', 'marketing'], label)).toEqual([
+      { label, value: '' },
+      { label: 'bare', value: 'bare' },
+      { label: 'marketing', value: 'marketing' },
+    ])
+  })
+
+  it('collapses to the single fallback entry when `default` is all there is', () => {
+    expect(layoutSelectOptions(['default'], label)).toEqual([{ label, value: '' }])
+  })
+
+  it('yields only the fallback entry for an empty list', () => {
+    expect(layoutSelectOptions([], label)).toEqual([{ label, value: '' }])
   })
 })

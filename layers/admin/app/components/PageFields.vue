@@ -25,6 +25,11 @@ const props = defineProps<{
 const emit = defineEmits<{ update: [name: string, value: unknown] }>()
 const { t } = useT()
 
+// A project with a single layout has nothing to choose, so the control stays out of the pane entirely
+// rather than offering one dead option.
+const layoutOptions = computed(() => layoutSelectOptions(useOfferableLayouts(), t('pageSettings.layoutDefault')))
+const showLayout = computed(() => !!props.pageLike && layoutOptions.value.length > 1)
+
 // Live preview of the slug the server will auto-generate from the title while the field is left blank
 // (the server slugifies the title on save). Falls back to '/' when there is no title yet.
 const slugPlaceholder = computed(() => {
@@ -84,6 +89,26 @@ const slugPlaceholder = computed(() => {
         :placeholder="slugPlaceholder"
         v-bind="f"
         @update:model-value="(v) => emit('update', 'path', v)"
+      />
+    </template>
+  </UiField>
+
+  <!-- Which layout renders this page (the `layout` system column). Empty = the `default` layout, so an
+       unset value keeps rendering exactly as a project without the column. -->
+  <UiField
+    v-if="showLayout"
+    class="page-settings__layout"
+    :label="t('pageSettings.layoutLabel')"
+    :hint="t('pageSettings.layoutHint')"
+    :error="errors.layout || null"
+  >
+    <template #default="f">
+      <UiSelect
+        :model-value="(values.layout as string) ?? ''"
+        :options="layoutOptions"
+        :disabled="disabled"
+        v-bind="f"
+        @update:model-value="(v) => emit('update', 'layout', v)"
       />
     </template>
   </UiField>

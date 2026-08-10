@@ -144,6 +144,9 @@ export const en: Catalog = {
   // page settings (system fields on pageLike collections)
   'pageSettings.slugLabel': 'Slug',
   'pageSettings.slugHint': 'URL path, e.g. /about (blank = auto-generated from the title)',
+  'pageSettings.layoutLabel': 'Layout',
+  'pageSettings.layoutHint': 'Which layout renders this page.',
+  'pageSettings.layoutDefault': 'Standard (default)',
   'pageSettings.statusLabel': 'Status',
   'pageSettings.statusHint': 'Draft stays off the live site; Published renders it.',
   'pageSettings.statusDraft': 'Draft',

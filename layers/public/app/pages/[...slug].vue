@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { LayoutKey } from 'nuxt/app'
+
 // The record decides its own layout, so route-meta resolution is opted out of and this page renders the
 // `<NuxtLayout>` itself. Side effect worth knowing: the layout becomes a CHILD of the page, so it can read
 // `usePublicPageState()` during SSR — as its parent it rendered before the page had written it.
@@ -43,8 +45,11 @@ const { data: resolved } = await useAsyncData(`page:${locale}:${path}`, () =>
 )
 const page = computed(() => resolved.value?.page ?? null)
 // `fallback` below only rescues a truthy name that is missing from the layout map, so the empty cases have
-// to be coalesced here — see resolvePageLayout.
-const pageLayout = computed(() => resolvePageLayout(page.value?.layout))
+// to be coalesced here — see resolvePageLayout. The cast is the one honest bridge in this file: the stored
+// name is arbitrary editor data, while `NuxtLayout` types `name` as the union of layouts that existed at
+// build time. Narrowing to that union is impossible for a value read from the DB, and `fallback` is exactly
+// the runtime guard for a name outside it.
+const pageLayout = computed(() => resolvePageLayout(page.value?.layout) as LayoutKey)
 
 // The layout (language menu & co.) needs the resolved record and its collection; pages and layouts share
 // no other channel, so mirror the fetch result into the shared state — reactively, so client-side
