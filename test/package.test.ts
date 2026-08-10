@@ -110,6 +110,25 @@ describe('package.json — installable as a Nuxt meta-layer (`extends: ["@michae
     }
   })
 
+  it('prefixes every `optimizeDeps.include` entry with its own published name', () => {
+    // The nested `<pkg> > <dep>` form is what makes Vite resolve each dep from the ENGINE's directory
+    // rather than the consumer's root — under pnpm the engine's transitive deps are not hoisted, so a
+    // wrong prefix silently resolves nowhere, the dep is never pre-bundled, and the admin editor's
+    // reka-ui/tiptap arrive as an unbundled request waterfall. Vite swallows an unresolvable prefix
+    // (`resolvePackageData(...)?.dir || basedir`), so the only symptom is a warning in the consumer's
+    // terminal — never in this repo, whose root has the deps hoisted anyway.
+    const config = readFileSync(resolve(root, 'nuxt.config.ts'), 'utf8')
+    const block = config.match(/optimizeDeps:\s*\{[\s\S]*?include:\s*\[([\s\S]*?)\]/)
+    expect(block, 'optimizeDeps.include not found in nuxt.config.ts').toBeTruthy()
+    const entries = [...block![1]!.matchAll(/'([^']+)'/g)].map((m) => m[1]!)
+    expect(entries.length).toBeGreaterThan(0)
+    for (const entry of entries) {
+      const [prefix, dep] = entry.split('>').map((s) => s.trim())
+      expect(prefix, `${entry} must be prefixed with the published package name`).toBe(pkg.name)
+      expect(pkg.dependencies, `${dep} is pre-bundled but not a dependency`).toHaveProperty(dep!)
+    }
+  })
+
   it('does not use `exports` (it would gate the published subpaths consumers rely on)', () => {
     // `kestrel/scripts/hash-password.mjs` (docs) + the deep `kestrel/layers/.../kestrel-config` type import
     // must stay reachable; an `exports` map without those keys would 404 them. `main` alone keeps all subpaths.

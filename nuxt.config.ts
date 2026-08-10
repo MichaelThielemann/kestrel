@@ -83,22 +83,25 @@ export default defineNuxtConfig({
   vite: {
     build: { rollupOptions: { onwarn } },
     optimizeDeps: {
-      // Nested "kestrel > dep" form: Vite resolves each dep from the `kestrel` PACKAGE's directory
-      // rather than the (consumer) project root. Under pnpm these are kestrel's transitive deps and
-      // are NOT hoisted into a consumer's top-level node_modules, so a bare specifier is
-      // "Unresolvable" from the consumer root. In-repo `kestrel` is not a resolvable package name, so
-      // Vite's nestedResolveBasedir falls back to the repo root where these deps ARE hoisted — same
-      // result. The runtime `import('@tiptap/...')` still reuses the pre-bundle (tryOptimizedResolve
-      // matches the "> dep" id + src dir).
+      // Nested "<pkg> > dep" form: Vite resolves each dep from THIS package's directory rather than from
+      // the consumer's project root. It has to be the published name — under pnpm these are kestrel's
+      // transitive deps and are not hoisted into a consumer's top-level node_modules, so resolving from
+      // the root finds nothing. An unresolvable prefix is swallowed (`resolvePackageData(…)?.dir ||
+      // basedir`), and the entry then degrades to a bare lookup from the root: fine in-repo and for a
+      // hoisted npm/yarn consumer, silently unbundled for a pnpm one — which is why a stale prefix shows
+      // up only in a consumer's terminal. In-repo the name is likewise unresolvable and that same
+      // fallback lands on the repo root, where the deps ARE hoisted. The runtime `import('@tiptap/...')`
+      // still reuses the pre-bundle (tryOptimizedResolve matches the "> dep" id + src dir).
+      // `test/package.test.ts` pins the prefix to package.json's `name`.
       include: [
-        'kestrel > @internationalized/date',
-        'kestrel > @tiptap/extension-highlight',
-        'kestrel > @tiptap/extension-subscript',
-        'kestrel > @tiptap/extension-superscript',
-        'kestrel > @tiptap/extension-text-align',
-        'kestrel > @tiptap/starter-kit',
-        'kestrel > @tiptap/vue-3',
-        'kestrel > reka-ui',
+        '@michaelthielemann/kestrel > @internationalized/date',
+        '@michaelthielemann/kestrel > @tiptap/extension-highlight',
+        '@michaelthielemann/kestrel > @tiptap/extension-subscript',
+        '@michaelthielemann/kestrel > @tiptap/extension-superscript',
+        '@michaelthielemann/kestrel > @tiptap/extension-text-align',
+        '@michaelthielemann/kestrel > @tiptap/starter-kit',
+        '@michaelthielemann/kestrel > @tiptap/vue-3',
+        '@michaelthielemann/kestrel > reka-ui',
       ],
     },
   },
