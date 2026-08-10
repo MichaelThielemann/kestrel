@@ -471,6 +471,18 @@ describe('kestrel CLI', () => {
     expect(Buffer.byteLength(run('secret').stdout.trim())).toBeGreaterThanOrEqual(32)
   })
 
+  // `hash-password > secret.txt` must yield a file holding the hash and nothing else, so both entry
+  // points have to prompt on stderr. Only the interactive branch is affected and a spawned test has no
+  // tty to reach it, hence the source-level guard.
+  it.each([
+    ['scripts/kestrel.mjs', 'async function hashPasswordCommand'],
+    ['scripts/hash-password.mjs', 'process.stdin.isTTY'],
+  ])('prompts on stderr in %s so stdout stays pipeable', (file, anchor) => {
+    const src = readFileSync(resolve(root, file), 'utf8')
+    const call = src.slice(src.indexOf('promptPassword({', src.indexOf(anchor)))
+    expect(call.slice(0, call.indexOf('}'))).toContain('output: process.stderr')
+  })
+
   // An empty --password (an unset $PW in a script) used to be hashed and written, leaving /admin open to
   // a login with no password at all while doctor reported the project healthy.
   it('refuses an empty or too-short --password instead of provisioning an open admin', () => {

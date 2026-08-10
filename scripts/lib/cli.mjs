@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, chmodSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
+import { createInterface } from 'node:readline/promises'
 
 export const MIN_PASSWORD_LENGTH = 8
 
@@ -65,44 +66,58 @@ export function walk(dir, base = dir) {
   return found
 }
 
-/**
- * Reads a line with the echo suppressed. readline echoes before we see the data event, so the fix is to
- * repaint the prompt over whatever was written — unconditionally, because a pasted secret arrives as one
- * chunk that ends in a newline and would otherwise be left on screen and in the scrollback.
- */
-async function askHidden(rl, question) {
-  const repaint = () => process.stdout.write(`\u001b[2K\u001b[200D${question}`)
-  process.stdin.on('data', repaint)
+/** Reads a line the interface is configured never to echo, so the prompt is ours to draw and to close. */
+async function askHidden(rl, question, write) {
+  write(question)
   try {
-    return (await rl.question(question)).trim()
+    return (await rl.question('')).trim()
   } finally {
-    process.stdin.off('data', repaint)
-    repaint()
-    process.stdout.write('\n')
+    write('\n')
   }
 }
 
 export class Cancelled extends Error {}
 
-/** Throws `Cancelled` on Ctrl-C / Ctrl-D so a caller can exit cleanly instead of on an AbortError stack. */
-export async function promptPassword(rl, { warn = out } = {}) {
-  for (;;) {
-    let first
-    try {
-      first = await askHidden(rl, 'Admin password: ')
-      if (first.length < MIN_PASSWORD_LENGTH) {
-        warn(`  at least ${MIN_PASSWORD_LENGTH} characters, please`)
-        continue
+/**
+ * Owns its readline interface, because the two options that keep the secret off the screen can only be
+ * set at construction: `output: null` makes readline write nothing at all, and `terminal: true` still
+ * gives it the keypress handling (backspace, Ctrl-C, Ctrl-D) that would otherwise fall to the tty's own
+ * echoing line discipline. Erasing readline's echo afterwards cannot match that — a pasted secret arrives
+ * as one chunk that is echoed AND newlined in a single write, stranding the cleartext on a line no
+ * repaint can still reach, and a redirected stdout leaves `terminal` false with nothing to suppress.
+ *
+ * Throws `Cancelled` on Ctrl-C / Ctrl-D so a caller can exit cleanly instead of on an AbortError stack.
+ */
+export async function promptPassword({
+  input = process.stdin,
+  output = process.stdout,
+  warn = (m) => output.write(`${m}\n`),
+  note = (m) => output.write(`${m}\n`),
+} = {}) {
+  const draw = (s) => output.write(s)
+  const rl = createInterface({ input, output: null, terminal: true })
+  note(`Choose a password for /admin — at least ${MIN_PASSWORD_LENGTH} characters, kept only as a scrypt hash.`)
+  try {
+    for (;;) {
+      let first
+      try {
+        first = await askHidden(rl, 'New admin password: ', draw)
+        if (first.length < MIN_PASSWORD_LENGTH) {
+          warn(`  too short — at least ${MIN_PASSWORD_LENGTH} characters`)
+          continue
+        }
+        if (first !== (await askHidden(rl, 'Repeat password: ', draw))) {
+          warn('  the two entries differ — try again')
+          continue
+        }
+      } catch (err) {
+        throw err?.code === 'ABORT_ERR' ? new Cancelled() : err
       }
-      if (first !== (await askHidden(rl, 'Repeat password: '))) {
-        warn('  the two entries differ — try again')
-        continue
-      }
-    } catch (err) {
-      throw err?.code === 'ABORT_ERR' ? new Cancelled() : err
+      if (first === undefined) throw new Cancelled()
+      return first
     }
-    if (first === undefined) throw new Cancelled()
-    return first
+  } finally {
+    rl.close()
   }
 }
 

@@ -10,7 +10,7 @@ pnpm create kestrel my-site
 cd my-site && pnpm install && pnpm dev
 ```
 
-The scaffolder writes a project that runs as-is, prompting once for an admin password:
+The scaffolder writes a project that runs as-is, asking you once to choose an admin password:
 
 | File | Why |
 | --- | --- |
@@ -29,8 +29,8 @@ There are **two** entry points, and which one you want depends on whether the di
 | **New project** | `pnpm create kestrel my-site` | Zero dependencies, downloads in a second. **Refuses** a directory that already holds a project — it will not merge into someone else's app |
 | **Existing project** | `pnpm add @michaelthielemann/kestrel` then `pnpm kestrel init` | Keeps every file that exists, merges `package.json` key-wise (your values win) and fills only the `.env` keys that are absent or empty |
 
-Both prompt for a password, are safe to re-run, and end by naming anything still broken — a re-run never
-rotates a live session secret. The engine's CLI has three more commands:
+Both ask you to choose a password, are safe to re-run, and end by naming anything still broken — a
+re-run never rotates a live session secret. The engine's CLI has three more commands:
 
 ```bash
 pnpm kestrel doctor          # diagnose without changing anything

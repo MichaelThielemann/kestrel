@@ -93,7 +93,7 @@ documented, none enforced or automated.
 - `init` is **idempotent and additive**, because the most common caller is a project that already ran
   `pnpm add`: existing files are kept, `package.json` is merged key-wise with the project's own values
   winning, and `.env` is filled only where a key is absent or empty — re-running never rotates a live
-  session secret. It prompts once for an admin password and writes the scrypt hash itself, so the
+  session secret. It asks once for a new admin password and writes the scrypt hash itself, so the
   documented three-command dance disappears.
 - Keeping a file cannot mean declaring success. `init` ends with the `doctor` pass and exits non-zero
   while anything still breaks `/admin` — the `nuxi init` `app.vue` is precisely the case that survives a

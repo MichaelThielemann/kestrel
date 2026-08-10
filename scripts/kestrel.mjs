@@ -2,7 +2,6 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve, basename, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createInterface } from 'node:readline/promises'
 import { hashPassword, sessionSecret } from './lib/password.mjs'
 import { PACKAGE_NAME, diagnoseProject, mergeEnv, mergePackageJson, renderTemplate, targetName, toPackageName } from './lib/scaffold.mjs'
 import { Cancelled, MIN_PASSWORD_LENGTH, makePaint, out, parseArgs, promptPassword, readIf, readStdin, walk, write } from './lib/cli.mjs'
@@ -71,15 +70,12 @@ async function init(positional, flags) {
   out()
 
   if (password === undefined && !flags.yes && process.stdin.isTTY) {
-    const rl = createInterface({ input: process.stdin, output: process.stdout })
     try {
-      password = await promptPassword(rl, { warn: (m) => out(yellow(m)) })
+      password = await promptPassword({ warn: (m) => out(yellow(m)), note: (m) => out(dim(m)) })
     } catch (err) {
-      rl.close()
       if (err instanceof Cancelled) fail('cancelled')
       throw err
     }
-    rl.close()
     out()
   }
 
@@ -170,15 +166,14 @@ async function hashPasswordCommand(positional) {
   let password = positional[0]
   if (password === undefined) {
     if (process.stdin.isTTY) {
-      const rl = createInterface({ input: process.stdin, output: process.stdout })
+      // Only the hash may reach stdout — an operator redirects it straight into a secret store.
+      const ask = (m) => process.stderr.write(`${m}\n`)
       try {
-        password = await promptPassword(rl, { warn: (m) => out(yellow(m)) })
+        password = await promptPassword({ output: process.stderr, warn: (m) => ask(yellow(m)), note: (m) => ask(dim(m)) })
       } catch (err) {
-        rl.close()
         if (err instanceof Cancelled) fail('cancelled')
         throw err
       }
-      rl.close()
     } else password = await readStdin()
   }
   if (!password) fail('no password given')

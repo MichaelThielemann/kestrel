@@ -100,6 +100,17 @@ describe('the payload copy', () => {
     }
   })
 
+  // `cli.mjs` is byte-pinned above, but the two front ends that call it are not pinned against each other.
+  // The hidden prompt only stays hidden because its interface is built with `terminal: true`, which cannot
+  // be set after construction — so that construction has to live in the shared lib. A front end building
+  // its own interface would drift silently: the leak shows on a user's terminal, never in CI.
+  it('leaves the password prompt entirely to the shared lib', () => {
+    for (const file of ['scripts/kestrel.mjs', 'packages/create-kestrel/index.mjs']) {
+      const src = readFileSync(resolve(root, file), 'utf8')
+      expect(src, `${file} must not build its own readline interface`).not.toContain('readline')
+    }
+  })
+
   // postpack is not guaranteed to run (a failed publish skips it), so anything prepack writes must be a
   // generated file that `--clean` deletes — never a key in the committed manifest, which would be
   // committed and then silently pin stale ranges.

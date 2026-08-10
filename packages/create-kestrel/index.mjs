@@ -2,7 +2,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve, basename, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { createInterface } from 'node:readline/promises'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // `templates`/`lib` exist only in a packed tarball (see the manifest's //payload note); from a checkout
@@ -94,15 +93,12 @@ out(`${bold('Kestrel')} ${dim(`v${ENGINE_VERSION}`)} — creating ${bold(relativ
 out()
 
 if (password === undefined && !flags.yes && process.stdin.isTTY) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
   try {
-    password = await promptPassword(rl, { warn: (m) => out(yellow(m)) })
+    password = await promptPassword({ warn: (m) => out(yellow(m)), note: (m) => out(dim(m)) })
   } catch (err) {
-    rl.close()
     if (err instanceof Cancelled) fail('cancelled')
     throw err
   }
-  rl.close()
   out()
 }
 

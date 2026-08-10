@@ -36,7 +36,7 @@ static host. It is deliberately **not**:
 ## Features
 
 - **Runnable in one command** — `pnpm create kestrel` scaffolds a project that boots with a working
-  `/admin`, prompting for the admin password and writing its hash; `kestrel init` does the same to an
+  `/admin`, asking you to choose the admin password and writing its hash; `kestrel init` does the same to an
   existing project without clobbering it, and `kestrel doctor` names whatever is still missing.
 - **Collection-driven** — declare collections + fields in TypeScript; Kestrel derives the SQLite tables, a
   typed CRUD REST API, and the full admin UI. The schema **migrates itself** (additive in dev; explicit
@@ -66,7 +66,7 @@ pnpm create kestrel my-site
 cd my-site && pnpm install && pnpm dev
 ```
 
-It asks for an admin password and writes a project that runs as-is: `nuxt.config.ts` extending the
+It asks you to choose an admin password and writes a project that runs as-is: `nuxt.config.ts` extending the
 meta-layer, an `app.vue` that renders, a `.env` holding a fresh session secret and the scrypt hash of
 your password, and one example block. Sign in at <http://localhost:3000/admin>.
 

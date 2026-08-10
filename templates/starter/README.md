@@ -8,7 +8,7 @@ pnpm install
 pnpm dev
 ```
 
-Admin: <http://localhost:3000/admin> — sign in with the password you chose during `kestrel init`.
+Admin: <http://localhost:3000/admin> — sign in with the password you chose while scaffolding.
 Forgot it? `pnpm hash-password` prints a fresh hash for `KESTREL_ADMIN_PASSWORD_HASH` in `.env`.
 
 ## What is here
