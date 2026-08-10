@@ -441,6 +441,34 @@ registerCollectionEditor('node-graph', MyNodeGraphBody)
 An `editor` type with no registered body renders a clear "no editor is registered" placeholder (localized)
 rather than a blank pane. This is how the galleries and node-graph extensions swap the editor surface.
 
+## Per-page layouts
+
+Ship more than one layout in `app/layouts/` and an editor can pick which one renders a page — the page
+editor grows a **Layout** control under Page Options, listing the layouts your project actually has. Nothing
+to register: they are discovered from Nuxt's own layout resolution, so a layout of yours that shadows one of
+Kestrel's is what appears.
+
+```
+app/layouts/
+  default.vue            ← every page unless it says otherwise
+  landing.vue            ← offered in the editor as "landing"
+  legal.vue              ← offered as "legal"
+```
+
+Notes worth knowing before you rely on it:
+
+- **A single-layout project sees no control.** With only `default.vue` there is nothing to choose, so the
+  select stays out of the pane. The `admin` layout is never offerable.
+- **Leaving it unset is the normal case** and stores `NULL`, which renders `default`. The select shows that
+  as one entry ("Standard (default)"); `default` is not separately listed, because an unset value already
+  means it.
+- **Deleting a layout file does not break the pages that referenced it** — they fall back to `default`
+  rather than blanking. Nothing warns you, though, so grep your DB for the name before you delete the file
+  if a page depended on that layout for something load-bearing.
+- **The choice is per row, not per translation group.** Each locale's page is set independently.
+- Your layout can read the record it is rendering via `usePublicPageState()`, which holds during SSR and
+  static generation.
+
 ## Opt-in extensions
 
 Some features ship as **separate, opt-in extension layers** (own packages, never bundled with the core). You

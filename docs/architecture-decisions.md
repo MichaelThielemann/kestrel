@@ -2,6 +2,61 @@
 
 Lightweight ADR log — newest first. Each entry: **Context · Decision · Consequences · Future**.
 
+## ADR-0006 — A page picks its layout, and the page owns the `<NuxtLayout>`
+
+**Status:** accepted.
+
+**Context.** A consumer needed eight legal pages rendered without the consent SDK their one layout injects
+unconditionally — the kind of per-page template choice every CMS offers and Kestrel had no answer for. There
+was no per-record layout concept: `CollectionDef` carries `fieldLayout` (admin editor rows) and `editor`
+(which admin body component), both admin-only. The public catch-all set no `definePageMeta({ layout })` and
+`layers/public/app/app.vue` renders `<NuxtLayout>` with no `name`, so the layout always came from route meta
+that nothing ever set.
+
+The obvious alternatives are each closed. A second layout selected at runtime needs `setPageLayout()` or
+`<NuxtLayout :name>` in `app.vue` — and that prop *wins over route meta*, so it would strip every admin page
+of its `layout: 'admin'`. `definePageMeta` is a compile-time macro and cannot read a DB value.
+`routeRules.appLayout` exists but freezes into the build, while `output.auto` means the runtime publisher
+outlives it, so an editor's change would need a redeploy. The `seo` column cannot carry it either:
+`seoSchema` is a closed `z.object`, so an extra key is stripped on save — a silent data loss.
+
+**Decision.**
+- A nullable `layout` **system column**, gated on `pageLike` like `path` — not a field on `pages.ts`.
+  Collection files dedupe by basename with the consumer winning, so a consumer shadowing `pages.ts` would
+  *drop* a field-based column and turn it into a destructive `rebuild_table` that both gates withhold. A
+  system column follows any shadowing def that keeps `pageLike: true`, and covers a consumer's own pageLike
+  collections too.
+- The column is **deliberately not an enum** of the discovered layouts. The edit form re-sends every key on
+  every save, so an enum would 400 every future save of a page whose layout file was later deleted — locking
+  the record out of the admin. An unknown name degrades at render instead.
+- The catch-all declares **`definePageMeta({ layout: false })`** and renders its own
+  `<NuxtLayout :name fallback="default">`. Without `layout: false` both layouts nest.
+- The resolver **coalesces every empty form to `default`**, and this is the subtle part: `layout: false`
+  makes `route.meta.layout` the literal `false`, and NuxtLayout resolves `props.name ?? route.meta.layout`,
+  where `??` keeps `false`. Passing an unset column through as `undefined`/`''` therefore renders the page
+  with *no layout wrapper at all*, and `fallback` does not rescue it — it only applies to a truthy name
+  missing from the layout map. Verified against prerendered output, not reasoned about.
+- **Discovery reuses Nuxt's own resolution.** Nuxt already collects `app/layouts/*.vue` across the layers
+  with the same name-first, consumer-wins dedup and fills `app.layouts` just before `app:resolve`, which
+  runs inside `generateApp` ahead of template writing. So the module reads that map rather than scanning,
+  filters out the `admin` shell, and emits a build-time constant. No `collectLayoutSfcs` sibling.
+- The select **hides itself below two layouts**: a project with only `default` has nothing to choose. Its
+  fallback entry stores `NULL`, never `''` — an unset value must stay distinguishable from a failed save,
+  and `default` is not offered as its own value because an unset column already means it.
+
+**Consequences.** A page's layout is editorial data, so changing it re-renders that route through the
+existing invalidation path with no new plumbing. Existing projects are unaffected: the column is nullable
+and additive, and a single-layout project sees no new control. One deliberate limit — the layout hangs per
+**row**, not per translation group, so each locale is set independently.
+
+A side effect worth more than the feature in some projects: the layout is now a **child** of the page rather
+than its parent, so `usePublicPageState()` finally holds during SSR. As the parent it rendered before the
+page had written the state, which made the composable's contract quietly untrue in static output.
+
+**Future.** If a project wants the choice constrained (only these two layouts for these collections), that
+belongs in a validation hook over the same column, not in the column's type — the render-time fallback is
+what keeps a deleted layout from blanking a live page.
+
 ## ADR-0005 — Two scaffolder entry points over one template, and a build-time app-shell guard
 
 **Status:** accepted.

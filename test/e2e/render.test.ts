@@ -56,6 +56,30 @@ describe('public rendering (e2e)', async () => {
     try { rmSync(uploads, { recursive: true, force: true }) } catch {}
   })
 
+  it('renders a page in the layout it selects, and the default when it selects none', async () => {
+    // `app/layouts/alt.vue` marks itself with data-layout; the default layout does not. Exactly one <main>
+    // per page also proves `layout: false` stopped the route-meta layout from wrapping it a second time.
+    await $fetch('/api/pages', { method: 'POST', headers: { cookie }, body: { title: 'Alt', path: '/alt-layout', status: 'published', layout: 'alt' } })
+    await $fetch('/api/pages', { method: 'POST', headers: { cookie }, body: { title: 'Plain', path: '/plain-layout', status: 'published' } })
+
+    const alt = await $fetch('/alt-layout') as string
+    expect(alt).toContain('data-layout="alt"')
+    expect(alt.match(/<main/g)?.length).toBe(1)
+
+    const plain = await $fetch('/plain-layout') as string
+    expect(plain).not.toContain('data-layout=')
+    expect(plain.match(/<main/g)?.length).toBe(1)
+  })
+
+  it('still renders a page whose selected layout no longer exists', async () => {
+    // The column is deliberately not an enum, so a consumer deleting a layout file must degrade to the
+    // default rather than blank the page — that is what NuxtLayout's `fallback` is for.
+    await $fetch('/api/pages', { method: 'POST', headers: { cookie }, body: { title: 'Gone', path: '/gone-layout', status: 'published', layout: 'deleted-layout' } })
+    const html = await $fetch('/gone-layout') as string
+    expect(html).toContain('<main>')
+    expect(html).toContain('Gone')
+  })
+
   it('renders a published page with its hero block and resolved media', async () => {
     const html = await $fetch('/') as string
     expect(html).toContain('Welcome home')
