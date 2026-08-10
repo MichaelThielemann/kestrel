@@ -18,7 +18,6 @@ export function offerableLayouts(layouts: Record<string, ResolvedLayout | undefi
     .sort()
 }
 
-/** The discovered names as a module body, so the admin bundle can import a build-time constant. */
 export function renderLayoutRegistry(names: string[]): string {
   return `export const kestrelLayouts = ${JSON.stringify(names)}\n`
 }

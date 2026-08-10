@@ -135,7 +135,7 @@ export function useEditForm(opts: UseEditFormOptions) {
     if (blocksEnabled.value) next.content = (source?.content as unknown[]) ?? []
     // `path` (the page slug) is a pageLike system column, likewise round-tripped explicitly.
     if (pageLike.value) next.path = (source?.path as string | null | undefined) ?? ''
-    // `layout` is a pageLike system column too; '' is the "no override" form the select binds to.
+    // '' is the "no override" form the select binds to.
     if (pageLike.value) next.layout = (source?.layout as string | null | undefined) ?? ''
     // `seo` is a JSON system column; default to an empty object so the editor can fill it in.
     if (hasSeo.value) next.seo = (source?.seo as Record<string, unknown> | undefined) ?? {}
