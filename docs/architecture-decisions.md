@@ -6,7 +6,7 @@ Lightweight ADR log — newest first. Each entry: **Context · Decision · Conse
 
 **Status:** accepted.
 
-**Context.** A consumer needed eight legal pages rendered without the consent SDK their one layout injects
+**Context.** A consumer needed its legal pages rendered without the consent SDK its layout injects
 unconditionally — the kind of per-page template choice every CMS offers and Kestrel had no answer for. There
 was no per-record layout concept: `CollectionDef` carries `fieldLayout` (admin editor rows) and `editor`
 (which admin body component), both admin-only. The public catch-all set no `definePageMeta({ layout })` and
