@@ -37,6 +37,10 @@ jobs:
       - name: Build
         run: pnpm build
       - name: Static generate
+        # `generate` runs in production mode, where the session secret is required — without one every
+        # public route 500s. A throwaway value is enough: nothing here signs a cookie that outlives the job.
+        env:
+          KESTREL_SESSION_SECRET: ci-only-not-a-real-secret-0123456789abcdef
         run: pnpm generate
 
       # The e2e suite boots a real dev server and drives Chromium; each spec file starts its own server on
