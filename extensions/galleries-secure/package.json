@@ -15,16 +15,16 @@
     "!**/*.nuxt.test.ts"
   ],
   "peerDependencies": {
+    "@michaelthielemann/kestrel": "*",
     "drizzle-orm": "^0.45.0",
     "vue": "^3.5.0",
-    "zod": "^4.0.0",
-    "@michaelthielemann/kestrel": "*"
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@michaelthielemann/kestrel": "workspace:*",
-    "drizzle-orm": "^0.45.0",
+    "drizzle-orm": "^0.45.2",
     "vue": "3.5.35",
-    "zod": "^4.0.0"
+    "zod": "^4.4.3"
   },
   "license": "Apache-2.0",
   "author": "Michael Thielemann <283621694+MichaelThielemann@users.noreply.github.com>",

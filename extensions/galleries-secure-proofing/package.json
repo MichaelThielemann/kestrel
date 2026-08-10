@@ -15,15 +15,15 @@
     "!**/*.nuxt.test.ts"
   ],
   "peerDependencies": {
-    "drizzle-orm": "^0.45.0",
-    "vue": "^3.5.0",
     "@michaelthielemann/kestrel": "*",
-    "@michaelthielemann/kestrel-galleries-secure": "*"
+    "@michaelthielemann/kestrel-galleries-secure": "*",
+    "drizzle-orm": "^0.45.0",
+    "vue": "^3.5.0"
   },
   "devDependencies": {
     "@michaelthielemann/kestrel": "workspace:*",
     "@michaelthielemann/kestrel-galleries-secure": "workspace:*",
-    "drizzle-orm": "^0.45.0",
+    "drizzle-orm": "^0.45.2",
     "vue": "3.5.35"
   },
   "license": "Apache-2.0",
