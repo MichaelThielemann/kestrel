@@ -1,6 +1,6 @@
 {
   "name": "create-kestrel",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Scaffold a Kestrel site: `pnpm create kestrel my-site`.",
   "license": "Apache-2.0",
   "author": "Michael Thielemann <283621694+MichaelThielemann@users.noreply.github.com>",
