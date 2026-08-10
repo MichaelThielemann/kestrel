@@ -28,11 +28,16 @@ const rank = (v: StoredVariant): number => (v.pinned || v.source === 'manual' ? 
  * config policy variants) when the registry is empty/absent. `presets` are config-authored named variants
  * (`image.variants`): explicit, name-referenced declarations that are never scan-discovered, so they stay
  * active through usage-driven narrowing (unioned into a non-empty registry, winning any name collision).
+ *
+ * `fromRegistry` is the verdict a DELETING caller (the backfill prune) must gate on: true only when at least
+ * one stored entry SURVIVED validation, so the set really is the registered one. Absent, unread, empty and
+ * wholly-rejected registries all resolve to the same superset fallback, under which every registered
+ * derivative looks deregistered — the row count alone cannot tell those apart from a narrowed set.
  * Pure — the load-bearing logic, unit-tested without a DB.
  */
 export function resolveActiveVariants(
   stored: StoredVariant[] | null | undefined, fallback: ResolvedVariant[], presets: ResolvedVariant[] = [],
-): ResolvedVariant[] {
+): { specs: ResolvedVariant[]; fromRegistry: boolean } {
   // A registry row is hand-authorable via the media_settings JSON PATCH; reject a name outside the
   // derivative-key charset ([A-Za-z0-9_-]) — an out-of-charset char breaks the URL / the prune-media
   // referencedKeys regex (its derivative is pruned though pages reference it) and a `/` nests a pseudo-folder.
@@ -41,7 +46,7 @@ export function resolveActiveVariants(
     (v): v is StoredVariant => !!v && safeName(v.name) && Number.isFinite(v.width) && v.width >= 1,
   )
   // Empty registry ⇒ the fallback already contains the presets (resolveVariants unions them), so return it as-is.
-  if (!list.length) return fallback
+  if (!list.length) return { specs: fallback, fromRegistry: false }
   const byName = new Map<string, StoredVariant>()
   for (const v of list) {
     const prev = byName.get(v.name)
@@ -50,7 +55,7 @@ export function resolveActiveVariants(
   for (const p of presets) {
     if (p && typeof p.name === 'string' && p.name !== '' && Number.isFinite(p.width) && p.width >= 1) byName.set(p.name, { ...p, source: 'manual' })
   }
-  return [...byName.values()].map((v): ResolvedVariant => ({
+  const specs = [...byName.values()].map((v): ResolvedVariant => ({
     name: v.name,
     width: Math.floor(v.width),
     // coerce a garbage/stale height to null so it never reaches sharp's crop resize and 500s the upload
@@ -62,6 +67,7 @@ export function resolveActiveVariants(
     position: typeof v.position === 'string' && SHARP_POSITIONS.has(v.position) ? v.position : 'centre',
     formats: v.formats?.length ? v.formats : ['webp'],
   }))
+  return { specs, fromRegistry: true }
 }
 
 /**
@@ -87,12 +93,12 @@ export function reconcileVariants(existing: StoredVariant[], discovered: Resolve
 }
 
 /**
- * Read the persisted variant registry (the `media_settings` singleton) and resolve the active set,
- * falling back to `fallback` (the resolved config policy variants) when nothing is stored yet. `presets`
- * (config-authored named variants) stay active regardless of the stored set. The upload path calls this
- * so it derives exactly the currently-registered set + presets (narrow generation).
+ * The raw stored registry rows (the `media_settings` singleton), or `null` when there are none to resolve
+ * from — the read threw (media_settings not migrated) or nothing is stored. Whether the resolved set may be
+ * DELETED against is not decidable here: that is `resolveActiveVariants`' `fromRegistry` verdict, which only
+ * a validation pass over these rows can give.
  */
-export function activeVariants(db: BetterSQLite3Database, fallback: ResolvedVariant[], presets: ResolvedVariant[] = []): ResolvedVariant[] {
+export function readVariantRegistry(db: BetterSQLite3Database): StoredVariant[] | null {
   const cols = getTableColumns(mediaSettings) as Record<string, never>
   let row: { variants?: StoredVariant[] | null } | undefined
   try {
@@ -100,9 +106,18 @@ export function activeVariants(db: BetterSQLite3Database, fallback: ResolvedVari
       | { variants?: StoredVariant[] | null }
       | undefined
   } catch {
-    // media_settings not migrated yet (a DB provisioned by committed migrations alone) — degrade to the
-    // config fallback rather than 500 the upload. Mirrors attachDeadRefs tolerating a missing record_refs.
-    row = undefined
+    return null
   }
-  return resolveActiveVariants(row?.variants ?? null, fallback, presets)
+  const stored = row?.variants
+  return Array.isArray(stored) ? stored : null
+}
+
+/**
+ * Resolves the active variant set for the upload path (narrow generation: registered set + presets).
+ * Deliberately forgiving: an unreadable registry degrades to the config fallback rather than 500 the
+ * upload (mirrors attachDeadRefs tolerating a missing record_refs). Discards `fromRegistry` — never use
+ * this to decide what may be pruned; a deleting caller needs `resolveActiveVariants` directly.
+ */
+export function activeVariants(db: BetterSQLite3Database, fallback: ResolvedVariant[], presets: ResolvedVariant[] = []): ResolvedVariant[] {
+  return resolveActiveVariants(readVariantRegistry(db), fallback, presets).specs
 }

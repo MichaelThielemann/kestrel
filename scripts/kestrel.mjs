@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve, basename, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hashPassword, sessionSecret } from './lib/password.mjs'
-import { PACKAGE_NAME, diagnoseProject, mergeEnv, mergePackageJson, renderTemplate, targetName, toPackageName } from './lib/scaffold.mjs'
+import { PACKAGE_NAME, diagnoseProject, envValue, isPlainObject, mergeEnv, mergePackageJson, renderTemplate, targetName, toPackageName } from './lib/scaffold.mjs'
 import { Cancelled, MIN_PASSWORD_LENGTH, makePaint, out, parseArgs, promptPassword, readIf, readStdin, walk, write } from './lib/cli.mjs'
 
 // Node builtins only, no build step: runs the same from a checkout, from node_modules and via `pnpm dlx`.
@@ -46,18 +46,25 @@ async function init(positional, flags) {
   const templateDir = join(TEMPLATES, 'starter')
   if (!existsSync(templateDir)) fail(`template payload missing at ${templateDir} — reinstall ${PACKAGE_NAME}.`)
 
-  // Validate before touching disk: a half-scaffolded project is worse than a refused one.
+  // Read the target before touching disk: a half-scaffolded project is worse than a refused one.
   const manifestPath = join(target, 'package.json')
   const existingManifest = readIf(manifestPath)
   if (existingManifest !== null) {
+    let parsed
     try {
-      JSON.parse(existingManifest)
+      parsed = JSON.parse(existingManifest)
     } catch {
       fail(`${manifestPath} is not valid JSON — fix it first; refusing to scaffold over a broken manifest.`)
     }
+    if (!isPlainObject(parsed)) fail(`${manifestPath} is not a JSON object — fix it first; refusing to scaffold over a broken manifest.`)
   }
+  const envPath = join(target, '.env')
+  const existingEnv = readIf(envPath)
 
-  let password = typeof flags.password === 'string' ? flags.password : undefined
+  // No flag swallows a `-`-prefixed token, so a dash-leading password reaches init as no value at all.
+  if (flags.password === true) fail('--password needs a value — write --password=<pw> if it starts with a dash.')
+  const supplied = typeof flags.password === 'string'
+  let password = supplied ? flags.password : undefined
   if (password !== undefined && password.length < MIN_PASSWORD_LENGTH) {
     fail(`--password must be at least ${MIN_PASSWORD_LENGTH} characters (an empty one would leave /admin open).`)
   }
@@ -70,13 +77,21 @@ async function init(positional, flags) {
   out()
 
   if (password === undefined && !flags.yes && process.stdin.isTTY) {
-    try {
-      password = await promptPassword({ warn: (m) => out(yellow(m)), note: (m) => out(dim(m)) })
-    } catch (err) {
-      if (err instanceof Cancelled) fail('cancelled')
-      throw err
+    // The prompt loops until a valid password is typed twice, so it cannot be declined, and the hash is
+    // folded into the session signing key — asking on a project that already has one would rotate the
+    // password, and sign everyone out, without ever offering the operator a way to say no.
+    if (envValue(existingEnv ?? '', 'KESTREL_ADMIN_PASSWORD_HASH')) {
+      out(dim('KESTREL_ADMIN_PASSWORD_HASH is already set — pass --password to change it.'))
+      out()
+    } else {
+      try {
+        password = await promptPassword({ warn: (m) => out(yellow(m)), note: (m) => out(dim(m)) })
+      } catch (err) {
+        if (err instanceof Cancelled) fail('cancelled')
+        throw err
+      }
+      out()
     }
-    out()
   }
 
   const vars = templateVars(projectName)
@@ -109,12 +124,14 @@ async function init(positional, flags) {
   }
 
   // Seed from `.env.example` so the generated file keeps its per-key comments.
-  const envPath = join(target, '.env')
-  const hadEnv = existsSync(envPath)
+  const hadEnv = existingEnv !== null
   const envEntries = { KESTREL_SESSION_SECRET: sessionSecret(), KESTREL_SECURE_COOKIES: 'false' }
   if (password !== undefined) envEntries.KESTREL_ADMIN_PASSWORD_HASH = hashPassword(password)
-  const seed = hadEnv ? readFileSync(envPath, 'utf8') : (readIf(join(target, '.env.example')) ?? '')
-  const { text, written } = mergeEnv(seed, envEntries)
+  const seed = existingEnv ?? readIf(join(target, '.env.example')) ?? ''
+  // Only an explicitly supplied password replaces a hash that is already set. That is not session-safety:
+  // the hash is folded into the cookie signing key, so any rotation signs every user out. What keeps a
+  // plain re-run harmless is that it changes neither the hash nor the secret.
+  const { text, written } = mergeEnv(seed, envEntries, supplied ? ['KESTREL_ADMIN_PASSWORD_HASH'] : [])
   if (written.length) {
     write(envPath, text, 0o600)
     ;(hadEnv ? merged : created).push(`.env ${dim(`(${written.join(', ')})`)}`)
@@ -191,7 +208,7 @@ ${bold('kestrel')} ${dim(`v${pkg.version}`)}
 
 ${bold('init flags')}
   --name <name>       package name (default: the directory name, slugified)
-  --password <pw>     set the admin password without prompting
+  --password <pw>     set or change the admin password without prompting
   --yes               never prompt; leaves KESTREL_ADMIN_PASSWORD_HASH for you to fill in
   --force             overwrite existing files (package.json and .env are always merged, never replaced)
 
@@ -199,8 +216,16 @@ ${dim('Existing files are kept and re-running init is safe. To create a NEW proj
 `)
 }
 
-const { flags, positional } = parseArgs(process.argv.slice(2), ['yes', 'force', 'help', 'version'])
+const argv = process.argv.slice(2)
+const { flags, positional } = parseArgs(argv, ['yes', 'force', 'help', 'version'])
 const command = positional.shift()
+
+// Only these two read a positional as a directory, and an option that took no value lands there: a
+// `--password -pw` would otherwise put the cleartext on disk as a directory name. `--` is how the caller
+// says a dash-leading positional is what they meant.
+if (!argv.includes('--') && (command === 'init' || command === 'doctor') && positional[0]?.startsWith('-')) {
+  fail(`unknown option "${positional[0]}" — run \`kestrel help\`.`)
+}
 
 if (flags.version || command === 'version') out(pkg.version)
 else if (flags.help || !command || command === 'help') help()

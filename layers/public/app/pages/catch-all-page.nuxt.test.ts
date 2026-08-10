@@ -1,20 +1,25 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
+import { defineEventHandler, createError } from 'h3'
 import Page from './[...slug].vue'
 import { usePublicPageState } from '../composables/public-page'
 
 // The catch-all resolves via /api/route; return a record + its collection so we can assert the page mirrors
 // BOTH into the shared state (the whole point of keeping `collection`).
 const route = { collection: 'pages', page: { title: 'About', status: 'published', content: [], layout: 'marketing' } }
-registerEndpoint('/api/route', () => route)
+const h = vi.hoisted(() => ({ path: '/about', resolveStatus: 200 }))
+registerEndpoint('/api/route', defineEventHandler(() => {
+  if (h.resolveStatus !== 200) throw createError({ statusCode: h.resolveStatus })
+  return route
+}))
 
 // `meta` must be present: the page renders its own <NuxtLayout>, which reads route.meta.layoutTransition.
-const h = vi.hoisted(() => ({ path: '/about' }))
 mockNuxtImport('useRoute', () => () => ({ path: h.path, query: {}, meta: {} }))
 
 beforeEach(() => {
   h.path = '/about'
+  h.resolveStatus = 200
   usePublicPageState().value = { collection: null, page: null }
 })
 
@@ -39,5 +44,23 @@ describe('catch-all page — per-record layout', () => {
     expect(layout.exists()).toBe(true)
     expect(layout.props('name')).toBe('marketing')
     expect(layout.props('fallback')).toBe('default')
+  })
+})
+
+// The site root renders an empty document before a home page exists, which is a 200 with a body — so the
+// publisher treats it as a successful render and bakes it. That is only correct when the resolver actually
+// looked: an unreadable collection must surface as an error, or the blank document overwrites the live root.
+describe('catch-all page — an incomplete resolve is not an empty site', () => {
+  it('propagates the resolver failure at the site root instead of rendering the empty document', async () => {
+    h.path = '/'
+    h.resolveStatus = 503
+    await expect(mountSuspended(Page)).rejects.toMatchObject({ statusCode: 503 })
+  })
+
+  it('still renders the empty document at the root when the resolver simply found nothing', async () => {
+    h.path = '/'
+    const wrapper = await mountSuspended(Page)
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'NuxtLayout' }).exists()).toBe(true)
   })
 })

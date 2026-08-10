@@ -35,7 +35,7 @@ const { locale, path } = resolvePublicRoute(route.path.split('/').filter(Boolean
 // `/api/route` and a draft renders at its real URL (the live preview); anonymous + the static render
 // stay published-only (the handler enforces it).
 const requestFetch = useRequestFetch()
-const { data: resolved } = await useAsyncData(`page:${locale}:${path}`, () =>
+const { data: resolved, error: resolveError } = await useAsyncData(`page:${locale}:${path}`, () =>
   requestFetch('/api/route', {
     query: { path, locale },
   }).then((r) => r as {
@@ -78,6 +78,13 @@ const { data: previewSession } = previewRequested
       requestFetch('/api/auth/session').catch(() => ({ authenticated: false })))
   : { data: ref<{ authenticated: boolean } | null>(null) }
 const previewActive = computed(() => previewRequested && previewSession.value?.authenticated === true)
+
+// `useAsyncData` resolves even when the fetch threw, so the resolver's own failure has to be re-raised here
+// or the root's empty document (a 200 WITH a body) reads as a successful render and the publisher bakes it
+// over the live page. Unconditional on purpose, not just for `/`: on any other path the failure would fall
+// through to the 404 below, which asserts "no such page" from a lookup that never completed — a claim
+// crawlers and caches act on, and one the publisher files as a skip instead of the error the editor shows.
+if (resolveError.value) throw resolveError.value
 
 // The site root stays reachable (empty document) before a home page is published;
 // any other unmatched path is a genuine 404.

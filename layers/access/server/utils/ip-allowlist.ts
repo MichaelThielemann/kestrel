@@ -42,7 +42,10 @@ function parseCidr(token: string): Cidr | null {
   const slash = token.indexOf('/')
   const base = ipv4ToInt(slash === -1 ? token : token.slice(0, slash))
   if (base === null) return null
-  const bits = slash === -1 ? 32 : Number(token.slice(slash + 1))
+  // `Number()` alone would widen a malformed prefix into a mask: '' → 0 → 0.0.0.0/0, and '0x10'/'1e1' → 16/10.
+  const bitsRaw = slash === -1 ? '32' : token.slice(slash + 1).trim()
+  if (!/^\d+$/.test(bitsRaw)) return null
+  const bits = Number(bitsRaw)
   if (!Number.isInteger(bits) || bits < 0 || bits > 32) return null
   const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0
   return { base: (base & mask) >>> 0, mask }

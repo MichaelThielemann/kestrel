@@ -1,8 +1,9 @@
 import type { ColumnShape, IndexShape, TableShape, SchemaSnapshot } from './model'
 
 // Read the *actual* schema of a live SQLite database into the normalized model, so `diffSchema` can
-// compare it against the desired schema (ADR-0002). Typed structurally (prepare + pragma) so it accepts
-// any better-sqlite3 connection without importing the native module here.
+// compare it against the desired schema (ADR-0002). Typed structurally (prepare + pragma) to keep the
+// native module out of this file — but the shape is narrower than better-sqlite3's own (which types
+// `pragma` as returning `unknown`), so a real connection only reaches these entry points through a cast.
 
 interface Row { [key: string]: unknown }
 export interface IntrospectDb {

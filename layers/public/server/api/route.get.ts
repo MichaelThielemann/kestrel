@@ -14,13 +14,33 @@ export default defineEventHandler((event) => {
   const isStaticRender = import.meta.prerender === true || isRendererContext()
   const publishedOnly = isStaticRender || event.context.readScope !== 'all'
   const db = useDb()
-  const resolved = resolvePage(db, allCollections(), path, locale, publishedOnly)
+  const { page: resolved, failed } = resolvePage(db, allCollections(), path, locale, publishedOnly)
   // The site-wide head tier rides along on the fetch the page already awaits, so it reaches SSR and the
-  // prerender on a path that is known to work. Looked up through the registry, not imported, so a consumer
-  // that disables the collection gets `null` instead of a query against a table the schema never created.
-  // `depth: 1` resolves the sharing image into `$media`; `getSingleton` captures the read, so an edit
-  // re-publishes every route that embedded it.
+  // prerender on a path that is known to work. Looked up through the registry, not imported, so an
+  // installation whose registry never received the built-in simply has the tier off (`null`) instead of
+  // querying a table the schema never created. `depth: 1` resolves the sharing image into `$media`;
+  // `getSingleton` captures the read, so an edit re-publishes every route that embedded it.
   const siteCollection = getCollection('site')
-  const site = siteCollection ? getSingleton(db, siteCollection, locale, false, 1) : null
+  let site: ReturnType<typeof getSingleton> = null
+  let siteUnreadable = false
+  if (siteCollection) {
+    try { site = getSingleton(db, siteCollection, locale, false, 1) }
+    catch (error) {
+      // Registered but unreadable (its migration hasn't been run) — indistinguishable in the response from
+      // the off state above, so it joins the incomplete-read channel rather than degrading silently.
+      siteUnreadable = true
+      console.error('[kestrel] route: the site singleton could not be read:', (error as Error)?.message ?? error)
+    }
+  }
+  // One rule for every incomplete read: never answer 200. The publisher classifies a 200-with-body as a
+  // successful render, writes it over the live file and records success — so an unreadable page collection
+  // would bake the catch-all's empty document over a real page (the record may well live in the collection
+  // that failed, which is why this is not a 404), and an unreadable head tier would strip the composed
+  // title, default description and sharing image from every route it touches. Both are unrecoverable
+  // without a full re-publish and neither leaves a mark. A 5xx keeps the existing artifact and turns the
+  // editor's status red. The head tier is site-wide, so it fails the request even when a page did resolve.
+  if (siteUnreadable || (failed.length && !resolved)) {
+    throw createError({ statusCode: 503, statusMessage: 'Route lookup incomplete' })
+  }
   return { collection: resolved?.collection ?? null, page: resolved?.page ?? null, alternates: resolved?.alternates ?? [], site }
 })

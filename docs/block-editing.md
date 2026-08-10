@@ -18,8 +18,9 @@ A block is `{ id, type, props, slots? }`. Each block **type** is authored as a *
 
 A build-time extractor (`layers/core/modules/auto-discovery/extract-block.ts`) statically evaluates those
 two macro arguments and lifts the schema into the `#kestrel/blocks` registry; the auto-discovery module
-registers `app/blocks/` as the global `Blocks<Name>` components. Two types ship by default: `hero`
-(heading, image, cta) and `prose` (body).
+registers `app/blocks/` as the global `Blocks<Name>` components. **No block types ship in the package** —
+the scaffolder emits one starter `Prose.vue` to build from, and the `hero` (heading, image, cta) / `prose`
+(body) pair in this repo is demo content.
 
 The server validates `content` as a discriminated union on `type`, validating each block's `props`
 against that type's field schema (with depth/size guards). This runs on create and update.

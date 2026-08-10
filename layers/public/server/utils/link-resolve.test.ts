@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest'
-import { isPubliclyLinkable } from './link-resolve'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
+import { buildCollection } from '../../../fields/server/utils/buildCollection'
+import { defineCollection } from '../../../core/server/utils/defineCollection'
+import { registerCollection, clearRegistry } from '../../../core/server/utils/registry'
+import { isPubliclyLinkable, resolveInternalHref } from './link-resolve'
 
 describe('isPubliclyLinkable — status-gate internal link targets (no draft slug leak)', () => {
   it('rejects a missing target', () => {
@@ -15,5 +19,23 @@ describe('isPubliclyLinkable — status-gate internal link targets (no draft slu
   it('accepts any existing target when the collection has no status column (nothing to gate)', () => {
     expect(isPubliclyLinkable({ path: '/x' }, false)).toBe(true)
     expect(isPubliclyLinkable({ status: 'draft', path: '/x' }, false)).toBe(true) // no status column → ignore the field
+  })
+})
+
+describe('resolveInternalHref — an unreadable target', () => {
+  afterEach(() => { clearRegistry() })
+
+  it('logs the target it could not read before falling back to the not-linkable null', () => {
+    registerCollection(buildCollection(defineCollection({
+      name: 'pages', mode: 'multi', translatable: false, pageLike: true, status: true, fields: { title: { type: 'text' } },
+    })))
+    const db = { select: () => { throw new Error('no such table: pages') } } as unknown as BetterSQLite3Database
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(resolveInternalHref('pages', 7, db)).toBeNull()
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('resolveInternalHref: pages:7 unreadable'), expect.anything())
+    } finally {
+      error.mockRestore()
+    }
   })
 })

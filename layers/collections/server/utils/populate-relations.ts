@@ -11,6 +11,7 @@ export type ResolveRecord = (
   id: number,
   depth: number,
   locale: string,
+  publicOnly: boolean,
 ) => Record<string, unknown> | null
 
 /**
@@ -36,31 +37,43 @@ export function skipMissing(fetch: () => Record<string, unknown>): Record<string
  * fails the whole read. The related read passes `ctx.depth - 1`; `populateRow` bails at depth 0, so a
  * relation cycle terminates. Registered per-type via `registerFieldPopulator('relation', …)`; the shared
  * field-tree walker drives it over top-level fields, block props, slots, and repeater entries.
+ *
+ * Under `ctx.publicOnly` a relation into a collection `isPublicCollection` rejects is left unexpanded
+ * (raw id only, NO `$<name>` sibling at all — a relation field targets exactly one collection, so a
+ * `many` relation is all-or-nothing): expansion must not reach a record the caller could not have
+ * requested directly. The check runs BEFORE `resolve`, so a withheld target never enters the memo.
  */
-export function buildRelationFieldPopulator(resolveRecord: ResolveRecord): FieldPopulator {
-  // The same target (collection+id+depth+locale) is resolved once — build-wide during a generate run
+export function buildRelationFieldPopulator(
+  resolveRecord: ResolveRecord,
+  isPublicCollection: (collection: string) => boolean,
+): FieldPopulator {
+  // The same target (collection+id+depth+locale+scope) is resolved once — build-wide during a generate run
   // (memoDuringPrerender), request-/publish-run-wide via the resolve scope (which also budgets the
   // distinct fan-out of one live request and replays read-tags on hits, so publish deps stay complete).
   // memoResolver OUTERMOST: the per-scope budget verdict must stay scope-local. If memoDuringPrerender
   // wrapped memoResolver, a build-wide memoize would cache a budget-skip `null` and poison every later
   // page of a `nuxt generate`. With this order the build-wide memo only ever caches REAL resolver results.
-  const key = (collection: string, id: number, depth: number, locale: string) => `rel:${collection}:${id}:${depth}:${locale}`
+  // `publicOnly` is part of the key because the same record populates DIFFERENTLY under it (its own
+  // non-public relations are withheld) — sharing one entry would serve one scope's record to the other.
+  const key = (collection: string, id: number, depth: number, locale: string, publicOnly: boolean) => `rel:${collection}:${id}:${depth}:${locale}:${publicOnly}`
   const resolve = memoResolver(memoDuringPrerender(resolveRecord, key), key)
   return (bag, key, field, ctx, keyMode) => {
     if (!fieldIs(field, 'relation')) return
     const collection = field.relation.collection
+    const publicOnly = ctx.publicOnly === true
+    if (publicOnly && !isPublicCollection(collection)) return
     const depth = ctx.depth - 1
     if (field.relation.many) {
       const ids = bag[key]
       if (Array.isArray(ids)) {
         bag['$' + key] = ids
           .filter((n): n is number => typeof n === 'number')
-          .map((id) => resolve(collection, id, depth, ctx.locale))
+          .map((id) => resolve(collection, id, depth, ctx.locale, publicOnly))
           .filter((r): r is Record<string, unknown> => r != null)
       }
     } else {
       const id = bag[keyMode === 'columns' ? `${key}Id` : key]
-      if (typeof id === 'number') bag['$' + key] = resolve(collection, id, depth, ctx.locale)
+      if (typeof id === 'number') bag['$' + key] = resolve(collection, id, depth, ctx.locale, publicOnly)
     }
   }
 }

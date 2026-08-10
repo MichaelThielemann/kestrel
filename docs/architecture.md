@@ -96,8 +96,16 @@ The things that live *between* layers and bite if you don't know them:
 - **Auth context.** The `access-guard` middleware sets `event.context.principal` + `readScope`
   (`published` | `all`); `core`'s collection GET handlers read `readScope` to scope reads. Anonymous
   visitors get published read on **every** page-like collection — the registry-driven
-  `publicReadableResources()` set, which the guard and the sitemap (`isPubliclyReadable`) both consult as
-  the single source of public reachability. (Contract: `layers/access/server/types.d.ts`.)
+  `publicReadableResources()` set, which the guard, the sitemap and the relation populator
+  (`isPubliclyReadable`) all consult. It bounds `?depth` on the **generic `/api/<collection>` read
+  routes**: an anonymous read there expands relations only into that set. Two limits it does NOT cover.
+  The populator consults the public set alone, not the guard's whole decision — a resource opened by
+  `registerAccessGrant('anonymous', …)` is served on its own route but still withheld from a populated
+  sidecar (fail-closed drift, so nothing leaks). And `/api/route`, the public render entry, is granted to
+  every principal and populates in FULL for all of them, so a relation into a non-public collection is
+  expanded there. Gating it by role is not a local fix — the renderer needs full population, so the live
+  anonymous render would then diverge from the baked page. (Contract:
+  `layers/access/server/types.d.ts`.)
 - **jsKey ↔ dbName.** `core`'s `isSingleRefColumn` predicate decides whether a `relation`/`media` field
   is stored as a single FK column; `fields`' `resolveColumnName` uses it to map that field's key to
   `<key>Id` / `<key>_id` (everything else uses the snake_cased key). The serializer emits the result as a
@@ -234,11 +242,13 @@ intentional fail-soft.
 
 ### `public` — the SSG render path
 **Owns:** the *only* render path for the generated site — a catch-all page that renders **any** page-like
-collection's blocks (not just `pages`), the SSG artifacts (sitemap/robots), build-time prerender route
-discovery, internal-link resolution, and the optional S3 deploy of the output.
+collection's blocks (not just `pages`), per-page layout selection, the built-in `site` singleton (the
+site-wide head defaults a page's own SEO fields fall back to), the SSG artifacts (sitemap/robots),
+build-time prerender route discovery, internal-link resolution, and the optional S3 deploy of the output.
 **Start:** `app/pages/[...slug].vue` (the catch-all) resolves a path to the first published record across
 every pageLike collection via `server/api/route.get.ts` → `server/utils/page-resolve.ts`, then renders it
-with `app/components/BlockRenderer.vue` (recursive block→component render + the admin-preview seam);
+with `app/components/BlockRenderer.vue` (recursive block→component render + the admin-preview seam) inside
+the layout `app/utils/page-layout.ts` picks from the record's `layout` column;
 the editor live-preview runs as an **iframe** onto that same path (`?kestrel-preview=1` + admin →
 `app/components/KestrelPreviewBridge.vue` swaps in the editor's tree over origin-checked postMessage;
 `app/pages/__kestrel/preview.vue` is the admin-gated fallback for unsaved records; protocol in
@@ -250,11 +260,16 @@ partial `path` index) → `server/routes/sitemap.xml.get.ts` + `server/utils/sit
 just public pages; links ARE status-gated — a MISSING **or** draft target renders `#` (only a collection
 without a `status` column resolves unconditionally; the editor is warned separately), and every internal
 target is captured as a read dep so an availability change re-renders the referrer — while the sitemap +
-prerender discovery stay published-only; build-before-migrate hazard — prerender/
-sitemap/link-resolve read the DB at points where the table may not exist yet, so they degrade
-gracefully; richtext internal links (`kestrel:<col>:<id>` markers) are a separate mechanism from the
-`link` field.
-**Docs:** `static-output.md` (prerender/sitemap/deploy), `reference-integrity.md` (the invalidation model, durable `publish_deps`, status-gated links), `block-editing.md` (BlockRenderer + preview seam).
+prerender discovery stay published-only; build-before-migrate hazard — prerender discovery, sitemap and
+link-resolve read the DB at points where the table may not exist yet, so they degrade gracefully (and log
+the skip, which is otherwise an invisible de-index), but `page-resolve` is the exception: an incomplete
+scan cannot tell "no page here" from "unreadable", so `/api/route` 503s and the route bakes NO file rather
+than an empty document over a live page; richtext internal links (`kestrel:<col>:<id>` markers) are a
+separate mechanism from the `link` field; the catch-all declares `layout: false` and mounts
+`<NuxtLayout>` itself (ADR-0006), so the layout is a CHILD of the page and an unset/unknown `layout` must
+be coalesced to `default` — `NuxtLayout`'s own `fallback` never fires for the literal `false` that
+`layout: false` leaves in the route meta.
+**Docs:** `static-output.md` (prerender/sitemap/deploy), `reference-integrity.md` (the invalidation model, durable `publish_deps`, status-gated links), `block-editing.md` (BlockRenderer + preview seam), ADR-0006 (per-page layouts).
 
 ---
 

@@ -27,6 +27,12 @@ export interface WriteClassification {
   /** The page's own public route from the OLD row (pageLike + had a path), else null — the route whose
    *  static file must be pruned on a slug change / unpublish / delete (symmetric to `selfRoute`). */
   oldRoute: string | null
+  groupTag: string | null
+}
+
+/** The data tag naming a translation group. `#` keeps it clear of the `<coll>:<id>` record namespace. */
+export function translationGroupTag(coll: string, group: string): string {
+  return `${coll}#group:${group}`
 }
 
 /** What to republish for a write. Routes are resolved from `tags` against the captured deps index. */
@@ -71,13 +77,19 @@ export function classifyWrite(def: WriteCollection, before: Row, after: Row, pri
   // change (path unchanged) still moves the route — the old-locale file must be pruned.
   const pathChanged = pageLike && status === 'updated' && oldRoute !== selfRoute
 
-  return { collection: def.name, pageLike, status, id, pathChanged, statusChanged, isPublished, wasPublished, selfRoute, oldRoute }
+  // `update` refuses to move a row between groups, so the surviving row's group is the group either way.
+  const group = row?.translationGroup
+  const groupTag = typeof group === 'string' && group ? translationGroupTag(def.name, group) : null
+
+  return { collection: def.name, pageLike, status, id, pathChanged, statusChanged, isPublished, wasPublished, selfRoute, oldRoute, groupTag }
 }
 
 /**
- * Decide what a write invalidates, per the maintainer-agreed model. Two notions of "dependent":
+ * Decide what a write invalidates, per the maintainer-agreed model. Three notions of "dependent":
  *  - LISTINGS — pages that QUERY the collection (overviews) → captured as the `<coll>` tag.
  *  - EXPLICIT REFERRERS — pages that LINK/EMBED/relate-to a specific record → captured as `<coll>:<id>`.
+ *  - TRANSLATION SIBLINGS — every member of a group bakes the group's hreflang set → captured as the
+ *    group tag, the only edge that reaches members which rendered before this row existed.
  *
  * Two principles drive the split:
  *  1. FRESHENING (content or path changed) re-renders BOTH listings and explicit referrers (`[coll, coll:id]`)
@@ -94,7 +106,10 @@ export function classifyWrite(def: WriteCollection, before: Row, after: Row, pri
 export function planInvalidation(ev: WriteClassification): Invalidation {
   const coll = ev.collection
   const recordTag = ev.id != null ? `${coll}:${ev.id}` : null
-  const tags = recordTag ? [coll, recordTag] : [coll]
+  // Unlike recordTag (dropped on create — no referrer can target a brand-new id), groupTag is included even
+  // there: a new sibling still changes every existing member's hreflang set.
+  const groupTags = ev.groupTag ? [ev.groupTag] : []
+  const tags = recordTag ? [coll, recordTag, ...groupTags] : [coll, ...groupTags]
   const selfRender = ev.pageLike && ev.selfRoute ? [ev.selfRoute] : []
 
   // DELETE — leaves the collection. Listings re-render, referrers too (their baked link/hreflang now points
@@ -108,7 +123,7 @@ export function planInvalidation(ev: WriteClassification): Invalidation {
   // record re-renders listings + its own route. No referrer can point at a brand-new id, so no `coll:id`.
   if (ev.status === 'created') {
     if (!ev.isPublished) return { type: 'noop' }
-    return { type: 'tags', tags: [coll], render: selfRender, prune: [] }
+    return { type: 'tags', tags: [coll, ...groupTags], render: selfRender, prune: [] }
   }
 
   // UNPUBLISH — leaves the published set. Listings re-render; referrers re-render so their link falls back to

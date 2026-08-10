@@ -22,7 +22,17 @@ import type { ResolvedMedia } from '../../../media/server/utils/resolve'
 // tolerates a stale id — the things a fake resolver can't prove.
 const authors = buildCollection(defineCollection({
   name: 'authors', mode: 'multi', translatable: false,
-  fields: { name: { type: 'text', required: true }, photo: { type: 'media' } },
+  fields: {
+    name: { type: 'text', required: true },
+    photo: { type: 'media' },
+    dossier: { type: 'relation', relation: { collection: 'dossiers' } },
+  },
+}))
+
+// The second hop of a public → public → non-public chain.
+const dossiers = buildCollection(defineCollection({
+  name: 'dossiers', mode: 'multi', translatable: false,
+  fields: { note: { type: 'text', required: true } },
 }))
 
 const fakeMedia = (id: number, _locale: string): ResolvedMedia | null =>
@@ -36,16 +46,20 @@ const postsDef = defineCollection({
 
 let db: ReturnType<typeof drizzle>
 let adaId: number
+let dossierId: number
 
 beforeEach(() => {
   clearRegistry()
   clearPopulator()
   clearFieldPopulators()
   const sqlite = new Database(':memory:')
-  for (const stmt of renderSqlite(diffSchema(desiredSchema([authors.table]), {}))) sqlite.exec(stmt)
+  for (const stmt of renderSqlite(diffSchema(desiredSchema([authors.table, dossiers.table]), {}))) sqlite.exec(stmt)
   db = drizzle(sqlite)
   registerCollection(authors)
-  const ada = create(db, authors, { name: 'Ada' }) as Record<string, unknown>
+  registerCollection(dossiers)
+  const dossier = create(db, dossiers, { note: 'unlisted' }) as Record<string, unknown>
+  dossierId = dossier.id as number
+  const ada = create(db, authors, { name: 'Ada', dossierId }) as Record<string, unknown>
   adaId = ada.id as number
   // Set the media FK column directly (avoids create()'s single-ref input-key mapping); the fake resolver
   // turns id 42 into a $media entry when the author is populated at depth ≥ 1.
@@ -53,12 +67,12 @@ beforeEach(() => {
 
   registerPopulator(buildFieldTreePopulator())
   registerFieldPopulator('media', buildMediaFieldPopulator(fakeMedia))
-  registerFieldPopulator('relation', buildRelationFieldPopulator((collection, id, depth, locale) => {
+  registerFieldPopulator('relation', buildRelationFieldPopulator((collection, id, depth, locale, publicOnly) => {
     const built = getCollection(collection)
     if (!built) return null
-    try { return getOne(db, built, id, depth, locale, true) as Record<string, unknown> }
+    try { return getOne(db, built, id, depth, locale, true, publicOnly) as Record<string, unknown> }
     catch { return null } // stale / deleted / draft → skip
-  }))
+  }, (collection) => collection === 'authors'))
 })
 afterEach(() => {
   clearRegistry()
@@ -84,5 +98,19 @@ describe('relation populator — end-to-end with real getOne', () => {
   it('sets $author to null for a stale id (getOne 404 → skipped, not thrown)', () => {
     const out = populateRow({ id: 1, authorId: 9999 }, { depth: 2, locale: 'en', def: postsDef })
     expect(out.$author).toBeNull()
+  })
+
+  it('expands the nested $dossier hop for an unrestricted read', () => {
+    const out = populateRow({ id: 1, authorId: adaId }, { depth: 3, locale: 'en', def: postsDef })
+    const author = out.$author as Record<string, unknown>
+    expect((author.$dossier as Record<string, unknown>).note).toBe('unlisted')
+  })
+
+  it('stops a public-only read at the first non-public hop of a public → public → non-public chain', () => {
+    const out = populateRow({ id: 1, authorId: adaId }, { depth: 3, locale: 'en', def: postsDef, publicOnly: true })
+    const author = out.$author as Record<string, unknown>
+    expect(author.name).toBe('Ada')
+    expect('$dossier' in author).toBe(false)
+    expect(author.dossierId).toBe(dossierId)
   })
 })

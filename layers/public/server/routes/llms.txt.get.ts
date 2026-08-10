@@ -44,8 +44,11 @@ export default defineEventHandler((event) => {
     let rows: Record<string, unknown>[]
     try {
       rows = db.select(proj as never).from(c.table).all() as Record<string, unknown>[]
-    } catch {
-      continue // table not migrated yet (e.g. a bare prerender DB)
+    } catch (error) {
+      // Skipping keeps a bare prerender DB publishable, but a drifted table drops the whole section — a
+      // silent gap the publisher would write straight over the live artifact.
+      console.error(`[kestrel] llms.txt: skipped collection ${c.def.name}:`, (error as Error)?.message ?? error)
+      continue
     }
     const entries: LlmsEntry[] = []
     for (const row of rows) {

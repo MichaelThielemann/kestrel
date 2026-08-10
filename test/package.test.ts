@@ -138,9 +138,12 @@ describe('package.json — installable as a Nuxt meta-layer (`extends: ["@michae
   it('ships the build-time tools a consumer needs to compile Kestrel\'s SFCs/SCSS as runtime `dependencies`', () => {
     // A consumer's Vite/Vue build compiles Kestrel's own components from node_modules: scss blocks need
     // `sass`, and `defineProps<ImportedType>()` (the shared FieldComponentProps) needs `typescript` for
-    // @vue/compiler-sfc to resolve the cross-module type. As devDependencies they'd be absent for consumers
-    // → the build fails ("Failed to load TypeScript" / sass not found). They must be `dependencies`.
-    for (const tool of ['sass', 'typescript']) {
+    // @vue/compiler-sfc to resolve the cross-module type. The same argument covers the `@types/*` shims for
+    // the untyped packages `layers/` imports: the tarball ships uncompiled .ts, so a consumer's own typecheck
+    // reads those sources and fails with TS7016 inside node_modules without them. As devDependencies they'd
+    // be absent for consumers → the build fails ("Failed to load TypeScript" / sass not found). They must be
+    // `dependencies`.
+    for (const tool of ['sass', 'typescript', '@types/better-sqlite3', '@types/jsdom', '@types/sanitize-html']) {
       expect(pkg.dependencies, `${tool} must be a runtime dependency`).toHaveProperty(tool)
       expect(pkg.devDependencies?.[tool], `${tool} must NOT be a devDependency`).toBeUndefined()
     }

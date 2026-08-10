@@ -39,8 +39,11 @@ export default defineEventHandler((event) => {
     let rows: Record<string, unknown>[]
     try {
       rows = db.select(proj as never).from(c.table).all() as Record<string, unknown>[]
-    } catch {
-      continue // table not migrated yet (e.g. a bare prerender DB)
+    } catch (error) {
+      // Skipping keeps a bare prerender DB publishable, but a drifted table de-indexes every page of the
+      // collection — a silent gap the publisher would write straight over the live sitemap.
+      console.error(`[kestrel] sitemap.xml: skipped collection ${c.def.name}:`, (error as Error)?.message ?? error)
+      continue
     }
     for (const row of rows) {
       if (c.def.status && row.status !== 'published') continue

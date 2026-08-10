@@ -27,8 +27,11 @@ export function resolveInternalHref(collection: string, id: number, db = useDb()
   let row: Record<string, unknown> | undefined
   try {
     row = db.select().from(c.table).where(eq(cols.id, id)).get() as Record<string, unknown> | undefined
-  } catch {
-    return null // table not migrated yet (e.g. a bare prerender DB)
+  } catch (error) {
+    // Still null (a throw would 500 every page holding an internal link on a bare prerender DB), but the
+    // memo caches that null run-wide as "not linkable", so the dead link needs a trace to be diagnosable.
+    console.error(`[kestrel] resolveInternalHref: ${collection}:${id} unreadable:`, (error as Error)?.message ?? error)
+    return null
   }
   if (!isPubliclyLinkable(row, Object.hasOwn(cols, 'status'))) return null
   return pageRowHref(row, primaryLocale(), prefixPrimaryLocale())

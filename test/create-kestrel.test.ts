@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 
 const root = process.cwd()
 const pkgDir = resolve(root, 'packages/create-kestrel')
@@ -163,6 +163,28 @@ describe('create-kestrel CLI', () => {
   const run = (...args: string[]) =>
     spawnSync(process.execPath, [bin, ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } })
 
+  // The interactive branch is reachable only behind a tty, and readline discards a line that arrives
+  // before the question meant to read it — so fake the tty and feed exactly one line per prompt drawn.
+  const TTY_STUB = 'data:text/javascript,Object.defineProperty(process.stdin,"isTTY",{value:true})'
+  const runInteractive = (password: string, ...args: string[]) =>
+    new Promise<{ status: number | null; stdout: string; prompts: number }>((resolve) => {
+      const child = spawn(process.execPath, ['--import', TTY_STUB, bin, ...args], {
+        cwd: dir,
+        env: { ...process.env, NO_COLOR: '1' },
+      })
+      let stdout = ''
+      let sent = 0
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk)
+        const asked = (stdout.match(/(?:New admin|Repeat) password: /g) ?? []).length
+        while (sent < asked) {
+          child.stdin.write(`${password}\n`)
+          sent++
+        }
+      })
+      child.on('close', (status) => resolve({ status, stdout, prompts: sent }))
+    })
+
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'create-kestrel-'))
   })
@@ -210,6 +232,78 @@ describe('create-kestrel CLI', () => {
   it('proceeds into a non-empty directory when forced', () => {
     writeFileSync(join(dir, 'package.json'), '{}')
     expect(run('--force', '--password', 'a-good-password').status).toBe(0)
+  })
+
+  // --force says the directory is not empty, not that its contents may go.
+  it('merges an existing package.json when forced rather than replacing it', () => {
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'mine', version: '9.9.9', dependencies: { lodash: '^4' }, scripts: { build: 'tsc' } }),
+    )
+    expect(run('--force', '--password', 'a-good-password').status).toBe(0)
+    const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+    expect(manifest.name).toBe('mine')
+    expect(manifest.version).toBe('9.9.9')
+    expect(manifest.dependencies.lodash).toBe('^4')
+    expect(manifest.scripts.build).toBe('tsc')
+    expect(manifest.dependencies['@michaelthielemann/kestrel']).toBeDefined()
+  })
+
+  it('refuses a broken manifest before writing anything', () => {
+    writeFileSync(join(dir, 'package.json'), '{ not json')
+    const res = run('--force', '--password', 'a-good-password')
+    expect(res.status).toBe(1)
+    expect(res.stderr).toContain('not valid JSON')
+    expect(existsSync(join(dir, 'nuxt.config.ts')), 'nothing may be written before the refusal').toBe(false)
+  })
+
+  // `null`, `42` and `"oops"` all parse; merging then throws on the `in` operator, half-way through a
+  // write loop that starts with README.md — the very state the pre-flight exists to prevent.
+  it('refuses a manifest that parses to something other than an object', () => {
+    writeFileSync(join(dir, 'package.json'), '42')
+    const res = run('--force', '--password', 'a-good-password')
+    expect(res.status).toBe(1)
+    expect(res.stderr).not.toContain('TypeError')
+    expect(existsSync(join(dir, 'README.md')), 'nothing may be written before the refusal').toBe(false)
+  })
+
+  it('refuses a --password that took no value rather than scaffolding without one', () => {
+    const res = run('--password', '--yes')
+    expect(res.status).toBe(1)
+    expect(res.stderr).toContain('--password')
+    expect(existsSync(join(dir, '.env')), 'nothing may be written before the refusal').toBe(false)
+  })
+
+  it('rotates the admin hash of an existing .env while leaving the session secret alone', () => {
+    writeFileSync(join(dir, '.env'), 'KESTREL_ADMIN_PASSWORD_HASH=stale\nKESTREL_SESSION_SECRET=precious\n')
+    expect(run('--force', '--password', 'a-good-password').status).toBe(0)
+    const env = readFileSync(join(dir, '.env'), 'utf8')
+    expect(env).toMatch(/^KESTREL_ADMIN_PASSWORD_HASH=scrypt\$/m)
+    expect(env).toContain('KESTREL_SESSION_SECRET=precious')
+  })
+
+  it('asks for a password when scaffolding a new site', async () => {
+    const res = await runInteractive('typed-password', 'my-site')
+    expect(res.status, res.stdout).toBe(0)
+    expect(res.prompts).toBe(2)
+    expect(readFileSync(join(dir, 'my-site/.env'), 'utf8')).toMatch(/^KESTREL_ADMIN_PASSWORD_HASH=scrypt\$/m)
+  })
+
+  // The prompt loops until a valid password is typed twice, so it cannot be declined; and the hash is
+  // folded into the session signing key, so answering it would sign every user out. --force says the
+  // directory may be scaffolded into, not that its admin password may change.
+  it('neither asks again nor changes the hash when the forced target already has one', async () => {
+    writeFileSync(join(dir, '.env'), 'KESTREL_ADMIN_PASSWORD_HASH=live\nKESTREL_SESSION_SECRET=precious\n')
+    const res = await runInteractive('typed-password', '--force')
+    expect(res.status, res.stdout).toBe(0)
+    expect(res.prompts, 'a password that cannot be used must not be asked for').toBe(0)
+    expect(res.stdout).toContain('already set')
+    expect(readFileSync(join(dir, '.env'), 'utf8')).toContain('KESTREL_ADMIN_PASSWORD_HASH=live')
+  })
+
+  it('does not report an .env write when there was no key left to fill', () => {
+    writeFileSync(join(dir, '.env'), 'KESTREL_SESSION_SECRET=precious\nKESTREL_SECURE_COOKIES=false\n')
+    expect(run('--force', '--yes').stdout).not.toContain('.env ()')
   })
 
   it('ignores dotfiles when deciding whether the target is empty', () => {

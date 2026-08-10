@@ -7,9 +7,11 @@ import { renderSqlite } from './render-sqlite'
 // `SchemaOp[]` over the normalized model, independent of any database. A `Dialect` is what binds that
 // core to a concrete backend — it knows how to read the backend's live schema back into the model
 // (`introspect`), how to turn ops into the backend's DDL (`render`), and how to quote an identifier.
-// `sync.ts` is threaded with a Dialect (defaulting to `sqlite`), so adding a second backend means writing
-// one new Dialect — not touching diff/sync. SQLite is the only implementation today; `postgres` is a
-// reserved, fail-loud slot.
+// `sync.ts` is threaded with a Dialect (defaulting to `sqlite`), so DDL rendering, introspection and
+// identifier quoting are swappable without touching the diff. The seam stops there: `diff.ts` emits
+// `rebuild_table` because SQLite has no ALTER/DROP COLUMN, and sync's pre-flight feasibility probes are
+// SQLite SQL (`PRAGMA table_info`, `json_extract`) — a second backend needs both adjusted alongside its
+// new Dialect. SQLite is the only implementation today; `postgres` is a reserved, fail-loud slot.
 export interface Dialect {
   /** Stable identifier, e.g. `sqlite` | `postgres`. */
   readonly name: string

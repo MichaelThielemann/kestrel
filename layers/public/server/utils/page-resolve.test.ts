@@ -47,19 +47,19 @@ describe('resolvePage', () => {
     insert(sqlite, 'p2', { path: '/promo', status: 'published' })
 
     // registration order is the precedence rule: p1 before p2 → p1 wins on the shared path
-    expect(resolvePage(db, [p1, p2, settings], '/about', 'en')).toMatchObject({ collection: 'p1' })
+    expect(resolvePage(db, [p1, p2, settings], '/about', 'en').page).toMatchObject({ collection: 'p1' })
     // only p2 owns /promo
-    expect(resolvePage(db, [p1, p2, settings], '/promo', 'en')).toMatchObject({ collection: 'p2' })
+    expect(resolvePage(db, [p1, p2, settings], '/promo', 'en').page).toMatchObject({ collection: 'p2' })
     // a draft is never served (publishedOnly), even though the row exists
-    expect(resolvePage(db, [p1, p2, settings], '/draft', 'en')).toBeNull()
-    expect(resolvePage(db, [p1, p2, settings], '/missing', 'en')).toBeNull()
+    expect(resolvePage(db, [p1, p2, settings], '/draft', 'en').page).toBeNull()
+    expect(resolvePage(db, [p1, p2, settings], '/missing', 'en').page).toBeNull()
   })
 
   it('honours the requested locale', () => {
     const { db, sqlite } = build([p1])
     insert(sqlite, 'p1', { path: '/x', status: 'published', locale: 'de' })
-    expect(resolvePage(db, [p1], '/x', 'de')).toMatchObject({ collection: 'p1' })
-    expect(resolvePage(db, [p1], '/x', 'en')).toBeNull() // no en row at this path
+    expect(resolvePage(db, [p1], '/x', 'de').page).toMatchObject({ collection: 'p1' })
+    expect(resolvePage(db, [p1], '/x', 'en').page).toBeNull() // no en row at this path
   })
 
   it('returns the published translation alternates of the matched page (never drafts), by locale', () => {
@@ -68,7 +68,7 @@ describe('resolvePage', () => {
     insert(sqlite, 'p1', { path: '/x-de', status: 'published', locale: 'de', group: 'g1' })
     insert(sqlite, 'p1', { path: '/x-fr', status: 'draft', locale: 'fr', group: 'g1' })
     insert(sqlite, 'p1', { path: '/other', status: 'published', locale: 'en', group: 'g2' })
-    const resolved = resolvePage(db, [p1], '/x', 'en')!
+    const resolved = resolvePage(db, [p1], '/x', 'en').page!
     expect(resolved.alternates).toEqual([
       { locale: 'de', path: '/x-de' },
       { locale: 'en', path: '/x' },
@@ -84,7 +84,7 @@ describe('resolvePage', () => {
     insSeo('/about', 'en', false)
     insSeo('/ueber-uns', 'de', true) // published but noindexed → must NOT appear as an alternate
     insSeo('/a-propos', 'fr', false)
-    const { result, tags } = await withReadCapture(() => resolvePage(db, [seoP], '/about', 'en')!)
+    const { result, tags } = await withReadCapture(() => resolvePage(db, [seoP], '/about', 'en').page!)
     // the noindexed DE variant is dropped; EN + FR remain → still a real (≥2) hreflang set
     expect(result.alternates).toEqual([
       { locale: 'en', path: '/about' },
@@ -102,7 +102,7 @@ describe('resolvePage', () => {
     insSeo('/ueber-uns', 'de', true) // the page being rendered — itself noindexed
     insSeo('/about', 'en', false)
     insSeo('/a-propos', 'fr', false)
-    const resolved = resolvePage(db, [seoP], '/ueber-uns', 'de')!
+    const resolved = resolvePage(db, [seoP], '/ueber-uns', 'de').page!
     // en+fr alone would be a valid (>=2) hreflang set, but without a self-reference it must be suppressed
     expect(resolved.alternates).toEqual([])
   })
@@ -113,7 +113,7 @@ describe('resolvePage', () => {
     insert(sqlite, 'p1', { path: '/about', status: 'published', locale: 'en', group: 'g1' })
     insert(sqlite, 'p1', { path: '/ueber-uns', status: 'draft', locale: 'de', group: 'g1' })
     const draftId = (sqlite.prepare(`SELECT id FROM p1 WHERE locale = 'de'`).get() as { id: number }).id
-    const { result, tags } = await withReadCapture(() => resolvePage(db, [p1], '/about', 'en')!)
+    const { result, tags } = await withReadCapture(() => resolvePage(db, [p1], '/about', 'en').page!)
     // the draft sibling is still never advertised (lone published member → no hreflang set) …
     expect(result.alternates).toEqual([])
     // … but the dependency edge exists, so the PUBLISH tag `p1:<id>` has something to match
@@ -126,7 +126,7 @@ describe('resolvePage', () => {
       sqlite.prepare(`INSERT INTO nostatus (locale, translation_group, path, title, created_at, updated_at) VALUES (?, 'g1', ?, 'T', 0, 0)`).run(locale, path)
     ins('/about', 'en')
     ins('/ueber-uns', 'de')
-    expect(resolvePage(db, [noStatus], '/about', 'en')!.alternates).toEqual([
+    expect(resolvePage(db, [noStatus], '/about', 'en').page!.alternates).toEqual([
       { locale: 'de', path: '/ueber-uns' },
       { locale: 'en', path: '/about' },
     ])
@@ -137,20 +137,20 @@ describe('resolvePage', () => {
     insert(sqlite, 'p1', { path: '/x', status: 'published', locale: 'en', group: 'g1' })
     sqlite.prepare(`INSERT INTO p1 (locale, translation_group, path, status, title, created_at, updated_at) VALUES ('de', 'g1', NULL, 'published', 'T', 0, 0)`).run()
     // only EN has a path → group of 1 after dropping the null-path DE row → no alternates, no throw
-    expect(resolvePage(db, [p1], '/x', 'en')!.alternates).toEqual([])
+    expect(resolvePage(db, [p1], '/x', 'en').page!.alternates).toEqual([])
   })
 
   it('returns no alternates for a lone page (single-member group)', () => {
     const { db, sqlite } = build([p1])
     insert(sqlite, 'p1', { path: '/solo', status: 'published' })
-    expect(resolvePage(db, [p1], '/solo', 'en')!.alternates).toEqual([])
+    expect(resolvePage(db, [p1], '/solo', 'en').page!.alternates).toEqual([])
   })
 
   it('skips a collection whose table is missing/drifted instead of throwing out of resolvePage', () => {
     const { db, sqlite } = build([p1, p2])
     insert(sqlite, 'p2', { path: '/about', status: 'published' })
     sqlite.exec('DROP TABLE p1') // simulate an unmigrated/drifted collection sharing this build's DB
-    expect(resolvePage(db, [p1, p2], '/about', 'en')).toMatchObject({ collection: 'p2' })
+    expect(resolvePage(db, [p1, p2], '/about', 'en').page).toMatchObject({ collection: 'p2' })
   })
 
   it('logs the skipped collection — a swallowed read must not look like an empty result', () => {
@@ -165,12 +165,49 @@ describe('resolvePage', () => {
     } finally { spy.mockRestore() }
   })
 
+  it('reports the collections whose lookup failed, so no match is not read as no such page', () => {
+    const { db, sqlite } = build([p1, p2])
+    insert(sqlite, 'p2', { path: '/about', status: 'published' })
+    sqlite.exec('DROP TABLE p1')
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      // a match in a healthy collection still resolves — the gap is reported alongside it …
+      expect(resolvePage(db, [p1, p2], '/about', 'en').failed).toEqual(['p1'])
+      // … and a scan that matched nothing is explicitly INCOMPLETE, not an authoritative 404
+      expect(resolvePage(db, [p1, p2], '/nowhere', 'en')).toEqual({ page: null, failed: ['p1'] })
+    } finally { spy.mockRestore() }
+  })
+
+  it('subscribes the rendered page to its translation group, so any sibling write re-renders it', async () => {
+    const { withReadCapture } = await import('../../../core/server/utils/read-capture')
+    const { DepsStore } = await import('./publish/deps')
+    const { classifyWrite, planInvalidation } = await import('./publish/invalidation')
+    const { db, sqlite } = build([p1])
+    // /about renders while it is the ONLY member of its group — nothing it captures can name a sibling yet
+    insert(sqlite, 'p1', { path: '/about', status: 'published', locale: 'en', group: 'g1' })
+    const { tags } = await withReadCapture(() => resolvePage(db, [p1], '/about', 'en').page!)
+    const deps = new DepsStore()
+    deps.record('/about', tags)
+
+    const sibling = (over: Record<string, unknown> = {}) => ({ id: 99, path: '/ueber-uns', locale: 'de', status: 'published', translationGroup: 'g1', ...over })
+    const routes = (before: Record<string, unknown> | null, after: Record<string, unknown> | null) => {
+      const inv = planInvalidation(classifyWrite(p1.def, before, after, 'en'))
+      return inv.type === 'tags' ? deps.routesForTags(inv.tags) : []
+    }
+    // created straight as published …
+    expect(routes(null, sibling())).toContain('/about')
+    // … the commonest flow: draft, then publish …
+    expect(routes(sibling({ status: 'draft' }), sibling())).toContain('/about')
+    // … and deleted again: /about's hreflang set must lose it
+    expect(routes(sibling(), null)).toContain('/about')
+  })
+
   it('resolves a draft when publishedOnly is false (the authenticated admin preview path)', () => {
     const { db, sqlite } = build([p1])
     insert(sqlite, 'p1', { path: '/draft', status: 'draft' })
     // default (published-only) hides the draft — the static-site / anonymous contract
-    expect(resolvePage(db, [p1], '/draft', 'en')).toBeNull()
+    expect(resolvePage(db, [p1], '/draft', 'en').page).toBeNull()
     // opting out of the published gate surfaces it (admin live preview)
-    expect(resolvePage(db, [p1], '/draft', 'en', false)).toMatchObject({ collection: 'p1' })
+    expect(resolvePage(db, [p1], '/draft', 'en', false).page).toMatchObject({ collection: 'p1' })
   })
 })

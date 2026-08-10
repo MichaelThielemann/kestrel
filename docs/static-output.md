@@ -19,12 +19,42 @@ media origin (NGINX / S3), not bundled into the HTML.
 At build time the `prerender-routes` module reads the SQLite database and registers one route
 per **published** page path, plus the two artifacts below:
 
-- The site root `/` (always, even before a home page exists).
+- The site root `/` (always seeded, and rendered as an empty document before a home page exists).
 - Every published page-like record's path. Primary-locale pages are unprefixed (`/about`);
   other locales are prefixed (`/de/ueber-uns`).
 - `/sitemap.xml`
 - `/robots.txt`
 - `/llms.txt`
+
+A route whose lookup could not *complete* — an unmigrated or drifted table, so "no page here" is
+unknowable rather than true — errors instead of rendering, and no HTML is written for it. That includes
+the root, which is otherwise the one path that always produces a file. The generate itself still exits 0
+(`prerender.failOnError` is off by design), so check the prerender log, not the exit code. Nothing
+destructive follows from it: the deploy step counts a failed route as an incomplete run and suppresses
+the S3 prune, so the live page it could not re-render survives.
+
+### What a generated page contains
+
+A prerendered page ships more than its visible markup. Nuxt serialises the data the page resolved into a
+hydration payload — inline in the HTML as `__NUXT_DATA__`, and, for a prerendered route, additionally as a
+sibling `_payload.json` that client-side navigation fetches instead of re-querying the API. Both are static
+files on the public site.
+
+That payload holds the **whole record**, not the fields the template rendered: every column of the page's
+own row, the `site` singleton, and — because the render populates at depth 1 — every column of each related
+record under its `$<field>` sidecar. There is no projection anywhere on that path; `list()` selects the full
+row and the populator attaches whatever it read.
+
+**So any collection reachable from a page-like record's relations is public data, whatever its access
+grant.** A relation from a published page into a collection holding private columns publishes those columns,
+permanently, in every page that carries the relation. The access layer does not bound this and cannot: it
+governs who may call the API, while the payload is written at build time by the renderer, which is
+deliberately unrestricted so the baked page is complete.
+
+To keep a column out of the bake, project the relation where it is populated — see the per-instance
+`populate` override in [population.md](./population.md), and note the delegation rule there: an override
+that replaces the type populator instead of delegating to it loses `captureRead`, and with it the
+invalidation that re-publishes the page when the related record changes.
 
 That is the `output.auto: false` model. On the default (`auto: true`) the **runtime publisher** owns the
 static output instead — it keeps it current *while the CMS runs*, re-rendering only the routes a content

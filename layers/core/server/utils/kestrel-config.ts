@@ -6,7 +6,8 @@ import { resolve } from 'node:path'
 /**
  * Non-secret S3 settings (used when `media.driver === 's3'`). The access-key id and secret are
  * deliberately **absent** here — they are env-only (`KESTREL_S3_ACCESS_KEY_ID` /
- * `KESTREL_S3_SECRET_ACCESS_KEY`), read at driver construction, never in committed config.
+ * `KESTREL_S3_SECRET_ACCESS_KEY`), read at module setup — unconditionally, whatever the driver — and
+ * frozen into `runtimeConfig`, never in committed config.
  */
 export interface KestrelS3Config {
   /** Target bucket name. */
@@ -122,8 +123,7 @@ export interface KestrelConfig {
     publicDir?: string
     /** Auto-publish affected pages on every content write (default true). */
     auto?: boolean
-    /** Run a FULL reconcile every N minutes (default 0 = off) — self-heals missed invalidations and
-     *  picks up time-based `publishDate` publishing that no write event would trigger. */
+    /** Run a FULL reconcile every N minutes (default 0 = off) — self-heals a missed invalidation. */
     reconcileMinutes?: number
     /** Verbose publish logging: emit a timestamped per-route line (rendered / pruned) on each incremental
      *  republish, on top of the summary line. Default false (`KESTREL_OUTPUT_VERBOSE`). */

@@ -31,9 +31,12 @@ const KEY_RE = /^\s*([A-Z][A-Z0-9_]*)\s*=/
 
 /**
  * Fills only keys that are absent or empty, so re-running `init` never rotates a live session secret.
+ * A key in `force` replaces a value that is already there — for a secret the caller supplied by hand,
+ * where being handed one at all is the instruction to change it.
  * Returns the new text plus the keys that changed.
  */
-export function mergeEnv(existing, entries) {
+export function mergeEnv(existing, entries, force = []) {
+  const forced = new Set(force)
   const pending = new Map(Object.entries(entries))
   const lines = existing === '' ? [] : existing.split('\n')
   const written = []
@@ -51,7 +54,7 @@ export function mergeEnv(existing, entries) {
     if (!key || !pending.has(key) || lastIndex.get(key) !== i) return line
     const value = pending.get(key)
     pending.delete(key)
-    if (line.slice(line.indexOf('=') + 1).trim() !== '') return line
+    if (line.slice(line.indexOf('=') + 1).trim() !== '' && !forced.has(key)) return line
     written.push(key)
     return `${key}=${value}`
   })
@@ -68,7 +71,8 @@ export function mergeEnv(existing, entries) {
   return { text: out.join('\n'), written }
 }
 
-const isObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v)
+/** `typeof null === 'object'`, and arrays are objects too — both need explicit exclusion for a plain object check. */
+export const isPlainObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 const NESTED = ['scripts', 'dependencies', 'devDependencies']
 // `type` decides whether every .js in the project is ESM or CJS, so injecting it silently could break a
@@ -87,13 +91,19 @@ export function mergePackageJson(existing, template) {
   }
   for (const key of NESTED) {
     if (!template[key]) continue
-    merged[key] = isObject(existing[key]) ? { ...template[key], ...existing[key] } : template[key]
+    merged[key] = isPlainObject(existing[key]) ? { ...template[key], ...existing[key] } : template[key]
     for (const name of Object.keys(template[key])) {
-      if (!isObject(existing[key]) || !(name in existing[key])) added.push(`${key}.${name}`)
+      if (!isPlainObject(existing[key]) || !(name in existing[key])) added.push(`${key}.${name}`)
     }
   }
   return { merged, added }
 }
+
+/**
+ * The value a dotenv key carries, or `undefined`/`''` when it carries none.
+ * Horizontal whitespace only: `\s*` would let an empty assignment match the NEXT line's value.
+ */
+export const envValue = (env, key) => new RegExp(`^[^\\S\\n]*${key}[^\\S\\n]*=[^\\S\\n]*(.+)$`, 'm').exec(env)?.[1].trim()
 
 const withoutComments = (src) => src.replace(/<!--[\s\S]*?-->/g, '')
 // `<nuxt-page />` is as valid as `<NuxtPage />`; matching only the Pascal spelling would flag a working app.
@@ -160,8 +170,7 @@ export function diagnoseProject({ packageJson, nuxtConfig, appVue, env }) {
   if (env === null) {
     add('error', 'no .env — sign-in at /admin answers 503 until KESTREL_ADMIN_PASSWORD_HASH is set. Run `kestrel init`.')
   } else {
-    // Horizontal whitespace only: `\s*` would let an empty assignment match the NEXT line's value.
-    const value = (key) => new RegExp(`^[^\\S\\n]*${key}[^\\S\\n]*=[^\\S\\n]*(.+)$`, 'm').exec(env)?.[1].trim()
+    const value = (key) => envValue(env, key)
     if (!value('KESTREL_ADMIN_PASSWORD_HASH')) {
       add('error', 'KESTREL_ADMIN_PASSWORD_HASH is unset — /admin renders but sign-in answers 503. Run `kestrel hash-password`.')
     }

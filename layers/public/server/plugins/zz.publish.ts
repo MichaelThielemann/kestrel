@@ -15,7 +15,7 @@ import { registerWriteListener } from '../../../core/server/utils/write-events'
  *     DETACHED (`runNitroPlugins` is synchronous + unawaited; `localFetch` is already wired before plugins
  *     run + before the server listens), so it never blocks boot.
  *  3. RECONCILER — an optional periodic full publish (`output.reconcileMinutes`) self-heals any missed
- *     invalidation and picks up time-based `publishDate` publishing that no write event would trigger.
+ *     invalidation.
  */
 export default defineNitroPlugin(() => {
   if (import.meta.dev) return

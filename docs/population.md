@@ -10,8 +10,8 @@ recursive.
 `layers/core/server/utils/populate.ts` owns two registries:
 
 - **`registerPopulator(fn)`** — whole-row populators, run in turn by `populateRow(row, ctx)`
-  (`ctx = { depth, locale, def }`), bailing at `depth <= 0`. There is exactly **one** today: the field-tree
-  walker.
+  (`ctx = { depth, locale, def, publicOnly }`), bailing at `depth <= 0`. There is exactly **one** today: the
+  field-tree walker.
 - **`registerFieldPopulator(type, fn)`** — one **per-field-type** populator, keyed by type name (last-wins).
   A `FieldPopulator(bag, key, field, ctx, keyMode)` reads its value out of `bag` and mutates `bag` in place
   (attach `$media`, a `$<name>` relation sibling, resolve a link value). The owning layer registers its own,
@@ -50,13 +50,31 @@ record is itself populated — so `lineup.$speakers[i].$media.photo` resolves in
   relation cycle always terminates.
 - **Published-only** — a draft/missing/deleted target is skipped (single → `null`, many → dropped), never
   leaked to a public read and never 404-ing the whole record.
+- **Public set** — the generic `/api/<collection>` read routes set `ctx.publicOnly` for an **anonymous**
+  principal (and for a missing one, which is a guard regression and fails closed onto it), and a relation
+  whose target collection is outside the registry-driven public set (`publicReadableResources()`) is then
+  left unexpanded — raw id only, no `$<name>` at all — at every hop. Population must not reach a record the
+  caller could not have requested directly. It follows the **role**, not the read scope: the renderer is
+  published-only too, but it builds the static site and keeps full population. Where the bound stops:
+  the set is not the guard's whole decision (it omits `registeredGrants()`, so the populator is if anything
+  stricter than the route that serves the same collection), and `/api/route` — the public render entry,
+  which every principal may call — never sets the flag at all, so a live render populates in full for
+  anyone. `?depth` on the generic routes is bounded; the render entry is not.
+
+  **The flag bounds an API, not the data's reach.** The render entry has to populate in full — the flag
+  would strip every non-page-like relation out of the static site — and what it populates is serialised
+  into each generated page's hydration payload, so it is published regardless. The authoritative exposure
+  boundary is therefore the bake, not the guard: treat any collection reachable from a page-like record's
+  relations as public, and project it here if it holds columns that must not ship. See
+  [static-output.md](./static-output.md).
 - **Output shape** — the raw id column is untouched; the resolved record(s) live under the `$<name>` sibling.
 
 ## Per-instance override
 
 A `FieldDef` may carry an inline `populate` (Pruvious `additional.population`) that the walker runs instead of
 the type default for that one field — e.g. a relation projecting only a couple of columns. Server-only; a
-function, so it is never serialized to the admin.
+function, so it is never serialized to the admin. It replaces the type populator wholesale, so an override
+that expands a reference owns the `ctx.publicOnly` check too.
 
 ```ts
 defineCollection({
@@ -69,3 +87,20 @@ defineCollection({
   },
 })
 ```
+
+**To narrow a relation, delegate first — do not re-read the table.** The type populator is what calls
+`captureRead` on the target, so an override that fetches the record itself drops the read-tag: the page
+would then never re-publish when the related record changes, silently and only in the incremental
+publisher. Run the registered populator, then trim what it attached:
+
+```ts
+populate: (bag, key, field, ctx, keyMode) => {
+  getFieldPopulator('relation')?.(bag, key, field, ctx, keyMode)
+  const rel = bag['$' + key] as { id: number; name: string } | null
+  if (rel) bag['$' + key] = { id: rel.id, name: rel.name }
+},
+```
+
+This is also how a private column is kept out of the static bake, since the renderer populates in full —
+and it is payload shaping, not access control: a depth-0 read of the collection itself still returns the
+column to anyone the access layer admits.

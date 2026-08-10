@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   PACKAGE_NAME,
   diagnoseProject,
@@ -109,6 +109,15 @@ describe('mergeEnv', () => {
     const { text, written } = mergeEnv('KESTREL_SESSION_SECRET=keep-me\n', { KESTREL_SESSION_SECRET: 'new' })
     expect(text).toContain('KESTREL_SESSION_SECRET=keep-me')
     expect(written).toEqual([])
+  })
+
+  // A password handed to the CLI is an explicit instruction to change it; the session secret is not, so
+  // only the named keys may replace a value that is already there.
+  it('replaces a non-empty value only for the keys it is told may change', () => {
+    const { text, written } = mergeEnv('A=old\nB=old\n', { A: 'new', B: 'new' }, ['A'])
+    expect(text).toContain('A=new')
+    expect(text).toContain('B=old')
+    expect(written).toEqual(['A'])
   })
 
   it('appends a key that is absent entirely', () => {
@@ -391,6 +400,28 @@ describe('kestrel CLI', () => {
   const run = (...args: string[]) =>
     spawnSync(process.execPath, [cli, ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } })
 
+  // The interactive branch is reachable only behind a tty, and readline discards a line that arrives
+  // before the question meant to read it — so fake the tty and feed exactly one line per prompt drawn.
+  const TTY_STUB = 'data:text/javascript,Object.defineProperty(process.stdin,"isTTY",{value:true})'
+  const runInteractive = (password: string, ...args: string[]) =>
+    new Promise<{ status: number | null; stdout: string; prompts: number }>((resolve) => {
+      const child = spawn(process.execPath, ['--import', TTY_STUB, cli, ...args], {
+        cwd: dir,
+        env: { ...process.env, NO_COLOR: '1' },
+      })
+      let stdout = ''
+      let sent = 0
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk)
+        const asked = (stdout.match(/(?:New admin|Repeat) password: /g) ?? []).length
+        while (sent < asked) {
+          child.stdin.write(`${password}\n`)
+          sent++
+        }
+      })
+      child.on('close', (status) => resolve({ status, stdout, prompts: sent }))
+    })
+
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'kestrel-cli-'))
   })
@@ -460,6 +491,40 @@ describe('kestrel CLI', () => {
     expect(readFileSync(join(dir, '.env'), 'utf8')).toBe(before)
   })
 
+  // Supplying --password on an already-scaffolded project is how an operator changes the admin password;
+  // keeping the old hash leaves them locked out of a project the CLI reported as set up.
+  it('rotates the admin password hash when a new one is supplied', () => {
+    const value = (env: string, key: string) => new RegExp(`^${key}=(.+)$`, 'm').exec(env)?.[1]
+    run('init', '--password', 'a-good-password', '--yes')
+    const before = readFileSync(join(dir, '.env'), 'utf8')
+    expect(run('init', '--password', 'another-good-password', '--yes').status).toBe(0)
+    const after = readFileSync(join(dir, '.env'), 'utf8')
+    expect(value(after, 'KESTREL_ADMIN_PASSWORD_HASH')).not.toBe(value(before, 'KESTREL_ADMIN_PASSWORD_HASH'))
+    expect(value(after, 'KESTREL_SESSION_SECRET'), "the session secret is not the CLI's to rotate").toBe(
+      value(before, 'KESTREL_SESSION_SECRET'),
+    )
+  })
+
+  it('asks for a password on a project that has none', async () => {
+    const res = await runInteractive('typed-password', 'init')
+    expect(res.status, res.stdout).toBe(0)
+    expect(res.prompts).toBe(2)
+    expect(readFileSync(join(dir, '.env'), 'utf8')).toMatch(/^KESTREL_ADMIN_PASSWORD_HASH=scrypt\$/m)
+  })
+
+  // The prompt loops until a valid password is typed twice, so it cannot be declined; and the hash is
+  // folded into the session signing key, so answering it would sign every user out. Asking at all on a
+  // configured project is therefore a password rotation the operator never asked for.
+  it('neither asks again nor changes the hash when one is already set', async () => {
+    run('init', '--password', 'a-good-password', '--yes')
+    const before = readFileSync(join(dir, '.env'), 'utf8')
+    const res = await runInteractive('typed-password', 'init')
+    expect(res.status, res.stdout).toBe(0)
+    expect(res.prompts, 'a password that cannot be used must not be asked for').toBe(0)
+    expect(res.stdout).toContain('already set')
+    expect(readFileSync(join(dir, '.env'), 'utf8')).toBe(before)
+  })
+
   it('reports every problem in a directory that is not a Kestrel project', () => {
     const res = run('doctor')
     expect(res.status).toBe(1)
@@ -500,6 +565,36 @@ describe('kestrel CLI', () => {
     expect(existsSync(join(dir, 'nuxt.config.ts')), 'the cwd must be left alone').toBe(false)
   })
 
+  // No flag swallows a `-`-prefixed token, so `--password -pw` arrives as the target directory: scaffolding
+  // into it would leave the cleartext admin password on disk as a directory name.
+  it('refuses a target that reads as an option instead of naming a directory after it', () => {
+    for (const command of ['init', 'doctor']) {
+      const res = run(command, '--password', '-Secret123!', '--yes')
+      expect(res.status, command).toBe(1)
+      expect(res.stderr).toContain('unknown option')
+    }
+    expect(existsSync(join(dir, '-Secret123!'))).toBe(false)
+  })
+
+  it('refuses a --password that took no value rather than scaffolding without one', () => {
+    const res = run('init', '--password', '--yes')
+    expect(res.status).toBe(1)
+    expect(res.stderr).toContain('--password')
+    expect(existsSync(join(dir, '.env')), 'nothing may be written before the refusal').toBe(false)
+  })
+
+  // The positional the guard above rejects is a legitimate value here.
+  it('hashes a password that starts with a dash', () => {
+    expect(run('hash-password', '-Secret123!').stdout.trim()).toMatch(/^scrypt\$/)
+  })
+
+  // `--` is the documented way to pass a dash-leading positional, so the guard above must not eat it.
+  it('takes a directory whose name starts with a dash after a bare --', () => {
+    const res = run('doctor', '--', '-weird')
+    expect(res.stderr).not.toContain('unknown option')
+    expect(res.stdout).toContain('no package.json')
+  })
+
   // --force may replace template files, but a manifest carries the user's dependencies and version.
   it('never replaces an existing package.json, even with --force', () => {
     writeFileSync(
@@ -521,14 +616,26 @@ describe('kestrel CLI', () => {
     expect(existsSync(join(dir, 'nuxt.config.ts')), 'nothing may be written before the refusal').toBe(false)
   })
 
+  // `null`, `42` and `"oops"` all parse; merging then throws on the `in` operator, half-way through a
+  // write loop that starts with README.md — the very state the pre-flight exists to prevent.
+  it('refuses a manifest that parses to something other than an object', () => {
+    writeFileSync(join(dir, 'package.json'), 'null')
+    const res = run('init', '--password', 'a-good-password')
+    expect(res.status).toBe(1)
+    expect(res.stderr).not.toContain('TypeError')
+    expect(existsSync(join(dir, 'README.md')), 'nothing may be written before the refusal').toBe(false)
+  })
+
   it('writes the .env holding the secrets owner-only', () => {
     run('init', '--password', 'a-good-password')
     expect(statSync(join(dir, '.env')).mode & 0o777).toBe(0o600)
   })
 
   it('fails loudly on an unknown command', () => {
-    const res = run('frobnicate')
-    expect(res.status).toBe(1)
-    expect(res.stderr).toContain('unknown command')
+    for (const arg of ['frobnicate', '-x']) {
+      const res = run(arg)
+      expect(res.status, arg).toBe(1)
+      expect(res.stderr).toContain('unknown command')
+    }
   })
 })

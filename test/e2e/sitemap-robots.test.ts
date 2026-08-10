@@ -6,8 +6,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch } from '@nuxt/test-utils/e2e'
 import { hashPassword } from '../../layers/auth/server/utils/password'
 
-const dbPath = join(tmpdir(), `kestrel-ssg-e2e-${process.pid}.sqlite`)
-const PW = 'ssg-e2e-pw'
+const dbPath = join(tmpdir(), `kestrel-sitemap-e2e-${process.pid}.sqlite`)
+const PW = 'sitemap-e2e-pw'
 
 process.env.KESTREL_DB = dbPath
 process.env.KESTREL_SESSION_SECRET = 's'.repeat(40)
@@ -15,7 +15,7 @@ process.env.KESTREL_SECURE_COOKIES = 'false'
 process.env.KESTREL_SITE_URL = 'https://example.test'
 process.env.KESTREL_ADMIN_PASSWORD_HASH = await hashPassword(PW)
 
-describe('SSG output: sitemap + robots (e2e)', async () => {
+describe('sitemap.xml + robots.txt routes (e2e)', async () => {
   await setup({ rootDir: fileURLToPath(new URL('../../', import.meta.url)), dev: true })
 
   beforeAll(async () => {

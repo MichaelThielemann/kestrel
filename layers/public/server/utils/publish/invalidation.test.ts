@@ -122,3 +122,47 @@ describe('classifyWrite + planInvalidation — precise per-case invalidation mod
     expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages'], render: [], prune: ['/x'] })
   })
 })
+
+// A page's baked hreflang set covers its whole translation group, so every member's output depends on
+// every other member's existence — an edge `<coll>:<id>` cannot express, because a member that rendered
+// before a sibling existed never captured that sibling's id. The group tag carries it on every branch.
+describe('translation-group invalidation', () => {
+  const member = (over: Record<string, unknown> = {}) => pub({ id: 11, path: '/x', locale: 'de', translationGroup: 'g1', ...over })
+
+  it('creating a published sibling tags the group (no id edge reaches the members that predate it)', () => {
+    const ev = classifyWrite(page, null, member(), 'en')
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages#group:g1'], render: ['/de/x'], prune: [] })
+  })
+
+  it('publishing a sibling that was created as a draft tags the group', () => {
+    const ev = classifyWrite(page, member({ status: 'draft' }), member({ status: 'published' }), 'en')
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:11', 'pages#group:g1'], render: ['/de/x'], prune: [] })
+  })
+
+  it('unpublishing a sibling tags the group', () => {
+    const ev = classifyWrite(page, member({ status: 'published' }), member({ status: 'draft' }), 'en')
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:11', 'pages#group:g1'], render: [], prune: ['/de/x'] })
+  })
+
+  it('deleting a sibling tags the group (the group it left is smaller for everyone else)', () => {
+    const ev = classifyWrite(page, member(), null, 'en')
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:11', 'pages#group:g1'], render: [], prune: ['/de/x'] })
+  })
+
+  it('renaming a sibling tags the group (every member advertises the new hreflang href)', () => {
+    const ev = classifyWrite(page, member({ path: '/x' }), member({ path: '/y' }), 'en')
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:11', 'pages#group:g1'], render: ['/de/y'], prune: ['/de/x'] })
+  })
+
+  it('a group-less row carries no group tag (a non-translatable write must not over-invalidate)', () => {
+    const ev = classifyWrite(page, pub(), pub(), 'en')
+    expect(ev.groupTag).toBe(null)
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: ['/spk/a'], prune: [] })
+  })
+
+  it('an empty translationGroup is not a group', () => {
+    const ev = classifyWrite(data, null, { id: 5, translationGroup: '' }, 'en')
+    expect(ev.groupTag).toBe(null)
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['speakers'], render: [], prune: [] })
+  })
+})

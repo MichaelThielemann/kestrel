@@ -29,8 +29,10 @@ There are **two** entry points, and which one you want depends on whether the di
 | **New project** | `pnpm create kestrel my-site` | Zero dependencies, downloads in a second. **Refuses** a directory that already holds a project — it will not merge into someone else's app |
 | **Existing project** | `pnpm add @michaelthielemann/kestrel` then `pnpm kestrel init` | Keeps every file that exists, merges `package.json` key-wise (your values win) and fills only the `.env` keys that are absent or empty |
 
-Both ask you to choose a password, are safe to re-run, and end by naming anything still broken — a
-re-run never rotates a live session secret. The engine's CLI has three more commands:
+Both ask you to choose a password when the project has none yet, are safe to re-run, and end by naming
+anything still broken — a re-run changes neither the session secret nor an admin hash that is already set.
+Rotating the hash is what `--password` is for, and it does sign everyone out: the hash is folded into the
+cookie signing key. The engine's CLI has three more commands:
 
 ```bash
 pnpm kestrel doctor          # diagnose without changing anything
@@ -146,15 +148,30 @@ Every field also accepts these common flags: `required`, `unique` (a unique DB i
 `index: true` (a **non-unique** DB index — add it to a field you filter or sort by a lot but that isn't
 unique). Both index flags flow through the schema engine (dev auto-sync) and `drizzle-kit`.
 
-> The built-in collections are `pages`, `media`, and `media_settings` (a nav-hidden system store).
+> The built-in collections are `pages`, `media`, `site` (the site-wide head singleton) and
+> `media_settings` (a nav-hidden system store).
 > `folders` is a plain support table, not a manageable collection, and has no `collections` toggle. Only
 > `pages`/`media` are toggleable. To customise one, either disable it
 > (`kestrel: { collections: { pages: false } }`) and define your own, or define a collection with the same
 > name — Kestrel warns and the later definition wins. (`posts` / `settings` are **not** built in — they're
 > demo content in this repo; build your own as needed, e.g. a `settings` singleton for site-wide nav.)
 >
-> Kestrel ships the render engine but **no public components**: provide your own page layout and one
-> block SFC per block type (`app/blocks/Hero.vue` — schema + display in one file — is the `hero` block).
+> Kestrel ships the render engine and the two field-level rendering primitives it depends on:
+> `<KestrelImg>` (a `<picture>` built from a media record's derivatives — a variant is derived *because*
+> some `<KestrelImg>` declares it) and `<KestrelLink>` (an `<a>` for a `link` field value). It ships **no
+> page components**, and only a bare `default` layout (`<main><slot /></main>`) meant to be shadowed:
+> provide your own layout and one block SFC per block type (`app/blocks/Hero.vue` — schema + display in
+> one file — is the `hero` block).
+>
+> One caveat on "no page components": the package ships the whole `layers` tree, so the media layer's
+> `<MediaImage>` — a plain `<img>` over whatever derivatives a media record already has — is auto-imported
+> into your app as well. It is demo scaffolding, not supported surface: its only caller is this repo's
+> `Hero.vue`, which is *not* shipped. It works, but it declares nothing to the variant scan, so the sizes
+> it can render are whatever the registry happens to hold: on a site that uses it exclusively that is the
+> full configured ladder, while adding one `<KestrelImg>` anywhere narrows the registry to what *that*
+> component declared and every `<MediaImage>` silently falls back to the surviving slice. It is also
+> webp-only, and uses the full-size original as its `src`. Reach for `<KestrelImg>` — and pass it `widths`
+> (or `crop` / `preset`): with none of them its candidate pool is empty and it degrades to the original too.
 >
 > **Styling is yours.** Kestrel's admin uses SCSS internally but ships `sass` and scopes its design system
 > to `/admin`, so it never touches your public site — use any CSS approach there (Bootstrap, Tailwind,
@@ -458,7 +475,8 @@ head.
   text field trims on write, so a stored `" | "` could not keep its spaces.
 - A page title that already ends in the base title is left as it is, which matters for content migrated
   from a CMS that baked the site name into every title.
-- Switch the whole thing off with `kestrel: { collections: { site: false } }`.
+- Unlike `pages` and `media` it has no `collections` toggle — it is always registered. Leaving the record
+  untouched is the off switch.
 
 ## Per-page layouts
 

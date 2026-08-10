@@ -19,6 +19,11 @@ const pages = buildCollection(defineCollection({
 const landing = buildCollection(defineCollection({
   name: 'landing', mode: 'multi', translatable: false, pageLike: true, fields: { title: { type: 'text' } },
 }))
+// Its table gets a projected column dropped mid-test, so the read throws like a drifted/unmigrated DB.
+const drifted = buildCollection(defineCollection({
+  name: 'drifted', mode: 'multi', translatable: false, pageLike: true, status: true, seo: true,
+  fields: { title: { type: 'text' } },
+}))
 
 let db: BetterSQLite3Database
 let sqlite: Database.Database
@@ -33,7 +38,10 @@ function insert(row: { path: string; status: string; locale?: string; group?: st
 
 beforeAll(async () => {
   sqlite = new Database(':memory:')
-  const desired = desiredSchema([pages.table, landing.table], new Map([[pages.def.name, pages.def], [landing.def.name, landing.def]]))
+  const desired = desiredSchema(
+    [pages.table, landing.table, drifted.table],
+    new Map([[pages.def.name, pages.def], [landing.def.name, landing.def], [drifted.def.name, drifted.def]]),
+  )
   for (const stmt of renderSqlite(diffSchema(desired, {}))) sqlite.exec(stmt)
   db = drizzle(sqlite)
   const spyDb = { select: (...args: unknown[]) => { selectArgs.push(args); return (db.select as (...a: unknown[]) => unknown)(...args) } }
@@ -80,5 +88,21 @@ describe('sitemap.xml route', () => {
     const xml = handler({}) as string
     vi.stubGlobal('allCollections', (): BuiltCollection[] => [pages])
     expect(xml).toContain('<loc>https://example.test/promo</loc>')
+  })
+
+  it('logs the collection it skipped when its table is unreadable, instead of silently de-indexing its pages', () => {
+    sqlite.prepare(`INSERT INTO drifted (path, status, title, seo, created_at, updated_at) VALUES ('/gone', 'published', 'T', '{}', 0, 1000)`).run()
+    sqlite.exec('ALTER TABLE drifted DROP COLUMN seo')
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('allCollections', (): BuiltCollection[] => [pages, drifted])
+    try {
+      const xml = handler({}) as string
+      expect(xml).not.toContain('/gone') // the gap itself stays — a bare prerender DB must not fail the publish
+      expect(xml).toContain('<loc>https://example.test/about</loc>')
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('sitemap.xml: skipped collection drifted'), expect.anything())
+    } finally {
+      error.mockRestore()
+      vi.stubGlobal('allCollections', (): BuiltCollection[] => [pages])
+    }
   })
 })

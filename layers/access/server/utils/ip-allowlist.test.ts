@@ -60,6 +60,26 @@ describe('ip-allowlist', () => {
       parseAllowlist('1.2.3.4, 10.0.0.0/8', (token) => rejected.push(token))
       expect(rejected).toEqual([])
     })
+    it('rejects a missing or non-numeric prefix instead of widening it', () => {
+      const rejected: string[] = []
+      const cidrs = parseAllowlist('203.0.113.10/, 10.0.0.0/0x10, 10.0.0.0/1e1, 10.0.0.0/24.0', (t) => rejected.push(t))
+      expect(cidrs).toHaveLength(0)
+      expect(rejected).toEqual(['203.0.113.10/', '10.0.0.0/0x10', '10.0.0.0/1e1', '10.0.0.0/24.0'])
+      expect(ipAllowed('8.8.8.8', parseAllowlist('203.0.113.10/'))).toBe(false)
+    })
+    it('keeps only the good CIDR when a bad prefix sits alongside it', () => {
+      const cidrs = parseAllowlist('10.0.0.0/8, 203.0.113.10/')
+      expect(cidrs).toHaveLength(1)
+      expect(ipAllowed('10.1.2.3', cidrs)).toBe(true)
+      expect(ipAllowed('8.8.8.8', cidrs)).toBe(false)
+    })
+    it('still accepts a padded prefix and one spaced away from the slash', () => {
+      expect(ipAllowed('10.1.2.3', parseAllowlist('10.0.0.0/ 8'))).toBe(true)
+      expect(ipAllowed('10.1.2.3', parseAllowlist('10.0.0.0/008'))).toBe(true)
+    })
+    it('still honours a deliberate 0.0.0.0/0', () => {
+      expect(ipAllowed('8.8.8.8', parseAllowlist('0.0.0.0/0'))).toBe(true)
+    })
   })
 
   describe('ipv4ToInt', () => {

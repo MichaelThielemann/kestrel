@@ -190,7 +190,7 @@ describe('resolveKestrel — precedence is KESTREL_* env → config → default 
     // defaults: empty strings, region us-east-1
     expect(resolveKestrel({}, {}, root).media.s3).toEqual(defaultS3)
 
-    // secrets are NEVER part of the resolved config (env-only, read at driver construction)
+    // secrets are NEVER part of the resolved config (env-only, read at module setup)
     const r = resolveKestrel({}, { KESTREL_S3_ACCESS_KEY_ID: 'AKIA', KESTREL_S3_SECRET_ACCESS_KEY: 'secret' }, root).media.s3
     expect(r).not.toHaveProperty('accessKeyId')
     expect(r).not.toHaveProperty('secretAccessKey')

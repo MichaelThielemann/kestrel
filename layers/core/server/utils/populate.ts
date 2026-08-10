@@ -1,6 +1,8 @@
 import type { CollectionDef, FieldDef } from './defineCollection'
 
-export interface PopulateCtx { depth: number; locale: string; def: CollectionDef }
+/** `publicOnly`: the read is served to a principal that may only reach the public collection set, so a
+ *  populator must not expand a reference into a collection the guard would have refused it directly. */
+export interface PopulateCtx { depth: number; locale: string; def: CollectionDef; publicOnly?: boolean }
 export type Populator = (row: Record<string, unknown>, ctx: PopulateCtx) => Record<string, unknown>
 
 // A composed list: each registered populator runs in turn over the row (e.g. media attaches `$media`,

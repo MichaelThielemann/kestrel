@@ -123,7 +123,7 @@ function filterKindMap(c: BuiltCollection): Record<string, FilterKind> {
   return map
 }
 
-export function list(db: DB, c: BuiltCollection, q: ListQuery, publishedOnly = false) {
+export function list(db: DB, c: BuiltCollection, q: ListQuery, publishedOnly = false, publicOnly = false) {
   const cols = columns(c)
   // A listing depends on the whole collection (any add/remove/edit changes it) — tag it collection-level.
   if (q.capture !== false) captureRead(c.def.name)
@@ -187,7 +187,7 @@ export function list(db: DB, c: BuiltCollection, q: ListQuery, publishedOnly = f
   // fan-out is budgeted — an anonymous `?depth=10&perPage=500` read can no longer multiply into an
   // unbounded number of synchronous DB reads (each blocks the single event-loop thread).
   const data = withResolveScope(
-    () => rawData.map((r) => populateRow(r as Record<string, unknown>, { depth, locale: populateLocale, def: c.def })),
+    () => rawData.map((r) => populateRow(r as Record<string, unknown>, { depth, locale: populateLocale, def: c.def, publicOnly })),
     resolveBudgetFor(perPage), // scale the ceiling with the page size so a full legitimate page always populates
     `list ${c.def.name}`,
   ) as Row[]
@@ -258,7 +258,7 @@ function attachTranslationStatus(db: DB, c: BuiltCollection, rows: Row[], publis
   }
 }
 
-export function getOne(db: DB, c: BuiltCollection, id: number, depth = 0, locale?: string, publishedOnly = false): Row {
+export function getOne(db: DB, c: BuiltCollection, id: number, depth = 0, locale?: string, publishedOnly = false, publicOnly = false): Row {
   captureRead(c.def.name, id) // a detail read depends on exactly this record
   const cols = columns(c)
   const row = db.select().from(table(c)).where(eq(cols.id, id)).get() as Row | undefined
@@ -270,7 +270,7 @@ export function getOne(db: DB, c: BuiltCollection, id: number, depth = 0, locale
   const loc = c.def.translatable ? resolveLocale(locale) : primaryLocale()
   // Nested reads (the relation populator's recursive getOne) reuse the enclosing request's scope.
   return withResolveScope(
-    () => populateRow(row as Record<string, unknown>, { depth: safeDepth, locale: loc, def: c.def }),
+    () => populateRow(row as Record<string, unknown>, { depth: safeDepth, locale: loc, def: c.def, publicOnly }),
     resolveBudgetFor(1),
     `get ${c.def.name}:${id}`,
   ) as Row
@@ -516,7 +516,7 @@ export function resolveTranslations(db: DB, c: BuiltCollection, id: number): Rec
   return result
 }
 
-export function getSingleton(db: DB, c: BuiltCollection, locale?: string, publishedOnly = false, depth = 0): Row | null {
+export function getSingleton(db: DB, c: BuiltCollection, locale?: string, publishedOnly = false, depth = 0, publicOnly = false): Row | null {
   captureRead(c.def.name) // a singleton (nav/settings/footer) is global — any page that reads it depends on it
   const cols = columns(c)
   const loc = c.def.translatable ? resolveLocale(locale) : primaryLocale()
@@ -527,7 +527,7 @@ export function getSingleton(db: DB, c: BuiltCollection, locale?: string, publis
   // Populate like list()/getOne() so a singleton's media/relation/link fields resolve at depth > 0 — the
   // canonical settings-singleton (site logo, nav link repeater) relies on this exactly as any collection does.
   return withResolveScope(
-    () => populateRow(row as Record<string, unknown>, { depth: clampDepth(depth), locale: loc, def: c.def }),
+    () => populateRow(row as Record<string, unknown>, { depth: clampDepth(depth), locale: loc, def: c.def, publicOnly }),
     resolveBudgetFor(1),
     `singleton ${c.def.name}`,
   ) as Row

@@ -46,7 +46,7 @@ export default {
     dir: '.data/published',           // local dir for the published HTML + synced _nuxt (relative → root)
     publicDir: '.output/public',      // source of the built client bundle the publisher mirrors in
     auto: true,                       // re-publish affected pages on every content write
-    reconcileMinutes: 0,              // >0 → full reconcile every N min (self-heals + time-based publishDate)
+    reconcileMinutes: 0,              // >0 → full re-publish every N min (self-heals a missed invalidation)
     verbose: false,                   // per-route render/prune log lines on each republish
     s3: {                             // used only when driver: 's3'
       bucket: 'my-site',
@@ -90,6 +90,12 @@ The mapping (env overrides): `db`→`KESTREL_DB`, `siteUrl`→`KESTREL_SITE_URL`
 `output.reconcileMinutes`→`KESTREL_OUTPUT_RECONCILE_MINUTES`, `output.verbose`→`KESTREL_OUTPUT_VERBOSE`,
 `output.s3.{bucket,region,endpoint,prefix}`→`KESTREL_OUTPUT_S3_{BUCKET,REGION,ENDPOINT,PREFIX}`,
 `preview.desktopWidth`→`KESTREL_PREVIEW_DESKTOP_WIDTH`.
+
+One env var has no config key because it is a build-time switch rather than a setting:
+`KESTREL_OUTPUT_DRY_RUN` (`1` / `true` / `yes` / `on`) makes `nuxt generate` *report* what it would do
+instead of doing it — the S3 output deploy logs the upload and the reconcile deletes without touching the
+bucket, and the media prune logs the baked files it would remove without deleting them. See
+[static-output.md](./static-output.md#output-target-local-directory-or-s3).
 
 Resolution is the pure `resolveKestrel()` (`layers/core/server/utils/kestrel-config.ts`), used by every
 consumer so they can't disagree. `drizzle-kit` honours `kestrel.db` because `drizzle.config` imports the

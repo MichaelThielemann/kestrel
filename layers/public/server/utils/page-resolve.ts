@@ -1,11 +1,19 @@
 import { asc, eq, getTableColumns } from 'drizzle-orm'
 import { list } from '../../../core/server/utils/crud'
 import { captureRead } from '../../../core/server/utils/read-capture'
+import { translationGroupTag } from './publish/invalidation'
 import type { BuiltCollection } from '../../../core/server/utils/collection-types'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 
 export interface PageAlternate { locale: string; path: string }
 export interface ResolvedPage { collection: string; page: Record<string, unknown>; alternates: PageAlternate[] }
+
+/** The matched page (or null) plus the collections whose lookup threw. `failed` is non-empty ⇒ the scan
+ *  was INCOMPLETE, so `page: null` must never be treated as an authoritative "no such page". */
+export interface PageResolution {
+  page: ResolvedPage | null
+  failed: string[]
+}
 
 /**
  * The page's published, INDEXABLE translation siblings (self included) as locale→path pairs — the hreflang
@@ -14,12 +22,15 @@ export interface ResolvedPage { collection: string; page: Record<string, unknown
  * hreflang to a noindexed page is a conflicting signal), null-path rows skipped, and a single-member group
  * returns [] (hreflang is meaningless for a lone page). EVERY sibling in the group is `captureRead`-tagged,
  * filtered-out ones included, so an incremental publish re-renders every group member when a sibling is
- * renamed/published/unpublished — otherwise a baked page would keep a stale/dead hreflang href.
+ * renamed/published/unpublished — otherwise a baked page would keep a stale/dead hreflang href. The GROUP
+ * itself is tagged too: a sibling that does not exist yet has no id to have been captured, so the group tag
+ * is the only edge a later CREATE can match.
  */
 function publishedAlternates(db: BetterSQLite3Database, c: BuiltCollection, page: Record<string, unknown>): PageAlternate[] {
   if (c.def.mode !== 'multi' || !c.def.translatable) return []
   const group = page.translationGroup
   if (typeof group !== 'string' || !group) return []
+  captureRead(translationGroupTag(c.def.name, group))
   const cols = getTableColumns(c.table) as Record<string, never>
   // A status-less pageLike collection has no draft state — every sibling is "published".
   const hasStatus = Object.hasOwn(cols, 'status')
@@ -54,13 +65,15 @@ function publishedAlternates(db: BetterSQLite3Database, c: BuiltCollection, page
 
 /**
  * The first page-like record (across all collections, in registration order) whose `path` matches,
- * populated at depth 1 — or null. Reuses the access-scoped `list()` so media/links populate exactly as
- * a direct collection read would. `publishedOnly` defaults true: a static render (prerender / runtime
- * publisher) and an anonymous live request must never see drafts. The authenticated-admin live preview
- * passes false to surface a draft at its real URL. Registration order is the precedence rule when two
- * page-like collections happen to share a path.
+ * populated at depth 1 — or null, alongside the collections that could not be read at all. Reuses the
+ * access-scoped `list()` so media/links populate exactly as a direct collection read would.
+ * `publishedOnly` defaults true: a static render (prerender / runtime publisher) and an anonymous live
+ * request must never see drafts. The authenticated-admin live preview passes false to surface a draft at
+ * its real URL. Registration order is the precedence rule when two page-like collections happen to share
+ * a path.
  */
-export function resolvePage(db: BetterSQLite3Database, collections: BuiltCollection[], path: string, locale?: string, publishedOnly = true): ResolvedPage | null {
+export function resolvePage(db: BetterSQLite3Database, collections: BuiltCollection[], path: string, locale?: string, publishedOnly = true): PageResolution {
+  const failed: string[] = []
   for (const c of collections) {
     if (!c.def.pageLike) continue
     // withTotal:false — read only the first row, skip count(). capture:false — don't tag the whole
@@ -73,14 +86,15 @@ export function resolvePage(db: BetterSQLite3Database, collections: BuiltCollect
       // Table not migrated yet (e.g. a bare prerender DB) — isolate this collection's drift from the rest,
       // but never silently: an unread collection is indistinguishable from one with no matching page, and
       // the publisher would write a 404 over every one of its routes.
+      failed.push(c.def.name)
       console.error(`[kestrel] resolvePage: skipped collection ${c.def.name}:`, (error as Error)?.message ?? error)
       continue
     }
     const { data } = result
     if (data.length) {
       captureRead(c.def.name, (data[0] as { id?: number }).id ?? null)
-      return { collection: c.def.name, page: data[0]!, alternates: publishedAlternates(db, c, data[0]!) }
+      return { page: { collection: c.def.name, page: data[0]!, alternates: publishedAlternates(db, c, data[0]!) }, failed }
     }
   }
-  return null
+  return { page: null, failed }
 }

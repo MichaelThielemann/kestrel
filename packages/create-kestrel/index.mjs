@@ -17,9 +17,8 @@ if (!TEMPLATES || !LIB || !existsSync(join(TEMPLATES, 'starter'))) {
 }
 
 const { hashPassword, sessionSecret } = await import(pathToFileURL(join(LIB, 'password.mjs')).href)
-const { diagnoseProject, mergeEnv, renderTemplate, targetName, toPackageName } = await import(
-  pathToFileURL(join(LIB, 'scaffold.mjs')).href
-)
+const { diagnoseProject, envValue, isPlainObject, mergeEnv, mergePackageJson, renderTemplate, targetName, toPackageName } =
+  await import(pathToFileURL(join(LIB, 'scaffold.mjs')).href)
 const { Cancelled, MIN_PASSWORD_LENGTH, makePaint, out, parseArgs, promptPassword, readIf, walk, write } = await import(
   pathToFileURL(join(LIB, 'cli.mjs')).href
 )
@@ -47,9 +46,9 @@ ${bold('create-kestrel')} ${dim(`v${ENGINE_VERSION}`)}
   ${bold('pnpm create kestrel')} [dir]   scaffold a new Kestrel site
 
   --name <name>      package name (default: the directory name, slugified)
-  --password <pw>    set the admin password without prompting
+  --password <pw>    set or change the admin password without prompting
   --yes              never prompt; leaves KESTREL_ADMIN_PASSWORD_HASH for you to fill in
-  --force            scaffold into a directory that is not empty
+  --force            scaffold into a directory that is not empty (package.json and .env are merged, never replaced)
 
 ${dim('To add Kestrel to an EXISTING project use the engine\'s own CLI: `pnpm kestrel init`.')}
 `)
@@ -66,7 +65,10 @@ if (flags.version) {
 }
 if (positional[0]?.startsWith('-')) fail(`unknown option "${positional[0]}" — run \`create-kestrel --help\`.`)
 
-let password = typeof flags.password === 'string' ? flags.password : undefined
+// No flag swallows a `-`-prefixed token, so a dash-leading password arrives as no value at all.
+if (flags.password === true) fail('--password needs a value — write --password=<pw> if it starts with a dash.')
+const supplied = typeof flags.password === 'string'
+let password = supplied ? flags.password : undefined
 if (password !== undefined && password.length < MIN_PASSWORD_LENGTH) {
   fail(`--password must be at least ${MIN_PASSWORD_LENGTH} characters (an empty one would leave /admin open).`)
 }
@@ -85,6 +87,21 @@ if (!flags.force && occupied.length) {
   )
 }
 
+// Read the target before touching disk: a half-scaffolded project is worse than a refused one.
+const manifestPath = join(target, 'package.json')
+const existingManifest = readIf(manifestPath)
+if (existingManifest !== null) {
+  let parsed
+  try {
+    parsed = JSON.parse(existingManifest)
+  } catch {
+    fail(`${manifestPath} is not valid JSON — fix it first; refusing to scaffold over a broken manifest.`)
+  }
+  if (!isPlainObject(parsed)) fail(`${manifestPath} is not a JSON object — fix it first; refusing to scaffold over a broken manifest.`)
+}
+const envPath = join(target, '.env')
+const existingEnv = readIf(envPath)
+
 mkdirSync(target, { recursive: true })
 const name = toPackageName(typeof flags.name === 'string' ? flags.name : basename(target))
 
@@ -93,13 +110,21 @@ out(`${bold('Kestrel')} ${dim(`v${ENGINE_VERSION}`)} — creating ${bold(relativ
 out()
 
 if (password === undefined && !flags.yes && process.stdin.isTTY) {
-  try {
-    password = await promptPassword({ warn: (m) => out(yellow(m)), note: (m) => out(dim(m)) })
-  } catch (err) {
-    if (err instanceof Cancelled) fail('cancelled')
-    throw err
+  // The prompt loops until a valid password is typed twice, so it cannot be declined, and the hash is
+  // folded into the session signing key — asking when --force lands on a project that already has one
+  // would rotate the password, and sign everyone out, with no way for the operator to say no.
+  if (envValue(existingEnv ?? '', 'KESTREL_ADMIN_PASSWORD_HASH')) {
+    out(dim('KESTREL_ADMIN_PASSWORD_HASH is already set — pass --password to change it.'))
+    out()
+  } else {
+    try {
+      password = await promptPassword({ warn: (m) => out(yellow(m)), note: (m) => out(dim(m)) })
+    } catch (err) {
+      if (err instanceof Cancelled) fail('cancelled')
+      throw err
+    }
+    out()
   }
-  out()
 }
 
 const vars = {
@@ -111,17 +136,32 @@ const vars = {
 }
 const starter = join(TEMPLATES, 'starter')
 for (const rel of walk(starter).sort()) {
-  write(join(target, targetName(rel)), renderTemplate(readFileSync(join(starter, rel), 'utf8'), vars))
-  out(`  ${green('created')} ${targetName(rel)}`)
+  const entry = targetName(rel)
+  const body = renderTemplate(readFileSync(join(starter, rel), 'utf8'), vars)
+
+  // --force means the directory is not empty, not that its contents may go: a manifest carries the
+  // caller's dependencies and version, and replacing it is data loss rather than a scaffold.
+  if (entry === 'package.json' && existingManifest !== null) {
+    const { merged, added } = mergePackageJson(JSON.parse(existingManifest), JSON.parse(body))
+    if (added.length) {
+      write(manifestPath, `${JSON.stringify(merged, null, 2)}\n`)
+      out(`  ${green('updated')} package.json ${dim(`(+ ${added.join(', ')})`)}`)
+    } else out(`  ${dim('kept   ')} package.json`)
+    continue
+  }
+  write(join(target, entry), body)
+  out(`  ${green('created')} ${entry}`)
 }
 
-const envPath = join(target, '.env')
 const envEntries = { KESTREL_SESSION_SECRET: sessionSecret(), KESTREL_SECURE_COOKIES: 'false' }
 if (password !== undefined) envEntries.KESTREL_ADMIN_PASSWORD_HASH = hashPassword(password)
-const seed = readIf(envPath) ?? readIf(join(target, '.env.example')) ?? ''
-const { text, written } = mergeEnv(seed, envEntries)
+const seed = existingEnv ?? readIf(join(target, '.env.example')) ?? ''
+// Only an explicitly supplied password replaces a hash that is already set. That is not session-safety:
+// the hash is folded into the cookie signing key, so any rotation signs every user out. What keeps a
+// forced re-run harmless is that it changes neither the hash nor the secret.
+const { text, written } = mergeEnv(seed, envEntries, supplied ? ['KESTREL_ADMIN_PASSWORD_HASH'] : [])
 write(envPath, text, 0o600)
-out(`  ${green('created')} .env ${dim(`(${written.join(', ')})`)}`)
+out(written.length ? `  ${green('created')} .env ${dim(`(${written.join(', ')})`)}` : `  ${dim('kept   ')} .env`)
 
 const remaining = diagnoseProject({
   packageJson: readIf(join(target, 'package.json')),

@@ -5,7 +5,7 @@ import type { StorageDriver } from '../../../core/server/utils/storage'
 import { media } from '../collections/media'
 import { deriveImage, RASTER } from './derive'
 import { derivativeKey, type DerivativeManifest } from './record'
-import { activeVariants } from './variants'
+import { readVariantRegistry, resolveActiveVariants } from './variants'
 import { withLock, mediaLockKey } from '../../../core/server/utils/key-lock'
 import { emitMediaWrite } from './media-write'
 
@@ -16,7 +16,8 @@ const MEDIA_CACHE_CONTROL = 'public, max-age=31536000'
 export interface BackfillPlan {
   /** Specs, each carrying ONLY its missing formats, to derive + add. */
   missing: ResolvedVariant[]
-  /** Object keys of manifest entries no longer in the active set (deregistered) — to prune. */
+  /** Object keys of manifest entries no longer in the active set (deregistered) — to prune. Always empty
+   *  when the caller passes `prune: false`, i.e. the active set is a fallback rather than the registry. */
   orphanKeys: string[]
 }
 
@@ -26,7 +27,9 @@ export interface BackfillPlan {
  * never be satisfied). Orphans are keyed per `<name>.<format>`, so a deregistered FORMAT of a still-active
  * name is pruned too.
  */
-export function planBackfill(row: { width: number | null; derivatives: DerivativeManifest | null }, specs: ResolvedVariant[]): BackfillPlan {
+export function planBackfill(
+  row: { width: number | null; derivatives: DerivativeManifest | null }, specs: ResolvedVariant[], prune = true,
+): BackfillPlan {
   const manifest = row.derivatives ?? {}
   const activeKeys = new Set<string>()
   const missing: ResolvedVariant[] = []
@@ -40,7 +43,7 @@ export function planBackfill(row: { width: number | null; derivatives: Derivativ
     if (missingFormats.length) missing.push({ ...spec, formats: missingFormats })
   }
   const orphanKeys: string[] = []
-  for (const [k, entry] of Object.entries(manifest)) if (!activeKeys.has(k) && entry.key) orphanKeys.push(entry.key)
+  if (prune) for (const [k, entry] of Object.entries(manifest)) if (!activeKeys.has(k) && entry.key) orphanKeys.push(entry.key)
   return { missing, orphanKeys }
 }
 
@@ -53,9 +56,9 @@ interface BackfillRow { id: number; storageKey: string; mime: string; width: num
  * (that is Slice 9's published-media GC, a different concern).
  */
 export async function backfillRow(
-  db: BetterSQLite3Database, driver: StorageDriver, row: BackfillRow, specs: ResolvedVariant[], policy: ResolvedImagePolicy,
+  db: BetterSQLite3Database, driver: StorageDriver, row: BackfillRow, specs: ResolvedVariant[], policy: ResolvedImagePolicy, prune = true,
 ): Promise<{ generated: number; pruned: number }> {
-  const plan = planBackfill(row, specs)
+  const plan = planBackfill(row, specs, prune)
   if (!plan.missing.length && !plan.orphanKeys.length) return { generated: 0, pruned: 0 }
 
   const orphaned = new Set(plan.orphanKeys)
@@ -84,7 +87,12 @@ export async function backfillRow(
   return { generated, pruned: plan.orphanKeys.length }
 }
 
-export interface BackfillReport { rows: number; rowsChanged: number; generated: number; pruned: number; check: boolean }
+export interface BackfillReport {
+  rows: number; rowsChanged: number; generated: number; pruned: number; check: boolean
+  /** The run declined to prune because the active set is the config fallback, not the registry — so a
+   *  `pruned: 0` here means "could not tell what is registered", not "nothing was deregistered". */
+  pruneWithheld: boolean
+}
 
 /**
  * Iterate every raster media row, reconciling each to the active variant set. Sequential (sharp CPU + a
@@ -94,14 +102,18 @@ export interface BackfillReport { rows: number; rowsChanged: number; generated: 
 export async function runBackfill(
   db: BetterSQLite3Database, driver: StorageDriver, policy: ResolvedImagePolicy, opts: { check?: boolean } = {},
 ): Promise<BackfillReport> {
-  const specs = activeVariants(db, policy.variants, policy.presets)
+  // Deriving a superset is harmless, deleting against one is not, so the prune follows the resolver's own
+  // verdict: an unmigrated, unreadable, empty or wholly-rejected registry resolves to the CONFIG fallback,
+  // under which every registered variant of every row looks deregistered.
+  const { specs, fromRegistry: prune } = resolveActiveVariants(readVariantRegistry(db), policy.variants, policy.presets)
+  if (!prune) console.warn('[kestrel] backfill: no usable variant registry — generating against the config fallback and withholding the prune. Run a full publish so the prerender scan populates media_settings.')
   const rows = db.select().from(media).all() as BackfillRow[]
-  const report: BackfillReport = { rows: rows.length, rowsChanged: 0, generated: 0, pruned: 0, check: !!opts.check }
+  const report: BackfillReport = { rows: rows.length, rowsChanged: 0, generated: 0, pruned: 0, check: !!opts.check, pruneWithheld: !prune }
   for (const snapshot of rows) {
     if (!RASTER.has(snapshot.mime)) continue
     if (opts.check) {
       // Dry-run reads only (against the snapshot) — no mutation, so no lock.
-      const plan = planBackfill(snapshot, specs)
+      const plan = planBackfill(snapshot, specs, prune)
       const toGenerate = plan.missing.reduce((n, s) => n + s.formats.length, 0)
       if (!toGenerate && !plan.orphanKeys.length) continue
       report.rowsChanged++
@@ -116,11 +128,11 @@ export async function runBackfill(
       const cols = getTableColumns(media) as Record<string, never>
       const row = db.select().from(media).where(eq(cols.id, snapshot.id)).get() as BackfillRow | undefined
       if (!row || !RASTER.has(row.mime)) return
-      const plan = planBackfill(row, specs)
+      const plan = planBackfill(row, specs, prune)
       if (!plan.missing.length && !plan.orphanKeys.length) return
       report.rowsChanged++
       try {
-        const r = await backfillRow(db, driver, row, specs, policy)
+        const r = await backfillRow(db, driver, row, specs, policy, prune)
         report.generated += r.generated
         report.pruned += r.pruned
       } catch (error) {
