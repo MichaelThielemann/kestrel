@@ -1,6 +1,12 @@
 <script setup lang="ts">
+// The record decides its own layout, so route-meta resolution is opted out of and this page renders the
+// `<NuxtLayout>` itself. Side effect worth knowing: the layout becomes a CHILD of the page, so it can read
+// `usePublicPageState()` during SSR — as its parent it rendered before the page had written it.
+definePageMeta({ layout: false })
+
 interface RenderedPage {
   title?: string
+  layout?: string | null
   seo?: {
     title?: string
     description?: string
@@ -36,6 +42,9 @@ const { data: resolved } = await useAsyncData(`page:${locale}:${path}`, () =>
   }),
 )
 const page = computed(() => resolved.value?.page ?? null)
+// `fallback` below only rescues a truthy name that is missing from the layout map, so the empty cases have
+// to be coalesced here — see resolvePageLayout.
+const pageLayout = computed(() => resolvePageLayout(page.value?.layout))
 
 // The layout (language menu & co.) needs the resolved record and its collection; pages and layouts share
 // no other channel, so mirror the fetch result into the shared state — reactively, so client-side
@@ -113,21 +122,23 @@ useSeoMeta({
 </script>
 
 <template>
-  <article>
-    <!-- Only ever shown to an authenticated admin previewing an unpublished page (drafts never resolve
-         for anonymous visitors or the static render), so it never ships to the public/static site.
-         Suppressed inside the editor preview iframe — the editor's own status ampel covers it. -->
-    <div v-if="isDraftPreview && !previewActive" class="kestrel-draft-badge" role="status">
-      <span class="kestrel-draft-badge__dot" aria-hidden="true" />
-      Draft preview — not published
-    </div>
-    <!-- Editor preview: the bridge swaps in the editor's live (unsaved) tree over postMessage and makes
-         blocks selectable; the saved content renders until the first message. Normal path unchanged. -->
-    <LazyKestrelPreviewBridge v-if="previewActive" :blocks="(page?.content as any[]) ?? []" v-slot="{ blocks }">
-      <BlockRenderer :blocks="(blocks as any[])" />
-    </LazyKestrelPreviewBridge>
-    <BlockRenderer v-else :blocks="(page?.content as any[]) ?? []" />
-  </article>
+  <NuxtLayout :name="pageLayout" fallback="default">
+    <article>
+      <!-- Only ever shown to an authenticated admin previewing an unpublished page (drafts never resolve
+           for anonymous visitors or the static render), so it never ships to the public/static site.
+           Suppressed inside the editor preview iframe — the editor's own status ampel covers it. -->
+      <div v-if="isDraftPreview && !previewActive" class="kestrel-draft-badge" role="status">
+        <span class="kestrel-draft-badge__dot" aria-hidden="true" />
+        Draft preview — not published
+      </div>
+      <!-- Editor preview: the bridge swaps in the editor's live (unsaved) tree over postMessage and makes
+           blocks selectable; the saved content renders until the first message. Normal path unchanged. -->
+      <LazyKestrelPreviewBridge v-if="previewActive" :blocks="(page?.content as any[]) ?? []" v-slot="{ blocks }">
+        <BlockRenderer :blocks="(blocks as any[])" />
+      </LazyKestrelPreviewBridge>
+      <BlockRenderer v-else :blocks="(page?.content as any[]) ?? []" />
+    </article>
+  </NuxtLayout>
 </template>
 
 <style scoped>
