@@ -441,6 +441,25 @@ registerCollectionEditor('node-graph', MyNodeGraphBody)
 An `editor` type with no registered body renders a clear "no editor is registered" placeholder (localized)
 rather than a blank pane. This is how the galleries and node-graph extensions swap the editor surface.
 
+## Site-wide head settings
+
+The **Site** entry in the admin holds the tier above a single page: a base title, its separator and
+position, a default meta description, and a default sharing image. Per locale, because a base title is.
+
+Each value is a fallback, not an override — a page that sets its own SEO description keeps it, and the site
+value fills in for every page that does not. An untouched Site record changes nothing about the emitted
+head.
+
+- `siteUrl` and `siteName` stay in `kestrel.config.ts`. The build needs them for canonical URLs, the sitemap
+  and `robots.txt`, so they cannot be read from the database.
+- Only the document `<title>` is composed. `og:title` keeps the bare page title, since `og:site_name`
+  already carries the site name.
+- The separator is stored as a bare token (`|`, `·`, `—`) and padded with single spaces when rendered — a
+  text field trims on write, so a stored `" | "` could not keep its spaces.
+- A page title that already ends in the base title is left as it is, which matters for content migrated
+  from a CMS that baked the site name into every title.
+- Switch the whole thing off with `kestrel: { collections: { site: false } }`.
+
 ## Per-page layouts
 
 Ship more than one layout in `app/layouts/` and an editor can pick which one renders a page — the page

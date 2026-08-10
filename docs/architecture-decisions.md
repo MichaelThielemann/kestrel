@@ -2,6 +2,57 @@
 
 Lightweight ADR log — newest first. Each entry: **Context · Decision · Consequences · Future**.
 
+## ADR-0007 — A `site` singleton for the site-wide half of the page head
+
+**Status:** accepted.
+
+**Context.** Kestrel already owns the public `<head>` — the catch-all emits canonical, hreflang, `og:*`,
+`twitter:card` and `robots` through `buildPageHead`. What was missing is the tier above the page. The
+per-page `seo` group is a closed set (`title`, `description`, `noindex`, `image`), and `siteName`/`siteUrl`
+are config-only, so a site-wide description, a base title and a fallback social image had nowhere to live.
+That asymmetry was the defect: `description` is site-wide in exactly the sense `siteName` is.
+
+Config could not be the answer for editorial values. Non-auth `KESTREL_*` is read once at Nuxt module setup
+and frozen into `runtimeConfig`, so changing a base title would mean a rebuild triggered by hand. A write to
+a collection re-publishes the affected routes on its own, through `captureRead` → publish deps →
+`routesForTags`.
+
+**Decision.**
+- A **translatable single collection `site`**, `builtin: true` so a consumer can switch it off, holding only
+  the counterparts of the per-page group plus the title composition. It lives in `layers/public`, the layer
+  whose render consumes it. `siteUrl`/`siteName` stay in config, because the build needs them for canonical
+  URLs, the sitemap and `robots.txt` and therefore cannot read them from the DB.
+- **Not** named `settings`. Collection files dedupe by basename with the consumer winning, and shadowing
+  replaces a whole definition rather than merging fields — a consumer defining its own `settings.ts` would
+  silently lose everything the built-in contributed.
+- **The precedence chain sits before `buildPageHead`, not inside it.** That function already receives
+  `title`/`description`/`image` resolved, so widening its signature would have churned a pure function with
+  full test coverage for nothing. Two small pure functions (`composeTitle`, `siteHeadFallbacks`) do the
+  merge, and each is unit-testable on its own.
+- **Only `<title>` is composed.** `og:title` keeps the bare page title, because `og:site_name` already
+  carries the site — emitting the composed string in both would duplicate the site name in every share
+  preview.
+- **A page title that already ends in the base title is left alone.** Migrated content routinely carries the
+  site name in the page title, and appending it again reads as a bug to everyone who looks at the tab.
+- **The separator is stored as a bare token and padded at render.** A `text` field trims on write, so a
+  stored `" | "` comes back as `"|"` and glues the two titles together. Found by the e2e, not by reasoning:
+  the first run rendered `Pricing·Acme Docs`.
+- The row reaches the render **on the fetch the page already awaits** — `/api/route` returns it alongside
+  the resolved page. That path is public-safe, already runs per route, and demonstrably survives
+  `nuxt generate`; a second endpoint would have been a second thing to keep working under prerender. It is
+  looked up through the registry rather than imported, so a consumer who disables the collection gets `null`
+  instead of a query against a table the schema never created.
+
+**Consequences.** With an empty row every fallback is absent and the emitted head is what it was before, so
+existing projects upgrade silently — `site.test.ts` pins that every field stays nullable. A site edit
+re-publishes the routes that embedded it, for free, because `getSingleton` captures the read. One visible
+side effect: the row now rides in every page's hydration payload, so a site-wide description is present in
+the HTML even on pages that override it — public content either way, but it means an assertion about the
+document is not an assertion about the meta tag.
+
+**Future.** Per-collection defaults or per-locale social images extend the same chain rather than adding a
+second mechanism. The chain is the contract; the fields are not.
+
 ## ADR-0006 — A page picks its layout, and the page owns the `<NuxtLayout>`
 
 **Status:** accepted.
