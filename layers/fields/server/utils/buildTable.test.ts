@@ -159,3 +159,33 @@ describe('buildTable — honest translatable', () => {
     expect(idx).toEqual(expect.arrayContaining(['posts_group_locale', 'posts_group']))
   })
 })
+
+describe('buildTable — the pageLike layout column', () => {
+  const pageLike = (fields = {}) => defineCollection({
+    name: 'pages', mode: 'multi', translatable: true, pageLike: true, fields,
+  })
+
+  it('emits a nullable `layout` column for a pageLike collection', () => {
+    const col = getTableConfig(buildTable(pageLike())).columns.find((c) => c.name === 'layout')
+    expect(col).toBeDefined()
+    // Nullable with no default: an unset layout must stay unset, so the render-time fallback is the one
+    // and only place `default` is decided.
+    expect(col!.notNull).toBe(false)
+    expect(col!.hasDefault).toBe(false)
+  })
+
+  it('emits no `layout` column for a collection that is not pageLike', () => {
+    const t = buildTable(defineCollection({ name: 'notes', mode: 'multi', fields: { body: { type: 'text' } } }))
+    expect(getTableConfig(t).columns.map((c) => c.name)).not.toContain('layout')
+  })
+
+  it('refuses a field that would clobber the system column', () => {
+    expect(() => buildTable(pageLike({ layout: { type: 'text' } })))
+      .toThrow(/resolves to the reserved system column "layout"/)
+  })
+
+  it('still allows a field named `layout` where no system column exists', () => {
+    const t = buildTable(defineCollection({ name: 'notes', mode: 'multi', fields: { layout: { type: 'text' } } }))
+    expect(getTableConfig(t).columns.map((c) => c.name)).toContain('layout')
+  })
+})

@@ -17,7 +17,7 @@ function reservedColumns(def: CollectionDef): { js: Set<string>; db: Set<string>
   if (def.translatable) add('locale', 'locale')
   if (def.mode === 'single') add('singletonKey', 'singleton_key')
   else if (def.translatable) add('translationGroup', 'translation_group')
-  if (def.pageLike) add('path', 'path')
+  if (def.pageLike) { add('path', 'path'); add('layout', 'layout') }
   if (def.status) add('status', 'status')
   if (def.seo) add('seo', 'seo')
   if (def.blocks?.enabled) add('content', 'content')
@@ -67,7 +67,13 @@ export function buildTable(def: CollectionDef): SQLiteTable {
   if (def.translatable) cols.locale = text('locale').notNull()
   if (def.mode === 'single') cols.singletonKey = text('singleton_key').notNull()
   else if (def.translatable) cols.translationGroup = text('translation_group').notNull()
-  if (def.pageLike) cols.path = text('path')
+  if (def.pageLike) {
+    cols.path = text('path')
+    // Nullable with no default: an editor's "inherit" must be distinguishable from an explicit `default`,
+    // and the render decides the fallback (see resolvePageLayout) so a deleted layout file degrades in one
+    // place instead of being frozen into every row.
+    cols.layout = text('layout')
+  }
   if (def.status) cols.status = text('status').notNull().default('draft')
   if (def.seo) cols.seo = text('seo', { mode: 'json' }).$type<SeoMeta>().notNull().default(sql`'{}'`)
   if (def.blocks?.enabled) cols.content = text('content', { mode: 'json' }).$type<Block[]>().notNull().default(sql`'[]'`)
