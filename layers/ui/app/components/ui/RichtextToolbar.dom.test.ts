@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import RichtextToolbar from './RichtextToolbar.vue'
 
-// A chainable mock editor that records the command names invoked on it.
+// A chainable mock editor that records the command names invoked on it. It proves the toolbar ISSUES a
+// command, never that a real editor honours it — a command the schema rejects is recorded identically.
+// Anything about the resulting document belongs in `richtext.dom.test.ts`, which drives a real instance.
 function createMockEditor(attrs: Record<string, unknown> = {}) {
   const calls: string[] = []
   const chain: any = new Proxy(() => chain, {

@@ -8,6 +8,7 @@ import { Superscript } from '@tiptap/extension-superscript'
 import { TextAlign } from '@tiptap/extension-text-align'
 import RichtextToolbar from './RichtextToolbar.vue'
 import { RichtextSpanClass, RichtextBlockClass } from '../../utils/richtext-preserve-class'
+import { RICHTEXT_LINK_SCHEME } from '../../../../fields/app/utils/richtext-links'
 
 const props = withDefaults(
   defineProps<{
@@ -38,7 +39,10 @@ const editor = useEditor({
   extensions: [
     StarterKit.configure({
       heading: { levels: [1, 2, 3, 4, 5, 6] },
-      link: { openOnClick: false },
+      // `protocols`: the Link mark validates every href against its own scheme allowlist, which has no
+      // `kestrel:`. Without this it drops the whole anchor when stored content is loaded and makes the
+      // toolbar's `setLink` a silent no-op — opening and saving a record would destroy its internal links.
+      link: { openOnClick: false, protocols: [RICHTEXT_LINK_SCHEME] },
     }),
     Highlight,
     Subscript,

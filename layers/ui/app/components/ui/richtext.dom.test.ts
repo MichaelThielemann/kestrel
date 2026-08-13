@@ -2,10 +2,20 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import Richtext from './Richtext.vue'
+import { richtextLinkHref } from '../../../../fields/app/utils/richtext-links'
+
+type LiveEditor = {
+  commands: { insertContent: (s: string) => boolean }
+  chain: () => {
+    setTextSelection: (r: { from: number; to: number }) => {
+      setLink: (a: { href: string }) => { run: () => boolean }
+    }
+  }
+  getHTML: () => string
+}
 
 /** The live TipTap instance behind the wrapper — the only way to drive a REAL edit under happy-dom. */
-const editorOf = (w: VueWrapper) =>
-  (w.vm as unknown as { editor: { commands: { insertContent: (s: string) => boolean } } }).editor
+const editorOf = (w: VueWrapper) => (w.vm as unknown as { editor: LiveEditor }).editor
 
 // Smoke only: ProseMirror's editing surface is not reliable under happy-dom, so
 // editor interaction is verified manually. We assert the component mounts and the
@@ -69,5 +79,31 @@ describe('UiRichtext', () => {
     expect(emits).toBeTruthy()
     expect(String(emits!.at(-1)![0])).toContain('Other!')
     w.unmount()
+  })
+
+  // TipTap's Link mark validates every href against its own scheme allowlist, which has no `kestrel:`.
+  // Unconfigured it drops the whole anchor on load and makes `setLink` a silent no-op, so merely opening
+  // and saving a record would destroy its internal links. Only a REAL editor catches this — the toolbar
+  // test drives a stand-in and would pass either way.
+  describe('internal `kestrel:` links', () => {
+    const HREF = richtextLinkHref('pages', 7)
+
+    it('keeps the marker href when stored content is loaded', async () => {
+      const w = mount(Richtext, { props: { modelValue: `<p>see <a href="${HREF}">this page</a> ok</p>` } })
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(editorOf(w).getHTML()).toContain(`href="${HREF}"`)
+      w.unmount()
+    })
+
+    it('lets the toolbar set one', async () => {
+      const w = mount(Richtext, { props: { modelValue: '<p>hello world</p>' } })
+      await new Promise((r) => setTimeout(r, 0))
+
+      editorOf(w).chain().setTextSelection({ from: 1, to: 6 }).setLink({ href: HREF }).run()
+
+      expect(editorOf(w).getHTML()).toContain(`href="${HREF}"`)
+      w.unmount()
+    })
   })
 })

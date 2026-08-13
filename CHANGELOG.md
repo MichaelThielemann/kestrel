@@ -9,6 +9,13 @@ Releases before 1.7.0 are documented by their tags and commit history.
 
 ### Fixed
 
+- **Internal links in richtext survive the editor.** Setting one from the toolbar was a silent no-op — the
+  picker closed and nothing was linked — and an already-stored `<a href="kestrel:…">` was dropped whole,
+  leaving its text behind unlinked, so the first real edit to that field destroyed the reference with
+  nothing in the stored HTML to recover the target from. The sanitizer allows the `kestrel:` scheme, but
+  TipTap's Link mark keeps its own allowlist and rejects any scheme not in `protocols`; `UiRichtext` now
+  registers `RICHTEXT_LINK_SCHEME` there. Merely opening a record was never enough to lose the link.
+
 - **The page builder no longer falls back to "Unsaved" right after saving a richtext block.** The record
   was stored correctly, but the lamp returned to amber and stayed there until an unrelated save cleared
   it. The block pane is disabled while a save is in flight, and TipTap emits an `update` for that bare

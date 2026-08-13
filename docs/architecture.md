@@ -166,11 +166,18 @@ canonical widget) → `assets/scss/_tokens.scss`. Design language: a refined-ind
 aesthetic — calm active states, lucide icons via `UiIcon` (no emoji/ASCII glyphs), no dashed/bubble
 placeholder clichés; the public SSG `:root` tokens stay untouched.
 **Gotchas:** `_tokens.scss` `:root` colors **drive the public SSG site** ("do not retune"); admin styling
-goes under `:root[data-theme]`. happy-dom doesn't render **teleported** widgets (combobox/datepicker/
-richtext/dialog) → those are smoke-tested only, with load-bearing logic in pure utils. **TipTap emits
+goes under `:root[data-theme]`. happy-dom doesn't render **teleported** widgets (Reka's combobox and
+datepicker content) → those are smoke-tested only, with load-bearing logic in pure utils. Richtext and
+`UiDialog` are **not** among them and must not be smoke-tested by default: `UiDialog` renders in place on
+purpose, and of the editor only ProseMirror's *editing surface* resists happy-dom — the TipTap document
+behind it (schema, marks, `setLink`, the `getHTML` round-trip) is fully driveable through the exposed
+`editor`, which is the only tier that can catch content being silently dropped. **TipTap emits
 `update` for non-content changes** — `setEditable`/`setOptions` emit directly, past the transaction
 pipeline's docChanged guard — so `UiRichtext` gates every emit on the doc having actually changed; an
-echo reaches the edit form as a user edit and re-dirties a record that was just saved. **Portaled
+echo reaches the edit form as a user edit and re-dirties a record that was just saved. **TipTap's Link
+mark keeps its own scheme allowlist**, independent of the sanitizer's: a scheme missing from `protocols`
+is rejected on parse (the whole anchor is unwrapped, text kept) and makes `setLink` a silent no-op that
+still returns `true` — so a custom scheme has to be allowed in *both* places. **Portaled
 overlays must use global (unscoped) styles** — a scoped `<style>` loses its `data-v` attr once Reka
 teleports the content to `<body>` (the `Menu` background bug). Adding a field type = a `Field*.vue` +
 a registration. Adding an icon = extend the `IconName` union **and** the `icons` map.
