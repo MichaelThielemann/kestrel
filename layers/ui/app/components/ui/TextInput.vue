@@ -31,6 +31,7 @@ const inputType = computed(() => (revealable.value && revealed.value ? 'text' : 
 
 <template>
   <div class="ui-input-wrap">
+    <!-- eslint-disable-next-line vuejs-accessibility/form-control-has-label -- id/label land via v-bind="$attrs" from the wrapping UiField, invisible to static analysis -->
     <input
       v-model="model"
       :type="inputType"

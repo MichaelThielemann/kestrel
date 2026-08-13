@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest'
+import type { H3Event } from 'h3'
 import { trustProxyDepth, forwardedForHop, clientIp, throttleKey } from './client-ip'
 
 // Minimal stand-in for an H3Event: getRequestIP reads the socket peer; getRequestHeader reads headers.
-const fakeEvent = (xff?: string, peer: string | undefined = '9.9.9.9'): any => ({
+// Deliberately only the subset those two h3 helpers touch — not a full H3Event — hence the `unknown` hop.
+const fakeEvent = (xff?: string, peer: string | undefined = '9.9.9.9'): H3Event => ({
   context: {},
   node: { req: { headers: xff === undefined ? {} : { 'x-forwarded-for': xff }, socket: { remoteAddress: peer } } },
-})
+}) as unknown as H3Event
 
 describe('client-ip', () => {
   describe('trustProxyDepth', () => {
@@ -57,7 +59,7 @@ describe('client-ip', () => {
       expect(clientIp(fakeEvent('1.1.1.1'), { KESTREL_TRUST_PROXY: '2' })).toBe('9.9.9.9')
     })
     it('falls back to "unknown" when there is no peer address either', () => {
-      const noPeer: any = { context: {}, node: { req: { headers: {}, socket: {} } } }
+      const noPeer = { context: {}, node: { req: { headers: {}, socket: {} } } } as unknown as H3Event
       expect(clientIp(noPeer, {})).toBe('unknown')
     })
   })

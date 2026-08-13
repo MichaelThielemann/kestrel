@@ -83,19 +83,19 @@ describe('MediaTable', () => {
     expect((w.emitted('select')?.at(-1) as [LibraryItem, unknown])[0]).toMatchObject({ type: 'folder' })
   })
   it('marks folders with data-drop-folder and highlights the drop target', async () => {
-    const items = [
+    const items: LibraryItem[] = [
       { type: 'folder', folder: { path: 'photos', name: 'photos', size: 0 } },
       { type: 'file', file: { id: 1, filename: 'a.png', mime: 'image/png', folder: '', size: 1, src: '/u/a' } },
-    ] as any
+    ]
     const w = await mountSuspended(MediaTable, { props: { items, isSelected: () => false, dropTargetPath: 'photos' } })
     expect(w.findAll('[data-drop-folder]').length).toBe(1) // folders only
     expect(w.find('[data-drop-folder="photos"]').classes()).toContain('is-drop-target')
   })
   it('marks file rows with data-file-id (folders carry data-drop-folder instead)', async () => {
-    const items = [
+    const items: LibraryItem[] = [
       { type: 'folder', folder: { path: 'pics', name: 'pics', size: 0 } },
       { type: 'file', file: { id: 7, filename: 'a.png', mime: 'image/png', folder: '', size: 1, src: '/u/a' } },
-    ] as any
+    ]
     const w = await mountSuspended(MediaTable, { props: { items, isSelected: () => false } })
     expect(w.findAll('[data-file-id]').length).toBe(1)
     expect(w.find('[data-file-id="7"]').exists()).toBe(true)

@@ -126,6 +126,7 @@ function insertRowAt(at: number) {
       {{ name }}<span v-if="required" aria-hidden="true">*</span>
     </legend>
 
+    <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- @dragleave is a mouse-only progressive enhancement; the move-up/move-down buttons below give the same reorder fully keyboard access -->
     <div ref="rowsEl" class="ui-repeater__rows" @dragleave="onDragLeave">
       <template v-for="(row, i) in rows" :key="keys[i]">
         <div class="ui-repeater__insert-zone">
@@ -140,6 +141,7 @@ function insertRowAt(at: number) {
           </button>
         </div>
 
+        <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag handlers are a mouse-only progressive enhancement; the move-up/move-down buttons below give the same reorder fully keyboard access -->
         <div
           class="ui-repeater__row-wrap"
           :class="{ 'ui-repeater__row-wrap--over': overIndex === i && dragIndex !== i }"

@@ -135,7 +135,8 @@ describe('useRepeater', () => {
     expect(rows.value[0]!.label).toBe('X')
     expect(rows.value[1]!.label).toBe('Y')
     expect(keys.value.length).toBe(2)
-    // keys are regenerated (fresh ids — at minimum different count means different)
+    // keys are regenerated: the pre-reassign key must not survive into the new set
+    expect(keys.value).not.toContain(oldKey)
   })
 
   it('reassigning model to array equal to last emit does not thrash keys', async () => {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { SerializedCollection } from '../../../core/server/utils/serialize-collection'
 import { sortDirection, type FilterCell } from '../utils/list-query'
-import { type ListColumn } from '../utils/list-columns'
+import type { ListColumn } from '../utils/list-columns'
 import { PER_PAGE_OPTIONS } from '../../../core/app/utils/list-limits'
 import type { BatchDeleteReport } from '../utils/collection-ops'
 import { OPS_BY_KIND, DEFAULT_OP, type FilterKind, type FilterOp } from '../../../core/app/utils/filter-ops'
@@ -19,7 +19,6 @@ const collection = computed(() => props.schema.name)
 const label = computed(() => resolveLocalized(props.schema.label?.singular, lang.value) ?? props.schema.name)
 // Prefer the collection's complete per-locale "create" phrase; fall back to the generic template.
 const newLabel = computed(() => resolveLocalized(props.schema.label?.new, lang.value) ?? t('common.new', { label: label.value }))
-const translatable = computed(() => !!props.schema.translatable && props.schema.mode === 'multi')
 const localeQuery = computed(() => (props.locale ? `?locale=${props.locale}` : ''))
 
 // Configurable columns (persisted per-collection). The select + row-action columns are CHROME — fixed
@@ -56,7 +55,7 @@ watch([filterableColumns, () => JSON.stringify(filter.value)], () => {
     const cm = filter.value[c.key]
     draft[c.key] = { op: cm?.op ?? DEFAULT_OP[c.filterKind ?? 'text'], value: cm?.value ?? '' }
   }
-  for (const key of Object.keys(draft)) if (!cols.some((c) => c.key === key)) delete draft[key]
+  for (const key of Object.keys(draft)) if (!cols.some((c) => c.key === key)) Reflect.deleteProperty(draft, key)
 }, { immediate: true })
 
 function opsFor(c: ListColumn): readonly FilterOp[] {
@@ -205,6 +204,9 @@ async function fetchRows() {
 }
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
+// The per-page `<select>` is hand-rolled directly in this template (no UiField/UiCheckbox wrapper), so the
+// label↔control association needs an explicit pair for static a11y analysis to see it.
+const perPageId = useId()
 
 // Filters: edited in the Filter panel (a value change debounces; an operator change commits at once), shown
 // as removable chips in the bar. `commitDrafts` builds a fresh clause map from the non-empty draft cells and
@@ -460,6 +462,7 @@ await fetchRows()
             @click="togglePanel('columns', $event)"
           >{{ t('list.columns') }}</UiButton>
           <div v-if="openPanel === 'columns'" id="list-columns-panel" class="list__panel">
+            <!-- eslint-disable-next-line vuejs-accessibility/label-has-for -- native wrapping label around a custom UiCheckbox; no `for`/`id` pair needed, invisible to static analysis -->
             <label v-for="c in available" :key="c.key" class="list__col-row">
               <UiCheckbox
                 class="list__col-check"
@@ -620,9 +623,10 @@ await fetchRows()
       <UiButton type="button" size="sm" :disabled="page <= 1" @click="prev">{{ t('list.prev') }}</UiButton>
       <span class="list__page">{{ t('list.page', { page, totalPages, total }) }}</span>
       <UiButton type="button" size="sm" :disabled="page >= totalPages" @click="next">{{ t('list.next') }}</UiButton>
-      <label class="list__perpage">
+      <label class="list__perpage" :for="perPageId">
         <span class="list__perpage-label">{{ t('list.perPage') }}</span>
         <select
+          :id="perPageId"
           class="list__perpage-select"
           :value="perPage"
           :aria-label="t('list.perPage')"

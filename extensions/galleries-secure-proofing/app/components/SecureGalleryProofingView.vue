@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 // CUSTOMER proofing view. Drives ONE base `useSecureGallery` instance (password → decrypted tree + `seal`),
 // reuses the base recursive grid `<SecureGalleryNodes>` and overlays a colour-flag + comment control per
 // photo via its `#image` slot. Marks are sealed + submitted (debounced) through `useProofing` — only
@@ -6,7 +6,11 @@
 // `PROOFING_COLORS` (this layer) are auto-imported. Plain HTML + scoped CSS (public site, no admin tokens).
 import { ref, watch } from 'vue'
 
-const props = defineProps(['gallery', 'gallerySlug'])
+// The gallery view input, forwarded straight into the base's `useSecureGallery`. Mirrors the base's
+// `GalleryViewRef` structurally (no cross-package type import — this extension ships independently of
+// `kestrel-galleries-secure`'s source layout, same reasoning as `SecureGalleryProofingEditor.vue`'s `GalleryRef`).
+interface GalleryRef { v: 2; galleryId: string; saltB64: string; verify: { iv: string; data: string }; base: string }
+const props = defineProps<{ gallery?: GalleryRef | null; gallerySlug: string }>()
 
 const { state, error, tree, unlock, seal, open } = useSecureGallery(() => props.gallery, { autoFromHash: true })
 const { marks, setMark, status, loadMine } = useProofing({ gallerySlug: props.gallerySlug, seal, open })
@@ -16,13 +20,13 @@ watch(state, (s) => { if (s === 'unlocked') loadMine() })
 const password = ref('')
 function submit() { if (password.value) unlock(password.value) }
 
-const markOf = (blobKey) => marks.value[blobKey] ?? {}
-function toggleColor(blobKey, color) {
+const markOf = (blobKey: string) => marks.value[blobKey] ?? {}
+function toggleColor(blobKey: string, color: string) {
   const cur = markOf(blobKey)
   setMark(blobKey, { ...cur, color: cur.color === color ? undefined : color })
 }
-function onComment(blobKey, e) {
-  setMark(blobKey, { ...markOf(blobKey), comment: e.target.value })
+function onComment(blobKey: string, e: Event) {
+  setMark(blobKey, { ...markOf(blobKey), comment: (e.target as HTMLTextAreaElement).value })
 }
 const statusLabel = { saving: 'Saving…', saved: 'Saved', error: 'Save failed', idle: '' }
 </script>
@@ -36,7 +40,9 @@ const statusLabel = { saving: 'Saving…', saved: 'Saved', error: 'Save failed',
         <p class="sgp__status" :class="`sgp__status--${status}`" role="status" aria-live="polite">{{ statusLabel[status] }}</p>
         <SecureGalleryNodes :nodes="tree">
           <template #image="{ image }">
-            <figure class="sgp__item" :class="markOf(image.blobKey).color ? `sgp__item--${markOf(image.blobKey).color}` : ''">
+            <!-- SecureGalleryNodes only ever invokes #image for an image node (never a folder); narrow the
+                 slot's GalleryNode union here so the image-only fields below type-check. -->
+            <figure v-if="image.type === 'image'" class="sgp__item" :class="markOf(image.blobKey).color ? `sgp__item--${markOf(image.blobKey).color}` : ''">
               <img v-if="!image.failed" :src="image.src" :alt="image.name" :title="image.name" loading="lazy" />
               <span v-else class="sgp__fail">Could not decrypt this image.</span>
               <div class="sgp__flags">
@@ -49,6 +55,7 @@ const statusLabel = { saving: 'Saving…', saved: 'Saved', error: 'Save failed',
               </div>
               <textarea
                 class="sgp__comment" rows="2" placeholder="Comment…" maxlength="2000"
+                :aria-label="`Comment on ${image.name}`"
                 :value="markOf(image.blobKey).comment ?? ''" @input="onComment(image.blobKey, $event)"
               />
             </figure>

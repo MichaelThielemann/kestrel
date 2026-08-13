@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import type { H3Error } from 'h3'
 import { adminPasswordHash, requireAdminHash } from './admin-credential'
 
 describe('admin-credential', () => {
@@ -16,7 +17,7 @@ describe('admin-credential', () => {
 
   it('requireAdminHash throws a distinct 503 (not 401) and warns once when not configured', () => {
     const warn = vi.fn()
-    let caught: any
+    let caught: H3Error | undefined
     try {
       requireAdminHash({}, warn)
     } catch (e) {

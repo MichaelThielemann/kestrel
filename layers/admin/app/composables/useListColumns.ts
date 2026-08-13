@@ -39,7 +39,7 @@ export function useListColumns(schema: Ref<SerializedCollection>) {
 
   function reset() {
     const next = { ...store.value }
-    delete next[schema.value.name]
+    Reflect.deleteProperty(next, schema.value.name)
     store.value = next
   }
 

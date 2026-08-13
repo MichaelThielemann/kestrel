@@ -25,6 +25,7 @@ watch(() => props.indeterminate, syncIndeterminate)
 </script>
 
 <template>
+  <!-- eslint-disable-next-line vuejs-accessibility/form-control-has-label -- id/label land via UiField's attrs fallthrough (single root element), invisible to static analysis -->
   <input
     ref="input"
     v-model="model"

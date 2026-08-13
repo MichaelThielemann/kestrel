@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { defineComponent, ref } from 'vue'
 import { getQuery } from 'h3'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { defineComponent, ref } from 'vue'
 import { useRecordOptions } from './useRecordOptions'
 
 registerEndpoint('/api/posts/options', (event) => {

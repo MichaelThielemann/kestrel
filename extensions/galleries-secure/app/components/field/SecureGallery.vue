@@ -127,7 +127,7 @@ async function putIndex(opts: { repair?: boolean } = {}) {
       // The stored index is not an index any more. This model is intact and is the better copy — but writing
       // over storage is destructive, so ask first.
       damagedStored.value = true
-      throw new Error('The stored gallery index is damaged. Everything in this tab is intact — restore it over the damaged index to save.')
+      throw new Error('The stored gallery index is damaged. Everything in this tab is intact — restore it over the damaged index to save.', { cause: err })
     }
     if (status !== 409) throw err
     damagedStored.value = false // a 409 means the server read a real index back — whatever was damaged is gone
@@ -136,7 +136,7 @@ async function putIndex(opts: { repair?: boolean } = {}) {
     // (the rejected write was their first trip to storage), so discarding them would leave their ciphertext
     // permanently undecryptable — and unreferenced, hence orphan-pruned. Surface it and let the user merge.
     conflict.value = true
-    throw new Error('This gallery was changed elsewhere. Your changes are still here — merge them with the current version to save.')
+    throw new Error('This gallery was changed elsewhere. Your changes are still here — merge them with the current version to save.', { cause: err })
   }
 }
 
@@ -163,7 +163,7 @@ async function mergeStored() {
     for (const blobId of dropped) {
       const p = previews.value[blobId]
       if (p?.src) URL.revokeObjectURL(p.src)
-      const next = { ...previews.value }; delete next[blobId]; previews.value = next
+      const next = { ...previews.value }; Reflect.deleteProperty(next, blobId); previews.value = next
     }
     files.value = merged
     folders.value = [...new Set([...current.folders, ...folders.value.filter((p) => unsavedFolders.has(p))])]
@@ -330,7 +330,8 @@ const isSelected = (item: LibraryItem) => selected.value.has(keyOf(item))
 function onSelect(item: LibraryItem) {
   const k = keyOf(item)
   const next = new Set(selected.value)
-  next.has(k) ? next.delete(k) : next.add(k)
+  if (next.has(k)) next.delete(k)
+  else next.add(k)
   selected.value = next
 }
 function navigate(path: string) { currentFolder.value = path; selected.value = new Set() }
@@ -426,7 +427,7 @@ async function onDelete() {
       try { await $fetch('/api/galleries-secure/blob', { method: 'DELETE', body: { galleryId: model.value.galleryId, blobId } }) } catch { /* orphan ciphertext is harmless */ }
       const p = previews.value[blobId]
       if (p?.src) URL.revokeObjectURL(p.src)
-      const next = { ...previews.value }; delete next[blobId]; previews.value = next
+      const next = { ...previews.value }; Reflect.deleteProperty(next, blobId); previews.value = next
     }
     selected.value = new Set()
   } catch (err) {
@@ -591,6 +592,7 @@ defineExpose({ key, open })
 
         <!-- UNLOCKED: media-style explorer over the encrypted gallery -->
         <template v-else>
+          <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- mouse-only progressive enhancement; the MediaToolbar "Upload" button below does the same add-files action via a real, keyboard-reachable <button> + hidden file input -->
           <div class="secure-gallery__explorer" :class="{ 'is-drag': dragActive }" @drop="onDrop" @dragover="onDragOver" @dragleave="onDragLeave">
             <p v-if="conflict" class="secure-gallery__conflict">
               <UiIcon name="triangle-alert" size="0.875rem" />

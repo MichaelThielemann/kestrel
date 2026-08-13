@@ -22,6 +22,7 @@ const slotProps = computed(() => ({
 
 <template>
   <div class="ui-field" :data-invalid="error ? 'true' : undefined">
+    <!-- eslint-disable-next-line vuejs-accessibility/label-has-for -- the matching control is the default slot's content, invisible to static analysis across the slot boundary -->
     <label v-if="label" :for="fieldId" class="ui-field__label">
       {{ label }}<span v-if="required" class="ui-field__required" aria-hidden="true">*</span>
     </label>

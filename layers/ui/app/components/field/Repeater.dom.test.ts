@@ -9,16 +9,6 @@ const textRepeaterField = {
   options: { fields: { label: { type: 'text' as const } } },
 }
 
-const twoFieldRepeater = {
-  type: 'repeater' as const,
-  options: {
-    fields: {
-      label: { type: 'text' as const },
-      score: { type: 'number' as const },
-    },
-  },
-}
-
 describe('FieldRepeater', () => {
   it('renders one row per model row with sub-field inputs', () => {
     const w = mount(FieldRepeater, {

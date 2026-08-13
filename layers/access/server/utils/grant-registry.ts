@@ -32,5 +32,5 @@ export function registeredGrants(): Readonly<Partial<Record<Role, Grant[]>>> {
 
 /** Test helper: drop all registered grants (the registry is a module singleton). */
 export function clearAccessGrants(): void {
-  for (const role of Object.keys(registered) as Role[]) delete registered[role]
+  for (const role of Object.keys(registered) as Role[]) Reflect.deleteProperty(registered, role)
 }

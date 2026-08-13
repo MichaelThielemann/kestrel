@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useState } from '#imports'
 import { registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
+import type { RouteLocationNormalized } from 'vue-router'
 import middleware from './admin-auth'
 
 const { navigateToMock } = vi.hoisted(() => ({ navigateToMock: vi.fn() }))
@@ -9,7 +10,10 @@ mockNuxtImport('navigateTo', () => navigateToMock)
 let sessionRes: { authenticated: boolean; exp?: number }
 registerEndpoint('/api/auth/session', () => sessionRes)
 
-const run = (fullPath: string) => (middleware as any)({ fullPath }, { fullPath: '/' })
+// The middleware only reads `to.fullPath`, so the test route objects are deliberately partial — cast
+// through `unknown` rather than typing `middleware` itself as `any`.
+const asRoute = (fullPath: string) => ({ fullPath }) as unknown as RouteLocationNormalized
+const run = (fullPath: string) => middleware(asRoute(fullPath), asRoute('/'))
 
 beforeEach(() => {
   navigateToMock.mockClear()

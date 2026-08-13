@@ -100,7 +100,7 @@ function evalObjectExpr(content: string, node: Node, scope: Record<string, unkno
   const src = content.slice(node.start, node.end)
   const names = Object.keys(scope)
   try {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+     
     const fn = new Function(...names, `return (${src})`)
     const out = fn(...names.map((k) => scope[k]))
     if (!out || typeof out !== 'object') throw new Error('expected an object literal')
@@ -109,6 +109,7 @@ function evalObjectExpr(content: string, node: Node, scope: Record<string, unkno
     throw new Error(
       `${where}: could not evaluate the block declaration. Field/block args must be self-contained literals + ` +
         `field-factory calls (no imported constants, computed values, or TS type-args). Cause: ${(e as Error).message}`,
+      { cause: e },
     )
   }
 }
@@ -126,7 +127,7 @@ export function extractBlockDef(sfcSource: string, fileBase: string): ExtractedB
   try {
     ast = parse(content, { sourceType: 'module', plugins: ['typescript'] })
   } catch (e) {
-    throw new Error(`${fileBase}: could not parse <script setup> — ${(e as Error).message}`)
+    throw new Error(`${fileBase}: could not parse <script setup> — ${(e as Error).message}`, { cause: e })
   }
 
   const props = macroCall(ast, 'defineProps')

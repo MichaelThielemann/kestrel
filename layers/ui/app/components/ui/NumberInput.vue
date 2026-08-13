@@ -55,6 +55,7 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <div v-if="suffix" class="ui-number-wrap" :class="{ 'ui-number-wrap--slim': slim }" :data-disabled="disabled || undefined">
+    <!-- eslint-disable-next-line vuejs-accessibility/form-control-has-label -- id/label land via v-bind="$attrs" from the wrapping UiField, invisible to static analysis -->
     <input
       v-model="text"
       type="number"
@@ -70,6 +71,7 @@ function onKeydown(e: KeyboardEvent) {
     >
     <span class="ui-number-wrap__suffix" aria-hidden="true">{{ suffix }}</span>
   </div>
+  <!-- eslint-disable-next-line vuejs-accessibility/form-control-has-label -- id/label land via v-bind="$attrs" from the wrapping UiField, invisible to static analysis -->
   <input
     v-else
     v-model="text"

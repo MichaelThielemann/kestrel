@@ -8,7 +8,7 @@ import { list } from './crud'
 import { desiredSchema } from '../schema/desired'
 import { diffSchema } from '../schema/diff'
 import { renderSqlite } from '../schema/render-sqlite'
-import { defineCollection } from './defineCollection'
+import { defineCollection, type FieldDef } from './defineCollection'
 import { clearRegistry, registerCollection } from './registry'
 import { buildCollection } from '../../../fields/server/utils/buildCollection'
 import { registerBlock, clearBlocks } from '../../../fields/server/utils/defineBlock'
@@ -132,7 +132,7 @@ describe('deadTargets — batched dead-ness classification', () => {
 
 describe('collectionMayReference', () => {
   it('is true for relation/media/link/richtext, repeaters holding one, or blocks; false otherwise', () => {
-    const may = (fields: Record<string, any>, blocks = false) =>
+    const may = (fields: Record<string, FieldDef>, blocks = false) =>
       collectionMayReference(defineCollection({ name: 'x', mode: 'multi', translatable: false, ...(blocks ? { blocks: { enabled: true } } : {}), fields }))
     expect(may({ a: { type: 'relation', relation: { collection: 'u' } } })).toBe(true)
     expect(may({ a: { type: 'media' } })).toBe(true)

@@ -104,7 +104,7 @@ describe('sessionSettings production guards', () => {
   const saved: Record<string, string | undefined> = {}
   beforeEach(() => { for (const k of KEYS) saved[k] = process.env[k] })
   afterEach(() => {
-    for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k] }
+    for (const k of KEYS) { if (saved[k] === undefined) Reflect.deleteProperty(process.env, k); else process.env[k] = saved[k] }
   })
 
   it('throws in production when KESTREL_SECURE_COOKIES=false', () => {

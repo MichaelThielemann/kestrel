@@ -12,6 +12,7 @@ const model = defineModel<string | null>()
 </script>
 
 <template>
+  <!-- eslint-disable-next-line vuejs-accessibility/form-control-has-label -- id/label land via Vue's default attrs fallthrough (single root element) from the wrapping UiField -->
   <textarea
     v-model="model"
     :rows="rows"

@@ -119,7 +119,8 @@ export function useMediaLibrary(opts: { urlSync?: boolean; accept?: 'image' | 'a
   function select(item: LibraryItem) { const k = itemKey(item); selected.value = new Set([k]); anchorKey = k }
   function toggle(item: LibraryItem) {
     const k = itemKey(item); const s = new Set(selected.value)
-    s.has(k) ? s.delete(k) : s.add(k)
+    if (s.has(k)) s.delete(k)
+    else s.add(k)
     selected.value = s; anchorKey = k
   }
   function range(item: LibraryItem) { selected.value = computeRange(orderedKeys.value, anchorKey ?? itemKey(item), itemKey(item), selected.value) }

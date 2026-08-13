@@ -18,6 +18,13 @@ const saved = ref(false)
 const { t } = useT()
 const toast = useToast()
 const f = useEditForm({ collection: props.collection, id: props.id, locale: props.localeParam, group: props.group })
+// `useEditForm` returns its refs/computeds synchronously (only its internal `init()` is async), so this
+// destructure is safe to read before `f.ready` resolves — pulled up here (rather than after the await
+// below, where it originally lived) so `defineExpose` can also run before that same await.
+const {
+  formError, saving, submit, dirty, editorType, pageLike, hasStatus,
+  savedStatus, undo, redo, canUndo, canRedo,
+} = f
 
 // Editor → field-widget context. MUST run BEFORE the top-level `await` below — after an await the setup
 // instance context is gone and `provide` silently no-ops. `id`/`saved` let a widget clean up an abandoned
@@ -71,17 +78,6 @@ provide(editorFormContextKey, {
   applyFrom: f.applyFrom, pageFieldsBindings, pageFieldsHandlers,
   registerRevealError: (fn: () => void) => { revealError = fn },
 })
-
-await f.ready
-
-const {
-  formError, saving, submit, dirty, editorType, pageLike, hasStatus,
-  savedStatus, undo, redo, canUndo, canRedo,
-} = f
-
-// Which editor body renders (fields · blocks · an extension type). Resolved from the registry; an
-// unregistered type falls back to the visible EditorUnsupported panel.
-const bodyComponent = computed(() => resolveCollectionEditor(editorType.value))
 
 // Right dot of the editor Ampel: the live / generated state of THIS record's static page. Only a saved
 // pageLike record has one (a non-pageLike collection produces no static page; an unsaved `new` has no row).
@@ -192,10 +188,18 @@ async function openPreview() {
 // submits this form by id (formId), reads the in-flight `saving` for the button state, drives the
 // unsaved-changes guard off `dirty`, and the undo/redo controls off the history API exposed here.
 // The exposed shape IS the `EditorExpose` contract (utils/editor-expose.ts) — keep them in sync.
+// MUST run BEFORE the `await f.ready` below — Vue does not guarantee an async setup component's expose is
+// wired if `defineExpose` runs after a top-level await (the parent's template ref may resolve first).
 defineExpose({
   dirty, saving, undo, redo, canUndo, canRedo, hasStatus, status, savedStatus, previewUrl, pageLike,
   live: liveStatus.data, recordTitle: heading, publish, publishing, canPublish, openPreview, previewOpening,
 })
+
+await f.ready
+
+// Which editor body renders (fields · blocks · an extension type). Resolved from the registry; an
+// unregistered type falls back to the visible EditorUnsupported panel.
+const bodyComponent = computed(() => resolveCollectionEditor(editorType.value))
 
 async function onSave() {
   // Read BEFORE the save: a successful submit rebaselines, after which the saved status is the new one.

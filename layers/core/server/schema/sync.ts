@@ -1,4 +1,4 @@
-import { type IntrospectDb } from './introspect'
+import type { IntrospectDb } from './introspect'
 import { diffSchema } from './diff'
 import { sqlite, type Dialect } from './dialect'
 import type { SchemaSnapshot, SchemaOp } from './model'

@@ -117,7 +117,9 @@ function moveChip(from: number, to: number) {
     class="ui-combobox"
   >
     <ComboboxAnchor class="ui-combobox__anchor" :data-multiple="multiple || undefined" :aria-invalid="invalid || undefined">
+      <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions, vuejs-accessibility/no-redundant-roles -- @dragleave is a mouse-only progressive enhancement (the chip-move buttons below give the same reorder fully keyboard access); role="list" is NOT redundant here, `list-style: none` below strips the implicit list semantics in WebKit, see the "WebKit list-semantics fix" test -->
       <ul v-if="multiple && selected.length" ref="chips" class="ui-combobox__chips" role="list" @dragleave="onDragLeave">
+        <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag handlers are a mouse-only progressive enhancement; the chip-move buttons below give the same reorder fully keyboard access -->
         <li
           v-for="(s, i) in selected"
           :key="s.value"

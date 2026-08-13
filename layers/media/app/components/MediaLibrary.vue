@@ -82,7 +82,8 @@ function onSelect(item: LibraryItem, mods: { toggle: boolean; range: boolean }) 
   if (props.pick && props.multiple) {
     if (item.type !== 'file') return
     const s = new Set(picked.value)
-    s.has(item.file.id) ? s.delete(item.file.id) : s.add(item.file.id)
+    if (s.has(item.file.id)) s.delete(item.file.id)
+    else s.add(item.file.id)
     picked.value = s
     return
   }
@@ -288,6 +289,7 @@ const localizedMenu = computed(() => menuItems.value.map((s) => ({
 </script>
 
 <template>
+  <!-- eslint-disable-next-line vuejs-accessibility/click-events-have-key-events, vuejs-accessibility/no-static-element-interactions -- @click.self clears selection as a mouse-only bulk convenience; Space-toggle on each MediaGrid/MediaTable item already gives keyboard users the same end state -->
   <section class="media-library" @click.self="lib.clear()" @dragenter="onDragEnter" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
     <MediaPathBar :folder="folder" @navigate="lib.navigate" />
     <MediaToolbar
@@ -301,6 +303,7 @@ const localizedMenu = computed(() => menuItems.value.map((s) => ({
     />
     <UiMenu :items="localizedMenu" @select="onMenuSelect">
       <!-- @contextmenu.capture sets the menu target before Reka's own handler opens the menu, so menuItems is correct when the menu renders -->
+      <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- contextmenu fires natively via Shift+F10/the Menu key when a MediaGrid/MediaTable item has focus, so this capture handler is already keyboard-reachable -->
       <div class="media-library__items" @contextmenu.capture="onContextMenu">
         <UiAlert v-if="error" variant="error">{{ error }}</UiAlert>
         <p v-else-if="!loading && !items.length" class="media-library__empty">{{ t('media.folderEmpty') }}</p>

@@ -56,7 +56,8 @@ function onKeydown(e: KeyboardEvent) {
   const el = e.target as HTMLElement | null
   if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return
   e.preventDefault()
-  isRedo ? ctx.redo() : ctx.undo()
+  if (isRedo) ctx.redo()
+  else ctx.undo()
 }
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))

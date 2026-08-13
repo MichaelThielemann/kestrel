@@ -17,7 +17,8 @@ const hasA11yName = computed(() => props.label != null || attrs.role != null || 
 <template>
   <!-- v-html body is either a static registry icon or developer-supplied SVG allowlist-sanitised by
        resolveIconBody → sanitizeIconSvg (no script-capable elements/attributes survive). -->
-  <svg
+  <!-- eslint-disable-next-line vue/no-v-html -- sanitized via resolveIconBody -> sanitizeIconSvg (allowlist-only tags/attrs) -->
+  <svg v-html="body"
     class="ui-icon"
     :data-icon="dataIcon"
     :width="dim"
@@ -31,7 +32,6 @@ const hasA11yName = computed(() => props.label != null || attrs.role != null || 
     :role="label ? 'img' : undefined"
     :aria-label="label || undefined"
     :aria-hidden="hasA11yName ? undefined : 'true'"
-    v-html="body"
   />
 </template>
 

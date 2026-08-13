@@ -117,7 +117,9 @@ defineExpose({ onConfirm, removeId, onDragStart, onDrop, moveItem })
   <UiField :id="id" :label="name" :error="error" :required="required">
     <template #default="f">
       <div class="field-media">
+        <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- @dragleave is a mouse-only progressive enhancement; the move-earlier/move-later buttons below give the same reorder fully keyboard access -->
         <ul v-if="resolved.length" ref="itemsEl" class="field-media__items" @dragleave="onDragLeave">
+          <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag handlers are a mouse-only progressive enhancement; the move-earlier/move-later buttons below give the same reorder fully keyboard access -->
           <li
             v-for="(r, i) in resolved"
             :key="r.id"

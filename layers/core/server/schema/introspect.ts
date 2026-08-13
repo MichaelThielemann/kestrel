@@ -1,4 +1,4 @@
-import type { ColumnShape, IndexShape, TableShape, SchemaSnapshot } from './model'
+import type { ColumnShape, IndexShape, SchemaSnapshot } from './model'
 
 // Read the *actual* schema of a live SQLite database into the normalized model, so `diffSchema` can
 // compare it against the desired schema (ADR-0002). Typed structurally (prepare + pragma) to keep the

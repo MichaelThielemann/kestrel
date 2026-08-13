@@ -161,6 +161,7 @@ export const fieldTypes: Record<string, FieldTypeDescriptor> = {
             type: z.literal('external'),
             // http(s) only, no control chars, no embedded credentials — the value ends up in a static <a href>.
             url: z.string().trim().pipe(z.url({ protocol: /^https?$/ })).refine((v) => {
+              // eslint-disable-next-line no-control-regex -- deliberately rejects control characters embedded in a URL destined for a static <a href>
               if (/[\u0000-\u001f]/.test(v)) return false
               const u = new URL(v)
               return !u.username && !u.password
@@ -168,7 +169,7 @@ export const fieldTypes: Record<string, FieldTypeDescriptor> = {
             label,
           }),
           z.object({ type: z.literal('email'), email: z.string().trim().pipe(z.email()), label }),
-          z.object({ type: z.literal('tel'), tel: z.string().trim().min(1).regex(/^[+0-9 ()\-.\/]+$/).refine((v) => /[0-9]/.test(v), 'Tel must contain at least one digit'), label }),
+          z.object({ type: z.literal('tel'), tel: z.string().trim().min(1).regex(/^[+0-9 ()\-./]+$/).refine((v) => /[0-9]/.test(v), 'Tel must contain at least one digit'), label }),
         ]),
         f,
       )

@@ -59,10 +59,12 @@ const rangeEnd = computed<string | null>({
   <UiFieldset v-else :id="id" :label="name" :error="error" :required="required">
     <template #default="f">
       <template v-if="isTime">
+        <!-- eslint-disable-next-line vuejs-accessibility/label-has-for -- native wrapping label around a custom UiTimeInput; no `for`/`id` pair needed, invisible to static analysis -->
         <label class="field-datetime__sub">
           <span class="field-datetime__sublabel">{{ t('field.datetime.range_start') }}</span>
           <UiTimeInput v-model="rangeStart" :disabled="disabled" v-bind="f" />
         </label>
+        <!-- eslint-disable-next-line vuejs-accessibility/label-has-for -- native wrapping label around a custom UiTimeInput; no `for`/`id` pair needed, invisible to static analysis -->
         <label class="field-datetime__sub">
           <span class="field-datetime__sublabel">{{ t('field.datetime.range_end') }}</span>
           <UiTimeInput v-model="rangeEnd" :disabled="disabled" v-bind="f" />

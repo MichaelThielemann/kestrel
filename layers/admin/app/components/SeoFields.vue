@@ -90,6 +90,7 @@ const socialImageField = { type: 'media', options: { accept: 'image' } } as Fiel
       </template>
     </UiField>
 
+    <!-- eslint-disable-next-line vuejs-accessibility/label-has-for -- native wrapping label around a custom UiCheckbox; no `for`/`id` pair needed, invisible to static analysis -->
     <label class="seo-fields__noindex">
       <UiCheckbox
         :model-value="!!value.noindex"

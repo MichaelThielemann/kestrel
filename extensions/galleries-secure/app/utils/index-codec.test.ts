@@ -51,7 +51,7 @@ describe('index-codec mutations (pure)', () => {
   })
 
   it('removeFolderRecursive drops subtree + reports blobIds', () => {
-    let m: WorkingModel = { files: [file('b1', 'x', 'Party'), file('b2', 'y', 'Party/Tag1'), file('b3', 'z', 'Other')], folders: ['Party', 'Party/Tag1', 'Other'] }
+    const m: WorkingModel = { files: [file('b1', 'x', 'Party'), file('b2', 'y', 'Party/Tag1'), file('b3', 'z', 'Other')], folders: ['Party', 'Party/Tag1', 'Other'] }
     const { model, removedBlobIds } = removeFolderRecursive(m, 'Party')
     expect(removedBlobIds.sort()).toEqual(['b1', 'b2'])
     expect(model.files.map((f) => f.blobId)).toEqual(['b3'])

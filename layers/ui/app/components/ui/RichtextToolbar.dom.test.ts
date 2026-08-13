@@ -5,9 +5,11 @@ import RichtextToolbar from './RichtextToolbar.vue'
 // A chainable mock editor that records the command names invoked on it. It proves the toolbar ISSUES a
 // command, never that a real editor honours it — a command the schema rejects is recorded identically.
 // Anything about the resulting document belongs in `richtext.dom.test.ts`, which drives a real instance.
+type ChainMock = Record<string, (...args: unknown[]) => ChainMock>
+
 function createMockEditor(attrs: Record<string, unknown> = {}) {
   const calls: string[] = []
-  const chain: any = new Proxy(() => chain, {
+  const chain: ChainMock = new Proxy({} as ChainMock, {
     get(_t, prop) {
       if (prop === 'run') return () => { calls.push('run') }
       return (...args: unknown[]) => {

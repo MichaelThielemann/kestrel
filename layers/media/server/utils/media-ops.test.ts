@@ -169,6 +169,6 @@ describe('deleteAffected', () => {
     // must not abort the loop before it reaches the next item
     expect(count(sql`select count(*) c from media`)).toBe(0)
     expect(await driver.exists!('pics/b.png')).toBe(false)
-    void a
+    void a; void b
   })
 })

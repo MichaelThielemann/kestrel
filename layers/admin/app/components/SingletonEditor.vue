@@ -4,7 +4,7 @@
 // CollectionEditor's form by id; `saving`/`dirty` come from the editor's exposed state.
 import type { EditorExpose } from '../utils/editor-expose'
 
-const props = defineProps<{ collection: string; title: string; localeParam?: string }>()
+defineProps<{ collection: string; title: string; localeParam?: string }>()
 
 const { t } = useT()
 const toast = useToast()

@@ -10,7 +10,8 @@ const props = defineProps<{
   id?: string
 }>()
 
-const { fieldId, hintId, errId, describedby, ariaInvalid, ariaRequired } = useFieldA11y(props)
+// No `fieldId`: a group has no single control to point a label `for` at (see below).
+const { hintId, errId, describedby, ariaInvalid, ariaRequired } = useFieldA11y(props)
 
 // No `id` — a group has no single control to point a label `for` at; the
 // <legend> labels the group natively. Consumers spread these onto the group root.

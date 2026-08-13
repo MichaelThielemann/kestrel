@@ -23,6 +23,7 @@ function toggle(value: string, checked: boolean) {
 
 <template>
   <div class="ui-checkbox-group" role="group">
+    <!-- eslint-disable-next-line vuejs-accessibility/label-has-for -- native wrapping label around a custom UiCheckbox; no `for`/`id` pair needed, invisible to static analysis -->
     <label v-for="o in options" :key="o.value" class="ui-checkbox-group__item">
       <UiCheckbox
         :model-value="selected.includes(o.value)"

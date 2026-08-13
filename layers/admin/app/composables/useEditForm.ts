@@ -95,8 +95,8 @@ export function useEditForm(opts: UseEditFormOptions) {
   function restore(snap: Record<string, unknown>) {
     const fresh = snapshot(snap)
     for (const k of Object.keys(fresh)) values[k] = fresh[k]
-    for (const k of Object.keys(values)) if (!(k in fresh)) delete values[k]
-    for (const k of Object.keys(errors)) delete errors[k]
+    for (const k of Object.keys(values)) if (!(k in fresh)) Reflect.deleteProperty(values, k)
+    for (const k of Object.keys(errors)) Reflect.deleteProperty(errors, k)
     blockErrors.value = {}
     formError.value = ''
     coalesceKey = ''
@@ -304,7 +304,7 @@ export function useEditForm(opts: UseEditFormOptions) {
     // Clear the whole map, not just declared-field errors: `path`/`seo`/`status` are system columns
     // (never in `fields.value`), so a stale server error on one of them would otherwise survive a
     // later successful save. `validateAll` below repopulates every declared-field error fresh.
-    for (const k of Object.keys(errors)) delete errors[k]
+    for (const k of Object.keys(errors)) Reflect.deleteProperty(errors, k)
     // Client-side validation failed: surface the same banner the server path raises, so the failure is
     // never silent — the offending field's inline error can sit in an unmounted pane (blocks editor).
     if (!validateAll()) {

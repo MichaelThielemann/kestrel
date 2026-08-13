@@ -47,7 +47,7 @@ function onFiles(e: Event) {
     <div class="media-toolbar__actions">
       <UiButtonGroup v-model="viewModel" :options="VIEW_OPTIONS" :aria-label="t('mediaToolbar.viewAriaLabel')" />
       <span class="media-toolbar__divider" aria-hidden="true"></span>
-      <input ref="fileInput" type="file" multiple class="media-toolbar__file" @change="onFiles" />
+      <input ref="fileInput" type="file" multiple class="media-toolbar__file" :aria-label="t('mediaToolbar.upload')" @change="onFiles" />
       <UiButton :disabled="disabled" @click="fileInput?.click()"><UiIcon name="upload" :size="16" /> {{ t('mediaToolbar.upload') }}</UiButton>
       <UiButton :disabled="disabled" @click="emit('new-folder')"><UiIcon name="folder-plus" :size="16" /> {{ t('mediaToolbar.newFolder') }}</UiButton>
     </div>
