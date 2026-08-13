@@ -189,13 +189,14 @@ Two ways to produce the static output:
   `node .output/server/index.mjs`) publishes on boot and incrementally re-publishes the affected pages when
   you press **Publish** in the editor, into `output.dir` (default `.data/published`). Saving is a DB write
   and leaves the live page alone (unpublishing and deleting still take a page down at once) — see
-  [ADR-0008](docs/architecture-decisions.md). Serve that dir with any static server, e.g.
-  `npx serve .data/published`.
+  [ADR-0008](docs/architecture-decisions.md), or set `output.publishOnSave: true` for the pre-1.8 behaviour
+  where every save republished. Serve that dir with any static server, e.g. `npx serve .data/published`.
 
 The runtime publisher is **intentionally disabled in `pnpm dev`** (a dev render would write un-hashed Vite
 HTML), so the static files only appear on a production run. In dev you instead get the **live preview**:
 public pages render straight from the running server, and an authenticated admin can open an unpublished
-page at its real URL (the "open in new tab" button in the editor). See
+page at its real URL (the "open in new tab" button in the editor) — with unsaved changes that button
+carries them along in a preview ticket rather than saving them. See
 [static-output.md](docs/static-output.md) for the full picture.
 
 ### Simulate a production deploy locally

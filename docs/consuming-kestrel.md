@@ -215,6 +215,13 @@ admin-only. (A non-pageLike collection has no public surface — its whole `/api
   `delete` | `publish` | `unpublish` | `duplicate`. `delete`/`publish`/`unpublish` are all-or-nothing
   (an unknown id 404s before any write); `duplicate` returns the **created** ids in `ids`. This is the
   wire surface behind both the collection list's Bulk bar and the per-row quick-actions.
+- `POST /api/publish` — `{ collection, ids }` (or `{ collection, id }`): write these records' static
+  files to the configured output, plus every page whose baked output embeds them. **A write no longer does
+  this on its own** (ADR-0008): saving persists to the DB, publishing produces the files. The bulk
+  `publish`/`unpublish` action above still only sets `status` — the admin list calls both, in that order.
+  Answers `{ queued, generates, routes, pruned, drafts }`; `generates: false` means this environment
+  produces no files at all (dev, or `output.auto` off), and `drafts` lists ids that have no public page to
+  write. Set `output.publishOnSave: true` to go back to publishing on every write.
 - **Optimistic concurrency:** a `PATCH`/`PUT` may send an `X-Kestrel-If-Unmodified-Since: <updatedAt-ms>`
   header (the `updatedAt` epoch you last read). If the record has changed since, the write is refused with
   **409** before any mutation — so a stale editor tab can't silently revert a newer save. Omit the header

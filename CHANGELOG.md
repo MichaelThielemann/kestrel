@@ -7,6 +7,21 @@ Releases before 1.7.0 are documented by their tags and commit history.
 
 ## [Unreleased]
 
+> ### ⚠ Breaking behaviour change — read before upgrading
+>
+> **Saving a record no longer puts it on the live site.** No API was removed and nothing fails to build,
+> but the moment content becomes public moved: it is now an explicit **Publish**, not a side effect of
+> Save. An existing project upgrades without any code change and keeps working — editors simply have to
+> press Publish (or the bulk Publish action) for a change to reach the static output.
+>
+> **Action required, per project, if you want the old behaviour:** set `output.publishOnSave: true` in
+> `kestrel.config.ts` (or `KESTREL_OUTPUT_PUBLISH_ON_SAVE=1`). That restores 1.7.x exactly — every write
+> republishes, the Publish button disappears, and a full publish holds nothing back.
+>
+> **Unaffected:** unpublishing and deleting still take a page down immediately, `nuxt generate` still
+> builds the whole site from the current DB, and the sitemap/`status` semantics are unchanged.
+> Rationale and the full model: [ADR-0008](docs/architecture-decisions.md).
+
 ### Changed
 
 - **Saving no longer publishes.** A save writes the DB; the new **Publish** button (right of Save in the
