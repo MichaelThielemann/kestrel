@@ -24,6 +24,11 @@ const props = withDefaults(
 )
 const model = defineModel<string | null>()
 
+// TipTap emits `update` for non-content changes too — `setEditable`/`setOptions` emit directly, past the
+// transaction pipeline and its docChanged guard — and that echo reaches the edit form as a user edit.
+// Only a changed doc is one, so every emit is checked against the doc it last saw.
+let lastDoc: unknown = null
+
 // StarterKit (v3) already bundles Link + Underline; only the rest are added here.
 const editor = useEditor({
   content: model.value ?? '',
@@ -41,7 +46,12 @@ const editor = useEditor({
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
     RichtextSpanClass, RichtextBlockClass, // preserve consumer presentational classes on round-trip
   ],
+  onCreate: ({ editor }) => {
+    lastDoc = editor.state.doc
+  },
   onUpdate: ({ editor }) => {
+    if (editor.state.doc === lastDoc) return
+    lastDoc = editor.state.doc
     model.value = editor.isEmpty ? '' : editor.getHTML()
   },
 })
@@ -53,10 +63,15 @@ watch(model, (value) => {
   const current = e.isEmpty ? '' : e.getHTML()
   // `emitUpdate: false`: this value came FROM the model, so re-emitting it would reach the edit form as
   // a user edit — clearing the redo stack and turning a restored null back into ''.
-  if (next !== current) e.commands.setContent(next, { emitUpdate: false })
+  if (next !== current) {
+    e.commands.setContent(next, { emitUpdate: false })
+    lastDoc = e.state.doc
+  }
 })
 
-watch(() => props.disabled, (d) => editor.value?.setEditable(!d))
+// `false` — the second arg suppresses the update event; `disabled` tracks the form's `saving` flag, so
+// the post-save toggle would otherwise re-dirty the form that was just rebaselined.
+watch(() => props.disabled, (d) => editor.value?.setEditable(!d, false))
 
 // Apply the accessible name + textbox semantics directly to the ProseMirror surface, reactively (the
 // error-driven describedby/invalid arrive after mount). `editor.view.dom` is the contenteditable element.

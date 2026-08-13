@@ -167,7 +167,10 @@ aesthetic — calm active states, lucide icons via `UiIcon` (no emoji/ASCII glyp
 placeholder clichés; the public SSG `:root` tokens stay untouched.
 **Gotchas:** `_tokens.scss` `:root` colors **drive the public SSG site** ("do not retune"); admin styling
 goes under `:root[data-theme]`. happy-dom doesn't render **teleported** widgets (combobox/datepicker/
-richtext/dialog) → those are smoke-tested only, with load-bearing logic in pure utils. **Portaled
+richtext/dialog) → those are smoke-tested only, with load-bearing logic in pure utils. **TipTap emits
+`update` for non-content changes** — `setEditable`/`setOptions` emit directly, past the transaction
+pipeline's docChanged guard — so `UiRichtext` gates every emit on the doc having actually changed; an
+echo reaches the edit form as a user edit and re-dirties a record that was just saved. **Portaled
 overlays must use global (unscoped) styles** — a scoped `<style>` loses its `data-v` attr once Reka
 teleports the content to `<body>` (the `Menu` background bug). Adding a field type = a `Field*.vue` +
 a registration. Adding an icon = extend the `IconName` union **and** the `icons` map.

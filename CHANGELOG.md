@@ -5,6 +5,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
+## [Unreleased]
+
+### Fixed
+
+- **The page builder no longer falls back to "Unsaved" right after saving a richtext block.** The record
+  was stored correctly, but the lamp returned to amber and stayed there until an unrelated save cleared
+  it. The block pane is disabled while a save is in flight, and TipTap emits an `update` for that bare
+  editability change — past the transaction pipeline, so the usual guards do not apply. The echo landed
+  in the form after the save had already taken its baseline, and because the editor's serialization and
+  the server's sanitizer are not byte-identical (`<br>` vs `<br />`, `&nbsp;`, `text-align: center`), it
+  read as a real difference. `UiRichtext` now emits only when the document actually changed.
+
 ## [1.7.0] — 2026-08-11
 
 A hardening release. No API was removed, but several behaviours changed in ways a deployment can notice —
