@@ -9,6 +9,9 @@ export interface PublishStatusData {
   updatedAt?: string | null
   /** Which output the last attempt wrote to — `'local'` dir or `'s3'` bucket; null when no row yet. */
   target?: 'local' | 's3' | null
+  /** The record was saved after its page was last published — the live file is an older version of it.
+   *  The normal working state while editing, since a save no longer republishes (ADR-0008). */
+  pending?: boolean
   /** Whether the runtime publisher actually produces files in THIS environment (prod + `output.auto`).
    *  `false` in dev / with static output off → a page can never turn "Live" here, so don't poll for it. */
   generates?: boolean

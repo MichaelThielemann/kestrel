@@ -85,6 +85,21 @@ export function classifyWrite(def: WriteCollection, before: Row, after: Row, pri
 }
 
 /**
+ * What a plain SAVE may do to the static output. Saving persists to the DB; writing a page's file is the
+ * explicit publish action's job (`planInvalidation`, driven by `POST /api/publish`), so a save renders
+ * nothing — the live site keeps serving the last published version while the editor works on the next one.
+ *
+ * REMOVAL is the asymmetry, and it is deliberate: an unpublished or deleted record must not keep a live
+ * page, so those two branches act immediately. Their referrer/listing re-renders come along, because a
+ * baked link to a page that just went offline is stale the moment it goes — the same "availability" rule
+ * `planInvalidation` documents, minus everything that would put NEW content on the live site.
+ */
+export function planSaveInvalidation(ev: WriteClassification): Invalidation {
+  const removal = ev.status === 'deleted' || (ev.statusChanged && !ev.isPublished)
+  return removal ? planInvalidation(ev) : { type: 'noop' }
+}
+
+/**
  * Decide what a write invalidates, per the maintainer-agreed model. Three notions of "dependent":
  *  - LISTINGS — pages that QUERY the collection (overviews) → captured as the `<coll>` tag.
  *  - EXPLICIT REFERRERS — pages that LINK/EMBED/relate-to a specific record → captured as `<coll>:<id>`.

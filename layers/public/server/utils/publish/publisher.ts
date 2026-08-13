@@ -12,8 +12,9 @@ import { withResolveScope } from '../../../../core/server/utils/resolve-scope'
 import { runAsRenderer } from '../../../../access/server/utils/render-context'
 import { htmlKeyForRoute } from './route-keys'
 import { staleRoutes, type DepsStore } from './deps'
-import { recordPublishStatus, clearPublishStatus, renderOutcome } from './publish-status'
+import { recordPublishStatus, clearPublishStatus, renderOutcome, lastPublishedAt } from './publish-status'
 import { routesToPrune, type Invalidation } from './invalidation'
+import { pendingRoutes } from './pending'
 
 /**
  * The runtime static publisher: renders public routes from the LIVE server (`localFetch`, the same
@@ -69,6 +70,8 @@ export async function renderRoute(route: string): Promise<{ body: Buffer | null;
  *  route set is INCOMPLETE, so it must never be used as the authority for what to delete. */
 export interface PublishedRoutes {
   routes: string[]
+  /** Each route's record `updatedAt` in ms — the "last saved" half of the saved-vs-published comparison. */
+  savedAt: Map<string, number>
   /** Names of collections whose route query threw (drifted schema, locked DB) — routes are missing. */
   failed: string[]
 }
@@ -82,6 +85,7 @@ export function allPublishedRoutes(): PublishedRoutes {
   const prefixPrimary = prefixPrimaryLocale()
   const pub = publicReadableResources()
   const routes = new Set<string>([localePath('/', primary, primary, prefixPrimary)]) // `/` or `/<primary>`
+  const savedAt = new Map<string, number>()
   const failed: string[] = []
   for (const c of allCollections()) {
     if (!c.def.pageLike || !isPubliclyReadable(c.def.name, pub)) continue
@@ -94,6 +98,9 @@ export function allPublishedRoutes(): PublishedRoutes {
     const proj: Record<string, unknown> = { path: cols.path }
     if (c.def.translatable) proj.locale = cols.locale
     if (c.def.status) proj.status = cols.status
+    // `updatedAt` is a system column on every built collection, but this projection also runs against
+    // hand-rolled tables in tests — guard it exactly like `locale`, or its absence throws the select.
+    if (Object.hasOwn(cols, 'updatedAt')) proj.updatedAt = cols.updatedAt
     let rows: Record<string, unknown>[]
     try { rows = db.select(proj as never).from(c.table).all() as Record<string, unknown>[] }
     catch (error) {
@@ -106,10 +113,14 @@ export function allPublishedRoutes(): PublishedRoutes {
     for (const row of rows) {
       if (c.def.status && row.status !== 'published') continue
       const route = pageRowHref(row, primary, prefixPrimary) // the shared (path, locale) → route rule
-      if (route) routes.add(route)
+      if (!route) continue
+      routes.add(route)
+      const saved = row.updatedAt
+      if (saved instanceof Date) savedAt.set(route, saved.getTime())
+      else if (typeof saved === 'number') savedAt.set(route, saved)
     }
   }
-  return { routes: [...routes], failed }
+  return { routes: [...routes], savedAt, failed }
 }
 
 /** Render + write the given routes (skips non-200). When `deps` is given, each render is wrapped in a
@@ -226,7 +237,7 @@ export async function publishFull(driver: StorageDriver = outputDriver(), deps?:
   // runs late (layer-then-filename order) — finish populating the registry first. Moving the read before
   // an await would silently render an empty registry. See docs/architecture.md → "Server plugins".
   await syncStaticAssets(driver, cfg.publicDir)
-  const { routes, failed } = allPublishedRoutes()
+  const { routes, savedAt, failed } = allPublishedRoutes()
   if (failed.length) {
     // Keep on doubt: with a collection missing from the enumeration, every one of its live pages looks
     // stale, so a prune would wipe it from the output. Rendering still proceeds — a stale extra file is
@@ -247,11 +258,21 @@ export async function publishFull(driver: StorageDriver = outputDriver(), deps?:
     }
   }
 
+  // A full run resynchronizes the output with the DB, so without this it would push every saved-but-
+  // unpublished edit live — exactly what deferring the publish exists to prevent. Those routes keep the
+  // file their last publish wrote (they stay in `routes`, so the prune above still treats them as live).
+  const skipped = pendingRoutes(savedAt, lastPublishedAt(useDb()))
+  if (skipped.length) {
+    console.info(`[kestrel] publish: ${skipped.length} route(s) held at their published version (unpublished changes): ${skipped.join(', ')}`)
+  }
+  const skip = new Set(skipped)
+  const renderRoutes = routes.filter((route) => !skip.has(route))
+
   // Reset the discovery accumulator so this full run reconciles ONLY what it actually renders — an earlier
   // incremental (tag) publish also feeds the accumulator, and a variant it recorded whose usage was later
   // removed would otherwise survive and be re-registered here (defeating usage-driven narrowing).
   clearVariants()
-  const written = await publishRoutes(routes, driver, deps)
+  const written = await publishRoutes(renderRoutes, driver, deps)
   const rendered = written.length
   await publishMeta(driver)
   // Auto-discovery: a FULL render just visited every published route, so the capture accumulator now holds
@@ -260,8 +281,10 @@ export async function publishFull(driver: StorageDriver = outputDriver(), deps?:
   // by the un-rendered routes. ONLY narrow when EVERY route rendered: a partial failure leaves the accumulator
   // incomplete, so reconciling would deregister variants still referenced by the stale (kept) published HTML,
   // which a later backfill would then delete out from under the live page. An un-enumerated collection is
-  // the same partial-coverage case: its pages were never visited, so their variants are missing too.
-  if (!failed.length && rendered === routes.length) saveDiscoveredVariants(useDb())
+  // the same partial-coverage case: its pages were never visited, so their variants are missing too — and
+  // so is a route held back at its published version: its live file still references the variants this run
+  // never saw.
+  if (!failed.length && !skipped.length && rendered === renderRoutes.length) saveDiscoveredVariants(useDb())
   return { rendered, pruned }
 }
 

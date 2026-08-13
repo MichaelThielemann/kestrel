@@ -366,6 +366,9 @@ export function useEditForm(opts: UseEditFormOptions) {
     ready,
     setField,
     validateAll,
+    // The wire body a save would send — also what a preview ticket carries, so an external tab renders
+    // exactly what a save would have stored (ADR-0008).
+    buildBody,
     submit,
     undo,
     redo,

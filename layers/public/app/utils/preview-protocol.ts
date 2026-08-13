@@ -13,6 +13,8 @@
 
 /** Query flag that switches the public page into preview mode (value `1`). */
 export const PREVIEW_QUERY = 'kestrel-preview'
+/** Query carrying a preview TICKET — the editor's unsaved state, rendered in a normal tab (ADR-0008). */
+export const PREVIEW_TOKEN_QUERY = 'kestrel-preview-token'
 /** Dedicated preview page for records without a public URL (new/unsaved, non-pageLike). Admin-gated. */
 export const PREVIEW_FALLBACK_PATH = '/__kestrel/preview'
 
@@ -74,6 +76,20 @@ export function parseFrameMessage(data: unknown): FrameToEditorMessage | null {
  * pageLike record — server-populated first paint, drafts included for the admin session), else the
  * dedicated fallback page (new/unsaved records, non-pageLike collections). Both carry the preview flag.
  */
+/**
+ * The record a ticket preview renders: the saved row with the editor's unsaved values laid over it. Both
+ * halves are column-keyed (the editor sends what a save would send), so this is a shallow override — a
+ * field the editor did not touch keeps the stored value, and a page that does not exist yet (an unsaved
+ * slug) renders from the payload alone. Pure.
+ */
+export function previewPage(
+  saved: Record<string, unknown> | null,
+  values: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  if (!values) return saved
+  return { ...(saved ?? {}), ...values }
+}
+
 export function previewSrc(publicUrl: string | null, locale: string): string {
   if (publicUrl) return `${publicUrl}?${PREVIEW_QUERY}=1`
   const loc = locale ? `&locale=${encodeURIComponent(locale)}` : ''

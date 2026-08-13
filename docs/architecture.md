@@ -60,10 +60,13 @@ compose those.
 5. `core/server/plugins/03.record-refs.ts` and `media/server/plugins/03.media-cleanup.ts` — register
    **deferred** write-event listeners (the `record_refs` index + dead-ref derivation, and the on-delete
    media cleanup that prunes an asset's derivatives). They fire on a write, never at plugin init.
-6. `public/server/plugins/zz.publish.ts` (`zz` = last *within the public layer*) — registers a deferred
-   listener wiring the runtime incremental publisher to content-write events; it reads the registry +
-   every populator/ref hook at republish time (after a write), not at init, so the page renders fully
-   populated regardless of plugin init order. Dev/prerender-aware (see [static-output.md](./static-output.md)).
+6. `public/server/plugins/zz.publish.ts` (`zz` = last *within the public layer*) — owns the publish queue
+   and deps index, publishes them through `utils/publish/publish-runtime.ts` (what `POST /api/publish`
+   reaches), and registers a deferred write listener. Since ADR-0008 that listener plans with
+   `planSaveInvalidation`, i.e. a save only ever REMOVES output (unpublish/delete); rendering waits for an
+   explicit publish. It reads the registry + every populator/ref hook at republish time (after a write),
+   not at init, so the page renders fully populated regardless of plugin init order. Dev/prerender-aware
+   (see [static-output.md](./static-output.md)).
 
 ## Where to start
 
@@ -264,7 +267,9 @@ the layout `app/utils/page-layout.ts` picks from the record's `layout` column;
 the editor live-preview runs as an **iframe** onto that same path (`?kestrel-preview=1` + admin →
 `app/components/KestrelPreviewBridge.vue` swaps in the editor's tree over origin-checked postMessage;
 `app/pages/__kestrel/preview.vue` is the admin-gated fallback for unsaved records; protocol in
-`app/utils/preview-protocol.ts`) →
+`app/utils/preview-protocol.ts`). An external tab has no parent window, so it carries the unsaved state as
+a ticket instead: `server/api/preview.post.ts` mints it into `server/utils/preview-token.ts` and
+`preview.get.ts` reads it back populated (`?kestrel-preview-token=`, ADR-0008) →
 `modules/prerender-routes/*` (build-time route discovery — `discover.ts` finds every pageLike table by its
 partial `path` index) → `server/routes/sitemap.xml.get.ts` + `server/utils/sitemap.ts` →
 `server/utils/populate-links.ts` + `plugins/02.register-links.ts` → `modules/deploy-output/*`.

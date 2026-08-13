@@ -7,6 +7,7 @@ export const en: Catalog = {
   // common / shared
   'common.new': 'New {label}',
   'common.save': 'Save',
+  'common.publish': 'Publish',
   'common.cancel': 'Cancel',
   'common.create': 'Create',
   'common.delete': 'Delete',
@@ -154,6 +155,11 @@ export const en: Catalog = {
 
   // editor action bar — live preview + status "Ampel"
   'editor.openInNewTab': 'Open in new tab',
+  'editor.previewUnsaved': 'Preview unsaved changes in a new tab',
+  'editor.previewFailed': 'Could not open the preview.',
+  'editor.publishFailed': 'Publishing failed.',
+  'editor.publishNotGenerated': 'Static output is off in this environment — nothing was written.',
+  'editor.publishDraft': 'A draft has no public page. Publish it by setting its status to Published.',
   // editor Ampel — LEFT lamp: one WORD + a details tooltip (save + publish lifecycle of this record)
   'editorStatus.word.saving': 'Saving…',
   'editorStatus.word.unsaved': 'Unsaved',
@@ -171,9 +177,11 @@ export const en: Catalog = {
   'editorStatus.word.notBuilt': 'Not built',
   'editorStatus.word.notLive': 'Not live',
   'editorStatus.word.error': 'Error',
+  'editorStatus.word.outdated': 'Outdated',
   'editorStatus.live.liveS3': 'Live — page uploaded to S3.',
   'editorStatus.live.liveLocal': 'Live — page written to the static output.',
   'editorStatus.live.pending': 'Publishing in progress…',
+  'editorStatus.live.outdated': 'Saved but not published — the live page still shows the last published version.',
   'editorStatus.live.notBuilt': 'Not generated in this environment — the static page is built on deploy.',
   'editorStatus.live.error': 'Publishing the static page failed.',
   'editorStatus.live.draft': 'Draft — not generated. It stays off the live site until published.',

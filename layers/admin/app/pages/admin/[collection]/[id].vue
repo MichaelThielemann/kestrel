@@ -43,12 +43,10 @@ const heading = computed(() =>
       : t('editor.editRecord', { collection: singular.value, id }),
 )
 
-// Open the record's real public URL in a new tab — the live preview (drafts included, served to the
-// authenticated admin by the public render path). Withheld until there's a saved, routable page.
-function openPreview() {
-  const url = editorRef.value?.previewUrl
-  if (url) window.open(url, '_blank', 'noopener,noreferrer')
-}
+// The external-tab button always works now: with unsaved edits it opens a preview TICKET (no save, no
+// publish), otherwise the record's own URL — so the tooltip has to say which of the two you'd get.
+const previewTitle = computed(() => t(editorRef.value?.dirty ? 'editor.previewUnsaved' : 'editor.openInNewTab'))
+
 const skipGuard = ref(false)
 
 // Delete flows through the shared batch op + the same confirm dialog the list uses, so the delete logic
@@ -120,10 +118,12 @@ async function confirmDelete() {
       <div class="record__actions">
         <UiButton type="button" variant="ghost" size="sm" icon="undo" :disabled="saving || !editorRef?.canUndo" :title="t('history.undo')" :aria-label="t('history.undo')" @click="editorRef?.undo()" />
         <UiButton type="button" variant="ghost" size="sm" icon="redo" :disabled="saving || !editorRef?.canRedo" :title="t('history.redo')" :aria-label="t('history.redo')" @click="editorRef?.redo()" />
-        <UiButton v-if="editorRef?.previewUrl" type="button" variant="ghost" size="sm" icon="external-link" :title="t('editor.openInNewTab')" :aria-label="t('editor.openInNewTab')" @click="openPreview" />
+        <UiButton type="button" variant="ghost" size="sm" icon="external-link" :title="previewTitle" :aria-label="previewTitle" :loading="editorRef?.previewOpening" @click="editorRef?.openPreview()" />
         <UiButton type="button" variant="secondary" size="sm" icon="x" :disabled="saving" @click="toList">{{ t('common.cancel') }}</UiButton>
         <UiButton v-if="id !== 'new'" variant="danger" size="sm" icon="trash" :loading="deleting" @click="onDelete">{{ t('common.delete') }}</UiButton>
         <UiButton type="submit" :form="EDITOR_FORM_ID" variant="primary" size="sm" icon="check" :loading="saving">{{ t('common.save') }}</UiButton>
+        <!-- Publishing is its own decision: Save persists, Publish writes the static page (ADR-0008). -->
+        <UiButton type="button" variant="secondary" size="sm" icon="upload" :loading="editorRef?.publishing" :disabled="saving" @click="editorRef?.publish()">{{ t('common.publish') }}</UiButton>
         <EditorStatus class="record__ampel" :dirty="editorRef?.dirty ?? false" :saving="saving" :has-status="editorRef?.hasStatus ?? false" :status="editorRef?.status" :saved-status="editorRef?.savedStatus" :page-like="editorRef?.pageLike ?? false" :live="editorRef?.live" />
       </div>
     </div>

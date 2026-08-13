@@ -85,6 +85,29 @@ describe('EditorStatus — right dot (live / generated state, pageLike only)', (
     expect(liveTone(w)).toBe('amber')
   })
 
+  // Saving no longer republishes, so "published page, newer saved content" is the normal working state.
+  it('amber "Outdated" when the record was saved after its page was last published', async () => {
+    const w = await mountSuspended(EditorStatus, {
+      props: { dirty: false, pageLike: true, hasStatus: true, status: 'published', live: { route: '/about', status: 'success', pending: true } },
+    })
+    expect(liveTone(w)).toBe('amber')
+    expect(liveWord(w)).toBe('Outdated')
+  })
+
+  it('goes back to green once the page is published again', async () => {
+    const w = await mountSuspended(EditorStatus, {
+      props: { dirty: false, pageLike: true, hasStatus: true, status: 'published', live: { route: '/about', status: 'success', pending: false } },
+    })
+    expect(liveTone(w)).toBe('green')
+  })
+
+  it('a failed publish stays red even with newer saved changes — the error is the bigger signal', async () => {
+    const w = await mountSuspended(EditorStatus, {
+      props: { dirty: false, pageLike: true, hasStatus: true, status: 'published', live: { route: '/about', status: 'error', error: 'S3 403', pending: true } },
+    })
+    expect(liveTone(w)).toBe('red')
+  })
+
   it('blue for a draft (intentionally not generated), regardless of any stale status row', async () => {
     const w = await mountSuspended(EditorStatus, {
       props: { dirty: false, pageLike: true, hasStatus: true, status: 'draft', live: { route: '/about', status: 'success' } },

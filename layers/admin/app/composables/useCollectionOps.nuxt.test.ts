@@ -24,11 +24,17 @@ registerEndpoint('/api/references/referrers', (event) => {
   return { counts: { '1': 3, '2': 0 } }
 })
 
+let publishBodies: Record<string, unknown>[] = []
+registerEndpoint('/api/publish', async (event) => {
+  publishBodies.push(await readBody(event))
+  return { queued: true, generates: true, routes: [], pruned: [], drafts: [] }
+})
+
 let changed = 0
 const Host = defineComponent({ setup: () => ({ ops: useCollectionOps('things', () => { changed++ }) }), template: '<div/>' })
 
 describe('useCollectionOps', () => {
-  beforeEach(() => { lastBulk = {}; bulkCalls = 0; failBulk = false; changed = 0; refQuery = {} })
+  beforeEach(() => { lastBulk = {}; bulkCalls = 0; failBulk = false; changed = 0; refQuery = {}; publishBodies = [] })
 
   it('previewDelete reads the referrer aggregate and folds it into a report (no mutation)', async () => {
     const w = await mountSuspended(Host)
@@ -63,6 +69,16 @@ describe('useCollectionOps', () => {
     expect(lastBulk.action).toBe('publish')
     await w.vm.ops.setStatus([1], 'draft'); await flushPromises()
     expect(lastBulk.action).toBe('unpublish')
+  })
+
+  // Since ADR-0008 the status write and the render are two steps: publishing has to ask for the render,
+  // while unpublishing must not — the write event prunes the pages on its own, at once.
+  it('setStatus publishes the static output after a bulk publish, and not after an unpublish', async () => {
+    const w = await mountSuspended(Host)
+    await w.vm.ops.setStatus([1, 2], 'published'); await flushPromises()
+    expect(publishBodies).toEqual([{ collection: 'things', ids: [1, 2] }])
+    await w.vm.ops.setStatus([1], 'draft'); await flushPromises()
+    expect(publishBodies).toHaveLength(1)
   })
 
   it('surfaces the server statusMessage on failure and rethrows', async () => {

@@ -2,6 +2,53 @@
 
 Lightweight ADR log — newest first. Each entry: **Context · Decision · Consequences · Future**.
 
+## ADR-0008 — Saving and publishing are two actions, and previewing is neither
+
+**Status:** accepted.
+
+**Context.** Until now a save WAS a publish. `registerWriteListener` classified every content write and
+enqueued an incremental republish, so editing a published page put the edit on the live site seconds later,
+with no step in between. The only way to work on a live page without the work being live was to unpublish
+it first — which takes the current page offline, the opposite of what an editor wants. The editor's
+open-in-new-tab button made the gap visible: it opens the record's saved URL, so the tab shows the last
+saved state and looks like nothing happened (it never saved anything — verified), while the in-editor
+iframe shows unsaved content over postMessage. Two previews, two different answers.
+
+**Decision.**
+- **A save writes the DB; publishing writes the static output.** `planSaveInvalidation` is the write
+  listener's planner and passes through only what a save must still REMOVE — an unpublished or deleted
+  record's page. Everything renderable waits for `POST /api/publish`, which plans the same invalidation the
+  write listener used to (`planInvalidation`) and enqueues it on the same queue.
+- **Removal stays immediate, and that asymmetry is the point.** A page that was unpublished or deleted must
+  not stay live while its record says otherwise; a page whose *content* changed is still a page the site can
+  legitimately serve, in its last published version. Losing content is recoverable, serving withdrawn
+  content is not.
+- **A full publish holds back routes with unpublished changes.** The boot publish and the reconciler
+  re-render from the DB, which would push every saved-but-unpublished edit live on the next restart — the
+  whole mechanism, undone by a deploy. They now skip routes whose record `updatedAt` is newer than their
+  `publish_status` row, so those keep the file their last publish wrote. A route that was never published
+  is NOT held back: on a first deploy there is no older version to protect, and holding it would produce an
+  empty site.
+- **The record's `status` is unchanged** — it still means "may be public" and still gates the resolver, the
+  sitemap and link resolution. What changed is only WHEN the file is written. The Publish button promotes a
+  draft on the way, because pressing it is the publish intent.
+- **Previewing unsaved changes uses a ticket, not a save.** `POST /api/preview` puts the editor's current
+  form body in a short-lived, admin-only, session-bound in-memory store and returns a token; the tab opens
+  `<url>?kestrel-preview-token=…` and the page lays those values over the stored record. Nothing is
+  written, and the ticket is populated server-side on read so images and internal links resolve exactly as
+  they do on a real page. A record with no public URL previews on the existing `/__kestrel/preview` page.
+
+**Consequences.** The editor gains a second lamp state — "Outdated": saved, published, but the live file is
+an older version. That is now the normal state of a page being worked on, so it is amber, not red. A
+consumer who relied on "save = live" must press Publish (or run the `publish:run` task); the CHANGELOG
+calls this out as the one behavioural break. `nuxt generate` is unaffected and still renders whatever the
+DB currently holds — it is a build of the whole site, not the incremental publisher, so a generate-based
+deploy publishes unpublished edits along with everything else.
+
+**Future.** Real versioning (a published snapshot per record) would make "publish" restorable and let a
+full publish rebuild the exact published state rather than holding routes back. The ticket store is
+per-process by design; a multi-instance deployment would need a shared one, or a sticky session.
+
 ## ADR-0007 — A `site` singleton for the site-wide half of the page head
 
 **Status:** accepted.

@@ -23,4 +23,10 @@ export interface EditorExpose {
   live: PublishStatusData | null
   /** The record's own title (see `recordTitle`), or `''` — the header then shows "Edit {collection} #{id}". */
   recordTitle: string
+  /** Save, then write the static output (ADR-0008) — a draft is promoted to published on the way. */
+  publish: () => Promise<void>
+  publishing: boolean
+  /** Open the record in a new tab: the saved URL, or the unsaved state carried by a preview ticket. */
+  openPreview: () => Promise<void>
+  previewOpening: boolean
 }

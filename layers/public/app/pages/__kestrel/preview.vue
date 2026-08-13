@@ -3,8 +3,10 @@
  * Dedicated editor live-preview page for records WITHOUT a public URL — a new/unsaved record, a blank
  * slug, or a blocks-enabled non-pageLike collection. It renders the real public app (default layout,
  * the consumer's CSS/fonts/breakpoints) around an empty BlockRenderer that the editor fills over the
- * postMessage bridge. Saved pageLike records preview at their REAL URL instead (higher fidelity);
- * this page is the graceful fallback so previews never regress to "save first".
+ * postMessage bridge — or, when opened in a separate tab with `?kestrel-preview-token=…`, around the
+ * ticket's unsaved content (ADR-0008), since a tab with no parent window has no bridge to listen to.
+ * Saved pageLike records preview at their REAL URL instead (higher fidelity); this page is the graceful
+ * fallback so previews never regress to "save first".
  *
  * Admin-gated server-side: `useRequestFetch` forwards the incoming cookies to `/api/auth/session`
  * (the same seam the catch-all uses for draft rendering), and anonymous requests get a 404 — the
@@ -20,6 +22,16 @@ if (!session.value?.authenticated) throw createError({ statusCode: 404, statusMe
 // Content locale from the editor (drives <html lang> for faithful per-locale rendering).
 const route = useRoute()
 const lang = typeof route.query.locale === 'string' && route.query.locale ? route.query.locale : undefined
+
+// Ticket content for the external-tab case; null (→ the bridge's own empty tree) without one.
+const token = route.query[PREVIEW_TOKEN_QUERY]
+const { data: ticket } = typeof token === 'string' && token
+  ? await useAsyncData(`kestrel-preview-ticket:${token}`, () =>
+      requestFetch('/api/preview', { query: { token } })
+        .then((r) => r as { payload?: { values?: Record<string, unknown> } } | null)
+        .catch(() => null))
+  : { data: ref<{ payload?: { values?: Record<string, unknown> } } | null>(null) }
+const ticketBlocks = computed(() => (ticket.value?.payload?.values?.content as unknown[] | undefined) ?? [])
 useHead({
   title: 'Preview',
   meta: [{ name: 'robots', content: 'noindex, nofollow' }],
@@ -28,7 +40,7 @@ useHead({
 </script>
 
 <template>
-  <KestrelPreviewBridge v-slot="{ blocks }">
+  <KestrelPreviewBridge :blocks="ticketBlocks" v-slot="{ blocks }">
     <BlockRenderer :blocks="(blocks as any[])" />
   </KestrelPreviewBridge>
 </template>

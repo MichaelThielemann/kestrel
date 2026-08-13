@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   PREVIEW_QUERY, PREVIEW_FALLBACK_PATH,
   contentMessage, selectedMessage, readyMessage, selectMessage,
-  parseEditorMessage, parseFrameMessage, previewSrc,
+  parseEditorMessage, parseFrameMessage, previewSrc, previewPage,
 } from './preview-protocol'
 
 describe('preview message builders + parsers', () => {
@@ -44,5 +44,22 @@ describe('previewSrc — the iframe URL for the editor host', () => {
   it('falls back to the dedicated preview route (with locale) when there is no public URL', () => {
     expect(previewSrc(null, 'de')).toBe(`${PREVIEW_FALLBACK_PATH}?${PREVIEW_QUERY}=1&locale=de`)
     expect(previewSrc(null, '')).toBe(`${PREVIEW_FALLBACK_PATH}?${PREVIEW_QUERY}=1`)
+  })
+})
+
+describe('previewPage — the editor\'s unsaved values over the saved record', () => {
+  const saved = { title: 'Saved', content: [{ type: 'hero' }], seo: { title: 'S' }, status: 'published' }
+
+  it('overrides only what the editor sent', () => {
+    expect(previewPage(saved, { title: 'Unsaved' })).toEqual({ ...saved, title: 'Unsaved' })
+  })
+
+  it('renders from the payload alone when the page does not exist yet (an unsaved slug)', () => {
+    expect(previewPage(null, { title: 'Brand new', content: [] })).toEqual({ title: 'Brand new', content: [] })
+  })
+
+  it('is the saved record untouched when there is no ticket', () => {
+    expect(previewPage(saved, null)).toBe(saved)
+    expect(previewPage(saved, undefined)).toBe(saved)
   })
 })

@@ -1,8 +1,9 @@
 import { createPublishQueue } from '../utils/publish/queue'
+import { setPublishRuntime } from '../utils/publish/publish-runtime'
 import { DepsStore } from '../utils/publish/deps'
 import { createSqlitePersistence } from '../utils/publish/deps-persistence'
 import { outputDriver, publishInvalidation } from '../utils/publish/publisher'
-import { classifyWrite, planInvalidation } from '../utils/publish/invalidation'
+import { classifyWrite, planSaveInvalidation } from '../utils/publish/invalidation'
 import { registerWriteListener } from '../../../core/server/utils/write-events'
 
 /**
@@ -48,8 +49,15 @@ export default defineNitroPlugin(() => {
     onError: (error) => console.error('[kestrel] publish run failed:', error),
   })
 
+  // The explicit publish action (`POST /api/publish`) enqueues through this same queue, so a publish and
+  // a write-driven prune are serialized by one single-flight run rather than racing each other.
+  setPublishRuntime({ queue, deps })
+
+  // A save writes the DB, not the site: `planSaveInvalidation` passes through only what a save must still
+  // REMOVE from the output (an unpublished or deleted record's page). Everything renderable waits for an
+  // explicit publish — see ADR-0008.
   registerWriteListener(({ def, before, after }) => {
-    queue.enqueue(planInvalidation(classifyWrite(def, before, after, primaryLocale(), prefixPrimaryLocale())))
+    queue.enqueue(planSaveInvalidation(classifyWrite(def, before, after, primaryLocale(), prefixPrimaryLocale())))
   })
 
   // Boot publish goes THROUGH the queue (not a direct publishFull) so it shares the single-flight guard:

@@ -43,6 +43,24 @@ export function renderOutcome(status: number, hasBody: boolean): 'success' | 'er
   return 'skip'
 }
 
+/**
+ * Every route's last successful-or-failed publish time, in ms — the "last published" half of the
+ * saved-vs-published comparison a deferred publish needs. Same missing-table resilience as the writers:
+ * an unmigrated deploy yields an empty map, which reads as "nothing was ever published here" and so
+ * holds nothing back.
+ */
+export function lastPublishedAt(db: BetterSQLite3Database): Map<string, number> {
+  const out = new Map<string, number>()
+  try {
+    for (const row of db.select({ route: publishStatus.route, updatedAt: publishStatus.updatedAt }).from(publishStatus).all()) {
+      if (row.updatedAt instanceof Date) out.set(row.route, row.updatedAt.getTime())
+    }
+  } catch (error) {
+    console.warn('[kestrel] could not read publish status:', (error as Error).message)
+  }
+  return out
+}
+
 /** Clear a route's status row — its static file was pruned (unpublish / delete / slug change), so it is no
  *  longer live. Idempotent; same missing-table resilience as `recordPublishStatus`. */
 export function clearPublishStatus(db: BetterSQLite3Database, route: string): void {

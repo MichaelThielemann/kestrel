@@ -75,7 +75,9 @@ describe('admin record editor (e2e, browser)', async () => {
     const page = await authedPage('/admin/posts/new')
     await page.getByLabel('title').waitFor()
     await expect.poll(async () => page.getByLabel('title').inputValue()).toBe('')
-    await page.getByRole('button', { name: 'Save' }).waitFor()
+    // `exact`: an accessible name matches by SUBSTRING and case-insensitively, so a bare 'Save' also
+    // hits the preview button's "Preview unsaved changes in a new tab".
+    await page.getByRole('button', { name: 'Save', exact: true }).waitFor()
   })
 
   it('drives the full create -> list -> edit -> delete loop through the UI', async () => {
@@ -84,7 +86,7 @@ describe('admin record editor (e2e, browser)', async () => {
     // create — a brand-new record saves into its OWN editor URL (not back to the list); the
     // post-save navigation to /admin/posts/<id> only happens once the create succeeds.
     await page.getByLabel('title').fill('Loop Alpha')
-    await page.getByRole('button', { name: 'Save' }).click()
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
     await page.waitForURL(/\/admin\/posts\/\d+/)
 
     // the list shows the new row
@@ -98,7 +100,7 @@ describe('admin record editor (e2e, browser)', async () => {
     await page.getByLabel('title').fill('Loop Beta')
     // wait for the save to round-trip (the toast text "Saved" collides with the editor-status ampel label)
     const savedEdit = page.waitForResponse((r) => /\/api\/posts\/\d+/.test(r.url()) && r.request().method() === 'PATCH')
-    await page.getByRole('button', { name: 'Save' }).click()
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
     await savedEdit
     await page.goto(url('/admin/posts'))
     await page.getByText('Loop Beta').waitFor()
@@ -155,7 +157,7 @@ describe('admin record editor (e2e, browser)', async () => {
     await page.getByLabel('Site Name', { exact: true }).fill('Acme Co')
     // wait for the PUT to round-trip (the toast text "Saved" collides with the editor-status ampel label)
     const saved = page.waitForResponse((r) => /\/api\/settings/.test(r.url()) && r.request().method() === 'PUT')
-    await page.getByRole('button', { name: 'Save' }).click()
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
     await saved
 
     // a fresh load reads the persisted singleton back through GET /api/settings
@@ -198,7 +200,7 @@ describe('admin record editor (e2e, browser)', async () => {
     await page.getByLabel('Heading').fill('My Hero')
     // wait for the PATCH to round-trip (the toast text "Saved" collides with the editor-status ampel label)
     const savedPage = page.waitForResponse((r) => /\/api\/pages\/\d+/.test(r.url()) && r.request().method() === 'PATCH')
-    await page.getByRole('button', { name: 'Save' }).click()
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
     await savedPage
 
     const reopened = await authedPage(`/admin/pages/${created.id}`)
@@ -207,5 +209,43 @@ describe('admin record editor (e2e, browser)', async () => {
     // label reserves for it, and that padding contains the button box's centre — where a bare click lands.
     await reopened.getByRole('button', { name: 'Hero' }).locator('.block-tree__node-name').click()
     await expect.poll(async () => reopened.getByLabel('Heading').inputValue()).toBe('My Hero')
+  })
+
+  // The feature ADR-0008 exists for: look at work in progress on the real page, in a real tab, without
+  // saving it and without publishing it.
+  it('previews unsaved changes in a new tab through a ticket — no save, no publish', async () => {
+    const created = await $fetch('/api/pages', {
+      method: 'POST',
+      headers: { cookie },
+      body: { title: 'Ticket Page', path: '/ticket-page', status: 'published' },
+    }) as { id: number }
+
+    const page = await authedPage(`/admin/pages/${created.id}`)
+    // The page editor also carries an SEO "Title", so take the first match — the page field — and prove
+    // it is the right one before typing into it.
+    const titleField = page.getByLabel('title').first()
+    await expect.poll(async () => titleField.inputValue()).toBe('Ticket Page')
+    await titleField.fill('Only in the preview')
+
+    // Any write here would be the bug this feature removes.
+    let wrote = false
+    page.on('request', (r) => {
+      if (/\/api\/pages/.test(r.url()) && ['PATCH', 'POST', 'PUT'].includes(r.method())) wrote = true
+    })
+
+    const [preview] = await Promise.all([
+      page.context().waitForEvent('page'),
+      page.getByRole('button', { name: 'Preview unsaved changes in a new tab' }).click(),
+    ])
+    // The tab opens blank (synchronously, so no popup blocker) and is redirected once the ticket is minted.
+    await preview.waitForURL(/kestrel-preview-token=/)
+    await preview.waitForLoadState('domcontentloaded')
+    await expect.poll(async () => preview.title()).toContain('Only in the preview')
+    await preview.getByText('Preview — unsaved changes, not published').waitFor()
+    expect(wrote).toBe(false)
+
+    // …and the stored record is untouched.
+    const stored = await $fetch(`/api/pages/${created.id}`, { headers: { cookie } }) as { title: string }
+    expect(stored.title).toBe('Ticket Page')
   })
 })

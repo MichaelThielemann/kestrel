@@ -66,19 +66,32 @@ skipped (see below).
 When `output.auto` is on (the default), the running server publishes the static site itself instead of
 relying on a separate `nuxt generate`:
 
-- **Auto-trigger.** Every content write is classified into an *invalidation* and an incremental
-  republish is enqueued (debounced + coalesced + single-flight). Only the affected routes re-render:
+- **Publish action.** Saving a record writes the DB and leaves the live site alone; **publishing** is the
+  separate action that writes the static file(s) — the editor's Publish button, or `POST /api/publish`
+  (`{ collection, ids }`, admin-only). It classifies the record into an *invalidation* and enqueues an
+  incremental republish (debounced + coalesced + single-flight). Only the affected routes re-render:
   a **durable** route→dependency index (`publish_deps`, survives restarts) maps an edited record back to
   exactly the pages that read it (the record's own detail page + any overview that lists it), so editing
   one record doesn't re-render the whole collection. What re-renders vs prunes per event (content edit /
   publish / unpublish / delete / slug change), and why an availability change re-renders the pages that
   link to the record as well, is the **invalidation model** in
   [reference-integrity.md](./reference-integrity.md). `sitemap.xml` / `robots.txt` regenerate too (a
-  `<lastmod>` may have changed).
+  `<lastmod>` may have changed). Publishing also prunes the record's own abandoned URLs — the file a
+  published rename left behind at the old path.
+- **Save-time removal.** A save still acts on the output in exactly one direction: **removal**. Unpublishing
+  or deleting a record prunes its page immediately (and re-renders what linked to it), because a page taken
+  offline must not stay live. Nothing is ever *rendered* by a save.
 - **Boot publish.** A full publish on startup resyncs this build's hashed `_nuxt` bundle and re-records
   every route's dependencies. Detached, so it never blocks boot.
 - **Reconciler.** An optional periodic full publish (`output.reconcileMinutes`, default `0` = off)
   self-heals any missed invalidation and picks up time-based publishing no write event would trigger.
+
+Both full publishes (boot and reconciler) **hold back routes with unpublished changes**: a route whose
+record was saved after its `publish_status` row keeps the file its last publish wrote, so a restart or a
+reconcile never puts work-in-progress on the live site. A route that has never been published is not held
+back — on a first deploy there is no older version to protect. `nuxt generate` is a build of the whole site
+from the current DB and makes no such distinction: a generate-based deploy publishes saved-but-unpublished
+edits along with everything else.
 
 The target is the same `output` block as the `generate` deploy — a local dir (default `.data/published`)
 or an S3 bucket. Pruning the static files of unpublished/deleted/renamed pages is **always on** (output ≡
@@ -128,8 +141,14 @@ Ampel dot below). In **dev** the publisher is off, so there are no rows and the 
 Public pages are also retrievable from the running CMS like a normal CMS, which powers an in-editor
 preview:
 
-- The editor toolbar has an **"open in new tab"** button (shown once a page has a saved, routable path)
-  that opens the record at its real public URL.
+- The editor toolbar has an **"open in new tab"** button. With no unsaved changes it opens the record at its
+  real public URL. With unsaved changes it opens a **preview ticket** instead of saving: the editor posts
+  its current form body to `POST /api/preview` (admin-only, session-bound, in-memory, ~10 min TTL) and opens
+  `<url>?kestrel-preview-token=…`, where the page lays those values over the stored record. Nothing is
+  written to the DB and nothing is published; the ticket is populated server-side on read, so media and
+  internal links resolve as they do on a real page, and the tab carries a "Preview — unsaved changes"
+  badge plus `noindex`. A record with no public URL (never saved, blank slug, non-pageLike) previews the
+  same way on `/__kestrel/preview`.
 - An authenticated admin can preview an **unpublished** page at that URL: the public render entry
   (`GET /api/route`) is readable by everyone but **scoped per principal** — anonymous and the static
   render stay published-only, while the admin session resolves drafts. A small "Draft preview" badge
@@ -140,7 +159,9 @@ preview:
   (pageLike collections only) is the live / **generated** state of this record's static page, read from
   `publish_status`: green (published and the route's last publish succeeded), red (the last publish
   errored — the tooltip shows the message, incl. S3, and when), amber (published but not generated yet —
-  republish in flight, or dev), blue (a Draft, intentionally not generated). The right dot carries a
+  republish in flight, or dev), amber **"Outdated"** (published, but the record was saved after that publish
+  — the live page is an older version, which is the normal state while editing), blue (a Draft,
+  intentionally not generated). The right dot carries a
   tooltip with the localized label, the last-published time, and the error text on a failure; it refreshes
   on load and after each save.
 

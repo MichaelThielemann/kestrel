@@ -465,10 +465,11 @@ export function removeMany(db: DB, c: BuiltCollection, ids: number[]): { count: 
 }
 
 /**
- * Publish / unpublish a batch of rows by persisting their `status` — NOT a separate publish path. Writing
- * `status` and emitting the SAME write event the editor save emits IS the publish: classifyWrite →
- * planInvalidation → the publish queue coalesces N emits into one incremental publish (PUBLISH renders the
- * self route, UNPUBLISH prunes the old route). ALL-OR-NOTHING like `removeMany` (a missing id 404s before
+ * Publish / unpublish a batch of rows by persisting their `status` — the record's public INTENT, not the
+ * static file. Since ADR-0008 those are two steps: this write emits the same event an editor save emits,
+ * and the public layer's listener acts on the removal half only (UNPUBLISH prunes the route at once, so a
+ * page taken offline can never stay live). Making a page appear is the explicit publish action
+ * (`POST /api/publish`). ALL-OR-NOTHING like `removeMany` (a missing id 404s before
  * any write). Validation (`assertConditions`) runs on PUBLISH ONLY — unpublishing must never be blockable
  * (you must always be able to take a broken page offline). Omits `update()`'s slug/transform branches,
  * which are provably inert for a status-only change.

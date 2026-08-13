@@ -17,10 +17,8 @@ function onSaved() {
   toast.success(t('toast.saved'))
 }
 
-function openPreview() {
-  const url = editorRef.value?.previewUrl
-  if (url) window.open(url, '_blank', 'noopener,noreferrer')
-}
+// Unsaved edits preview through a ticket instead of a save; the editor owns both paths (ADR-0008).
+const previewTitle = computed(() => t(editorRef.value?.dirty ? 'editor.previewUnsaved' : 'editor.openInNewTab'))
 
 // Guard in-app navigation away from unsaved changes — both record-change AND same-record `?locale`
 // switches (the LocaleBar's singleton locale switch reuses this route record → onBeforeRouteUpdate).
@@ -35,8 +33,10 @@ useUnsavedGuard(() => editorRef.value?.dirty ?? false, () => t('editor.discardCo
       <div class="singleton__actions">
         <UiButton type="button" variant="ghost" size="sm" icon="undo" :disabled="saving || !editorRef?.canUndo" :title="t('history.undo')" :aria-label="t('history.undo')" @click="editorRef?.undo()" />
         <UiButton type="button" variant="ghost" size="sm" icon="redo" :disabled="saving || !editorRef?.canRedo" :title="t('history.redo')" :aria-label="t('history.redo')" @click="editorRef?.redo()" />
-        <UiButton v-if="editorRef?.previewUrl" type="button" variant="ghost" size="sm" icon="external-link" :title="t('editor.openInNewTab')" :aria-label="t('editor.openInNewTab')" @click="openPreview" />
+        <UiButton type="button" variant="ghost" size="sm" icon="external-link" :title="previewTitle" :aria-label="previewTitle" :loading="editorRef?.previewOpening" @click="editorRef?.openPreview()" />
         <UiButton type="submit" :form="EDITOR_FORM_ID" variant="primary" size="sm" icon="check" :loading="saving">{{ t('common.save') }}</UiButton>
+        <!-- Publishing is its own decision: Save persists, Publish writes the static page (ADR-0008). -->
+        <UiButton type="button" variant="secondary" size="sm" icon="upload" :loading="editorRef?.publishing" :disabled="saving" @click="editorRef?.publish()">{{ t('common.publish') }}</UiButton>
         <EditorStatus class="singleton__ampel" :dirty="editorRef?.dirty ?? false" :saving="saving" :has-status="editorRef?.hasStatus ?? false" :status="editorRef?.status" :saved-status="editorRef?.savedStatus" :page-like="editorRef?.pageLike ?? false" :live="editorRef?.live" />
       </div>
     </div>

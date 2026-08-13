@@ -23,7 +23,7 @@ The publisher records, per published route, the tags it read while rendering —
 index (`publish_deps`) that **survives restarts**, so a page unpublished/deleted while the server was down
 is still pruned on the next boot. A write maps its changed tags back to exactly the routes they affect.
 
-What a write does, per event (the agreed model — `layers/public/server/utils/publish/invalidation.ts`):
+What each event invalidates (the agreed model — `layers/public/server/utils/publish/invalidation.ts`):
 
 | Event on record A | A's own static file | Listings (`<coll>`) | Explicit referrers (`<coll>:<id>`) |
 |---|---|---|---|
@@ -32,6 +32,12 @@ What a write does, per event (the agreed model — `layers/public/server/utils/p
 | Publish | render route | re-render (joins the set) | **re-render** (the baked `#` becomes the real path) |
 | Unpublish | **prune route file** | re-render (leaves the set) | **re-render** (link falls back to `#`) + warned |
 | Delete | prune route file (+ media derivatives) | re-render (leaves the collection) | **re-render** (link falls back to `#`) + warned |
+
+**When each row runs is a separate question from what it contains** (ADR-0008). A *save* only executes the
+rows that REMOVE output — Unpublish and Delete — and it executes them immediately, because a page taken
+offline must not stay live. Every rendering row waits for an explicit **publish** (`POST /api/publish`, the
+editor's Publish button, or the `publish:run` task), which plans exactly the same invalidation from the
+record's current state. So the table is the model; publishing is when it is applied.
 
 Two principles drive it:
 

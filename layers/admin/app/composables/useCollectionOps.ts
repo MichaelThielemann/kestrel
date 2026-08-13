@@ -45,9 +45,21 @@ export function useCollectionOps(collection: MaybeRefOrGetter<string>, onChanged
 
   const confirmDelete = (ids: number[]) => bulk('delete', ids)
   const duplicate = (ids: number[]) => bulk('duplicate', ids)
-  /** Persist a new status; the server's write pipeline (emitWrite) turns that into a publish/unpublish. */
-  const setStatus = (ids: number[], status: 'published' | 'draft') =>
-    bulk(status === 'published' ? 'publish' : 'unpublish', ids)
+  /**
+   * Persist a new status and, for a publish, write the static output too (ADR-0008). Two calls because
+   * they are two things: the bulk endpoint owns the DB write (validation, all-or-nothing, write events),
+   * `/api/publish` owns the render. Unpublishing needs no second call — the write event prunes the pages
+   * on its own, since taking a page offline must never wait for a separate action.
+   */
+  const setStatus = async (ids: number[], status: 'published' | 'draft'): Promise<BulkResult> => {
+    const res = await bulk(status === 'published' ? 'publish' : 'unpublish', ids)
+    if (status === 'published') {
+      // Best-effort: the records ARE published (the state the list shows); a failed render surfaces on the
+      // record's own status lamp, and re-pressing Publish retries it.
+      await $fetch('/api/publish', { method: 'POST', body: { collection: name(), ids } }).catch(() => null)
+    }
+    return res
+  }
 
   return { busy, error, previewDelete, confirmDelete, duplicate, setStatus }
 }

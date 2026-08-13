@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { localePath } from '../../../core/app/utils/locale-path'
+import { PREVIEW_TOKEN_QUERY, PREVIEW_FALLBACK_PATH } from '../../../public/app/utils/preview-protocol'
 import { resolveCollectionEditor } from '../utils/editor-registry'
 import { editorFormContextKey } from '../utils/editor-form-context'
 import '../utils/register-builtin-editors'
@@ -94,28 +95,117 @@ const liveStatus = usePublishStatus({
 // Carries "poll the live status on mount" across the create→navigate remount (see usePendingPublishPoll).
 const pendingPoll = usePendingPublishPoll()
 
+// ---- publish + external preview -------------------------------------------------------------------
+// Saving persists to the DB and leaves the live site alone; publishing writes the static file(s). The two
+// are separate buttons because they are separate decisions (ADR-0008) — you can save a page a dozen times
+// while the published version stays exactly as it was.
+const publishing = ref(false)
+const previewOpening = ref(false)
+
+/** Save (a publish publishes what you SEE), promote a draft, then write the output. */
+async function publish() {
+  if (publishing.value || saving.value) return
+  publishing.value = true
+  try {
+    // Pressing Publish IS the publish intent, so a draft is promoted here rather than sending the user to
+    // the status select first. A statusless collection has nothing to promote.
+    if (hasStatus.value && f.values.status !== 'published') f.setField('status', 'published')
+    const r = await submit()
+    if (!r.ok) {
+      revealError?.()
+      toast.error(formError.value || t('editor.saveFailed'))
+      return
+    }
+    saved.value = true
+    // The saved row's id, whatever the route param says — `single`/`new` are not ids.
+    const id = (r.record as { id?: number } | null)?.id ?? Number(props.id)
+    if (!Number.isInteger(id)) return
+    const since = liveStatus.data.value.updatedAt ?? null
+    // Awaited BEFORE `saved` is emitted: on a new record that emit navigates to the record's own URL and
+    // tears this instance down, which would cut the request short.
+    const res = await $fetch<{ generates: boolean; drafts: number[] }>('/api/publish', {
+      method: 'POST', body: { collection: props.collection, id },
+    }).catch(() => null)
+    // A create navigates to the new record's URL (a full remount), so this instance is gone before its
+    // poll could run — hand the intent to the arriving one instead.
+    if (props.id === 'new') pendingPoll.value = pageLike.value && !!res?.generates
+    emit('saved', r.record)
+    if (!res) { toast.error(t('editor.publishFailed')); return }
+    if (res.drafts.length) { toast.info(t('editor.publishDraft')); return }
+    if (!res.generates) { toast.info(t('editor.publishNotGenerated')); return }
+    toast.success(t('toast.published'))
+    void liveStatus.refreshUntilSettled({ since })
+  } finally {
+    publishing.value = false
+  }
+}
+
+/**
+ * Open the record in a new tab. Unsaved edits travel as a preview TICKET (a token in the URL) instead of
+ * being written to the DB: previewing must never be an unasked-for save. A saved, unmodified record just
+ * opens its URL.
+ *
+ * The tab is opened SYNCHRONOUSLY (about:blank) and redirected once the ticket is minted — a popup opened
+ * after an await is a popup blocker's textbook case. That costs `noopener`, which the direct path keeps;
+ * the target is our own origin either way.
+ */
+async function openPreview() {
+  const url = previewUrl.value
+  if (!dirty.value && props.id !== 'new' && url) {
+    window.open(url, '_blank', 'noopener,noreferrer')
+    return
+  }
+  const tab = window.open('', '_blank')
+  previewOpening.value = true
+  try {
+    const ticket = await $fetch<{ token: string }>('/api/preview', {
+      method: 'POST',
+      body: {
+        collection: props.collection,
+        id: Number.isInteger(Number(props.id)) ? Number(props.id) : null, // 'new' / 'single' have no id
+        locale: f.locale.value,
+        values: f.buildBody(),
+      },
+    }).catch(() => null)
+    if (!ticket) {
+      tab?.close()
+      toast.error(t('editor.previewFailed'))
+      return
+    }
+    // No public URL (never saved, blank slug, non-pageLike) → the dedicated preview page renders the
+    // ticket in the real public app instead.
+    const base = url ?? `${PREVIEW_FALLBACK_PATH}?locale=${encodeURIComponent(f.locale.value)}`
+    const target = `${base}${base.includes('?') ? '&' : '?'}${PREVIEW_TOKEN_QUERY}=${encodeURIComponent(ticket.token)}`
+    if (tab) tab.location.replace(target)
+    else window.open(target, '_blank', 'noopener,noreferrer') // popup blocked → try once more, directly
+  } finally {
+    previewOpening.value = false
+  }
+}
+
 // The record-editor page renders the action toolbar (Save/Cancel/Delete + Undo/Redo) in its header: it
 // submits this form by id (formId), reads the in-flight `saving` for the button state, drives the
 // unsaved-changes guard off `dirty`, and the undo/redo controls off the history API exposed here.
 // The exposed shape IS the `EditorExpose` contract (utils/editor-expose.ts) — keep them in sync.
-defineExpose({ dirty, saving, undo, redo, canUndo, canRedo, hasStatus, status, savedStatus, previewUrl, pageLike, live: liveStatus.data, recordTitle: heading })
+defineExpose({
+  dirty, saving, undo, redo, canUndo, canRedo, hasStatus, status, savedStatus, previewUrl, pageLike,
+  live: liveStatus.data, recordTitle: heading, publish, publishing, openPreview, previewOpening,
+})
 
 async function onSave() {
+  // Read BEFORE the save: a successful submit rebaselines, after which the saved status is the new one.
+  const wasPublished = savedStatus.value === 'published'
   const r = await submit()
   if (r.ok) {
     saved.value = true
-    // The save may have (re)published the page. A PUBLISHED page republishes asynchronously (a debounced
-    // queue) in prod, so poll the right lamp until it settles (Live / Error) rather than catching only the
-    // in-flight state; `since` is the pre-save row timestamp so a stale prior success/error can't settle the
-    // poll early. A DRAFT produces no file → a single refresh (to reflect the draft / cleared row).
-    const wasNew = props.id === 'new'
-    const isDraft = hasStatus.value && status.value === 'draft'
+    // A save publishes nothing (ADR-0008), so there is no in-flight republish to poll for — one refresh,
+    // which is what turns the right lamp to "Outdated": still live, now an older version than the record.
+    // An unpublish is the exception the write path still acts on, and its prune is enqueued the same
+    // debounced way, so that case polls until the row clears.
+    const unpublished = hasStatus.value && wasPublished && status.value === 'draft'
     const since = liveStatus.data.value.updatedAt ?? null
-    // A create navigates the editor to the new record's URL (a full remount), so this `new` instance is
-    // torn down before its poll could run — hand the intent to the arriving instance instead.
-    if (wasNew) pendingPoll.value = pageLike.value && !isDraft
     emit('saved', r.record)
-    if (!wasNew) void (isDraft ? liveStatus.refresh() : liveStatus.refreshUntilSettled({ since }))
+    if (props.id !== 'new') void (unpublished ? liveStatus.refreshUntilSettled({ since }) : liveStatus.refresh())
     return
   }
   // Save failed — let the active body reveal the problem (the blocks body focuses the offending block /

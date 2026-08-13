@@ -45,7 +45,20 @@ const { data: resolved, error: resolveError } = await useAsyncData(`page:${local
     site?: SiteHead | null
   }),
 )
-const page = computed(() => resolved.value?.page ?? null)
+// Ticket preview (ADR-0008): `?kestrel-preview-token=…` carries the editor's UNSAVED state, so an external
+// tab can show work in progress without a save and without publishing. The ticket is admin-only and
+// session-bound server-side; an expired/foreign/unknown one reads as null and the saved record renders.
+const previewToken = route.query[PREVIEW_TOKEN_QUERY]
+const { data: ticket } = typeof previewToken === 'string' && previewToken
+  ? await useAsyncData(`kestrel-preview-ticket:${previewToken}`, () =>
+      requestFetch('/api/preview', { query: { token: previewToken } })
+        .then((r) => r as { payload?: { values?: Record<string, unknown> } } | null)
+        .catch(() => null))
+  : { data: ref<{ payload?: { values?: Record<string, unknown> } } | null>(null) }
+const previewValues = computed(() => ticket.value?.payload?.values ?? null)
+const previewingTicket = computed(() => previewValues.value !== null)
+
+const page = computed(() => previewPage(resolved.value?.page ?? null, previewValues.value) as (RenderedPage & Record<string, unknown>) | null)
 // `fallback` below only rescues a truthy name that is missing from the layout map, so the empty cases have
 // to be coalesced here — see resolvePageLayout. The cast is the one honest bridge in this file: the stored
 // name is arbitrary editor data, while `NuxtLayout` types `name` as the union of layouts that existed at
@@ -60,13 +73,20 @@ const pageState = usePublicPageState()
 watchEffect(() => {
   pageState.value = {
     collection: resolved.value?.collection ?? null,
-    page: resolved.value?.page ?? null,
+    page: page.value,
   }
 })
 
 // A draft only ever resolves here for an authenticated admin (anonymous + the static render are
 // published-only), so its presence is an unambiguous "you are previewing an unpublished page" signal.
 const isDraftPreview = computed(() => page.value?.status === 'draft')
+
+// What this tab is actually showing, when it is not the live page. A ticket outranks the draft notice: the
+// content on screen was never saved at all, which is the stronger caveat.
+const previewNotice = computed(() => {
+  if (previewingTicket.value) return 'Preview — unsaved changes, not published'
+  return isDraftPreview.value ? 'Draft preview — not published' : ''
+})
 
 // Editor live-preview mode: `?kestrel-preview=1` AND an authenticated admin session. The session is
 // checked server-side (cookies forwarded, same seam as the draft fetch above) so SSR and hydration
@@ -129,7 +149,8 @@ useHead({
 useSeoMeta({
   title: documentTitle,
   description: fallbacks.description,
-  robots: seo.noindex ? 'noindex, nofollow' : undefined,
+  // A ticket preview is unsaved content at a real URL — never indexable, whatever the record's own SEO says.
+  robots: previewingTicket.value || seo.noindex ? 'noindex, nofollow' : undefined,
   ogTitle: head.meta.ogTitle,
   ogDescription: head.meta.ogDescription,
   ogUrl: head.meta.ogUrl,
@@ -148,9 +169,9 @@ useSeoMeta({
       <!-- Only ever shown to an authenticated admin previewing an unpublished page (drafts never resolve
            for anonymous visitors or the static render), so it never ships to the public/static site.
            Suppressed inside the editor preview iframe — the editor's own status ampel covers it. -->
-      <div v-if="isDraftPreview && !previewActive" class="kestrel-draft-badge" role="status">
+      <div v-if="previewNotice && !previewActive" class="kestrel-draft-badge" role="status">
         <span class="kestrel-draft-badge__dot" aria-hidden="true" />
-        Draft preview — not published
+        {{ previewNotice }}
       </div>
       <!-- Editor preview: the bridge swaps in the editor's live (unsaved) tree over postMessage and makes
            blocks selectable; the saved content renders until the first message. Normal path unchanged. -->

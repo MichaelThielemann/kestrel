@@ -4,6 +4,7 @@ import type { Catalog } from '../composables/useT'
 export const de: Catalog = {
   'common.new': '{label} anlegen',
   'common.save': 'Speichern',
+  'common.publish': 'Veröffentlichen',
   'common.cancel': 'Abbrechen',
   'common.create': 'Erstellen',
   'common.delete': 'Löschen',
@@ -142,6 +143,11 @@ export const de: Catalog = {
   'pageSettings.statusPublished': 'Veröffentlicht',
 
   'editor.openInNewTab': 'In neuem Tab öffnen',
+  'editor.previewUnsaved': 'Ungespeicherte Änderungen in neuem Tab ansehen',
+  'editor.previewFailed': 'Vorschau konnte nicht geöffnet werden.',
+  'editor.publishFailed': 'Veröffentlichen fehlgeschlagen.',
+  'editor.publishNotGenerated': 'Statischer Output ist in dieser Umgebung aus — es wurde nichts geschrieben.',
+  'editor.publishDraft': 'Ein Entwurf hat keine öffentliche Seite. Zum Veröffentlichen den Status auf Veröffentlicht setzen.',
   // editor status light — LEFT lamp: ONE word + details tooltip (save/publish status)
   'editorStatus.word.saving': 'Speichert…',
   'editorStatus.word.unsaved': 'Ungespeichert',
@@ -159,9 +165,11 @@ export const de: Catalog = {
   'editorStatus.word.notBuilt': 'Nicht gebaut',
   'editorStatus.word.notLive': 'Nicht live',
   'editorStatus.word.error': 'Fehler',
+  'editorStatus.word.outdated': 'Veraltet',
   'editorStatus.live.liveS3': 'Live — Seite auf S3 abgelegt.',
   'editorStatus.live.liveLocal': 'Live — Seite in den statischen Output geschrieben.',
   'editorStatus.live.pending': 'Wird veröffentlicht…',
+  'editorStatus.live.outdated': 'Gespeichert, aber nicht veröffentlicht — live steht noch die zuletzt veröffentlichte Fassung.',
   'editorStatus.live.notBuilt': 'In dieser Umgebung nicht generiert — die statische Seite wird beim Deploy gebaut.',
   'editorStatus.live.error': 'Generieren der statischen Seite fehlgeschlagen.',
   'editorStatus.live.draft': 'Entwurf — nicht generiert. Erscheint erst nach Veröffentlichung auf der Live-Seite.',

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { classifyWrite, planInvalidation, routesToPrune } from './invalidation'
+import { classifyWrite, planInvalidation, planSaveInvalidation, routesToPrune } from './invalidation'
 
 describe('routesToPrune', () => {
   it('never prunes a route that was just rendered live (render wins a coalesced render+prune collision)', () => {
@@ -120,6 +120,58 @@ describe('classifyWrite + planInvalidation — precise per-case invalidation mod
     const ev = classifyWrite(page, { path: '/x', status: 'published' }, { path: '/x', status: 'draft' }, 'en')
     expect(ev.id).toBe(null)
     expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages'], render: [], prune: ['/x'] })
+  })
+})
+
+// Saving writes the DB; only an explicit publish writes static files. A save may still REMOVE output —
+// a page that left the published set (or the collection) must not stay live while its record says
+// otherwise — but it never renders one. Everything renderable waits for `planInvalidation`.
+describe('planSaveInvalidation — a save removes, never renders', () => {
+  it('published content edit → noop (the live file keeps the last published content until you publish)', () => {
+    const ev = classifyWrite(page, pub(), pub({ title: 'edited' }), 'en')
+    expect(planSaveInvalidation(ev)).toEqual({ type: 'noop' })
+    // …while an explicit publish of the same write does render it.
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: ['/spk/a'], prune: [] })
+  })
+
+  it('slug change → noop: the old file stays live at the old URL until the rename is published', () => {
+    const ev = classifyWrite(page, pub({ path: '/x' }), pub({ path: '/y' }), 'en')
+    expect(planSaveInvalidation(ev)).toEqual({ type: 'noop' })
+  })
+
+  it('flipping the status select to published → noop (the Publish action writes the file)', () => {
+    const ev = classifyWrite(page, pub({ status: 'draft' }), pub({ status: 'published' }), 'en')
+    expect(planSaveInvalidation(ev)).toEqual({ type: 'noop' })
+  })
+
+  it('creating a published record → noop (nothing is live until it is published)', () => {
+    const ev = classifyWrite(page, null, pub({ id: 1, path: '/x' }), 'en')
+    expect(planSaveInvalidation(ev)).toEqual({ type: 'noop' })
+  })
+
+  it('UNPUBLISH stays immediate — a page taken offline must not remain live', () => {
+    const ev = classifyWrite(page, pub({ status: 'published' }), pub({ status: 'draft' }), 'en')
+    expect(planSaveInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: [], prune: ['/spk/a'] })
+  })
+
+  it('DELETE stays immediate — the artifact of a record that no longer exists is pruned', () => {
+    const ev = classifyWrite(page, pub({ id: 1, path: '/x' }), null, 'en')
+    expect(planSaveInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:1'], render: [], prune: ['/x'] })
+  })
+
+  it('unpublish + rename in one save prunes the OLD (live) route', () => {
+    const ev = classifyWrite(page, pub({ status: 'published', path: '/old' }), pub({ status: 'draft', path: '/new' }), 'en')
+    expect(planSaveInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: [], prune: ['/old'] })
+  })
+
+  it('deleting a non-pageLike row still re-renders the listings that read it', () => {
+    const ev = classifyWrite(data, { id: 5 }, null, 'en')
+    expect(planSaveInvalidation(ev)).toEqual({ type: 'tags', tags: ['speakers', 'speakers:5'], render: [], prune: [] })
+  })
+
+  it('draft churn → noop', () => {
+    const ev = classifyWrite(page, pub({ status: 'draft' }), pub({ status: 'draft', title: 'x' }), 'en')
+    expect(planSaveInvalidation(ev)).toEqual({ type: 'noop' })
   })
 })
 

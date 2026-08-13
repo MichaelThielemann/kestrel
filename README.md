@@ -186,9 +186,11 @@ Two ways to produce the static output:
 
 - **One-shot:** `pnpm generate` → `.output/public` (the classic full rebuild).
 - **Runtime publisher (default):** a **production** run (`pnpm build && pnpm preview`, or
-  `node .output/server/index.mjs`) publishes on boot and incrementally re-publishes the affected pages on
-  every content write, into `output.dir` (default `.data/published`). Serve that dir with any static
-  server, e.g. `npx serve .data/published`.
+  `node .output/server/index.mjs`) publishes on boot and incrementally re-publishes the affected pages when
+  you press **Publish** in the editor, into `output.dir` (default `.data/published`). Saving is a DB write
+  and leaves the live page alone (unpublishing and deleting still take a page down at once) — see
+  [ADR-0008](docs/architecture-decisions.md). Serve that dir with any static server, e.g.
+  `npx serve .data/published`.
 
 The runtime publisher is **intentionally disabled in `pnpm dev`** (a dev render would write un-hashed Vite
 HTML), so the static files only appear on a production run. In dev you instead get the **live preview**:

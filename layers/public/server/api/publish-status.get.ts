@@ -2,6 +2,7 @@ import { eq, getTableColumns } from 'drizzle-orm'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import { publishStatus } from '../database/publish-status'
 import { routeForRecord } from '../utils/publish/route-for-record'
+import { hasPendingChanges } from '../utils/publish/pending'
 
 /**
  * Admin-only read of the LIVE publish state of a record's static page (`?collection=&id=`). Admin-only by
@@ -24,21 +25,25 @@ export default defineEventHandler((event) => {
   const name = typeof q.collection === 'string' ? q.collection : ''
   const id = Number(typeof q.id === 'string' ? q.id : NaN)
   const c = getCollection(name)
-  if (!c || !c.def.pageLike || !Number.isInteger(id) || id <= 0) return { route: null, status: null, ...env }
+  if (!c || !c.def.pageLike || !Number.isInteger(id) || id <= 0) return { route: null, status: null, pending: false, ...env }
 
   const db = useDb()
   const table = c.table as AnySQLiteTable
   const cols = getTableColumns(table) as Record<string, never>
-  const row = db.select().from(table).where(eq(cols.id, id)).get() as { path?: unknown; locale?: unknown } | undefined
+  const row = db.select().from(table).where(eq(cols.id, id)).get() as { path?: unknown; locale?: unknown; updatedAt?: unknown } | undefined
   const route = routeForRecord(row, true, primaryLocale(), prefixPrimaryLocale())
-  if (!route) return { route: null, status: null, ...env }
+  if (!route) return { route: null, status: null, pending: false, ...env }
 
+  // Saved after it was last published: with publishing deferred to an explicit action, that is the normal
+  // working state of a page being edited — the live file is the previous version until someone publishes.
+  const savedAt = row?.updatedAt instanceof Date ? row.updatedAt.getTime() : null
   try {
     const st = db.select().from(publishStatus).where(eq(publishStatus.route, route)).get()
-    if (!st) return { route, status: null, ...env }
-    return { route, status: st.status, error: st.error, updatedAt: st.updatedAt, target: st.target, ...env }
+    if (!st) return { route, status: null, pending: false, ...env }
+    const pending = hasPendingChanges(savedAt, st.updatedAt instanceof Date ? st.updatedAt.getTime() : null)
+    return { route, status: st.status, error: st.error, updatedAt: st.updatedAt, target: st.target, pending, ...env }
   } catch {
     // publish_status not migrated yet → treat as "no status" rather than a 500.
-    return { route, status: null, ...env }
+    return { route, status: null, pending: false, ...env }
   }
 })

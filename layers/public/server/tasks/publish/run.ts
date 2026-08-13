@@ -5,7 +5,8 @@ import { createSqlitePersistence } from '../../utils/publish/deps-persistence'
 /**
  * The shared publish engine, exposed as a Nitro task. Renders every published page (+ sitemap/robots)
  * via the live server, mirrors `_nuxt`/assets, and always prunes the routes that left the published set
- * (output ≡ DB).
+ * (output ≡ DB). Like every full publish it HOLDS BACK routes with unpublished changes (ADR-0008) — a
+ * resync must not push work in progress live; those pages go out when they are published.
  *
  * Triggering (Nuxt 4.4 / Nitro 2.13 — there is NO `nuxi task run`):
  *   - dev:  GET http://localhost:3000/_nitro/tasks/publish:run   (the dev-only task route; plumbing smoke test)

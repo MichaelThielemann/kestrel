@@ -9,6 +9,17 @@ Releases before 1.7.0 are documented by their tags and commit history.
 
 ### Changed
 
+- **Saving no longer publishes.** A save writes the DB; the new **Publish** button (right of Save in the
+  record and singleton editors, or `POST /api/publish`) writes the static file(s) to the configured output.
+  Editing a published page therefore leaves the live page exactly as it was until you publish — which is
+  what makes previewing safe. Two deliberate exceptions keep the output honest: **unpublishing and deleting
+  still prune immediately** (a page taken offline must not stay live), and a **full publish** (boot /
+  reconciler) holds back routes whose record was saved after their last publish instead of pushing
+  work-in-progress live. A route that was never published is still rendered by the boot publish, so a first
+  deploy behaves as before. `nuxt generate` is unchanged: it builds the whole site from the current DB.
+  Upgrading an existing project: nothing breaks, but content edits now need the Publish step. See
+  [ADR-0008](docs/architecture-decisions.md).
+
 - **The richtext allowlist no longer accepts `img`, `figure`, `figcaption` or `table` markup.** It used to,
   but no editor extension can parse any of them: such content — which can only arrive through the API, a
   seed or a migration, never through the editor — was displayed as bare text and deleted by the first
@@ -16,6 +27,18 @@ Releases before 1.7.0 are documented by their tags and commit history.
   instead of latent. Images belong in a media field or an image block; tables await an editor that can
   hold them. A test now asserts that the allowlist and the editor's schema agree, so widening one without
   the other fails the suite.
+
+### Added
+
+- **Preview unsaved changes in a real tab.** The editor's open-in-new-tab button no longer only shows the
+  last saved state: with unsaved changes it mints a short-lived, admin-only, session-bound **preview
+  ticket** (`POST /api/preview`) and opens `<url>?kestrel-preview-token=…`. The page renders the editor's
+  current values over the stored record — populated server-side, so media and internal links resolve —
+  marked with a "Preview — unsaved changes" badge and `noindex`. Nothing is saved and nothing is published.
+  Records with no public URL (never saved, blank slug, non-pageLike) preview the same way on
+  `/__kestrel/preview`.
+- **An "Outdated" state in the editor's live lamp** — published, but the record has been saved since, so the
+  live page is an older version. `GET /api/publish-status` reports it as `pending`.
 
 ### Fixed
 

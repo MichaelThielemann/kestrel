@@ -17,12 +17,13 @@ const { allPublishedRoutes, publishFull } = await import('./publisher')
 
 // Drizzle tables whose columns match a `pageLike` collection: `pages` matches its SQL table, `posts`
 // declares a `status` column the SQL table does not have (a drifted / unmigrated deploy) so its SELECT throws.
-const pagesTable = sqliteTable('pages', { id: integer('id').primaryKey(), path: text('path'), status: text('status') })
+const pagesTable = sqliteTable('pages', { id: integer('id').primaryKey(), path: text('path'), status: text('status'), updatedAt: integer('updated_at', { mode: 'timestamp_ms' }) })
 const postsTable = sqliteTable('posts', { id: integer('id').primaryKey(), path: text('path'), status: text('status') })
 
 const pages = { def: { name: 'pages', pageLike: true, status: true }, table: pagesTable }
 const posts = { def: { name: 'posts', pageLike: true, status: true }, table: postsTable }
 
+let sqlite: Database.Database
 let db: BetterSQLite3Database
 let collections: unknown[]
 let saveDiscovered: ReturnType<typeof vi.fn>
@@ -48,8 +49,8 @@ function fakeDriver() {
 }
 
 beforeEach(() => {
-  const sqlite = new Database(':memory:')
-  sqlite.exec('CREATE TABLE pages (id INTEGER PRIMARY KEY, path TEXT, status TEXT)')
+  sqlite = new Database(':memory:')
+  sqlite.exec('CREATE TABLE pages (id INTEGER PRIMARY KEY, path TEXT, status TEXT, updated_at INTEGER)')
   sqlite.exec('CREATE TABLE posts (id INTEGER PRIMARY KEY, path TEXT)') // drifted: no `status` column
   sqlite.exec('CREATE TABLE publish_status (route TEXT PRIMARY KEY NOT NULL, status TEXT NOT NULL, error TEXT, target TEXT NOT NULL, updated_at INTEGER NOT NULL)')
   sqlite.exec("INSERT INTO pages (id, path, status) VALUES (1, '/a', 'published')")
@@ -77,7 +78,14 @@ afterEach(() => { vi.restoreAllMocks() })
 describe('allPublishedRoutes', () => {
   it('enumerates every published page-like route plus the site root', () => {
     collections = [pages]
-    expect(allPublishedRoutes()).toEqual({ routes: ['/', '/a'], failed: [] })
+    const { routes, failed } = allPublishedRoutes()
+    expect({ routes, failed }).toEqual({ routes: ['/', '/a'], failed: [] })
+  })
+
+  it('carries each route\'s last-saved stamp, so a full publish can tell published content from newer edits', () => {
+    collections = [pages]
+    sqlite.exec('UPDATE pages SET updated_at = 5000 WHERE id = 1')
+    expect(allPublishedRoutes().savedAt.get('/a')).toBe(5000)
   })
 
   it('reports the collections whose query failed instead of silently dropping their routes', () => {
@@ -121,6 +129,53 @@ describe('publishFull — prune safety on an incomplete enumeration', () => {
     collections = [pages]
     await publishFull(driver, new DepsStore())
     expect(saveDiscovered).toHaveBeenCalled()
+  })
+})
+
+// A full publish (boot / reconciler) resynchronizes the output with the DB — which, with publishing
+// deferred to an explicit action, would push every saved-but-unpublished edit live behind the editor's
+// back. Those routes keep the file they were last published with instead.
+describe('publishFull — saved-but-unpublished edits stay unpublished', () => {
+  const publishedAt = (route: string, seconds: number) =>
+    sqlite.exec(`INSERT INTO publish_status (route, status, target, updated_at) VALUES ('${route}', 'success', 'local', ${seconds})`)
+
+  beforeEach(() => {
+    collections = [pages]
+    sqlite.exec("INSERT INTO pages (id, path, status, updated_at) VALUES (2, '/b', 'published', 9000)")
+  })
+
+  it('skips a route whose record was saved after its last publish', async () => {
+    sqlite.exec('UPDATE pages SET updated_at = 9000 WHERE id = 1')
+    publishedAt('/a', 2) // /a published at t=2s, saved again at t=9s → pending
+    publishedAt('/b', 20) // /b published after its last save → still current
+    const result = await publishFull(driver, new DepsStore())
+    expect(driver.written).not.toContain('a/index.html')
+    expect(driver.written).toContain('b/index.html')
+    expect(result.rendered).toBe(2) // `/` and `/b`
+  })
+
+  it('never prunes a skipped route — its published file is what the site is still serving', async () => {
+    sqlite.exec('UPDATE pages SET updated_at = 9000 WHERE id = 1')
+    publishedAt('/a', 2)
+    const deps = new DepsStore()
+    deps.record('/a', ['pages'])
+    await publishFull(driver, deps)
+    expect(driver.deleted).toEqual([])
+    expect(deps.routes()).toContain('/a')
+  })
+
+  it('still renders a published route that was never published to a file (a first deploy has nothing to protect)', async () => {
+    sqlite.exec('UPDATE pages SET updated_at = 9000 WHERE id = 1')
+    const result = await publishFull(driver, new DepsStore())
+    expect(driver.written).toContain('a/index.html')
+    expect(result.rendered).toBe(3)
+  })
+
+  it('does not narrow the variant registry when a route was skipped (its live file still uses those variants)', async () => {
+    sqlite.exec('UPDATE pages SET updated_at = 9000 WHERE id = 1')
+    publishedAt('/a', 2)
+    await publishFull(driver, new DepsStore())
+    expect(saveDiscovered).not.toHaveBeenCalled()
   })
 })
 

@@ -63,6 +63,11 @@ const live = computed<{ tone: 'green' | 'red' | 'amber' | 'blue' | 'neutral'; wo
   if (s === 'error')
     return { tone: 'red', word: t('editorStatus.word.error'), detail: t('editorStatus.live.error'), when: updatedAtLabel.value, error: props.live?.error ?? '' }
   if (s === 'success') {
+    // Saved after the last publish: the file IS live, but it is an older version of this record. Saving no
+    // longer republishes (ADR-0008), so this is the normal state of a page being worked on — amber, not red.
+    if (props.live?.pending) {
+      return { tone: 'amber', word: t('editorStatus.word.outdated'), detail: t('editorStatus.live.outdated'), when: updatedAtLabel.value }
+    }
     // Where the file actually landed — surface local vs S3 in the tooltip ("stored on S3").
     const onS3 = (props.live?.target ?? props.live?.driver) === 's3'
     return { tone: 'green', word: t('editorStatus.word.live'), detail: t(onS3 ? 'editorStatus.live.liveS3' : 'editorStatus.live.liveLocal'), when: updatedAtLabel.value }
