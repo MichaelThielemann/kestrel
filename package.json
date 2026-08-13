@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "A slim, collection-driven Nuxt 4 CMS meta-layer with a runtime schema engine. Add `extends: ['@michaelthielemann/kestrel']`, define collections, and the database migrates itself.",
   "license": "Apache-2.0",
   "author": "Michael Thielemann <283621694+MichaelThielemann@users.noreply.github.com>",
