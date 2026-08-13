@@ -167,6 +167,7 @@ pnpm generate       # render the static public site to .output/public
 pnpm test           # node + happy-dom unit tests
 pnpm test:nuxt      # Nuxt-environment component tests
 pnpm test:e2e       # end-to-end tests (real dev server)
+pnpm lint           # ESLint (Nuxt-aware, generated from the playground)
 
 pnpm db:generate    # drizzle-kit: generate a migration
 pnpm db:migrate     # drizzle-kit: apply migrations

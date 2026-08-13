@@ -44,6 +44,7 @@
   "engines": {
     "node": ">=22.12.0"
   },
+  "//lint": "The root eslint.config.mjs imports the generated playground/.nuxt/eslint.config.mjs (Nuxt-aware: auto-import globals for every layer + extension) — `nuxt prepare` must run first or that import 404s on a fresh checkout. Cheap on a warm .nuxt cache, so it's chained rather than a separate step.",
   "scripts": {
     "dev": "nuxt dev",
     "build": "nuxt build",
@@ -56,6 +57,7 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:nuxt": "vitest run --config vitest.nuxt.config.ts",
     "typecheck": "node scripts/typecheck.mjs",
+    "lint": "nuxt prepare playground && eslint .",
     "hash-password": "node scripts/hash-password.mjs"
   },
   "dependencies": {
@@ -110,11 +112,14 @@
     }
   },
   "devDependencies": {
+    "@nuxt/eslint": "^1.9.0",
     "@nuxt/kit": "^4.5.2",
     "@nuxt/test-utils": "^4.1.0",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/test-utils": "^2.4.11",
     "drizzle-kit": "^0.31.10",
+    "eslint": "^9.39.1",
+    "eslint-plugin-vuejs-accessibility": "^2.4.1",
     "h3": "^1.15.11",
     "happy-dom": "^20.11.2",
     "playwright-core": "^1.62.1",

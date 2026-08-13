@@ -3,6 +3,11 @@
 export default defineNuxtConfig({
   compatibilityDate: '2026-06-02',
   future: { compatibilityVersion: 4 },
+  // ESLint lives on the playground, not the root config: the root ships to consumers via `files` (see
+  // package.json's `//publish`), and a published layer must not force its own lint tooling into a
+  // consumer's build. The playground composes every layer + both extensions, so linting it from the
+  // generated `.nuxt/eslint.config.mjs` covers the whole monorepo's auto-imports in one project-aware pass.
+  modules: ['@nuxt/eslint'],
   // Core first (by path), then the opt-in extensions (workspace-linked by package name — an external
   // consumer would `pnpm add` them and use the same names here). Proofing extends the base, so it comes last.
   extends: ['..', '@michaelthielemann/kestrel-galleries-secure', '@michaelthielemann/kestrel-galleries-secure-proofing'],
