@@ -46,7 +46,7 @@ export default {
     dir: '.data/published',           // local dir for the published HTML + synced _nuxt (relative → root)
     publicDir: '.output/public',      // source of the built client bundle the publisher mirrors in
     auto: true,                       // run the publisher in-process (publishing is an explicit action)
-    publishOnSave: false,             // true → every save republishes again (pre-1.8 model, no Publish button)
+    publishOnSave: false,             // true → every save republishes again (pre-2.0 model, no Publish button)
     reconcileMinutes: 0,              // >0 → full re-publish every N min (self-heals a missed invalidation)
     verbose: false,                   // per-route render/prune log lines on each republish
     s3: {                             // used only when driver: 's3'

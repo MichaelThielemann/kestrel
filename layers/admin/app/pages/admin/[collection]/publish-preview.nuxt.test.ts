@@ -85,7 +85,7 @@ describe('record editor — Save and Publish are separate actions', () => {
     expect(labels.indexOf('Publish')).toBe(labels.indexOf('Save') + 1)
   })
 
-  // `output.publishOnSave` is the way back to the pre-1.8 model, where a save republished on its own.
+  // `output.publishOnSave` is the way back to the pre-2.0 model, where a save republished on its own.
   it('drops the Publish button when the consumer turned the split off', async () => {
     calls.publishOnSave = true
     const w = await mountSuspended(RecordPage)

@@ -157,7 +157,7 @@ describe('resolveKestrel — precedence is KESTREL_* env → config → default 
     expect(resolveKestrel({ output: { verbose: false } }, { KESTREL_OUTPUT_VERBOSE: 'true' }, root).output.verbose).toBe(true)
     expect(resolveKestrel({ output: { verbose: true } }, {}, root).output.verbose).toBe(true) // config used when env absent
     // publishOnSave: the opt-out of the save/publish split (ADR-0008). Default OFF — publishing is its own
-    // action; `true` restores the pre-1.8 behaviour where every save republished.
+    // action; `true` restores the pre-2.0 behaviour where every save republished.
     expect(resolveKestrel({}, {}, root).output.publishOnSave).toBe(false)
     expect(resolveKestrel({ output: { publishOnSave: true } }, {}, root).output.publishOnSave).toBe(true)
     expect(resolveKestrel({}, { KESTREL_OUTPUT_PUBLISH_ON_SAVE: 'true' }, root).output.publishOnSave).toBe(true)

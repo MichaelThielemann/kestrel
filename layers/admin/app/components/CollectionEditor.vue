@@ -101,7 +101,7 @@ const pendingPoll = usePendingPublishPoll()
 // while the published version stays exactly as it was.
 const publishing = ref(false)
 const previewOpening = ref(false)
-// `output.publishOnSave` turns the split off again (a save republishes, as before 1.8) — then a Publish
+// `output.publishOnSave` turns the split off again (a save republishes, as before 2.0) — then a Publish
 // button would have nothing to do, so the hosts hide it. Reported by /api/publish-status; unknown (a
 // never-saved record, which does not fetch it) reads as the default, i.e. the button stays.
 const publishOnSave = computed(() => liveStatus.data.value.publishOnSave === true)

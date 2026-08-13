@@ -5,7 +5,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
-## [Unreleased]
+## [Unreleased] — 2.0.0
+
+The major is for one behaviour, not for an API break: **saving a record no longer publishes it**. Nothing
+was removed and no consumer code has to change, but the moment content reaches the live site moved, and a
+project that relied on the old timing must say so explicitly (`output.publishOnSave: true`). Everything
+else in this release — the richtext fixes below — would have been 1.8.0; it never shipped.
 
 > ### ⚠ Breaking behaviour change — read before upgrading
 >
@@ -15,7 +20,7 @@ Releases before 1.7.0 are documented by their tags and commit history.
 > press Publish (or the bulk Publish action) for a change to reach the static output.
 >
 > **Action required, per project, if you want the old behaviour:** set `output.publishOnSave: true` in
-> `kestrel.config.ts` (or `KESTREL_OUTPUT_PUBLISH_ON_SAVE=1`). That restores 1.7.x exactly — every write
+> `kestrel.config.ts` (or `KESTREL_OUTPUT_PUBLISH_ON_SAVE=1`). That restores the 1.x behaviour exactly — every write
 > republishes, the Publish button disappears, and a full publish holds nothing back.
 >
 > **Unaffected:** unpublishing and deleting still take a page down immediately, `nuxt generate` still

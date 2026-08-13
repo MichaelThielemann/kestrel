@@ -86,7 +86,7 @@ export function classifyWrite(def: WriteCollection, before: Row, after: Row, pri
 
 /**
  * What the write listener enqueues for a content write. `publishOnSave` (`output.publishOnSave`) is the
- * documented way back to the pre-1.8 model where a save WAS a publish: with it on, a write plans exactly
+ * documented way back to the pre-2.0 model where a save WAS a publish: with it on, a write plans exactly
  * what it always did. Off (the default), only removals pass — see `planSaveInvalidation`.
  */
 export function planWrite(ev: WriteClassification, publishOnSave: boolean): Invalidation {

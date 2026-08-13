@@ -55,7 +55,7 @@ export default defineNitroPlugin(() => {
 
   // A save writes the DB, not the site: by default only what a save must still REMOVE from the output (an
   // unpublished or deleted record's page) passes through, and everything renderable waits for an explicit
-  // publish — see ADR-0008. `output.publishOnSave` restores the pre-1.8 model, where every write republished.
+  // publish — see ADR-0008. `output.publishOnSave` restores the pre-2.0 model, where every write republished.
   const publishOnSave = output.publishOnSave ?? false
   registerWriteListener(({ def, before, after }) => {
     queue.enqueue(planWrite(classifyWrite(def, before, after, primaryLocale(), prefixPrimaryLocale()), publishOnSave))

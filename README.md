@@ -189,7 +189,7 @@ Two ways to produce the static output:
   `node .output/server/index.mjs`) publishes on boot and incrementally re-publishes the affected pages when
   you press **Publish** in the editor, into `output.dir` (default `.data/published`). Saving is a DB write
   and leaves the live page alone (unpublishing and deleting still take a page down at once) — see
-  [ADR-0008](docs/architecture-decisions.md), or set `output.publishOnSave: true` for the pre-1.8 behaviour
+  [ADR-0008](docs/architecture-decisions.md), or set `output.publishOnSave: true` for the pre-2.0 behaviour
   where every save republished. Serve that dir with any static server, e.g. `npx serve .data/published`.
 
 The runtime publisher is **intentionally disabled in `pnpm dev`** (a dev render would write un-hashed Vite

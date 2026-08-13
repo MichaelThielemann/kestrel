@@ -124,7 +124,7 @@ export interface KestrelConfig {
     /** Auto-publish affected pages on every content write (default true). */
     auto?: boolean
     /** Opt out of the save/publish split (ADR-0008): `true` makes every content write republish the pages
-     *  it affects, as before 1.8 — the editor's Publish button then has nothing left to do and is hidden.
+     *  it affects, as before 2.0 — the editor's Publish button then has nothing left to do and is hidden.
      *  Default false: saving writes the DB, publishing writes the static files.
      *  Env `KESTREL_OUTPUT_PUBLISH_ON_SAVE`. */
     publishOnSave?: boolean

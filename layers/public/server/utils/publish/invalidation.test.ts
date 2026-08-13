@@ -175,7 +175,7 @@ describe('planSaveInvalidation — a save removes, never renders', () => {
   })
 })
 
-// `output.publishOnSave` is the escape hatch back to the pre-1.8 model: a consumer who wants every save
+// `output.publishOnSave` is the escape hatch back to the pre-2.0 model: a consumer who wants every save
 // to republish sets it, and the write listener plans exactly as it used to.
 describe('planWrite — the publishOnSave escape hatch', () => {
   const ev = classifyWrite(page, pub(), pub({ title: 'edited' }), 'en')
@@ -184,7 +184,7 @@ describe('planWrite — the publishOnSave escape hatch', () => {
     expect(planWrite(ev, false)).toEqual({ type: 'noop' })
   })
 
-  it('with publishOnSave, the same write republishes immediately (the pre-1.8 behaviour)', () => {
+  it('with publishOnSave, the same write republishes immediately (the pre-2.0 behaviour)', () => {
     expect(planWrite(ev, true)).toEqual(planInvalidation(ev))
   })
 

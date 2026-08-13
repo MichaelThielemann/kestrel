@@ -86,7 +86,7 @@ relying on a separate `nuxt generate`:
 - **Reconciler.** An optional periodic full publish (`output.reconcileMinutes`, default `0` = off)
   self-heals any missed invalidation and picks up time-based publishing no write event would trigger.
 
-**Opting out: `output.publishOnSave: true`** (env `KESTREL_OUTPUT_PUBLISH_ON_SAVE=1`) restores the pre-1.8
+**Opting out: `output.publishOnSave: true`** (env `KESTREL_OUTPUT_PUBLISH_ON_SAVE=1`) restores the pre-2.0
 model — every content write republishes the pages it affects, exactly as the table in
 [reference-integrity.md](./reference-integrity.md) describes, with no separate publish step. The editor then
 hides its Publish button and never reports "Outdated", a full publish holds nothing back, and

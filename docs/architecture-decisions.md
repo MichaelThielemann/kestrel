@@ -37,7 +37,7 @@ iframe shows unsaved content over postMessage. Two previews, two different answe
   `<url>?kestrel-preview-token=…` and the page lays those values over the stored record. Nothing is
   written, and the ticket is populated server-side on read so images and internal links resolve exactly as
   they do on a real page. A record with no public URL previews on the existing `/__kestrel/preview` page.
-- **One switch back, not a mode matrix.** `output.publishOnSave: true` restores the pre-1.8 behaviour in
+- **One switch back, not a mode matrix.** `output.publishOnSave: true` restores the pre-2.0 behaviour in
   one place — the write listener's planner (`planWrite`) — and everything downstream reads that same flag:
   a full publish stops holding routes back, `/api/publish-status` stops reporting unpublished changes (with
   the split off, "saved since the last publish" means a republish is in flight, not something to act on),
