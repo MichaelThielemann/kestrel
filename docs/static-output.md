@@ -86,6 +86,13 @@ relying on a separate `nuxt generate`:
 - **Reconciler.** An optional periodic full publish (`output.reconcileMinutes`, default `0` = off)
   self-heals any missed invalidation and picks up time-based publishing no write event would trigger.
 
+**Opting out: `output.publishOnSave: true`** (env `KESTREL_OUTPUT_PUBLISH_ON_SAVE=1`) restores the pre-1.8
+model — every content write republishes the pages it affects, exactly as the table in
+[reference-integrity.md](./reference-integrity.md) describes, with no separate publish step. The editor then
+hides its Publish button and never reports "Outdated", a full publish holds nothing back, and
+`POST /api/publish` keeps working as a manual "republish this now". Setting it is a per-environment
+decision like every other `output` key; the default (`false`) is the split.
+
 Both full publishes (boot and reconciler) **hold back routes with unpublished changes**: a route whose
 record was saved after its `publish_status` row keeps the file its last publish wrote, so a restart or a
 reconcile never puts work-in-progress on the live site. A route that has never been published is not held

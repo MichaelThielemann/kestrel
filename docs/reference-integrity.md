@@ -37,7 +37,8 @@ What each event invalidates (the agreed model — `layers/public/server/utils/pu
 rows that REMOVE output — Unpublish and Delete — and it executes them immediately, because a page taken
 offline must not stay live. Every rendering row waits for an explicit **publish** (`POST /api/publish`, the
 editor's Publish button, or the `publish:run` task), which plans exactly the same invalidation from the
-record's current state. So the table is the model; publishing is when it is applied.
+record's current state. So the table is the model; publishing is when it is applied — unless `output.publishOnSave` is on, which
+puts every row back on the write itself (see [static-output.md](./static-output.md)).
 
 Two principles drive it:
 

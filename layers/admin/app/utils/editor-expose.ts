@@ -26,6 +26,8 @@ export interface EditorExpose {
   /** Save, then write the static output (ADR-0008) — a draft is promoted to published on the way. */
   publish: () => Promise<void>
   publishing: boolean
+  /** False when `output.publishOnSave` is on — a save republishes, so the hosts hide the Publish button. */
+  canPublish: boolean
   /** Open the record in a new tab: the saved URL, or the unsaved state carried by a preview ticket. */
   openPreview: () => Promise<void>
   previewOpening: boolean

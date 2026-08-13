@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { classifyWrite, planInvalidation, planSaveInvalidation, routesToPrune } from './invalidation'
+import { classifyWrite, planInvalidation, planSaveInvalidation, planWrite, routesToPrune } from './invalidation'
 
 describe('routesToPrune', () => {
   it('never prunes a route that was just rendered live (render wins a coalesced render+prune collision)', () => {
@@ -172,6 +172,25 @@ describe('planSaveInvalidation — a save removes, never renders', () => {
   it('draft churn → noop', () => {
     const ev = classifyWrite(page, pub({ status: 'draft' }), pub({ status: 'draft', title: 'x' }), 'en')
     expect(planSaveInvalidation(ev)).toEqual({ type: 'noop' })
+  })
+})
+
+// `output.publishOnSave` is the escape hatch back to the pre-1.8 model: a consumer who wants every save
+// to republish sets it, and the write listener plans exactly as it used to.
+describe('planWrite — the publishOnSave escape hatch', () => {
+  const ev = classifyWrite(page, pub(), pub({ title: 'edited' }), 'en')
+
+  it('defers by default: a content edit changes no output until it is published', () => {
+    expect(planWrite(ev, false)).toEqual({ type: 'noop' })
+  })
+
+  it('with publishOnSave, the same write republishes immediately (the pre-1.8 behaviour)', () => {
+    expect(planWrite(ev, true)).toEqual(planInvalidation(ev))
+  })
+
+  it('a removal is immediate either way', () => {
+    const gone = classifyWrite(page, pub({ id: 1, path: '/x' }), null, 'en')
+    expect(planWrite(gone, false)).toEqual(planWrite(gone, true))
   })
 })
 

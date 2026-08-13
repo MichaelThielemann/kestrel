@@ -3,7 +3,7 @@ import { setPublishRuntime } from '../utils/publish/publish-runtime'
 import { DepsStore } from '../utils/publish/deps'
 import { createSqlitePersistence } from '../utils/publish/deps-persistence'
 import { outputDriver, publishInvalidation } from '../utils/publish/publisher'
-import { classifyWrite, planSaveInvalidation } from '../utils/publish/invalidation'
+import { classifyWrite, planWrite } from '../utils/publish/invalidation'
 import { registerWriteListener } from '../../../core/server/utils/write-events'
 
 /**
@@ -20,7 +20,7 @@ import { registerWriteListener } from '../../../core/server/utils/write-events'
  */
 export default defineNitroPlugin(() => {
   if (import.meta.dev) return
-  const output = (useRuntimeConfig().kestrel as { output?: { auto?: boolean; reconcileMinutes?: number; verbose?: boolean } }).output
+  const output = (useRuntimeConfig().kestrel as { output?: { auto?: boolean; publishOnSave?: boolean; reconcileMinutes?: number; verbose?: boolean } }).output
   if (!output?.auto) return
 
   // `output.verbose`: on top of the one-line summary, itemise each incremental republish with a
@@ -53,11 +53,12 @@ export default defineNitroPlugin(() => {
   // a write-driven prune are serialized by one single-flight run rather than racing each other.
   setPublishRuntime({ queue, deps })
 
-  // A save writes the DB, not the site: `planSaveInvalidation` passes through only what a save must still
-  // REMOVE from the output (an unpublished or deleted record's page). Everything renderable waits for an
-  // explicit publish — see ADR-0008.
+  // A save writes the DB, not the site: by default only what a save must still REMOVE from the output (an
+  // unpublished or deleted record's page) passes through, and everything renderable waits for an explicit
+  // publish — see ADR-0008. `output.publishOnSave` restores the pre-1.8 model, where every write republished.
+  const publishOnSave = output.publishOnSave ?? false
   registerWriteListener(({ def, before, after }) => {
-    queue.enqueue(planSaveInvalidation(classifyWrite(def, before, after, primaryLocale(), prefixPrimaryLocale())))
+    queue.enqueue(planWrite(classifyWrite(def, before, after, primaryLocale(), prefixPrimaryLocale()), publishOnSave))
   })
 
   // Boot publish goes THROUGH the queue (not a direct publishFull) so it shares the single-flight guard:

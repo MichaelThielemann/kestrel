@@ -18,7 +18,9 @@ Releases before 1.7.0 are documented by their tags and commit history.
   work-in-progress live. A route that was never published is still rendered by the boot publish, so a first
   deploy behaves as before. `nuxt generate` is unchanged: it builds the whole site from the current DB.
   Upgrading an existing project: nothing breaks, but content edits now need the Publish step. See
-  [ADR-0008](docs/architecture-decisions.md).
+  [ADR-0008](docs/architecture-decisions.md). To keep the old behaviour, set **`output.publishOnSave: true`**
+  (env `KESTREL_OUTPUT_PUBLISH_ON_SAVE=1`): every save republishes as before, the Publish button disappears,
+  and a full publish holds nothing back.
 
 - **The richtext allowlist no longer accepts `img`, `figure`, `figcaption` or `table` markup.** It used to,
   but no editor extension can parse any of them: such content — which can only arrive through the API, a

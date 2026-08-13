@@ -85,6 +85,15 @@ export function classifyWrite(def: WriteCollection, before: Row, after: Row, pri
 }
 
 /**
+ * What the write listener enqueues for a content write. `publishOnSave` (`output.publishOnSave`) is the
+ * documented way back to the pre-1.8 model where a save WAS a publish: with it on, a write plans exactly
+ * what it always did. Off (the default), only removals pass — see `planSaveInvalidation`.
+ */
+export function planWrite(ev: WriteClassification, publishOnSave: boolean): Invalidation {
+  return publishOnSave ? planInvalidation(ev) : planSaveInvalidation(ev)
+}
+
+/**
  * What a plain SAVE may do to the static output. Saving persists to the DB; writing a page's file is the
  * explicit publish action's job (`planInvalidation`, driven by `POST /api/publish`), so a save renders
  * nothing — the live site keeps serving the last published version while the editor works on the next one.

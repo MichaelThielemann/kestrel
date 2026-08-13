@@ -15,6 +15,7 @@ interface FakeEvent { query: Record<string, unknown> }
 
 let db: BetterSQLite3Database
 let sqlite: Database.Database
+let publishOnSave = false
 
 Object.assign(globalThis, {
   defineEventHandler: (handler: unknown) => handler,
@@ -23,7 +24,7 @@ Object.assign(globalThis, {
   useDb: () => db,
   primaryLocale: () => 'en',
   prefixPrimaryLocale: () => false,
-  useRuntimeConfig: () => ({ kestrel: { output: { driver: 'local', auto: true } } }),
+  useRuntimeConfig: () => ({ kestrel: { output: { driver: 'local', auto: true, publishOnSave } } }),
 })
 
 const handler = (await import('./publish-status.get')).default as unknown as (event: FakeEvent) => Record<string, unknown>
@@ -40,6 +41,7 @@ function seed(id: number, savedAt: number, publishedAt?: number): void {
 }
 
 beforeEach(() => {
+  publishOnSave = false
   sqlite = new Database(':memory:')
   const desired = desiredSchema([pages.table], new Map([['pages', pages.def]]) as never)
   for (const stmt of renderSqlite(diffSchema(desired, {}))) sqlite.exec(stmt)
@@ -61,5 +63,13 @@ describe('GET /api/publish-status — unpublished changes', () => {
   it('does not flag a page that was never published (nothing to fall behind)', () => {
     seed(3, 10_000)
     expect(get(3)).toMatchObject({ route: '/p3', status: null, pending: false })
+  })
+
+  // With `output.publishOnSave` a save republishes on its own, so "saved since the last publish" is a
+  // republish in flight — the lamp must keep showing that, not an "Outdated" the user cannot act on.
+  it('never flags unpublished changes when the consumer opted out of the split', () => {
+    publishOnSave = true
+    seed(4, 60_000, 10)
+    expect(get(4)).toMatchObject({ pending: false, publishOnSave: true })
   })
 })

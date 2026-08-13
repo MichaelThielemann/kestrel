@@ -101,6 +101,11 @@ const pendingPoll = usePendingPublishPoll()
 // while the published version stays exactly as it was.
 const publishing = ref(false)
 const previewOpening = ref(false)
+// `output.publishOnSave` turns the split off again (a save republishes, as before 1.8) — then a Publish
+// button would have nothing to do, so the hosts hide it. Reported by /api/publish-status; unknown (a
+// never-saved record, which does not fetch it) reads as the default, i.e. the button stays.
+const publishOnSave = computed(() => liveStatus.data.value.publishOnSave === true)
+const canPublish = computed(() => !publishOnSave.value)
 
 /** Save (a publish publishes what you SEE), promote a draft, then write the output. */
 async function publish() {
@@ -189,7 +194,7 @@ async function openPreview() {
 // The exposed shape IS the `EditorExpose` contract (utils/editor-expose.ts) — keep them in sync.
 defineExpose({
   dirty, saving, undo, redo, canUndo, canRedo, hasStatus, status, savedStatus, previewUrl, pageLike,
-  live: liveStatus.data, recordTitle: heading, publish, publishing, openPreview, previewOpening,
+  live: liveStatus.data, recordTitle: heading, publish, publishing, canPublish, openPreview, previewOpening,
 })
 
 async function onSave() {
@@ -202,10 +207,13 @@ async function onSave() {
     // which is what turns the right lamp to "Outdated": still live, now an older version than the record.
     // An unpublish is the exception the write path still acts on, and its prune is enqueued the same
     // debounced way, so that case polls until the row clears.
+    // …with one exception in each direction: an unpublish IS acted on at save time (its prune rides the same
+    // debounced queue), and with `publishOnSave` every save republishes, so both poll until the row settles.
     const unpublished = hasStatus.value && wasPublished && status.value === 'draft'
+    const settles = unpublished || (publishOnSave.value && status.value !== 'draft')
     const since = liveStatus.data.value.updatedAt ?? null
     emit('saved', r.record)
-    if (props.id !== 'new') void (unpublished ? liveStatus.refreshUntilSettled({ since }) : liveStatus.refresh())
+    if (props.id !== 'new') void (settles ? liveStatus.refreshUntilSettled({ since }) : liveStatus.refresh())
     return
   }
   // Save failed — let the active body reveal the problem (the blocks body focuses the offending block /

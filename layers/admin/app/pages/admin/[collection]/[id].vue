@@ -123,7 +123,7 @@ async function confirmDelete() {
         <UiButton v-if="id !== 'new'" variant="danger" size="sm" icon="trash" :loading="deleting" @click="onDelete">{{ t('common.delete') }}</UiButton>
         <UiButton type="submit" :form="EDITOR_FORM_ID" variant="primary" size="sm" icon="check" :loading="saving">{{ t('common.save') }}</UiButton>
         <!-- Publishing is its own decision: Save persists, Publish writes the static page (ADR-0008). -->
-        <UiButton type="button" variant="secondary" size="sm" icon="upload" :loading="editorRef?.publishing" :disabled="saving" @click="editorRef?.publish()">{{ t('common.publish') }}</UiButton>
+        <UiButton v-if="editorRef?.canPublish !== false" type="button" variant="secondary" size="sm" icon="upload" :loading="editorRef?.publishing" :disabled="saving" @click="editorRef?.publish()">{{ t('common.publish') }}</UiButton>
         <EditorStatus class="record__ampel" :dirty="editorRef?.dirty ?? false" :saving="saving" :has-status="editorRef?.hasStatus ?? false" :status="editorRef?.status" :saved-status="editorRef?.savedStatus" :page-like="editorRef?.pageLike ?? false" :live="editorRef?.live" />
       </div>
     </div>

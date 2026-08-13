@@ -135,11 +135,11 @@ describe('resolveKestrel — precedence is KESTREL_* env → config → default 
     // defaults
     expect(resolveKestrel({}, {}, root).output).toEqual({
       driver: 'local', dir: '/root/.data/published', publicDir: '/root/.output/public',
-      auto: true, reconcileMinutes: 0, verbose: false, s3: outS3,
+      auto: true, publishOnSave: false, reconcileMinutes: 0, verbose: false, s3: outS3,
     })
     // config wins; relative dirs resolve against root
     expect(resolveKestrel({ output: { driver: 's3', dir: 'dist/site', publicDir: 'build/pub', auto: false, reconcileMinutes: 15, verbose: true, s3: { bucket: 'b', prefix: 'p' } } }, {}, root).output)
-      .toEqual({ driver: 's3', dir: '/root/dist/site', publicDir: '/root/build/pub', auto: false, reconcileMinutes: 15, verbose: true, s3: { bucket: 'b', region: 'us-east-1', endpoint: '', prefix: 'p' } })
+      .toEqual({ driver: 's3', dir: '/root/dist/site', publicDir: '/root/build/pub', auto: false, publishOnSave: false, reconcileMinutes: 15, verbose: true, s3: { bucket: 'b', region: 'us-east-1', endpoint: '', prefix: 'p' } })
     // env fills when config absent
     const e = resolveKestrel({}, { KESTREL_OUTPUT_DRIVER: 's3', KESTREL_OUTPUT_DIR: 'out', KESTREL_OUTPUT_AUTO: 'false', KESTREL_OUTPUT_RECONCILE_MINUTES: '30', KESTREL_OUTPUT_S3_BUCKET: 'eb' }, root).output
     expect(e.driver).toBe('s3'); expect(e.dir).toBe('/root/out'); expect(e.auto).toBe(false); expect(e.reconcileMinutes).toBe(30); expect(e.s3.bucket).toBe('eb')
@@ -156,6 +156,12 @@ describe('resolveKestrel — precedence is KESTREL_* env → config → default 
     expect(resolveKestrel({}, { KESTREL_OUTPUT_VERBOSE: 'true' }, root).output.verbose).toBe(true)
     expect(resolveKestrel({ output: { verbose: false } }, { KESTREL_OUTPUT_VERBOSE: 'true' }, root).output.verbose).toBe(true)
     expect(resolveKestrel({ output: { verbose: true } }, {}, root).output.verbose).toBe(true) // config used when env absent
+    // publishOnSave: the opt-out of the save/publish split (ADR-0008). Default OFF — publishing is its own
+    // action; `true` restores the pre-1.8 behaviour where every save republished.
+    expect(resolveKestrel({}, {}, root).output.publishOnSave).toBe(false)
+    expect(resolveKestrel({ output: { publishOnSave: true } }, {}, root).output.publishOnSave).toBe(true)
+    expect(resolveKestrel({}, { KESTREL_OUTPUT_PUBLISH_ON_SAVE: 'true' }, root).output.publishOnSave).toBe(true)
+    expect(resolveKestrel({ output: { publishOnSave: true } }, { KESTREL_OUTPUT_PUBLISH_ON_SAVE: 'false' }, root).output.publishOnSave).toBe(false)
   })
 
   it('media.driver: normalises case and rejects unknown drivers (fail-loud, not silent 404s)', () => {

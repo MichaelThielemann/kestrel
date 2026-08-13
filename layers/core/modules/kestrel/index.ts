@@ -74,6 +74,7 @@ export default defineNuxtModule<KestrelConfig>({
       dir: c.output.dir,
       publicDir: c.output.publicDir,
       auto: c.output.auto,
+      publishOnSave: c.output.publishOnSave,
       reconcileMinutes: c.output.reconcileMinutes,
       verbose: c.output.verbose,
       s3: {

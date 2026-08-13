@@ -29,6 +29,7 @@ interface OutputRc {
   dir: string
   publicDir: string
   auto: boolean
+  publishOnSave: boolean
   reconcileMinutes: number
   verbose: boolean
   s3: { bucket: string; region: string; endpoint: string; prefix: string; accessKeyId: string; secretAccessKey: string; sessionToken: string }
@@ -261,7 +262,9 @@ export async function publishFull(driver: StorageDriver = outputDriver(), deps?:
   // A full run resynchronizes the output with the DB, so without this it would push every saved-but-
   // unpublished edit live — exactly what deferring the publish exists to prevent. Those routes keep the
   // file their last publish wrote (they stay in `routes`, so the prune above still treats them as live).
-  const skipped = pendingRoutes(savedAt, lastPublishedAt(useDb()))
+  // …unless the consumer opted out of the split (`output.publishOnSave`): there, a save IS a publish, so
+  // "saved after the last publish" means a republish is merely in flight, not deliberately withheld.
+  const skipped = cfg.publishOnSave ? [] : pendingRoutes(savedAt, lastPublishedAt(useDb()))
   if (skipped.length) {
     console.info(`[kestrel] publish: ${skipped.length} route(s) held at their published version (unpublished changes): ${skipped.join(', ')}`)
   }

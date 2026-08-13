@@ -171,6 +171,16 @@ describe('publishFull — saved-but-unpublished edits stay unpublished', () => {
     expect(result.rendered).toBe(3)
   })
 
+  it('holds nothing back with output.publishOnSave — that mode never defers a publish in the first place', async () => {
+    sqlite.exec('UPDATE pages SET updated_at = 9000 WHERE id = 1')
+    publishedAt('/a', 2)
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({ kestrel: { output: { driver: 'local', dir: '', publicDir: '/kestrel-no-such-public-dir', auto: false, publishOnSave: true, reconcileMinutes: 0, verbose: false, s3: {} } } }),
+    })
+    await publishFull(driver, new DepsStore())
+    expect(driver.written).toContain('a/index.html')
+  })
+
   it('does not narrow the variant registry when a route was skipped (its live file still uses those variants)', async () => {
     sqlite.exec('UPDATE pages SET updated_at = 9000 WHERE id = 1')
     publishedAt('/a', 2)

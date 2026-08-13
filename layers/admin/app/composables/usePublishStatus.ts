@@ -12,6 +12,9 @@ export interface PublishStatusData {
   /** The record was saved after its page was last published — the live file is an older version of it.
    *  The normal working state while editing, since a save no longer republishes (ADR-0008). */
   pending?: boolean
+  /** The consumer opted out of the save/publish split (`output.publishOnSave`): a save republishes on its
+   *  own, so the editor offers no Publish button and never reports unpublished changes. */
+  publishOnSave?: boolean
   /** Whether the runtime publisher actually produces files in THIS environment (prod + `output.auto`).
    *  `false` in dev / with static output off → a page can never turn "Live" here, so don't poll for it. */
   generates?: boolean

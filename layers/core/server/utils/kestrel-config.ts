@@ -123,6 +123,11 @@ export interface KestrelConfig {
     publicDir?: string
     /** Auto-publish affected pages on every content write (default true). */
     auto?: boolean
+    /** Opt out of the save/publish split (ADR-0008): `true` makes every content write republish the pages
+     *  it affects, as before 1.8 — the editor's Publish button then has nothing left to do and is hidden.
+     *  Default false: saving writes the DB, publishing writes the static files.
+     *  Env `KESTREL_OUTPUT_PUBLISH_ON_SAVE`. */
+    publishOnSave?: boolean
     /** Run a FULL reconcile every N minutes (default 0 = off) — self-heals a missed invalidation. */
     reconcileMinutes?: number
     /** Verbose publish logging: emit a timestamped per-route line (rendered / pruned) on each incremental
@@ -158,6 +163,7 @@ export interface ResolvedKestrel {
     dir: string
     publicDir: string
     auto: boolean
+    publishOnSave: boolean
     reconcileMinutes: number
     verbose: boolean
     s3: ResolvedS3Settings
@@ -394,6 +400,7 @@ export function resolveKestrel(config: KestrelConfig | undefined, env: Env, root
     dir: resolveMaybe(rootDir, clean(env.KESTREL_OUTPUT_DIR) ?? clean(o.dir) ?? '.data/published'),
     publicDir: resolveMaybe(rootDir, clean(env.KESTREL_OUTPUT_PUBLIC_DIR) ?? clean(o.publicDir) ?? '.output/public'),
     auto: envBool(env.KESTREL_OUTPUT_AUTO, o.auto ?? true),
+    publishOnSave: envBool(env.KESTREL_OUTPUT_PUBLISH_ON_SAVE, o.publishOnSave ?? false),
     reconcileMinutes: resolveNonNegInt(o.reconcileMinutes, env.KESTREL_OUTPUT_RECONCILE_MINUTES),
     verbose: envBool(env.KESTREL_OUTPUT_VERBOSE, o.verbose ?? false),
     s3: resolveS3Settings(o.s3, env, 'KESTREL_OUTPUT_S3'),

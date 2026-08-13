@@ -18,8 +18,11 @@ export default defineEventHandler((event) => {
   // (`driver`) and whether the runtime publisher actually produces files HERE (prod + `output.auto`). In dev
   // (or with auto off) nothing is ever generated, so the lamp shows a calm "Not built" instead of a stuck
   // "Generating". Read straight from runtimeConfig — no need to pull in the whole publisher module.
-  const output = (useRuntimeConfig().kestrel as { output?: { driver?: 'local' | 's3'; auto?: boolean } }).output
-  const env = { driver: (output?.driver ?? 'local') as 'local' | 's3', generates: !import.meta.dev && !!output?.auto }
+  const output = (useRuntimeConfig().kestrel as { output?: { driver?: 'local' | 's3'; auto?: boolean; publishOnSave?: boolean } }).output
+  // `publishOnSave` also tells the editor whether to offer a Publish button at all: with the split turned
+  // off there is nothing left for it to do.
+  const publishOnSave = !!output?.publishOnSave
+  const env = { driver: (output?.driver ?? 'local') as 'local' | 's3', generates: !import.meta.dev && !!output?.auto, publishOnSave }
 
   const q = getQuery(event)
   const name = typeof q.collection === 'string' ? q.collection : ''
@@ -40,7 +43,9 @@ export default defineEventHandler((event) => {
   try {
     const st = db.select().from(publishStatus).where(eq(publishStatus.route, route)).get()
     if (!st) return { route, status: null, pending: false, ...env }
-    const pending = hasPendingChanges(savedAt, st.updatedAt instanceof Date ? st.updatedAt.getTime() : null)
+    // With the split off, a save republishes on its own, so a newer save means a republish is in flight —
+    // reporting that as "unpublished changes" would ask the user to act on something already happening.
+    const pending = !publishOnSave && hasPendingChanges(savedAt, st.updatedAt instanceof Date ? st.updatedAt.getTime() : null)
     return { route, status: st.status, error: st.error, updatedAt: st.updatedAt, target: st.target, pending, ...env }
   } catch {
     // publish_status not migrated yet → treat as "no status" rather than a 500.

@@ -46,6 +46,7 @@ export default {
     dir: '.data/published',           // local dir for the published HTML + synced _nuxt (relative → root)
     publicDir: '.output/public',      // source of the built client bundle the publisher mirrors in
     auto: true,                       // run the publisher in-process (publishing is an explicit action)
+    publishOnSave: false,             // true → every save republishes again (pre-1.8 model, no Publish button)
     reconcileMinutes: 0,              // >0 → full re-publish every N min (self-heals a missed invalidation)
     verbose: false,                   // per-route render/prune log lines on each republish
     s3: {                             // used only when driver: 's3'
@@ -87,6 +88,7 @@ The mapping (env overrides): `db`→`KESTREL_DB`, `siteUrl`→`KESTREL_SITE_URL`
 `media.image.jpegQuality`→`KESTREL_MEDIA_IMAGE_JPEG_QUALITY` (`media.image.variants` is **config-only** — no env override),
 `output.driver`→`KESTREL_OUTPUT_DRIVER`, `output.dir`→`KESTREL_OUTPUT_DIR`,
 `output.publicDir`→`KESTREL_OUTPUT_PUBLIC_DIR`, `output.auto`→`KESTREL_OUTPUT_AUTO`,
+`output.publishOnSave`→`KESTREL_OUTPUT_PUBLISH_ON_SAVE`,
 `output.reconcileMinutes`→`KESTREL_OUTPUT_RECONCILE_MINUTES`, `output.verbose`→`KESTREL_OUTPUT_VERBOSE`,
 `output.s3.{bucket,region,endpoint,prefix}`→`KESTREL_OUTPUT_S3_{BUCKET,REGION,ENDPOINT,PREFIX}`,
 `preview.desktopWidth`→`KESTREL_PREVIEW_DESKTOP_WIDTH`.

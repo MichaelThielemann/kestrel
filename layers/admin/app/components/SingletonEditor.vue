@@ -36,7 +36,7 @@ useUnsavedGuard(() => editorRef.value?.dirty ?? false, () => t('editor.discardCo
         <UiButton type="button" variant="ghost" size="sm" icon="external-link" :title="previewTitle" :aria-label="previewTitle" :loading="editorRef?.previewOpening" @click="editorRef?.openPreview()" />
         <UiButton type="submit" :form="EDITOR_FORM_ID" variant="primary" size="sm" icon="check" :loading="saving">{{ t('common.save') }}</UiButton>
         <!-- Publishing is its own decision: Save persists, Publish writes the static page (ADR-0008). -->
-        <UiButton type="button" variant="secondary" size="sm" icon="upload" :loading="editorRef?.publishing" :disabled="saving" @click="editorRef?.publish()">{{ t('common.publish') }}</UiButton>
+        <UiButton v-if="editorRef?.canPublish !== false" type="button" variant="secondary" size="sm" icon="upload" :loading="editorRef?.publishing" :disabled="saving" @click="editorRef?.publish()">{{ t('common.publish') }}</UiButton>
         <EditorStatus class="singleton__ampel" :dirty="editorRef?.dirty ?? false" :saving="saving" :has-status="editorRef?.hasStatus ?? false" :status="editorRef?.status" :saved-status="editorRef?.savedStatus" :page-like="editorRef?.pageLike ?? false" :live="editorRef?.live" />
       </div>
     </div>

@@ -14,6 +14,7 @@ const pagesSchema = {
 registerEndpoint('/api/collections', () => ({ data: [pagesSchema] }))
 
 const calls = vi.hoisted(() => ({
+  publishOnSave: false,
   writes: [] as Record<string, unknown>[],
   publishes: [] as Record<string, unknown>[],
   tickets: [] as Record<string, unknown>[],
@@ -29,7 +30,7 @@ registerEndpoint('/api/pages/1', async (event) => {
 })
 registerEndpoint('/api/pages', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
 registerEndpoint('/api/pages/1/dead-refs', () => [])
-registerEndpoint('/api/publish-status', () => ({ route: '/existing', status: 'success', pending: true, generates: true, updatedAt: '2026-08-13T09:30:00.000Z' }))
+registerEndpoint('/api/publish-status', () => ({ route: '/existing', status: 'success', pending: !calls.publishOnSave, generates: true, publishOnSave: calls.publishOnSave, updatedAt: '2026-08-13T09:30:00.000Z' }))
 registerEndpoint('/api/publish', async (event) => {
   calls.publishes.push(await readBody(event))
   return { queued: true, generates: true, routes: ['/existing'], pruned: [], drafts: [] }
@@ -52,6 +53,7 @@ let lastTab: { location: { replace: (url: string) => void }; close: () => void }
 beforeEach(() => {
   h.params = { collection: 'pages', id: '1' }
   h.nav.length = 0
+  calls.publishOnSave = false
   calls.writes.length = 0
   calls.publishes.length = 0
   calls.tickets.length = 0
@@ -81,6 +83,14 @@ describe('record editor — Save and Publish are separate actions', () => {
     const labels = w.find('.record__actions').findAll('.ui-button').map((b) => b.text()).filter(Boolean)
     expect(labels).toContain('Publish')
     expect(labels.indexOf('Publish')).toBe(labels.indexOf('Save') + 1)
+  })
+
+  // `output.publishOnSave` is the way back to the pre-1.8 model, where a save republished on its own.
+  it('drops the Publish button when the consumer turned the split off', async () => {
+    calls.publishOnSave = true
+    const w = await mountSuspended(RecordPage)
+    await settle()
+    expect(w.find('.record__actions').findAll('.ui-button').map((b) => b.text())).not.toContain('Publish')
   })
 
   it('Save writes the record and asks for no publish at all', async () => {
