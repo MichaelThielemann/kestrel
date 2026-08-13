@@ -1,16 +1,19 @@
 import sanitizeHtml from 'sanitize-html'
 import { RICHTEXT_LINK_SCHEME } from '../../app/utils/richtext-links'
 
+// Kept deliberately in step with the editor's schema (`ui/Richtext.vue`): a tag allowed here that no
+// extension can parse is not "supported", it is a delayed deletion — the editor drops it on load and the
+// next save persists the loss. `richtext.dom.test.ts` asserts the two lists agree, so widening this one
+// means teaching the editor the tag in the same change. Images belong in a media field or an image
+// block, not in flow text; tables await an editor that can hold them.
 export const RICHTEXT_ALLOWLIST: sanitizeHtml.IOptions = {
   allowedTags: [
     'p', 'br', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'sub', 'sup', 'mark',
     'blockquote', 'pre', 'code', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-    'ul', 'ol', 'li', 'a', 'img', 'figure', 'figcaption', 'hr',
-    'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
+    'ul', 'ol', 'li', 'a', 'hr',
   ],
   allowedAttributes: {
     a: ['href', 'title', 'target', 'rel'],
-    img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
     '*': ['class', 'style'],
   },
   allowedStyles: {

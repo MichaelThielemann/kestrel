@@ -8,10 +8,10 @@ describe('sanitizeRichtext', () => {
   it('drops <script>', () => {
     expect(sanitizeRichtext('<script>alert(1)</script><p>ok</p>')).toBe('<p>ok</p>')
   })
-  it('neutralises img onerror but keeps the img', () => {
-    const out = sanitizeRichtext('<img src="x" onerror="alert(1)">')
-    expect(out).toContain('<img')
-    expect(out).not.toContain('onerror')
+  // Flow text holds no images — they belong in a media field or an image block, and the editor's schema
+  // cannot parse one, so allowing it here would only mean the first edit deletes it.
+  it('drops an img entirely, script handler and all', () => {
+    expect(sanitizeRichtext('<img src="x" onerror="alert(1)">')).toBe('')
   })
   it('drops javascript: hrefs', () => {
     expect(sanitizeRichtext('<a href="javascript:alert(1)">x</a>')).not.toContain('javascript:')
@@ -68,5 +68,41 @@ describe('sanitizeRichtext', () => {
   })
   it('rejects a non-whitelisted text-align value', () => {
     expect(sanitizeRichtext('<p style="text-align:expression(alert(1))">x</p>')).not.toContain('expression')
+  })
+})
+
+// The dialect the server STORES, construct by construct. It is not the editor's: sanitize-html
+// self-closes void elements, decodes `&nbsp;` and drops the space inside a style value, where TipTap's
+// serializer does none of those. Editing such a field therefore leaves the form "unsaved" until it is
+// written once, even when nothing changed — accepted, see docs/dev/ACCEPTED-DECISIONS.md (AD-7). This
+// table exists so a shift in that dialect surfaces as a named row rather than as a phantom lamp.
+describe('sanitizeRichtext — the stored dialect', () => {
+  const NBSP = '\u00A0' // written as an escape: a raw U+00A0 in source is invisible in a diff
+  const corpus: [name: string, input: string, stored: string][] = [
+    ['plain paragraph', '<p>a b</p>', '<p>a b</p>'],
+    ['hard break', '<p>a<br>b</p>', '<p>a<br />b</p>'],
+    ['horizontal rule', '<hr>', '<hr />'],
+    ['non-breaking space', '<p>a&nbsp;b</p>', `<p>a${NBSP}b</p>`],
+    ['alignment', '<p style="text-align: center">c</p>', '<p style="text-align:center">c</p>'],
+    ['marks', '<p><strong>a</strong><em>b</em><mark>c</mark></p>', '<p><strong>a</strong><em>b</em><mark>c</mark></p>'],
+    ['heading', '<h2>t</h2>', '<h2>t</h2>'],
+    ['span class', '<p><span class="c">x</span></p>', '<p><span class="c">x</span></p>'],
+    ['nested list', '<ul><li><p>a</p><ul><li><p>b</p></li></ul></li></ul>', '<ul><li><p>a</p><ul><li><p>b</p></li></ul></li></ul>'],
+    ['blockquote', '<blockquote><p>q</p></blockquote>', '<blockquote><p>q</p></blockquote>'],
+    ['code block', '<pre><code>c</code></pre>', '<pre><code>c</code></pre>'],
+    ['relative link', '<p><a href="/impressum">l</a></p>', '<p><a href="/impressum">l</a></p>'],
+    ['mailto link', '<p><a href="mailto:a@b.c">l</a></p>', '<p><a href="mailto:a@b.c">l</a></p>'],
+    ['internal link', '<p><a href="kestrel:pages:7">l</a></p>', '<p><a href="kestrel:pages:7">l</a></p>'],
+    ['external link', '<p><a href="https://e.com/x">l</a></p>', '<p><a href="https://e.com/x" target="_blank" rel="noopener noreferrer nofollow">l</a></p>'],
+    ['image', '<p>t</p><figure><img src="/x.jpg" alt="a"><figcaption>c</figcaption></figure>', '<p>t</p>c'],
+    ['table', '<table><tbody><tr><td>z</td></tr></tbody></table>', 'z'],
+  ]
+
+  it.each(corpus)('%s', (_name, input, stored) => {
+    expect(sanitizeRichtext(input)).toBe(stored)
+  })
+
+  it('stores a fixed point in every case', () => {
+    for (const [name, , stored] of corpus) expect([name, sanitizeRichtext(stored)]).toEqual([name, stored])
   })
 })

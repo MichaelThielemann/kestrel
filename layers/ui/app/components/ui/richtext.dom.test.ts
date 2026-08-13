@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import Richtext from './Richtext.vue'
 import { richtextLinkHref } from '../../../../fields/app/utils/richtext-links'
+import { RICHTEXT_ALLOWLIST } from '../../../../fields/server/field-registry/sanitize'
 
 type LiveEditor = {
   commands: { insertContent: (s: string) => boolean }
@@ -103,6 +104,85 @@ describe('UiRichtext', () => {
       editorOf(w).chain().setTextSelection({ from: 1, to: 6 }).setLink({ href: HREF }).run()
 
       expect(editorOf(w).getHTML()).toContain(`href="${HREF}"`)
+      w.unmount()
+    })
+  })
+
+  // `sanitize.ts` is the sole authority on target/rel: it adds them to absolute http(s) links and strips
+  // them from every other kind, so a same-site link never opens a new tab. The Link mark stamps its own
+  // defaults on EVERY anchor, so a stored non-absolute link came back decorated — a difference the edit
+  // form reads as an unsaved change, and one that never converges because the next save strips them again.
+  describe('link target/rel', () => {
+    const cases: [string, string][] = [
+      ['internal', `<p><a href="${richtextLinkHref('pages', 7)}">x</a></p>`],
+      ['relative', '<p><a href="/impressum">x</a></p>'],
+      ['mailto', '<p><a href="mailto:a@b.c">x</a></p>'],
+    ]
+
+    it.each(cases)('round-trips a %s link byte-identically', async (_name, stored) => {
+      const w = mount(Richtext, { props: { modelValue: stored } })
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(editorOf(w).getHTML()).toBe(stored)
+      w.unmount()
+    })
+
+    it('keeps the attributes the server put on an external link', async () => {
+      const stored = '<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://example.com/x">x</a></p>'
+      const w = mount(Richtext, { props: { modelValue: stored } })
+      await new Promise((r) => setTimeout(r, 0))
+
+      const html = editorOf(w).getHTML()
+      expect(html).toContain('target="_blank"')
+      expect(html).toContain('rel="noopener noreferrer nofollow"')
+      w.unmount()
+    })
+  })
+
+  // The sanitizer's allowlist and the editor's schema have to agree. A tag the server accepts but no
+  // extension parses is silently deleted by the first edit, and the next save persists that loss — so
+  // every allowed tag needs a case here, and the coverage assertion below fails if one is added without.
+  // `b`/`i` are aliases the schema normalizes to `strong`/`em`; a bare `<span>` only survives WITH a
+  // class (that is what RichtextSpanClass captures), which is also all the allowlist promises.
+  describe('every allowed tag survives the editor', () => {
+    const roundTrip: Record<string, { stored: string; as?: string }> = {
+      p: { stored: '<p>x</p>' },
+      br: { stored: '<p>a<br>b</p>' },
+      span: { stored: '<p><span class="c">x</span></p>' },
+      strong: { stored: '<p><strong>x</strong></p>' },
+      b: { stored: '<p><b>x</b></p>', as: 'strong' },
+      em: { stored: '<p><em>x</em></p>' },
+      i: { stored: '<p><i>x</i></p>', as: 'em' },
+      u: { stored: '<p><u>x</u></p>' },
+      s: { stored: '<p><s>x</s></p>' },
+      sub: { stored: '<p><sub>x</sub></p>' },
+      sup: { stored: '<p><sup>x</sup></p>' },
+      mark: { stored: '<p><mark>x</mark></p>' },
+      blockquote: { stored: '<blockquote><p>x</p></blockquote>' },
+      pre: { stored: '<pre><code>x</code></pre>' },
+      code: { stored: '<p><code>x</code></p>' },
+      h1: { stored: '<h1>x</h1>' },
+      h2: { stored: '<h2>x</h2>' },
+      h3: { stored: '<h3>x</h3>' },
+      h4: { stored: '<h4>x</h4>' },
+      h5: { stored: '<h5>x</h5>' },
+      h6: { stored: '<h6>x</h6>' },
+      ul: { stored: '<ul><li><p>x</p></li></ul>' },
+      ol: { stored: '<ol><li><p>x</p></li></ol>' },
+      li: { stored: '<ul><li><p>x</p></li></ul>' },
+      a: { stored: '<p><a href="/x">x</a></p>' },
+      hr: { stored: '<hr>' },
+    }
+
+    it('covers every tag the sanitizer allows', () => {
+      expect(Object.keys(roundTrip).sort()).toEqual([...RICHTEXT_ALLOWLIST.allowedTags!].sort())
+    })
+
+    it.each(Object.entries(roundTrip))('keeps <%s>', async (tag, { stored, as }) => {
+      const w = mount(Richtext, { props: { modelValue: stored } })
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(editorOf(w).getHTML()).toMatch(new RegExp(`<${as ?? tag}[ >]`))
       w.unmount()
     })
   })

@@ -152,7 +152,9 @@ default-export files), so the engine's no-default-export infra is never scanned 
 the `validator` in `field-registry` is the *sole* server authority (the `app/utils` validators are advisory
 UX only); single relation/media get the `Id` suffix, multiple don't; `buildBlocksSchema([])` is
 `z.never()` so block content fails validation until `registerBlock` has run; richtext is sanitised via a
-Zod `.transform` (silently rewritten, not rejected).
+Zod `.transform` (silently rewritten, not rejected) whose **allowlist is held in step with the editor's
+schema** — a tag the sanitizer accepts but no extension parses is a delayed deletion, not a feature, so
+widening `RICHTEXT_ALLOWLIST` means teaching `ui/Richtext.vue` the tag in the same change.
 **Docs:** `consuming-kestrel.md` (the field DSL, consumer angle), ADR-0002.
 
 ### `ui` — admin design system

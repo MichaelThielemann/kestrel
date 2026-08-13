@@ -7,7 +7,25 @@ Releases before 1.7.0 are documented by their tags and commit history.
 
 ## [Unreleased]
 
+### Changed
+
+- **The richtext allowlist no longer accepts `img`, `figure`, `figcaption` or `table` markup.** It used to,
+  but no editor extension can parse any of them: such content — which can only arrive through the API, a
+  seed or a migration, never through the editor — was displayed as bare text and deleted by the first
+  edit, and the next save persisted that loss. Rejecting it on write makes the loss immediate and visible
+  instead of latent. Images belong in a media field or an image block; tables await an editor that can
+  hold them. A test now asserts that the allowlist and the editor's schema agree, so widening one without
+  the other fails the suite.
+
 ### Fixed
+
+- **The editor stops overriding the server's link policy.** TipTap's Link mark stamps
+  `target="_blank" rel="noopener noreferrer nofollow"` onto every anchor it renders, while the sanitizer
+  applies those attributes only to absolute `http(s)` links and strips them from every other kind — so a
+  stored internal, relative or `mailto:` link came back from the editor decorated, which the edit form
+  read as an unsaved change that never converged (the next save stripped the attributes again). The mark
+  no longer sets its own defaults; `sanitize.ts` remains the sole authority, and published output is
+  unchanged.
 
 - **Internal links in richtext survive the editor.** Setting one from the toolbar was a silent no-op — the
   picker closed and nothing was linked — and an already-stored `<a href="kestrel:…">` was dropped whole,

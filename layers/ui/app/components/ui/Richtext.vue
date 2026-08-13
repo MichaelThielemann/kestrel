@@ -42,7 +42,10 @@ const editor = useEditor({
       // `protocols`: the Link mark validates every href against its own scheme allowlist, which has no
       // `kestrel:`. Without this it drops the whole anchor when stored content is loaded and makes the
       // toolbar's `setLink` a silent no-op — opening and saving a record would destroy its internal links.
-      link: { openOnClick: false, protocols: [RICHTEXT_LINK_SCHEME] },
+      // `target`/`rel` null: the sanitizer owns that policy — it decorates absolute http(s) links and
+      // strips the attributes from every other kind. The mark's own defaults would stamp them on ANY
+      // anchor, so a stored internal/relative/mailto link came back changed and read as an unsaved edit.
+      link: { openOnClick: false, protocols: [RICHTEXT_LINK_SCHEME], HTMLAttributes: { target: null, rel: null } },
     }),
     Highlight,
     Subscript,
