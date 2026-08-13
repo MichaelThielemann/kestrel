@@ -61,6 +61,13 @@ else in this release — the richtext fixes below — would have been 1.8.0; it 
   `/__kestrel/preview`.
 - **An "Outdated" state in the editor's live lamp** — published, but the record has been saved since, so the
   live page is an older version. `GET /api/publish-status` reports it as `pending`.
+- **ESLint**, dev-only (not part of the published package): `pnpm lint` runs a Nuxt-aware config generated
+  from the playground (auto-import globals for every layer + extension), typescript-eslint's strict preset,
+  and `eslint-plugin-vuejs-accessibility`, wired into CI right after `typecheck`. Fixing what it surfaced
+  closed a few real accessibility gaps in the admin editor — missing labels on hand-rolled controls (the
+  proofing gallery's comment box, the media upload trigger) — and replaced several `delete obj[key]` calls
+  with `Reflect.deleteProperty`, test-only `any` with real types, and a couple of rethrows that had dropped
+  their original error as `cause`.
 
 ### Fixed
 
