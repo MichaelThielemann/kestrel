@@ -56,6 +56,9 @@ export default defineNuxtModule<KestrelConfig>({
     pub.siteName = c.siteName ?? ''
     // Reference desktop width (px) for the admin page-builder preset; the editor's scale-to-fit shrinks it.
     pub.previewDesktopWidth = c.preview.desktopWidth
+    // Whether the admin shows the EU AI Act disclosure controls on a media asset; the data itself is
+    // always resolved server-side, so flipping this off only hides the editor.
+    pub.aiDisclosureEnabled = c.aiDisclosure.enabled
 
     // Server-only resolved settings, so server utils read the CONSUMER's `kestrel: {}` (via this module)
     // rather than importing Kestrel's own `kestrel.config.ts` file. Essential when Kestrel is consumed as

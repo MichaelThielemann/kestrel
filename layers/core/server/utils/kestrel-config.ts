@@ -142,6 +142,10 @@ export interface KestrelConfig {
    *  preset renders at before the editor's scale-to-fit shrinks it to the pane; default 1440. Env:
    *  `KESTREL_PREVIEW_DESKTOP_WIDTH`. */
   preview?: { desktopWidth?: number }
+  /** EU AI Act Art. 50 disclosure fields on media assets — OFF by default. Kestrel only stores/manages
+   *  this metadata; it never burns a label/watermark into an image and never auto-emits it into public
+   *  output — see docs/media-uploads.md. Env: `KESTREL_AI_DISCLOSURE`. */
+  aiDisclosure?: { enabled?: boolean }
 }
 
 export interface ResolvedKestrel {
@@ -172,6 +176,9 @@ export interface ResolvedKestrel {
   collections: { pages: boolean; media: boolean }
   /** Resolved admin-preview settings (surfaced to the client via `runtimeConfig.public`). */
   preview: { desktopWidth: number }
+  /** Gates the media-disclosure UI in the admin ONLY. `ResolvedMedia.aiDisclosure` is always resolved from
+   *  the columns, so turning this off hides the editor controls without touching existing data. */
+  aiDisclosure: { enabled: boolean }
 }
 
 type Env = Record<string, string | undefined>
@@ -413,5 +420,7 @@ export function resolveKestrel(config: KestrelConfig | undefined, env: Env, root
 
   const preview = { desktopWidth: resolvePosInt(c.preview?.desktopWidth, env.KESTREL_PREVIEW_DESKTOP_WIDTH, 1440) }
 
-  return { dbPath, siteUrl, siteName, siteDescription, supportedLocales, primaryLocale, prefixPrimary, media, output, collections, preview }
+  const aiDisclosure = { enabled: envBool(env.KESTREL_AI_DISCLOSURE, c.aiDisclosure?.enabled ?? false) }
+
+  return { dbPath, siteUrl, siteName, siteDescription, supportedLocales, primaryLocale, prefixPrimary, media, output, collections, preview, aiDisclosure }
 }

@@ -100,6 +100,14 @@ describe('resolveKestrel — precedence is KESTREL_* env → config → default 
     expect(resolveKestrel({ collections: { media: true } }, { KESTREL_COLLECTIONS_MEDIA: '0' }, root).collections.media).toBe(false)
   })
 
+  it('aiDisclosure.enabled: default off; config on; KESTREL_AI_DISCLOSURE env wins', () => {
+    expect(resolveKestrel(undefined, {}, root).aiDisclosure).toEqual({ enabled: false })
+    expect(resolveKestrel({ aiDisclosure: { enabled: true } }, {}, root).aiDisclosure.enabled).toBe(true)
+    expect(resolveKestrel(undefined, { KESTREL_AI_DISCLOSURE: 'true' }, root).aiDisclosure.enabled).toBe(true)
+    // env is the override escape-hatch, both directions
+    expect(resolveKestrel({ aiDisclosure: { enabled: true } }, { KESTREL_AI_DISCLOSURE: '0' }, root).aiDisclosure.enabled).toBe(false)
+  })
+
   it('preview.desktopWidth: default 1440; config override; KESTREL_PREVIEW_DESKTOP_WIDTH env wins; garbage/≤0 falls through', () => {
     expect(resolveKestrel({}, {}, root).preview).toEqual({ desktopWidth: 1440 })
     expect(resolveKestrel({ preview: { desktopWidth: 1280 } }, {}, root).preview.desktopWidth).toBe(1280)
