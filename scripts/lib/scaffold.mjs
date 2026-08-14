@@ -110,11 +110,22 @@ const withoutComments = (src) => src.replace(/<!--[\s\S]*?-->/g, '')
 const kebab = (tag) => tag.replace(/(?!^)([A-Z])/g, '-$1').toLowerCase()
 export const usesComponent = (src, tag) => new RegExp(`<\\s*(${tag}|${kebab(tag)})[\\s/>]`, 'i').test(src)
 
+/** Whether `output.publishOnSave` resolves to `true` — config or its env override, same precedence as
+ *  `resolveKestrel` (env wins when it names a valid boolean; otherwise the config file's own value). */
+function publishOnSaveEnabled(kestrelConfig, env) {
+  const fromEnv = env !== null ? envValue(env, 'KESTREL_OUTPUT_PUBLISH_ON_SAVE')?.toLowerCase() : undefined
+  if (fromEnv !== undefined) {
+    if (['true', '1', 'yes', 'on'].includes(fromEnv)) return true
+    if (['false', '0', 'no', 'off'].includes(fromEnv)) return false
+  }
+  return typeof kestrelConfig === 'string' && /\bpublishOnSave\s*:\s*true\b/.test(kestrelConfig)
+}
+
 /**
  * `kestrel doctor`, as a pure function of what was read; `null` means the file is absent.
  * The `app.vue` rules mirror `layers/core/modules/kestrel/app-shell.ts`; a test pins the two together.
  */
-export function diagnoseProject({ packageJson, nuxtConfig, appVue, env }) {
+export function diagnoseProject({ packageJson, nuxtConfig, appVue, env, kestrelConfig }) {
   const found = []
   const add = (level, message) => found.push({ level, message })
 
@@ -177,6 +188,17 @@ export function diagnoseProject({ packageJson, nuxtConfig, appVue, env }) {
     if (!value('KESTREL_SESSION_SECRET')) {
       add('warn', 'KESTREL_SESSION_SECRET is unset — dev falls back to a random per-process secret (sessions drop on restart) and production refuses to boot.')
     }
+  }
+
+  // Informational, not a misconfiguration: `publishOnSave: false` is the correct 2.0 default. Named
+  // because it is a silent behaviour change from 1.x — a headless consumer that only PATCHes content and
+  // never opens /admin gets no other signal that saves stopped reaching the static output.
+  if (!publishOnSaveEnabled(kestrelConfig, env)) {
+    add(
+      'info',
+      'saving a record no longer publishes it by default — only an explicit Publish action does (ADR-0008). ' +
+        'Set `output.publishOnSave: true` in kestrel.config.ts, or KESTREL_OUTPUT_PUBLISH_ON_SAVE=1, to restore the pre-2.0 behaviour.',
+    )
   }
 
   return found

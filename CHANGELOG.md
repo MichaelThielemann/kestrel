@@ -5,7 +5,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
-## [Unreleased] — 2.0.0
+## [2.0.0] — 2026-08-14
 
 The major is for one behaviour, not for an API break: **saving a record no longer publishes it**. Nothing
 was removed and no consumer code has to change, but the moment content reaches the live site moved, and a
@@ -32,11 +32,13 @@ else in this release — the richtext fixes below — would have been 1.8.0; it 
 - **Saving no longer publishes.** A save writes the DB; the new **Publish** button (right of Save in the
   record and singleton editors, or `POST /api/publish`) writes the static file(s) to the configured output.
   Editing a published page therefore leaves the live page exactly as it was until you publish — which is
-  what makes previewing safe. Two deliberate exceptions keep the output honest: **unpublishing and deleting
-  still prune immediately** (a page taken offline must not stay live), and a **full publish** (boot /
-  reconciler) holds back routes whose record was saved after their last publish instead of pushing
-  work-in-progress live. A route that was never published is still rendered by the boot publish, so a first
-  deploy behaves as before. `nuxt generate` is unchanged: it builds the whole site from the current DB.
+  what makes previewing safe. **Unpublishing and deleting still prune immediately** — a page taken offline
+  must not stay live. Every publish, full or incremental, **holds back routes with unpublished changes**, so
+  neither a restart nor somebody else's Publish pushes your work-in-progress live; withholding follows the
+  RECORD, so a saved-but-unpublished rename keeps serving its old URL rather than publishing the new one.
+  A held route is frozen whole, links included. A record that has never been published anywhere is still
+  rendered, so a first deploy behaves as before. `nuxt generate` is unchanged: it builds the whole site from
+  the current DB.
   Upgrading an existing project: nothing breaks, but content edits now need the Publish step. See
   [ADR-0008](docs/architecture-decisions.md). To keep the old behaviour, set **`output.publishOnSave: true`**
   (env `KESTREL_OUTPUT_PUBLISH_ON_SAVE=1`): every save republishes as before, the Publish button disappears,
@@ -70,6 +72,20 @@ else in this release — the richtext fixes below — would have been 1.8.0; it 
   their original error as `cause`.
 
 ### Fixed
+
+- **A ticket preview no longer skips the richtext sanitizer.** `sanitizeRichtext` runs as part of the write
+  schema, so a preview ticket — which is never written — carried the editor's raw HTML through to the page's
+  `v-html`. The mint now sanitizes the payload it stores, walking blocks and repeaters the way a save does,
+  so the preview renders exactly the bytes a save would have kept.
+
+- **A cleared relation no longer previews as still set.** The ticket lays the editor's values over the saved
+  record, and the populator omits a `$<relation>` sidecar entirely when the id is null — so clearing a single
+  relation or media field left the previously populated record visible under the old sidecar.
+
+- **The editor stops claiming a publish is running when none is.** A page with no publish row read as
+  "Generating…", which was true while every save enqueued a republish and is not any more: nothing runs
+  until someone presses Publish. It now reads "Not published" — unless `output.publishOnSave` is on, where a
+  save really does enqueue one.
 
 - **The editor stops overriding the server's link policy.** TipTap's Link mark stamps
   `target="_blank" rel="noopener noreferrer nofollow"` onto every anchor it renders, while the sanitizer

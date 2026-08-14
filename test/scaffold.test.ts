@@ -204,6 +204,7 @@ describe('diagnoseProject', () => {
     nuxtConfig: `export default defineNuxtConfig({ extends: ['${PACKAGE_NAME}'] })`,
     appVue: '<template><NuxtLayout><NuxtPage /></NuxtLayout></template>',
     env: 'KESTREL_SESSION_SECRET=abc\nKESTREL_ADMIN_PASSWORD_HASH=scrypt$x\n',
+    kestrelConfig: 'export default { output: { publishOnSave: true } } satisfies KestrelConfig',
   }
 
   it('passes a correctly set-up project', () => {
@@ -258,9 +259,62 @@ describe('diagnoseProject', () => {
   })
 
   it('errors for a directory that is not a project at all', () => {
-    const found = diagnoseProject({ packageJson: null, nuxtConfig: null, appVue: null, env: null })
-    expect(found.every((d) => d.level === 'error')).toBe(true)
-    expect(found.length).toBeGreaterThanOrEqual(3)
+    const found = diagnoseProject({ packageJson: null, nuxtConfig: null, appVue: null, env: null, kestrelConfig: null })
+    const errors = found.filter((d) => d.level === 'error')
+    expect(errors.length).toBeGreaterThanOrEqual(3)
+    // No kestrel.config.ts either, so the publishOnSave note still fires — it is informational, not an error.
+    expect(found.some((d) => d.level === 'info')).toBe(true)
+  })
+})
+
+// 2.0 turned off publish-on-save by default (ADR-0008); an operator upgrading a 1.x deployment — especially
+// a headless consumer that only PATCHes content and never opens /admin — gets no other signal that saves
+// stopped reaching the static output. `kestrel doctor` names the fact and the opt-out, unconditionally
+// (it is informational, so it never trips the error-only exit code) unless the project explicitly opted in.
+describe('diagnoseProject — output.publishOnSave', () => {
+  const base = {
+    packageJson: JSON.stringify({ scripts: { dev: 'nuxt dev' }, dependencies: { [PACKAGE_NAME]: '^1.2.1' }, devDependencies: { nuxt: '^4.4.8' } }),
+    nuxtConfig: `export default defineNuxtConfig({ extends: ['${PACKAGE_NAME}'] })`,
+    appVue: '<template><NuxtLayout><NuxtPage /></NuxtLayout></template>',
+    env: 'KESTREL_SESSION_SECRET=abc\nKESTREL_ADMIN_PASSWORD_HASH=scrypt$x\n',
+  }
+
+  it('notes it when there is no kestrel.config.ts at all', () => {
+    const found = diagnoseProject({ ...base, kestrelConfig: null })
+    expect(found).toHaveLength(1)
+    expect(found[0].level).toBe('info')
+    expect(found[0].message).toContain('publishOnSave')
+  })
+
+  it('notes it when kestrel.config.ts exists but does not opt in', () => {
+    const found = diagnoseProject({ ...base, kestrelConfig: 'export default {} satisfies KestrelConfig' })
+    expect(found.map((d) => d.level)).toEqual(['info'])
+  })
+
+  it('says nothing once the config opts in', () => {
+    const found = diagnoseProject({ ...base, kestrelConfig: 'export default { output: { publishOnSave: true } } satisfies KestrelConfig' })
+    expect(found).toEqual([])
+  })
+
+  // Precedence matches resolveKestrel: env overrides the config file either direction.
+  it('is satisfied by the env override alone, config absent', () => {
+    const found = diagnoseProject({ ...base, kestrelConfig: null, env: `${base.env}KESTREL_OUTPUT_PUBLISH_ON_SAVE=1\n` })
+    expect(found).toEqual([])
+  })
+
+  it('still fires when the env override explicitly turns it back off, even though the config opts in', () => {
+    const found = diagnoseProject({
+      ...base,
+      kestrelConfig: 'export default { output: { publishOnSave: true } } satisfies KestrelConfig',
+      env: `${base.env}KESTREL_OUTPUT_PUBLISH_ON_SAVE=0\n`,
+    })
+    expect(found.map((d) => d.level)).toEqual(['info'])
+  })
+
+  // Informational must never read as a failure: `kestrel doctor`'s exit code checks only for 'error'.
+  it('is never level "error" — it must not fail `kestrel doctor`\'s exit code', () => {
+    const found = diagnoseProject({ ...base, kestrelConfig: null })
+    expect(found.every((d) => d.level !== 'error')).toBe(true)
   })
 })
 
@@ -285,6 +339,7 @@ describe('doctor and the build-time guard agree on app.vue', () => {
       nuxtConfig: `extends: ['${PACKAGE_NAME}']`,
       appVue: src,
       env: 'KESTREL_SESSION_SECRET=a\nKESTREL_ADMIN_PASSWORD_HASH=b\n',
+      kestrelConfig: 'export default { output: { publishOnSave: true } } satisfies KestrelConfig',
     })
     expect(fromGuard[0]?.level ?? null).toBe(expected)
     expect(fromDoctor[0]?.level ?? null).toBe(expected)

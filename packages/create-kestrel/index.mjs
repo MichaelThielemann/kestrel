@@ -167,13 +167,17 @@ const remaining = diagnoseProject({
   packageJson: readIf(join(target, 'package.json')),
   nuxtConfig: readIf(join(target, 'nuxt.config.ts')),
   appVue: readIf(join(target, 'app/app.vue')),
+  kestrelConfig: readIf(join(target, 'kestrel.config.ts')),
   env: readIf(envPath),
 })
-if (remaining.length) {
+// `info` findings describe how the project is configured; this heading is for what is broken, and a
+// freshly scaffolded project has no pre-2.0 timing to be surprised by.
+const toFix = remaining.filter((d) => d.level !== 'info')
+if (toFix.length) {
   out()
   out(bold('Still to fix:'))
   out()
-  for (const d of remaining) {
+  for (const d of toFix) {
     out(`${d.level === 'error' ? red('✖ error') : yellow('▲ warn ')} ${d.message}`)
     out()
   }

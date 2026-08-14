@@ -30,13 +30,16 @@ function inspect(target) {
     packageJson: readIf(join(target, 'package.json')),
     nuxtConfig: readIf(join(target, 'nuxt.config.ts')) ?? readIf(join(target, 'nuxt.config.js')),
     appVue: readIf(join(target, 'app', 'app.vue')) ?? readIf(join(target, 'app.vue')),
+    kestrelConfig: readIf(join(target, 'kestrel.config.ts')) ?? readIf(join(target, 'kestrel.config.js')),
     env: readIf(join(target, '.env')),
   })
 }
 
+const LEVEL_LABEL = { error: () => red('✖ error'), info: () => dim('· note '), warn: () => yellow('▲ warn ') }
+
 function printFindings(found) {
   for (const d of found) {
-    out(`${d.level === 'error' ? red('✖ error') : yellow('▲ warn ')} ${d.message}`)
+    out(`${(LEVEL_LABEL[d.level] ?? LEVEL_LABEL.warn)()} ${d.message}`)
     out()
   }
 }
@@ -170,10 +173,11 @@ function doctor(positional) {
   const found = inspect(target)
 
   out()
-  if (!found.length) {
+  // An `info` finding is a note about how this project is configured, not a problem with it — so it prints,
+  // but it must not withhold the all-clear the way a warning does.
+  if (!found.some((d) => d.level !== 'info')) {
     out(`${green('✔')} ${relative(process.cwd(), target) || '.'} looks like a working Kestrel project.`)
     out()
-    return 0
   }
   printFindings(found)
   return found.some((d) => d.level === 'error') ? 1 : 0

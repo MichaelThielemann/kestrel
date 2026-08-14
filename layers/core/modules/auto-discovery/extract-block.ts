@@ -100,7 +100,9 @@ function evalObjectExpr(content: string, node: Node, scope: Record<string, unkno
   const src = content.slice(node.start, node.end)
   const names = Object.keys(scope)
   try {
-     
+    // `src` is a slice of the CONSUMER's own block-SFC source, evaluated once here at build/discovery time
+    // to recover the object literal's runtime shape — never attacker- or request-supplied, so this is not
+    // an eval-injection surface.
     const fn = new Function(...names, `return (${src})`)
     const out = fn(...names.map((k) => scope[k]))
     if (!out || typeof out !== 'object') throw new Error('expected an object literal')
