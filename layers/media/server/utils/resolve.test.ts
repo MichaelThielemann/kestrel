@@ -48,6 +48,18 @@ describe('resolveMedia', () => {
     expect(r.variants).toEqual([])
     expect(r.alt).toBeNull()
   })
+  it('resolves the EU AI Act disclosure from the top-level columns', () => {
+    const tagged = { ...row, aiSourceType: 'trainedAlgorithmicMedia', aiNote: 'Midjourney v7' }
+    expect(resolveMedia(tagged as never, 'en', publicUrl).aiDisclosure)
+      .toEqual({ sourceType: 'trainedAlgorithmicMedia', note: 'Midjourney v7' })
+  })
+  it('keeps the note optional but never emits a half-filled disclosure without a source type', () => {
+    expect(resolveMedia({ ...row, aiSourceType: 'algorithmicallyEnhanced', aiNote: null } as never, 'en', publicUrl).aiDisclosure)
+      .toEqual({ sourceType: 'algorithmicallyEnhanced', note: null })
+    // evidence text alone is not a disclosure — an unset source type resolves to null
+    expect(resolveMedia({ ...row, aiSourceType: null, aiNote: 'EXIF Software: Midjourney' } as never, 'en', publicUrl).aiDisclosure).toBeNull()
+    expect(resolveMedia(row as never, 'en', publicUrl).aiDisclosure).toBeNull()
+  })
   it('exposes the storage folder, defaulting to "" when the row folder is null', () => {
     expect(resolveMedia(row as never, 'en', publicUrl).folder).toBe('pics')
     expect(resolveMedia({ id: 2, folder: null, storageKey: 'y.png', mime: 'image/png', width: null, height: null, thumbhash: null, derivatives: null, translations: null } as never, 'en', publicUrl).folder).toBe('')

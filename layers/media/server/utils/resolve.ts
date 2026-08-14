@@ -7,6 +7,9 @@ import type { DerivativeManifest } from './record'
 /** One derivative, tagged with its parsed name + format so `<picture>` rendering can group by format. */
 export interface MediaVariant { name: string; format: string; url: string; width: number; height: number }
 
+/** The disclosure-relevant subset of the IPTC Digital Source Type vocabulary (EU AI Act Art. 50). */
+export type AiSourceType = 'trainedAlgorithmicMedia' | 'compositeWithTrainedAlgorithmicMedia' | 'algorithmicallyEnhanced'
+
 export interface ResolvedMedia {
   id: number
   /** The media's storage folder ('' at the media root) — lets the field open the picker there. */
@@ -23,6 +26,10 @@ export interface ResolvedMedia {
   srcset: { url: string; width: number }[]
   /** Every derivative, name+format-tagged — the source `KestrelImg`/`useMediaVariant` build `<picture>` from. */
   variants: MediaVariant[]
+  /** EU AI Act Art. 50 disclosure, set by an editor — null when unset. Always resolved regardless of
+   *  `kestrel.config.ts`'s `aiDisclosure.enabled` (that flag only gates the admin UI). Kestrel never
+   *  renders this automatically; read it directly or opt into `KestrelImg`'s `aiBadge` prop. */
+  aiDisclosure: { sourceType: AiSourceType; note: string | null } | null
 }
 
 interface MediaRow {
@@ -35,6 +42,8 @@ interface MediaRow {
   thumbhash: string | null
   derivatives: DerivativeManifest | null
   translations: Record<string, { alt?: string; title?: string; description?: string }> | null
+  aiSourceType: string | null
+  aiNote: string | null
 }
 
 export function resolveMedia(row: MediaRow, locale: string, publicUrl: (key: string) => string): ResolvedMedia {
@@ -69,6 +78,9 @@ export function resolveMedia(row: MediaRow, locale: string, publicUrl: (key: str
     src: publicUrl(row.storageKey),
     srcset,
     variants,
+    // A note without a source type is only evidence (e.g. the upload scan's pre-fill), not a disclosure —
+    // never emit a half-filled object a consumer might render as one.
+    aiDisclosure: row.aiSourceType ? { sourceType: row.aiSourceType as AiSourceType, note: row.aiNote ?? null } : null,
   }
 }
 
