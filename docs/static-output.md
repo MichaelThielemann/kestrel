@@ -93,12 +93,24 @@ hides its Publish button and never reports "Outdated", a full publish holds noth
 `POST /api/publish` keeps working as a manual "republish this now". Setting it is a per-environment
 decision like every other `output` key; the default (`false`) is the split.
 
-Both full publishes (boot and reconciler) **hold back routes with unpublished changes**: a route whose
-record was saved after its `publish_status` row keeps the file its last publish wrote, so a restart or a
-reconcile never puts work-in-progress on the live site. A route that has never been published is not held
-back — on a first deploy there is no older version to protect. `nuxt generate` is a build of the whole site
-from the current DB and makes no such distinction: a generate-based deploy publishes saved-but-unpublished
-edits along with everything else.
+**Routes with unpublished changes are held back** — by every publish, full or incremental. A route whose
+record was saved after its `publish_status` row keeps the file its last publish wrote, so neither a restart,
+a reconcile, nor somebody else's Publish puts work-in-progress on the live site. Withholding is keyed to the
+RECORD, not to the route string, so a saved-but-unpublished rename keeps serving its old URL instead of
+publishing the new one and deleting the old.
+
+Two consequences worth knowing:
+
+- A withheld route is frozen **whole**. It keeps the links and hreflang of its last publish too, so a link
+  on it that points at a page somebody has since unpublished stays stale until that route is itself
+  published. Rendering a page's published body while resolving fresh links needs a per-record published
+  snapshot, which Kestrel does not have (see ADR-0008, *Future*).
+- A route that has never been published at all is **not** held back, as long as its record has no live file
+  under a previous route either — on a first deploy there is no older version to protect, and holding
+  everything back would produce an empty site.
+
+`nuxt generate` makes no such distinction: it is a build of the whole site from the current DB, so a
+generate-based deploy publishes saved-but-unpublished edits along with everything else.
 
 The target is the same `output` block as the `generate` deploy — a local dir (default `.data/published`)
 or an S3 bucket. Pruning the static files of unpublished/deleted/renamed pages is **always on** (output ≡

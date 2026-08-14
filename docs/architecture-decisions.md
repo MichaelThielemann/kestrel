@@ -23,12 +23,25 @@ iframe shows unsaved content over postMessage. Two previews, two different answe
   not stay live while its record says otherwise; a page whose *content* changed is still a page the site can
   legitimately serve, in its last published version. Losing content is recoverable, serving withdrawn
   content is not.
-- **A full publish holds back routes with unpublished changes.** The boot publish and the reconciler
-  re-render from the DB, which would push every saved-but-unpublished edit live on the next restart — the
-  whole mechanism, undone by a deploy. They now skip routes whose record `updatedAt` is newer than their
-  `publish_status` row, so those keep the file their last publish wrote. A route that was never published
-  is NOT held back: on a first deploy there is no older version to protect, and holding it would produce an
-  empty site.
+- **Every publish holds back routes with unpublished changes — full and incremental alike.** Re-rendering
+  from the DB pushes whatever the DB currently holds, so any render of a route whose record has moved on
+  publishes work nobody released. That reaches further than the boot publish: an incremental publish renders
+  every route matching the invalidation's tags, and since each page reads the `site` singleton, publishing
+  site settings would otherwise flush every withheld edit on the site at once. So a route whose record
+  `updatedAt` is newer than its `publish_status` row keeps the file its last publish wrote, wherever the
+  render was triggered from. The route a publish was explicitly FOR is exempt — pressing Publish is what
+  clears the withholding.
+- **Withholding is keyed to the record, not the route string.** A rename moves the string, so the new route
+  has no `publish_status` row of its own; keyed by route it would slip through the never-published carve-out
+  below, publishing the unpublished rename *and* pruning the old URL that is still the live one. A record's
+  previously-published routes are consulted instead, and protected from the prune while it is held.
+  A record with no prior published route keeps the carve-out: on a first deploy there is no older version to
+  protect, and holding it would produce an empty site.
+- **A held route is frozen whole, links included.** It keeps the baked links and hreflang of its last
+  publish, so a link to a page that has since been unpublished stays stale until the referrer is itself
+  published. That is the accepted cost: a route serving one publish generation throughout is more coherent
+  than a file mixing an old body with fresh links, and the alternative — rendering the published body while
+  resolving current links — needs the per-record snapshot named under *Future*.
 - **The record's `status` is unchanged** — it still means "may be public" and still gates the resolver, the
   sitemap and link resolution. What changed is only WHEN the file is written. The Publish button promotes a
   draft on the way, because pressing it is the publish intent.

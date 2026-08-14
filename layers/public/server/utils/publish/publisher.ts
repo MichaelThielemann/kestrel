@@ -14,7 +14,7 @@ import { htmlKeyForRoute } from './route-keys'
 import { staleRoutes, type DepsStore } from './deps'
 import { recordPublishStatus, clearPublishStatus, renderOutcome, lastPublishedAt } from './publish-status'
 import { routesToPrune, type Invalidation } from './invalidation'
-import { pendingRoutes } from './pending'
+import { pendingRoutes, heldRoutes } from './pending'
 
 /**
  * The runtime static publisher: renders public routes from the LIVE server (`localFetch`, the same
@@ -73,6 +73,9 @@ export interface PublishedRoutes {
   routes: string[]
   /** Each route's record `updatedAt` in ms — the "last saved" half of the saved-vs-published comparison. */
   savedAt: Map<string, number>
+  /** Each route's owning record as its deps tag (`<coll>:<id>`) — route strings move on a rename, records
+   *  do not, so withholding a renamed page needs the identity behind the route. */
+  recordTag: Map<string, string>
   /** Names of collections whose route query threw (drifted schema, locked DB) — routes are missing. */
   failed: string[]
 }
@@ -87,6 +90,7 @@ export function allPublishedRoutes(): PublishedRoutes {
   const pub = publicReadableResources()
   const routes = new Set<string>([localePath('/', primary, primary, prefixPrimary)]) // `/` or `/<primary>`
   const savedAt = new Map<string, number>()
+  const recordTag = new Map<string, string>()
   const failed: string[] = []
   for (const c of allCollections()) {
     if (!c.def.pageLike || !isPubliclyReadable(c.def.name, pub)) continue
@@ -102,6 +106,7 @@ export function allPublishedRoutes(): PublishedRoutes {
     // `updatedAt` is a system column on every built collection, but this projection also runs against
     // hand-rolled tables in tests — guard it exactly like `locale`, or its absence throws the select.
     if (Object.hasOwn(cols, 'updatedAt')) proj.updatedAt = cols.updatedAt
+    if (Object.hasOwn(cols, 'id')) proj.id = cols.id
     let rows: Record<string, unknown>[]
     try { rows = db.select(proj as never).from(c.table).all() as Record<string, unknown>[] }
     catch (error) {
@@ -119,9 +124,12 @@ export function allPublishedRoutes(): PublishedRoutes {
       const saved = row.updatedAt
       if (saved instanceof Date) savedAt.set(route, saved.getTime())
       else if (typeof saved === 'number') savedAt.set(route, saved)
+      // The same tag the publisher records against a rendered route, so a route can be traced back to its
+      // record even after a rename moved the route string.
+      if (typeof row.id === 'number') recordTag.set(route, `${c.def.name}:${row.id}`)
     }
   }
-  return { routes: [...routes], savedAt, failed }
+  return { routes: [...routes], savedAt, recordTag, failed }
 }
 
 /** Render + write the given routes (skips non-200). When `deps` is given, each render is wrapped in a
@@ -238,7 +246,7 @@ export async function publishFull(driver: StorageDriver = outputDriver(), deps?:
   // runs late (layer-then-filename order) — finish populating the registry first. Moving the read before
   // an await would silently render an empty registry. See docs/architecture.md → "Server plugins".
   await syncStaticAssets(driver, cfg.publicDir)
-  const { routes, savedAt, failed } = allPublishedRoutes()
+  const { routes, savedAt, recordTag, failed } = allPublishedRoutes()
   if (failed.length) {
     // Keep on doubt: with a collection missing from the enumeration, every one of its live pages looks
     // stale, so a prune would wipe it from the output. Rendering still proceeds — a stale extra file is
@@ -246,12 +254,27 @@ export async function publishFull(driver: StorageDriver = outputDriver(), deps?:
     console.error(`[kestrel] publish: prune skipped — routes of ${failed.join(', ')} could not be enumerated; existing files kept`)
   }
 
+  // A full run resynchronizes the output with the DB, so without this it would push every saved-but-
+  // unpublished edit live — exactly what deferring the publish exists to prevent. Those routes keep the
+  // file their last publish wrote.
+  // …unless the consumer opted out of the split (`output.publishOnSave`): there, a save IS a publish, so
+  // "saved after the last publish" means a republish is merely in flight, not deliberately withheld.
+  // Computed BEFORE the prune, because a held record's live file may sit at a route the DB no longer names
+  // (an unpublished rename), and that file is what the site is still serving. Without `deps` there is no
+  // way to find those prior routes, so only same-route withholding applies — the pre-rename behaviour.
+  const { hold, keep } = cfg.publishOnSave
+    ? { hold: new Set<string>(), keep: new Set<string>() }
+    : heldRoutes(savedAt, lastPublishedAt(useDb()), recordTag, (tag) => deps?.routesForTags([tag]) ?? [])
+  if (hold.size) {
+    console.info(`[kestrel] publish: ${hold.size} route(s) held at their published version (unpublished changes): ${[...hold].join(', ')}`)
+  }
+
   // Targeted prune: a route we previously published that is no longer in the published set — a page
   // unpublished, deleted, or whose slug changed — must lose its static file. Safe because it only deletes
   // files this publisher wrote (tracked in deps, durable across restarts). Output ≡ DB; no opt-in toggle.
   let pruned = 0
   if (deps && !failed.length) {
-    const stale = staleRoutes(deps.routes(), routes)
+    const stale = staleRoutes(deps.routes(), routes).filter((route) => !keep.has(route))
     if (stale.length) {
       await prunePages(stale, driver)
       for (const route of stale) deps.forget(route)
@@ -259,17 +282,7 @@ export async function publishFull(driver: StorageDriver = outputDriver(), deps?:
     }
   }
 
-  // A full run resynchronizes the output with the DB, so without this it would push every saved-but-
-  // unpublished edit live — exactly what deferring the publish exists to prevent. Those routes keep the
-  // file their last publish wrote (they stay in `routes`, so the prune above still treats them as live).
-  // …unless the consumer opted out of the split (`output.publishOnSave`): there, a save IS a publish, so
-  // "saved after the last publish" means a republish is merely in flight, not deliberately withheld.
-  const skipped = cfg.publishOnSave ? [] : pendingRoutes(savedAt, lastPublishedAt(useDb()))
-  if (skipped.length) {
-    console.info(`[kestrel] publish: ${skipped.length} route(s) held at their published version (unpublished changes): ${skipped.join(', ')}`)
-  }
-  const skip = new Set(skipped)
-  const renderRoutes = routes.filter((route) => !skip.has(route))
+  const renderRoutes = routes.filter((route) => !hold.has(route))
 
   // Reset the discovery accumulator so this full run reconciles ONLY what it actually renders — an earlier
   // incremental (tag) publish also feeds the accumulator, and a variant it recorded whose usage was later
@@ -287,7 +300,7 @@ export async function publishFull(driver: StorageDriver = outputDriver(), deps?:
   // the same partial-coverage case: its pages were never visited, so their variants are missing too — and
   // so is a route held back at its published version: its live file still references the variants this run
   // never saw.
-  if (!failed.length && !skipped.length && rendered === renderRoutes.length) saveDiscoveredVariants(useDb())
+  if (!failed.length && !hold.size && rendered === renderRoutes.length) saveDiscoveredVariants(useDb())
   return { rendered, pruned }
 }
 
@@ -296,13 +309,39 @@ export async function publishFull(driver: StorageDriver = outputDriver(), deps?:
  *  (their `<lastmod>` may have changed). */
 export interface PublishResult { rendered: string[]; pruned: string[]; counts: { rendered: number; pruned: number } }
 
+/**
+ * Drop the routes a tag match dragged in that are holding their published version back. Withholding is a
+ * property of the ROUTE, not of the full publish: a route whose record was saved after its last publish
+ * serves that published file until someone publishes it. Without this, publishing one record re-renders
+ * every route tagged with the collection — and every route reads the `site` singleton — from the live DB,
+ * so a routine Publish writes an unrelated record's withheld body to the live site.
+ *
+ * A route named in `render` is exempt: it IS what the publish was for, and pressing Publish is what clears
+ * the withholding. The prune set is untouched — removal has no publish intent left to protect, so an
+ * unpublished or deleted record's page still goes at once (ADR-0008).
+ *
+ * The cost, deliberately accepted: a withheld route keeps the baked links and hreflang of its last
+ * publish, so a link to a record that has since been unpublished stays stale until the referrer itself is
+ * published. That is the same staleness its body already carries — a frozen route is one publish
+ * generation throughout, rather than a mix of two. Rendering a referrer from its published state while
+ * resolving fresh links needs a published snapshot per record, which is ADR-0008's "Future".
+ */
+function withheldRemoved(inv: Extract<Invalidation, { type: 'tags' }>, routes: string[]): string[] {
+  if (outputConfig().publishOnSave) return routes // that mode never defers a publish in the first place
+  // An un-enumerable collection contributes no `savedAt` entry, so its routes are simply not withheld —
+  // the same direction publishFull takes, and the non-destructive one (a stale re-render, never a delete).
+  const held = new Set(pendingRoutes(allPublishedRoutes().savedAt, lastPublishedAt(useDb())))
+  const explicit = new Set(inv.render)
+  return routes.filter((route) => explicit.has(route) || !held.has(route))
+}
+
 export async function publishInvalidation(inv: Invalidation, driver: StorageDriver = outputDriver(), deps?: DepsStore): Promise<PublishResult> {
   if (inv.type === 'noop') return { rendered: [], pruned: [], counts: { rendered: 0, pruned: 0 } }
   if (inv.type === 'full') {
     const r = await publishFull(driver, deps) // full: counts only (don't list every route)
     return { rendered: [], pruned: [], counts: { rendered: r.rendered, pruned: r.pruned } }
   }
-  const routes = [...new Set([...(deps?.routesForTags(inv.tags) ?? []), ...inv.render])]
+  const routes = withheldRemoved(inv, [...new Set([...(deps?.routesForTags(inv.tags) ?? []), ...inv.render])])
   const rendered = await publishRoutes(routes, driver, deps)
   let pruned: string[] = []
   // Never prune a route we just wrote live — render wins a coalesced render+prune collision (see routesToPrune).

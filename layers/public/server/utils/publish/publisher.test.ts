@@ -13,7 +13,7 @@ vi.mock('nitropack/runtime', () => ({
   useNitroApp: () => ({ localFetch: async () => new Response('<html>x</html>', { status: 200 }) }),
 }))
 
-const { allPublishedRoutes, publishFull } = await import('./publisher')
+const { allPublishedRoutes, publishFull, publishInvalidation } = await import('./publisher')
 
 // Drizzle tables whose columns match a `pageLike` collection: `pages` matches its SQL table, `posts`
 // declares a `status` column the SQL table does not have (a drifted / unmigrated deploy) so its SELECT throws.
@@ -181,11 +181,90 @@ describe('publishFull — saved-but-unpublished edits stay unpublished', () => {
     expect(driver.written).toContain('a/index.html')
   })
 
+  // A rename moves the route STRING, so the record's new route has no publish_status row and the
+  // never-published carve-out waves it through — while the old route, still the live one, looks abandoned
+  // to the prune. The carve-out is about a first deploy having nothing to protect; a rename has plenty.
+  it('holds back a renamed route whose record still has a live file at its old route', async () => {
+    collections = [pages]
+    sqlite.exec("UPDATE pages SET path = '/new', updated_at = 9000 WHERE id = 1")
+    publishedAt('/old', 2)
+    const deps = new DepsStore()
+    deps.record('/old', ['pages', 'pages:1'])
+    await publishFull(driver, deps)
+    expect(driver.written).not.toContain('new/index.html')
+    expect(driver.deleted).not.toContain('old/index.html')
+    expect(deps.routes()).toContain('/old')
+  })
+
+  it('publishes the rename once it is no longer pending — the old route is then genuinely abandoned', async () => {
+    collections = [pages]
+    sqlite.exec("UPDATE pages SET path = '/new', updated_at = 1000 WHERE id = 1")
+    publishedAt('/old', 20) // published AFTER the last save → the rename was published, /old is stale
+    const deps = new DepsStore()
+    deps.record('/old', ['pages', 'pages:1'])
+    await publishFull(driver, deps)
+    expect(driver.written).toContain('new/index.html')
+    expect(driver.deleted).toContain('old/index.html')
+  })
+
   it('does not narrow the variant registry when a route was skipped (its live file still uses those variants)', async () => {
     sqlite.exec('UPDATE pages SET updated_at = 9000 WHERE id = 1')
     publishedAt('/a', 2)
     await publishFull(driver, new DepsStore())
     expect(saveDiscovered).not.toHaveBeenCalled()
+  })
+})
+
+// The hold-back is not a property of the FULL publish, it is a property of the route: a route with
+// unpublished changes serves its last published file until someone publishes it. An incremental publish
+// re-renders every tag-matched route from the live DB, so without the same filter, publishing one record
+// writes an unrelated record's withheld body to the live site — the split, undone by a routine click.
+describe('publishInvalidation — a tag-matched route with unpublished changes stays at its published version', () => {
+  const publishedAt = (route: string, seconds: number) =>
+    sqlite.exec(`INSERT INTO publish_status (route, status, target, updated_at) VALUES ('${route}', 'success', 'local', ${seconds})`)
+
+  // `/a` (id 1) was published at t=2s and edited at t=9s → withheld. `/b` (id 2) is current. Both carry
+  // the `pages` tag, as every page that lists the collection or reads the `site` singleton does.
+  const withheldA = () => {
+    collections = [pages]
+    sqlite.exec('UPDATE pages SET updated_at = 9000 WHERE id = 1')
+    sqlite.exec("INSERT INTO pages (id, path, status, updated_at) VALUES (2, '/b', 'published', 1000)")
+    publishedAt('/a', 2)
+    publishedAt('/b', 20)
+    const deps = new DepsStore()
+    deps.record('/a', ['pages', 'pages:1'])
+    deps.record('/b', ['pages', 'pages:2'])
+    return deps
+  }
+
+  it('does not write a withheld referrer when another record is published', async () => {
+    const deps = withheldA()
+    await publishInvalidation({ type: 'tags', tags: ['pages', 'pages:2'], render: ['/b'], prune: [] }, driver, deps)
+    expect(driver.written).not.toContain('a/index.html')
+    expect(driver.written).toContain('b/index.html')
+  })
+
+  it('still writes the route the publish was actually FOR — pressing Publish is what clears it', async () => {
+    const deps = withheldA()
+    await publishInvalidation({ type: 'tags', tags: ['pages', 'pages:1'], render: ['/a'], prune: [] }, driver, deps)
+    expect(driver.written).toContain('a/index.html')
+  })
+
+  it('holds nothing back with output.publishOnSave — that mode never defers a publish', async () => {
+    const deps = withheldA()
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({ kestrel: { output: { driver: 'local', dir: '', publicDir: '/kestrel-no-such-public-dir', auto: false, publishOnSave: true, reconcileMinutes: 0, verbose: false, s3: {} } } }),
+    })
+    await publishInvalidation({ type: 'tags', tags: ['pages', 'pages:2'], render: ['/b'], prune: [] }, driver, deps)
+    expect(driver.written).toContain('a/index.html')
+  })
+
+  // Withholding governs what is WRITTEN, never what is removed: a route whose record was unpublished or
+  // deleted has no publish intent left to protect, and ADR-0008 keeps removal immediate on purpose.
+  it('still prunes a withheld route that is being removed', async () => {
+    const deps = withheldA()
+    await publishInvalidation({ type: 'tags', tags: ['pages', 'pages:1'], render: [], prune: ['/a'] }, driver, deps)
+    expect(driver.deleted).toContain('a/index.html')
   })
 })
 
