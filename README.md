@@ -23,7 +23,8 @@ static host. It is deliberately **not**:
 - **SQLite only** — one database, single instance. (A Postgres `Dialect` seam exists; no impl is active.)
 - **No public data API** — only published *page-like* records have a read surface (mirroring the static
   output); everything else stays behind the admin guard. No per-request rate limiting / live API.
-- **No runtime redirect engine** — handle redirects at the edge (NGINX / CDN).
+- **No runtime redirect engine** — redirects are *authored* in the CMS and published as a `redirects.json`
+  artifact, but Kestrel never answers a 30x itself; an edge (NGINX / njs / CloudFront) has to read it.
 - **No per-file access control on uploads.** The admin guard protects the media *library* — listing,
   editing, deleting — but not the bytes. With `media.driver: 'local'` the files are served from the app
   origin by Nitro's static handler, which runs ahead of every middleware, so anyone who knows a URL can
@@ -49,13 +50,18 @@ static host. It is deliberately **not**:
 - **Block page-builder** — a 3-pane editor (tree · live preview · fields) with nestable block slots; each
   block is a single `app/blocks/*.vue` SFC (schema via field-factory `defineProps` + the display template).
 - **Media library** — upload (magic-byte sniff + SVG sanitize), local or S3 storage, responsive WebP
-  derivatives + thumbhash, folders, and a full-screen asset viewer.
+  derivatives + thumbhash, folders, and a full-screen asset viewer. Optional **EU AI Act (Art. 50)
+  disclosure** fields per asset, with an upload-time scan for AI-origin signals (off by default).
 - **Multilingual content** — optional per-record translations, an editor locale flow, locale-prefixed
   routing, hreflang alternates in the sitemap.
 - **Static output** — `nuxt generate` (full rebuild) or a runtime **incremental publisher** (re-renders
-  only the pages a write affects), to a local dir or S3; emits `sitemap.xml`, `robots.txt`, and
-  **`llms.txt`** (an [llmstxt.org](https://llmstxt.org) site map so AI agents grasp the site). A live
-  in-dashboard preview renders straight from the origin.
+  only the pages a write affects), to a local dir or S3; emits `sitemap.xml`, `robots.txt`,
+  **`llms.txt`** (an [llmstxt.org](https://llmstxt.org) site map so AI agents grasp the site) and
+  `redirects.json`. A live in-dashboard preview renders straight from the origin.
+- **Search + answer engines** — canonical / Open Graph / hreflang tags and a schema.org JSON-LD graph
+  (`WebSite` + `WebPage`/`Article` + `BreadcrumbList`) on every page, no wiring. Two opt-in extras publish
+  more than the page already showed: `seo.articleMeta` (author / publication date / keywords) and
+  `seo.llmsFull` (`/llms-full.txt`, every published page's body in one document).
 - **Reference integrity** — writes invalidate exactly the affected static pages; dead-reference warnings;
   required + globally-unique page slugs per locale.
 
@@ -126,9 +132,9 @@ where to start reading, the cross-layer seams, the gotchas). Then the per-topic 
 | [consuming-kestrel.md](docs/consuming-kestrel.md) | Using Kestrel in your own app: defining collections/fields/blocks, auto-discovery, the schema lifecycle |
 | [configuration.md](docs/configuration.md) | The single config source (`kestrel.config.ts`), every `KESTREL_*` env var, the auth/session env split |
 | [block-editing.md](docs/block-editing.md) | The block content model + the 3-pane block editor (tree · preview · fields) |
-| [media-uploads.md](docs/media-uploads.md) | Ingest security, storage drivers (local/S3), responsive-image derivation |
+| [media-uploads.md](docs/media-uploads.md) | Ingest security, storage drivers (local/S3), responsive-image derivation, EU AI Act disclosure |
 | [multilingual.md](docs/multilingual.md) | Content locales, the editor locale flow, locale-prefixed routing |
-| [static-output.md](docs/static-output.md) | `nuxt generate` + the runtime incremental publisher, the live editor preview, `sitemap.xml` / `robots.txt` / `llms.txt`, CMS-managed redirects, the optional S3 deploy |
+| [static-output.md](docs/static-output.md) | `nuxt generate` + the runtime incremental publisher, the live editor preview, `sitemap.xml` / `robots.txt` / `llms.txt` / `llms-full.txt`, the JSON-LD structured data, CMS-managed redirects, the optional S3 deploy |
 | [reference-integrity.md](docs/reference-integrity.md) | How writes invalidate the static site precisely, dead-reference warnings (a dead link renders `#`, and the editor is warned), and required/unique page slugs |
 | [architecture-decisions.md](docs/architecture-decisions.md) | ADRs (the collection-derived schema engine, reference integrity, the auth/password choice) |
 
@@ -147,7 +153,8 @@ The CMS is split into Nuxt layers under `layers/`:
   lives in the repo root, dev-only, and is **not** shipped in the package.)
 - **`media`** — uploads, pluggable storage, image derivation, the media library + asset viewer.
 - **`admin`** — the editor SPA: collection list, record editor, the 3-pane block editor.
-- **`public`** — the SSG render path: the catch-all page, `BlockRenderer`, sitemap / robots / llms.txt, deploy.
+- **`public`** — the SSG render path: the catch-all page, `BlockRenderer`, the JSON-LD head, the literal-key
+  artifacts (sitemap / robots / llms.txt / llms-full.txt / redirects.json), deploy.
 
 `playground/` is a small consuming example. `templates/starter/` is what the scaffolder writes out;
 `scripts/kestrel.mjs` is the engine's CLI and `packages/create-kestrel/` the standalone

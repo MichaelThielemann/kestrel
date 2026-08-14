@@ -20,6 +20,24 @@ Releases before 1.7.0 are documented by their tags and commit history.
 - **`CollectionDef.validate`** — whole-record, pre-write validation for what a per-field Zod validator
   cannot see (it only ever sees one field's value). Issues are keyed by field, so they land on the field
   in the editor like any other 400.
+- **Structured data for search and answer engines.** Every page now carries a schema.org JSON-LD graph
+  (`WebSite` + `WebPage`/`Article` + `BreadcrumbList`) alongside the canonical / Open Graph / hreflang tags
+  it already emitted — unconditional, because it only restates what the page head already says. Two extras
+  are **opt-in**, since each publishes something the site did not publish before: `seo.articleMeta`
+  (`KESTREL_SEO_ARTICLE_META`) offers editors author / publication date / keywords and promotes the page's
+  node to `Article`, and `seo.llmsFull` (`KESTREL_SEO_LLMS_FULL`) serves and publishes `/llms-full.txt`,
+  every published, indexable page's full body as Markdown in one document. `noindex` removes a page from
+  all of it consistently. See [`docs/static-output.md` › Structured data](docs/static-output.md#structured-data-json-ld).
+- **EU AI Act (Art. 50) disclosure on media assets** — opt-in via `aiDisclosure.enabled`
+  (`KESTREL_AI_DISCLOSURE`), off by default. Two nullable columns (`aiSourceType`, `aiNote`) record how an
+  asset was produced; with the flag on, the media viewer gains the controls and each upload is scanned for
+  AI-origin signals (IPTC/XMP `DigitalSourceType`, C2PA presence, generator `Software` tags, PNG prompt
+  chunks), quoted into `aiNote` — never into `aiSourceType`, which stays a human decision, and never over
+  text a person wrote. Kestrel stores and manages this metadata only: it burns in no watermark, signs no
+  C2PA manifest, and emits nothing into public output on its own. `ResolvedMedia.aiDisclosure` is always
+  resolved, so turning the flag back off keeps existing data. `<KestrelImg ai-badge>` renders an optional,
+  deliberately unstyled badge. See
+  [`docs/media-uploads.md` › EU AI Act disclosure](docs/media-uploads.md#eu-ai-act-art-50-disclosure).
 
 ### Fixed
 
@@ -29,8 +47,9 @@ Releases before 1.7.0 are documented by their tags and commit history.
 - An error banner in the editor could come up empty behind an HTTP/2 proxy: `statusMessage` was read from
   the response's reason phrase, which HTTP/2 does not carry. It is now read from the error body.
 
-> **Action required: run `db:migrate`.** The `redirects` table is new. It is additive and non-destructive,
-> so a plain migrate applies it; nothing else changes for an existing project.
+> **Action required: run `db:migrate`.** The `redirects` table is new, and `media` gains the nullable
+> `ai_source_type` / `ai_note` columns. Both changes are additive and non-destructive, so a plain migrate
+> applies them; an unset value behaves exactly as before, and nothing else changes for an existing project.
 
 ## [2.0.0] — 2026-08-14
 

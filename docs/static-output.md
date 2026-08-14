@@ -17,7 +17,7 @@ media origin (NGINX / S3), not bundled into the HTML.
 ## What gets prerendered
 
 At build time the `prerender-routes` module reads the SQLite database and registers one route
-per **published** page path, plus the two artifacts below:
+per **published** page path, plus the artifacts below:
 
 - The site root `/` (always seeded, and rendered as an empty document before a home page exists).
 - Every published page-like record's path. Primary-locale pages are unprefixed (`/about`);
