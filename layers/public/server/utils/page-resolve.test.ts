@@ -275,14 +275,136 @@ describe('resolvePage ancestors (the breadcrumb trail)', () => {
     expect(resolvePage(db, [seoP], '/x', 'en').page!.ancestors).toEqual([{ path: '/', title: 'Meta title', locale: 'en' }])
   })
 
-  it('captures each ancestor as a publish dependency, so renaming one re-renders its descendants', async () => {
+  // The dependency is on the PATH, not on whatever record happens to sit there — Kestrel has no
+  // parent/child relation, so an ancestor that does not exist yet has no id to capture, and a page
+  // created there later is precisely the change the trail is waiting for.
+  it('subscribes to every ancestor PATH it looked in, including the ones with no page', async () => {
     const { withReadCapture } = await import('../../../core/server/utils/read-capture')
     const { db, sqlite } = build([p1])
     insert(sqlite, 'p1', { path: '/blog', status: 'published' })
     insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
     const blogId = (sqlite.prepare(`SELECT id FROM p1 WHERE path = '/blog'`).get() as { id: number }).id
     const { tags } = await withReadCapture(() => resolvePage(db, [p1], '/blog/hello', 'en').page!)
+    // `/` has no page at all — the tag still has to exist, or creating one later could never reach here
+    expect(tags).toContain('#path:/')
+    expect(tags).toContain('#path:/blog')
+    // …and the record that IS there is captured too: the path tag alone cannot carry a rename or a
+    // noindex, because the publish action classifies those writes as before === after
     expect(tags).toContain(`p1:${blogId}`)
+    // its own path is not an ancestor of itself
+    expect(tags).not.toContain('#path:/blog/hello')
+  })
+
+  it('captures a currently-invisible ancestor too, so its removal can repair the trail', async () => {
+    const { withReadCapture } = await import('../../../core/server/utils/read-capture')
+    const { db, sqlite } = build([p1])
+    insert(sqlite, 'p1', { path: '/blog', status: 'draft' })
+    insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
+    const draftId = (sqlite.prepare(`SELECT id FROM p1 WHERE path = '/blog'`).get() as { id: number }).id
+    const { result, tags } = await withReadCapture(() => resolvePage(db, [p1], '/blog/hello', 'en').page!)
+    expect(result.ancestors).toEqual([]) // a draft is no crumb …
+    expect(tags).toContain(`p1:${draftId}`) // … but publishing it must still reach this page
+  })
+
+  it('subscribes even when the ancestor lookup could not complete, so a repair can still reach it', async () => {
+    const { withReadCapture } = await import('../../../core/server/utils/read-capture')
+    const { db, sqlite } = build([p1, p2])
+    insert(sqlite, 'p2', { path: '/blog/hello', status: 'published' })
+    sqlite.exec('DROP TABLE p1')
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { tags } = await withReadCapture(() => resolvePage(db, [p1, p2], '/blog/hello', 'en').page!)
+      expect(tags).toContain('#path:/blog')
+    } finally { spy.mockRestore() }
+  })
+
+  // End to end over the two halves: what a descendant captures has to be what a write to that path emits.
+  // The publish action (ADR-0008) classifies its write as before === after — the record's CURRENT state —
+  // so a transition (rename, noindex, unpublish) is invisible in that classification and only the edges
+  // the descendant captured can carry it.
+  describe('the edges a descendant captures reach the write that changes its trail', () => {
+    const deps = async (db: BetterSQLite3Database, path: string, route: string) => {
+      const { withReadCapture } = await import('../../../core/server/utils/read-capture')
+      const { DepsStore } = await import('./publish/deps')
+      const { tags } = await withReadCapture(() => resolvePage(db, [p1], path, 'en').page!)
+      const store = new DepsStore()
+      store.record(route, tags)
+      return store
+    }
+    /** What the editor's Publish button plans for a record in its current state. */
+    const publishOf = async (row: Record<string, unknown>) => {
+      const { classifyWrite, planInvalidation } = await import('./publish/invalidation')
+      return planInvalidation(classifyWrite(p1.def, row, row, 'en'))
+    }
+
+    it('a page CREATED at an ancestor path — the edge no record tag can carry', async () => {
+      const { db, sqlite } = build([p1])
+      insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
+      const store = await deps(db, '/blog/hello', '/blog/hello')
+      const { classifyWrite, planInvalidation } = await import('./publish/invalidation')
+      const inv = planInvalidation(classifyWrite(p1.def, null, { id: 42, path: '/blog', locale: 'en', status: 'published', seo: {} }, 'en'))
+      expect(inv.type === 'tags' && store.routesForTags(inv.tags)).toContain('/blog/hello')
+    })
+
+    it('an ancestor RENAMED away — the publish only knows the NEW path, so the OLD path needs another edge', async () => {
+      const { db, sqlite } = build([p1])
+      insert(sqlite, 'p1', { path: '/blog', status: 'published' })
+      insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
+      const store = await deps(db, '/blog/hello', '/blog/hello')
+      const id = (sqlite.prepare(`SELECT id FROM p1 WHERE path = '/blog'`).get() as { id: number }).id
+      // the save renames but publishes nothing; the publish then sees only the renamed row
+      const inv = await publishOf({ id, path: '/news', locale: 'en', status: 'published', seo: {} })
+      expect(inv.type === 'tags' && store.routesForTags(inv.tags)).toContain('/blog/hello')
+    })
+
+    it('an ancestor hidden with noindex — it is a crumb on NEITHER side of the publish', async () => {
+      const { db, sqlite } = build([seoP])
+      const insSeo = (path: string) =>
+        sqlite.prepare(`INSERT INTO seop (locale, translation_group, path, status, title, seo, created_at, updated_at) VALUES ('en', ?, ?, 'published', 'T', '{}', 0, 0)`)
+          .run(`g-${path}`, path)
+      insSeo('/blog')
+      insSeo('/blog/hello')
+      const { withReadCapture } = await import('../../../core/server/utils/read-capture')
+      const { DepsStore } = await import('./publish/deps')
+      const { classifyWrite, planInvalidation } = await import('./publish/invalidation')
+      const { tags } = await withReadCapture(() => resolvePage(db, [seoP], '/blog/hello', 'en').page!)
+      const store = new DepsStore()
+      store.record('/blog/hello', tags)
+      const id = (sqlite.prepare(`SELECT id FROM seop WHERE path = '/blog'`).get() as { id: number }).id
+      const hidden = { id, path: '/blog', locale: 'en', status: 'published', seo: { noindex: true } }
+      const inv = planInvalidation(classifyWrite(seoP.def, hidden, hidden, 'en'))
+      expect(inv.type === 'tags' && store.routesForTags(inv.tags)).toContain('/blog/hello')
+    })
+
+    it('an ancestor UNPUBLISHED — also invisible on both sides of its own publish', async () => {
+      const { db, sqlite } = build([p1])
+      insert(sqlite, 'p1', { path: '/blog', status: 'published' })
+      insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
+      const store = await deps(db, '/blog/hello', '/blog/hello')
+      const id = (sqlite.prepare(`SELECT id FROM p1 WHERE path = '/blog'`).get() as { id: number }).id
+      const { classifyWrite, planInvalidation } = await import('./publish/invalidation')
+      const inv = planInvalidation(classifyWrite(p1.def, { id, path: '/blog', locale: 'en', status: 'published' }, { id, path: '/blog', locale: 'en', status: 'draft' }, 'en'))
+      expect(inv.type === 'tags' && store.routesForTags(inv.tags)).toContain('/blog/hello')
+    })
+
+    it('an ancestor that is currently invisible still carries an edge, so removing it repairs the trail', async () => {
+      const { db, sqlite } = build([p1, p2])
+      // p1 shadows the path with a DRAFT, so p2's published page is not the crumb today …
+      insert(sqlite, 'p1', { path: '/blog', status: 'draft' })
+      insert(sqlite, 'p2', { path: '/blog', status: 'published' })
+      insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
+      const { withReadCapture } = await import('../../../core/server/utils/read-capture')
+      const { DepsStore } = await import('./publish/deps')
+      const { classifyWrite, planInvalidation } = await import('./publish/invalidation')
+      const { result, tags } = await withReadCapture(() => resolvePage(db, [p1, p2], '/blog/hello', 'en').page!)
+      expect(result.ancestors).toEqual([]) // the draft shadows it
+      const store = new DepsStore()
+      store.record('/blog/hello', tags)
+      // … deleting the shadow uncovers it, and that write must reach this page
+      const draftId = (sqlite.prepare(`SELECT id FROM p1 WHERE path = '/blog'`).get() as { id: number }).id
+      const inv = planInvalidation(classifyWrite(p1.def, { id: draftId, path: '/blog', locale: 'en', status: 'draft' }, null, 'en'))
+      expect(inv.type === 'tags' && store.routesForTags(inv.tags)).toContain('/blog/hello')
+    })
   })
 
   // A non-translatable pageLike record has ONE URL — the unprefixed/primary one the sitemap and the

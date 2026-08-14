@@ -1,7 +1,7 @@
 import { and, asc, eq, getTableColumns } from 'drizzle-orm'
 import { list } from '../../../core/server/utils/crud'
 import { captureRead } from '../../../core/server/utils/read-capture'
-import { translationGroupTag } from './publish/invalidation'
+import { pagePathTag, translationGroupTag } from './publish/invalidation'
 import type { BuiltCollection } from '../../../core/server/utils/collection-types'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 
@@ -93,11 +93,15 @@ function ancestorPaths(path: string): string[] {
  * breadcrumb items are links, and a trail that points at a 404 is a worse signal than a shorter trail.
  * The filters mirror the sitemap's, so a breadcrumb never advertises what the sitemap withholds.
  *
- * Each ancestor found is `captureRead`-tagged, so retitling, renaming, unpublishing or deleting it
- * re-renders every descendant that baked it. The one edge that cannot exist is CREATE: a page created at
- * `/blog` after `/blog/hello` was published has no id anything could have captured, so that crumb appears
- * on the next full publish rather than immediately (the same shape of gap `publishedAlternates` closes
- * with a group tag — there is no equivalent tag for "the page at this path" today).
+ * TWO dependency edges are captured per ancestor, because neither covers the other:
+ *  - the PATH (`pagePathTag`), for every path looked in — including those with no page at all and those
+ *    whose lookup threw. Kestrel has no parent/child relation between pages, so an ancestor is a
+ *    path-prefix match, and a page CREATED at `/blog` after `/blog/hello` was published has no id anything
+ *    could have captured beforehand. A path is knowable before its page exists.
+ *  - the RECORD (`<coll>:<id>`) of whatever row sits there, captured before the filters below so a
+ *    currently-invisible one counts too — the edge that carries a rename, a `noindex` or an unpublish,
+ *    none of which `crumbTags` can see (see the comment at that capture).
+ * `publishedAlternates` pairs a group tag with a record tag for exactly the same reason.
  */
 function publishedAncestors(
   db: BetterSQLite3Database,
@@ -108,6 +112,10 @@ function publishedAncestors(
 ): PageAncestor[] {
   const out: PageAncestor[] = []
   for (const ancestorPath of ancestorPaths(path)) {
+    // Before the scan, so the edge exists whatever the scan finds — no page, a draft, a noindexed one, or
+    // a collection whose table could not be read. A write at this path emits the same tag (`crumbTags` in
+    // classifyWrite), which is what repairs this page's trail.
+    captureRead(pagePathTag(ancestorPath))
     for (const c of collections) {
       if (!c.def.pageLike) continue
       // Project only what a crumb needs — never the row: this runs once per path segment per render, and
@@ -133,6 +141,14 @@ function publishedAncestors(
         continue
       }
       if (!row) continue
+      // BOTH edges are needed, and neither subsumes the other — the same pairing `publishedAlternates`
+      // uses. The record tag covers every change to the row sitting here, INCLUDING the ones that make it
+      // stop being a crumb: the explicit publish action classifies its write as `before === after` (the
+      // record's current state), so a rename, a `noindex` or an unpublish is invisible in `crumbTags`,
+      // which only ever names where the record is NOW. `<coll>:<id>` is in that write's tag list whatever
+      // the row looks like, so it is what repairs the trail. Captured BEFORE the filters below, so a
+      // draft/noindexed/shadowing row — one that is currently NOT the crumb — still carries the edge that
+      // fires when it goes away.
       captureRead(c.def.name, row.id)
       if (publishedOnly && hasStatus && row.status !== 'published') break
       if (row.seo?.noindex) break

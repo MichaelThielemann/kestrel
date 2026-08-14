@@ -12,12 +12,44 @@ go stale:
 
 ## The invalidation model
 
-A write to record *A* can affect other pages in two ways:
+A write to record *A* can affect other pages in three ways:
 
 - **Listings** — a page that QUERIES *A*'s collection (an overview rendering `list(posts)`). It depends on
   the collection, not a specific row → captured as the tag `<collection>`.
 - **Explicit referrers** — a page that LINKS to *A*, embeds *A*'s data, or has a relation/media field to
   *A* → captured as the tag `<collection>:<id>` (resolving/embedding *A* reads it by id).
+- **Descendants** — a page whose path sits BELOW *A*'s and therefore bakes *A* as a breadcrumb step. It
+  captures **two** tags per ancestor: `#path:<path>` *and* the `<collection>:<id>` of whatever record sits
+  there, invisible ones included.
+
+The third one needs both edges, and neither covers the other.
+
+`#path:` exists because Kestrel has **no parent/child relation** between pages: `path` is a plain column,
+an auto-generated slug is always flat, and nesting exists only because an editor typed slashes into one —
+so "descendant" *is* a path-prefix match. A page **created** at `/blog` after `/blog/hello` was published
+has no id anything could have captured beforehand; a path is knowable before its page exists. So a page
+subscribes to every ancestor path it *looked in*, including the ones with no page and the ones whose
+lookup failed.
+
+`<collection>:<id>` exists because a write's tags name where the record is **now**, not where it was. The
+explicit publish action classifies its write as `before === after` (`publish.post.ts` — a re-render of the
+record's current state), so a rename, a `noindex` or an unpublish is simply not visible in it: publishing
+`/blog` after renaming it to `/news` emits `#path:/news`, which no descendant of `/blog` ever captured. The
+record tag is in that write's tag list whatever the row looks like, so it is what repairs the trail — which
+is why it is captured *before* the published/`noindex` filters, so a draft or shadowing row that is
+currently no crumb still carries the edge that fires when it goes away. (`publishedAlternates` pairs a
+group tag with a record tag for exactly the same reason.)
+
+Two more properties worth knowing. `#path:` is deliberately **locale-less** (a non-translatable record has
+no locale to name, and a descendant must still be reached when a locale-less page appears above it), so it
+over-approximates across locales — extra re-renders, never a stale page. And it is emitted whenever the
+record is a visible crumb on either side of the write, without asking whether the *label* changed, for the
+same `before === after` reason.
+
+Publishing a section index therefore re-renders the pages under it — the honest cost of a baked breadcrumb,
+and, since a save renders nothing by default (ADR-0008), a cost paid only on an explicit publish. The
+extreme of that is the **home page**, which is an ancestor of every page: publishing `/` re-renders the
+whole site.
 
 The publisher records, per published route, the tags it read while rendering — a durable `route → tags`
 index (`publish_deps`) that **survives restarts**, so a page unpublished/deleted while the server was down
@@ -25,13 +57,19 @@ is still pruned on the next boot. A write maps its changed tags back to exactly 
 
 What each event invalidates (the agreed model — `layers/public/server/utils/publish/invalidation.ts`):
 
-| Event on record A | A's own static file | Listings (`<coll>`) | Explicit referrers (`<coll>:<id>`) |
-|---|---|---|---|
-| Content edit | re-render (if published) | re-render | **re-render** (fresh data/label) |
-| Slug / path change | prune old route + render new | re-render | **re-render** (link path updates) |
-| Publish | render route | re-render (joins the set) | **re-render** (the baked `#` becomes the real path) |
-| Unpublish | **prune route file** | re-render (leaves the set) | **re-render** (link falls back to `#`) + warned |
-| Delete | prune route file (+ media derivatives) | re-render (leaves the collection) | **re-render** (link falls back to `#`) + warned |
+| Event on record A | A's own static file | Listings (`<coll>`) | Explicit referrers (`<coll>:<id>`) | Descendants |
+|---|---|---|---|---|
+| Content edit | re-render (if published) | re-render | **re-render** (fresh data/label) | re-render (the crumb label may have moved) |
+| Slug / path change | prune old route + render new | re-render | **re-render** (link path updates) | re-render under **both** paths — the new one via `#path:`, the old one via `<coll>:<id>` |
+| Publish | render route | re-render (joins the set) | **re-render** (the baked `#` becomes the real path) | re-render (the crumb appears) |
+| Unpublish | **prune route file** | re-render (leaves the set) | **re-render** (link falls back to `#`) + warned | re-render (the crumb disappears) |
+| Delete | prune route file (+ media derivatives) | re-render (leaves the collection) | **re-render** (link falls back to `#`) + warned | re-render (the crumb disappears) |
+| Create (published) | render route | re-render (joins the set) | — (no id can point at it yet) | **re-render** via `#path:` — the edge only a path tag can carry |
+| `seo.noindex` flip | re-render | re-render | re-render | re-render via `<coll>:<id>` (a noindexed page is in no trail) |
+
+A record that is unpublished, `noindex`ed or path-less is nobody's crumb, so writes to it emit no `#path:`
+tag — the same rule the breadcrumb lookup applies. Its `<coll>:<id>` still reaches the descendants that
+captured it, which is what makes those rows' *removal* repair the trail rather than leaving it stale.
 
 **When each row runs is a separate question from what it contains** (ADR-0008). A *save* only executes the
 rows that REMOVE output — Unpublish and Delete — and it executes them immediately, because a page taken
@@ -50,6 +88,10 @@ Two principles drive it:
   hreflang set lists only its published translation siblings. Only a re-render can move those. The editor is
   warned on top (next section), because a link that now renders `#` is correct output for a broken
   reference, not a fixed reference.
+
+Descendants follow the same two principles — a crumb bakes an ancestor's label (freshening) and whether it
+is a crumb at all (availability) — with one extra: a page can depend on an ancestor that **does not exist
+yet**, which is why that edge is the only one keyed on something other than a record.
 
 A `full` republish (every route + prune of everything that left the published set) is reserved for the boot
 publish and the optional reconciler; a normal content write never triggers one.

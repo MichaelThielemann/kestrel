@@ -20,17 +20,17 @@ describe('classifyWrite + planInvalidation — precise per-case invalidation mod
   // CONTENT EDIT — content freshening: listings (<coll>) + explicit referrers (<coll>:<id>) re-render; own route too.
   it('published content edit → tags [coll, coll:id] + own route', () => {
     const ev = classifyWrite(page, pub(), pub(), 'en')
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: ['/spk/a'], prune: [] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/spk/a'], render: ['/spk/a'], prune: [] })
   })
 
   it('a non-primary locale yields a prefixed self route', () => {
     const ev = classifyWrite(page, pub({ id: 3, path: '/p', locale: 'de' }), pub({ id: 3, path: '/p', locale: 'de' }), 'en')
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:3'], render: ['/de/p'], prune: [] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:3', '#path:/p'], render: ['/de/p'], prune: [] })
   })
 
   it('with prefixPrimary, the primary self route is prefixed too', () => {
     const ev = classifyWrite(page, pub(), pub(), 'en', true)
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: ['/en/spk/a'], prune: [] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/spk/a'], render: ['/en/spk/a'], prune: [] })
   })
 
   it('singleton / non-pageLike content edit → tags [coll, coll:id], no own route', () => {
@@ -42,7 +42,7 @@ describe('classifyWrite + planInvalidation — precise per-case invalidation mod
   it('slug/path change → tags [coll, coll:id], render new, prune old', () => {
     const ev = classifyWrite(page, pub({ path: '/x' }), pub({ path: '/y' }), 'en')
     expect(ev.pathChanged).toBe(true)
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: ['/y'], prune: ['/x'] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/x', '#path:/y'], render: ['/y'], prune: ['/x'] })
   })
 
   // LOCALE-ONLY change — the route is localePath(path, locale), so changing only the locale moves the route
@@ -50,7 +50,7 @@ describe('classifyWrite + planInvalidation — precise per-case invalidation mod
   it('locale-only change (path unchanged) → prune old-locale route, render new-locale route', () => {
     const ev = classifyWrite(page, pub({ id: 7, path: '/about', locale: 'en' }), pub({ id: 7, path: '/about', locale: 'de' }), 'en')
     expect(ev.pathChanged).toBe(true)
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: ['/de/about'], prune: ['/about'] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/about'], render: ['/de/about'], prune: ['/about'] })
   })
 
   // PUBLISH — availability change: listings re-render (joins published set); render own route; and the record
@@ -59,7 +59,7 @@ describe('classifyWrite + planInvalidation — precise per-case invalidation mod
   it('publish (draft → published) → tags [coll, coll:id] + own route (referrers baked "#" while it was a draft)', () => {
     const ev = classifyWrite(page, pub({ status: 'draft' }), pub({ status: 'published' }), 'en')
     expect(ev.statusChanged).toBe(true)
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: ['/spk/a'], prune: [] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/spk/a'], render: ['/spk/a'], prune: [] })
   })
 
   // UNPUBLISH — availability change: listings re-render (leaves published set); prune own route; the record tag
@@ -68,7 +68,7 @@ describe('classifyWrite + planInvalidation — precise per-case invalidation mod
   it('unpublish (published → draft) → tags [coll, coll:id] + prune own route (hreflang siblings/referrers re-render)', () => {
     const ev = classifyWrite(page, pub({ status: 'published' }), pub({ status: 'draft' }), 'en')
     expect(ev.statusChanged).toBe(true)
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: [], prune: ['/spk/a'] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/spk/a'], render: [], prune: ['/spk/a'] })
   })
 
   // DELETE — availability change: listings re-render (leaves collection); prune own route (pageLike); the record
@@ -76,7 +76,7 @@ describe('classifyWrite + planInvalidation — precise per-case invalidation mod
   it('delete of a pageLike → tags [coll, coll:id] + prune old route', () => {
     const ev = classifyWrite(page, pub({ id: 1, path: '/x' }), null, 'en')
     expect(ev.status).toBe('deleted')
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:1'], render: [], prune: ['/x'] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:1', '#path:/x'], render: [], prune: ['/x'] })
   })
 
   it('delete of a non-pageLike (a data row a listing reads) → tags [coll, coll:id], no prune', () => {
@@ -89,7 +89,7 @@ describe('classifyWrite + planInvalidation — precise per-case invalidation mod
   it('create of a published pageLike → tags [coll] only + own route (NOT coll:id)', () => {
     const ev = classifyWrite(page, null, pub({ id: 1, path: '/x' }), 'en')
     expect(ev.status).toBe('created')
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages'], render: ['/x'], prune: [] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', '#path:/x'], render: ['/x'], prune: [] })
   })
 
   it('create of a non-pageLike (a data row) → tags [coll] only', () => {
@@ -111,7 +111,7 @@ describe('classifyWrite + planInvalidation — precise per-case invalidation mod
   // EDGE: unpublish + rename in one save — the live static file is at the OLD path; prune that, not the new one.
   it('unpublish + rename → prune the OLD route (the published file), tags [coll, coll:id]', () => {
     const ev = classifyWrite(page, pub({ status: 'published', path: '/old' }), pub({ status: 'draft', path: '/new' }), 'en')
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: [], prune: ['/old'] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/old'], render: [], prune: ['/old'] })
   })
 
   // A record with no id (a not-yet-persisted / id-less row) can carry no <coll>:<id> tag — the availability
@@ -119,7 +119,7 @@ describe('classifyWrite + planInvalidation — precise per-case invalidation mod
   it('availability change on an id-less row → tags [coll] only', () => {
     const ev = classifyWrite(page, { path: '/x', status: 'published' }, { path: '/x', status: 'draft' }, 'en')
     expect(ev.id).toBe(null)
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages'], render: [], prune: ['/x'] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', '#path:/x'], render: [], prune: ['/x'] })
   })
 })
 
@@ -131,7 +131,7 @@ describe('planSaveInvalidation — a save removes, never renders', () => {
     const ev = classifyWrite(page, pub(), pub({ title: 'edited' }), 'en')
     expect(planSaveInvalidation(ev)).toEqual({ type: 'noop' })
     // …while an explicit publish of the same write does render it.
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: ['/spk/a'], prune: [] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/spk/a'], render: ['/spk/a'], prune: [] })
   })
 
   it('slug change → noop: the old file stays live at the old URL until the rename is published', () => {
@@ -151,17 +151,17 @@ describe('planSaveInvalidation — a save removes, never renders', () => {
 
   it('UNPUBLISH stays immediate — a page taken offline must not remain live', () => {
     const ev = classifyWrite(page, pub({ status: 'published' }), pub({ status: 'draft' }), 'en')
-    expect(planSaveInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: [], prune: ['/spk/a'] })
+    expect(planSaveInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/spk/a'], render: [], prune: ['/spk/a'] })
   })
 
   it('DELETE stays immediate — the artifact of a record that no longer exists is pruned', () => {
     const ev = classifyWrite(page, pub({ id: 1, path: '/x' }), null, 'en')
-    expect(planSaveInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:1'], render: [], prune: ['/x'] })
+    expect(planSaveInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:1', '#path:/x'], render: [], prune: ['/x'] })
   })
 
   it('unpublish + rename in one save prunes the OLD (live) route', () => {
     const ev = classifyWrite(page, pub({ status: 'published', path: '/old' }), pub({ status: 'draft', path: '/new' }), 'en')
-    expect(planSaveInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: [], prune: ['/old'] })
+    expect(planSaveInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/old'], render: [], prune: ['/old'] })
   })
 
   it('deleting a non-pageLike row still re-renders the listings that read it', () => {
@@ -202,38 +202,102 @@ describe('translation-group invalidation', () => {
 
   it('creating a published sibling tags the group (no id edge reaches the members that predate it)', () => {
     const ev = classifyWrite(page, null, member(), 'en')
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages#group:g1'], render: ['/de/x'], prune: [] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages#group:g1', '#path:/x'], render: ['/de/x'], prune: [] })
   })
 
   it('publishing a sibling that was created as a draft tags the group', () => {
     const ev = classifyWrite(page, member({ status: 'draft' }), member({ status: 'published' }), 'en')
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:11', 'pages#group:g1'], render: ['/de/x'], prune: [] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:11', 'pages#group:g1', '#path:/x'], render: ['/de/x'], prune: [] })
   })
 
   it('unpublishing a sibling tags the group', () => {
     const ev = classifyWrite(page, member({ status: 'published' }), member({ status: 'draft' }), 'en')
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:11', 'pages#group:g1'], render: [], prune: ['/de/x'] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:11', 'pages#group:g1', '#path:/x'], render: [], prune: ['/de/x'] })
   })
 
   it('deleting a sibling tags the group (the group it left is smaller for everyone else)', () => {
     const ev = classifyWrite(page, member(), null, 'en')
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:11', 'pages#group:g1'], render: [], prune: ['/de/x'] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:11', 'pages#group:g1', '#path:/x'], render: [], prune: ['/de/x'] })
   })
 
   it('renaming a sibling tags the group (every member advertises the new hreflang href)', () => {
     const ev = classifyWrite(page, member({ path: '/x' }), member({ path: '/y' }), 'en')
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:11', 'pages#group:g1'], render: ['/de/y'], prune: ['/de/x'] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:11', 'pages#group:g1', '#path:/x', '#path:/y'], render: ['/de/y'], prune: ['/de/x'] })
   })
 
   it('a group-less row carries no group tag (a non-translatable write must not over-invalidate)', () => {
     const ev = classifyWrite(page, pub(), pub(), 'en')
     expect(ev.groupTag).toBe(null)
-    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: ['/spk/a'], prune: [] })
+    expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/spk/a'], render: ['/spk/a'], prune: [] })
   })
 
   it('an empty translationGroup is not a group', () => {
     const ev = classifyWrite(data, null, { id: 5, translationGroup: '' }, 'en')
     expect(ev.groupTag).toBe(null)
     expect(planInvalidation(ev)).toEqual({ type: 'tags', tags: ['speakers'], render: [], prune: [] })
+  })
+})
+
+// The third notion of "dependent": pages BELOW this one in the path hierarchy, which bake it as a
+// breadcrumb step. Kestrel has no parent/child relation — a descendant is a path-prefix match — so the
+// edge cannot be a record tag: the case that matters most is a page CREATED at an ancestor path, which
+// has no id anything could have captured beforehand.
+describe('classifyWrite — the breadcrumb (page-path) edge', () => {
+  const seoPub = (over: Record<string, unknown> = {}) => pub({ seo: {}, ...over })
+
+  it('names the record’s own path, so its descendants re-render', () => {
+    expect(classifyWrite(page, seoPub(), seoPub(), 'en').crumbTags).toEqual(['#path:/spk/a'])
+    expect(planInvalidation(classifyWrite(page, seoPub(), seoPub(), 'en')).type === 'tags'
+      && planInvalidation(classifyWrite(page, seoPub(), seoPub(), 'en')).tags).toContain('#path:/spk/a')
+  })
+
+  it('fires on CREATE — the case a record tag can never cover', () => {
+    const ev = classifyWrite(page, null, seoPub({ path: '/blog' }), 'en')
+    expect(ev.crumbTags).toEqual(['#path:/blog'])
+    const inv = planInvalidation(ev)
+    expect(inv.type === 'tags' && inv.tags).toContain('#path:/blog')
+  })
+
+  it('names BOTH paths on a rename, so the old path’s descendants lose the crumb and the new path’s gain it', () => {
+    expect(classifyWrite(page, seoPub({ path: '/blog' }), seoPub({ path: '/news' }), 'en').crumbTags)
+      .toEqual(['#path:/blog', '#path:/news'])
+  })
+
+  it('fires on publish, unpublish and delete', () => {
+    expect(classifyWrite(page, seoPub({ status: 'draft' }), seoPub(), 'en').crumbTags).toEqual(['#path:/spk/a'])
+    expect(classifyWrite(page, seoPub(), seoPub({ status: 'draft' }), 'en').crumbTags).toEqual(['#path:/spk/a'])
+    expect(classifyWrite(page, seoPub(), null, 'en').crumbTags).toEqual(['#path:/spk/a'])
+  })
+
+  it('stays silent for a record that is in nobody’s breadcrumb on either side', () => {
+    // a draft that stays a draft
+    expect(classifyWrite(page, seoPub({ status: 'draft' }), seoPub({ status: 'draft' }), 'en').crumbTags).toEqual([])
+    // noindex: publishedAncestors skips it, so it is not a crumb step
+    const hidden = seoPub({ seo: { noindex: true } })
+    expect(classifyWrite(page, hidden, hidden, 'en').crumbTags).toEqual([])
+    // a path-less row has no URL to be a crumb for
+    expect(classifyWrite(page, seoPub({ path: null }), seoPub({ path: null }), 'en').crumbTags).toEqual([])
+    // not page-like at all
+    expect(classifyWrite(data, { id: 1 }, { id: 1 }, 'en').crumbTags).toEqual([])
+  })
+
+  it('fires when noindex flips, in both directions — the crumb appears or disappears', () => {
+    const shown = seoPub()
+    const hidden = seoPub({ seo: { noindex: true } })
+    expect(classifyWrite(page, shown, hidden, 'en').crumbTags).toEqual(['#path:/spk/a'])
+    expect(classifyWrite(page, hidden, shown, 'en').crumbTags).toEqual(['#path:/spk/a'])
+  })
+
+  it('is the raw path, not the locale-prefixed route — a descendant looks its ancestors up by path', () => {
+    expect(classifyWrite(page, seoPub({ locale: 'de' }), seoPub({ locale: 'de' }), 'en').crumbTags)
+      .toEqual(['#path:/spk/a'])
+  })
+
+  it('is not planned for a save that renders nothing (the publish/save split still holds)', () => {
+    // a plain content edit is a save-time noop; nothing may reach the live site, breadcrumbs included
+    expect(planSaveInvalidation(classifyWrite(page, seoPub(), seoPub(), 'en'))).toEqual({ type: 'noop' })
+    // an unpublish IS a save-time removal, and its descendants must drop the crumb immediately
+    const inv = planSaveInvalidation(classifyWrite(page, seoPub(), seoPub({ status: 'draft' }), 'en'))
+    expect(inv.type === 'tags' && inv.tags).toContain('#path:/spk/a')
   })
 })

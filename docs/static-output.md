@@ -224,10 +224,12 @@ two can never disagree:
 Nothing is emitted at all when `KESTREL_SITE_URL` is unset (every `@id`/`url` would be relative), for a
 `seo.noindex` page, or in an unsaved ticket preview.
 
-One invalidation edge does not exist: creating a page at `/blog` after `/blog/hello` was published leaves
-that descendant's breadcrumb short until the next full publish. Retitling, renaming, unpublishing or
-deleting an ancestor *does* re-render its descendants immediately — only the create case has no record id
-for the dependency index to have captured.
+Breadcrumbs participate in incremental publishing like everything else: a page subscribes to each ancestor
+**path** it looked in (`#path:/blog`) *and* to the record it found there, so creating a page at `/blog`
+after `/blog/hello` was published repairs that descendant's trail on the spot — as do retitling, renaming,
+unpublishing, deleting or `noindex`ing an ancestor. See
+[reference-integrity.md › The invalidation model](./reference-integrity.md#the-invalidation-model) for the
+full table, and for why publishing a section index re-renders the pages beneath it.
 
 ### Article metadata — opt-in (`seo.articleMeta`)
 

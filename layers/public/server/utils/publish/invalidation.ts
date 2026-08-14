@@ -28,11 +28,35 @@ export interface WriteClassification {
    *  static file must be pruned on a slug change / unpublish / delete (symmetric to `selfRoute`). */
   oldRoute: string | null
   groupTag: string | null
+  /** Page-path tags for the breadcrumb edge — this record's own path before and/or after the write (both,
+   *  on a rename); empty when it is nobody's crumb step on either side. See `pagePathTag`. */
+  crumbTags: string[]
 }
 
 /** The data tag naming a translation group. `#` keeps it clear of the `<coll>:<id>` record namespace. */
 export function translationGroupTag(coll: string, group: string): string {
   return `${coll}#group:${group}`
+}
+
+/**
+ * The data tag naming a page-like PATH rather than a record — the edge a DESCENDANT's breadcrumb hangs on.
+ *
+ * It has to be the path, because Kestrel has no parent/child relation between pages: `path` is a plain
+ * column, a slug is flat unless an editor types slashes into it, and "descendant" is nothing but a
+ * path-prefix match. So the case that matters most — a page CREATED at `/blog` after `/blog/hello` was
+ * already published — has no record id that anything could have captured beforehand. A path, by contrast,
+ * is knowable before its page exists, so a descendant subscribes to the path it looked in.
+ *
+ * Deliberately locale-LESS: a non-translatable record has no locale to name, and a descendant looking up
+ * `/blog` in its own locale must still be reached when the page that appears there is a locale-less one.
+ * It therefore over-approximates across locales (an `en` `/blog` write also re-renders a `de` descendant
+ * of the same spelling) — extra renders, never a stale page.
+ *
+ * The leading `#` keeps it clear of the `<coll>` and `<coll>:<id>` namespaces (a collection name never
+ * starts with one).
+ */
+export function pagePathTag(path: string): string {
+  return `#path:${path}`
 }
 
 /** What to republish for a write. Routes are resolved from `tags` against the captured deps index. */
@@ -59,6 +83,18 @@ function isPublic(def: WriteCollection, row: Row): boolean {
   return !!row && row.status === 'published'
 }
 
+/**
+ * The path this record contributes as a breadcrumb step, or null when it contributes none. Mirrors
+ * `publishedAncestors` exactly — that lookup skips anything unpublished, `noindex`ed or path-less, so a
+ * record in one of those states is in nobody's trail and its writes owe nobody a re-render.
+ */
+function crumbPath(def: WriteCollection, row: Row): string | null {
+  if (!def.pageLike || !row) return null
+  if (!isPublic(def, row)) return null
+  if ((row.seo as { noindex?: boolean } | null | undefined)?.noindex) return null
+  return typeof row.path === 'string' && row.path ? row.path : null
+}
+
 /** Reduce a before/after row pair (either may be null) to a `WriteClassification`. Pure (routes via the shared `pageRowHref`). */
 export function classifyWrite(def: WriteCollection, before: Row, after: Row, primaryLocale: string, prefixPrimary = false): WriteClassification {
   const status: WriteClassification['status'] = before === null ? 'created' : after === null ? 'deleted' : 'updated'
@@ -81,7 +117,14 @@ export function classifyWrite(def: WriteCollection, before: Row, after: Row, pri
   const group = row?.translationGroup
   const groupTag = typeof group === 'string' && group ? translationGroupTag(def.name, group) : null
 
-  return { collection: def.name, pageLike, status, id, pathChanged, statusChanged, isPublished, wasPublished, selfRoute, oldRoute, groupTag }
+  // Both sides, so a rename repairs the descendants of the OLD path as well as the new one. Deliberately
+  // NOT narrowed to "did the crumb's label actually change": the explicit publish action classifies its
+  // write as before === after (`publish.post.ts` — a re-render of the record's current state), so a diff
+  // would see nothing on the very publish that makes the crumb appear.
+  const crumbTags = [...new Set([crumbPath(def, before), crumbPath(def, after)].filter((p): p is string => p !== null))]
+    .map(pagePathTag)
+
+  return { collection: def.name, pageLike, status, id, pathChanged, statusChanged, isPublished, wasPublished, selfRoute, oldRoute, groupTag, crumbTags }
 }
 
 /**
@@ -133,7 +176,9 @@ export function planInvalidation(ev: WriteClassification): Invalidation {
   // Unlike recordTag (dropped on create — no referrer can target a brand-new id), groupTag is included even
   // there: a new sibling still changes every existing member's hreflang set.
   const groupTags = ev.groupTag ? [ev.groupTag] : []
-  const tags = recordTag ? [coll, recordTag, ...groupTags] : [coll, ...groupTags]
+  // Like groupTag, the crumb tags ride EVERY branch including create — a page appearing at an ancestor
+  // path is exactly what a descendant's breadcrumb was waiting for.
+  const tags = recordTag ? [coll, recordTag, ...groupTags, ...ev.crumbTags] : [coll, ...groupTags, ...ev.crumbTags]
   const selfRender = ev.pageLike && ev.selfRoute ? [ev.selfRoute] : []
 
   // DELETE — leaves the collection. Listings re-render, referrers too (their baked link/hreflang now points
@@ -147,7 +192,7 @@ export function planInvalidation(ev: WriteClassification): Invalidation {
   // record re-renders listings + its own route. No referrer can point at a brand-new id, so no `coll:id`.
   if (ev.status === 'created') {
     if (!ev.isPublished) return { type: 'noop' }
-    return { type: 'tags', tags: [coll, ...groupTags], render: selfRender, prune: [] }
+    return { type: 'tags', tags: [coll, ...groupTags, ...ev.crumbTags], render: selfRender, prune: [] }
   }
 
   // UNPUBLISH — leaves the published set. Listings re-render; referrers re-render so their link falls back to

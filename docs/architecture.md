@@ -292,8 +292,12 @@ be coalesced to `default` — `NuxtLayout`'s own `fallback` never fires for the 
 `layout: false` leaves in the route meta; the artifacts published at literal keys are ONE list
 (`META_ARTIFACTS` in `modules/deploy-output/deploy-output.ts`) because three call sites must agree on it —
 the publisher renders them, the asset mirror must skip the build's stale copies, and the cache policy keys
-off the same names; a page's breadcrumb depends on its published ancestors, and the one edge the dependency
-index cannot carry is a newly CREATED ancestor (no record id existed to capture).
+off the same names; a page's breadcrumb subscribes to each ancestor with TWO tags and needs both — a
+`pagePathTag` (the only dependency keyed on a path rather than a record: Kestrel has no parent/child
+relation, a descendant is a path-prefix match, and a page CREATED at an ancestor path has no id to have
+been captured) plus the record tag of whatever sits there, captured before the visibility filters, because
+the publish action classifies its write as `before === after` and so cannot name where a renamed or
+newly-hidden ancestor USED to be.
 **Docs:** `static-output.md` (prerender/sitemap/deploy), `reference-integrity.md` (the invalidation model, durable `publish_deps`, status-gated links), `block-editing.md` (BlockRenderer + preview seam), ADR-0006 (per-page layouts).
 
 ---

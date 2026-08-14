@@ -72,7 +72,7 @@ describe('POST /api/publish — the explicit "write the static file" action', ()
   it('enqueues the record\'s own route plus the pages that embed it', async () => {
     insert(1, '/kept', 'published')
     const res = await post({ collection: 'pages', ids: [1] })
-    expect(enqueued).toEqual([{ type: 'tags', tags: ['pages', 'pages:1'], render: ['/kept'], prune: [] }])
+    expect(enqueued).toEqual([{ type: 'tags', tags: ['pages', 'pages:1', '#path:/kept'], render: ['/kept'], prune: [] }])
     expect(res.queued).toBe(true)
     expect(res.routes).toEqual(['/kept'])
   })

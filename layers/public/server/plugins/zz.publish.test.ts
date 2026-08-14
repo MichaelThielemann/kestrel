@@ -76,7 +76,7 @@ describe('zz.publish plugin — write-listener wiring (output.publishOnSave)', (
 
     it('an unpublish of that record still enqueues a real invalidation with a prune', () => {
       const inv = fireWrite(pub({ status: 'published' }), pub({ status: 'draft' }))
-      expect(inv).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: [], prune: ['/spk/a'] })
+      expect(inv).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/spk/a'], render: [], prune: ['/spk/a'] })
     })
   })
 
@@ -84,7 +84,7 @@ describe('zz.publish plugin — write-listener wiring (output.publishOnSave)', (
     it('the same plain content edit enqueues a real render invalidation', () => {
       output.publishOnSave = true
       const inv = fireWrite(pub(), pub({ title: 'edited' }))
-      expect(inv).toEqual({ type: 'tags', tags: ['pages', 'pages:7'], render: ['/spk/a'], prune: [] })
+      expect(inv).toEqual({ type: 'tags', tags: ['pages', 'pages:7', '#path:/spk/a'], render: ['/spk/a'], prune: [] })
     })
   })
 })
