@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { SerializedCollection } from '../../../core/server/utils/serialize-collection'
+import type { Localized } from '../../../core/server/utils/defineCollection'
 import { sortDirection, type FilterCell } from '../utils/list-query'
 import type { ListColumn } from '../utils/list-columns'
 import { PER_PAGE_OPTIONS } from '../../../core/app/utils/list-limits'
@@ -74,7 +75,10 @@ function enumOptions(c: ListColumn): { label: string; value: string }[] {
     { value: 'draft', label: t('pageSettings.statusDraft') },
     { value: 'published', label: t('pageSettings.statusPublished') },
   ]
-  return ((c.field?.options?.choices ?? []) as { label: string; value: string }[])
+  // A choice label is `Localized`, so resolve it here as the editor widget does — `{{ o.label }}` would
+  // stringify a `{ en, de }` map into the filter dropdown.
+  return ((c.field?.options?.choices ?? []) as { label: Localized; value: string }[])
+    .map((o) => ({ value: o.value, label: resolveLocalized(o.label, lang.value) ?? o.value }))
 }
 function displayValue(kind: FilterKind, value: string): string {
   if (kind === 'boolean') return value === 'true' ? t('filter.bool.true') : value === 'false' ? t('filter.bool.false') : value

@@ -155,6 +155,19 @@ const failingSchema = {
   fields: { title: { type: 'text', required: false, translatable: false, unique: false } },
 }
 
+// A choice column whose labels are per-language maps — what every built-in collection authors.
+const choiceSchema = {
+  name: 'things', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
+  blocks: { enabled: false }, label: { singular: 'Thing', plural: 'Things' },
+  fields: {
+    title: { type: 'text', required: true, translatable: false, unique: false },
+    kind: {
+      type: 'choice', required: false, translatable: false, unique: false,
+      options: { choices: [{ label: { en: 'Permanent', de: 'Dauerhaft' }, value: 'p' }, { label: 'Plain', value: 'x' }] },
+    },
+  },
+}
+
 const mount = (props: Record<string, unknown>) => mountSuspended(CollectionList, { props })
 const settle = async () => {
   await new Promise((r) => setTimeout(r, 20))
@@ -648,5 +661,20 @@ describe('CollectionList', () => {
     expect(lastQuery.sort).toBe('title') // the sort landed
     // The in-progress operator choice survives — it was NOT reverted to the default 'eq'.
     expect((w.find('select.list__filter-op[data-filter-op="title"]').element as HTMLSelectElement).value).toBe('contains')
+  })
+})
+
+describe('CollectionList — a choice filter with localized labels', () => {
+  it('renders the label for the active language, not the raw `{ en, de }` map', async () => {
+    const w = await mount({ schema: choiceSchema })
+    await settle()
+    await findByText(w, '.ui-button', 'Filter').trigger('click')
+    await settle()
+    const select = w.find('select.list__filter[data-filter="kind"]')
+    expect(select.exists()).toBe(true)
+    const texts = select.findAll('option').map((o) => o.text())
+    expect(texts).toContain('Permanent')
+    expect(texts).toContain('Plain')
+    expect(texts.join(' ')).not.toContain('{')
   })
 })

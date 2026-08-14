@@ -23,9 +23,9 @@ Releases before 1.7.0 are documented by their tags and commit history.
 
 ### Fixed
 
-- A `choice` field's per-language labels (`{ en, de }`) rendered as a raw JSON blob in the editor's
-  select and button group instead of the label for the active admin language — visible on the built-in
-  `site` collection's "Base title position".
+- A `choice` field's per-language labels (`{ en, de }`) rendered as a raw JSON blob instead of the label
+  for the active admin language — in the editor's select and button group (visible on the built-in `site`
+  collection's "Base title position") and in a list view's filter dropdown.
 - An error banner in the editor could come up empty behind an HTTP/2 proxy: `statusMessage` was read from
   the response's reason phrase, which HTTP/2 does not carry. It is now read from the error body.
 
