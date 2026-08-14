@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-galleries-secure-proofing",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Opt-in Kestrel extension: client proofing (Lightroom-style colour flags + comments) on top of kestrel-galleries-secure. Customer marks are encrypted client-side; a public back-channel stores only ciphertext. Requires a running server (not pure-static).",
   "type": "module",
   "main": "./nuxt.config.ts",
