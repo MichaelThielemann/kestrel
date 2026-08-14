@@ -81,13 +81,33 @@ export function parseFrameMessage(data: unknown): FrameToEditorMessage | null {
  * halves are column-keyed (the editor sends what a save would send), so this is a shallow override — a
  * field the editor did not touch keeps the stored value, and a page that does not exist yet (an unsaved
  * slug) renders from the payload alone. Pure.
+ *
+ * One override is not shallow: a single-valued relation/media field is column-keyed `<name>Id` (the
+ * `resolveColumnName`/`isSingleRefColumn` convention — many-relations and multi-media stay bare-keyed, so
+ * they're untouched by this), while its populated sidecar sits ALONGSIDE the id, not under it — `$<name>`
+ * for a relation (`buildRelationFieldPopulator`), `$media.<name>` for media (`populate.ts`'s `attach`).
+ * `values` here is raw unsaved editor state, never itself populated, so clearing such a field to null
+ * leaves `saved`'s old sidecar with nothing to overwrite it — a plain spread would let a removed
+ * author/cover keep rendering. Drop it explicitly for every `<name>Id` key the editor cleared.
  */
 export function previewPage(
   saved: Record<string, unknown> | null,
   values: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> | null {
   if (!values) return saved
-  return { ...(saved ?? {}), ...values }
+  const merged: Record<string, unknown> = { ...(saved ?? {}), ...values }
+  for (const key of Object.keys(values)) {
+    if (values[key] !== null || !key.endsWith('Id')) continue
+    const name = key.slice(0, -2)
+    if (!name) continue
+    if (Object.hasOwn(merged, `$${name}`)) delete merged[`$${name}`]
+    const media = merged.$media as Record<string, unknown> | undefined
+    if (media && Object.hasOwn(media, name)) {
+      const { [name]: _dropped, ...rest } = media
+      merged.$media = rest
+    }
+  }
+  return merged
 }
 
 export function previewSrc(publicUrl: string | null, locale: string): string {

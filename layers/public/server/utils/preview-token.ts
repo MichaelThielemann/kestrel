@@ -7,10 +7,15 @@ import type { H3Event } from 'h3'
  * instead of saving (which would publish intent the user never expressed) it mints a ticket and opens
  * `<url>?kestrel-preview-token=…`. Nothing is written to the DB; the ticket lives in this process only.
  *
- * The admin session is the actual gate (both endpoints are admin-only under the default-deny API guard);
- * the owner binding on top means one admin's ticket is not usable from another session. Tickets stay
- * readable until they expire — a preview tab may be reloaded — and the store bounds itself in both
- * directions: a sweep on every mint, and a hard cap that evicts the oldest ticket.
+ * The admin session is the actual gate (both endpoints are admin-only under the default-deny API guard).
+ * The owner binding on top is NOT per-session isolation today: Kestrel has one shared admin credential and
+ * `derivePrincipal` (access layer) never mints more than one admin identity, so every caller that reaches
+ * this store has already been narrowed by `requireAdmin` to the same principal, and `previewOwner()`
+ * resolves to the literal string `'admin'` every time — `t.owner === owner` cannot currently be false for
+ * an admin caller. The binding is kept because it is the seam that makes the check meaningful the moment
+ * (if ever) a per-user identity is added upstream; until then it costs nothing and documents the intent.
+ * Tickets stay readable until they expire — a preview tab may be reloaded — and the store bounds itself in
+ * both directions: a sweep on every mint, and a hard cap that evicts the oldest ticket.
  *
  * In-memory by design: previewing is a per-editor, per-minute affair, and a second server instance would
  * simply re-mint. Nothing durable depends on it.
@@ -74,7 +79,9 @@ export function createPreviewStore(opts: PreviewStoreOptions = {}): PreviewStore
         tickets.delete(token)
         return null
       }
-      // A ticket is bound to the session that minted it — a leaked URL is not a second way in.
+      // Bound to the minting owner rather than trusted on token possession alone — inert while every admin
+      // caller resolves to the same owner (see the module docstring), but the check a future per-user
+      // identity would need is already the one being run, not one that would need to be added later.
       return t.owner === owner ? t.payload : null
     },
     size: () => tickets.size,
@@ -82,9 +89,12 @@ export function createPreviewStore(opts: PreviewStoreOptions = {}): PreviewStore
 }
 
 /**
- * Who a ticket belongs to. Kestrel's admin session has no per-user identity of its own (one admin,
- * one password hash), so the role stands in when `userId` is null — the binding narrows a leaked URL to
- * an authenticated admin session, it is not an authorization tier of its own.
+ * Who a ticket belongs to. In production this only ever runs after `requireAdmin(event)` has already
+ * thrown for anyone but the admin principal, and `derivePrincipal` (access layer) always gives that
+ * principal a fixed `userId: 'admin'` — so the first branch always wins and this always returns the
+ * literal `'admin'`. The `role` / `'anonymous'` fallbacks are unreached by any principal shape
+ * `derivePrincipal` produces today; kept as a defensive default rather than a non-null assertion, since
+ * this function has no way to enforce that invariant itself.
  */
 export function previewOwner(event: H3Event): string {
   const principal = event.context.principal as { userId?: string | null; role?: string } | undefined

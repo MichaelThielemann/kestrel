@@ -3,6 +3,7 @@ import { createError } from 'h3'
 import Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { buildCollection } from '../../../fields/server/utils/buildCollection'
+import { requireAdmin } from '../../../access/server/utils/require-admin'
 import { defineCollection } from '../../../core/server/utils/defineCollection'
 import { parseIdList } from '../../../core/server/utils/http'
 import { desiredSchema } from '../../../core/server/schema/desired'
@@ -34,9 +35,7 @@ Object.assign(globalThis, {
   defineEventHandler: (handler: unknown) => handler,
   createError,
   readBody: async () => body,
-  requireAdmin: (event: FakeEvent) => {
-    if (event.context.principal !== 'admin') throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
-  },
+  requireAdmin,
   getCollection: (name: string) => (name === 'pages' ? pages : null),
   useDb: () => db,
   parseIdList,
@@ -46,7 +45,7 @@ Object.assign(globalThis, {
 })
 
 const handler = (await import('./publish.post')).default as unknown as (event: FakeEvent) => Promise<Record<string, unknown>>
-const post = (b: Record<string, unknown>) => { body = b; return handler({ context: { principal: 'admin' } }) }
+const post = (b: Record<string, unknown>) => { body = b; return handler({ context: { principal: { userId: 'admin', role: 'admin' } } }) }
 
 function insert(id: number, path: string, status: string): void {
   sqlite.prepare('INSERT INTO pages (id, path, status, title, created_at, updated_at) VALUES (?, ?, ?, ?, 0, 0)').run(id, path, status, `T${id}`)
@@ -138,6 +137,12 @@ describe('POST /api/publish — the explicit "write the static file" action', ()
     insert(1, '/kept', 'published')
     body = { collection: 'pages', ids: [1] }
     await expect(handler({ context: {} })).rejects.toMatchObject({ statusCode: 401 })
+  })
+
+  it('401s a renderer principal — read-only role, not merely "some principal present"', async () => {
+    insert(1, '/kept', 'published')
+    body = { collection: 'pages', ids: [1] }
+    await expect(handler({ context: { principal: { userId: 'renderer', role: 'renderer' } } })).rejects.toMatchObject({ statusCode: 401 })
   })
 
   it('reports that nothing is generated here instead of pretending, when the publisher is off', async () => {

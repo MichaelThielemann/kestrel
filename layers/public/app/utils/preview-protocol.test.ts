@@ -62,4 +62,23 @@ describe('previewPage — the editor\'s unsaved values over the saved record', (
     expect(previewPage(saved, null)).toBe(saved)
     expect(previewPage(saved, undefined)).toBe(saved)
   })
+
+  it('drops the stale $<relation> sidecar when a single relation is cleared to null', () => {
+    const withAuthor = { ...saved, authorId: 5, $author: { id: 5, name: 'Jane' } }
+    expect(previewPage(withAuthor, { authorId: null })).toEqual({ ...saved, authorId: null })
+  })
+
+  it('drops the stale $media.<field> sidecar when a single media field is cleared to null', () => {
+    const withCover = { ...saved, coverId: 5, $media: { cover: { id: 5, url: '/cover.jpg' } } }
+    expect(previewPage(withCover, { coverId: null })).toEqual({ ...saved, coverId: null, $media: {} })
+  })
+
+  it('control: an untouched relation/media field KEEPS its sidecar', () => {
+    const withBoth = {
+      ...saved,
+      authorId: 5, $author: { id: 5, name: 'Jane' },
+      coverId: 9, $media: { cover: { id: 9, url: '/cover.jpg' } },
+    }
+    expect(previewPage(withBoth, { title: 'Unsaved' })).toEqual({ ...withBoth, title: 'Unsaved' })
+  })
 })
