@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { eq, inArray, getTableColumns, isNull } from 'drizzle-orm'
-import { media } from '../../collections/media'
+import builtMedia, { media } from '../../collections/media'
 import { useStorageDriver, mediaRuntimeConfig } from '../../../../core/server/utils/storage'
 import { sniffMime, extForMime, resolveAllowedMimes } from '../../utils/sniff'
 import { sanitizeFolder, buildKey, suggestFreeName, withExtension } from '../../utils/naming'
@@ -17,6 +17,8 @@ import { isUniqueViolation } from '../../../../core/server/utils/crud'
 import { withLock, mediaLockKey } from '../../../../core/server/utils/key-lock'
 import { requireMediaCollection } from '../../utils/media-enabled'
 import { emitMediaWrite } from '../../utils/media-write'
+import { detectAiSignal, aiSignalNote } from '../../utils/ai-signal-detect'
+import { aiDisclosureEnabled } from '../../utils/ai-disclosure-enabled'
 
 export default defineEventHandler(async (event) => {
   requireAdmin(event) // write-authorization backstop (defense-in-depth; see require-admin.ts)
@@ -83,12 +85,23 @@ export default defineEventHandler(async (event) => {
   const description = text('description')
   const translations = alt || title || description ? { [primaryLocale()]: { alt, title, description } } : {}
 
+  // EU AI Act Art. 50 disclosure. The classification is validated against the collection's own choice
+  // schema so the allow-list has a single source of truth (same as the PATCH route).
+  const aiSourceType = text('aiSourceType')?.trim() || undefined
+  if (aiSourceType && !builtMedia.update.safeParse({ aiSourceType }).success) {
+    throw createError({ statusCode: 400, statusMessage: `Invalid AI disclosure: unknown source type "${aiSourceType}"` })
+  }
+  const uploadedAiNote = text('aiNote')?.trim() || undefined
+  // Only parse when the feature is on: consumers who leave it off pay nothing for it. What the scan finds
+  // is EVIDENCE for the free-text note — it never asserts `aiSourceType`, which stays a human decision.
+  const signal = aiDisclosureEnabled() && !uploadedAiNote ? await detectAiSignal(bytes, mime).catch(() => null) : null
+
   // Serialize the collision-check → put → insert per storageKey: two concurrent uploads to the SAME key
   // (or a backfill re-deriving it) must not interleave, or last-writer-wins would leave the winning row
   // describing the loser's bytes. Different keys never share a lock, so throughput is unaffected.
   const { row, created } = await withLock(mediaLockKey(storageKey), async (): Promise<{ row: Record<string, unknown>; created: boolean }> => {
     const existing = db.select().from(media).where(eq(cols.storageKey, storageKey)).get() as
-      | { id: number; derivatives?: DerivativeManifest; translations?: Translations }
+      | { id: number; derivatives?: DerivativeManifest; translations?: Translations; aiNote?: string | null }
       | undefined
 
     // An object on disk with no media row (another media's derivative, or an orphan) must never be
@@ -131,7 +144,10 @@ export default defineEventHandler(async (event) => {
     }
 
     if (folder) ensureFolder(db, folder)
-    const values = buildMediaValues({ storageKey, folder, filename, mime, ext, size: bytes.length, checksum, derived, translations })
+    // The scan only ever fills a note that would otherwise be empty — it must not talk over an uploader's
+    // own text, nor over one an editor already curated on the row this upload is replacing.
+    const aiNote = uploadedAiNote ?? (existing?.aiNote ? undefined : signal && aiSignalNote(signal))
+    const values = buildMediaValues({ storageKey, folder, filename, mime, ext, size: bytes.length, checksum, derived, translations, aiSourceType, aiNote })
     try {
       // persistUpload writes the objects then the row; on a create-path failure it removes the freshly-written
       // blobs so a partial upload never strands orphans that permanently 409-block the filename.

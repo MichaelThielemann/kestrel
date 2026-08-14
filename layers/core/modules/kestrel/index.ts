@@ -70,6 +70,8 @@ export default defineNuxtModule<KestrelConfig>({
     srv.siteDescription = c.siteDescription
     // Built-in collection toggles (pages/media) — read by the register plugin to gate built-ins.
     srv.collections = c.collections
+    // Read by the upload route to decide whether to run the AI-signal scan at all.
+    srv.aiDisclosure = c.aiDisclosure
     // Static-publish target for the runtime publisher (server-only). S3 creds are env-only; prefer the
     // output-specific creds, fall back to the shared media creds so a single S3 account "just works".
     srv.output = {

@@ -127,3 +127,61 @@ describe('POST /api/media', () => {
     expect(stored).toContain('<rect')
   })
 })
+
+describe('POST /api/media — EU AI Act signal scan', () => {
+  // A PNG carrying a Stable-Diffusion-style `parameters` text chunk.
+  const generated = async () => {
+    const png = await sharp({ create: { width: 40, height: 40, channels: 3, background: '#123456' } }).png().toBuffer()
+    const data = Buffer.from('parameters\0masterpiece, Steps: 20', 'latin1')
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length)
+    const body = Buffer.concat([Buffer.from('tEXt', 'latin1'), data])
+    const table = new Uint32Array(256)
+    for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; table[n] = c >>> 0 }
+    let c = 0xFFFFFFFF
+    for (const b of body) c = table[(c ^ b) & 0xFF]! ^ (c >>> 8)
+    const crc = Buffer.alloc(4); crc.writeUInt32BE((c ^ 0xFFFFFFFF) >>> 0)
+    const iend = png.lastIndexOf(Buffer.from('IEND', 'latin1')) - 4
+    return Buffer.concat([png.subarray(0, iend), len, body, crc, png.subarray(iend)])
+  }
+
+  it('pre-fills aiNote with the evidence, and NEVER the aiSourceType classification', async () => {
+    runtime.kestrel = { aiDisclosure: { enabled: true } }
+    const row = await upload(await generated())
+    expect(row.aiNote).toContain('parameters')
+    expect(row.aiSourceType).toBeNull() // the legal classification stays a human decision
+  })
+
+  it('does not scan at all while the flag is off — no cost for consumers not using the feature', async () => {
+    const row = await upload(await generated())
+    expect(row.aiNote).toBeNull()
+    expect(row.aiSourceType).toBeNull()
+  })
+
+  it('never overwrites a note the uploader supplied', async () => {
+    runtime.kestrel = { aiDisclosure: { enabled: true } }
+    const row = await upload(await generated(), { aiNote: 'checked by hand' })
+    expect(row.aiNote).toBe('checked by hand')
+  })
+
+  it('leaves a clean photo alone (no evidence ⇒ no note)', async () => {
+    runtime.kestrel = { aiDisclosure: { enabled: true } }
+    const row = await upload(await png(60))
+    expect(row.aiNote).toBeNull()
+  })
+
+  it('accepts an uploader-supplied classification but rejects an unknown one with a 400', async () => {
+    runtime.kestrel = { aiDisclosure: { enabled: true } }
+    const ok = await upload(await png(60), { aiSourceType: 'algorithmicallyEnhanced' }, 'ok.png')
+    expect(ok.aiSourceType).toBe('algorithmicallyEnhanced')
+    await expect(upload(await png(60), { aiSourceType: 'nonsense' }, 'bad.png'))
+      .rejects.toThrowError(expect.objectContaining({ statusCode: 400 }))
+  })
+
+  it('a re-upload does not silently wipe an existing disclosure', async () => {
+    runtime.kestrel = { aiDisclosure: { enabled: true } }
+    const first = await upload(await png(60), { aiSourceType: 'trainedAlgorithmicMedia', aiNote: 'Midjourney v7' })
+    const replaced = await upload(await png(30), { overwrite: 'true' })
+    expect(replaced.id).toBe(first.id)
+    expect(replaced).toMatchObject({ aiSourceType: 'trainedAlgorithmicMedia', aiNote: 'Midjourney v7' })
+  })
+})

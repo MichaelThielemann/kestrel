@@ -14,6 +14,10 @@ export interface MediaInput {
   checksum: string
   derived?: DerivedImage
   translations?: Record<string, { alt?: string; title?: string; description?: string }>
+  /** EU AI Act disclosure to write. Omitted/null ⇒ the column is left out of the values entirely, which is
+   *  what keeps an overwrite from wiping a disclosure the re-upload did not re-send. */
+  aiSourceType?: string | null
+  aiNote?: string | null
 }
 
 /**
@@ -46,6 +50,10 @@ export function buildMediaValues(input: MediaInput): Record<string, unknown> {
     thumbhash: input.derived?.thumbhash ?? null,
     derivatives: manifest,
     translations: input.translations ?? {},
+    // Written only when there is something to write: the overwrite path feeds these same values to an
+    // UPDATE, and a null here would silently clear a disclosure an editor set on the existing row.
+    ...(input.aiSourceType != null ? { aiSourceType: input.aiSourceType } : {}),
+    ...(input.aiNote != null ? { aiNote: input.aiNote } : {}),
   }
 }
 

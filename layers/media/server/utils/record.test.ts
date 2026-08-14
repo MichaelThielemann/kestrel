@@ -32,6 +32,18 @@ describe('buildMediaValues', () => {
     expect(derivativeKey('a/logo.png', 'w320', 'webp')).toBe('a/logo.png-w320.webp')
     expect(derivativeKey('a/logo.png', 'w320', 'webp')).not.toBe(derivativeKey('a/logo.jpg', 'w320', 'webp'))
   })
+  it('writes the AI-disclosure columns ONLY when there is a value — so an overwrite never wipes them', () => {
+    const bare = buildMediaValues({ storageKey: 'a/x.png', folder: 'a', filename: 'x.png', mime: 'image/png', ext: 'png', size: 1, checksum: 'c' })
+    // absent from the update `set()` ⇒ a re-upload leaves an editor's existing disclosure untouched
+    expect('aiSourceType' in bare).toBe(false)
+    expect('aiNote' in bare).toBe(false)
+    const tagged = buildMediaValues({
+      storageKey: 'a/x.png', folder: 'a', filename: 'x.png', mime: 'image/png', ext: 'png', size: 1, checksum: 'c',
+      aiSourceType: 'trainedAlgorithmicMedia', aiNote: 'Midjourney v7',
+    })
+    expect(tagged).toMatchObject({ aiSourceType: 'trainedAlgorithmicMedia', aiNote: 'Midjourney v7' })
+  })
+
   it('handles a non-image (no derived) row with null dims + empty manifest', () => {
     const v = buildMediaValues({ storageKey: 'docs/x.pdf', folder: 'docs', filename: 'x.pdf', mime: 'application/pdf', ext: 'pdf', size: 9, checksum: 'd' })
     expect(v.width).toBeNull()
