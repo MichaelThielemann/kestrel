@@ -63,6 +63,9 @@ export default {
   preview: {                          // admin page-builder live preview
     desktopWidth: 1440,               // reference width (px) the Desktop preset renders at (scale-to-fit shrinks it)
   },
+  aiDisclosure: {                     // EU AI Act Art. 50 disclosure on media assets — see media-uploads.md
+    enabled: false,                   // off by default; on ⇒ the media viewer gains the disclosure fields
+  },
 } satisfies KestrelConfig
 ```
 
@@ -91,7 +94,12 @@ The mapping (env overrides): `db`→`KESTREL_DB`, `siteUrl`→`KESTREL_SITE_URL`
 `output.publishOnSave`→`KESTREL_OUTPUT_PUBLISH_ON_SAVE`,
 `output.reconcileMinutes`→`KESTREL_OUTPUT_RECONCILE_MINUTES`, `output.verbose`→`KESTREL_OUTPUT_VERBOSE`,
 `output.s3.{bucket,region,endpoint,prefix}`→`KESTREL_OUTPUT_S3_{BUCKET,REGION,ENDPOINT,PREFIX}`,
-`preview.desktopWidth`→`KESTREL_PREVIEW_DESKTOP_WIDTH`.
+`preview.desktopWidth`→`KESTREL_PREVIEW_DESKTOP_WIDTH`, `aiDisclosure.enabled`→`KESTREL_AI_DISCLOSURE`.
+
+`aiDisclosure.enabled` gates the **admin UI and the upload-time signal scan only** — never the data.
+`ResolvedMedia.aiDisclosure` is always resolved from the columns, so turning the flag back off keeps every
+disclosure already recorded; it just stops being editable. See
+[Media uploads → EU AI Act (Art. 50) disclosure](media-uploads.md#eu-ai-act-art-50-disclosure).
 
 One env var has no config key because it is a build-time switch rather than a setting:
 `KESTREL_OUTPUT_DRY_RUN` (`1` / `true` / `yes` / `on`) makes `nuxt generate` *report* what it would do

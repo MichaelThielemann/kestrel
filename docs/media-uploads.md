@@ -148,6 +148,123 @@ Because variants are usage-driven, the set evolves with the code. Four moments k
 
 > **Formats: WebP + JPEG.** Derivatives are emitted as WebP, plus a JPEG fallback when a usage asks for one (`:formats="['webp', 'jpeg']"`). The old AVIF *output* was dropped (nothing rendered referenced it); `.avif` is still accepted as an **upload** format. Variants are no longer a single fixed WebP ladder — a usage may declare multiple proportional `widths`, fixed `crop`s, and both `webp` + `jpeg`, and only those ship.
 
+## EU AI Act (Art. 50) disclosure
+
+Two optional, non-localized columns on every media asset let an editor record **how it was produced**:
+
+| `aiSourceType` | meaning |
+|---|---|
+| `trainedAlgorithmicMedia` | Fully AI-generated |
+| `compositeWithTrainedAlgorithmicMedia` | AI-generated content composited into real media (the Art. 50 "deepfake" case) |
+| `algorithmicallyEnhanced` | AI-enhanced / algorithmically edited real media |
+| *(unset — the default)* | No disclosure recorded; renders exactly as before the feature existed |
+
+`aiNote` is free text alongside it (the tool used, the prompt, whatever the editor wants to record). Both
+are **top-level columns, not per-locale** `translations` entries: how a photo was made does not change per
+translation.
+
+**Off by default.** Turn it on in `kestrel.config.ts`:
+
+```ts
+export default { aiDisclosure: { enabled: true } } satisfies KestrelConfig
+```
+
+(env override: `KESTREL_AI_DISCLOSURE`). With the flag on, the media viewer gains a source-type select and
+a note field on image assets; with it off, the admin shows nothing extra and a save from the viewer never
+touches the columns. The flag gates the **admin UI and the upload scan only** — `ResolvedMedia.aiDisclosure`
+is always resolved, so switching the flag back off keeps existing data, it just stops being editable.
+
+Consumers upgrading an existing project need a **`db:migrate`**: the two columns are additive and nullable,
+and an unset value behaves exactly as before.
+
+### What Kestrel deliberately does NOT do
+
+- **No pixel watermarking or label burn-in.** No server-side compositing, no EXIF/XMP writing, no C2PA
+  manifest signing.
+- **No automatic public markup.** Kestrel never injects a `<meta>` tag, JSON-LD or a visible badge into a
+  published page on its own — a silently-added claim in the wrong place, language or style is worse than
+  none.
+
+You remain the Art. 50 **deployer**. Kestrel stores and manages the metadata and hands it to you; *how* (or
+whether) you disclose on your site is your decision and your legal responsibility.
+
+### Upload-time signal scan
+
+While the flag is on, each upload is scanned for signals that a file was AI-produced, and what is found is
+quoted into `aiNote` (prefixed `Detected at upload:`). What it reads:
+
+- **IPTC/XMP `DigitalSourceType`** — the generator's own declaration, in the same vocabulary as the column.
+- **C2PA content credentials** — detected **structurally, presence only** (a JUMBF store: a PNG `caBX`
+  chunk, a JPEG `APP11` segment, a WebP `C2PA` chunk).
+- **EXIF `Software` / `ProcessingSoftware`** naming a known generator (Midjourney, DALL·E, Adobe Firefly,
+  Stable Diffusion, Leonardo.Ai, NightCafe, Bing Image Creator, Google ImageFX, Imagen, FLUX.1, Ideogram).
+  An ordinary "Adobe Photoshop" is not a match.
+- **PNG text chunks** keyed `parameters` / `prompt` / `workflow` (the Automatic1111 / Forge / ComfyUI
+  families), including the compressed `zTXt` and `iTXt` forms.
+
+Four things about it are load-bearing:
+
+1. **It fills `aiNote` only — never `aiSourceType`.** The legal classification stays a deliberate human
+   decision; a mislabeled or forged upstream file must not become Kestrel's own asserted classification.
+2. **It never overwrites text a person wrote** — not an `aiNote` sent with the upload, and not one already
+   on the row a re-upload replaces.
+3. **C2PA presence is not verification.** No signature is checked and no trust list is consulted (that
+   needs the full C2PA SDK, which Kestrel does not ship), so the evidence line says `unverified`.
+4. **Absence of a signal is not proof of non-AI origin.** Metadata is stripped by re-saving, screenshotting
+   or re-encoding, and container support is uneven — EXIF is read from JPEG/PNG/TIFF/HEIC, while for WebP
+   only the XMP packet and the C2PA chunk are found.
+
+### Reading the disclosure in your own templates
+
+Every resolved media relation carries it, so nothing about the badge below is required:
+
+```vue
+<script setup lang="ts">
+const { data } = await useFetch('/api/pages/1?populate=true')
+</script>
+
+<template>
+  <figure>
+    <KestrelImg :media="data.hero" :widths="[640, 1280]" />
+    <figcaption v-if="data.hero?.aiDisclosure">
+      {{ data.hero.aiDisclosure.note ?? 'AI-generated' }}
+    </figcaption>
+  </figure>
+</template>
+```
+
+`aiDisclosure` is `{ sourceType, note }` when a source type is set, and `null` otherwise — a note without a
+source type is only evidence, so it never resolves to a half-filled object.
+
+### The optional `KestrelImg` badge
+
+If you would rather not build your own element, `<KestrelImg>` can render one — **opt-in, and unstyled**:
+
+```vue
+<KestrelImg :media="hero" :widths="[640, 1280]" ai-badge />
+```
+
+It emits a single `<span class="kestrel-img__ai-badge" data-ai-source-type="…">` inside the `<picture>`,
+whose text is the `aiNote` (falling back to a short English label). Kestrel gives it **layout only** —
+absolute placement in the picture's lower-inline-start corner and `pointer-events: none` — and no color,
+background, border, radius or font, so it is invisible until your stylesheet designs it:
+
+```css
+.kestrel-img__ai-badge {
+  margin: 0.5rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+  font-size: 0.75rem;
+}
+/* or key off the classification: */
+.kestrel-img__ai-badge[data-ai-source-type='trainedAlgorithmicMedia'] { background: rebeccapurple; }
+```
+
+The rules Kestrel ships are deliberately **unscoped**, so a plain `.kestrel-img__ai-badge` selector in your
+own CSS wins.
+
 ## Storage location & serving
 
 The uploads directory is configured **once** in `kestrel.config.ts` (see [configuration.md](./configuration.md)),
