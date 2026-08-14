@@ -27,6 +27,7 @@ per **published** page path, plus the two artifacts below:
 - `/llms.txt`
 - `/llms-full.txt` — only when `seo.llmsFull` is on (it 404s otherwise, and a prerender error would be
   reported for a route that does not exist).
+- `/redirects.json` (see [Redirects](#redirects))
 
 A route whose lookup could not *complete* — an unmigrated or drifted table, so "no page here" is
 unknowable rather than true — errors instead of rendering, and no HTML is written for it. That includes
@@ -469,11 +470,98 @@ points beyond that:
 - **Caching.** The deploy sets `Content-Type` **and** `Cache-Control` on every object: long-lived
   `public, max-age=31536000, immutable` for the content-hashed `_nuxt/` assets, and
   `public, max-age=0, must-revalidate` for the stable-URL `*.html` pages + `sitemap.xml` + `robots.txt` +
-  `llms.txt` + `llms-full.txt` (and Nuxt's `_nuxt/builds/latest.json` app manifest) so edits go live
-  promptly. Everything
-  else (favicons, fonts, un-hashed media) is left to the host default.
+  `llms.txt` + `llms-full.txt` + `redirects.json` (and Nuxt's `_nuxt/builds/latest.json` app manifest) so
+  edits go live promptly. Everything else (favicons, fonts, un-hashed media) is left to the host default.
+- **Redirects.** `redirects.json` is inert on its own — the bucket does not act on it. See
+  [Redirects](#redirects) for what has to read it.
 
 ## Redirects
 
-Redirects are handled at the NGINX / S3 edge, not at runtime — there is no runtime redirect
-engine.
+Redirects are **authored in the CMS** and **served at the edge**. Kestrel never redirects a visitor
+itself — there is no live public SSR to do it in. What it publishes is a small JSON artifact, and an
+NGINX / CloudFront / njs handler in front of the static origin reads it and answers 30x before the
+origin is touched.
+
+### Authoring
+
+The built-in **Redirects** singleton holds one repeater: a list of rules, each with a source path, a
+target and a status. **Row order is priority — the first rule that matches wins**, so the most specific
+rule belongs at the top; nothing is auto-sorted by specificity, because a UI that silently reorders is
+impossible to reason about from the editor.
+
+- **`From`** is a path, never a regex. `*` matches exactly one path segment; `**` matches one or more.
+  A missing leading slash is added, an authored trailing slash is dropped, and a trailing slash on the
+  request is tolerated — `/blog` and `/blog/` are the same rule. Matching is case-sensitive and
+  path-only: a query string, a fragment or a scheme/host in `From` is rejected at save time.
+- **`To`** is a path (`/artikel/$1`) or a full `http(s)` URL (`https://neu.example.com/artikel/$1`, for
+  a moved domain). `$1`, `$2`, … are the wildcards of `From` in authored order, and in an absolute URL
+  they may only appear after the host — a placeholder in the host would let a visitor pick the
+  destination. A `javascript:`/`data:` scheme, a protocol-relative `//host`, a backslash and embedded
+  credentials are all rejected. (Those checks cover what the editor typed; what a *capture* may contain
+  is enforced by the pattern instead — see the artifact section below.)
+- **`Status`** is `301` (permanent, the default), `302` (temporary), or `307`/`308` — the two that
+  preserve the request method, for the rare non-GET redirect.
+
+A rule that cannot compile fails the save with the offending row named (`Row 3: "To" references $2 but
+"From" has 1 wildcard(s)`), so an unpublishable rule can never reach the database and go quietly missing
+from the artifact.
+
+### The artifact
+
+`redirects.json` sits at the **output driver's root** — locally `output.dir`
+(`.data/published/redirects.json` by default), on S3 the configured prefix root. It is a sibling of
+`index.html` and `sitemap.xml`, never a child of a page directory. Its shape is a flat array in priority
+order:
+
+```json
+[
+  { "pattern": "^/blog/([^/\\\\\\x00-\\x1f\\x7f]+)/?$", "target": "/artikel/$1", "status": 301 },
+  { "pattern": "^/alte\\-seite/?$", "target": "/neue-seite", "status": 301 }
+]
+```
+
+`pattern` is an anchored regular-expression **source string**, already compiled from the wildcard syntax
+above. The edge only has to test it against the request path and substitute `$n` — no DSL parsing out
+there, and the translation stays in versioned, tested code.
+
+**The character classes are a security boundary, not noise.** A capture comes from the request, not from
+the editor, so nothing the authoring rules reject can be assumed about it. `*` and `**` therefore exclude
+a backslash (browsers resolve `Location: /\host` as `//host` — an open redirect) and the control
+characters that would split the header, and a `**` capture may not start with `/` (a target of `/$1`
+would become the protocol-relative `//host`). A request carrying any of those simply does not match and
+falls through to the origin, so a plain substitution at the edge is safe. Re-derive the patterns yourself
+and you own that invariant.
+
+**An empty rule list publishes `[]`, not nothing.** Zero redirects is a fully supported state, and the
+edge must read `[]` as "no redirects" rather than as an error; a *missing* or unparseable file means the
+edge should keep its last known-good list instead of blanking live redirects on one bad fetch.
+
+### When it is written
+
+- **On every save of the Redirects singleton** — deliberately decoupled from the publish cycle, so a
+  redirect goes live without a full republish and without pressing Publish (see
+  [ADR-0009](./architecture-decisions.md)). If that write fails, **the save fails** with a message saying
+  the artifact is stale and to save again; the row is already committed by then, and the server hands the
+  new baseline back with the error so the retry is not refused as a stale overwrite.
+- **…but only where the output target is what the site is served from.** That is `output.auto: true`
+  (either driver) and `auto: false` + `driver: 's3'`. In the classic build model — `auto: false` with the
+  default `driver: 'local'` — the deployed tree is `output.publicDir` (`.output/public`) while the
+  artifact goes to `output.dir`, so a redirect saved there goes live with the next `nuxt generate`, not
+  on save.
+- **On every full publish and every `nuxt generate`**, re-rendered from the live database like
+  `sitemap.xml` and `robots.txt`. That is not redundancy: a build-time S3 deploy reconciles the bucket
+  against `.output/public`, so an artifact the build never produced would be pruned as stale.
+
+### Consuming it at the edge
+
+Stock (open-source) NGINX has no dynamic key-value store — `keyval_zone` is NGINX **Plus**. The
+free-tier equivalent is **njs** (`ngx_http_js_module`): a `js_periodic` handler fetches `redirects.json`
+into a `js_shared_dict_zone`, and a request-path handler ahead of the origin `proxy_pass` walks the
+stored rules in order and returns the first match. Two rules for that handler: keep the last good list
+when a fetch or parse fails (never blank live redirects on one transient error), and poll faster on a
+cold start until the first well-formed response — including `[]`, so an empty list ends the burst
+instead of polling forever. The `Cache-Control` on the object is `max-age=0, must-revalidate` for the
+same reason: a cached copy would keep serving withdrawn redirects.
+
+The NGINX/njs configuration itself is deployment infrastructure and lives with the deployment, not in
+this repo.

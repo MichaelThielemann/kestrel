@@ -5,6 +5,33 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
+## [Unreleased]
+
+### Added
+
+- **CMS-managed redirects.** A built-in **Redirects** singleton lets editors keep a prioritised list of
+  `from → to` rules (`*` = one path segment, `**` = one or more, `$1`/`$2` for the captures; 301/302/307/
+  308). Saving compiles them and publishes `redirects.json` at the output driver's root — decoupled from
+  the publish cycle, so a redirect goes live without a full republish (where the output target is what the
+  site is served from: `output.auto: true`, or `auto: false` + `driver: 's3'`). Kestrel serves no
+  redirects itself; an edge (NGINX/njs, CloudFront) reads the artifact. If the write fails, the save fails
+  and says the artifact is stale. See [`docs/static-output.md` › Redirects](docs/static-output.md#redirects)
+  and [ADR-0009](docs/architecture-decisions.md).
+- **`CollectionDef.validate`** — whole-record, pre-write validation for what a per-field Zod validator
+  cannot see (it only ever sees one field's value). Issues are keyed by field, so they land on the field
+  in the editor like any other 400.
+
+### Fixed
+
+- A `choice` field's per-language labels (`{ en, de }`) rendered as a raw JSON blob in the editor's
+  select and button group instead of the label for the active admin language — visible on the built-in
+  `site` collection's "Base title position".
+- An error banner in the editor could come up empty behind an HTTP/2 proxy: `statusMessage` was read from
+  the response's reason phrase, which HTTP/2 does not carry. It is now read from the error body.
+
+> **Action required: run `db:migrate`.** The `redirects` table is new. It is additive and non-destructive,
+> so a plain migrate applies it; nothing else changes for an existing project.
+
 ## [2.0.0] — 2026-08-14
 
 The major is for one behaviour, not for an API break: **saving a record no longer publishes it**. Nothing

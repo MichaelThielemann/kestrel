@@ -128,7 +128,7 @@ where to start reading, the cross-layer seams, the gotchas). Then the per-topic 
 | [block-editing.md](docs/block-editing.md) | The block content model + the 3-pane block editor (tree · preview · fields) |
 | [media-uploads.md](docs/media-uploads.md) | Ingest security, storage drivers (local/S3), responsive-image derivation |
 | [multilingual.md](docs/multilingual.md) | Content locales, the editor locale flow, locale-prefixed routing |
-| [static-output.md](docs/static-output.md) | `nuxt generate` + the runtime incremental publisher, the live editor preview, `sitemap.xml` / `robots.txt` / `llms.txt`, the optional S3 deploy |
+| [static-output.md](docs/static-output.md) | `nuxt generate` + the runtime incremental publisher, the live editor preview, `sitemap.xml` / `robots.txt` / `llms.txt`, CMS-managed redirects, the optional S3 deploy |
 | [reference-integrity.md](docs/reference-integrity.md) | How writes invalidate the static site precisely, dead-reference warnings (a dead link renders `#`, and the editor is warned), and required/unique page slugs |
 | [architecture-decisions.md](docs/architecture-decisions.md) | ADRs (the collection-derived schema engine, reference integrity, the auth/password choice) |
 

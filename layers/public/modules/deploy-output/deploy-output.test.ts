@@ -71,6 +71,12 @@ describe('cacheControlFor', () => {
     expect(cacheControlFor('robots.txt')).toBe(REVALIDATE)
     expect(cacheControlFor('llms.txt')).toBe(REVALIDATE)
     expect(cacheControlFor('llms-full.txt')).toBe(REVALIDATE)
+    // The edge polls redirects.json; a cached copy would keep serving withdrawn redirects.
+    expect(cacheControlFor('redirects.json')).toBe(REVALIDATE)
+  })
+  it('does not force revalidation on some other json', () => {
+    expect(cacheControlFor('data/redirects.json.bak')).toBeUndefined()
+    expect(cacheControlFor('manifest.json')).toBeUndefined()
   })
   it('leaves other (non-hashed) assets without an explicit policy — host default', () => {
     expect(cacheControlFor('favicon.ico')).toBeUndefined()

@@ -2,6 +2,78 @@
 
 Lightweight ADR log — newest first. Each entry: **Context · Decision · Consequences · Future**.
 
+## ADR-0009 — CMS-managed redirects publish an artifact on save, through a fail-able write effect
+
+**Status:** accepted.
+
+**Context.** Editors need to manage SEO redirects, and a redirect has to go live without a deployment —
+the whole point of a redirect is that someone is already hitting the old URL. Kestrel has no live public
+SSR, so it cannot serve the 30x itself; the edge (NGINX/njs, CloudFront) has to, from a small artifact
+Kestrel publishes. That artifact is only useful if it is never behind the database: an editor who saw a
+green save and a stale edge is exactly the failure mode this feature cannot have.
+
+Nothing in the write path could express that. `registerWriteListener` is fire-and-forget **by design** —
+`emitWrite` wraps every listener in a `try/catch` so a publishing failure can never break a content write
+— and it is synchronous, so an async rejection escapes as an unhandled rejection instead. The obvious
+alternative, a dedicated `PUT /api/redirects` route shadowing the generic `/api/[collection]` one, was
+tried and rejected on evidence: registering a static `/api/redirects` node in the router **steals the
+whole `/api/redirects/**` subtree**. h3's per-method fallback does find the generic handler for a `GET`,
+but `event.context.params` comes from the originally matched (static) node, so `collection` is
+`undefined` and the singleton's load 404s; every sub-path stops resolving altogether. Media only gets
+away with a partial static directory because its admin UI is bespoke and never calls the generic
+sub-routes.
+
+**Decision.**
+- **A second, narrow seam in core: post-write EFFECTS** (`write-effects.ts`), awaited by the singleton
+  PUT route, whose rejection becomes the save's error response. Effects sit beside the listener bus
+  rather than changing it: the invariant that a publish failure must not break a content write is worth
+  keeping, and the redirects artifact is the case where the opposite is true.
+- **Deliberately only the singleton PUT runs effects.** Widening them to create/update/delete would make
+  every content write fail-able, which is the invariant the listener bus exists to protect.
+- **A save is not atomic with the artifact, and the message says so.** The row is committed before an
+  effect runs (better-sqlite3 writes are synchronous and CRUD holds no transaction), so a failed write
+  means "saved, but the edge still serves the previous rules — press Save again". Writing the artifact
+  first would only invert the divergence; there is no transaction spanning SQLite and S3. The retry has
+  to actually work, so the failing PUT hands the committed row's new `updatedAt` back in the error and
+  the editor takes it as its baseline — otherwise the optimistic-concurrency precondition refuses the
+  very save the message asks for, deterministically rather than as a race.
+- **The wildcard→regex translation happens in Kestrel, not at the edge.** `redirects.json` carries
+  compiled, anchored regex source strings, so the njs handler only matches and substitutes. Editors never
+  write a regex; `*` is one path segment, `**` is one or more.
+- **A rule that cannot compile is a pre-write 400, not a post-write error.** That needed a whole-record
+  validation seam (`CollectionDef.validate`), because a Zod field validator sees one field at a time and
+  cannot tell that `to: '/x/$2'` needs a second wildcard in `from`. Without it an unpublishable row could
+  be stored, then fail every later publish and the prerender of `/redirects.json`.
+- **The artifact is also produced at build time**, exactly like `sitemap.xml`/`robots.txt`/`llms.txt`: a
+  route, a prerender seed, a re-render on every full publish, and an exclusion from the build-asset
+  mirror. Not redundancy — a build-time S3 deploy reconciles the bucket against `.output/public` and
+  would otherwise prune a save-time key as stale. The four lists that used to spell those names out are
+  now one `META_KEYS`.
+- **An empty rule list publishes `[]`.** Zero redirects is a supported state, not an absent file; the
+  edge must be able to tell it apart from a failed fetch, which it has to survive by keeping its last
+  good list.
+- **A capture is untrusted input, so the PATTERN is the guard.** `normalizeTarget` can only vouch for
+  what the editor typed; `$n` is spliced in from the request. The emitted character classes therefore
+  exclude a backslash and the control characters that split a header, and forbid a `**` capture from
+  starting with `/` — so `/\evil.com/shop/x` and `/blog//evil.com` do not match at all rather than
+  producing an off-site `Location`. A placeholder inside an absolute target's host is rejected at
+  authoring time, since no character class can fix where `$n` sits.
+
+**Consequences.** Consumers need a `db:migrate` for the new (additive) `redirects` table. The artifact
+lands at the output **driver's** root — `output.dir` locally (`.data/published/` by default), the
+configured prefix on S3 — as a sibling of `index.html`, not "alongside `published/`"; the local driver
+refuses a key that escapes that root. Save-time publishing only reaches the live site where that target
+is what the site is served from (`output.auto: true`, or `auto: false` + `driver: 's3'`); in the classic
+`auto: false` + local build model the deployed tree is `.output/public` and a redirect goes live with the
+next `nuxt generate`. Redirects are global, not per-locale. `redirects.json` is inert until an edge reads
+it; the NGINX/njs side is deployment infrastructure and lives with the deployment.
+
+**Future.** The editor has no per-field help text (`BaseFieldDef` has no `help`), so the priority rule
+and the wildcard syntax ride along in the field labels. A real `help` affordance is its own slice. Also
+open: per-row error addressing inside a repeater (a server issue at `['rules', 2, 'to']` currently
+collapses onto the repeater's legend, which is why every message names its row in prose), and metrics
+for redirect hits beyond the edge's access log.
+
 ## ADR-0008 — Saving and publishing are two actions, and previewing is neither
 
 **Status:** accepted.

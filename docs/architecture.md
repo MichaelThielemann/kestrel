@@ -25,7 +25,7 @@ core ───────────────► the model + data engine + 
   ├─ collections ───► the toggleable `pages` built-in + the register plugin (demo content lives in repo root)
   ├─ media ─────────► uploads, storage drivers, derivation, the media library + viewer
   ├─ admin ─────────► the editor SPA (collection list, record editor, 3-pane block editor)
-  └─ public ────────► the SSG render path (catch-all page, BlockRenderer, sitemap/robots, deploy)
+  └─ public ────────► the SSG render path (catch-all page, BlockRenderer, sitemap/robots/redirects, deploy)
 ```
 
 `core` is the foundation, but **not strictly the lowest layer**: it reaches *up* by relative path into
@@ -257,10 +257,11 @@ intentional fail-soft.
 
 ### `public` — the SSG render path
 **Owns:** the *only* render path for the generated site — a catch-all page that renders **any** page-like
-collection's blocks (not just `pages`), per-page layout selection, the built-in `site` singleton (the
-site-wide head defaults a page's own SEO fields fall back to), the SSG artifacts (sitemap/robots/llms) and
-the agent-facing head (JSON-LD), build-time prerender route discovery, internal-link resolution, and the
-optional S3 deploy of the output.
+collection's blocks (not just `pages`), per-page layout selection, the built-in `site` and `redirects`
+singletons (the site-wide head defaults a page's own SEO fields fall back to; the redirect rules the edge
+serves), the SSG artifacts (sitemap/robots/llms/redirects.json, one `META_KEYS` list) and the agent-facing
+head (JSON-LD), build-time prerender route discovery, internal-link resolution, and the optional S3 deploy
+of the output.
 **Start:** `app/pages/[...slug].vue` (the catch-all) resolves a path to the first published record across
 every pageLike collection via `server/api/route.get.ts` → `server/utils/page-resolve.ts`, then renders it
 with `app/components/BlockRenderer.vue` (recursive block→component render + the admin-preview seam) inside
@@ -276,7 +277,11 @@ partial `path` index) → `server/routes/sitemap.xml.get.ts` + `server/utils/sit
 `app/utils/page-head.ts` + `app/utils/json-ld.ts` (the two pure head models the catch-all feeds) →
 `server/routes/llms{,-full}.txt.get.ts` + `server/utils/llms{,-full}.ts` +
 `server/utils/richtext-markdown.ts` (the richtext→Markdown converter `llms-full.txt` needs) →
-`server/utils/populate-links.ts` + `plugins/02.register-links.ts` → `modules/deploy-output/*`.
+`server/utils/populate-links.ts` + `plugins/02.register-links.ts` → `modules/deploy-output/*`. Redirects
+are their own small path: `server/collections/redirects.ts` (its `validate` compiles the rules pre-write) →
+`server/utils/publish/redirect-rules.ts` (the pure wildcard→regex compiler, also the executable spec for
+the edge) → `plugins/03.redirects.ts` (a fail-able post-write EFFECT, not a write listener) +
+`server/routes/redirects.json.get.ts` (so the build produces it too, ADR-0009).
 **Gotchas:** the internal-link populator mutates **every** collection read (registered globally), not
 just public pages; links ARE status-gated — a MISSING **or** draft target renders `#` (only a collection
 without a `status` column resolves unconditionally; the editor is warned separately), and every internal
@@ -290,15 +295,17 @@ separate mechanism from the `link` field; the catch-all declares `layout: false`
 `<NuxtLayout>` itself (ADR-0006), so the layout is a CHILD of the page and an unset/unknown `layout` must
 be coalesced to `default` — `NuxtLayout`'s own `fallback` never fires for the literal `false` that
 `layout: false` leaves in the route meta; the artifacts published at literal keys are ONE list
-(`META_ARTIFACTS` in `modules/deploy-output/deploy-output.ts`) because three call sites must agree on it —
-the publisher renders them, the asset mirror must skip the build's stale copies, and the cache policy keys
-off the same names; a page's breadcrumb subscribes to each ancestor with TWO tags and needs both — a
+(`META_KEYS` in `modules/deploy-output/deploy-output.ts`) because four call sites must agree on it — the
+publisher renders them, the asset mirror must skip the build's stale copies, the prerender module seeds
+them as routes, and the cache policy keys off the same names (only the prerender seeding is flag-aware:
+`llms-full.txt` 404s unless `kestrel.seo.llmsFull` is on, and a prerender error fails `nuxt generate`);
+a page's breadcrumb subscribes to each ancestor with TWO tags and needs both — a
 `pagePathTag` (the only dependency keyed on a path rather than a record: Kestrel has no parent/child
 relation, a descendant is a path-prefix match, and a page CREATED at an ancestor path has no id to have
 been captured) plus the record tag of whatever sits there, captured before the visibility filters, because
 the publish action classifies its write as `before === after` and so cannot name where a renamed or
 newly-hidden ancestor USED to be.
-**Docs:** `static-output.md` (prerender/sitemap/deploy), `reference-integrity.md` (the invalidation model, durable `publish_deps`, status-gated links), `block-editing.md` (BlockRenderer + preview seam), ADR-0006 (per-page layouts).
+**Docs:** `static-output.md` (prerender/sitemap/deploy), `reference-integrity.md` (the invalidation model, durable `publish_deps`, status-gated links), `block-editing.md` (BlockRenderer + preview seam), ADR-0006 (per-page layouts), ADR-0009 (redirects).
 
 ---
 

@@ -4,7 +4,7 @@ import { defineNuxtModule } from '@nuxt/kit'
 import Database from 'better-sqlite3'
 import { collectPageRoutes, pageLikeTables } from './discover'
 import { localePath } from '../../../core/app/utils/locale-path'
-import { recordRouteDiscovery, type RouteDiscovery } from '../deploy-output/deploy-output'
+import { recordRouteDiscovery, META_KEYS, type RouteDiscovery } from '../deploy-output/deploy-output'
 import { resolveKestrel, type KestrelConfig } from '../../../core/server/utils/kestrel-config'
 
 // Read published paths from EVERY page-like collection straight from the DB at build time so
@@ -73,9 +73,9 @@ export default defineNuxtModule({
       // Hand the deploy module the completeness of THIS enumeration — the only step that knows it.
       recordRouteDiscovery(nuxt, discovery)
       nitro.prerender ||= {}
-      // `llms-full.txt` only when the consumer opted in — the route 404s otherwise, and a prerender error
-      // fails the whole `nuxt generate`.
-      const meta = ['/sitemap.xml', '/robots.txt', '/llms.txt', ...(c.seo.llmsFull ? ['/llms-full.txt'] : [])]
+      // Every meta artifact EXCEPT `llms-full.txt`, which is seeded only when the consumer opted in — the
+      // route 404s otherwise, and a prerender error fails the whole `nuxt generate`.
+      const meta = META_KEYS.filter((k) => k !== 'llms-full.txt' || c.seo.llmsFull).map((k) => `/${k}`)
       nitro.prerender.routes = [...new Set([...(nitro.prerender.routes ?? []), ...discovery.routes, ...meta])]
       // Render pages in parallel — the dominant lever on `nuxt generate` wall-clock as page count grows.
       // Safe: page reads are synchronous better-sqlite3 (WAL + busy_timeout, can't interleave mid-statement);

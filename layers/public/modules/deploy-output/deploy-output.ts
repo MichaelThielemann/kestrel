@@ -66,25 +66,29 @@ export function precompressedEncoding(filename: string, siblingNames: string[]):
   return m[1] === 'br' ? 'br' : 'gzip'
 }
 
-/**
- * The site-level artifacts published at LITERAL keys (not `<path>/index.html`): the crawler/agent-facing
- * documents. One list because three call sites must agree on it — the publisher renders them fresh from
- * the live DB, the asset mirror must therefore SKIP the build's stale copies, and each lives at a stable
- * URL whose content changes on any write, so it revalidates rather than caching immutably.
- * `llms-full.txt` is opt-in (`kestrel.seo.llmsFull`) and simply renders to a 404 when off — it stays in
- * this list either way, so the two rules that are about the FILENAME hold regardless of the flag.
- */
-export const META_ARTIFACTS: readonly string[] = ['sitemap.xml', 'robots.txt', 'llms.txt', 'llms-full.txt']
-
 const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable'
 const REVALIDATE_CACHE = 'public, max-age=0, must-revalidate'
 
+/** Artifacts served at a LITERAL key (not `<path>/index.html`) and rendered from the live DB rather than
+ *  copied from the build. One list, because each of them has to be handled the same way in four places:
+ *  re-rendered on every publish, excluded from the build-asset mirror (a stale copy must never overwrite
+ *  a fresh one), seeded into the prerender routes, and cached as revalidate-always below.
+ *  `llms-full.txt` is opt-in (`kestrel.seo.llmsFull`) and simply renders to a 404 when off — it stays in
+ *  this list either way, so the rules that are about the FILENAME hold regardless of the flag; only the
+ *  prerender seeding, which asks for the ROUTE, has to consult it. */
+export const META_KEYS = ['sitemap.xml', 'robots.txt', 'llms.txt', 'llms-full.txt', 'redirects.json'] as const
+
+export function isMetaKey(key: string): boolean {
+  return (META_KEYS as readonly string[]).includes(key)
+}
+
 /**
  * `Cache-Control` for a static-output key, or `undefined` for no explicit policy. Content-hashed
- * `_nuxt/` assets get a year + `immutable` (the hash is the cache key — new content ⇒ new URL). HTML,
- * the sitemap and `robots.txt` live at *stable* URLs whose content changes on any deploy, so they get
- * `max-age=0, must-revalidate` (cacheable but always revalidated). Everything else (favicons, fonts,
- * un-hashed media) is left to the host default.
+ * `_nuxt/` assets get a year + `immutable` (the hash is the cache key — new content ⇒ new URL). HTML and
+ * the `META_KEYS` artifacts live at *stable* URLs whose content changes on any deploy, so they get
+ * `max-age=0, must-revalidate` (cacheable but always revalidated) — `redirects.json` especially, since a
+ * cached copy keeps serving withdrawn redirects. Everything else (favicons, fonts, un-hashed media) is
+ * left to the host default.
  */
 export function cacheControlFor(key: string): string | undefined {
   // Nuxt's app manifest lives at a STABLE _nuxt URL but its content (the buildId) changes every build, so it
@@ -92,7 +96,7 @@ export function cacheControlFor(key: string): string | undefined {
   if (key === '_nuxt/builds/latest.json') return REVALIDATE_CACHE
   if (key === '_nuxt' || key.startsWith('_nuxt/')) return IMMUTABLE_CACHE
   const base = key.split('/').pop() ?? key
-  if (base.endsWith('.html') || META_ARTIFACTS.includes(base)) return REVALIDATE_CACHE
+  if (base.endsWith('.html') || isMetaKey(base)) return REVALIDATE_CACHE
   return undefined
 }
 

@@ -4,7 +4,7 @@ import { getTableColumns } from 'drizzle-orm'
 import type { StorageDriver } from '../../../../core/server/utils/storage'
 import { createLocalDriver } from '../../../../core/server/utils/storage.local'
 import { createS3Driver } from '../../../../core/server/utils/storage.s3'
-import { contentTypeFor, cacheControlFor, precompressedEncoding, META_ARTIFACTS } from '../../../modules/deploy-output/deploy-output'
+import { contentTypeFor, cacheControlFor, precompressedEncoding, META_KEYS, isMetaKey } from '../../../modules/deploy-output/deploy-output'
 import { localePath } from '../../../../core/app/utils/locale-path'
 import { pageRowHref } from '../../../../core/server/utils/page-route'
 import { withReadCapture } from '../../../../core/server/utils/read-capture'
@@ -185,13 +185,14 @@ export async function prunePages(routes: string[], driver: StorageDriver): Promi
   }
 }
 
-/** Render + write the crawler/agent artifacts (served at literal keys, not `<path>/index.html`).
+/** Render + write the crawler/agent artifacts — sitemap/robots/llms/redirects, served at literal keys
+ *  rather than `<path>/index.html`.
  *  A 404 means the route is switched off (`llms-full.txt` without `kestrel.seo.llmsFull`) — the file it
  *  wrote while it WAS on must go, or the flag would stop publishing new content while the last full dump
  *  stayed live. That is a deterministic route-level answer, not the incomplete-read case a delete must
  *  never act on; any other non-200 leaves the existing file alone. */
 async function publishMeta(driver: StorageDriver): Promise<void> {
-  for (const key of META_ARTIFACTS) {
+  for (const key of META_KEYS) {
     const { body, status } = await renderRoute(`/${key}`)
     if (body) await driver.put(key, body, contentTypeFor(key), { cacheControl: cacheControlFor(key) })
     else if (status === 404) await driver.delete(key)
@@ -223,7 +224,7 @@ async function syncStaticAssets(driver: StorageDriver, publicDir: string): Promi
       // exactly like its uncompressed sibling, or it ships as a live sidecar for the fresh HTML rendered
       // below — served to any Accept-Encoding-negotiating client instead of the page just published.
       const base = rel.replace(/\.(?:br|gz)$/i, '')
-      if (!e.isFile() || base.endsWith('.html') || META_ARTIFACTS.includes(base)) continue
+      if (!e.isFile() || base.endsWith('.html') || isMetaKey(base)) continue
       const bytes = await readFile(resolve(dir, e.name))
       // Tag a precompressed sibling (`.br`/`.gz` beside its base) with Content-Encoding so a proxy over S3
       // serves it directly; a standalone archive stays unencoded so browsers don't decode + corrupt it.

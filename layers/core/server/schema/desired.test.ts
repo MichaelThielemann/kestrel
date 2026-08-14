@@ -9,7 +9,7 @@ import { diffSchema } from './diff'
 import { renderSqlite } from './render-sqlite'
 import { buildTable } from '../../../fields/server/utils/buildTable'
 import { defineCollection } from '../utils/defineCollection'
-import { pages, posts, settings, media, mediaSettings, site, folders, publishDeps, publishStatus, recordRefs } from '../../../../server/database/schema'
+import { pages, posts, settings, media, mediaSettings, site, redirects, folders, publishDeps, publishStatus, recordRefs } from '../../../../server/database/schema'
 
 const pagesTable = buildTable(defineCollection({
   name: 'pages', mode: 'multi', translatable: true, pageLike: true, seo: true, blocks: { enabled: true }, status: true,
@@ -94,7 +94,7 @@ describe('desiredSchema — diverse field types round-trip (consumer collections
 
 describe('desiredSchema — parity with the committed drizzle-kit migrations', () => {
   it('desired schema of the live tables equals the migrated DB → boot auto-sync is a no-op on built-ins', () => {
-    const desired = desiredSchema([pages, posts, settings, media, mediaSettings, site, folders, publishDeps, publishStatus, recordRefs])
+    const desired = desiredSchema([pages, posts, settings, media, mediaSettings, site, redirects, folders, publishDeps, publishStatus, recordRefs])
     const sqlite = new Database(':memory:')
     migrate(drizzle(sqlite), { migrationsFolder: resolve(process.cwd(), 'server/database/migrations') })
     expect(diffSchema(desired, introspect(sqlite))).toEqual([])
