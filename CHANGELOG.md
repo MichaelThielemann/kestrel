@@ -5,7 +5,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
-## [Unreleased]
+## [2.1.0] — 2026-08-14
+
+Three additive, independently opt-in features. Nothing was removed and no API changed, but two new
+migrations mean an existing project needs a `db:migrate` before it boots — see the note at the end.
 
 ### Added
 
@@ -235,4 +238,6 @@ that found *nothing*, because the second one silently overwrites live output wit
 - [consuming-kestrel.md](docs/consuming-kestrel.md) corrects the shipped public-component surface and the
   built-in collection list.
 
+[2.1.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v2.1.0
+[2.0.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v2.0.0
 [1.7.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v1.7.0
