@@ -15,6 +15,9 @@ export interface PublishStatusData {
   /** The consumer opted out of the save/publish split (`output.publishOnSave`): a save republishes on its
    *  own, so the editor offers no Publish button and never reports unpublished changes. */
   publishOnSave?: boolean
+  /** The page has no publish row at all. Distinct from "a publish is in flight": with the split on, a save
+   *  enqueues nothing, so this state only ends when someone presses Publish. */
+  neverPublished?: boolean
   /** Whether the runtime publisher actually produces files in THIS environment (prod + `output.auto`).
    *  `false` in dev / with static output off → a page can never turn "Live" here, so don't poll for it. */
   generates?: boolean

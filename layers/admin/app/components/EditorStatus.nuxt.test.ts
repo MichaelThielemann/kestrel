@@ -148,6 +148,30 @@ describe('EditorStatus — right dot (live / generated state, pageLike only)', (
     expect(liveWord(err)).toBe('Error')
   })
 
+  // A save no longer enqueues anything, so "no status row" stopped meaning "a publish is running". Claiming
+  // progress here points the user at a spinner instead of at the Publish button they actually need.
+  it('blue "Not published" for a page that has never been published', async () => {
+    const w = await mountSuspended(EditorStatus, {
+      props: { dirty: false, pageLike: true, hasStatus: true, status: 'published', live: { route: '/about', status: null, neverPublished: true, generates: true } },
+    })
+    expect(liveTone(w)).toBe('blue')
+    expect(liveWord(w)).toBe('Not published')
+  })
+
+  it('keeps "Generating…" with publishOnSave — there a save really does enqueue a republish', async () => {
+    const w = await mountSuspended(EditorStatus, {
+      props: { dirty: false, pageLike: true, hasStatus: true, status: 'published', live: { route: '/about', status: null, neverPublished: true, publishOnSave: true, generates: true } },
+    })
+    expect(liveWord(w)).toBe('Generating…')
+  })
+
+  it('the environment still wins: nothing is generated here at all', async () => {
+    const w = await mountSuspended(EditorStatus, {
+      props: { dirty: false, pageLike: true, hasStatus: true, status: 'published', live: { route: '/about', status: null, neverPublished: true, generates: false } },
+    })
+    expect(liveWord(w)).toBe('Not built')
+  })
+
   it('neutral "Not built" when this environment does not generate (dev / static output off)', async () => {
     const w = await mountSuspended(EditorStatus, {
       props: { dirty: false, pageLike: true, hasStatus: true, status: 'published', live: { route: '/about', status: null, generates: false } },

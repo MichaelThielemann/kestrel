@@ -73,3 +73,22 @@ describe('GET /api/publish-status — unpublished changes', () => {
     expect(get(4)).toMatchObject({ pending: false, publishOnSave: true })
   })
 })
+
+// "No status row" and "a publish is in flight" used to be the same state, because a save always enqueued
+// one. With publishing deferred to an explicit action they are opposites: nothing is running, and nothing
+// will, until someone presses Publish. The lamp needs to tell them apart.
+describe('GET /api/publish-status — never published', () => {
+  it('reports a routable page with no publish row as never published', () => {
+    seed(1, 10_000)
+    expect(get(1)).toMatchObject({ route: '/p1', status: null, neverPublished: true })
+  })
+
+  it('is not "never published" once the page has a publish row', () => {
+    seed(2, 10_000, 60)
+    expect(get(2)).toMatchObject({ neverPublished: false })
+  })
+
+  it('is not "never published" for a record with no public route at all', () => {
+    expect(get(99)).toMatchObject({ route: null, neverPublished: false })
+  })
+})

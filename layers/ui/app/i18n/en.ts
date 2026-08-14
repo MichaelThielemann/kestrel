@@ -174,6 +174,7 @@ export const en: Catalog = {
   // editor Ampel — RIGHT lamp: one WORD + a details tooltip (generated state of the static page)
   'editorStatus.word.live': 'Live',
   'editorStatus.word.generating': 'Generating…',
+  'editorStatus.word.notPublished': 'Not published',
   'editorStatus.word.notBuilt': 'Not built',
   'editorStatus.word.notLive': 'Not live',
   'editorStatus.word.error': 'Error',
@@ -182,6 +183,7 @@ export const en: Catalog = {
   'editorStatus.live.liveLocal': 'Live — page written to the static output.',
   'editorStatus.live.pending': 'Publishing in progress…',
   'editorStatus.live.outdated': 'Saved but not published — the live page still shows the last published version.',
+  'editorStatus.live.notPublished': 'Never published — press Publish to put this page on the live site.',
   'editorStatus.live.notBuilt': 'Not generated in this environment — the static page is built on deploy.',
   'editorStatus.live.error': 'Publishing the static page failed.',
   'editorStatus.live.draft': 'Draft — not generated. It stays off the live site until published.',

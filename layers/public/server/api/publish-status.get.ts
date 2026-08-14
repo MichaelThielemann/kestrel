@@ -28,27 +28,31 @@ export default defineEventHandler((event) => {
   const name = typeof q.collection === 'string' ? q.collection : ''
   const id = Number(typeof q.id === 'string' ? q.id : NaN)
   const c = getCollection(name)
-  if (!c || !c.def.pageLike || !Number.isInteger(id) || id <= 0) return { route: null, status: null, pending: false, ...env }
+  if (!c || !c.def.pageLike || !Number.isInteger(id) || id <= 0) return { route: null, status: null, pending: false, neverPublished: false, ...env }
 
   const db = useDb()
   const table = c.table as AnySQLiteTable
   const cols = getTableColumns(table) as Record<string, never>
   const row = db.select().from(table).where(eq(cols.id, id)).get() as { path?: unknown; locale?: unknown; updatedAt?: unknown } | undefined
   const route = routeForRecord(row, true, primaryLocale(), prefixPrimaryLocale())
-  if (!route) return { route: null, status: null, pending: false, ...env }
+  if (!route) return { route: null, status: null, pending: false, neverPublished: false, ...env }
 
   // Saved after it was last published: with publishing deferred to an explicit action, that is the normal
   // working state of a page being edited — the live file is the previous version until someone publishes.
   const savedAt = row?.updatedAt instanceof Date ? row.updatedAt.getTime() : null
   try {
     const st = db.select().from(publishStatus).where(eq(publishStatus.route, route)).get()
-    if (!st) return { route, status: null, pending: false, ...env }
+    // A routable page with no row was never published. Before the split that was indistinguishable from
+    // "a publish is running" — a save always enqueued one — but now nothing is in flight and nothing will be
+    // until someone presses Publish, so the lamp must not claim progress that is not happening.
+    if (!st) return { route, status: null, pending: false, neverPublished: true, ...env }
     // With the split off, a save republishes on its own, so a newer save means a republish is in flight —
     // reporting that as "unpublished changes" would ask the user to act on something already happening.
     const pending = !publishOnSave && hasPendingChanges(savedAt, st.updatedAt instanceof Date ? st.updatedAt.getTime() : null)
-    return { route, status: st.status, error: st.error, updatedAt: st.updatedAt, target: st.target, pending, ...env }
+    return { route, status: st.status, error: st.error, updatedAt: st.updatedAt, target: st.target, pending, neverPublished: false, ...env }
   } catch {
-    // publish_status not migrated yet → treat as "no status" rather than a 500.
-    return { route, status: null, pending: false, ...env }
+    // publish_status not migrated yet → treat as "no status" rather than a 500. Not "never published"
+    // either: the table is unreadable, so the page's real state is unknown, not known to be absent.
+    return { route, status: null, pending: false, neverPublished: false, ...env }
   }
 })

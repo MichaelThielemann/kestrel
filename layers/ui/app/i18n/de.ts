@@ -162,6 +162,7 @@ export const de: Catalog = {
   // editor status light — RIGHT lamp: ONE word + details tooltip (static-page generation status)
   'editorStatus.word.live': 'Live',
   'editorStatus.word.generating': 'Generiert…',
+  'editorStatus.word.notPublished': 'Nicht veröffentlicht',
   'editorStatus.word.notBuilt': 'Nicht gebaut',
   'editorStatus.word.notLive': 'Nicht live',
   'editorStatus.word.error': 'Fehler',
@@ -170,6 +171,7 @@ export const de: Catalog = {
   'editorStatus.live.liveLocal': 'Live — Seite in den statischen Output geschrieben.',
   'editorStatus.live.pending': 'Wird veröffentlicht…',
   'editorStatus.live.outdated': 'Gespeichert, aber nicht veröffentlicht — live steht noch die zuletzt veröffentlichte Fassung.',
+  'editorStatus.live.notPublished': 'Nie veröffentlicht — mit Veröffentlichen kommt die Seite auf die Live-Site.',
   'editorStatus.live.notBuilt': 'In dieser Umgebung nicht generiert — die statische Seite wird beim Deploy gebaut.',
   'editorStatus.live.error': 'Generieren der statischen Seite fehlgeschlagen.',
   'editorStatus.live.draft': 'Entwurf — nicht generiert. Erscheint erst nach Veröffentlichung auf der Live-Seite.',

@@ -76,6 +76,12 @@ const live = computed<{ tone: 'green' | 'red' | 'amber' | 'blue' | 'neutral'; wo
   // static output off) → a calm neutral "Not built". Unknown (undefined) → assume a publish is in flight.
   if (props.live?.generates === false)
     return { tone: 'neutral', word: t('editorStatus.word.notBuilt'), detail: t('editorStatus.live.notBuilt') }
+  // Never published, and a save no longer enqueues anything (ADR-0008) — so nothing is in flight and
+  // nothing will be until someone presses Publish. Reporting progress here would point the user at a
+  // spinner instead of at the one action that changes it. With `publishOnSave` a save DOES republish, so
+  // there the in-flight reading is the right one.
+  if (props.live?.neverPublished && !props.live?.publishOnSave)
+    return { tone: 'blue', word: t('editorStatus.word.notPublished'), detail: t('editorStatus.live.notPublished') }
   return { tone: 'amber', word: t('editorStatus.word.generating'), detail: t('editorStatus.live.pending') }
 })
 </script>
