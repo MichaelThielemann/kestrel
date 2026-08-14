@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { LayoutKey } from 'nuxt/app'
+import type { LayoutKey } from '#app'
 import type { SiteHead } from '../utils/site-head'
 
 // The record decides its own layout, so route-meta resolution is opted out of and this page renders the
