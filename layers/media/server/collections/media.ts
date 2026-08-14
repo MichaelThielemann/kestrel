@@ -22,6 +22,20 @@ const built = buildCollection(defineCollection({
     thumbhash: { type: 'text' },
     derivatives: { type: 'json' },
     translations: { type: 'json' },
+    // EU AI Act Art. 50 disclosure. Top-level, NOT per-locale (`translations`): how an asset was produced
+    // does not change per translation. The vocabulary mirrors the disclosure-relevant subset of IPTC's
+    // Digital Source Type, so a later metadata-embedding slice can map 1:1.
+    aiSourceType: {
+      type: 'choice',
+      options: {
+        choices: [
+          { label: 'Fully AI-generated', value: 'trainedAlgorithmicMedia' },
+          { label: 'AI content composited into real media', value: 'compositeWithTrainedAlgorithmicMedia' },
+          { label: 'AI-enhanced / algorithmically edited', value: 'algorithmicallyEnhanced' },
+        ],
+      },
+    },
+    aiNote: { type: 'text' },
   },
 }))
 

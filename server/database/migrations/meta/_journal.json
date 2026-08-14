@@ -92,6 +92,13 @@
       "when": 1786375267923,
       "tag": "0012_site_seo_singleton",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1786692536502,
+      "tag": "0013_media_ai_disclosure",
+      "breakpoints": true
     }
   ]
 }

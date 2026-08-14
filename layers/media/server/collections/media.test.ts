@@ -15,4 +15,24 @@ describe('media collection', () => {
     expect(built.insert.safeParse({ storageKey: 'a/b.webp', filename: 'b.webp', mime: 'image/webp', ext: 'webp', size: 10 }).success).toBe(true)
     expect(built.insert.safeParse({ filename: 'b.webp' }).success).toBe(false)
   })
+
+  describe('EU AI Act disclosure columns', () => {
+    const validRow = { storageKey: 'a/b.webp', filename: 'b.webp', mime: 'image/webp', ext: 'webp', size: 10 }
+
+    it('adds nullable ai_source_type / ai_note columns', () => {
+      const columns = getTableConfig(built.table).columns
+      const byName = Object.fromEntries(columns.map((c) => [c.name, c]))
+      expect(Object.keys(byName)).toEqual(expect.arrayContaining(['ai_source_type', 'ai_note']))
+      expect(byName.ai_source_type!.notNull).toBe(false)
+      expect(byName.ai_note!.notNull).toBe(false)
+    })
+
+    it('accepts the disclosure vocabulary, rejects an unknown value, and stays optional', () => {
+      expect(built.insert.safeParse({ ...validRow, aiSourceType: 'trainedAlgorithmicMedia' }).success).toBe(true)
+      expect(built.insert.safeParse({ ...validRow, aiSourceType: 'compositeWithTrainedAlgorithmicMedia' }).success).toBe(true)
+      expect(built.insert.safeParse({ ...validRow, aiSourceType: 'algorithmicallyEnhanced', aiNote: 'upscaled' }).success).toBe(true)
+      expect(built.insert.safeParse({ ...validRow, aiSourceType: 'not-a-real-value' }).success).toBe(false)
+      expect(built.insert.safeParse(validRow).success).toBe(true)
+    })
+  })
 })
