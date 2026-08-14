@@ -148,7 +148,26 @@ Every field also accepts these common flags: `required`, `unique` (a unique DB i
 `index: true` (a **non-unique** DB index — add it to a field you filter or sort by a lot but that isn't
 unique). Both index flags flow through the schema engine (dev auto-sync) and `drizzle-kit`.
 
-> The built-in collections are `pages`, `media`, `site` (the site-wide head singleton) and
+For a rule the per-field schema cannot express — a field validator only ever sees its own value — a
+collection may declare `validate`. It runs server-side **before** the write and returns issues keyed by
+field, so they land on the field in the editor like any other validation error. Mind the asymmetry: the
+`record` it reads is keyed by **column** name (`authorId` for a single `relation`/`media` field), while
+an issue's `path[0]` is the **field** key:
+
+```ts
+export default defineCollection({
+  name: 'events',
+  mode: 'multi',
+  fields: { startsAt: { type: 'datetime' }, endsAt: { type: 'datetime' } },
+  validate: (record) =>
+    record.startsAt && record.endsAt && record.endsAt < record.startsAt
+      ? [{ path: ['endsAt'], message: 'The end must not precede the start.' }]
+      : [],
+})
+```
+
+> The built-in collections are `pages`, `media`, `site` (the site-wide head singleton), `redirects` (the
+> edge redirect rules — see [static-output.md › Redirects](./static-output.md#redirects)) and
 > `media_settings` (a nav-hidden system store).
 > `folders` is a plain support table, not a manageable collection, and has no `collections` toggle. Only
 > `pages`/`media` are toggleable. To customise one, either disable it

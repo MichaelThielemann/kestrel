@@ -17,6 +17,8 @@ export interface FetchErrorInfo {
   statusCode?: number
   statusMessage?: string
   issues: ServerIssue[]
+  /** The error body when it is NOT a Zod-issue array — e.g. `{ savedUpdatedAt }` from a failed write effect. */
+  data?: Record<string, unknown>
 }
 
 // The wire `SerializedField` is structurally what every Field* widget and `validateField` read
@@ -26,13 +28,18 @@ export function asFieldDef(field: SerializedField): FieldDef {
 }
 
 // Read an ofetch/H3 error envelope: top-level statusCode/statusMessage, Zod issues nested at err.data.data.
+// The BODY's statusMessage wins over the response's: ofetch maps `statusMessage` from `response.statusText`,
+// and HTTP/2 has no reason phrase — behind any h2 proxy that arrives as '' and the real message is only in
+// the JSON. Anything else under `data` (not an issue array) is handed back for the caller to act on.
 export function readFetchError(e: unknown): FetchErrorInfo {
   const err = e as { statusCode?: number; statusMessage?: string; data?: { data?: ServerIssue[] } & Record<string, unknown> }
-  const raw = err.data?.data ?? err.data
+  const body = Array.isArray(err.data) ? undefined : err.data
+  const raw = body?.data ?? err.data
   return {
     statusCode: err.statusCode,
-    statusMessage: err.statusMessage,
+    statusMessage: (body?.statusMessage as string | undefined) || err.statusMessage,
     issues: Array.isArray(raw) ? (raw as ServerIssue[]) : [],
+    ...(body && !Array.isArray(body.data) ? { data: body } : {}),
   }
 }
 

@@ -97,7 +97,7 @@ export type FieldDef =
   | (BaseFieldDef & { type: 'number'; options?: { min?: number; max?: number; integer?: boolean; decimals?: number; unit?: string; units?: string[] } })
   | (BaseFieldDef & { type: 'boolean' })
   | (BaseFieldDef & { type: 'datetime'; options?: { precision?: 'date' | 'datetime' | 'time'; range?: boolean } })
-  | (BaseFieldDef & { type: 'choice'; options: { choices: { label: string; value: string }[]; multiple?: boolean; display?: 'select' | 'buttons' | 'checkboxes' } })
+  | (BaseFieldDef & { type: 'choice'; options: { choices: { label: Localized; value: string }[]; multiple?: boolean; display?: 'select' | 'buttons' | 'checkboxes' } })
   | (BaseFieldDef & { type: 'link'; options?: { types?: LinkType[]; collections?: string[] } })
   | (BaseFieldDef & { type: 'media'; options?: { multiple?: boolean; accept?: 'image' | 'any' } })
   | (BaseFieldDef & { type: 'relation'; relation: { collection: string; many?: boolean; labelField?: string } })
@@ -158,6 +158,13 @@ export interface CollectionDef {
    *  so adding a field never hides it. Absent → today's one-field-per-row. (Deviates from Pruvious, which
    *  nests this under a `dashboard` wrapper — Kestrel keeps its flat CollectionDef idiom.) */
   fieldLayout?: FieldLayoutDSL
+  /** Whole-record validation the per-field Zod schema cannot express, because a field validator only ever
+   *  sees its own value — e.g. a rule set whose rows have to compile as a unit. Runs server-side BEFORE
+   *  the write, next to the conditional-required check, and its issues become the same field-scoped 400
+   *  the editor already renders. Server-only: a function, never serialized.
+   *  Note the asymmetry: `record` is keyed by COLUMN name (`authorId` for a single relation/media field —
+   *  see `resolveColumnName`), while an issue's `path[0]` is the FIELD key the editor renders against. */
+  validate?: (record: Record<string, unknown>) => Array<{ path: (string | number)[]; message: string }>
   /** Display labels. `new` is the complete, per-locale "create" phrase (e.g. de `'Neue Seite'` /
    *  `'Neuer Beitrag'`) — supplying the whole phrase sidesteps German gender agreement, which no
    *  `'Neu {x}'` template can get right. Falls back to a generic phrase from `singular` when absent. */

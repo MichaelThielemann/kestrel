@@ -229,6 +229,20 @@ describe('readFetchError', () => {
     expect(readFetchError({ statusCode: 409, statusMessage: 'Conflict' }).issues).toEqual([])
     expect(readFetchError({ data: [{ path: ['x'], message: 'm' }] }).issues).toEqual([{ path: ['x'], message: 'm' }])
   })
+
+  it('prefers the BODY statusMessage — HTTP/2 has no reason phrase, so statusText arrives empty', () => {
+    const e = { statusCode: 500, statusMessage: '', data: { statusMessage: 'Redirects saved but not published' } }
+    expect(readFetchError(e).statusMessage).toBe('Redirects saved but not published')
+  })
+
+  it('still reads the response statusText when the body carries none', () => {
+    expect(readFetchError({ statusCode: 409, statusMessage: 'Conflict' }).statusMessage).toBe('Conflict')
+  })
+
+  it('surfaces a non-issue data payload so the caller can act on it', () => {
+    expect(readFetchError({ statusCode: 500, data: { savedUpdatedAt: 1234 } }).data).toEqual({ savedUpdatedAt: 1234 })
+    expect(readFetchError({ statusCode: 400, data: [{ path: ['x'], message: 'm' }] }).data).toBeUndefined()
+  })
 })
 
 describe('mapServerErrors', () => {

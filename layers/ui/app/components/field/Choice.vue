@@ -5,17 +5,22 @@ import UiFieldset from '../ui/Fieldset.vue'
 import UiSelect from '../ui/Select.vue'
 import UiButtonGroup from '../ui/ButtonGroup.vue'
 import UiCheckboxGroup from '../ui/CheckboxGroup.vue'
+import { resolveLocalized } from '../../utils/localized'
 import type { FieldComponentProps } from '../../utils/field-component'
 import type { FieldOf } from '../../../../core/server/utils/defineCollection'
 
 const props = defineProps<FieldComponentProps>()
 const model = defineModel<string | string[] | null>()
 
+const { lang } = useT()
+
 const cfg = computed(() => {
   if (props.field.type !== 'choice') return { choices: [] as { label: string; value: string }[], multiple: false, buttons: false }
   const o = (props.field as FieldOf<'choice'>).options
   return {
-    choices: o.choices,
+    // A choice label is `Localized` like every other author-supplied label. Resolving it HERE (not in the
+    // controls) is what keeps it out of the markup as a JSON blob — `{{ o.label }}` would stringify the map.
+    choices: o.choices.map((c) => ({ ...c, label: resolveLocalized(c.label, lang.value) ?? c.value })),
     multiple: !!o.multiple,
     buttons: o.display === 'buttons',
   }

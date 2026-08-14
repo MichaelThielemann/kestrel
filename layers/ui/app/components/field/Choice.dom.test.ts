@@ -26,3 +26,27 @@ describe('FieldChoice — optional single select', () => {
     expect(optionValues(w)).not.toContain('')
   })
 })
+
+describe('FieldChoice — localized choice labels', () => {
+  const localized = [
+    { label: { en: '301 - permanent', de: '301 - dauerhaft' }, value: '301' },
+    { label: { en: '302 - temporary', de: '302 - voruebergehend' }, value: '302' },
+  ]
+  const optionTexts = (w: ReturnType<typeof mount>) => w.get('select').findAll('option').map((o) => o.text())
+
+  it('resolves a per-language label instead of rendering the raw map', () => {
+    const w = mount(FieldChoice, { props: { ...base, field: { type: 'choice', required: true, options: { choices: localized } }, modelValue: '301' } })
+    expect(optionTexts(w)).toEqual(['301 - permanent', '302 - temporary'])
+  })
+
+  it('resolves them in the button display too', () => {
+    const w = mount(FieldChoice, { props: { ...base, field: { type: 'choice', required: true, options: { choices: localized, display: 'buttons' } }, modelValue: '301' } })
+    expect(w.text()).toContain('301 - permanent')
+    expect(w.text()).not.toContain('{')
+  })
+
+  it('leaves a plain-string label alone', () => {
+    const w = mount(FieldChoice, { props: { ...base, field: { type: 'choice', required: true, options: { choices } }, modelValue: 'a' } })
+    expect(optionTexts(w)).toEqual(['A', 'B'])
+  })
+})

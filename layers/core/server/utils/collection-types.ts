@@ -20,8 +20,9 @@ export interface BuiltCollection {
   insert: CollectionSchema
   update: CollectionSchema
   select: CollectionSchema
-  /** Re-enforce `required` for conditional fields whose condition is met against the whole record
-   *  (the per-field schema can't see siblings). Returns Zod-shaped issues keyed by the field's def
-   *  name. Present only when the collection has conditional required fields. */
+  /** Every pre-write check the per-field schema can't do because it sees one field at a time: `required`
+   *  re-enforced for conditional fields whose condition is met against the whole record, plus the
+   *  collection's own `def.validate`. Returns Zod-shaped issues keyed by the field's def name. Present
+   *  only when the collection has conditional required fields or a `validate`. */
   applyConditions?: (record: Record<string, unknown>) => { issues: ConditionIssue[] }
 }

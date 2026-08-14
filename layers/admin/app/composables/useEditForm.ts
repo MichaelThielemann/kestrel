@@ -278,7 +278,11 @@ export function useEditForm(opts: UseEditFormOptions) {
   }
 
   function handleError(e: unknown) {
-    const { statusCode, statusMessage, issues } = readFetchError(e)
+    const { statusCode, statusMessage, issues, data } = readFetchError(e)
+    // The row WAS written and a follow-up step failed (a write effect — see write-effects.ts), so the
+    // server hands back the new `updatedAt`. Take it as the baseline: the client only rebaselines on
+    // success, and without this the "save again" those errors ask for would 409 on a stale precondition.
+    if (typeof data?.savedUpdatedAt === 'number') baseUpdatedAt.value = data.savedUpdatedAt
     if (statusCode === 400) {
       const mapped = mapServerErrors(issues)
       for (const [k, msg] of Object.entries(mapped.fields)) errors[k] = msg
@@ -292,9 +296,11 @@ export function useEditForm(opts: UseEditFormOptions) {
           ? t('editor.fixBlockContent')
           : Object.keys(mapped.fields).length ? t('editor.fixPageFields') : '')
     } else if (statusCode === 409) {
-      formError.value = statusMessage ?? t('editor.saveConflict')
+      // `||`, not `??`: an absent reason phrase arrives as '' rather than undefined, and an empty banner
+      // is a silent failure — the Save button simply stops spinning.
+      formError.value = statusMessage || t('editor.saveConflict')
     } else {
-      formError.value = statusMessage ?? t('editor.saveFailed')
+      formError.value = statusMessage || t('editor.saveFailed')
     }
   }
 

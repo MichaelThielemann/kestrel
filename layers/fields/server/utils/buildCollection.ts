@@ -51,22 +51,24 @@ export function ensureBuilt(c: CollectionDef | BuiltCollection): BuiltCollection
 }
 
 /**
- * Build the `applyConditions` hook for a collection with conditional required fields, or `undefined`
- * when it has none (so CRUD skips it). The per-field schema relaxed every conditional field to optional
- * (it can't see siblings); this re-enforces `required` for the ones whose condition is met against the
- * whole record. Issues are keyed by the field's def name (so they map to the editor's per-field errors),
- * resolving each value at its column key (`<name>Id` for single relation/media).
+ * Build the `applyConditions` hook — every pre-write check the per-field schema can't do — or `undefined`
+ * when the collection needs none (so CRUD skips it). Two sources, both of which need the whole record:
+ * the per-field schema relaxed every conditional field to optional (it can't see siblings), so `required`
+ * is re-enforced here for the ones whose condition is met; and the collection's own `def.validate`, for a
+ * rule spanning fields. Issues are keyed by the field's def name (so they map to the editor's per-field
+ * errors), resolving each value at its column key (`<name>Id` for single relation/media).
  */
 function buildApplyConditions(def: CollectionDef): BuiltCollection['applyConditions'] {
   const required = Object.entries(def.fields).filter(([, f]) => f.condition && f.required)
-  if (!required.length) return undefined
+  if (!required.length && !def.validate) return undefined
+  if (!required.length) return (record) => ({ issues: def.validate!(record) })
   return (record) => {
     const scope: Record<string, unknown> = {}
     for (const [key, field] of Object.entries(def.fields)) scope[key] = record[resolveColumnName(key, field).jsKey]
     const issues = required
       .filter(([key, field]) => evaluateCondition(field.condition!, scope) && isEmptyValue(record[resolveColumnName(key, field).jsKey]))
       .map(([key]) => ({ path: [key], message: 'This field is required.' }))
-    return { issues }
+    return { issues: [...issues, ...(def.validate?.(record) ?? [])] }
   }
 }
 
