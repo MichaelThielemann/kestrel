@@ -56,7 +56,8 @@ export function listLibrary(db: BetterSQLite3Database, q: LibraryQuery, publicUr
     return {
       id: m.id, filename: r.filename as string, mime: m.mime, folder: r.folder as string,
       size: r.size as number, width: m.width, height: m.height, thumbhash: m.thumbhash,
-      src: m.src, srcset, alt: m.alt, createdAt: r.createdAt as Date, updatedAt: r.updatedAt as Date,
+      src: m.src, srcset, alt: m.alt, aiDisclosure: m.aiDisclosure,
+      createdAt: r.createdAt as Date, updatedAt: r.updatedAt as Date,
     }
   })
 

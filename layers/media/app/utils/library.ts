@@ -7,6 +7,8 @@ export type { LibraryFolder }
 export interface LibraryFile {
   id: number; filename: string; mime: string; folder: string; size: number
   width?: number; height?: number; thumbhash?: string; src: string; srcset?: string; alt?: string
+  /** EU AI Act Art. 50 disclosure — always listed; `kestrel.config.ts`'s flag only gates the editor. */
+  aiDisclosure?: { sourceType: string; note: string | null } | null
   createdAt?: string
 }
 export type LibraryItem =

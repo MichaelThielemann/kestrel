@@ -50,6 +50,12 @@ describe('listLibrary', () => {
     create(db, media, { storageKey: 'a/alt.png', folder: 'a', filename: 'alt.png', mime: 'image/png', ext: 'png', size: 1, translations: { en: { alt: 'a kitten' } } })
     expect(listLibrary(db, { folder: 'a' }, url).files.find((x) => x.filename === 'alt.png')!.alt).toBe('a kitten')
   })
+  it("carries a file's EU AI Act disclosure into the listing (null when unset)", () => {
+    create(db, media, { storageKey: 'a/ai.png', folder: 'a', filename: 'ai.png', mime: 'image/png', ext: 'png', size: 1, aiSourceType: 'trainedAlgorithmicMedia', aiNote: 'Midjourney v7' })
+    const files = listLibrary(db, { folder: 'a' }, url).files
+    expect(files.find((x) => x.filename === 'ai.png')!.aiDisclosure).toEqual({ sourceType: 'trainedAlgorithmicMedia', note: 'Midjourney v7' })
+    expect(files.find((x) => x.filename === 'one.png')!.aiDisclosure).toBeNull()
+  })
   it('reports the recursive byte size of each child folder', () => {
     // root → folder 'a' holds one.png(1) + doc.pdf(2) at 'a' plus deep.png(3) at 'a/b' = 6
     expect(listLibrary(db, { folder: '' }, url).folders.find((f) => f.path === 'a')!.size).toBe(6)

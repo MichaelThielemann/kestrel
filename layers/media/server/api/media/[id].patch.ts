@@ -1,8 +1,31 @@
 import { eq, getTableColumns } from 'drizzle-orm'
-import { media } from '../../collections/media'
+import builtMedia, { media } from '../../collections/media'
 import { mergeTranslations, type Translations } from '../../utils/translations'
 import { emitMediaWrite } from '../../utils/media-write'
 import { requireMediaCollection } from '../../utils/media-enabled'
+
+const AI_KEYS = ['aiSourceType', 'aiNote'] as const
+
+/**
+ * The EU AI Act disclosure columns are top-level (not per-locale), so they are patched as plain siblings of
+ * `translations`. Only the keys the body actually sent are written — omitting one must not clear it. The
+ * allow-list of source types is NOT duplicated here: the collection's own update schema (built from the
+ * `choice` field's `choices`) is the single source of truth, so an unknown value 400s instead of storing.
+ */
+function readAiDisclosure(body: Record<string, unknown> | undefined | null): Record<string, unknown> {
+  const sent = AI_KEYS.filter((k) => Object.hasOwn(body ?? {}, k))
+  if (!sent.length) return {}
+  const parsed = builtMedia.update.safeParse(Object.fromEntries(sent.map((k) => [k, body![k]])))
+  if (!parsed.success) {
+    throw createError({ statusCode: 400, statusMessage: `Invalid AI disclosure: ${parsed.error.issues[0]?.message ?? 'unknown value'}` })
+  }
+  const value = parsed.data as Record<string, unknown>
+  const patch: Record<string, unknown> = {}
+  for (const k of sent) patch[k] = value[k] ?? null
+  // A blanked note must round-trip as "no note", not as an empty string a badge would render as blank text.
+  if (patch.aiNote === '') patch.aiNote = null
+  return patch
+}
 
 export default defineEventHandler(async (event) => {
   requireAdmin(event) // write-authorization backstop (defense-in-depth; see require-admin.ts)
@@ -34,6 +57,7 @@ export default defineEventHandler(async (event) => {
     // `en.alt` from the media viewer) keeps the other locales AND the locale's other fields intact.
     patch.translations = mergeTranslations(current?.translations, body.translations as Translations)
   }
+  Object.assign(patch, readAiDisclosure(body))
   const row = db.update(media).set(patch).where(eq(cols.id, id)).returning().get() as Record<string, unknown> | undefined
   if (!row) throw createError({ statusCode: 404, statusMessage: `media ${id} not found` })
   emitMediaWrite({ id }, row) // alt/title/description changed → re-render embedding pages (fresh alt text)
