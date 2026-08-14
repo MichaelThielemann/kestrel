@@ -20,4 +20,7 @@ allowBuilds:
   better-sqlite3: true
   esbuild: true
   sharp: true
+  # The native resolver behind @nuxt/eslint's import plugin. Its install step links the platform binary;
+  # left unbuilt, a cold store fails the install outright rather than degrading, so `pnpm lint` cannot run.
+  unrs-resolver: true
   vue-demi: true
