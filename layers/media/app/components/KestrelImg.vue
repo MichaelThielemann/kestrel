@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useBlurUp } from '../composables/useBlurUp'
 import { useMediaVariant } from '../composables/useMediaVariant'
+import { aiSourceTypeLabel } from '../utils/ai-disclosure'
 import type { ResolvedMedia } from '../../server/utils/resolve'
 import type { VariantFit, VariantFormat } from '../../../core/server/utils/kestrel-config'
 
@@ -17,6 +18,11 @@ const props = defineProps<{
   formats?: VariantFormat[]
   sizes?: string
   priority?: boolean
+  /** Opt into a structurally-present but UNSTYLED EU AI Act disclosure badge (`.kestrel-img__ai-badge`),
+   *  rendered only when `media.aiDisclosure` is set. Off by default: Kestrel must never publish a claim
+   *  the consumer did not ask for, in a place/language/style it cannot know. The alternative escape hatch
+   *  is to read `media.aiDisclosure` and render your own element — see docs/media-uploads.md. */
+  aiBadge?: boolean
 }>()
 
 const { model } = useMediaVariant(
@@ -44,6 +50,11 @@ const { imgEl, animate, placeholderStyle, onLoad } = useBlurUp(() => props.media
       decoding="async"
       @load="onLoad"
     >
+    <span
+      v-if="aiBadge && media?.aiDisclosure"
+      class="kestrel-img__ai-badge"
+      :data-ai-source-type="media.aiDisclosure.sourceType"
+    >{{ media.aiDisclosure.note ?? aiSourceTypeLabel(media.aiDisclosure.sourceType) }}</span>
   </picture>
 </template>
 
@@ -61,5 +72,23 @@ const { imgEl, animate, placeholderStyle, onLoad } = useBlurUp(() => props.media
   .kestrel-img--in {
     animation: none;
   }
+}
+</style>
+
+<!-- Deliberately UNSCOPED: a scoped rule carries the `[data-v-*]` attribute selector, which out-specifies
+     a consumer stylesheet targeting `.kestrel-img__ai-badge` and would make the badge un-restylable.
+     Layout only — no color, background, border, radius or font — so nothing is visible as a "badge" until
+     the consumer's own CSS says so. Scoped to pictures that actually contain one, so a consumer who never
+     sets `ai-badge` gets no rule at all. -->
+<style>
+picture:has(> .kestrel-img__ai-badge) {
+  position: relative;
+  display: inline-block;
+}
+.kestrel-img__ai-badge {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  pointer-events: none;
 }
 </style>

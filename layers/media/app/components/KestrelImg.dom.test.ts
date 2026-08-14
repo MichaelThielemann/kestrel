@@ -42,3 +42,43 @@ describe('KestrelImg', () => {
     expect(w.find('img').attributes('src')).toBe('/uploads/hero.jpg')
   })
 })
+
+describe('KestrelImg — optional EU AI Act badge', () => {
+  const disclosed = { ...media, aiDisclosure: { sourceType: 'trainedAlgorithmicMedia', note: 'Midjourney v7' } }
+  const badge = (props: Record<string, unknown>) => mount(KestrelImg, { props: { widths: [320], ...props } }).find('.kestrel-img__ai-badge')
+
+  it('renders NOTHING unless the consumer explicitly asks for it', () => {
+    // Kestrel must never surface a disclosure the consumer did not opt into.
+    expect(badge({ media: disclosed }).exists()).toBe(false)
+    expect(badge({ media: disclosed, aiBadge: false }).exists()).toBe(false)
+  })
+
+  it('renders nothing when asked for but the asset carries no disclosure', () => {
+    expect(badge({ media, aiBadge: true }).exists()).toBe(false)
+    expect(badge({ media: { ...media, aiDisclosure: null }, aiBadge: true }).exists()).toBe(false)
+  })
+
+  it('renders the editor note, tagged with the machine-readable source type', () => {
+    const el = badge({ media: disclosed, aiBadge: true })
+    expect(el.exists()).toBe(true)
+    expect(el.attributes('data-ai-source-type')).toBe('trainedAlgorithmicMedia')
+    expect(el.text()).toBe('Midjourney v7')
+  })
+
+  it('falls back to a readable label when no note was entered', () => {
+    const el = badge({ media: { ...media, aiDisclosure: { sourceType: 'algorithmicallyEnhanced', note: null } }, aiBadge: true })
+    expect(el.text()).toBe('AI-edited')
+  })
+
+  it('carries no inline styling — the consumer\'s stylesheet is the only thing that designs it', () => {
+    const el = badge({ media: disclosed, aiBadge: true })
+    expect(el.attributes('style')).toBeUndefined()
+    // one stable, documented hook to target; no utility/theme classes baked in
+    expect(el.classes()).toEqual(['kestrel-img__ai-badge'])
+  })
+
+  it('sits inside the <picture>, so it can be positioned over the image', () => {
+    const w = mount(KestrelImg, { props: { media: disclosed, widths: [320], aiBadge: true } })
+    expect(w.find('picture > .kestrel-img__ai-badge').exists()).toBe(true)
+  })
+})
