@@ -51,18 +51,20 @@ function onOpenItem(item: LibraryItem) {
   viewerError.value = ''
   viewerOpen.value = true
 }
-async function onSaveAlt(alt: string) {
+async function onSaveMeta(alt: string, ai?: { aiSourceType: string | null; aiNote: string | null }) {
   const f = viewerFile.value as LibraryFileRow | null
   if (!f) return
   viewerBusy.value = true
   viewerError.value = ''
   try {
     // Alt lives in the per-locale translations JSON; write the primary locale (the library resolves
-    // alt in that same locale, so this round-trips into the list). The precondition header lets the
-    // server 409 instead of silently losing a concurrent edit from another open viewer tab.
+    // alt in that same locale, so this round-trips into the list). The AI disclosure is NOT per-locale,
+    // so it rides alongside as top-level keys — and only when the viewer actually offered it, so a save
+    // from a consumer with the feature off never clears a recorded disclosure. The precondition header
+    // lets the server 409 instead of silently losing a concurrent edit from another open viewer tab.
     await $fetch(`/api/media/${f.id}`, {
       method: 'PATCH',
-      body: { translations: { [primary]: { alt } } },
+      body: { translations: { [primary]: { alt } }, ...(ai ?? {}) },
       ...(f.updatedAt ? { headers: { 'x-kestrel-if-unmodified-since': String(new Date(f.updatedAt).getTime()) } } : {}),
     })
   } catch (e) {
@@ -336,7 +338,7 @@ const localizedMenu = computed(() => menuItems.value.map((s) => ({
       @update:open="(v) => { if (!v) upload.resolveAll('skip') }"
     />
     <MediaNewFolderDialog v-model:open="newFolderOpen" @create="onCreateFolder" />
-    <MediaViewer :open="viewerOpen" :file="viewerFile" :busy="viewerBusy" :error="viewerError" @update:open="(v) => { viewerOpen = v }" @save="onSaveAlt" />
+    <MediaViewer :open="viewerOpen" :file="viewerFile" :busy="viewerBusy" :error="viewerError" @update:open="(v) => { viewerOpen = v }" @save="onSaveMeta" />
     <UiAlert v-if="opError && !deleteOpen && !renameOpen" variant="error">{{ opError }}</UiAlert>
     <MediaDeleteDialog
       :open="deleteOpen"

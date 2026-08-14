@@ -3,9 +3,15 @@ import { ref, computed, watch } from 'vue'
 import { humanizeSize, type LibraryFile } from '../utils/library'
 
 // Fullscreen-ish preview + general info for a single file. Images additionally expose an editable alt
-// text (the only field worth maintaining from the library); everything else is read-only metadata.
+// text (the only field worth maintaining from the library) and — when the consumer switched the feature
+// on — the EU AI Act Art. 50 disclosure; everything else is read-only metadata.
 const props = defineProps<{ open: boolean; file: LibraryFile | null; busy?: boolean; error?: string | null }>()
-const emit = defineEmits<{ 'update:open': [boolean]; save: [string] }>()
+// The disclosure rides along as a SECOND positional argument rather than reshaping the first: an outside
+// consumer (`extensions/galleries-secure`) handles `save` as `(alt: string)` and simply ignores the extra.
+const emit = defineEmits<{
+  'update:open': [boolean]
+  save: [alt: string, ai?: { aiSourceType: string | null; aiNote: string | null }]
+}>()
 const { t, lang } = useT()
 
 const isImage = computed(() => props.file?.mime.startsWith('image/') ?? false)
@@ -18,12 +24,42 @@ const uploaded = computed(() => {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(lang.value)
 })
 
+// Gates the disclosure controls only — the data is always resolved server-side, so a consumer who turns
+// the flag back off keeps whatever was recorded, it just stops being editable here.
+const aiEnabled = computed(() => useRuntimeConfig().public.aiDisclosureEnabled === true)
+const showAi = computed(() => isImage.value && aiEnabled.value)
+const AI_SOURCE_TYPES = ['trainedAlgorithmicMedia', 'compositeWithTrainedAlgorithmicMedia', 'algorithmicallyEnhanced'] as const
+// A leading empty option is what makes "no disclosure recorded" both representable and clearable
+// (mirrors how `field/Choice.vue` renders a non-required single choice).
+const aiSourceTypeOptions = computed(() => [
+  { label: '—', value: '' },
+  ...AI_SOURCE_TYPES.map((v) => ({ label: t(`mediaViewer.aiSourceType.${v}`), value: v })),
+])
+
 const alt = ref('')
-// Seed (and re-seed) the draft whenever the dialog opens — immediate so a viewer mounted already-open
-// (or re-opened on a different file) shows the current alt rather than a stale/empty value.
-watch(() => props.open, (o) => { if (o) alt.value = props.file?.alt ?? '' }, { immediate: true })
-const dirty = computed(() => isImage.value && alt.value !== (props.file?.alt ?? ''))
-function save() { if (dirty.value && !props.busy) emit('save', alt.value) }
+const aiSourceType = ref('')
+const aiNote = ref('')
+const fileAlt = computed(() => props.file?.alt ?? '')
+const fileAiSourceType = computed(() => props.file?.aiDisclosure?.sourceType ?? '')
+const fileAiNote = computed(() => props.file?.aiDisclosure?.note ?? '')
+// Seed (and re-seed) the drafts whenever the dialog opens — immediate so a viewer mounted already-open
+// (or re-opened on a different file) shows the current values rather than stale/empty ones.
+watch(() => props.open, (o) => {
+  if (!o) return
+  alt.value = fileAlt.value
+  aiSourceType.value = fileAiSourceType.value
+  aiNote.value = fileAiNote.value
+}, { immediate: true })
+
+const aiDirty = computed(() => showAi.value && (aiSourceType.value !== fileAiSourceType.value || aiNote.value !== fileAiNote.value))
+const dirty = computed(() => isImage.value && (alt.value !== fileAlt.value || aiDirty.value))
+function save() {
+  if (!dirty.value || props.busy) return
+  // With the feature off the payload is omitted entirely, so an alt-only save can never blank a
+  // disclosure the consumer recorded while it was on.
+  if (!showAi.value) { emit('save', alt.value); return }
+  emit('save', alt.value, { aiSourceType: aiSourceType.value || null, aiNote: aiNote.value.trim() || null })
+}
 </script>
 
 <template>
@@ -46,6 +82,18 @@ function save() { if (dirty.value && !props.busy) emit('save', alt.value) }
             <UiTextInput v-model="alt" v-bind="f" @keydown.enter="save" />
           </template>
         </UiField>
+        <div v-if="showAi" class="media-viewer__ai">
+          <UiField :label="t('mediaViewer.aiSourceTypeLabel')" :hint="t('mediaViewer.aiSourceTypeHint')">
+            <template #default="f">
+              <UiSelect v-model="aiSourceType" :options="aiSourceTypeOptions" v-bind="f" />
+            </template>
+          </UiField>
+          <UiField :label="t('mediaViewer.aiNote')" :hint="t('mediaViewer.aiNoteHint')">
+            <template #default="f">
+              <UiTextInput v-model="aiNote" v-bind="f" @keydown.enter="save" />
+            </template>
+          </UiField>
+        </div>
         <UiAlert v-if="error" variant="error">{{ error }}</UiAlert>
         <!-- Optional per-file extra panel (e.g. proofing comments). Empty by default. -->
         <slot name="extra" :file="file" />
@@ -81,6 +129,7 @@ function save() { if (dirty.value && !props.busy) emit('save', alt.value) }
 .media-viewer__preview img { max-width: 100%; max-height: 70svh; object-fit: contain; }
 .media-viewer__ext { padding: var(--space-7); font-size: var(--text-xl); font-weight: var(--weight-bold); color: var(--color-text-muted); }
 .media-viewer__details { display: flex; flex-direction: column; gap: var(--space-4); }
+.media-viewer__ai { display: flex; flex-direction: column; gap: var(--space-3); }
 .media-viewer__info { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; }
 .media-viewer__info > div { display: flex; justify-content: space-between; gap: var(--space-3); font-size: var(--text-sm); }
 .media-viewer__info dt { color: var(--color-text-muted); }

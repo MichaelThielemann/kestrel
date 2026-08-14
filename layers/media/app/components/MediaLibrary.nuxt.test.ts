@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { setResponseStatus, getQuery, getRequestHeader } from 'h3'
+import { setResponseStatus, getQuery, getRequestHeader, readBody } from 'h3'
 import { nextTick } from 'vue'
 import MediaLibrary from './MediaLibrary.vue'
 import { useMediaClipboard } from '../composables/useMediaClipboard'
@@ -36,9 +36,14 @@ registerEndpoint('/api/media', (event) => {
 })
 
 let lastPatchHeader: string | undefined
+let lastPatchBody: Record<string, unknown> | undefined
 registerEndpoint('/api/media/1', {
   method: 'PATCH',
-  handler: (event) => { lastPatchHeader = getRequestHeader(event, 'x-kestrel-if-unmodified-since'); return { id: 1 } },
+  handler: async (event) => {
+    lastPatchHeader = getRequestHeader(event, 'x-kestrel-if-unmodified-since')
+    lastPatchBody = await readBody(event)
+    return { id: 1 }
+  },
 })
 
 describe('MediaLibrary', () => {
@@ -201,6 +206,18 @@ describe('MediaLibrary', () => {
     await w.findAll('button').find((b) => b.text() === 'Save')!.trigger('click')
     await flushPromises()
     expect(lastPatchHeader).toBe(String(new Date('2026-01-01T00:00:00.000Z').getTime()))
+  })
+
+  it('omits the AI-disclosure keys entirely while the feature is off, so an alt save cannot clear one', async () => {
+    lastPatchBody = undefined
+    const w = await mountSuspended(MediaLibrary)
+    await flushPromises()
+    await w.find('[data-file-id="1"]').trigger('dblclick')
+    await flushPromises()
+    await w.find('.media-viewer__details input').setValue('new alt')
+    await w.findAll('button').find((b) => b.text() === 'Save')!.trigger('click')
+    await flushPromises()
+    expect(lastPatchBody).toEqual({ translations: { en: { alt: 'new alt' } } })
   })
 
   it('starting an item drag does not crash (marker/payload covered by unit tests)', async () => {

@@ -337,6 +337,13 @@ export const en: Catalog = {
   'mediaViewer.alt': 'Alt text',
   'mediaViewer.altHint': 'Describes the image for screen readers and SEO.',
   'mediaViewer.saveFailed': "Couldn't save the alt text.",
+  'mediaViewer.aiSourceTypeLabel': 'AI disclosure',
+  'mediaViewer.aiSourceTypeHint': 'How this asset was produced (EU AI Act Art. 50). Leave empty when nothing needs disclosing.',
+  'mediaViewer.aiSourceType.trainedAlgorithmicMedia': 'Fully AI-generated',
+  'mediaViewer.aiSourceType.compositeWithTrainedAlgorithmicMedia': 'AI content composited into real media',
+  'mediaViewer.aiSourceType.algorithmicallyEnhanced': 'AI-enhanced / algorithmically edited',
+  'mediaViewer.aiNote': 'Disclosure note',
+  'mediaViewer.aiNoteHint': 'Free text, e.g. the tool used. Pre-filled with any AI signals found in the file at upload — evidence only, not a verified claim.',
 
   // richtext toolbar
   'richtext.bold': 'Bold',

@@ -313,6 +313,13 @@ export const de: Catalog = {
   'mediaViewer.alt': 'Alt-Text',
   'mediaViewer.altHint': 'Beschreibt das Bild für Screenreader und SEO.',
   'mediaViewer.saveFailed': 'Alt-Text konnte nicht gespeichert werden.',
+  'mediaViewer.aiSourceTypeLabel': 'KI-Kennzeichnung',
+  'mediaViewer.aiSourceTypeHint': 'Wie diese Datei entstanden ist (EU-KI-Verordnung Art. 50). Leer lassen, wenn nichts zu kennzeichnen ist.',
+  'mediaViewer.aiSourceType.trainedAlgorithmicMedia': 'Vollständig KI-generiert',
+  'mediaViewer.aiSourceType.compositeWithTrainedAlgorithmicMedia': 'KI-Inhalt in echtes Material montiert',
+  'mediaViewer.aiSourceType.algorithmicallyEnhanced': 'KI-bearbeitet / algorithmisch verändert',
+  'mediaViewer.aiNote': 'Hinweis zur Kennzeichnung',
+  'mediaViewer.aiNoteHint': 'Freitext, z. B. das verwendete Werkzeug. Beim Upload gefundene KI-Signale werden vorausgefüllt — nur Indizien, kein geprüfter Nachweis.',
 
   // richtext toolbar
   'richtext.bold': 'Fett',
