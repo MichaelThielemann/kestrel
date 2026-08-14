@@ -87,11 +87,13 @@ export function buildSitemap(entries: SitemapEntry[]): string {
   return `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"${xhtmlNs}>${urls}</urlset>`
 }
 
-export function buildRobots(opts: { sitemapUrl?: string; llmsUrl?: string } = {}): string {
+export function buildRobots(opts: { sitemapUrl?: string; llmsUrl?: string; llmsFullUrl?: string } = {}): string {
   const lines = ['User-agent: *', 'Allow: /']
-  // A comment (robots.txt has no standard llms directive) so crawlers that read robots also find the
-  // agent-oriented site map at /llms.txt. Kept above the blank-line-separated Sitemap directive.
+  // Comments (robots.txt has no standard llms directive) so crawlers that read robots also find the
+  // agent-oriented site map at /llms.txt — and its full-text long form when that is switched on.
+  // Kept above the blank-line-separated Sitemap directive.
   if (opts.llmsUrl) lines.push(`# llms.txt: ${opts.llmsUrl}`)
+  if (opts.llmsFullUrl) lines.push(`# llms-full.txt: ${opts.llmsFullUrl}`)
   if (opts.sitemapUrl) lines.push('', `Sitemap: ${opts.sitemapUrl}`)
   return `${lines.join('\n')}\n`
 }

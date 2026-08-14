@@ -30,3 +30,11 @@ export function siteDescription(): string {
   const fromRc = serverRuntimeConfig()?.kestrel as { siteDescription?: string } | undefined
   return (fromRc?.siteDescription ?? resolveServerKestrel().siteDescription ?? '').trim()
 }
+
+/** Whether `/llms-full.txt` is served, prerendered and published (`kestrel.seo.llmsFull`, default off).
+ *  Read the same two-tier way as every other server setting, so a consumed layer sees the CONSUMER's
+ *  config rather than Kestrel's own. */
+export function llmsFullEnabled(): boolean {
+  const fromRc = serverRuntimeConfig()?.kestrel as { seo?: { llmsFull?: boolean } } | undefined
+  return (fromRc?.seo?.llmsFull ?? resolveServerKestrel().seo.llmsFull) === true
+}

@@ -70,6 +70,7 @@ describe('cacheControlFor', () => {
     expect(cacheControlFor('sitemap.xml')).toBe(REVALIDATE)
     expect(cacheControlFor('robots.txt')).toBe(REVALIDATE)
     expect(cacheControlFor('llms.txt')).toBe(REVALIDATE)
+    expect(cacheControlFor('llms-full.txt')).toBe(REVALIDATE)
   })
   it('leaves other (non-hashed) assets without an explicit policy — host default', () => {
     expect(cacheControlFor('favicon.ico')).toBeUndefined()

@@ -258,8 +258,9 @@ intentional fail-soft.
 ### `public` — the SSG render path
 **Owns:** the *only* render path for the generated site — a catch-all page that renders **any** page-like
 collection's blocks (not just `pages`), per-page layout selection, the built-in `site` singleton (the
-site-wide head defaults a page's own SEO fields fall back to), the SSG artifacts (sitemap/robots),
-build-time prerender route discovery, internal-link resolution, and the optional S3 deploy of the output.
+site-wide head defaults a page's own SEO fields fall back to), the SSG artifacts (sitemap/robots/llms) and
+the agent-facing head (JSON-LD), build-time prerender route discovery, internal-link resolution, and the
+optional S3 deploy of the output.
 **Start:** `app/pages/[...slug].vue` (the catch-all) resolves a path to the first published record across
 every pageLike collection via `server/api/route.get.ts` → `server/utils/page-resolve.ts`, then renders it
 with `app/components/BlockRenderer.vue` (recursive block→component render + the admin-preview seam) inside
@@ -272,6 +273,9 @@ a ticket instead: `server/api/preview.post.ts` mints it into `server/utils/previ
 `preview.get.ts` reads it back populated (`?kestrel-preview-token=`, ADR-0008) →
 `modules/prerender-routes/*` (build-time route discovery — `discover.ts` finds every pageLike table by its
 partial `path` index) → `server/routes/sitemap.xml.get.ts` + `server/utils/sitemap.ts` →
+`app/utils/page-head.ts` + `app/utils/json-ld.ts` (the two pure head models the catch-all feeds) →
+`server/routes/llms{,-full}.txt.get.ts` + `server/utils/llms{,-full}.ts` +
+`server/utils/richtext-markdown.ts` (the richtext→Markdown converter `llms-full.txt` needs) →
 `server/utils/populate-links.ts` + `plugins/02.register-links.ts` → `modules/deploy-output/*`.
 **Gotchas:** the internal-link populator mutates **every** collection read (registered globally), not
 just public pages; links ARE status-gated — a MISSING **or** draft target renders `#` (only a collection
@@ -285,7 +289,11 @@ than an empty document over a live page; richtext internal links (`kestrel:<col>
 separate mechanism from the `link` field; the catch-all declares `layout: false` and mounts
 `<NuxtLayout>` itself (ADR-0006), so the layout is a CHILD of the page and an unset/unknown `layout` must
 be coalesced to `default` — `NuxtLayout`'s own `fallback` never fires for the literal `false` that
-`layout: false` leaves in the route meta.
+`layout: false` leaves in the route meta; the artifacts published at literal keys are ONE list
+(`META_ARTIFACTS` in `modules/deploy-output/deploy-output.ts`) because three call sites must agree on it —
+the publisher renders them, the asset mirror must skip the build's stale copies, and the cache policy keys
+off the same names; a page's breadcrumb depends on its published ancestors, and the one edge the dependency
+index cannot carry is a newly CREATED ancestor (no record id existed to capture).
 **Docs:** `static-output.md` (prerender/sitemap/deploy), `reference-integrity.md` (the invalidation model, durable `publish_deps`, status-gated links), `block-editing.md` (BlockRenderer + preview seam), ADR-0006 (per-page layouts).
 
 ---

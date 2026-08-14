@@ -24,6 +24,19 @@ const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim()
 // Additionally escape the brackets that would otherwise break the `[title](url)` markdown link.
 const linkText = (s: string): string => oneLine(s).replace(/[[\]]/g, '\\$&')
 
+/** The `## heading` for a collection's section: its plural label in the primary locale, else any locale's,
+ *  else its capitalised name. Shared by `llms.txt` and `llms-full.txt` so the two never disagree. */
+export function collectionHeading(def: { name: string; label?: { plural?: unknown } }, primaryLocale: string): string {
+  const cap = (s: string) => (s ? s[0]!.toUpperCase() + s.slice(1) : s)
+  const plural = def.label?.plural
+  if (typeof plural === 'string') return plural
+  if (plural && typeof plural === 'object') {
+    const byLocale = plural as Record<string, string>
+    return byLocale[primaryLocale] ?? Object.values(byLocale)[0] ?? cap(def.name)
+  }
+  return cap(def.name)
+}
+
 export function buildLlmsTxt(opts: { siteName: string; siteDescription?: string; sections: LlmsSection[] }): string {
   const lines: string[] = [`# ${oneLine(opts.siteName)}`]
   if (opts.siteDescription) lines.push('', `> ${oneLine(opts.siteDescription)}`)

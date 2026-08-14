@@ -42,5 +42,13 @@ export default defineEventHandler((event) => {
   if (siteUnreadable || (failed.length && !resolved)) {
     throw createError({ statusCode: 503, statusMessage: 'Route lookup incomplete' })
   }
-  return { collection: resolved?.collection ?? null, page: resolved?.page ?? null, alternates: resolved?.alternates ?? [], site }
+  return {
+    collection: resolved?.collection ?? null,
+    page: resolved?.page ?? null,
+    alternates: resolved?.alternates ?? [],
+    // The breadcrumb trail rides the same fetch as the hreflang set, for the same reason: it is resolved
+    // from the DB, and the publish-dep capture only works on a path the renderer actually awaits.
+    ancestors: resolved?.ancestors ?? [],
+    site,
+  }
 })

@@ -12,6 +12,10 @@ const props = defineProps<{
   path?: string
   locale: string
   disabled?: boolean
+  /** `kestrel.seo.articleMeta`. Off (the default) hides author/date/keywords entirely: an installation
+   *  that must not attribute content should never be offered the fields, not merely stop publishing
+   *  them. Stored values are hidden, never cleared — turning the flag back on restores them. */
+  articleMeta?: boolean
 }>()
 const emit = defineEmits<{ update: [seo: SeoMeta] }>()
 const { t } = useT()
@@ -89,6 +93,44 @@ const socialImageField = { type: 'media', options: { accept: 'image' } } as Fiel
         />
       </template>
     </UiField>
+
+    <!-- Article metadata (schema.org author / datePublished / keywords). Opt-in per installation. -->
+    <template v-if="articleMeta">
+      <UiField class="seo-fields__author" :label="t('seo.author')" :hint="t('seo.authorHint')">
+        <template #default="f">
+          <UiTextInput
+            :model-value="value.author ?? ''"
+            :disabled="disabled"
+            v-bind="f"
+            @update:model-value="(v) => patch({ author: v ?? '' })"
+          />
+        </template>
+      </UiField>
+
+      <UiField class="seo-fields__published" :label="t('seo.publishedDate')" :hint="t('seo.publishedDateHint')">
+        <template #default="f">
+          <UiDatePicker
+            :model-value="value.publishedDate || null"
+            precision="date"
+            :disabled="disabled"
+            :aria-label="t('seo.publishedDate')"
+            :describedby="f['aria-describedby']"
+            @update:model-value="(v) => patch({ publishedDate: v ?? '' })"
+          />
+        </template>
+      </UiField>
+
+      <UiField class="seo-fields__keywords" :label="t('seo.keywords')" :hint="t('seo.keywordsHint')">
+        <template #default="f">
+          <UiTextInput
+            :model-value="value.keywords ?? ''"
+            :disabled="disabled"
+            v-bind="f"
+            @update:model-value="(v) => patch({ keywords: v ?? '' })"
+          />
+        </template>
+      </UiField>
+    </template>
 
     <!-- eslint-disable-next-line vuejs-accessibility/label-has-for -- native wrapping label around a custom UiCheckbox; no `for`/`id` pair needed, invisible to static analysis -->
     <label class="seo-fields__noindex">

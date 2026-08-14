@@ -485,6 +485,32 @@ head.
 - Unlike `pages` and `media` it has no `collections` toggle — it is always registered. Leaving the record
   untouched is the off switch.
 
+## Search and answer engines
+
+Everything a crawler or an AI answer engine needs is emitted for you and needs no wiring: canonical / Open
+Graph / hreflang tags, a schema.org JSON-LD graph (`WebSite` + `WebPage`/`Article` + `BreadcrumbList`),
+`sitemap.xml`, `robots.txt` and `llms.txt`. Two extras are **opt-in** because each publishes something the
+site did not publish before — `seo.articleMeta` (author / publication date / keywords) and `seo.llmsFull`
+(`/llms-full.txt`, every published page's full body in one document). Both are described in
+[static-output.md](./static-output.md#structured-data-json-ld).
+
+What is left to you is the content itself, and it is the part that moves the needle most for passage
+retrieval — an answer engine quotes a passage, not a page:
+
+- **Give every page a real `<h1>` and a heading per section.** Headings are the chunk boundaries these
+  systems retrieve on, and they are what `llms-full.txt` carries through as Markdown structure. A page
+  built out of one long richtext block with no headings retrieves as one undifferentiated blob.
+- **Answer the question in the first paragraph under each heading**, then elaborate. Retrieval scores the
+  passage, not the page's overall quality.
+- **Write the meta description as the answer, not as a teaser.** It is what `llms.txt` publishes per page
+  and what a summary is most likely to be built from.
+- **Prefer explicit prose over layout-only structure.** A fact that only exists as a table cell or an icon
+  label is a fact the extractors above cannot carry: block props that are not `text` or `richtext` are not
+  part of the Markdown body.
+- **Keep `noindex` for what genuinely should not be found.** It removes the page from the sitemap, the
+  hreflang sets, `llms.txt`, `llms-full.txt`, the breadcrumb trails of its descendants, and its own
+  structured data — one switch, consistently.
+
 ## Per-page layouts
 
 Ship more than one layout in `app/layouts/` and an editor can pick which one renders a page — the page

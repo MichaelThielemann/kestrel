@@ -6,7 +6,7 @@ import { defineCollection } from '../../../core/server/utils/defineCollection'
 import { desiredSchema } from '../../../core/server/schema/desired'
 import { diffSchema } from '../../../core/server/schema/diff'
 import { renderSqlite } from '../../../core/server/schema/render-sqlite'
-import { buildLlmsTxt } from '../utils/llms'
+import { buildLlmsTxt, collectionHeading } from '../utils/llms'
 import type { BuiltCollection } from '../../../core/server/utils/collection-types'
 
 // The route is a server route driven by auto-imports; stub them as globals (the same seam the Nitro
@@ -56,6 +56,7 @@ beforeAll(async () => {
   vi.stubGlobal('publicReadableResources', () => ['pages'])
   vi.stubGlobal('isPubliclyReadable', () => true)
   vi.stubGlobal('buildLlmsTxt', buildLlmsTxt)
+  vi.stubGlobal('collectionHeading', collectionHeading)
   vi.stubGlobal('setHeader', () => {})
   handler = (await import('./llms.txt.get')).default as (event: unknown) => unknown
 })

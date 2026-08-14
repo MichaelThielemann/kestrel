@@ -135,4 +135,11 @@ describe('buildRobots', () => {
     // llms-only (no sitemap) still works
     expect(buildRobots({ llmsUrl: 'https://x.com/llms.txt' })).toBe('User-agent: *\nAllow: /\n# llms.txt: https://x.com/llms.txt\n')
   })
+
+  it('advertises llms-full.txt below llms.txt, and only when it is switched on', () => {
+    expect(buildRobots({ llmsUrl: 'https://x.com/llms.txt', llmsFullUrl: 'https://x.com/llms-full.txt' })).toBe(
+      'User-agent: *\nAllow: /\n# llms.txt: https://x.com/llms.txt\n# llms-full.txt: https://x.com/llms-full.txt\n',
+    )
+    expect(buildRobots({ llmsUrl: 'https://x.com/llms.txt' })).not.toContain('llms-full')
+  })
 })

@@ -16,5 +16,8 @@ export default defineNuxtConfig({
     media: { uploadDir: '.data/uploads' },
     // locales: ['en', 'de'],
     // collections: { pages: false },
+    // Answer-engine extras, both off until you opt in: articleMeta publishes author/date/keywords,
+    // llmsFull serves /llms-full.txt (every published page's full body in one file).
+    // seo: { articleMeta: true, llmsFull: true },
   },
 })

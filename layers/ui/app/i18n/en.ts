@@ -201,6 +201,12 @@ export const en: Catalog = {
   'editor.unsupported': 'No editor is registered for type “{type}”.',
   'seo.socialImage': 'Social share image',
   'seo.socialImageHint': 'Shown as the preview image when the page is shared (og:image).',
+  'seo.author': 'Author',
+  'seo.authorHint': 'Published as the article author in the page’s structured data.',
+  'seo.publishedDate': 'Publication date',
+  'seo.publishedDateHint': 'Tells search and answer engines how current this page is.',
+  'seo.keywords': 'Keywords',
+  'seo.keywordsHint': 'Comma-separated topics for this page.',
 
   // locale bar (translations)
   'localeBar.fieldLabel': 'Locale',

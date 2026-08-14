@@ -60,6 +60,10 @@ export default {
     pages: true,
     media: true,
   },
+  seo: {                              // search / answer-engine surface — both flags default to FALSE
+    articleMeta: false,               // true → offer + publish author / publication date / keywords
+    llmsFull: false,                  // true → serve and publish /llms-full.txt (every page's full body)
+  },
   preview: {                          // admin page-builder live preview
     desktopWidth: 1440,               // reference width (px) the Desktop preset renders at (scale-to-fit shrinks it)
   },
@@ -94,6 +98,7 @@ The mapping (env overrides): `db`→`KESTREL_DB`, `siteUrl`→`KESTREL_SITE_URL`
 `output.publishOnSave`→`KESTREL_OUTPUT_PUBLISH_ON_SAVE`,
 `output.reconcileMinutes`→`KESTREL_OUTPUT_RECONCILE_MINUTES`, `output.verbose`→`KESTREL_OUTPUT_VERBOSE`,
 `output.s3.{bucket,region,endpoint,prefix}`→`KESTREL_OUTPUT_S3_{BUCKET,REGION,ENDPOINT,PREFIX}`,
+`seo.articleMeta`→`KESTREL_SEO_ARTICLE_META`, `seo.llmsFull`→`KESTREL_SEO_LLMS_FULL`,
 `preview.desktopWidth`→`KESTREL_PREVIEW_DESKTOP_WIDTH`, `aiDisclosure.enabled`→`KESTREL_AI_DISCLOSURE`.
 
 `aiDisclosure.enabled` gates the **admin UI and the upload-time signal scan only** — never the data.
@@ -138,6 +143,8 @@ Nitro applies at server start — `NUXT_` + the runtimeConfig key path in SCREAM
 | media S3 credentials | `KESTREL_S3_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` | `NUXT_MEDIA_S3_ACCESS_KEY_ID` / `NUXT_MEDIA_S3_SECRET_ACCESS_KEY` |
 | output target | `KESTREL_OUTPUT_DIR` / `_DRIVER` | `NUXT_KESTREL_OUTPUT_DIR` / `NUXT_KESTREL_OUTPUT_DRIVER` |
 | output S3 credentials | `KESTREL_OUTPUT_S3_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` | `NUXT_KESTREL_OUTPUT_S3_ACCESS_KEY_ID` / `NUXT_KESTREL_OUTPUT_S3_SECRET_ACCESS_KEY` |
+| article metadata | `KESTREL_SEO_ARTICLE_META` | `NUXT_PUBLIC_SEO_ARTICLE_META` (the admin panel + page head read it client-side) |
+| `llms-full.txt` | `KESTREL_SEO_LLMS_FULL` | `NUXT_KESTREL_SEO_LLMS_FULL` |
 
 Every other resolved value follows the same rule (`runtimeConfig.media.local.dir` → `NUXT_MEDIA_LOCAL_DIR`).
 Note the two spellings differ on purpose: `KESTREL_*` names the *config* key, `NUXT_*` names the

@@ -22,6 +22,10 @@ const seoP = buildCollection(defineCollection({
 const noStatus = buildCollection(defineCollection({
   name: 'nostatus', mode: 'multi', translatable: true, pageLike: true, fields: { title: { type: 'text' } },
 }))
+// a NON-translatable pageLike collection: its rows have no locale, so they have exactly one public URL
+const landing = buildCollection(defineCollection({
+  name: 'landing', mode: 'multi', pageLike: true, fields: { headline: { type: 'text' } },
+}))
 // a non-pageLike collection (no path) — resolvePage must skip it without querying its table
 const settings = buildCollection(defineCollection({ name: 'settings', mode: 'single', fields: { siteName: { type: 'text' } } }))
 
@@ -209,5 +213,109 @@ describe('resolvePage', () => {
     expect(resolvePage(db, [p1], '/draft', 'en').page).toBeNull()
     // opting out of the published gate surfaces it (admin live preview)
     expect(resolvePage(db, [p1], '/draft', 'en', false).page).toMatchObject({ collection: 'p1' })
+  })
+})
+
+describe('resolvePage ancestors (the breadcrumb trail)', () => {
+  it('returns each published ancestor of the path, outermost first, with its title', () => {
+    const { db, sqlite } = build([p1])
+    insert(sqlite, 'p1', { path: '/', status: 'published' })
+    insert(sqlite, 'p1', { path: '/blog', status: 'published' })
+    insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
+    expect(resolvePage(db, [p1], '/blog/hello', 'en').page!.ancestors)
+      .toEqual([{ path: '/', title: 'T', locale: 'en' }, { path: '/blog', title: 'T', locale: 'en' }])
+  })
+
+  it('has no ancestors for the site root', () => {
+    const { db, sqlite } = build([p1])
+    insert(sqlite, 'p1', { path: '/', status: 'published' })
+    expect(resolvePage(db, [p1], '/', 'en').page!.ancestors).toEqual([])
+  })
+
+  it('skips a path segment that is not a published page — a breadcrumb must never link a 404', () => {
+    const { db, sqlite } = build([p1])
+    insert(sqlite, 'p1', { path: '/', status: 'published' })
+    insert(sqlite, 'p1', { path: '/blog', status: 'draft' })
+    insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
+    expect(resolvePage(db, [p1], '/blog/hello', 'en').page!.ancestors).toEqual([{ path: '/', title: 'T', locale: 'en' }])
+  })
+
+  it('skips a noindexed ancestor, matching the sitemap and hreflang rules', () => {
+    const { db, sqlite } = build([seoP])
+    const ins = (path: string, noindex: boolean) =>
+      sqlite.prepare(`INSERT INTO seop (locale, translation_group, path, status, title, seo, created_at, updated_at) VALUES ('en', ?, ?, 'published', 'T', ?, 0, 0)`)
+        .run(`g-${path}`, path, JSON.stringify(noindex ? { noindex: true } : {}))
+    ins('/', true)
+    ins('/blog', false)
+    ins('/blog/hello', false)
+    expect(resolvePage(db, [seoP], '/blog/hello', 'en').page!.ancestors).toEqual([{ path: '/blog', title: 'T', locale: 'en' }])
+  })
+
+  it('resolves ancestors in the page locale only', () => {
+    const { db, sqlite } = build([p1])
+    insert(sqlite, 'p1', { path: '/', status: 'published', locale: 'de' })
+    insert(sqlite, 'p1', { path: '/blog', status: 'published', locale: 'en' })
+    insert(sqlite, 'p1', { path: '/blog/hello', status: 'published', locale: 'de' })
+    // only the DE root matches; the EN /blog is not this page's ancestor
+    expect(resolvePage(db, [p1], '/blog/hello', 'de').page!.ancestors).toEqual([{ path: '/', title: 'T', locale: 'de' }])
+  })
+
+  it('finds an ancestor in a different pageLike collection', () => {
+    const { db, sqlite } = build([p1, p2])
+    insert(sqlite, 'p2', { path: '/', status: 'published' })
+    insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
+    expect(resolvePage(db, [p1, p2], '/blog/hello', 'en').page!.ancestors).toEqual([{ path: '/', title: 'T', locale: 'en' }])
+  })
+
+  it('prefers the meta title over the page title, as every other listing does', () => {
+    const { db, sqlite } = build([seoP])
+    sqlite.prepare(`INSERT INTO seop (locale, translation_group, path, status, title, seo, created_at, updated_at) VALUES ('en', 'g0', '/', 'published', 'Page title', ?, 0, 0)`)
+      .run(JSON.stringify({ title: 'Meta title' }))
+    sqlite.prepare(`INSERT INTO seop (locale, translation_group, path, status, title, seo, created_at, updated_at) VALUES ('en', 'g1', '/x', 'published', 'T', '{}', 0, 0)`).run()
+    expect(resolvePage(db, [seoP], '/x', 'en').page!.ancestors).toEqual([{ path: '/', title: 'Meta title', locale: 'en' }])
+  })
+
+  it('captures each ancestor as a publish dependency, so renaming one re-renders its descendants', async () => {
+    const { withReadCapture } = await import('../../../core/server/utils/read-capture')
+    const { db, sqlite } = build([p1])
+    insert(sqlite, 'p1', { path: '/blog', status: 'published' })
+    insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
+    const blogId = (sqlite.prepare(`SELECT id FROM p1 WHERE path = '/blog'`).get() as { id: number }).id
+    const { tags } = await withReadCapture(() => resolvePage(db, [p1], '/blog/hello', 'en').page!)
+    expect(tags).toContain(`p1:${blogId}`)
+  })
+
+  // A non-translatable pageLike record has ONE URL — the unprefixed/primary one the sitemap and the
+  // prerender seed both emit. Carrying its (absent) locale lets the breadcrumb build that same URL
+  // instead of prefixing it with the reader's locale, which would link a page that was never generated.
+  it('reports an ancestor locale only for a translatable collection', () => {
+    const { db, sqlite } = build([p1, noStatus])
+    insert(sqlite, 'p1', { path: '/blog/hello', status: 'published', locale: 'de' })
+    sqlite.prepare(`INSERT INTO nostatus (locale, translation_group, path, title, created_at, updated_at) VALUES ('de', 'g0', '/blog', 'T', 0, 0)`).run()
+    expect(resolvePage(db, [p1, noStatus], '/blog/hello', 'de').page!.ancestors).toEqual([{ path: '/blog', title: 'T', locale: 'de' }])
+
+    const flat = build([p1, landing])
+    insert(flat.sqlite, 'p1', { path: '/blog/hello', status: 'published', locale: 'de' })
+    flat.sqlite.prepare(`INSERT INTO landing (path, headline, created_at, updated_at) VALUES ('/blog', 'H', 0, 0)`).run()
+    expect(resolvePage(flat.db, [p1, landing], '/blog/hello', 'de').page!.ancestors).toEqual([{ path: '/blog' }])
+  })
+
+  it('picks a deterministic ancestor when no locale scopes the lookup', () => {
+    const { db, sqlite } = build([landing, p1])
+    sqlite.prepare(`INSERT INTO landing (path, headline, created_at, updated_at) VALUES ('/blog/hello', 'H', 0, 0)`).run()
+    insert(sqlite, 'p1', { path: '/blog', status: 'published', locale: 'fr' })
+    insert(sqlite, 'p1', { path: '/blog', status: 'published', locale: 'de' })
+    // locale-ordered, so the answer does not depend on insertion order
+    expect(resolvePage(db, [landing, p1], '/blog/hello').page!.ancestors).toEqual([{ path: '/blog', title: 'T', locale: 'de' }])
+  })
+
+  it('omits ancestors from a collection whose table is drifted instead of throwing', () => {
+    const { db, sqlite } = build([p1, p2])
+    insert(sqlite, 'p2', { path: '/blog/hello', status: 'published' })
+    sqlite.exec('DROP TABLE p1')
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(resolvePage(db, [p1, p2], '/blog/hello', 'en').page!.ancestors).toEqual([])
+    } finally { spy.mockRestore() }
   })
 })

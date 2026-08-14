@@ -138,6 +138,24 @@ export interface KestrelConfig {
   /** Disable Kestrel's built-in collections (default on). Set in `kestrel: {}` (consumer nuxt.config) or
    *  `kestrel.config.ts`; per-setting env `KESTREL_COLLECTIONS_PAGES` / `_MEDIA` overrides. */
   collections?: { pages?: boolean; media?: boolean }
+  /** Search / answer-engine surface. Both flags default to **false** and stay off until a consumer turns
+   *  them on: each one publishes something the site did not publish before, and an upgrade must never
+   *  start disclosing it. Everything else on this surface (canonical, OG, hreflang, sitemap, robots,
+   *  llms.txt, the WebSite/WebPage JSON-LD graph) is unconditional — it only restates what the page head
+   *  already says. */
+  seo?: {
+    /** Offer editors `author` / `publishedDate` / `keywords` on the SEO panel and publish them as
+     *  schema.org `author` / `datePublished` / `keywords` (which also promotes the page's JSON-LD node
+     *  from `WebPage` to `Article`). Some consumers must not attribute content at all — internal
+     *  authorship, confidentiality — so nothing is emitted and the fields are not even shown unless this
+     *  is on. Env `KESTREL_SEO_ARTICLE_META`. */
+    articleMeta?: boolean
+    /** Serve and publish `/llms-full.txt`: the full Markdown body of every published, indexable page in
+     *  one file (the llmstxt.org long form). Off by default — it aggregates the whole site into a single
+     *  scrapeable artifact, and it reads every page's block content on every publish, which the link-only
+     *  `llms.txt` deliberately avoids. Env `KESTREL_SEO_LLMS_FULL`. */
+    llmsFull?: boolean
+  }
   /** Admin page-builder live preview. `desktopWidth` is the reference viewport width (px) the "Desktop"
    *  preset renders at before the editor's scale-to-fit shrinks it to the pane; default 1440. Env:
    *  `KESTREL_PREVIEW_DESKTOP_WIDTH`. */
@@ -174,6 +192,8 @@ export interface ResolvedKestrel {
   }
   /** Resolved built-in-collection toggles (default on). The register plugin skips a built-in whose flag is false. */
   collections: { pages: boolean; media: boolean }
+  /** Resolved answer-engine toggles, both default-off (see `KestrelConfig.seo`). */
+  seo: { articleMeta: boolean; llmsFull: boolean }
   /** Resolved admin-preview settings (surfaced to the client via `runtimeConfig.public`). */
   preview: { desktopWidth: number }
   /** Gates the media-disclosure UI in the admin ONLY. `ResolvedMedia.aiDisclosure` is always resolved from
@@ -418,9 +438,14 @@ export function resolveKestrel(config: KestrelConfig | undefined, env: Env, root
     media: envBool(env.KESTREL_COLLECTIONS_MEDIA, c.collections?.media ?? true),
   }
 
+  const seo = {
+    articleMeta: envBool(env.KESTREL_SEO_ARTICLE_META, c.seo?.articleMeta ?? false),
+    llmsFull: envBool(env.KESTREL_SEO_LLMS_FULL, c.seo?.llmsFull ?? false),
+  }
+
   const preview = { desktopWidth: resolvePosInt(c.preview?.desktopWidth, env.KESTREL_PREVIEW_DESKTOP_WIDTH, 1440) }
 
   const aiDisclosure = { enabled: envBool(env.KESTREL_AI_DISCLOSURE, c.aiDisclosure?.enabled ?? false) }
 
-  return { dbPath, siteUrl, siteName, siteDescription, supportedLocales, primaryLocale, prefixPrimary, media, output, collections, preview, aiDisclosure }
+  return { dbPath, siteUrl, siteName, siteDescription, supportedLocales, primaryLocale, prefixPrimary, media, output, collections, seo, preview, aiDisclosure }
 }

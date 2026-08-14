@@ -35,6 +35,39 @@ describe('SeoFields', () => {
     expect(emitted!.at(-1)![0]).toEqual({ description: 'keep me', title: 'New meta title' })
   })
 
+  // Article metadata is opt-in (`kestrel.seo.articleMeta`): some installations must not attribute content
+  // at all, so the fields are not even offered until the consumer turns the flag on.
+  it('offers no article metadata fields by default', async () => {
+    const w = await mountSuspended(SeoFields, {
+      props: { value: { author: 'Ada' }, pageTitle: 'Home', path: '/', locale: 'en' },
+    })
+    expect(w.find('.seo-fields__author').exists()).toBe(false)
+    expect(w.find('.seo-fields__published').exists()).toBe(false)
+    expect(w.find('.seo-fields__keywords').exists()).toBe(false)
+    // a value already stored stays stored — it is only hidden, never cleared
+    expect(w.emitted('update')).toBeUndefined()
+  })
+
+  it('offers author, publication date and keywords when articleMeta is on', async () => {
+    const w = await mountSuspended(SeoFields, {
+      props: { value: {}, pageTitle: 'Home', path: '/', locale: 'en', articleMeta: true },
+    })
+    expect(w.find('.seo-fields__author input').exists()).toBe(true)
+    expect(w.find('.seo-fields__keywords input').exists()).toBe(true)
+    // the date picker is a teleported widget — happy-dom renders no teleport, so smoke-test its presence
+    expect(w.find('.seo-fields__published').exists()).toBe(true)
+  })
+
+  it('emits the merged object when an article field changes', async () => {
+    const w = await mountSuspended(SeoFields, {
+      props: { value: { title: 'keep me' }, pageTitle: 'Home', path: '/', locale: 'en', articleMeta: true },
+    })
+    await w.find('.seo-fields__author input').setValue('Ada Lovelace')
+    expect(w.emitted('update')!.at(-1)![0]).toEqual({ title: 'keep me', author: 'Ada Lovelace' })
+    await w.find('.seo-fields__keywords input').setValue('math, notes')
+    expect(w.emitted('update')!.at(-1)![0]).toMatchObject({ keywords: 'math, notes' })
+  })
+
   it('toggles noindex through the merged object', async () => {
     const w = await mountSuspended(SeoFields, {
       props: { value: {}, pageTitle: 'Home', path: '/', locale: 'en' },

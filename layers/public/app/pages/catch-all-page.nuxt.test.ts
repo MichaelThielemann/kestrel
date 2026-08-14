@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
 import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { defineEventHandler, createError } from 'h3'
 import Page from './[...slug].vue'
@@ -8,10 +8,15 @@ import { usePublicPageState } from '../composables/public-page'
 // The catch-all resolves via /api/route; return a record + its collection so we can assert the page mirrors
 // BOTH into the shared state (the whole point of keeping `collection`).
 const route = { collection: 'pages', page: { title: 'About', status: 'published', content: [], layout: 'marketing' } }
-const h = vi.hoisted(() => ({ path: '/about', resolveStatus: 200, resolveNull: false, query: {} as Record<string, string>, token: false }))
+const h = vi.hoisted(() => ({
+  path: '/about', resolveStatus: 200, resolveNull: false, query: {} as Record<string, string>, token: false,
+  seo: {} as Record<string, unknown>, ancestors: [] as Array<{ path: string; title?: string }>,
+}))
 registerEndpoint('/api/route', defineEventHandler(() => {
   if (h.resolveStatus !== 200) throw createError({ statusCode: h.resolveStatus })
-  return h.resolveNull ? { collection: null, page: null } : route
+  return h.resolveNull
+    ? { collection: null, page: null }
+    : { ...route, page: { ...route.page, seo: h.seo }, ancestors: h.ancestors }
 }))
 
 // `meta` must be present: the page renders its own <NuxtLayout>, which reads route.meta.layoutTransition.
@@ -29,8 +34,28 @@ beforeEach(() => {
   h.resolveNull = false
   h.query = {}
   h.token = false
+  h.seo = {}
+  h.ancestors = []
   usePublicPageState().value = { collection: null, page: null }
 })
+
+// Every case in this file mounts the same page into one shared `document.head`, and unhead only drops a
+// tag when the entry's component scope is disposed — a leaked mount would leave its JSON-LD behind for
+// the next case to read as its own.
+enableAutoUnmount(afterEach)
+
+const settle = async (): Promise<void> => { await flushPromises(); await new Promise((r) => setTimeout(r, 0)) }
+
+/** Mount the page and read back the JSON-LD unhead flushed into the document, or null when it emitted none. */
+async function mountJsonLd(): Promise<Record<string, unknown> | null> {
+  await settle() // let the previous case's auto-unmount reach the DOM before this one writes to it
+  await mountSuspended(Page)
+  await settle()
+  const el = document.head.querySelector('script[type="application/ld+json"]')
+  return el?.textContent ? JSON.parse(el.textContent) as Record<string, unknown> : null
+}
+const nodeOf = (ld: Record<string, unknown> | null, type: string) =>
+  ((ld?.['@graph'] ?? []) as Array<Record<string, unknown>>).find((n) => n['@type'] === type)
 
 describe('catch-all page — mirrors the resolved record + collection into usePublicPageState', () => {
   it('populates the shared state with { collection, page } after resolving', async () => {
@@ -39,6 +64,47 @@ describe('catch-all page — mirrors the resolved record + collection into usePu
     const state = usePublicPageState().value
     expect(state.collection).toBe('pages')
     expect(state.page).toMatchObject({ title: 'About' })
+  })
+})
+
+describe('catch-all page — JSON-LD', () => {
+  it('emits a WebPage node for the resolved record', async () => {
+    const ld = await mountJsonLd()
+    expect(ld).toMatchObject({ '@context': 'https://schema.org' })
+    expect(nodeOf(ld, 'WebPage')).toMatchObject({ url: 'http://localhost:3000/about', name: 'About' })
+  })
+
+  it('emits a BreadcrumbList from the ancestors the resolver returned', async () => {
+    h.ancestors = [{ path: '/', title: 'Home' }]
+    expect(nodeOf(await mountJsonLd(), 'BreadcrumbList')?.itemListElement).toEqual([
+      { '@type': 'ListItem', position: 1, name: 'Home', item: 'http://localhost:3000/' },
+      { '@type': 'ListItem', position: 2, name: 'About', item: 'http://localhost:3000/about' },
+    ])
+  })
+
+  it('emits none for a noindex page — the tag exists to be indexed', async () => {
+    h.seo = { noindex: true }
+    expect(await mountJsonLd()).toBeNull()
+  })
+
+  it('withholds stored article metadata while seo.articleMeta is off (the default)', async () => {
+    h.seo = { author: 'Ada Lovelace', publishedDate: '2026-01-15', keywords: 'a, b' }
+    const ld = await mountJsonLd()
+    expect(nodeOf(ld, 'Article')).toBeUndefined()
+    expect(JSON.stringify(ld)).not.toContain('Ada Lovelace')
+  })
+
+  it('publishes article metadata as an Article node once seo.articleMeta is on', async () => {
+    const rc = useRuntimeConfig().public as Record<string, unknown>
+    rc.seoArticleMeta = true
+    try {
+      h.seo = { author: 'Ada Lovelace', publishedDate: '2026-01-15', keywords: 'a, b' }
+      expect(nodeOf(await mountJsonLd(), 'Article')).toMatchObject({
+        author: { '@type': 'Person', name: 'Ada Lovelace' },
+        datePublished: '2026-01-15',
+        keywords: 'a, b',
+      })
+    } finally { rc.seoArticleMeta = false }
   })
 })
 

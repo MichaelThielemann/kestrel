@@ -15,6 +15,9 @@ interface RenderedPage {
     description?: string
     noindex?: boolean
     $media?: { image?: { src: string; width: number | null; height: number | null } | null }
+    author?: string
+    publishedDate?: string
+    keywords?: string
   }
   content?: unknown[]
   status?: string
@@ -42,6 +45,7 @@ const { data: resolved, error: resolveError } = await useAsyncData(`page:${local
     collection: string | null
     page: (RenderedPage & Record<string, unknown>) | null
     alternates?: Array<{ locale: string; path: string }>
+    ancestors?: Array<{ path: string; title?: string; locale?: string }>
     site?: SiteHead | null
   }),
 )
@@ -113,7 +117,7 @@ if (!page.value && path !== '/') throw createError({ statusCode: 404, statusMess
 // Canonical / Open Graph / twitter card / hreflang: pure model (`buildPageHead`) fed from the resolved
 // page + the public runtime config. Absolute-URL emissions (canonical, og:url, hreflang, relative
 // og:image) require a configured siteUrl and degrade away without one.
-const publicRc = useRuntimeConfig().public as { siteUrl?: string; siteName?: string }
+const publicRc = useRuntimeConfig().public as { siteUrl?: string; siteName?: string; seoArticleMeta?: boolean }
 const seo = page.value?.seo ?? {}
 const siteHead = resolved.value?.site ?? null
 const fallbacks = siteHeadFallbacks(seo, siteHead)
@@ -133,11 +137,36 @@ const head = buildPageHead({
   alternates: resolved.value?.alternates ?? [],
 })
 
+// schema.org JSON-LD — the one grounding signal every major answer engine documents. Same inputs as the
+// head above, so the two can never disagree; it degrades away without a siteUrl and is suppressed for a
+// noindex page or an unsaved ticket preview. Article metadata is published ONLY with `seo.articleMeta`
+// on: the fields may hold values (the column always round-trips them) that this installation must not
+// disclose, so the flag gates emission, not storage.
+const jsonLd = buildJsonLd({
+  siteUrl: typeof publicRc.siteUrl === 'string' ? publicRc.siteUrl : '',
+  siteName: typeof publicRc.siteName === 'string' ? publicRc.siteName : '',
+  canonical: head.canonical,
+  locale,
+  primary,
+  prefixPrimary,
+  title: pageTitle,
+  description: fallbacks.description,
+  imageUrl: head.meta.ogImage,
+  noindex: previewingTicket.value || seo.noindex,
+  ancestors: resolved.value?.ancestors ?? [],
+  article: publicRc.seoArticleMeta === true
+    ? { author: seo.author, publishedDate: seo.publishedDate, keywords: seo.keywords }
+    : null,
+})
+
 // Set the document language from the resolved locale so prerendered /de pages ship <html lang="de">
 // (WCAG 2.2 SC 3.1.1); without this every page would carry the build-default language.
 // Point AI agents at the generated llms.txt (alongside the robots.txt comment + sitemap) on every page.
 useHead({
   htmlAttrs: { lang: locale },
+  // `textContent` (not innerHTML) is unhead's XSS-safe arm for a data script: it takes the object and
+  // serializes it itself, so editor-authored strings can never close the <script>.
+  script: jsonLd ? [{ type: 'application/ld+json' as const, textContent: jsonLd }] : [],
   link: [
     // `rel` needs the literal type: unhead keys its link union on it, and inside an array literal that
     // reaches `link:` through a spread there is no contextual type to stop TS widening it to `string`.

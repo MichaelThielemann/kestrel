@@ -59,6 +59,10 @@ export default defineNuxtModule<KestrelConfig>({
     // Whether the admin shows the EU AI Act disclosure controls on a media asset; the data itself is
     // always resolved server-side, so flipping this off only hides the editor.
     pub.aiDisclosureEnabled = c.aiDisclosure.enabled
+    // Article metadata is an APP-side concern on both ends — the admin SEO panel decides whether to offer
+    // the fields, the public page decides whether to publish them as JSON-LD — so the flag has to be
+    // client-visible. It gates a disclosure, not a secret.
+    pub.seoArticleMeta = c.seo.articleMeta
 
     // Server-only resolved settings, so server utils read the CONSUMER's `kestrel: {}` (via this module)
     // rather than importing Kestrel's own `kestrel.config.ts` file. Essential when Kestrel is consumed as
@@ -72,6 +76,8 @@ export default defineNuxtModule<KestrelConfig>({
     srv.collections = c.collections
     // Read by the upload route to decide whether to run the AI-signal scan at all.
     srv.aiDisclosure = c.aiDisclosure
+    // Answer-engine toggles; `llmsFull` is server-only (it gates a Nitro route and what the publisher writes).
+    srv.seo = c.seo
     // Static-publish target for the runtime publisher (server-only). S3 creds are env-only; prefer the
     // output-specific creds, fall back to the shared media creds so a single S3 account "just works".
     srv.output = {

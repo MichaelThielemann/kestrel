@@ -25,6 +25,8 @@ per **published** page path, plus the two artifacts below:
 - `/sitemap.xml`
 - `/robots.txt`
 - `/llms.txt`
+- `/llms-full.txt` — only when `seo.llmsFull` is on (it 404s otherwise, and a prerender error would be
+  reported for a route that does not exist).
 
 A route whose lookup could not *complete* — an unmigrated or drifted table, so "no page here" is
 unknowable rather than true — errors instead of rendering, and no HTML is written for it. That includes
@@ -75,9 +77,9 @@ relying on a separate `nuxt generate`:
   one record doesn't re-render the whole collection. What re-renders vs prunes per event (content edit /
   publish / unpublish / delete / slug change), and why an availability change re-renders the pages that
   link to the record as well, is the **invalidation model** in
-  [reference-integrity.md](./reference-integrity.md). `sitemap.xml` / `robots.txt` regenerate too (a
-  `<lastmod>` may have changed). Publishing also prunes the record's own abandoned URLs — the file a
-  published rename left behind at the old path.
+  [reference-integrity.md](./reference-integrity.md). `sitemap.xml` / `robots.txt` / `llms.txt` (and
+  `llms-full.txt`, when on) regenerate too — a `<lastmod>` or a body may have changed. Publishing also
+  prunes the record's own abandoned URLs — the file a published rename left behind at the old path.
 - **Save-time removal.** A save still acts on the output in exactly one direction: **removal**. Unpublishing
   or deleting a record prunes its page immediately (and re-renders what linked to it), because a page taken
   offline must not stay live. Nothing is ever *rendered* by a save.
@@ -200,9 +202,48 @@ Every generated page emits, from its `seo` data and `KESTREL_SITE_URL`:
   upgrade the card to `summary_large_image`.
 - `<link rel="alternate" hreflang="…">` for each **published** translation of the page, plus `x-default` at
   the primary-locale variant — the page-level counterpart to the sitemap's hreflang set.
+- a `<script type="application/ld+json">` graph — see below.
 
 Everything that needs an absolute URL (canonical, `og:url`, hreflang, a relative `og:image`) is **omitted**
 when `KESTREL_SITE_URL` is unset; the plain title/description/OG-text tags still render.
+
+## Structured data (JSON-LD)
+
+Every generated page carries one schema.org `@graph`, built from the same values as the head above so the
+two can never disagree:
+
+- **`WebSite`** — the site's origin and `siteName`. Omitted (with the `isPartOf` edge that points at it)
+  when no `siteName` is configured, since a nameless node asserts nothing.
+- **`WebPage`** — the page: `url`, `name`, `description`, `inLanguage`, and `image` when an `og:image`
+  resolved. It becomes an **`Article`** (with `headline` instead of `name`) when article metadata is
+  switched on *and* the record carries some — see below.
+- **`BreadcrumbList`** — the trail from the path hierarchy. Only **real published, indexable pages** become
+  items: a path segment with no page behind it is skipped rather than invented, so a crumb never links a
+  404, and a trail with fewer than two items is dropped entirely.
+
+Nothing is emitted at all when `KESTREL_SITE_URL` is unset (every `@id`/`url` would be relative), for a
+`seo.noindex` page, or in an unsaved ticket preview.
+
+One invalidation edge does not exist: creating a page at `/blog` after `/blog/hello` was published leaves
+that descendant's breadcrumb short until the next full publish. Retitling, renaming, unpublishing or
+deleting an ancestor *does* re-render its descendants immediately — only the create case has no record id
+for the dependency index to have captured.
+
+### Article metadata — opt-in (`seo.articleMeta`)
+
+`author`, `publishedDate` and `keywords` live in the record's `seo` column and map to schema.org `author`
+(as a `Person`), `datePublished` and `keywords`. **Off by default**: some installations must not attribute
+content at all, so with the flag off the editor is not even offered the fields and nothing is published.
+
+The column always round-trips the values, so switching the flag off *hides and unpublishes* what is
+already stored rather than destroying it; switching it back on restores it. A `publishedDate` that is not
+an ISO date is rejected in the editor, and a value that somehow reaches the renderer unparseable is
+dropped rather than published as a broken `datePublished`.
+
+```ts
+// kestrel.config.ts
+export default { seo: { articleMeta: true } } satisfies KestrelConfig
+```
 
 ## sitemap.xml
 
@@ -227,11 +268,18 @@ prerender — drafts never leak.
 User-agent: *
 Allow: /
 # llms.txt: <KESTREL_SITE_URL>/llms.txt
+# llms-full.txt: <KESTREL_SITE_URL>/llms-full.txt
 
 Sitemap: <KESTREL_SITE_URL>/sitemap.xml
 ```
 
-The `Sitemap:` directive and the `llms.txt` comment are emitted only when `KESTREL_SITE_URL` is set.
+The `Sitemap:` directive and the `llms.txt` comment are emitted only when `KESTREL_SITE_URL` is set; the
+`llms-full.txt` comment additionally requires `seo.llmsFull`.
+
+There are **no per-crawler rules**, deliberately. A blanket `Allow: /` is current best practice: AI
+crawlers largely respect `robots.txt`, and blocking them costs visibility without buying anything back.
+Differentiating training crawlers from retrieval crawlers is a policy decision for a specific site, not a
+default — add the rules at your reverse proxy or ship your own `robots.txt` route if you need them.
 
 ## llms.txt
 
@@ -251,6 +299,55 @@ above) and a `<link rel="alternate" type="text/markdown" href="/llms.txt">` in e
 - [Home](https://www.example.com/): The landing page.
 - [About](https://www.example.com/about)
 ```
+
+## llms-full.txt — opt-in (`seo.llmsFull`)
+
+The long form of the same convention: where `llms.txt` is a map, this is the territory — every published,
+indexable page's **full body as Markdown**, in one document an answer engine can retrieve without crawling
+the site. Same collections, same status/`noindex` filters, same section headings.
+
+```
+# Example
+
+> What this site is about.
+
+## Pages
+
+### About
+
+Source: https://www.example.com/about
+
+Who we are.
+
+#### Our story
+
+We started in **1999**.
+```
+
+Pages sit at `###`, so a body's own headings are shifted down to start at `####` and the document keeps a
+valid outline. Richtext becomes real Markdown (headings, lists, links, quotes, code); block content is
+walked through each block's registered field defs, so `text` and `richtext` props are emitted in order and
+a block type that is not registered is skipped rather than guessed at. Internal richtext links resolve to
+absolute URLs when their target is itself published and indexable, and degrade to plain text otherwise —
+an unpublished URL is never leaked.
+
+Editor-authored text can never forge the document's own structure: every line that would open a Markdown
+block — a heading of any level, a list item, a quote, a code fence, a thematic break — is escaped, and a
+code block is fenced wider than any backtick run inside it. So a paragraph that literally reads
+`## Roadmap` stays a paragraph rather than becoming a sibling of the `## Pages` section.
+
+**Off by default, for two reasons.** It aggregates the whole site into a single scrapeable artifact, which
+is a disclosure decision that belongs to the site owner rather than to an upgrade; and unlike `llms.txt` —
+which deliberately projects away block content — it must read every row's body, on every incremental
+publish.
+
+```ts
+// kestrel.config.ts
+export default { seo: { llmsFull: true } } satisfies KestrelConfig
+```
+
+Turning it back off removes the published file on the next publish, so the last full dump does not stay
+live after the flag is withdrawn.
 
 ## Configuring the site URL
 
@@ -370,7 +467,8 @@ points beyond that:
 - **Caching.** The deploy sets `Content-Type` **and** `Cache-Control` on every object: long-lived
   `public, max-age=31536000, immutable` for the content-hashed `_nuxt/` assets, and
   `public, max-age=0, must-revalidate` for the stable-URL `*.html` pages + `sitemap.xml` + `robots.txt` +
-  `llms.txt` (and Nuxt's `_nuxt/builds/latest.json` app manifest) so edits go live promptly. Everything
+  `llms.txt` + `llms-full.txt` (and Nuxt's `_nuxt/builds/latest.json` app manifest) so edits go live
+  promptly. Everything
   else (favicons, fonts, un-hashed media) is left to the host default.
 
 ## Redirects

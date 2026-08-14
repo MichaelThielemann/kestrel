@@ -188,6 +188,12 @@ export const de: Catalog = {
   'editor.unsupported': 'Für den Typ „{type}“ ist kein Editor registriert.',
   'seo.socialImage': 'Social-Share-Bild',
   'seo.socialImageHint': 'Wird als Vorschaubild beim Teilen der Seite angezeigt (og:image).',
+  'seo.author': 'Autor/in',
+  'seo.authorHint': 'Wird in den strukturierten Daten der Seite als Verfasser/in veröffentlicht.',
+  'seo.publishedDate': 'Veröffentlichungsdatum',
+  'seo.publishedDateHint': 'Zeigt Such- und Antwortmaschinen, wie aktuell diese Seite ist.',
+  'seo.keywords': 'Schlagwörter',
+  'seo.keywordsHint': 'Themen dieser Seite, durch Kommas getrennt.',
 
   'localeBar.fieldLabel': 'Sprache',
   'localeBar.groupLabel': 'Inhaltssprache',

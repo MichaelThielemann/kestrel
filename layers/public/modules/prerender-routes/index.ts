@@ -73,7 +73,10 @@ export default defineNuxtModule({
       // Hand the deploy module the completeness of THIS enumeration — the only step that knows it.
       recordRouteDiscovery(nuxt, discovery)
       nitro.prerender ||= {}
-      nitro.prerender.routes = [...new Set([...(nitro.prerender.routes ?? []), ...discovery.routes, '/sitemap.xml', '/robots.txt', '/llms.txt'])]
+      // `llms-full.txt` only when the consumer opted in — the route 404s otherwise, and a prerender error
+      // fails the whole `nuxt generate`.
+      const meta = ['/sitemap.xml', '/robots.txt', '/llms.txt', ...(c.seo.llmsFull ? ['/llms-full.txt'] : [])]
+      nitro.prerender.routes = [...new Set([...(nitro.prerender.routes ?? []), ...discovery.routes, ...meta])]
       // Render pages in parallel — the dominant lever on `nuxt generate` wall-clock as page count grows.
       // Safe: page reads are synchronous better-sqlite3 (WAL + busy_timeout, can't interleave mid-statement);
       // the one WRITE on this path — the variant-registry capture — is an IMMEDIATE transaction, so

@@ -1,4 +1,4 @@
-import { asc, eq, getTableColumns } from 'drizzle-orm'
+import { and, asc, eq, getTableColumns } from 'drizzle-orm'
 import { list } from '../../../core/server/utils/crud'
 import { captureRead } from '../../../core/server/utils/read-capture'
 import { translationGroupTag } from './publish/invalidation'
@@ -6,7 +6,21 @@ import type { BuiltCollection } from '../../../core/server/utils/collection-type
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 
 export interface PageAlternate { locale: string; path: string }
-export interface ResolvedPage { collection: string; page: Record<string, unknown>; alternates: PageAlternate[] }
+/** One published page above this one in the path hierarchy — a real, linkable breadcrumb step. */
+export interface PageAncestor {
+  path: string
+  title?: string
+  /** The ancestor's OWN locale, so the crumb builds the URL that was actually published. Absent for a
+   *  non-translatable collection, whose rows have a single unprefixed (primary-locale) URL — prefixing
+   *  one of those with the reader's locale would link a page `nuxt generate` never wrote. */
+  locale?: string
+}
+export interface ResolvedPage {
+  collection: string
+  page: Record<string, unknown>
+  alternates: PageAlternate[]
+  ancestors: PageAncestor[]
+}
 
 /** The matched page (or null) plus the collections whose lookup threw. `failed` is non-empty ⇒ the scan
  *  was INCOMPLETE, so `page: null` must never be treated as an authoritative "no such page". */
@@ -63,6 +77,76 @@ function publishedAlternates(db: BetterSQLite3Database, c: BuiltCollection, page
   return alternates.length >= 2 ? alternates : []
 }
 
+/** Every strict path prefix of a page's path, outermost first: `/blog/hello` → `['/', '/blog']`. The
+ *  site root is an ancestor of everything except itself. */
+function ancestorPaths(path: string): string[] {
+  if (path === '/' || !path.startsWith('/')) return []
+  const segments = path.split('/').filter(Boolean)
+  const paths = ['/']
+  for (let i = 1; i < segments.length; i += 1) paths.push(`/${segments.slice(0, i).join('/')}`)
+  return paths
+}
+
+/**
+ * The page's breadcrumb trail: the published, INDEXABLE page at each ancestor path, in the page's own
+ * locale. A path segment with no page behind it is SKIPPED rather than synthesised — schema.org
+ * breadcrumb items are links, and a trail that points at a 404 is a worse signal than a shorter trail.
+ * The filters mirror the sitemap's, so a breadcrumb never advertises what the sitemap withholds.
+ *
+ * Each ancestor found is `captureRead`-tagged, so retitling, renaming, unpublishing or deleting it
+ * re-renders every descendant that baked it. The one edge that cannot exist is CREATE: a page created at
+ * `/blog` after `/blog/hello` was published has no id anything could have captured, so that crumb appears
+ * on the next full publish rather than immediately (the same shape of gap `publishedAlternates` closes
+ * with a group tag — there is no equivalent tag for "the page at this path" today).
+ */
+function publishedAncestors(
+  db: BetterSQLite3Database,
+  collections: BuiltCollection[],
+  path: string,
+  locale: string | undefined,
+  publishedOnly: boolean,
+): PageAncestor[] {
+  const out: PageAncestor[] = []
+  for (const ancestorPath of ancestorPaths(path)) {
+    for (const c of collections) {
+      if (!c.def.pageLike) continue
+      // Project only what a crumb needs — never the row: this runs once per path segment per render, and
+      // pulling every page's block JSON to read a title would multiply the cost of a full publish.
+      const cols = getTableColumns(c.table) as Record<string, never>
+      const hasStatus = Object.hasOwn(cols, 'status')
+      const proj: Record<string, unknown> = { id: cols.id, path: cols.path }
+      if (hasStatus) proj.status = cols.status
+      if (c.def.seo) proj.seo = cols.seo
+      if (c.def.translatable) proj.locale = cols.locale
+      if (Object.hasOwn(cols, 'title')) proj.title = cols.title
+      const scoped = c.def.translatable && locale ? and(eq(cols.path, ancestorPath), eq(cols.locale, locale)) : eq(cols.path, ancestorPath)
+      let row: { id: number; status?: string; seo?: { title?: string; noindex?: boolean } | null; title?: unknown; locale?: string } | undefined
+      try {
+        // Order by locale so an unscoped lookup (no locale requested) still answers deterministically
+        // rather than with whatever row the table happens to yield first.
+        const q = db.select(proj as never).from(c.table).where(scoped)
+        row = (c.def.translatable ? q.orderBy(asc(cols.locale)) : q).limit(1).get() as typeof row
+      } catch (error) {
+        // Same isolation rule as the main scan: a drifted collection loses its crumbs, loudly, instead of
+        // failing the whole render.
+        console.error(`[kestrel] resolvePage: skipped ancestor lookup in ${c.def.name}:`, (error as Error)?.message ?? error)
+        continue
+      }
+      if (!row) continue
+      captureRead(c.def.name, row.id)
+      if (publishedOnly && hasStatus && row.status !== 'published') break
+      if (row.seo?.noindex) break
+      const ancestor: PageAncestor = { path: ancestorPath }
+      const title = row.seo?.title || (typeof row.title === 'string' ? row.title : undefined)
+      if (title) ancestor.title = title
+      if (c.def.translatable && row.locale) ancestor.locale = row.locale
+      out.push(ancestor)
+      break
+    }
+  }
+  return out
+}
+
 /**
  * The first page-like record (across all collections, in registration order) whose `path` matches,
  * populated at depth 1 — or null, alongside the collections that could not be read at all. Reuses the
@@ -93,7 +177,15 @@ export function resolvePage(db: BetterSQLite3Database, collections: BuiltCollect
     const { data } = result
     if (data.length) {
       captureRead(c.def.name, (data[0] as { id?: number }).id ?? null)
-      return { page: { collection: c.def.name, page: data[0]!, alternates: publishedAlternates(db, c, data[0]!) }, failed }
+      return {
+        page: {
+          collection: c.def.name,
+          page: data[0]!,
+          alternates: publishedAlternates(db, c, data[0]!),
+          ancestors: publishedAncestors(db, collections, path, locale, publishedOnly),
+        },
+        failed,
+      }
     }
   }
   return { page: null, failed }

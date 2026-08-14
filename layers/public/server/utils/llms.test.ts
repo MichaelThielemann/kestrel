@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { buildLlmsTxt } from './llms'
+import { buildLlmsTxt, collectionHeading } from './llms'
+
+describe('collectionHeading', () => {
+  it('uses the plural label in the primary locale, any locale, or the capitalised name', () => {
+    expect(collectionHeading({ name: 'posts', label: { plural: { en: 'Posts', de: 'Beiträge' } } }, 'de')).toBe('Beiträge')
+    expect(collectionHeading({ name: 'posts', label: { plural: { de: 'Beiträge' } } }, 'en')).toBe('Beiträge')
+    expect(collectionHeading({ name: 'posts', label: { plural: 'Articles' } }, 'en')).toBe('Articles')
+    expect(collectionHeading({ name: 'posts' }, 'en')).toBe('Posts')
+    expect(collectionHeading({ name: '' }, 'en')).toBe('')
+  })
+})
 
 describe('buildLlmsTxt — llmstxt.org markdown for AI agents', () => {
   it('emits an H1 site name and trailing newline (no description, no sections)', () => {

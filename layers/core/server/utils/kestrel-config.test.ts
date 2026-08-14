@@ -121,6 +121,21 @@ describe('resolveKestrel — precedence is KESTREL_* env → config → default 
     expect(resolveKestrel({ preview: { desktopWidth: 1440.9 } }, {}, root).preview.desktopWidth).toBe(1440)
   })
 
+  it('seo.articleMeta / seo.llmsFull: both default OFF; config override; KESTREL_SEO_* env wins both ways', () => {
+    // Off by default on purpose: articleMeta publishes authorship + dates, llmsFull publishes every
+    // page's full body in one file. Neither may start happening because a consumer upgraded.
+    expect(resolveKestrel({}, {}, root).seo).toEqual({ articleMeta: false, llmsFull: false })
+    expect(resolveKestrel({ seo: { articleMeta: true } }, {}, root).seo.articleMeta).toBe(true)
+    expect(resolveKestrel({ seo: { llmsFull: true } }, {}, root).seo.llmsFull).toBe(true)
+    expect(resolveKestrel({}, { KESTREL_SEO_ARTICLE_META: 'true' }, root).seo.articleMeta).toBe(true)
+    expect(resolveKestrel({}, { KESTREL_SEO_LLMS_FULL: '1' }, root).seo.llmsFull).toBe(true)
+    expect(resolveKestrel({ seo: { articleMeta: true } }, { KESTREL_SEO_ARTICLE_META: 'false' }, root).seo.articleMeta).toBe(false)
+    expect(resolveKestrel({ seo: { llmsFull: true } }, { KESTREL_SEO_LLMS_FULL: 'off' }, root).seo.llmsFull).toBe(false)
+    // a blank or garbage env value falls through to config, like every other boolean setting
+    expect(resolveKestrel({ seo: { articleMeta: true } }, { KESTREL_SEO_ARTICLE_META: '' }, root).seo.articleMeta).toBe(true)
+    expect(resolveKestrel({ seo: { llmsFull: true } }, { KESTREL_SEO_LLMS_FULL: 'nope' }, root).seo.llmsFull).toBe(true)
+  })
+
   const defaultS3 = { bucket: '', region: 'us-east-1', endpoint: '', prefix: '', publicBaseUrl: '' }
 
   it('media: dir resolves against root; numbers/strings with sane defaults', () => {

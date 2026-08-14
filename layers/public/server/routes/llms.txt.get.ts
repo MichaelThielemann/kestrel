@@ -11,17 +11,6 @@ export default defineEventHandler((event) => {
   const primary = primaryLocale()
   const prefixPrimary = prefixPrimaryLocale()
 
-  const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s)
-  const headingFor = (def: { name: string; label?: { plural?: unknown } }): string => {
-    const pl = def.label?.plural
-    if (typeof pl === 'string') return pl
-    if (pl && typeof pl === 'object') {
-      const m = pl as Record<string, string>
-      return m[primary] ?? Object.values(m)[0] ?? cap(def.name)
-    }
-    return cap(def.name)
-  }
-
   const pub = publicReadableResources()
   const sections: LlmsSection[] = []
   // Without an absolute origin, every resource URL would be a relative path — omit the page sections (keep
@@ -66,7 +55,7 @@ export default defineEventHandler((event) => {
     }
     if (entries.length) {
       entries.sort((a, b) => a.url.localeCompare(b.url))
-      sections.push({ heading: headingFor(c.def), entries })
+      sections.push({ heading: collectionHeading(c.def, primary), entries })
     }
   }
 

@@ -30,6 +30,10 @@ const { t } = useT()
 const layoutOptions = computed(() => layoutSelectOptions(useOfferableLayouts(), t('pageSettings.layoutDefault')))
 const showLayout = computed(() => !!props.pageLike && layoutOptions.value.length > 1)
 
+// Article metadata is an installation-wide policy (`kestrel.seo.articleMeta`), not a per-collection one,
+// so it comes from runtimeConfig rather than the serialized collection schema.
+const articleMeta = computed(() => (useRuntimeConfig().public as { seoArticleMeta?: boolean }).seoArticleMeta === true)
+
 // Live preview of the slug the server will auto-generate from the title while the field is left blank
 // (the server slugifies the title on save). Falls back to '/' when there is no title yet.
 const slugPlaceholder = computed(() => {
@@ -121,6 +125,7 @@ const slugPlaceholder = computed(() => {
     :path="(values.path as string) ?? ''"
     :locale="locale"
     :disabled="disabled"
+    :article-meta="articleMeta"
     @update="(v) => emit('update', 'seo', v)"
   />
 </template>
