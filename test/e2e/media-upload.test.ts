@@ -6,6 +6,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, fetch as testFetch, createPage, url } from '@nuxt/test-utils/e2e'
 import sharp from 'sharp'
 import { hashPassword } from '../../layers/auth/server/utils/password'
+import { e2eBrowserOptions } from '../helpers/e2e-browser'
 
 const dbPath = join(tmpdir(), `kestrel-media-upload-e2e-${process.pid}.sqlite`)
 const uploads = mkdtempSync(join(tmpdir(), 'kestrel-media-upload-up-'))
@@ -22,6 +23,7 @@ describe('media upload + new-folder + collision (e2e, browser)', async () => {
     rootDir: fileURLToPath(new URL('../../', import.meta.url)),
     dev: true,
     browser: true,
+    browserOptions: e2eBrowserOptions,
   })
 
   let cookie = ''

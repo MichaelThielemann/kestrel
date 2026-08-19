@@ -5,6 +5,7 @@ import { rmSync } from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch, createPage, url } from '@nuxt/test-utils/e2e'
 import { hashPassword } from '../../layers/auth/server/utils/password'
+import { e2eBrowserOptions } from '../helpers/e2e-browser'
 
 const dbPath = join(tmpdir(), `kestrel-admin-editor-e2e-${process.pid}.sqlite`)
 const PW = 'admin-editor-e2e-pw'
@@ -17,15 +18,12 @@ process.env.KESTREL_ADMIN_PASSWORD_HASH = await hashPassword(PW)
 // would leak into each other (and leave behind). Same isolation idea as the pid-scoped DB.
 process.env.KESTREL_SESSION_EPOCH_FILE = `${dbPath}.epoch`
 
-// CI ships a Playwright-managed browser; locally pass a system binary via the env var.
-const launch = process.env.KESTREL_E2E_BROWSER_PATH ? { executablePath: process.env.KESTREL_E2E_BROWSER_PATH } : {}
-
 describe('admin record editor (e2e, browser)', async () => {
   await setup({
     rootDir: fileURLToPath(new URL('../../', import.meta.url)),
     dev: true,
     browser: true,
-    browserOptions: { type: 'chromium', launch },
+    browserOptions: e2eBrowserOptions,
   })
 
   let cookie = ''
