@@ -27,7 +27,7 @@ const model = defineModel<string | null>()
 </template>
 
 <style lang="scss">
-@use '../../assets/scss/mixins' as *;
+@use '../../assets/scss/mixins';
 
 .ui-select {
   position: relative;
@@ -35,7 +35,7 @@ const model = defineModel<string | null>()
   width: 100%;
 }
 .ui-select__field {
-  @include input-base;
+  @include mixins.input-base;
   width: 100%;
   appearance: none;
   // leave room for the overlaid chevron so long values don't run under it

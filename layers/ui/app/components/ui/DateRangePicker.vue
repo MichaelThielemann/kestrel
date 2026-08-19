@@ -95,6 +95,6 @@ const value = computed<{ start: DateValue | undefined; end: DateValue | undefine
 // Shares the global (non-scoped) datepicker chrome — the calendar is teleported to <body>, so a
 // `scoped` block would silently drop these styles. Included explicitly rather than borrowing them
 // from DatePicker being present on the page.
-@use '../../assets/scss/datepicker' as *;
-@include ui-datepicker;
+@use '../../assets/scss/datepicker';
+@include datepicker.ui-datepicker;
 </style>

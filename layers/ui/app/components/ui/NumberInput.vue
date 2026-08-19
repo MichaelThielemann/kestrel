@@ -90,17 +90,17 @@ function onKeydown(e: KeyboardEvent) {
 </template>
 
 <style lang="scss">
-@use '../../assets/scss/mixins' as *;
+@use '../../assets/scss/mixins';
 
 .ui-number {
-  @include input-base;
+  @include mixins.input-base;
   width: 100%;
 
   &::placeholder {
     color: var(--color-text-muted);
   }
   &--slim {
-    @include input-slim;
+    @include mixins.input-slim;
   }
 }
 
@@ -166,7 +166,7 @@ function onKeydown(e: KeyboardEvent) {
 // separate rule (not nested) so `.ui-number-wrap--slim .ui-number-wrap__input` outranks the base element rule.
 .ui-number-wrap--slim {
   .ui-number-wrap__input {
-    @include input-slim;
+    @include mixins.input-slim;
   }
   .ui-number-wrap__suffix {
     padding-inline: var(--space-2);

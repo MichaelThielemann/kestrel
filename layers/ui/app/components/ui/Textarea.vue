@@ -23,10 +23,10 @@ const model = defineModel<string | null>()
 </template>
 
 <style lang="scss">
-@use '../../assets/scss/mixins' as *;
+@use '../../assets/scss/mixins';
 
 .ui-textarea {
-  @include input-base;
+  @include mixins.input-base;
   width: 100%;
   font-family: inherit;
   line-height: var(--leading-normal);

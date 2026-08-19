@@ -36,10 +36,10 @@ watch(() => props.indeterminate, syncIndeterminate)
 </template>
 
 <style lang="scss">
-@use '../../assets/scss/mixins' as *;
+@use '../../assets/scss/mixins';
 
 .ui-checkbox {
-  @include focus-ring;
+  @include mixins.focus-ring;
   width: 1.25rem;
   height: 1.25rem;
   accent-color: var(--color-primary);

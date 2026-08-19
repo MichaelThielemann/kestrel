@@ -55,7 +55,7 @@ const inputType = computed(() => (revealable.value && revealed.value ? 'text' : 
 </template>
 
 <style lang="scss">
-@use '../../assets/scss/mixins' as *;
+@use '../../assets/scss/mixins';
 
 .ui-input-wrap {
   position: relative;
@@ -64,7 +64,7 @@ const inputType = computed(() => (revealable.value && revealed.value ? 'text' : 
 }
 
 .ui-input {
-  @include input-base;
+  @include mixins.input-base;
   width: 100%;
 
   &::placeholder {
@@ -72,7 +72,7 @@ const inputType = computed(() => (revealable.value && revealed.value ? 'text' : 
   }
 
   &--slim {
-    @include input-slim;
+    @include mixins.input-slim;
   }
 
   // Leave room for the inset reveal button so the value never sits under it. Declared after `--slim` so a
@@ -83,7 +83,7 @@ const inputType = computed(() => (revealable.value && revealed.value ? 'text' : 
 }
 
 .ui-input__reveal {
-  @include focus-ring;
+  @include mixins.focus-ring;
   position: absolute;
   inset-block: 1px;
   inset-inline-end: 1px;

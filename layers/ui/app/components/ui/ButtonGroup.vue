@@ -49,7 +49,7 @@ function onUpdate(v: unknown) {
 </template>
 
 <style lang="scss">
-@use '../../assets/scss/mixins' as *;
+@use '../../assets/scss/mixins';
 
 .ui-btngroup {
   display: inline-flex;
@@ -62,7 +62,7 @@ function onUpdate(v: unknown) {
   width: fit-content;
 
   &__item {
-    @include focus-ring;
+    @include mixins.focus-ring;
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);

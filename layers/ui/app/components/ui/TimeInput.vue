@@ -10,9 +10,9 @@ const model = defineModel<string | null>()
 </template>
 
 <style lang="scss">
-@use '../../assets/scss/mixins' as *;
+@use '../../assets/scss/mixins';
 
 .ui-time {
-  @include input-base;
+  @include mixins.input-base;
 }
 </style>

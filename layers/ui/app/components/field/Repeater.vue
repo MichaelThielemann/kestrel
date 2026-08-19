@@ -239,7 +239,7 @@ function insertRowAt(at: number) {
 </template>
 
 <style lang="scss">
-@use '../../assets/scss/mixins' as *;
+@use '../../assets/scss/mixins';
 
 .ui-repeater {
   display: flex;
@@ -294,7 +294,7 @@ function insertRowAt(at: number) {
   }
 
   &__insert {
-    @include focus-ring;
+    @include mixins.focus-ring;
     position: relative;
     z-index: 1;
     display: flex;
@@ -388,7 +388,7 @@ function insertRowAt(at: number) {
   &__move,
   &__duplicate,
   &__remove {
-    @include focus-ring;
+    @include mixins.focus-ring;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -428,7 +428,7 @@ function insertRowAt(at: number) {
   }
 
   &__add {
-    @include focus-ring;
+    @include mixins.focus-ring;
     align-self: flex-start;
     border: 1px solid var(--color-border);
     background: var(--color-surface);
@@ -450,7 +450,7 @@ function insertRowAt(at: number) {
   }
 
   &__live {
-    @include sr-only;
+    @include mixins.sr-only;
   }
 
   @media (prefers-reduced-motion: reduce) {

@@ -5,6 +5,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
+## [Unreleased]
+
+### Fixed
+
+- A consumer's global SCSS no longer breaks the build. Vite prepends
+  `css.preprocessorOptions.scss.additionalData` to *every* SCSS entry — the `<style lang="scss">` blocks
+  Kestrel ships included — so a design-system module forwarded `as *` lands in their global scope too.
+  Kestrel's stylesheets resolved their own mixins globally as well, which made a shared name ambiguous and
+  failed thirteen components with `This mixin is available from multiple global modules`; `focus-ring`,
+  `sr-only` and `input-base` are exactly the names a consumer's own system tends to define. Every shipped
+  stylesheet now reaches its members through the module namespace (`@include mixins.focus-ring`), so no
+  name a consumer injects can collide. The emitted CSS is unchanged. Projects that worked around this with
+  a `filename.includes('node_modules')` guard in `additionalData` no longer need it on Kestrel's account.
+
 ## [3.0.0] — 2026-08-19
 
 Every component Kestrel ships moves into a `Kestrel` namespace, so a consumer project can no longer

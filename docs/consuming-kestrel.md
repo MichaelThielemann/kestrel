@@ -226,7 +226,12 @@ export default defineCollection({
 >
 > **Styling is yours.** Kestrel's admin uses SCSS internally but ships `sass` and scopes its design system
 > to `/admin`, so it never touches your public site — use any CSS approach there (Bootstrap, Tailwind,
-> plain CSS) with no conflicts.
+> plain CSS) with no conflicts. That includes a global `vite.css.preprocessorOptions.scss.additionalData`:
+> Vite prepends it to *every* SCSS entry, Kestrel's shipped `<style lang="scss">` blocks included, so a
+> module you forward `as *` lands in their global scope too. Kestrel's own stylesheets reference every
+> member through its module namespace (`@include mixins.focus-ring`, never a bare `focus-ring`), so a
+> name you share with them — `focus-ring`, `sr-only`, `input-base` — stays unambiguous and the build is
+> unaffected. No `filename.includes('node_modules')` guard is needed on Kestrel's account.
 
 ### Page-like collections (rendered to static HTML)
 

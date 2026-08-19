@@ -87,6 +87,6 @@ const value = computed<DateValue | undefined>({
 
 <style lang="scss">
 // Shared, global (non-scoped) datepicker chrome — the calendar is teleported to <body>.
-@use '../../assets/scss/datepicker' as *;
-@include ui-datepicker;
+@use '../../assets/scss/datepicker';
+@include datepicker.ui-datepicker;
 </style>

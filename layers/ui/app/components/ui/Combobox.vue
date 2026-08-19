@@ -197,7 +197,7 @@ function moveChip(from: number, to: number) {
 </template>
 
 <style lang="scss">
-@use '../../assets/scss/mixins' as *;
+@use '../../assets/scss/mixins';
 
 .ui-combobox {
   &__anchor {
@@ -232,7 +232,7 @@ function moveChip(from: number, to: number) {
     font-size: var(--text-sm);
   }
   &__chip-remove {
-    @include focus-ring;
+    @include mixins.focus-ring;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -246,7 +246,7 @@ function moveChip(from: number, to: number) {
     line-height: 1;
   }
   &__chip-move {
-    @include focus-ring;
+    @include mixins.focus-ring;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -269,7 +269,7 @@ function moveChip(from: number, to: number) {
 
     &:disabled { cursor: default; } // stays collapsed (the reveal selector excludes :disabled)
   }
-  &__live { @include sr-only; }
+  &__live { @include mixins.sr-only; }
   &__chip {
     &:hover,
     &:focus-within {
@@ -302,7 +302,7 @@ function moveChip(from: number, to: number) {
     padding: var(--space-1) 0;
   }
   &__icon {
-    @include focus-ring;
+    @include mixins.focus-ring;
     border: 0;
     background: transparent;
     cursor: pointer;

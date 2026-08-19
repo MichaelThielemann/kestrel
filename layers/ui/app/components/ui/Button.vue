@@ -29,10 +29,10 @@ withDefaults(
 </template>
 
 <style lang="scss">
-@use '../../assets/scss/mixins' as *;
+@use '../../assets/scss/mixins';
 
 .ui-button {
-  @include focus-ring;
+  @include mixins.focus-ring;
   display: inline-flex;
   align-items: center;
   justify-content: center;

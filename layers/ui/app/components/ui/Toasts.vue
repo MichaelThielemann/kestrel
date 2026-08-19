@@ -39,9 +39,9 @@ const { t } = useT()
 </template>
 
 <style lang="scss">
-@use '../../assets/scss/mixins' as *;
+@use '../../assets/scss/mixins';
 
-.ui-toasts__live { @include sr-only; }
+.ui-toasts__live { @include mixins.sr-only; }
 
 .ui-toasts {
   position: fixed;
@@ -76,7 +76,7 @@ const { t } = useT()
   &__msg { flex: 1 1 auto; min-width: 0; }
 
   &__close {
-    @include focus-ring;
+    @include mixins.focus-ring;
     flex-shrink: 0;
     display: inline-flex;
     padding: var(--space-1);
