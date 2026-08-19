@@ -23,7 +23,7 @@ const heroImage = computed(() => (props.media as { image?: ResolvedMedia } | und
     <h1 v-if="heading">{{ heading }}</h1>
     <!-- The hero image is the conventional above-the-fold LCP element: load it eagerly and tell the browser
          its rendered width is the full viewport so phones don't over-fetch the largest srcset. -->
-    <MediaImage v-if="heroImage" :media="heroImage" :priority="true" sizes="100vw" />
+    <KestrelMediaImage v-if="heroImage" :media="heroImage" :priority="true" sizes="100vw" />
     <slot />
     <KestrelLink v-if="cta" :value="cta" class="block-hero__cta" />
   </section>

@@ -8,8 +8,8 @@ import BlockFields from './BlockFields.vue'
 const cardDef = {
   name: 'card', label: 'Card',
   fields: {
-    title: { type: 'text', required: true, translatable: false, unique: false },
-    count: { type: 'number', required: false, translatable: false, unique: false },
+    title: { type: 'text', required: true, unique: false },
+    count: { type: 'number', required: false, unique: false },
   },
 } as unknown as SerializedBlock
 
@@ -44,8 +44,8 @@ describe('BlockFields', () => {
     const def = {
       name: 'media', label: 'Media',
       fields: {
-        format: { type: 'text', required: false, translatable: false, unique: false },
-        alt: { type: 'text', required: false, translatable: false, unique: false, condition: { field: 'format', is: 'image' } },
+        format: { type: 'text', required: false, unique: false },
+        alt: { type: 'text', required: false, unique: false, condition: { field: 'format', is: 'image' } },
       },
     } as unknown as SerializedBlock
 

@@ -10,19 +10,19 @@ const title = computed(() => props.type === 'move' ? t('media.conflictTitleMove'
 </script>
 
 <template>
-  <UiDialog :open="open" :title="title" @update:open="(v) => emit('update:open', v)">
+  <KestrelUiDialog :open="open" :title="title" @update:open="(v) => emit('update:open', v)">
     <p>{{ t('media.conflictItems', { count: conflicts.length, dest: dest || t('media.rootFolder') }) }}</p>
     <ul class="media-conflict__list">
       <li v-for="c in conflicts" :key="c.targetPath">{{ c.targetPath }} — {{ c.type === 'folder-exists' ? t('media.conflictFolderExists') : t('media.conflictFileExists') }}</li>
     </ul>
-    <UiAlert v-if="error" variant="error">{{ error }}</UiAlert>
+    <KestrelUiAlert v-if="error" variant="error">{{ error }}</KestrelUiAlert>
     <template #footer>
-      <UiButton :disabled="busy" @click="emit('update:open', false)">{{ t('common.cancel') }}</UiButton>
-      <UiButton :disabled="busy" @click="emit('resolve', 'skip')">{{ t('media.skip') }}</UiButton>
-      <UiButton :disabled="busy" @click="emit('resolve', 'overwrite')">{{ t('media.replace') }}</UiButton>
-      <UiButton variant="primary" :disabled="busy" @click="emit('resolve', 'rename')">{{ t('media.keepBoth') }}</UiButton>
+      <KestrelUiButton :disabled="busy" @click="emit('update:open', false)">{{ t('common.cancel') }}</KestrelUiButton>
+      <KestrelUiButton :disabled="busy" @click="emit('resolve', 'skip')">{{ t('media.skip') }}</KestrelUiButton>
+      <KestrelUiButton :disabled="busy" @click="emit('resolve', 'overwrite')">{{ t('media.replace') }}</KestrelUiButton>
+      <KestrelUiButton variant="primary" :disabled="busy" @click="emit('resolve', 'rename')">{{ t('media.keepBoth') }}</KestrelUiButton>
     </template>
-  </UiDialog>
+  </KestrelUiDialog>
 </template>
 
 <style lang="scss" scoped>

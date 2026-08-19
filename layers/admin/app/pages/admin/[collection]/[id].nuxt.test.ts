@@ -8,13 +8,13 @@ import RecordPage from './[id].vue'
 const thingsSchema = {
   name: 'things', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: 'Thing', plural: 'Things' },
-  fields: { title: { type: 'text', required: true, translatable: false, unique: false } },
+  fields: { title: { type: 'text', required: true, unique: false } },
 }
 // Carries an explicit `label.new` — the create heading must use it verbatim, not the generic template.
 const articlesSchema = {
   name: 'articles', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: 'Article', plural: 'Articles', new: 'Compose article' },
-  fields: { title: { type: 'text', required: true, translatable: false, unique: false } },
+  fields: { title: { type: 'text', required: true, unique: false } },
 }
 registerEndpoint('/api/collections', () => ({ data: [thingsSchema, articlesSchema] }))
 registerEndpoint('/api/articles', () => ({ data: [], total: 0, page: 1, perPage: 25 }))

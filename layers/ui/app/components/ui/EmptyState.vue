@@ -6,7 +6,7 @@ defineProps<{ icon?: IconName; title: string; description?: string }>()
 
 <template>
   <div class="ui-empty">
-    <UiIcon v-if="icon" :name="icon" size="1.5rem" class="ui-empty__icon" />
+    <KestrelUiIcon v-if="icon" :name="icon" size="1.5rem" class="ui-empty__icon" />
     <p class="ui-empty__title">{{ title }}</p>
     <p v-if="description" class="ui-empty__desc">{{ description }}</p>
     <div v-if="$slots.action" class="ui-empty__action"><slot name="action" /></div>

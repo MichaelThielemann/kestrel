@@ -17,8 +17,8 @@ Object.assign(globalThis, {
   useDragReorder,
 })
 
-// Same gap for auto-imported components: a component whose template renders <UiIcon> resolves it to
+// Same gap for auto-imported components: a component whose template renders <KestrelUiIcon> resolves it to
 // nothing here, so the icon is missing from the rendered output and Vue logs a resolve warning on every
 // mount. Register the real primitive under its Nuxt-derived name — add a line here for any further
-// `Ui*` primitive that ends up nested inside a dom-tested component.
-Object.assign(config.global.components, { UiIcon })
+// `KestrelUi*` primitive that ends up nested inside a dom-tested component.
+Object.assign(config.global.components, { KestrelUiIcon: UiIcon })

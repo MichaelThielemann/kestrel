@@ -8,8 +8,8 @@ registerEndpoint('/api/collections', () => {
   calls++
   return {
     data: [
-      { name: 'posts', mode: 'multi', translatable: true, pageLike: false, seo: false, status: true, blocks: { enabled: false }, label: { singular: 'Post', plural: 'Posts' }, fields: { title: { type: 'text', required: true, translatable: false, unique: false } } },
-      { name: 'settings', mode: 'single', translatable: true, pageLike: false, seo: false, status: false, blocks: { enabled: false }, fields: { data: { type: 'json', required: false, translatable: false, unique: false } } },
+      { name: 'posts', mode: 'multi', translatable: true, pageLike: false, seo: false, status: true, blocks: { enabled: false }, label: { singular: 'Post', plural: 'Posts' }, fields: { title: { type: 'text', required: true, unique: false } } },
+      { name: 'settings', mode: 'single', translatable: true, pageLike: false, seo: false, status: false, blocks: { enabled: false }, fields: { data: { type: 'json', required: false, unique: false } } },
     ],
   }
 })

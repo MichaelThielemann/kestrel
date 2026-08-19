@@ -17,16 +17,16 @@ function submit() { if (canRename.value && !props.busy) emit('rename', draft.val
 </script>
 
 <template>
-  <UiDialog :open="open" :title="t('media.rename')" @update:open="(v) => emit('update:open', v)">
-    <UiField :label="t('media.newName')">
+  <KestrelUiDialog :open="open" :title="t('media.rename')" @update:open="(v) => emit('update:open', v)">
+    <KestrelUiField :label="t('media.newName')">
       <template #default="f">
-        <UiTextInput v-model="draft" v-bind="f" @keydown.enter="submit" />
+        <KestrelUiTextInput v-model="draft" v-bind="f" @keydown.enter="submit" />
       </template>
-    </UiField>
-    <UiAlert v-if="error" variant="error">{{ error }}</UiAlert>
+    </KestrelUiField>
+    <KestrelUiAlert v-if="error" variant="error">{{ error }}</KestrelUiAlert>
     <template #footer>
-      <UiButton :disabled="busy" @click="emit('update:open', false)">{{ t('common.cancel') }}</UiButton>
-      <UiButton variant="primary" :disabled="busy || !canRename" @click="submit">{{ t('media.rename') }}</UiButton>
+      <KestrelUiButton :disabled="busy" @click="emit('update:open', false)">{{ t('common.cancel') }}</KestrelUiButton>
+      <KestrelUiButton variant="primary" :disabled="busy || !canRename" @click="submit">{{ t('media.rename') }}</KestrelUiButton>
     </template>
-  </UiDialog>
+  </KestrelUiDialog>
 </template>

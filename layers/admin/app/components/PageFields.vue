@@ -3,7 +3,7 @@ import type { FieldDef } from '../../../core/server/utils/defineCollection'
 import type { LayoutNode } from '../../../core/server/utils/field-layout'
 import type { SeoMeta } from '../../../core/server/utils/seo'
 
-// The collection (page) field list — delegates to the shared <FieldLayout> renderer (rows / groups /
+// The collection (page) field list — delegates to the shared <KestrelFieldLayout> renderer (rows / groups /
 // widths, or one field per row when the collection declares no layout), shared by the flat-collection
 // form and the 3-pane editor's root-selected pane so the wiring lives in exactly one place. pageLike
 // collections also get their routable `path` (slug); seo-enabled ones get the SEO section — both as
@@ -45,14 +45,14 @@ const slugPlaceholder = computed(() => {
 <template>
   <!-- Publish gate (the `status` system column). The primary page-level control, so it leads the pane:
        Draft keeps the page out of the generated site; Published renders + auto-publishes it. -->
-  <UiField
+  <KestrelUiField
     v-if="status"
     class="page-settings__status"
     :label="t('pageSettings.statusLabel')"
     :hint="t('pageSettings.statusHint')"
   >
     <template #default="f">
-      <UiSelect
+      <KestrelUiSelect
         :model-value="(values.status as string) ?? 'draft'"
         :options="[
           { label: t('pageSettings.statusDraft'), value: 'draft' },
@@ -63,11 +63,11 @@ const slugPlaceholder = computed(() => {
         @update:model-value="(v) => emit('update', 'status', v)"
       />
     </template>
-  </UiField>
+  </KestrelUiField>
 
   <!-- The collection (page) fields, laid out by the shared renderer (rows / groups / widths, or one field
        per row when the collection declares no `fieldLayout`). The condition gate + dead-ref note live inside. -->
-  <FieldLayout
+  <KestrelFieldLayout
     :layout="fieldLayout"
     :fields="fields"
     :values="values"
@@ -79,7 +79,7 @@ const slugPlaceholder = computed(() => {
   />
 
   <!-- Page slug (the routable path). A system column on pageLike collections, edited like a field. -->
-  <UiField
+  <KestrelUiField
     v-if="pageLike"
     class="page-settings__slug"
     :label="t('pageSettings.slugLabel')"
@@ -87,7 +87,7 @@ const slugPlaceholder = computed(() => {
     :error="errors.path || null"
   >
     <template #default="f">
-      <UiTextInput
+      <KestrelUiTextInput
         :model-value="(values.path as string) ?? ''"
         :disabled="disabled"
         :placeholder="slugPlaceholder"
@@ -95,11 +95,11 @@ const slugPlaceholder = computed(() => {
         @update:model-value="(v) => emit('update', 'path', v)"
       />
     </template>
-  </UiField>
+  </KestrelUiField>
 
   <!-- Which layout renders this page (the `layout` system column). Empty = the `default` layout, so an
        unset value keeps rendering exactly as a project without the column. -->
-  <UiField
+  <KestrelUiField
     v-if="showLayout"
     class="page-settings__layout"
     :label="t('pageSettings.layoutLabel')"
@@ -107,7 +107,7 @@ const slugPlaceholder = computed(() => {
     :error="errors.layout || null"
   >
     <template #default="f">
-      <UiSelect
+      <KestrelUiSelect
         :model-value="(values.layout as string) ?? ''"
         :options="layoutOptions"
         :disabled="disabled"
@@ -115,10 +115,10 @@ const slugPlaceholder = computed(() => {
         @update:model-value="(v) => emit('update', 'layout', v)"
       />
     </template>
-  </UiField>
+  </KestrelUiField>
 
   <!-- Page SEO (meta title/description/noindex + Google preview). The `seo` JSON system column. -->
-  <SeoFields
+  <KestrelSeoFields
     v-if="seo"
     :value="(values.seo as SeoMeta) ?? {}"
     :page-title="(values.title as string) ?? ''"

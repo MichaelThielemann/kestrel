@@ -23,7 +23,7 @@ export interface FieldFactoryResult<C = unknown> {
 
 // Keys that belong on the FieldDef itself (not inside `options`); everything else a factory receives is a
 // type-specific option. Mirrors `BaseFieldDef` in defineCollection.ts.
-const BASE_KEYS = new Set(['required', 'translatable', 'unique', 'label', 'default', 'condition', 'renamedFrom', 'populate'])
+const BASE_KEYS = new Set(['required', 'unique', 'label', 'default', 'condition', 'renamedFrom', 'populate'])
 
 function partition(opts: Record<string, unknown>): { base: Record<string, unknown>; options: Record<string, unknown> } {
   const base: Record<string, unknown> = {}

@@ -117,7 +117,7 @@ function filterFn(item: unknown): boolean {
     <template #file-overlay="{ file }">
       <span v-for="c in colorsFor(file)" :key="c" :style="dotStyle(c)" :title="`Marked ${c}`" />
       <span v-if="commentCount(file)" :style="bubbleStyle" :title="`${commentCount(file)} comment(s)`">
-        <UiIcon name="message-square" :size="11" /> {{ commentCount(file) }}
+        <KestrelUiIcon name="message-square" :size="11" /> {{ commentCount(file) }}
       </span>
     </template>
 
@@ -126,7 +126,7 @@ function filterFn(item: unknown): boolean {
       <template v-if="colorsFor(file).length || commentCount(file)">
         <span v-for="c in colorsFor(file)" :key="c" :style="{ ...dotStyle(c), display: 'inline-block', verticalAlign: 'middle', marginInlineEnd: '3px' }" :title="`Marked ${c}`" />
         <span v-if="commentCount(file)" :style="{ ...bubbleStyle, marginInlineEnd: '6px', verticalAlign: 'middle' }">
-          <UiIcon name="message-square" :size="11" /> {{ commentCount(file) }}
+          <KestrelUiIcon name="message-square" :size="11" /> {{ commentCount(file) }}
         </span>
       </template>
     </template>

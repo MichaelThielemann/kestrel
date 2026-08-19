@@ -6,7 +6,7 @@ const { t } = useT()
 <template>
   <section class="media-page">
     <h1 class="media-page__title">{{ t('media.title') }}</h1>
-    <MediaLibrary />
+    <KestrelMediaLibrary />
   </section>
 </template>
 

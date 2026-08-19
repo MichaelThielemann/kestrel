@@ -5,6 +5,54 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
+## [Unreleased]
+
+Every component Kestrel ships moves into a `Kestrel` namespace, so a consumer project can no longer
+replace an admin component by accident — and gets one deliberate way to replace one on purpose.
+
+> ### ⚠ Breaking — component names
+>
+> A project whose own design system followed the conventional `app/components/ui/` layout was silently
+> overriding Kestrel's admin components: `app/components/ui/Icon.vue` and Kestrel's own resolved to the
+> same global name `UiIcon`, and Nuxt gives the consumer's app directory the higher priority. The admin
+> broke with no error.
+>
+> **Every shipped component is now prefixed:** `UiButton` → `KestrelUiButton`, `FieldText` →
+> `KestrelFieldText`, `CollectionList` → `KestrelCollectionList`, `MediaGrid` → `KestrelMediaGrid`.
+> Components that already carried the prefix keep their exact name — `KestrelImg`, `KestrelLink` and
+> `KestrelPreviewBridge` are unchanged, as is the `Blocks*` namespace for your own block components.
+>
+> **Action required** only if you referenced a Kestrel component in your own templates: add the prefix.
+> Two consumer-visible names change beyond that rule — `BlockRenderer` → `KestrelBlockRenderer` and
+> `MediaImage` → `KestrelMediaImage` (the latter appears in the starter's `Hero.vue`; it remains demo
+> scaffolding rather than supported surface).
+>
+> **Your own component names are now yours alone.** `UiButton`, `UiIcon` and every other generic name
+> are free for your site to use.
+
+### Added
+
+- `app/Kestrel/components/` — the one supported way to replace a shipped admin component. A file there
+  mirroring Kestrel's own path (`app/Kestrel/components/ui/Button.vue`) outranks the layer's; anywhere
+  else loses. Documented in [consuming-kestrel.md](docs/consuming-kestrel.md).
+- [docs/field-types.md](docs/field-types.md) — a reference for all twelve built-in field types: every
+  option, the column it becomes, and whether the server enforces it or it only configures the widget.
+  Covers what was previously undocumented, including the `json` type, `text.multiline`,
+  `number.decimals`/`unit`, `datetime.precision`/`range`, `choice.display`, `link.types`,
+  `media.accept` and `relation.labelField`.
+
+### Removed
+
+- `translatable` on a **field**. It was accepted, serialized to the admin and read by nothing — present
+  since the first public release without ever taking effect. Per-locale content is, and remains,
+  `translatable` on the **collection**. Setting it on a field is now a type error rather than a silent
+  no-op; delete the line. Sharing a single field across a collection's locales was never implemented and
+  is tracked separately.
+
+### Changed
+
+- Kestrel's component directories are registered with an explicit priority above the consumer's app
+  directory, so a name inside the `Kestrel` namespace cannot be claimed from outside the override seam.
 ## [2.1.0] — 2026-08-14
 
 Three additive, independently opt-in features. Nothing was removed and no API changed, but two new

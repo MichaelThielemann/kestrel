@@ -272,11 +272,11 @@ onUnmounted(() => {
 
     <!-- The editor body is chosen by the collection's `editor` type (fields · blocks · an extension). -->
     <component :is="bodyComponent" v-if="bodyComponent" />
-    <EditorUnsupported v-else :editor="editorType" />
+    <KestrelEditorUnsupported v-else :editor="editorType" />
 
     <div v-if="actions" class="editor__actions">
-      <UiButton type="submit" variant="primary" icon="check" :loading="saving">{{ t('common.save') }}</UiButton>
-      <UiButton type="button" variant="secondary" icon="x" :disabled="saving" @click="emit('cancel')">{{ t('common.cancel') }}</UiButton>
+      <KestrelUiButton type="submit" variant="primary" icon="check" :loading="saving">{{ t('common.save') }}</KestrelUiButton>
+      <KestrelUiButton type="button" variant="secondary" icon="x" :disabled="saving" @click="emit('cancel')">{{ t('common.cancel') }}</KestrelUiButton>
     </div>
   </form>
 </template>

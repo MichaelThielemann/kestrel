@@ -6,7 +6,7 @@ export interface Toast { id: number; type: ToastType; message: string }
 /**
  * Transient notification queue: `push` returns an id, auto-expires after `timeout` (0 = sticky),
  * and the queue is capped (oldest dropped). Pure factory so the logic is unit-testable; `useToast`
- * shares one instance app-wide. The teleported `<UiToasts>` container renders `items`.
+ * shares one instance app-wide. The teleported `<KestrelUiToasts>` container renders `items`.
  */
 export function createToastStore(opts: { limit?: number; defaultTimeout?: number } = {}) {
   const limit = opts.limit ?? 4

@@ -1,6 +1,6 @@
-// components are NOT auto-imported in a plugin's script context — pull FieldMedia from #components
-import { FieldMedia } from '#components'
+// components are NOT auto-imported in a plugin's script context — pull KestrelFieldMedia from #components
+import { KestrelFieldMedia } from '#components'
 
 export default defineNuxtPlugin(() => {
-  registerFieldComponent('media', FieldMedia)
+  registerFieldComponent('media', KestrelFieldMedia)
 })

@@ -6,9 +6,9 @@ import type { BlockRow, BlockTreeCtx } from '../utils/block-tree'
 import BlockTree from './BlockTree.vue'
 
 const defs = [
-  { name: 'card', label: 'Card', icon: 'image', fields: { title: { type: 'text', required: true, translatable: false, unique: false } } },
-  { name: 'note', label: 'Note', fields: { text: { type: 'text', required: false, translatable: false, unique: false } } },
-  { name: 'section', label: 'Section', slots: ['default'], fields: { title: { type: 'text', required: true, translatable: false, unique: false } } },
+  { name: 'card', label: 'Card', icon: 'image', fields: { title: { type: 'text', required: true, unique: false } } },
+  { name: 'note', label: 'Note', fields: { text: { type: 'text', required: false, unique: false } } },
+  { name: 'section', label: 'Section', slots: ['default'], fields: { title: { type: 'text', required: true, unique: false } } },
 ] as unknown as SerializedBlock[]
 const byName = Object.fromEntries(defs.map((d) => [d.name, d]))
 

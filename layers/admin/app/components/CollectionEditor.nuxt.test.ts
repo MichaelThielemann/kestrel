@@ -10,31 +10,31 @@ const schema = {
   name: 'things', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false },
   fields: {
-    title: { type: 'text', required: true, translatable: false, unique: false },
-    subtitle: { type: 'text', required: false, translatable: false, unique: false },
+    title: { type: 'text', required: true, unique: false },
+    subtitle: { type: 'text', required: false, unique: false },
   },
 }
 const pagesSchema = {
   name: 'pages', mode: 'multi', translatable: false, pageLike: true, seo: true, status: false,
   blocks: { enabled: true, allowed: ['hero', 'prose'] },
-  fields: { title: { type: 'text', required: true, translatable: false, unique: false } },
+  fields: { title: { type: 'text', required: true, unique: false } },
 }
 const articlesSchema = {
   name: 'articles', mode: 'multi', translatable: true, pageLike: false, seo: false, status: false,
   blocks: { enabled: false },
-  fields: { title: { type: 'text', required: true, translatable: true, unique: false } },
+  fields: { title: { type: 'text', required: true, unique: false } },
 }
 // Blocks-enabled AND translatable: exercises the LocaleBar living inside the page-fields pane.
 const localpagesSchema = {
   name: 'localpages', mode: 'multi', translatable: true, pageLike: true, seo: false, status: false,
   blocks: { enabled: true, allowed: ['hero', 'prose'] },
-  fields: { title: { type: 'text', required: true, translatable: true, unique: false } },
+  fields: { title: { type: 'text', required: true, unique: false } },
 }
 // An explicit editor type with no registered body → the visible fallback panel.
 const widgetsSchema = {
   name: 'widgets', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, editor: 'node-graph',
-  fields: { title: { type: 'text', required: true, translatable: false, unique: false } },
+  fields: { title: { type: 'text', required: true, unique: false } },
 }
 registerEndpoint('/api/collections', () => ({ data: [schema, pagesSchema, articlesSchema, localpagesSchema, widgetsSchema] }))
 registerEndpoint('/api/blocks', () => ({

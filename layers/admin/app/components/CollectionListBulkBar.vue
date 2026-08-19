@@ -14,11 +14,11 @@ const { t } = useT()
     <span class="list__bulk-count">{{ t('list.selected', { n: count }) }}</span>
     <div class="list__bulk-actions">
       <template v-if="hasStatus">
-        <UiButton type="button" size="sm" variant="secondary" :disabled="busy" @click="emit('setStatus', 'published')">{{ t('list.bulkPublish') }}</UiButton>
-        <UiButton type="button" size="sm" variant="secondary" :disabled="busy" @click="emit('setStatus', 'draft')">{{ t('list.bulkUnpublish') }}</UiButton>
+        <KestrelUiButton type="button" size="sm" variant="secondary" :disabled="busy" @click="emit('setStatus', 'published')">{{ t('list.bulkPublish') }}</KestrelUiButton>
+        <KestrelUiButton type="button" size="sm" variant="secondary" :disabled="busy" @click="emit('setStatus', 'draft')">{{ t('list.bulkUnpublish') }}</KestrelUiButton>
       </template>
-      <UiButton type="button" size="sm" variant="danger" :disabled="busy" @click="emit('delete')">{{ t('list.bulkDelete') }}</UiButton>
-      <UiButton type="button" size="sm" variant="ghost" @click="emit('clear')">{{ t('list.clearSelection') }}</UiButton>
+      <KestrelUiButton type="button" size="sm" variant="danger" :disabled="busy" @click="emit('delete')">{{ t('list.bulkDelete') }}</KestrelUiButton>
+      <KestrelUiButton type="button" size="sm" variant="ghost" @click="emit('clear')">{{ t('list.clearSelection') }}</KestrelUiButton>
     </div>
   </div>
 </template>

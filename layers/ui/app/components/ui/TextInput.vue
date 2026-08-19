@@ -49,7 +49,7 @@ const inputType = computed(() => (revealable.value && revealed.value ? 'text' : 
       :aria-label="revealed ? t('input.hidePassword') : t('input.showPassword')"
       @click="revealed = !revealed"
     >
-      <UiIcon :name="revealed ? 'eye-off' : 'eye'" size="1.125rem" />
+      <KestrelUiIcon :name="revealed ? 'eye-off' : 'eye'" size="1.125rem" />
     </button>
   </div>
 </template>

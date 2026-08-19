@@ -8,7 +8,7 @@ import SingletonEditor from './SingletonEditor.vue'
 const settingsSchema = {
   name: 'settings', mode: 'single', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: 'Settings', plural: 'Settings' },
-  fields: { siteName: { type: 'text', required: false, translatable: false, unique: false } },
+  fields: { siteName: { type: 'text', required: false, unique: false } },
 }
 registerEndpoint('/api/collections', () => ({ data: [settingsSchema] }))
 

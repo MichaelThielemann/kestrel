@@ -212,8 +212,8 @@ onUnmounted(() => { ro?.disconnect(); ro = null })
 
       <div class="block-preview__tools">
         <div class="block-preview__group">
-          <UiTooltip>
-            <UiButton
+          <KestrelUiTooltip>
+            <KestrelUiButton
               type="button"
               variant="ghost"
               size="sm"
@@ -222,14 +222,14 @@ onUnmounted(() => { ro?.disconnect(); ro = null })
               @click="refresh"
             />
             <template #content>{{ t('preview.refresh') }}</template>
-          </UiTooltip>
+          </KestrelUiTooltip>
         </div>
 
         <span class="block-preview__sep" aria-hidden="true" />
 
         <div class="block-preview__group" role="group" :aria-label="t('preview.deviceLabel')">
-          <UiTooltip v-for="p in presets" :key="p.key">
-            <UiButton
+          <KestrelUiTooltip v-for="p in presets" :key="p.key">
+            <KestrelUiButton
               type="button"
               variant="ghost"
               size="sm"
@@ -240,7 +240,7 @@ onUnmounted(() => { ro?.disconnect(); ro = null })
               @click="selectPreset(p)"
             />
             <template #content>{{ t(p.label) }} · {{ p.w }} × {{ p.h === 'auto' ? t('preview.auto') : p.h }}</template>
-          </UiTooltip>
+          </KestrelUiTooltip>
         </div>
 
         <span class="block-preview__sep" aria-hidden="true" />
@@ -253,7 +253,7 @@ onUnmounted(() => { ro?.disconnect(); ro = null })
         <div class="block-preview__dims">
           <!-- Either axis can be 'Auto' (fills the pane): typing a number fixes it, clearing the field
                returns it to Auto. Height is Auto under the Desktop preset. -->
-          <UiNumberInput
+          <KestrelUiNumberInput
             slim
             class="block-preview__dim"
             :model-value="width === 'auto' ? null : width"
@@ -264,7 +264,7 @@ onUnmounted(() => { ro?.disconnect(); ro = null })
             @change="onDimCommit('w', $event)"
           />
           <span class="block-preview__x" aria-hidden="true">×</span>
-          <UiNumberInput
+          <KestrelUiNumberInput
             slim
             class="block-preview__dim"
             :model-value="height === 'auto' ? null : height"

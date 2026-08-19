@@ -111,24 +111,24 @@ async function confirmDelete() {
   <section class="record">
     <div class="record__head">
       <NuxtLink :to="listPath" class="record__back">
-        <UiIcon name="arrow-left" :size="16" />
+        <KestrelUiIcon name="arrow-left" :size="16" />
         <span>{{ t('editor.back', { collection: plural }) }}</span>
       </NuxtLink>
       <h1 class="record__title" :class="{ 'record__title--generic': !hasRecordTitle }">{{ heading }}</h1>
       <div class="record__actions">
-        <UiButton type="button" variant="ghost" size="sm" icon="undo" :disabled="saving || !editorRef?.canUndo" :title="t('history.undo')" :aria-label="t('history.undo')" @click="editorRef?.undo()" />
-        <UiButton type="button" variant="ghost" size="sm" icon="redo" :disabled="saving || !editorRef?.canRedo" :title="t('history.redo')" :aria-label="t('history.redo')" @click="editorRef?.redo()" />
-        <UiButton type="button" variant="ghost" size="sm" icon="external-link" :title="previewTitle" :aria-label="previewTitle" :loading="editorRef?.previewOpening" @click="editorRef?.openPreview()" />
-        <UiButton type="button" variant="secondary" size="sm" icon="x" :disabled="saving" @click="toList">{{ t('common.cancel') }}</UiButton>
-        <UiButton v-if="id !== 'new'" variant="danger" size="sm" icon="trash" :loading="deleting" @click="onDelete">{{ t('common.delete') }}</UiButton>
-        <UiButton type="submit" :form="EDITOR_FORM_ID" variant="primary" size="sm" icon="check" :loading="saving">{{ t('common.save') }}</UiButton>
+        <KestrelUiButton type="button" variant="ghost" size="sm" icon="undo" :disabled="saving || !editorRef?.canUndo" :title="t('history.undo')" :aria-label="t('history.undo')" @click="editorRef?.undo()" />
+        <KestrelUiButton type="button" variant="ghost" size="sm" icon="redo" :disabled="saving || !editorRef?.canRedo" :title="t('history.redo')" :aria-label="t('history.redo')" @click="editorRef?.redo()" />
+        <KestrelUiButton type="button" variant="ghost" size="sm" icon="external-link" :title="previewTitle" :aria-label="previewTitle" :loading="editorRef?.previewOpening" @click="editorRef?.openPreview()" />
+        <KestrelUiButton type="button" variant="secondary" size="sm" icon="x" :disabled="saving" @click="toList">{{ t('common.cancel') }}</KestrelUiButton>
+        <KestrelUiButton v-if="id !== 'new'" variant="danger" size="sm" icon="trash" :loading="deleting" @click="onDelete">{{ t('common.delete') }}</KestrelUiButton>
+        <KestrelUiButton type="submit" :form="EDITOR_FORM_ID" variant="primary" size="sm" icon="check" :loading="saving">{{ t('common.save') }}</KestrelUiButton>
         <!-- Publishing is its own decision: Save persists, Publish writes the static page (ADR-0008). -->
-        <UiButton v-if="editorRef?.canPublish !== false" type="button" variant="secondary" size="sm" icon="upload" :loading="editorRef?.publishing" :disabled="saving" @click="editorRef?.publish()">{{ t('common.publish') }}</UiButton>
-        <EditorStatus class="record__ampel" :dirty="editorRef?.dirty ?? false" :saving="saving" :has-status="editorRef?.hasStatus ?? false" :status="editorRef?.status" :saved-status="editorRef?.savedStatus" :page-like="editorRef?.pageLike ?? false" :live="editorRef?.live" />
+        <KestrelUiButton v-if="editorRef?.canPublish !== false" type="button" variant="secondary" size="sm" icon="upload" :loading="editorRef?.publishing" :disabled="saving" @click="editorRef?.publish()">{{ t('common.publish') }}</KestrelUiButton>
+        <KestrelEditorStatus class="record__ampel" :dirty="editorRef?.dirty ?? false" :saving="saving" :has-status="editorRef?.hasStatus ?? false" :status="editorRef?.status" :saved-status="editorRef?.savedStatus" :page-like="editorRef?.pageLike ?? false" :live="editorRef?.live" />
       </div>
     </div>
-    <CollectionEditor ref="editorRef" :collection="collection" :id="id" :form-id="EDITOR_FORM_ID" :locale-param="localeParam" :group="group" :actions="false" @saved="onSaved" />
-    <CollectionDeleteDialog
+    <KestrelCollectionEditor ref="editorRef" :collection="collection" :id="id" :form-id="EDITOR_FORM_ID" :locale-param="localeParam" :group="group" :actions="false" @saved="onSaved" />
+    <KestrelCollectionDeleteDialog
       :open="deleteOpen"
       :report="deleteReport"
       :busy="deleting"

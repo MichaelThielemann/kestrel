@@ -293,8 +293,8 @@ const localizedMenu = computed(() => menuItems.value.map((s) => ({
 <template>
   <!-- eslint-disable-next-line vuejs-accessibility/click-events-have-key-events, vuejs-accessibility/no-static-element-interactions -- @click.self clears selection as a mouse-only bulk convenience; Space-toggle on each MediaGrid/MediaTable item already gives keyboard users the same end state -->
   <section class="media-library" @click.self="lib.clear()" @dragenter="onDragEnter" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
-    <MediaPathBar :folder="folder" @navigate="lib.navigate" />
-    <MediaToolbar
+    <KestrelMediaPathBar :folder="folder" @navigate="lib.navigate" />
+    <KestrelMediaToolbar
       :view="view"
       :search="search"
       :disabled="!!error"
@@ -303,23 +303,23 @@ const localizedMenu = computed(() => menuItems.value.map((s) => ({
       @upload="onUpload"
       @new-folder="newFolderOpen = true"
     />
-    <UiMenu :items="localizedMenu" @select="onMenuSelect">
+    <KestrelUiMenu :items="localizedMenu" @select="onMenuSelect">
       <!-- @contextmenu.capture sets the menu target before Reka's own handler opens the menu, so menuItems is correct when the menu renders -->
       <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- contextmenu fires natively via Shift+F10/the Menu key when a MediaGrid/MediaTable item has focus, so this capture handler is already keyboard-reachable -->
       <div class="media-library__items" @contextmenu.capture="onContextMenu">
-        <UiAlert v-if="error" variant="error">{{ error }}</UiAlert>
+        <KestrelUiAlert v-if="error" variant="error">{{ error }}</KestrelUiAlert>
         <p v-else-if="!loading && !items.length" class="media-library__empty">{{ t('media.folderEmpty') }}</p>
-        <MediaGrid v-else-if="view === 'grid'" :items="items" :is-selected="isSelectedItem" :drop-target-path="dropFolder" :parent-path="parentPath" :up-label="t('media.parentFolder')" @navigate="lib.navigate" @select="onSelect" @open="onOpenItem" @dragstart="onItemDragStart" @dragend="onItemDragEnd" />
-        <MediaTable v-else :items="items" :is-selected="isSelectedItem" :drop-target-path="dropFolder" :sort="sort" :parent-path="parentPath" :up-label="t('media.parentFolder')" @navigate="lib.navigate" @select="onSelect" @open="onOpenItem" @sort="lib.setSort" @dragstart="onItemDragStart" @dragend="onItemDragEnd" />
+        <KestrelMediaGrid v-else-if="view === 'grid'" :items="items" :is-selected="isSelectedItem" :drop-target-path="dropFolder" :parent-path="parentPath" :up-label="t('media.parentFolder')" @navigate="lib.navigate" @select="onSelect" @open="onOpenItem" @dragstart="onItemDragStart" @dragend="onItemDragEnd" />
+        <KestrelMediaTable v-else :items="items" :is-selected="isSelectedItem" :drop-target-path="dropFolder" :sort="sort" :parent-path="parentPath" :up-label="t('media.parentFolder')" @navigate="lib.navigate" @select="onSelect" @open="onOpenItem" @sort="lib.setSort" @dragstart="onItemDragStart" @dragend="onItemDragEnd" />
       </div>
-    </UiMenu>
+    </KestrelUiMenu>
     <div v-if="hasMore" class="media-library__more">
-      <UiButton :disabled="loading" @click="lib.loadMore">{{ t('media.loadMore') }}</UiButton>
+      <KestrelUiButton :disabled="loading" @click="lib.loadMore">{{ t('media.loadMore') }}</KestrelUiButton>
     </div>
     <p v-if="!clipboardEmpty" class="media-library__clipboard">
       {{ clipboardCount }} {{ clipboardCount === 1 ? t('media.clipboardItem') : t('media.clipboardItems') }} {{ clipboard?.mode === 'cut' ? t('media.clipboardCut') : t('media.clipboardCopied') }}
-      <UiButton size="sm" :disabled="!!error" @click="onPaste(folder)">{{ t('media.pasteHere') }}</UiButton>
-      <UiButton size="sm" variant="ghost" @click="clearClipboard()">{{ t('media.clear') }}</UiButton>
+      <KestrelUiButton size="sm" :disabled="!!error" @click="onPaste(folder)">{{ t('media.pasteHere') }}</KestrelUiButton>
+      <KestrelUiButton size="sm" variant="ghost" @click="clearClipboard()">{{ t('media.clear') }}</KestrelUiButton>
     </p>
     <p v-if="active || counts.done || counts.error || counts.skipped" class="media-library__status">
       <span v-if="active">{{ t('media.uploading') }}</span>{{ counts.done }} {{ t('media.uploadUploaded') }}<span v-if="counts.error">, {{ counts.error }} {{ t('media.uploadFailed') }}</span><span v-if="counts.skipped">, {{ counts.skipped }} {{ t('media.uploadSkipped') }}</span>
@@ -327,20 +327,20 @@ const localizedMenu = computed(() => menuItems.value.map((s) => ({
     <p class="media-library__sr-status" role="status" aria-live="polite">{{ srStatus }}</p>
     <div v-if="pick" class="media-library__pickbar">
       <span>{{ selectedFileIds.length }} {{ t('media.selected') }}</span>
-      <UiButton variant="primary" :disabled="!selectedFileIds.length" @click="onConfirmPick">{{ t('media.useSelected') }}</UiButton>
-      <UiButton variant="ghost" @click="emit('cancel')">{{ t('common.cancel') }}</UiButton>
+      <KestrelUiButton variant="primary" :disabled="!selectedFileIds.length" @click="onConfirmPick">{{ t('media.useSelected') }}</KestrelUiButton>
+      <KestrelUiButton variant="ghost" @click="emit('cancel')">{{ t('common.cancel') }}</KestrelUiButton>
     </div>
-    <MediaUploadDialog
+    <KestrelMediaUploadDialog
       :conflicts="conflicts"
       :open="conflicts.length > 0"
       @resolve="upload.resolve"
       @resolve-all="upload.resolveAll"
       @update:open="(v) => { if (!v) upload.resolveAll('skip') }"
     />
-    <MediaNewFolderDialog v-model:open="newFolderOpen" @create="onCreateFolder" />
-    <MediaViewer :open="viewerOpen" :file="viewerFile" :busy="viewerBusy" :error="viewerError" @update:open="(v) => { viewerOpen = v }" @save="onSaveMeta" />
-    <UiAlert v-if="opError && !deleteOpen && !renameOpen" variant="error">{{ opError }}</UiAlert>
-    <MediaDeleteDialog
+    <KestrelMediaNewFolderDialog v-model:open="newFolderOpen" @create="onCreateFolder" />
+    <KestrelMediaViewer :open="viewerOpen" :file="viewerFile" :busy="viewerBusy" :error="viewerError" @update:open="(v) => { viewerOpen = v }" @save="onSaveMeta" />
+    <KestrelUiAlert v-if="opError && !deleteOpen && !renameOpen" variant="error">{{ opError }}</KestrelUiAlert>
+    <KestrelMediaDeleteDialog
       :open="deleteOpen"
       :report="deleteReport"
       :names="fileNames"
@@ -349,7 +349,7 @@ const localizedMenu = computed(() => menuItems.value.map((s) => ({
       @confirm="onConfirmDelete"
       @update:open="(v) => { if (!v) { deleteOpen = false; deleteReport = null } }"
     />
-    <MediaRenameDialog
+    <KestrelMediaRenameDialog
       :open="renameOpen"
       :name="renameName"
       :busy="opsBusy"
@@ -357,8 +357,8 @@ const localizedMenu = computed(() => menuItems.value.map((s) => ({
       @rename="onConfirmRename"
       @update:open="(v) => { if (!v) { renameOpen = false; renameTarget = null } }"
     />
-    <UiAlert v-if="relocateError && !conflictOpen" variant="error">{{ relocateError }}</UiAlert>
-    <MediaConflictDialog
+    <KestrelUiAlert v-if="relocateError && !conflictOpen" variant="error">{{ relocateError }}</KestrelUiAlert>
+    <KestrelMediaConflictDialog
       :open="conflictOpen"
       :conflicts="pasteConflicts"
       :type="pendingRelocate?.type ?? 'move'"

@@ -29,12 +29,12 @@ const listLocale = computed(() => (def?.translatable ? (localeParam.value || pri
     <p v-if="!def" class="collection__missing">{{ t('collection.unknown', { name: collection }) }}</p>
 
     <template v-else-if="def.mode === 'single'">
-      <SingletonEditor :collection="collection" :title="resolveLocalized(def.label?.singular, lang) ?? collection" :locale-param="localeParam" />
+      <KestrelSingletonEditor :collection="collection" :title="resolveLocalized(def.label?.singular, lang) ?? collection" :locale-param="localeParam" />
     </template>
 
     <template v-else>
       <h1 class="collection__title">{{ resolveLocalized(def.label?.plural, lang) ?? collection }}</h1>
-      <CollectionList :schema="def" :locale="listLocale" />
+      <KestrelCollectionList :schema="def" :locale="listLocale" />
     </template>
   </section>
 </template>

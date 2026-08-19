@@ -18,15 +18,15 @@ function onCreate() {
 </script>
 
 <template>
-  <UiDialog :open="open" :title="t('media.newFolder')" @update:open="(v) => emit('update:open', v)">
-    <UiField :label="t('media.folderName')">
+  <KestrelUiDialog :open="open" :title="t('media.newFolder')" @update:open="(v) => emit('update:open', v)">
+    <KestrelUiField :label="t('media.folderName')">
       <template #default="f">
-        <UiTextInput v-model="name" :placeholder="t('media.folderNamePlaceholder')" v-bind="f" @keydown.enter="onCreate" />
+        <KestrelUiTextInput v-model="name" :placeholder="t('media.folderNamePlaceholder')" v-bind="f" @keydown.enter="onCreate" />
       </template>
-    </UiField>
+    </KestrelUiField>
     <template #footer>
-      <UiButton @click="emit('update:open', false)">{{ t('common.cancel') }}</UiButton>
-      <UiButton variant="primary" :disabled="!name.trim()" @click="onCreate">{{ t('common.create') }}</UiButton>
+      <KestrelUiButton @click="emit('update:open', false)">{{ t('common.cancel') }}</KestrelUiButton>
+      <KestrelUiButton variant="primary" :disabled="!name.trim()" @click="onCreate">{{ t('common.create') }}</KestrelUiButton>
     </template>
-  </UiDialog>
+  </KestrelUiDialog>
 </template>

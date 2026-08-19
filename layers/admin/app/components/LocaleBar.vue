@@ -38,11 +38,11 @@ const { t } = useT()
         class="locale-bar__item locale-bar__btn"
         :to="`/admin/${collection}?locale=${loc}`"
         :aria-label="t('localeBar.editLocale', { loc: up(loc) })"
-      >{{ up(loc) }}<UiIcon name="pencil" :size="14" /></NuxtLink>
+      >{{ up(loc) }}<KestrelUiIcon name="pencil" :size="14" /></NuxtLink>
 
       <span v-else-if="existingId(loc) !== null" class="locale-bar__item">
-        <NuxtLink class="locale-bar__btn" :to="`/admin/${collection}/${existingId(loc)}?locale=${loc}`" :aria-label="t('localeBar.editLocale', { loc: up(loc) })">{{ up(loc) }}<UiIcon name="pencil" :size="14" /></NuxtLink>
-        <button type="button" class="locale-bar__btn locale-bar__btn--copy" :aria-label="t('localeBar.copyInto', { loc: up(loc), current: up(current) })" @click="emit('copyFrom', loc)"><UiIcon name="copy" :size="14" /></button>
+        <NuxtLink class="locale-bar__btn" :to="`/admin/${collection}/${existingId(loc)}?locale=${loc}`" :aria-label="t('localeBar.editLocale', { loc: up(loc) })">{{ up(loc) }}<KestrelUiIcon name="pencil" :size="14" /></NuxtLink>
+        <button type="button" class="locale-bar__btn locale-bar__btn--copy" :aria-label="t('localeBar.copyInto', { loc: up(loc), current: up(current) })" @click="emit('copyFrom', loc)"><KestrelUiIcon name="copy" :size="14" /></button>
       </span>
 
       <NuxtLink
@@ -50,7 +50,7 @@ const { t } = useT()
         class="locale-bar__item locale-bar__btn locale-bar__btn--add"
         :to="createLink(loc)"
         :aria-label="t('localeBar.createTranslation', { loc: up(loc) })"
-      >{{ up(loc) }}<UiIcon name="plus" :size="14" /></NuxtLink>
+      >{{ up(loc) }}<KestrelUiIcon name="plus" :size="14" /></NuxtLink>
     </template>
   </div>
 </template>

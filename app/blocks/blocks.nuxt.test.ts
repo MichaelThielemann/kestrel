@@ -6,8 +6,8 @@ import Prose from './Prose.vue'
 // Block SFCs use auto-imported field factories + defineBlock, so they mount only in a Nuxt context — this
 // test doubles as the check that that auto-import path works. MediaImage is stubbed to keep the image
 // assertion simple; KestrelLink resolves for real (the CTA rendering is genuine).
-const MediaImageStub = { name: 'MediaImage', props: ['media'], template: '<img class="stub" :src="media.src">' }
-const opts = { global: { stubs: { MediaImage: MediaImageStub } } }
+const MediaImageStub = { name: 'KestrelMediaImage', props: ['media'], template: '<img class="stub" :src="media.src">' }
+const opts = { global: { stubs: { KestrelMediaImage: MediaImageStub } } }
 
 describe('Hero block SFC', () => {
   it('renders the heading', async () => {

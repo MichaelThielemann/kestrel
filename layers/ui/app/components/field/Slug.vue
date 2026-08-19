@@ -25,7 +25,7 @@ function onBlur() {
 </script>
 
 <template>
-  <UiField :id="id" :label="name" :error="error ?? undefined">
+  <KestrelUiField :id="id" :label="name" :error="error ?? undefined">
     <template #default="f">
       <div class="field-slug" :data-prefixed="!!prefix">
         <span v-if="prefix" class="field-slug__prefix">{{ prefix }}</span>
@@ -43,7 +43,7 @@ function onBlur() {
         />
       </div>
     </template>
-  </UiField>
+  </KestrelUiField>
 </template>
 
 <style lang="scss" scoped>

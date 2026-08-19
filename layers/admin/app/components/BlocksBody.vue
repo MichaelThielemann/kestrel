@@ -69,7 +69,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       <div class="editor3__tree-head">
         <p class="editor3__pane-label">{{ t('blocks.treeLabel') }}</p>
       </div>
-      <BlockTree
+      <KestrelBlockTree
         root
         :blocks="tree.blocks.value"
         :selected-id="selectedId"
@@ -82,12 +82,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
     <aside class="editor3__preview" :aria-label="t('preview.ariaLabel')">
       <!-- The "Preview" pane label is folded into BlockPreview's own toolbar row (single-line header). -->
-      <BlockPreview :content="content" :locale="locale" :selected-id="selectedId" @select="tree.select" />
+      <KestrelBlockPreview :content="content" :locale="locale" :selected-id="selectedId" @select="tree.select" />
     </aside>
 
     <section class="editor3__fields" :aria-label="t('blocks.fieldsLabel')">
       <!-- A block is selected → its fields; otherwise the page (collection) fields + locale switcher. -->
-      <BlockFields
+      <KestrelBlockFields
         v-if="selectedBlock"
         :block="selectedBlock"
         :def="byName[selectedBlock.type]"
@@ -99,7 +99,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       />
       <template v-else>
         <p class="editor3__pane-label">{{ t('blocks.pageFields') }}</p>
-        <PageFieldsPane v-bind="ctx.pageFieldsBindings.value" v-on="ctx.pageFieldsHandlers" />
+        <KestrelPageFieldsPane v-bind="ctx.pageFieldsBindings.value" v-on="ctx.pageFieldsHandlers" />
       </template>
     </section>
   </div>

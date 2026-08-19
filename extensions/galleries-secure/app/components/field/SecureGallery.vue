@@ -551,7 +551,7 @@ defineExpose({ key, open })
 </script>
 
 <template>
-  <UiField :id="id" :label="name" :error="notice ?? error ?? undefined">
+  <KestrelUiField :id="id" :label="name" :error="notice ?? error ?? undefined">
     <template #default="f">
       <div class="secure-gallery">
         <template v-if="phase === 'create'">
@@ -563,30 +563,30 @@ defineExpose({ key, open })
             <div class="secure-gallery__field">
               <!-- keydown + prevent: Enter's default is the record form's implicit submission, which
                    would validate + save the whole record before a keyup handler ever ran. -->
-              <UiTextInput :id="f.id" v-model="password" type="password" placeholder="Password" autocomplete="new-password" :disabled="disabled || busy" @keydown.enter.prevent="create" />
+              <KestrelUiTextInput :id="f.id" v-model="password" type="password" placeholder="Password" autocomplete="new-password" :disabled="disabled || busy" @keydown.enter.prevent="create" />
             </div>
             <div class="secure-gallery__field">
-              <UiTextInput v-model="confirm" type="password" placeholder="Confirm password" aria-label="Confirm password" autocomplete="new-password" :disabled="disabled || busy" @keydown.enter.prevent="create" />
+              <KestrelUiTextInput v-model="confirm" type="password" placeholder="Confirm password" aria-label="Confirm password" autocomplete="new-password" :disabled="disabled || busy" @keydown.enter.prevent="create" />
             </div>
-            <UiButton type="button" variant="ghost" :disabled="disabled || busy" @click="suggest">Suggest</UiButton>
-            <UiButton type="button" variant="secondary" :disabled="disabled || busy" @click="create">Create</UiButton>
+            <KestrelUiButton type="button" variant="ghost" :disabled="disabled || busy" @click="suggest">Suggest</KestrelUiButton>
+            <KestrelUiButton type="button" variant="secondary" :disabled="disabled || busy" @click="create">Create</KestrelUiButton>
           </div>
           <p v-if="suggested" class="secure-gallery__note">Suggested password: <code class="secure-gallery__suggested">{{ suggested }}</code> — store it safely, it cannot be recovered.</p>
         </template>
 
         <template v-else-if="phase === 'locked'">
           <p v-if="damagedIndex" class="secure-gallery__conflict">
-            <UiIcon name="triangle-alert" size="0.875rem" />
+            <KestrelUiIcon name="triangle-alert" size="0.875rem" />
             The password is correct, but this gallery’s index file is damaged, so its photos can no longer be
             decrypted. You can rebuild the gallery with an empty index and start over.
-            <UiButton type="button" variant="secondary" :disabled="busy" @click="rebuildIndex">Rebuild empty index</UiButton>
+            <KestrelUiButton type="button" variant="secondary" :disabled="busy" @click="rebuildIndex">Rebuild empty index</KestrelUiButton>
           </p>
           <p class="secure-gallery__note">This gallery is encrypted. Enter its password to view and manage the images.</p>
           <div class="secure-gallery__row">
             <div class="secure-gallery__field">
-              <UiTextInput :id="f.id" v-model="password" type="password" placeholder="Password" autocomplete="current-password" :disabled="disabled || busy" @keydown.enter.prevent="unlock" />
+              <KestrelUiTextInput :id="f.id" v-model="password" type="password" placeholder="Password" autocomplete="current-password" :disabled="disabled || busy" @keydown.enter.prevent="unlock" />
             </div>
-            <UiButton type="button" variant="secondary" :disabled="disabled || busy" @click="unlock">Unlock</UiButton>
+            <KestrelUiButton type="button" variant="secondary" :disabled="disabled || busy" @click="unlock">Unlock</KestrelUiButton>
           </div>
         </template>
 
@@ -595,18 +595,18 @@ defineExpose({ key, open })
           <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- mouse-only progressive enhancement; the MediaToolbar "Upload" button below does the same add-files action via a real, keyboard-reachable <button> + hidden file input -->
           <div class="secure-gallery__explorer" :class="{ 'is-drag': dragActive }" @drop="onDrop" @dragover="onDragOver" @dragleave="onDragLeave">
             <p v-if="conflict" class="secure-gallery__conflict">
-              <UiIcon name="triangle-alert" size="0.875rem" />
+              <KestrelUiIcon name="triangle-alert" size="0.875rem" />
               This gallery was changed elsewhere, so the last save was refused. Nothing here is lost — merge in
               the current version to save. Do not close this tab before it succeeds.
-              <UiButton type="button" variant="secondary" :disabled="busy" @click="mergeStored">Reload &amp; merge</UiButton>
+              <KestrelUiButton type="button" variant="secondary" :disabled="busy" @click="mergeStored">Reload &amp; merge</KestrelUiButton>
             </p>
             <p v-if="damagedStored" class="secure-gallery__conflict">
-              <UiIcon name="triangle-alert" size="0.875rem" />
+              <KestrelUiIcon name="triangle-alert" size="0.875rem" />
               The stored index of this gallery is damaged, so the last save was refused. Nothing here is lost —
               restore this tab’s version over it to save. Do not close this tab before it succeeds.
-              <UiButton type="button" variant="secondary" :disabled="busy" @click="restoreOverDamaged">Restore this version</UiButton>
+              <KestrelUiButton type="button" variant="secondary" :disabled="busy" @click="restoreOverDamaged">Restore this version</KestrelUiButton>
             </p>
-            <MediaToolbar :view="view" :search="search" :disabled="disabled || busy" @update:view="view = $event" @update:search="search = $event" @upload="onUpload" @new-folder="onNewFolder" />
+            <KestrelMediaToolbar :view="view" :search="search" :disabled="disabled || busy" @update:view="view = $event" @update:search="search = $event" @upload="onUpload" @new-folder="onNewFolder" />
             <nav class="secure-gallery__crumbs" aria-label="Folder path">
               <button type="button" class="secure-gallery__crumb" :disabled="busy" @click="navigate('')">/</button>
               <template v-for="(c, i) in crumbs" :key="c.path">
@@ -616,33 +616,33 @@ defineExpose({ key, open })
               <!-- Optional extension toolbar (e.g. proofing colour filter). Empty by default. -->
               <slot name="toolbar" />
               <span class="secure-gallery__spacer" />
-              <UiButton v-if="selectedFolderPaths.length === 1 && !selectedBlobIds.length" type="button" variant="ghost" :disabled="busy" @click="onRenameFolder">Rename</UiButton>
-              <UiButton v-if="selectedBlobIds.length" type="button" variant="ghost" :disabled="busy" @click="onMoveFiles">Move ({{ selectedBlobIds.length }})</UiButton>
-              <UiButton v-if="selectedBlobIds.length || selectedFolderPaths.length" type="button" variant="ghost" :disabled="busy" @click="onDelete">
-                <UiIcon name="trash" size="0.875rem" /> Delete ({{ selectedBlobIds.length + selectedFolderPaths.length }})
-              </UiButton>
-              <UiButton type="button" variant="ghost" :disabled="busy" @click="lock"><UiIcon name="lock" size="0.875rem" /> Lock</UiButton>
+              <KestrelUiButton v-if="selectedFolderPaths.length === 1 && !selectedBlobIds.length" type="button" variant="ghost" :disabled="busy" @click="onRenameFolder">Rename</KestrelUiButton>
+              <KestrelUiButton v-if="selectedBlobIds.length" type="button" variant="ghost" :disabled="busy" @click="onMoveFiles">Move ({{ selectedBlobIds.length }})</KestrelUiButton>
+              <KestrelUiButton v-if="selectedBlobIds.length || selectedFolderPaths.length" type="button" variant="ghost" :disabled="busy" @click="onDelete">
+                <KestrelUiIcon name="trash" size="0.875rem" /> Delete ({{ selectedBlobIds.length + selectedFolderPaths.length }})
+              </KestrelUiButton>
+              <KestrelUiButton type="button" variant="ghost" :disabled="busy" @click="lock"><KestrelUiIcon name="lock" size="0.875rem" /> Lock</KestrelUiButton>
             </nav>
 
-            <MediaGrid v-if="view === 'grid'" :items="visibleItems" :is-selected="isSelected" :parent-path="parentPath" up-label=".." @navigate="navigate" @select="onSelect" @open="onOpen">
+            <KestrelMediaGrid v-if="view === 'grid'" :items="visibleItems" :is-selected="isSelected" :parent-path="parentPath" up-label=".." @navigate="navigate" @select="onSelect" @open="onOpen">
               <template #file-overlay="s"><slot name="file-overlay" v-bind="s" /></template>
-            </MediaGrid>
-            <MediaTable v-else :items="visibleItems" :is-selected="isSelected" :parent-path="parentPath" up-label=".." @navigate="navigate" @select="onSelect" @open="onOpen">
+            </KestrelMediaGrid>
+            <KestrelMediaTable v-else :items="visibleItems" :is-selected="isSelected" :parent-path="parentPath" up-label=".." @navigate="navigate" @select="onSelect" @open="onOpen">
               <template #file-badge="s"><slot name="file-badge" v-bind="s" /></template>
-            </MediaTable>
+            </KestrelMediaTable>
 
             <p v-if="!visibleItems.length" class="secure-gallery__note">This folder is empty — drag photos or whole folders here, or use “Add images”.</p>
             <p v-if="busy" class="secure-gallery__busy">Working…</p>
             <p v-if="dragActive" class="secure-gallery__drophint">Drop to add &amp; encrypt into this folder</p>
           </div>
-          <MediaViewer :open="viewerOpen" :file="viewerFile" :busy="viewerBusy" :error="viewerError"
+          <KestrelMediaViewer :open="viewerOpen" :file="viewerFile" :busy="viewerBusy" :error="viewerError"
             @update:open="viewerOpen = $event" @save="onSaveAlt">
             <template #extra="s"><slot name="viewer-extra" v-bind="s" /></template>
-          </MediaViewer>
+          </KestrelMediaViewer>
         </template>
       </div>
     </template>
-  </UiField>
+  </KestrelUiField>
 </template>
 
 <style lang="scss" scoped>

@@ -1,6 +1,9 @@
 import { fileURLToPath } from 'node:url'
 
+import { kestrelComponents } from '../core/modules/component-namespace/shared'
+
 export default defineNuxtConfig({
+  components: [kestrelComponents(import.meta.url)],
   modules: [
     fileURLToPath(new URL('./modules/prerender-routes/index.ts', import.meta.url)),
     fileURLToPath(new URL('./modules/prune-media/index.ts', import.meta.url)),

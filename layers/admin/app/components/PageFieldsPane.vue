@@ -13,7 +13,7 @@ const { t } = useT()
 <template>
   <div v-if="translatable" class="ui-field">
     <span class="ui-field__label">{{ t('localeBar.fieldLabel') }}</span>
-    <LocaleBar
+    <KestrelLocaleBar
       :collection="collection"
       :id="id"
       :mode="mode"
@@ -23,7 +23,7 @@ const { t } = useT()
       @copy-from="(loc) => emit('copyFrom', loc)"
     />
   </div>
-  <PageFields
+  <KestrelPageFields
     :fields="fields"
     :field-layout="fieldLayout"
     :values="values"

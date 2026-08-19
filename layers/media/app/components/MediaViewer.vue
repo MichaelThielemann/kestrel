@@ -63,7 +63,7 @@ function save() {
 </script>
 
 <template>
-  <UiDialog :open="open" size="xl" :title="file?.filename ?? ''" @update:open="(v) => emit('update:open', v)">
+  <KestrelUiDialog :open="open" size="xl" :title="file?.filename ?? ''" @update:open="(v) => emit('update:open', v)">
     <div v-if="file" class="media-viewer">
       <div class="media-viewer__preview">
         <img v-if="isImage" :src="file.src" :srcset="file.srcset" sizes="(max-width: 60rem) 100vw, 60rem" :alt="file.alt ?? file.filename" />
@@ -77,33 +77,33 @@ function save() {
           <div><dt>{{ t('mediaViewer.folder') }}</dt><dd>{{ file.folder || '/' }}</dd></div>
           <div><dt>{{ t('mediaViewer.uploaded') }}</dt><dd>{{ uploaded }}</dd></div>
         </dl>
-        <UiField v-if="isImage" :label="t('mediaViewer.alt')" :hint="t('mediaViewer.altHint')">
+        <KestrelUiField v-if="isImage" :label="t('mediaViewer.alt')" :hint="t('mediaViewer.altHint')">
           <template #default="f">
-            <UiTextInput v-model="alt" v-bind="f" @keydown.enter="save" />
+            <KestrelUiTextInput v-model="alt" v-bind="f" @keydown.enter="save" />
           </template>
-        </UiField>
+        </KestrelUiField>
         <div v-if="showAi" class="media-viewer__ai">
-          <UiField :label="t('mediaViewer.aiSourceTypeLabel')" :hint="t('mediaViewer.aiSourceTypeHint')">
+          <KestrelUiField :label="t('mediaViewer.aiSourceTypeLabel')" :hint="t('mediaViewer.aiSourceTypeHint')">
             <template #default="f">
-              <UiSelect v-model="aiSourceType" :options="aiSourceTypeOptions" v-bind="f" />
+              <KestrelUiSelect v-model="aiSourceType" :options="aiSourceTypeOptions" v-bind="f" />
             </template>
-          </UiField>
-          <UiField :label="t('mediaViewer.aiNote')" :hint="t('mediaViewer.aiNoteHint')">
+          </KestrelUiField>
+          <KestrelUiField :label="t('mediaViewer.aiNote')" :hint="t('mediaViewer.aiNoteHint')">
             <template #default="f">
-              <UiTextInput v-model="aiNote" v-bind="f" @keydown.enter="save" />
+              <KestrelUiTextInput v-model="aiNote" v-bind="f" @keydown.enter="save" />
             </template>
-          </UiField>
+          </KestrelUiField>
         </div>
-        <UiAlert v-if="error" variant="error">{{ error }}</UiAlert>
+        <KestrelUiAlert v-if="error" variant="error">{{ error }}</KestrelUiAlert>
         <!-- Optional per-file extra panel (e.g. proofing comments). Empty by default. -->
         <slot name="extra" :file="file" />
       </aside>
     </div>
     <template v-if="file" #footer>
-      <UiButton :disabled="busy" @click="emit('update:open', false)">{{ t('common.close') }}</UiButton>
-      <UiButton v-if="isImage" variant="primary" :disabled="busy || !dirty" @click="save">{{ t('common.save') }}</UiButton>
+      <KestrelUiButton :disabled="busy" @click="emit('update:open', false)">{{ t('common.close') }}</KestrelUiButton>
+      <KestrelUiButton v-if="isImage" variant="primary" :disabled="busy || !dirty" @click="save">{{ t('common.save') }}</KestrelUiButton>
     </template>
-  </UiDialog>
+  </KestrelUiDialog>
 </template>
 
 <style lang="scss" scoped>

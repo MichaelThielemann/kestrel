@@ -26,7 +26,7 @@ function fileMeta(f: LibraryFile): string {
       <button type="button" class="media-grid__tile media-grid__tile--folder" data-test="folder-up"
         :aria-label="upLabel" @click="emit('navigate', parentPath)">
         <span class="media-grid__thumb-wrap">
-          <span class="media-grid__thumb media-grid__thumb--folder" aria-hidden="true"><UiIcon name="folder" :size="40" /></span>
+          <span class="media-grid__thumb media-grid__thumb--folder" aria-hidden="true"><KestrelUiIcon name="folder" :size="40" /></span>
         </span>
         <span class="media-grid__name">..</span>
       </button>
@@ -42,7 +42,7 @@ function fileMeta(f: LibraryFile): string {
         @dragstart="(e) => emit('dragstart', item, e)"
         @dragend="emit('dragend')">
         <span class="media-grid__thumb-wrap">
-          <span class="media-grid__thumb media-grid__thumb--folder" aria-hidden="true"><UiIcon name="folder" :size="40" /></span>
+          <span class="media-grid__thumb media-grid__thumb--folder" aria-hidden="true"><KestrelUiIcon name="folder" :size="40" /></span>
           <span v-if="item.folder.size != null" class="media-grid__meta" aria-hidden="true">{{ humanizeSize(item.folder.size) }}</span>
         </span>
         <span class="media-grid__name">{{ item.folder.name }}</span>
@@ -60,7 +60,7 @@ function fileMeta(f: LibraryFile): string {
         <span class="media-grid__thumb-wrap">
           <!-- Show a thumbnail for any image WITH a source: media files carry `srcset` (responsive derivatives),
                while a consumer feeding object-URLs (e.g. the secure gallery) has only `src`. Non-images → badge. -->
-          <MediaThumb v-if="item.file.mime?.startsWith('image/') && (item.file.srcset || item.file.src)" class="media-grid__thumb"
+          <KestrelMediaThumb v-if="item.file.mime?.startsWith('image/') && (item.file.srcset || item.file.src)" class="media-grid__thumb"
             :src="item.file.src" :srcset="item.file.srcset" sizes="160px" :alt="item.file.alt ?? item.file.filename" :thumbhash="item.file.thumbhash" />
           <span v-else class="media-grid__badge" aria-hidden="true">{{ ext(item.file.filename) }}</span>
           <span class="media-grid__meta" aria-hidden="true">{{ fileMeta(item.file) }}</span>

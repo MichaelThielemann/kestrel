@@ -11,22 +11,22 @@ const { t } = useT()
 </script>
 
 <template>
-  <UiDialog :open="open" :title="t('common.delete')" @update:open="(v) => emit('update:open', v)">
+  <KestrelUiDialog :open="open" :title="t('common.delete')" @update:open="(v) => emit('update:open', v)">
     <p v-if="report">{{ t('list.deleteSummary', { n: report.count }) }}</p>
     <div v-if="report && report.referencedCount > 0" class="collection-delete__warn">
       <p>{{ t('list.deleteReferrersWarn', { n: report.referencedCount }) }}</p>
     </div>
     <!-- The referrer lookup FAILED (not "none found"): inbound links are unknown, so caution rather than
          imply a safe delete. Distinct from the reference warning above, which needs a successful check. -->
-    <UiAlert v-if="report && report.checked === false" variant="warning" class="collection-delete__caution">
+    <KestrelUiAlert v-if="report && report.checked === false" variant="warning" class="collection-delete__caution">
       {{ t('list.deleteRefsUnverified') }}
-    </UiAlert>
-    <UiAlert v-if="error" variant="error">{{ error }}</UiAlert>
+    </KestrelUiAlert>
+    <KestrelUiAlert v-if="error" variant="error">{{ error }}</KestrelUiAlert>
     <template #footer>
-      <UiButton variant="ghost" :disabled="busy" @click="emit('update:open', false)">{{ t('common.cancel') }}</UiButton>
-      <UiButton variant="danger" :disabled="busy" @click="emit('confirm')">{{ t('common.delete') }}</UiButton>
+      <KestrelUiButton variant="ghost" :disabled="busy" @click="emit('update:open', false)">{{ t('common.cancel') }}</KestrelUiButton>
+      <KestrelUiButton variant="danger" :disabled="busy" @click="emit('confirm')">{{ t('common.delete') }}</KestrelUiButton>
     </template>
-  </UiDialog>
+  </KestrelUiDialog>
 </template>
 
 <style lang="scss" scoped>

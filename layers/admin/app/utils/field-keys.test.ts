@@ -3,7 +3,7 @@ import { jsKey } from './field-keys'
 import type { SerializedField } from '../../../core/server/utils/serialize-collection'
 
 function f(partial: Partial<SerializedField> & Pick<SerializedField, 'type'>): SerializedField {
-  return { required: false, translatable: false, unique: false, ...partial }
+  return { required: false, unique: false, ...partial }
 }
 
 describe('jsKey', () => {

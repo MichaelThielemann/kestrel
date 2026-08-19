@@ -30,7 +30,7 @@ const { t } = useT()
         >
           <span class="ui-toast__msg">{{ toast.message }}</span>
           <button type="button" class="ui-toast__close" :aria-label="t('toast.dismiss')" @click="toasts.dismiss(toast.id)">
-            <UiIcon name="x" size="0.875rem" />
+            <KestrelUiIcon name="x" size="0.875rem" />
           </button>
         </div>
       </TransitionGroup>

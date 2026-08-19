@@ -29,7 +29,7 @@ const dims = (f: { width?: number; height?: number }) => (f.width && f.height ? 
       <tr v-if="parentPath != null" class="media-table__row media-table__row--up" data-test="row-folder-up"
         tabindex="0" :aria-label="upLabel"
         @click="emit('navigate', parentPath)" @keydown.enter.space.prevent="emit('navigate', parentPath)">
-        <td><span aria-hidden="true"><UiIcon name="folder" :size="15" /></span> ..</td>
+        <td><span aria-hidden="true"><KestrelUiIcon name="folder" :size="15" /></span> ..</td>
         <td>{{ t('media.typeFolder') }}</td><td>—</td><td>—</td>
       </tr>
       <tr v-for="item in items" :key="itemKey(item)" class="media-table__row"
@@ -46,7 +46,7 @@ const dims = (f: { width?: number; height?: number }) => (f.width && f.height ? 
         @dragstart="(e) => emit('dragstart', item, e)"
         @dragend="emit('dragend')">
         <template v-if="item.type === 'folder'">
-          <td><span aria-hidden="true"><UiIcon name="folder" :size="15" /></span> {{ item.folder.name }}</td>
+          <td><span aria-hidden="true"><KestrelUiIcon name="folder" :size="15" /></span> {{ item.folder.name }}</td>
           <td>{{ t('media.typeFolder') }}</td><td>{{ item.folder.size != null ? humanizeSize(item.folder.size) : '—' }}</td><td>—</td>
         </template>
         <template v-else>

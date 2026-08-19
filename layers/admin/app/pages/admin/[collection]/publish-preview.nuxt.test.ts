@@ -9,7 +9,7 @@ import RecordPage from './[id].vue'
 const pagesSchema = {
   name: 'pages', mode: 'multi', translatable: false, pageLike: true, seo: false, status: true,
   blocks: { enabled: false }, label: { singular: 'Page', plural: 'Pages' },
-  fields: { title: { type: 'text', required: true, translatable: false, unique: false } },
+  fields: { title: { type: 'text', required: true, unique: false } },
 }
 registerEndpoint('/api/collections', () => ({ data: [pagesSchema] }))
 

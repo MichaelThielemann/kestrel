@@ -5,32 +5,32 @@ import type { CollectionDef } from './defineCollection'
 describe('serializeField', () => {
   it('normalizes flags and passes through per-type options', () => {
     expect(serializeField({ type: 'text', required: true, options: { maxLength: 50, multiline: true } }))
-      .toEqual({ type: 'text', required: true, translatable: false, unique: false, options: { maxLength: 50, multiline: true } })
+      .toEqual({ type: 'text', required: true, unique: false, options: { maxLength: 50, multiline: true } })
   })
 
   it('serializes a relation field (collection + many + labelField)', () => {
     expect(serializeField({ type: 'relation', relation: { collection: 'pages', many: true, labelField: 'title' } }))
-      .toEqual({ type: 'relation', required: false, translatable: false, unique: false, relation: { collection: 'pages', many: true, labelField: 'title' } })
+      .toEqual({ type: 'relation', required: false, unique: false, relation: { collection: 'pages', many: true, labelField: 'title' } })
   })
 
   it('recurses into repeater sub-fields', () => {
     const out = serializeField({ type: 'repeater', options: { fields: { label: { type: 'text' }, count: { type: 'number' } } } })
     expect(out.options).toEqual({ fields: {
-      label: { type: 'text', required: false, translatable: false, unique: false },
-      count: { type: 'number', required: false, translatable: false, unique: false },
+      label: { type: 'text', required: false, unique: false },
+      count: { type: 'number', required: false, unique: false },
     } })
   })
 
   it('serializes flag-only field types (boolean, json) with no options/relation/default', () => {
     expect(serializeField({ type: 'boolean' }))
-      .toEqual({ type: 'boolean', required: false, translatable: false, unique: false })
+      .toEqual({ type: 'boolean', required: false, unique: false })
     expect(serializeField({ type: 'json' }))
-      .toEqual({ type: 'json', required: false, translatable: false, unique: false })
+      .toEqual({ type: 'json', required: false, unique: false })
   })
 
   it('passes through media options', () => {
     expect(serializeField({ type: 'media', options: { multiple: true, accept: 'image' } }))
-      .toEqual({ type: 'media', required: false, translatable: false, unique: false, options: { multiple: true, accept: 'image' } })
+      .toEqual({ type: 'media', required: false, unique: false, options: { multiple: true, accept: 'image' } })
   })
 
   it('passes through link options (types + collections) and omits them when absent', () => {
@@ -41,7 +41,7 @@ describe('serializeField', () => {
 
   it('omits labelField, defaults many=false, and marks a bare relation single', () => {
     expect(serializeField({ type: 'relation', relation: { collection: 'posts' } }))
-      .toEqual({ type: 'relation', required: false, translatable: false, unique: false, single: true, relation: { collection: 'posts', many: false } })
+      .toEqual({ type: 'relation', required: false, unique: false, single: true, relation: { collection: 'posts', many: false } })
   })
 
   it('passes through choice multiple + display', () => {
@@ -76,9 +76,9 @@ describe('serializeField', () => {
       items: { type: 'repeater', options: { fields: { name: { type: 'text', required: true } } } },
     } } })
     expect(out.options).toEqual({ fields: {
-      gallery: { type: 'media', required: false, translatable: false, unique: false, options: { multiple: true } },
-      items: { type: 'repeater', required: false, translatable: false, unique: false, options: { fields: {
-        name: { type: 'text', required: true, translatable: false, unique: false },
+      gallery: { type: 'media', required: false, unique: false, options: { multiple: true } },
+      items: { type: 'repeater', required: false, unique: false, options: { fields: {
+        name: { type: 'text', required: true, unique: false },
       } } },
     } })
   })
@@ -139,8 +139,8 @@ describe('serializeCollection', () => {
       label: { singular: 'Page', plural: 'Pages' },
       icon: 'file-text',
       fields: {
-        title: { type: 'text', required: true, translatable: false, unique: false },
-        format: { type: 'choice', required: false, translatable: false, unique: false, options: { choices: [{ label: 'A', value: 'a' }], multiple: false } },
+        title: { type: 'text', required: true, unique: false },
+        format: { type: 'choice', required: false, unique: false, options: { choices: [{ label: 'A', value: 'a' }], multiple: false } },
       },
     })
   })
@@ -212,15 +212,15 @@ describe('serializeBlock', () => {
       label: 'Hero',
       slots: ['default'],
       fields: {
-        heading: { type: 'text', required: true, translatable: false, unique: false },
-        image: { type: 'media', required: false, translatable: false, unique: false, single: true },
+        heading: { type: 'text', required: true, unique: false },
+        image: { type: 'media', required: false, unique: false, single: true },
       },
     })
   })
 
   it('omits label and slots when absent or empty', () => {
     const out = serializeBlock({ name: 'prose', slots: [], fields: { body: { type: 'richtext', required: true } } })
-    expect(out).toEqual({ name: 'prose', fields: { body: { type: 'richtext', required: true, translatable: false, unique: false } } })
+    expect(out).toEqual({ name: 'prose', fields: { body: { type: 'richtext', required: true, unique: false } } })
     expect(out).not.toHaveProperty('label')
     expect(out).not.toHaveProperty('slots')
   })

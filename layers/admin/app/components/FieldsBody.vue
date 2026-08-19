@@ -6,7 +6,7 @@ const ctx = useEditorFormContext()
 
 <template>
   <div class="editor__flat">
-    <PageFieldsPane v-bind="ctx.pageFieldsBindings.value" v-on="ctx.pageFieldsHandlers" />
+    <KestrelPageFieldsPane v-bind="ctx.pageFieldsBindings.value" v-on="ctx.pageFieldsHandlers" />
   </div>
 </template>
 

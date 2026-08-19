@@ -8,8 +8,8 @@ const thingsSchema = {
   name: 'things', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: 'Thing', plural: 'Things' },
   fields: {
-    title: { type: 'text', required: true, translatable: false, unique: false },
-    body: { type: 'richtext', required: false, translatable: false, unique: false },
+    title: { type: 'text', required: true, unique: false },
+    body: { type: 'richtext', required: false, unique: false },
   },
 }
 
@@ -59,7 +59,7 @@ registerEndpoint('/api/statusy/bulk', async (event) => {
 const statusSchema = {
   name: 'statusy', mode: 'multi', translatable: false, pageLike: false, seo: false, status: true,
   blocks: { enabled: false }, label: { singular: 'S', plural: 'Ss' },
-  fields: { title: { type: 'text', required: true, translatable: false, unique: false } },
+  fields: { title: { type: 'text', required: true, unique: false } },
 }
 
 let relQuery: Record<string, unknown> = {}
@@ -71,8 +71,8 @@ const relSchema = {
   name: 'rel', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: 'Rel', plural: 'Rels' },
   fields: {
-    title: { type: 'text', required: false, translatable: false, unique: false },
-    author: { type: 'relation', required: false, translatable: false, unique: false, single: true, relation: { collection: 'users', many: false } },
+    title: { type: 'text', required: false, unique: false },
+    author: { type: 'relation', required: false, unique: false, single: true, relation: { collection: 'users', many: false } },
   },
 }
 
@@ -80,7 +80,7 @@ registerEndpoint('/api/cols', () => ({ data: [{ id: 1, title: 'X' }], total: 1, 
 const colsSchema = {
   name: 'cols', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: 'Col', plural: 'Cols' },
-  fields: { title: { type: 'text', required: false, translatable: false, unique: false } },
+  fields: { title: { type: 'text', required: false, unique: false } },
 }
 
 registerEndpoint('/api/transl', () => ({
@@ -95,7 +95,7 @@ registerEndpoint('/api/transl', () => ({
 const translSchema = {
   name: 'transl', mode: 'multi', translatable: true, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: 'Transl', plural: 'Transls' },
-  fields: { title: { type: 'text', required: true, translatable: false, unique: false } },
+  fields: { title: { type: 'text', required: true, unique: false } },
 }
 
 registerEndpoint('/api/deadlist', () => ({
@@ -111,8 +111,8 @@ const deadSchema = {
   name: 'deadlist', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: 'Item', plural: 'Items' },
   fields: {
-    title: { type: 'text', required: true, translatable: false, unique: false },
-    author: { type: 'relation', required: false, translatable: false, unique: false, single: true, relation: { collection: 'users', many: false } },
+    title: { type: 'text', required: true, unique: false },
+    author: { type: 'relation', required: false, unique: false, single: true, relation: { collection: 'users', many: false } },
   },
 }
 
@@ -127,10 +127,10 @@ const typedSchema = {
   name: 'typed', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: 'Typed', plural: 'Typed' },
   fields: {
-    active: { type: 'boolean', required: false, translatable: false, unique: false },
-    size: { type: 'choice', required: false, translatable: false, unique: false, options: { choices: [{ label: 'Small', value: 's' }, { label: 'Large', value: 'l' }], multiple: false } },
-    tags: { type: 'choice', required: false, translatable: false, unique: false, options: { choices: [{ label: 'News', value: 'news' }, { label: 'Blog', value: 'blog' }], multiple: true } },
-    gallery: { type: 'media', required: false, translatable: false, unique: false, single: false, options: { multiple: true } },
+    active: { type: 'boolean', required: false, unique: false },
+    size: { type: 'choice', required: false, unique: false, options: { choices: [{ label: 'Small', value: 's' }, { label: 'Large', value: 'l' }], multiple: false } },
+    tags: { type: 'choice', required: false, unique: false, options: { choices: [{ label: 'News', value: 'news' }, { label: 'Blog', value: 'blog' }], multiple: true } },
+    gallery: { type: 'media', required: false, unique: false, single: false, options: { multiple: true } },
   },
 }
 
@@ -139,7 +139,7 @@ registerEndpoint('/api/locthings', () => ({ data: [], total: 0, page: 1, perPage
 const localizedSchema = {
   name: 'locthings', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: { en: 'Thing', de: 'Ding' }, plural: { en: 'Things', de: 'Dinge' } },
-  fields: { title: { type: 'text', required: true, translatable: false, unique: false } },
+  fields: { title: { type: 'text', required: true, unique: false } },
 }
 
 // Fails while `failMode` is set, then succeeds — the test flips it before clicking Retry, so the result
@@ -152,7 +152,7 @@ registerEndpoint('/api/failing', () => {
 const failingSchema = {
   name: 'failing', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: 'Failing', plural: 'Failings' },
-  fields: { title: { type: 'text', required: false, translatable: false, unique: false } },
+  fields: { title: { type: 'text', required: false, unique: false } },
 }
 
 // A choice column whose labels are per-language maps — what every built-in collection authors.

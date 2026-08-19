@@ -104,6 +104,34 @@ Kestrel checks this at build time and prints the fix; `kestrel doctor` reports i
 shadowing applies to `app/error.vue` and `app/layouts/default.vue` — overriding those is normal and
 expected, it is only `app.vue` that is load-bearing.
 
+### Admin components — a reserved namespace
+
+Every component Kestrel ships is registered under a `Kestrel` prefix: `KestrelUiButton`,
+`KestrelFieldText`, `KestrelCollectionList`, `KestrelMediaGrid`. Your own `app/components/ui/Button.vue`
+stays `UiButton` and belongs to you alone — the two namespaces cannot collide in either direction, so a
+project design system that uses the conventional `app/components/ui/` layout can no longer replace an
+admin component by accident.
+
+To replace one deliberately, put yours under `app/Kestrel/components/`, mirroring the path it has inside
+Kestrel:
+
+```
+app/Kestrel/components/ui/Button.vue    replaces KestrelUiButton
+app/Kestrel/components/field/Text.vue   replaces KestrelFieldText
+```
+
+No other location works. Kestrel's own registration outranks your app directory everywhere else, so a
+file at `app/components/kestrel/UiButton.vue` loses rather than silently winning.
+
+> Two limits worth knowing before you reach for this. A component that Kestrel imports directly rather
+> than through auto-import is not replaceable this way — `field/Text.vue` imports its `UiField` wrapper by
+> relative path, and that import ignores the override. And a replacement inherits no compatibility
+> promise: props and slots of an internal component change without a major version.
+
+Prefer a registry wherever one exists — `registerFieldComponent` and `registerFieldEmpty` for a field
+widget, `registerCollectionEditor` for a whole editor body, `defineFieldType` for a new field type. Those
+are supported seams; replacing a component by name is an escape hatch.
+
 ### Auth (env-only)
 
 Secrets stay out of committed config. `kestrel init` writes both of these for you; by hand:
@@ -122,6 +150,10 @@ wrong password.
 Every non-auth setting also accepts a `KESTREL_*` env var (precedence: `KESTREL_*` env → `kestrel: {}` → default).
 
 ## Define a collection
+
+> Every field type and every option it accepts is documented in
+> **[field-types.md](./field-types.md)** — start there when you need to know what a type stores, which
+> options the server actually enforces, and which only configure the editor widget.
 
 Drop a file in `server/collections/` and default-export a `defineCollection(...)`. `defineCollection` is
 auto-imported from the meta-layer — no imports needed:
@@ -183,12 +215,12 @@ export default defineCollection({
 > one file — is the `hero` block).
 >
 > One caveat on "no page components": the package ships the whole `layers` tree, so the media layer's
-> `<MediaImage>` — a plain `<img>` over whatever derivatives a media record already has — is auto-imported
+> `<KestrelMediaImage>` — a plain `<img>` over whatever derivatives a media record already has — is auto-imported
 > into your app as well. It is demo scaffolding, not supported surface: its only caller is this repo's
 > `Hero.vue`, which is *not* shipped. It works, but it declares nothing to the variant scan, so the sizes
 > it can render are whatever the registry happens to hold: on a site that uses it exclusively that is the
 > full configured ladder, while adding one `<KestrelImg>` anywhere narrows the registry to what *that*
-> component declared and every `<MediaImage>` silently falls back to the surviving slice. It is also
+> component declared and every `<KestrelMediaImage>` silently falls back to the surviving slice. It is also
 > webp-only, and uses the full-size original as its `src`. Reach for `<KestrelImg>` — and pass it `widths`
 > (or `crop` / `preset`): with none of them its candidate pool is empty and it degrades to the original too.
 >

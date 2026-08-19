@@ -56,7 +56,7 @@ onUnmounted(() => clearTimeout(acTimer))
           <span class="media-pathbar__sep" aria-hidden="true">/</span>
         </template>
       </nav>
-      <button type="button" data-test="path-edit" class="media-pathbar__edit" :aria-label="t('mediaPath.editAriaLabel')" @click="startEdit"><UiIcon name="pencil" :size="14" /></button>
+      <button type="button" data-test="path-edit" class="media-pathbar__edit" :aria-label="t('mediaPath.editAriaLabel')" @click="startEdit"><KestrelUiIcon name="pencil" :size="14" /></button>
     </template>
     <div v-else class="media-pathbar__editor">
       <input

@@ -47,7 +47,7 @@ function pick(type: string): void {
       :aria-pressed="selectedId === null"
       @click="ctx.ops.select(null)"
     >
-      <UiIcon name="file-text" :size="15" class="block-tree__root-icon" />
+      <KestrelUiIcon name="file-text" :size="15" class="block-tree__root-icon" />
       <span>{{ t('blocks.page') }}</span>
     </button>
 
@@ -71,13 +71,13 @@ function pick(type: string): void {
           >
             <span class="block-tree__node-name">{{ labelOf(block) }}</span>
             <span v-if="errorIds.has(block.id)" class="block-tree__badge" role="img" :aria-label="t('blocks.invalid')" :title="t('blocks.invalid')">!</span>
-            <UiIcon v-if="deadRefIds.has(block.id)" name="triangle-alert" :size="14" class="block-tree__deadbadge" role="img" :aria-label="t('deadRefs.blockBadge')" :title="t('deadRefs.blockBadge')" />
+            <KestrelUiIcon v-if="deadRefIds.has(block.id)" name="triangle-alert" :size="14" class="block-tree__deadbadge" role="img" :aria-label="t('deadRefs.blockBadge')" :title="t('deadRefs.blockBadge')" />
           </button>
           <div class="block-tree__actions">
-            <button type="button" class="block-tree__btn" :disabled="disabled || i === 0" :aria-label="t('blocks.moveUp', { n: i + 1 })" @click="ctx.ops.move(block.id, -1)"><UiIcon name="chevron-up" :size="15" /></button>
-            <button type="button" class="block-tree__btn" :disabled="disabled || i === blocks.length - 1" :aria-label="t('blocks.moveDown', { n: i + 1 })" @click="ctx.ops.move(block.id, 1)"><UiIcon name="chevron-down" :size="15" /></button>
-            <button type="button" class="block-tree__btn" :disabled="disabled" :aria-label="t('blocks.duplicate', { n: i + 1 })" @click="ctx.ops.duplicate(block.id)"><UiIcon name="copy" :size="15" /></button>
-            <button type="button" class="block-tree__btn block-tree__btn--danger" :disabled="disabled" :aria-label="t('blocks.remove', { n: i + 1 })" @click="ctx.ops.remove(block.id)"><UiIcon name="trash" :size="15" /></button>
+            <button type="button" class="block-tree__btn" :disabled="disabled || i === 0" :aria-label="t('blocks.moveUp', { n: i + 1 })" @click="ctx.ops.move(block.id, -1)"><KestrelUiIcon name="chevron-up" :size="15" /></button>
+            <button type="button" class="block-tree__btn" :disabled="disabled || i === blocks.length - 1" :aria-label="t('blocks.moveDown', { n: i + 1 })" @click="ctx.ops.move(block.id, 1)"><KestrelUiIcon name="chevron-down" :size="15" /></button>
+            <button type="button" class="block-tree__btn" :disabled="disabled" :aria-label="t('blocks.duplicate', { n: i + 1 })" @click="ctx.ops.duplicate(block.id)"><KestrelUiIcon name="copy" :size="15" /></button>
+            <button type="button" class="block-tree__btn block-tree__btn--danger" :disabled="disabled" :aria-label="t('blocks.remove', { n: i + 1 })" @click="ctx.ops.remove(block.id)"><KestrelUiIcon name="trash" :size="15" /></button>
           </div>
         </div>
 
@@ -109,13 +109,13 @@ function pick(type: string): void {
         :aria-expanded="picking"
         @click="picking = true"
       >
-        <UiIcon name="plus" :size="15" />
+        <KestrelUiIcon name="plus" :size="15" />
         <span>{{ slotName ? t('blocks.addInto', { slot: slotName }) : t('blocks.add') }}</span>
       </button>
 
       <!-- The type picker lives in a centered modal (position:fixed) so it escapes the tree pane's
            overflow-y:auto clip; reka's DialogRoot owns Escape/outside-click dismissal + focus restore. -->
-      <UiDialog :open="picking" size="lg" :title="t('blocks.pickType')" @update:open="picking = $event">
+      <KestrelUiDialog :open="picking" size="lg" :title="t('blocks.pickType')" @update:open="picking = $event">
         <!-- future: category tabs + a search input mount here, above the grid -->
         <ul class="block-tree__picker" :aria-label="t('blocks.pickType')">
           <li v-for="bt in ctx.allowedTypes" :key="bt.name">
@@ -127,12 +127,12 @@ function pick(type: string): void {
               @click="pick(bt.name)"
             >
               <img v-if="bt.image" :src="bt.image" alt="" loading="lazy" class="block-tree__picker-img" />
-              <UiIcon v-else :name="bt.icon ?? 'layout-grid'" :size="24" class="block-tree__picker-icon" />
+              <KestrelUiIcon v-else :name="bt.icon ?? 'layout-grid'" :size="24" class="block-tree__picker-icon" />
               <span class="block-tree__picker-label">{{ resolveLocalized(bt.label, lang) ?? bt.name }}</span>
             </button>
           </li>
         </ul>
-      </UiDialog>
+      </KestrelUiDialog>
     </div>
   </div>
 </template>

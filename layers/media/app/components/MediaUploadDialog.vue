@@ -27,7 +27,7 @@ function rename(c: UploadItem) {
 </script>
 
 <template>
-  <UiDialog
+  <KestrelUiDialog
     :open="open"
     :title="t('media.conflicts.title')"
     :description="t('media.conflicts.desc', { count: conflicts.length })"
@@ -35,22 +35,22 @@ function rename(c: UploadItem) {
   >
     <div class="media-conflicts__all">
       <span>{{ t('media.conflicts.applyAll') }}</span>
-      <UiButton @click="emit('resolve-all', 'overwrite')">{{ t('media.conflicts.overwriteAll') }}</UiButton>
-      <UiButton @click="emit('resolve-all', 'rename')">{{ t('media.conflicts.renameAll') }}</UiButton>
-      <UiButton @click="emit('resolve-all', 'skip')">{{ t('media.conflicts.skipAll') }}</UiButton>
+      <KestrelUiButton @click="emit('resolve-all', 'overwrite')">{{ t('media.conflicts.overwriteAll') }}</KestrelUiButton>
+      <KestrelUiButton @click="emit('resolve-all', 'rename')">{{ t('media.conflicts.renameAll') }}</KestrelUiButton>
+      <KestrelUiButton @click="emit('resolve-all', 'skip')">{{ t('media.conflicts.skipAll') }}</KestrelUiButton>
     </div>
     <ul class="media-conflicts__list">
       <li v-for="c in conflicts" :key="c.id" class="media-conflicts__row">
         <span class="media-conflicts__name">{{ c.filename }}</span>
-        <UiTextInput v-model="names[c.id]" :aria-label="t('media.conflicts.newName', { name: c.filename })" />
+        <KestrelUiTextInput v-model="names[c.id]" :aria-label="t('media.conflicts.newName', { name: c.filename })" />
         <div class="media-conflicts__actions">
-          <UiButton @click="emit('resolve', c.id, 'overwrite', undefined)">{{ t('media.conflicts.overwrite') }}</UiButton>
-          <UiButton variant="primary" @click="rename(c)">{{ t('media.conflicts.rename') }}</UiButton>
-          <UiButton @click="emit('resolve', c.id, 'skip', undefined)">{{ t('media.conflicts.skip') }}</UiButton>
+          <KestrelUiButton @click="emit('resolve', c.id, 'overwrite', undefined)">{{ t('media.conflicts.overwrite') }}</KestrelUiButton>
+          <KestrelUiButton variant="primary" @click="rename(c)">{{ t('media.conflicts.rename') }}</KestrelUiButton>
+          <KestrelUiButton @click="emit('resolve', c.id, 'skip', undefined)">{{ t('media.conflicts.skip') }}</KestrelUiButton>
         </div>
       </li>
     </ul>
-  </UiDialog>
+  </KestrelUiDialog>
 </template>
 
 <style lang="scss" scoped>

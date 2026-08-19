@@ -205,9 +205,9 @@ useSeoMeta({
       <!-- Editor preview: the bridge swaps in the editor's live (unsaved) tree over postMessage and makes
            blocks selectable; the saved content renders until the first message. Normal path unchanged. -->
       <LazyKestrelPreviewBridge v-if="previewActive" :blocks="(page?.content as any[]) ?? []" v-slot="{ blocks }">
-        <BlockRenderer :blocks="(blocks as any[])" />
+        <KestrelBlockRenderer :blocks="(blocks as any[])" />
       </LazyKestrelPreviewBridge>
-      <BlockRenderer v-else :blocks="(page?.content as any[]) ?? []" />
+      <KestrelBlockRenderer v-else :blocks="(page?.content as any[]) ?? []" />
     </article>
   </NuxtLayout>
 </template>

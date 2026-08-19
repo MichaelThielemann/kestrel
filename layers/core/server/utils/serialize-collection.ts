@@ -4,7 +4,6 @@ import { resolveFieldLayout, type LayoutNode } from './field-layout'
 export interface SerializedField {
   type: FieldType
   required: boolean
-  translatable: boolean
   unique: boolean
   /** Optional (localized) editor label; the admin falls back to the humanized field key when absent. */
   label?: Localized
@@ -66,7 +65,6 @@ export function serializeField(field: FieldDef): SerializedField {
   const out: SerializedField = {
     type: field.type,
     required: field.required ?? false,
-    translatable: field.translatable ?? false,
     unique: field.unique ?? false,
   }
   if (isSingleRefColumn(field)) out.single = true

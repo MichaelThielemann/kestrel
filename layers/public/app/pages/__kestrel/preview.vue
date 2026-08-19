@@ -41,6 +41,6 @@ useHead({
 
 <template>
   <KestrelPreviewBridge :blocks="ticketBlocks" v-slot="{ blocks }">
-    <BlockRenderer :blocks="(blocks as any[])" />
+    <KestrelBlockRenderer :blocks="(blocks as any[])" />
   </KestrelPreviewBridge>
 </template>

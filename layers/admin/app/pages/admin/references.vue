@@ -26,14 +26,14 @@ try {
 <template>
   <section class="refs">
     <NuxtLink to="/admin" class="refs__back">
-      <UiIcon name="arrow-left" :size="16" />
+      <KestrelUiIcon name="arrow-left" :size="16" />
       <span>{{ t('nav.dashboard') }}</span>
     </NuxtLink>
     <h1 class="refs__title">{{ t('refs.title') }}</h1>
     <p class="refs__lede">{{ t('refs.lede') }}</p>
 
-    <UiAlert v-if="loadError" variant="error" class="refs__error">{{ t('refs.loadError') }}</UiAlert>
-    <UiEmptyState
+    <KestrelUiAlert v-if="loadError" variant="error" class="refs__error">{{ t('refs.loadError') }}</KestrelUiAlert>
+    <KestrelUiEmptyState
       v-else-if="!broken.length"
       icon="check"
       :title="t('refs.empty.title')"

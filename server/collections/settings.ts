@@ -9,13 +9,12 @@ const built = buildCollection(defineCollection({
   icon: 'settings',
   fields: {
     // Website-wide SEO defaults (per locale).
-    siteName: { type: 'text', translatable: true },
-    metaTitle: { type: 'text', translatable: true },
-    metaDescription: { type: 'text', translatable: true, options: { multiline: true } },
+    siteName: { type: 'text' },
+    metaTitle: { type: 'text' },
+    metaDescription: { type: 'text', options: { multiline: true } },
     // Main navigation menu: an ordered list of { label, link } items.
     mainMenu: {
       type: 'repeater',
-      translatable: true,
       options: {
         fields: {
           label: { type: 'text', required: true },

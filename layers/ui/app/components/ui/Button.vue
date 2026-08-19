@@ -23,7 +23,7 @@ withDefaults(
     :aria-busy="loading || undefined"
   >
     <span v-if="loading" class="ui-button__spinner" aria-hidden="true" />
-    <UiIcon v-else-if="icon" :name="icon" class="ui-button__icon" />
+    <KestrelUiIcon v-else-if="icon" :name="icon" class="ui-button__icon" />
     <span v-if="$slots.default" class="ui-button__label"><slot /></span>
   </button>
 </template>

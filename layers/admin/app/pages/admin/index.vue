@@ -27,10 +27,10 @@ $fetch<unknown[]>('/api/references/broken')
     <h1 class="dash__title">{{ t('dash.title') }}</h1>
     <p class="dash__lede">{{ t('dash.lede') }}</p>
     <NuxtLink v-if="brokenCount" to="/admin/references" class="dash__alert">
-      <UiIcon name="triangle-alert" :size="18" />
+      <KestrelUiIcon name="triangle-alert" :size="18" />
       <span>{{ t('refs.dashAlert', { n: brokenCount }) }}</span>
     </NuxtLink>
-    <UiEmptyState
+    <KestrelUiEmptyState
       v-if="!collections.length"
       icon="file-text"
       :title="t('dash.empty.title')"
@@ -39,7 +39,7 @@ $fetch<unknown[]>('/api/references/broken')
     <ul v-else class="dash__grid">
       <li v-for="c in collections" :key="c.name">
         <NuxtLink :to="`/admin/${c.name}`" class="dash__card">
-          <UiIcon :name="c.icon ?? 'file-text'" class="dash__icon" size="1.5rem" />
+          <KestrelUiIcon :name="c.icon ?? 'file-text'" class="dash__icon" size="1.5rem" />
           <span class="dash__name">{{ resolveLocalized(c.label?.plural, lang) ?? c.name }}</span>
           <span class="dash__mode">{{ c.mode === 'single' ? t('dash.mode.singleton') : t('dash.mode.collection') }}</span>
         </NuxtLink>

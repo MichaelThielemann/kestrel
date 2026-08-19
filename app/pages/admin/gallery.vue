@@ -48,7 +48,7 @@ const models = reactive(demos.map((d) => d.initial))
 
     <div class="gallery__grid">
       <article v-for="(d, i) in demos" :key="d.name" class="gallery__row">
-        <FieldRenderer v-model="models[i]" :field="d.field" :name="d.name" locale="en" />
+        <KestrelFieldRenderer v-model="models[i]" :field="d.field" :name="d.name" locale="en" />
         <pre class="gallery__value">{{ JSON.stringify(models[i]) }}</pre>
       </article>
     </div>

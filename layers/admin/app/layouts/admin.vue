@@ -32,7 +32,7 @@ useHead(() => ({
     <aside v-if="authenticated" class="admin__rail">
       <div class="rail__head">
         <NuxtLink to="/admin" class="rail__brand" aria-label="Kestrel">
-          <UiBrand />
+          <KestrelUiBrand />
           <span class="rail__brand-word rail__label">kestrel</span>
         </NuxtLink>
         <button
@@ -41,7 +41,7 @@ useHead(() => ({
           :aria-label="collapsed ? t('a11y.expandSidebar') : t('a11y.collapseSidebar')"
           @click="toggleRail"
         >
-          <UiIcon :name="collapsed ? 'panel-left-open' : 'panel-left-close'" size="1.25rem" />
+          <KestrelUiIcon :name="collapsed ? 'panel-left-open' : 'panel-left-close'" size="1.25rem" />
         </button>
       </div>
 
@@ -51,15 +51,15 @@ useHead(() => ({
           class="rail__item rail__item--dashboard"
           :title="collapsed ? t('nav.dashboard') : undefined"
         >
-          <UiIcon name="home" class="rail__icon" size="1.25rem" />
+          <KestrelUiIcon name="home" class="rail__icon" size="1.25rem" />
           <span class="rail__label">{{ t('nav.dashboard') }}</span>
         </NuxtLink>
 
-        <AdminNav />
+        <KestrelAdminNav />
       </div>
 
       <div class="rail__foot">
-        <AdminAccount />
+        <KestrelAdminAccount />
         <button
           type="button"
           class="rail__item"
@@ -67,14 +67,14 @@ useHead(() => ({
           :aria-label="theme === 'dark' ? t('a11y.toLight') : t('a11y.toDark')"
           @click="toggleTheme"
         >
-          <UiIcon :name="theme === 'dark' ? 'sun' : 'moon'" class="rail__icon" size="1.25rem" />
+          <KestrelUiIcon :name="theme === 'dark' ? 'sun' : 'moon'" class="rail__icon" size="1.25rem" />
           <span class="rail__label">{{ theme === 'dark' ? t('theme.light') : t('theme.dark') }}</span>
         </button>
       </div>
     </aside>
 
     <main class="admin__main"><slot /></main>
-    <UiToasts />
+    <KestrelUiToasts />
   </div>
 </template>
 

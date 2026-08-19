@@ -1,4 +1,7 @@
+import { kestrelComponents } from '../core/modules/component-namespace/shared'
+
 export default defineNuxtConfig({
+  components: [kestrelComponents(import.meta.url)],
   routeRules: {
     // The admin is a client-rendered SPA.
     '/admin/**': { ssr: false },

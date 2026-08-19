@@ -9,7 +9,7 @@ const { t } = useT()
 
 <template>
   <p v-if="show" class="field-dead-ref" role="note">
-    <UiIcon name="triangle-alert" :size="13" class="field-dead-ref__icon" />{{ t('deadRefs.fieldNote') }}
+    <KestrelUiIcon name="triangle-alert" :size="13" class="field-dead-ref__icon" />{{ t('deadRefs.fieldNote') }}
   </p>
 </template>
 

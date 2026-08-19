@@ -15,7 +15,6 @@ export type Localized = string | Record<string, string>
 interface BaseFieldDef {
   required?: boolean
   default?: unknown
-  translatable?: boolean
   unique?: boolean
   /** Add a non-unique DB index on this field's column — for a field frequently FILTERED or SORTED by but
    *  not unique (e.g. `media.folder`). `unique` already implies an index, so this is only the non-unique case. */

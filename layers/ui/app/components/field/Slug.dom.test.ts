@@ -4,7 +4,7 @@ import FieldSlug from './Slug.vue'
 import UiField from '../ui/Field.vue'
 
 const base = { name: 'Slug', locale: 'en', field: { type: 'slug' as const, options: { from: 'title' } } }
-const opts = { global: { components: { UiField } } }
+const opts = { global: { components: { KestrelUiField: UiField } } }
 
 describe('FieldSlug', () => {
   it('blur on an untouched null slug leaves the model untouched (no spurious dirty state)', async () => {

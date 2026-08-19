@@ -57,7 +57,7 @@ function rowTranslations(row: Record<string, unknown>) {
     <thead>
       <tr>
         <th class="list__select-th" scope="col">
-          <UiCheckbox
+          <KestrelUiCheckbox
             :model-value="allSelected"
             :indeterminate="headerIndeterminate"
             :aria-label="t('list.selectAll')"
@@ -85,7 +85,7 @@ function rowTranslations(row: Record<string, unknown>) {
     <tbody>
       <tr v-for="row in rows" :key="String(row.id)" class="list__row">
         <td class="list__select-cell">
-          <UiCheckbox
+          <KestrelUiCheckbox
             :model-value="selected.has(Number(row.id))"
             :aria-label="t('list.selectRow', { name: rowLabel(row) })"
             @update:model-value="(v) => emit('toggleRow', Number(row.id), v)"
@@ -94,19 +94,19 @@ function rowTranslations(row: Record<string, unknown>) {
         <td class="list__actions-cell">
           <div class="list__row-actions">
             <NuxtLink :to="`/admin/${collection}/${row.id}${localeQuery}`" class="list__action-btn" :aria-label="t('list.rowEdit', { name: rowLabel(row) })">
-              <UiIcon name="pencil" :size="15" />
+              <KestrelUiIcon name="pencil" :size="15" />
             </NuxtLink>
             <button type="button" class="list__action-btn" :disabled="busy" :aria-label="t('list.rowDuplicate', { name: rowLabel(row) })" @click="emit('duplicate', Number(row.id))">
-              <UiIcon name="copy" :size="15" />
+              <KestrelUiIcon name="copy" :size="15" />
             </button>
             <button type="button" class="list__action-btn list__action-btn--danger" :disabled="busy" :aria-label="t('list.rowDelete', { name: rowLabel(row) })" @click="emit('delete', [Number(row.id)])">
-              <UiIcon name="trash" :size="15" />
+              <KestrelUiIcon name="trash" :size="15" />
             </button>
           </div>
         </td>
         <td v-for="c in columns" :key="c.key" :class="{ 'list__narrow-cell': c.type === 'translations' || c.type === 'deadRefs' }">
           <span v-if="c.type === 'deadRefs'" class="list__deadrefs">
-            <UiIcon
+            <KestrelUiIcon
               v-if="row.$hasDeadRefs"
               name="triangle-alert"
               :size="15"

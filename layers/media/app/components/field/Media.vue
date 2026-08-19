@@ -114,7 +114,7 @@ defineExpose({ onConfirm, removeId, onDragStart, onDrop, moveItem })
 </script>
 
 <template>
-  <UiField :id="id" :label="name" :error="error" :required="required">
+  <KestrelUiField :id="id" :label="name" :error="error" :required="required">
     <template #default="f">
       <div class="field-media">
         <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- @dragleave is a mouse-only progressive enhancement; the move-earlier/move-later buttons below give the same reorder fully keyboard access -->
@@ -135,7 +135,7 @@ defineExpose({ onConfirm, removeId, onDragStart, onDrop, moveItem })
             @drop.prevent="onDrop(i)"
             @dragend="onDragEnd"
           >
-            <MediaThumb v-if="isImage(r)" draggable="false" class="field-media__thumb" :src="r.src" :srcset="srcsetOf(r)" sizes="80px" :alt="r.alt ?? ''" :thumbhash="r.thumbhash" />
+            <KestrelMediaThumb v-if="isImage(r)" draggable="false" class="field-media__thumb" :src="r.src" :srcset="srcsetOf(r)" sizes="80px" :alt="r.alt ?? ''" :thumbhash="r.thumbhash" />
             <a v-else draggable="false" class="field-media__file" :href="r.src" target="_blank" rel="noopener noreferrer" :title="filenameOf(r)">
               <span class="field-media__badge" aria-hidden="true">{{ fileExt(r) }}</span>
               <span class="field-media__filename">{{ filenameOf(r) }}</span>
@@ -148,7 +148,7 @@ defineExpose({ onConfirm, removeId, onDragStart, onDrop, moveItem })
                 :aria-label="t('field.media.move_earlier', { name: nameOf(r, i) })"
                 :disabled="i === 0"
                 @click="moveItem(i, -1)"
-              ><UiIcon name="chevron-left" size="0.875rem" /></button>
+              ><KestrelUiIcon name="chevron-left" size="0.875rem" /></button>
               <button
                 type="button"
                 draggable="false"
@@ -156,13 +156,13 @@ defineExpose({ onConfirm, removeId, onDragStart, onDrop, moveItem })
                 :aria-label="t('field.media.move_later', { name: nameOf(r, i) })"
                 :disabled="i === resolved.length - 1"
                 @click="moveItem(i, 1)"
-              ><UiIcon name="chevron-right" size="0.875rem" /></button>
+              ><KestrelUiIcon name="chevron-right" size="0.875rem" /></button>
             </template>
-            <button v-if="!disabled" type="button" draggable="false" class="field-media__remove" :aria-label="t('field.media.remove', { name: nameOf(r, i) })" @click="removeId(r.id)"><UiIcon name="x" size="1rem" /></button>
+            <button v-if="!disabled" type="button" draggable="false" class="field-media__remove" :aria-label="t('field.media.remove', { name: nameOf(r, i) })" @click="removeId(r.id)"><KestrelUiIcon name="x" size="1rem" /></button>
           </li>
         </ul>
         <p v-else class="field-media__empty">{{ t('field.media.empty') }}</p>
-        <UiButton
+        <KestrelUiButton
           v-if="!disabled"
           :id="f.id"
           type="button"
@@ -172,12 +172,12 @@ defineExpose({ onConfirm, removeId, onDragStart, onDrop, moveItem })
           @click="pickerOpen = true"
         >
           {{ multiple ? t('field.media.add') : (resolved.length ? t('field.media.replace') : t('field.media.select')) }}
-        </UiButton>
+        </KestrelUiButton>
         <span class="field-media__live" aria-live="polite">{{ liveMessage }}</span>
       </div>
-      <MediaPicker v-model:open="pickerOpen" :multiple="multiple" :accept="accept" :initial-folder="initialFolder" :initial-selected="ids" @confirm="onConfirm" />
+      <KestrelMediaPicker v-model:open="pickerOpen" :multiple="multiple" :accept="accept" :initial-folder="initialFolder" :initial-selected="ids" @confirm="onConfirm" />
     </template>
-  </UiField>
+  </KestrelUiField>
 </template>
 
 <style lang="scss" scoped>

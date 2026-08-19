@@ -25,22 +25,22 @@ async function submit() {
 <template>
   <form class="login" @submit.prevent="submit">
     <div class="login__brand">
-      <UiBrand />
+      <KestrelUiBrand />
       <span class="login__brand-word">kestrel</span>
     </div>
     <h1 class="login__title">{{ t('login.signIn') }}</h1>
-    <UiAlert v-if="error" variant="error">{{ error }}</UiAlert>
-    <UiField :label="t('login.password')">
+    <KestrelUiAlert v-if="error" variant="error">{{ error }}</KestrelUiAlert>
+    <KestrelUiField :label="t('login.password')">
       <template #default="f">
-        <UiTextInput
+        <KestrelUiTextInput
           v-model="password"
           type="password"
           autocomplete="current-password"
           v-bind="f"
         />
       </template>
-    </UiField>
-    <UiButton type="submit" variant="primary" :loading="loading">{{ t('login.signIn') }}</UiButton>
+    </KestrelUiField>
+    <KestrelUiButton type="submit" variant="primary" :loading="loading">{{ t('login.signIn') }}</KestrelUiButton>
   </form>
 </template>
 

@@ -22,7 +22,7 @@ try {
       :class="{ 'router-link-active': isNavItemActive(route.path, `/admin/${c.name}`) }"
       :title="collapsed ? (resolveLocalized(c.label?.plural, lang) ?? c.name) : undefined"
     >
-      <UiIcon :name="c.icon ?? 'file-text'" class="rail__icon" size="1.25rem" />
+      <KestrelUiIcon :name="c.icon ?? 'file-text'" class="rail__icon" size="1.25rem" />
       <span class="rail__label">{{ resolveLocalized(c.label?.plural, lang) ?? c.name }}</span>
     </NuxtLink>
   </nav>

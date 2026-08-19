@@ -4,7 +4,7 @@ import type { SerializedField } from '../../server/utils/serialize-collection'
 
 // Minimal SerializedField builder (only the fields fieldFilterKind reads matter).
 const sf = (type: string, extra: Partial<SerializedField> = {}): SerializedField =>
-  ({ type, required: false, translatable: false, unique: false, ...extra })
+  ({ type, required: false, unique: false, ...extra })
 
 describe('fieldFilterKind', () => {
   it('maps every built-in field type to its kind (incl. multiple/single/range variants)', () => {

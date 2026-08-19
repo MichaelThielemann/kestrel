@@ -56,9 +56,9 @@ const socialImageField = { type: 'media', options: { accept: 'image' } } as Fiel
       <div class="seo-preview__desc">{{ previewDesc }}</div>
     </div>
 
-    <UiField class="seo-fields__title" :label="t('seo.metaTitle')" :hint="`${titleLen}/${TITLE_MAX}`">
+    <KestrelUiField class="seo-fields__title" :label="t('seo.metaTitle')" :hint="`${titleLen}/${TITLE_MAX}`">
       <template #default="f">
-        <UiTextInput
+        <KestrelUiTextInput
           :model-value="value.title ?? ''"
           :placeholder="pageTitle"
           :disabled="disabled"
@@ -66,11 +66,11 @@ const socialImageField = { type: 'media', options: { accept: 'image' } } as Fiel
           @update:model-value="(v) => patch({ title: v ?? '' })"
         />
       </template>
-    </UiField>
+    </KestrelUiField>
 
-    <UiField class="seo-fields__desc" :label="t('seo.metaDescription')" :hint="`${descLen}/${DESC_MAX}`">
+    <KestrelUiField class="seo-fields__desc" :label="t('seo.metaDescription')" :hint="`${descLen}/${DESC_MAX}`">
       <template #default="f">
-        <UiTextarea
+        <KestrelUiTextarea
           :model-value="value.description ?? ''"
           :rows="3"
           :disabled="disabled"
@@ -78,11 +78,11 @@ const socialImageField = { type: 'media', options: { accept: 'image' } } as Fiel
           @update:model-value="(v) => patch({ description: v ?? '' })"
         />
       </template>
-    </UiField>
+    </KestrelUiField>
 
-    <UiField class="seo-fields__image" :label="t('seo.socialImage')" :hint="t('seo.socialImageHint')">
+    <KestrelUiField class="seo-fields__image" :label="t('seo.socialImage')" :hint="t('seo.socialImageHint')">
       <template #default="f">
-        <FieldMedia
+        <KestrelFieldMedia
           :field="socialImageField"
           name="seoImage"
           :locale="locale"
@@ -92,24 +92,24 @@ const socialImageField = { type: 'media', options: { accept: 'image' } } as Fiel
           @update:model-value="(v) => patch({ image: typeof v === 'number' ? v : null })"
         />
       </template>
-    </UiField>
+    </KestrelUiField>
 
     <!-- Article metadata (schema.org author / datePublished / keywords). Opt-in per installation. -->
     <template v-if="articleMeta">
-      <UiField class="seo-fields__author" :label="t('seo.author')" :hint="t('seo.authorHint')">
+      <KestrelUiField class="seo-fields__author" :label="t('seo.author')" :hint="t('seo.authorHint')">
         <template #default="f">
-          <UiTextInput
+          <KestrelUiTextInput
             :model-value="value.author ?? ''"
             :disabled="disabled"
             v-bind="f"
             @update:model-value="(v) => patch({ author: v ?? '' })"
           />
         </template>
-      </UiField>
+      </KestrelUiField>
 
-      <UiField class="seo-fields__published" :label="t('seo.publishedDate')" :hint="t('seo.publishedDateHint')">
+      <KestrelUiField class="seo-fields__published" :label="t('seo.publishedDate')" :hint="t('seo.publishedDateHint')">
         <template #default="f">
-          <UiDatePicker
+          <KestrelUiDatePicker
             :model-value="value.publishedDate || null"
             precision="date"
             :disabled="disabled"
@@ -118,23 +118,23 @@ const socialImageField = { type: 'media', options: { accept: 'image' } } as Fiel
             @update:model-value="(v) => patch({ publishedDate: v ?? '' })"
           />
         </template>
-      </UiField>
+      </KestrelUiField>
 
-      <UiField class="seo-fields__keywords" :label="t('seo.keywords')" :hint="t('seo.keywordsHint')">
+      <KestrelUiField class="seo-fields__keywords" :label="t('seo.keywords')" :hint="t('seo.keywordsHint')">
         <template #default="f">
-          <UiTextInput
+          <KestrelUiTextInput
             :model-value="value.keywords ?? ''"
             :disabled="disabled"
             v-bind="f"
             @update:model-value="(v) => patch({ keywords: v ?? '' })"
           />
         </template>
-      </UiField>
+      </KestrelUiField>
     </template>
 
     <!-- eslint-disable-next-line vuejs-accessibility/label-has-for -- native wrapping label around a custom UiCheckbox; no `for`/`id` pair needed, invisible to static analysis -->
     <label class="seo-fields__noindex">
-      <UiCheckbox
+      <KestrelUiCheckbox
         :model-value="!!value.noindex"
         :disabled="disabled"
         @update:model-value="(v) => patch({ noindex: v })"

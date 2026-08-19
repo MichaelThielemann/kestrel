@@ -11,9 +11,9 @@ const base = (over: Partial<SerializedCollection> = {}): SerializedCollection =>
   status: true,
   blocks: { enabled: true },
   fields: {
-    title: { type: 'text', required: true, translatable: false, unique: false },
-    body: { type: 'richtext', required: false, translatable: false, unique: false },
-    author: { type: 'relation', required: false, translatable: false, unique: false, single: true, relation: { collection: 'users', many: false } },
+    title: { type: 'text', required: true, unique: false },
+    body: { type: 'richtext', required: false, unique: false },
+    author: { type: 'relation', required: false, unique: false, single: true, relation: { collection: 'users', many: false } },
   },
   ...over,
 })
@@ -69,7 +69,7 @@ describe('availableColumns', () => {
     const keys = availableColumns(base({
       seo: false, // seo carries a media ref (the social image), so a reference-free collection must disable it
       blocks: { enabled: false },
-      fields: { title: { type: 'text', required: false, translatable: false, unique: false } },
+      fields: { title: { type: 'text', required: false, unique: false } },
     })).map((c) => c.key)
     expect(keys).not.toContain(DEAD_REFS_KEY)
   })
@@ -93,8 +93,8 @@ describe('defaultVisibleKeys', () => {
       seo: false, // no seo → no dead-refs column, so the visible set is just the fields + timestamps
       blocks: { enabled: false },
       fields: {
-        size: { type: 'choice', required: false, translatable: false, unique: false, options: { choices: [], multiple: false } },
-        tags: { type: 'choice', required: false, translatable: false, unique: false, options: { choices: [], multiple: true } },
+        size: { type: 'choice', required: false, unique: false, options: { choices: [], multiple: false } },
+        tags: { type: 'choice', required: false, unique: false, options: { choices: [], multiple: true } },
       },
     })
     expect(defaultVisibleKeys(schema)).toEqual(['size', 'createdAt', 'updatedAt'])
@@ -105,21 +105,21 @@ describe('hasReferenceFields', () => {
   it('is true for blocks, relation, media, link, richtext, or a repeater holding one', () => {
     expect(hasReferenceFields(base({ blocks: { enabled: true }, fields: {} }))).toBe(true)
     const f = (field: Record<string, unknown>) =>
-      hasReferenceFields(base({ blocks: { enabled: false }, fields: { x: { required: false, translatable: false, unique: false, ...field } as never } }))
+      hasReferenceFields(base({ blocks: { enabled: false }, fields: { x: { required: false, unique: false, ...field } as never } }))
     expect(f({ type: 'relation', relation: { collection: 'u', many: false } })).toBe(true)
     expect(f({ type: 'media' })).toBe(true)
     expect(f({ type: 'link' })).toBe(true)
     expect(f({ type: 'richtext' })).toBe(true)
-    expect(f({ type: 'repeater', options: { fields: { y: { type: 'link', required: false, translatable: false, unique: false } } } })).toBe(true)
+    expect(f({ type: 'repeater', options: { fields: { y: { type: 'link', required: false, unique: false } } } })).toBe(true)
   })
   it('is true when only the seo social-image column is present (no other ref fields)', () => {
-    expect(hasReferenceFields(base({ seo: true, blocks: { enabled: false }, fields: { title: { type: 'text', required: false, translatable: false, unique: false } } }))).toBe(true)
+    expect(hasReferenceFields(base({ seo: true, blocks: { enabled: false }, fields: { title: { type: 'text', required: false, unique: false } } }))).toBe(true)
   })
   it('is false for a collection of only plain scalar fields, no blocks, no seo', () => {
     expect(hasReferenceFields(base({
       seo: false,
       blocks: { enabled: false },
-      fields: { title: { type: 'text', required: false, translatable: false, unique: false } },
+      fields: { title: { type: 'text', required: false, unique: false } },
     }))).toBe(false)
   })
 })

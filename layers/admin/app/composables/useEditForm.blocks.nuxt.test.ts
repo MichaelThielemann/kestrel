@@ -16,13 +16,13 @@ import type { SerializedBlock } from '../../../core/server/utils/serialize-colle
 const proseDef = {
   name: 'prose',
   label: { en: 'Prose' },
-  fields: { body: { type: 'richtext', required: true, translatable: false, unique: false } },
+  fields: { body: { type: 'richtext', required: true, unique: false } },
 } as unknown as SerializedBlock
 
 const pagesSchema = {
   name: 'pages', mode: 'multi', translatable: false, pageLike: true, seo: true, status: true,
   blocks: { enabled: true, allowed: ['prose'] }, editor: 'blocks', nav: true,
-  fields: { title: { type: 'text', required: true, translatable: false, unique: false } },
+  fields: { title: { type: 'text', required: true, unique: false } },
 }
 
 // TipTap's own serialization of a body with a hard break; sanitize-html stores it as `<br />`.

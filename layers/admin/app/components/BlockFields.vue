@@ -5,7 +5,7 @@ import type { LayoutNode } from '../../../core/server/utils/field-layout'
 import type { BlockRow } from '../utils/block-tree'
 import { resolveLocalized } from '../../../ui/app/utils/localized'
 
-// The fields pane for the currently selected block: delegates to the shared <FieldLayout> renderer,
+// The fields pane for the currently selected block: delegates to the shared <KestrelFieldLayout> renderer,
 // driven by the selected block's props. `def` is the selected block's resolved definition (the parent
 // already has it). Errors are the id-keyed BlockErrorMap entry for this block (depth-independent); edits
 // emit (key, value) for an id-addressed setProp on the shared tree.
@@ -33,7 +33,7 @@ const blockLayout = computed(() => (props.def as { fieldLayout?: LayoutNode[] } 
 <template>
   <div class="block-fields">
     <p class="block-fields__title">{{ resolveLocalized(def?.label, lang) ?? block.type }}</p>
-    <FieldLayout
+    <KestrelFieldLayout
       :layout="blockLayout"
       :fields="subFields"
       :values="block.props"

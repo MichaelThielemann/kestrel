@@ -8,14 +8,14 @@ const postsSchema = {
   name: 'posts', mode: 'multi', translatable: true, pageLike: false, seo: false, status: true,
   blocks: { enabled: false },
   fields: {
-    title: { type: 'text', required: true, translatable: true, unique: false },
-    body: { type: 'richtext', required: false, translatable: true, unique: false },
+    title: { type: 'text', required: true, unique: false },
+    body: { type: 'richtext', required: false, unique: false },
   },
 }
 const settingsSchema = {
   name: 'settings', mode: 'single', translatable: true, pageLike: false, seo: false, status: false,
   blocks: { enabled: false },
-  fields: { data: { type: 'json', required: false, translatable: true, unique: false } },
+  fields: { data: { type: 'json', required: false, unique: false } },
 }
 
 let lastPostBody: Record<string, unknown> | null = null
@@ -67,21 +67,21 @@ const relSchema = {
   name: 'withrel', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false },
   fields: {
-    title: { type: 'text', required: false, translatable: false, unique: false },
-    author: { type: 'relation', required: false, translatable: false, unique: false, single: true, relation: { collection: 'users', many: false } },
+    title: { type: 'text', required: false, unique: false },
+    author: { type: 'relation', required: false, unique: false, single: true, relation: { collection: 'users', many: false } },
   },
 }
 const pagesSchema = {
   name: 'pages', mode: 'multi', translatable: true, pageLike: true, seo: true, status: true,
   blocks: { enabled: true, allowed: ['hero', 'prose'] },
-  fields: { title: { type: 'text', required: true, translatable: true, unique: false } },
+  fields: { title: { type: 'text', required: true, unique: false } },
 }
 const formsSchema = {
   name: 'forms', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false },
   fields: {
-    format: { type: 'choice', required: false, translatable: false, unique: false, options: { choices: [{ label: 'Image', value: 'image' }, { label: 'Text', value: 'text' }] } },
-    caption: { type: 'text', required: true, translatable: false, unique: false, condition: { field: 'format', is: 'image' } },
+    format: { type: 'choice', required: false, unique: false, options: { choices: [{ label: 'Image', value: 'image' }, { label: 'Text', value: 'text' }] } },
+    caption: { type: 'text', required: true, unique: false, condition: { field: 'format', is: 'image' } },
   },
 }
 let lastRelBody: Record<string, unknown> | null = null

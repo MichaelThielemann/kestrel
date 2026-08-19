@@ -27,7 +27,7 @@ defineExpose({ lang, selectLang, signOut })
       <button type="button" class="rail-account__trigger" :aria-label="t('account.label')" :title="t('account.label')">
         <span class="rail-account__avatar" aria-hidden="true">{{ initials }}</span>
         <span class="rail-account__name rail__label">{{ t('account.name') }}</span>
-        <UiIcon name="chevron-down" class="rail-account__caret rail__label" size="1rem" />
+        <KestrelUiIcon name="chevron-down" class="rail-account__caret rail__label" size="1rem" />
       </button>
     </DropdownMenuTrigger>
 
@@ -56,7 +56,7 @@ defineExpose({ lang, selectLang, signOut })
           >
             <span class="rail-account__check">
               <DropdownMenuItemIndicator>
-                <UiIcon name="check" size="1rem" />
+                <KestrelUiIcon name="check" size="1rem" />
               </DropdownMenuItemIndicator>
             </span>
             <span>{{ l.toUpperCase() }}</span>
@@ -66,7 +66,7 @@ defineExpose({ lang, selectLang, signOut })
         <DropdownMenuSeparator class="rail-account__sep" />
 
         <DropdownMenuItem class="rail-account__item rail-account__item--danger" @select="signOut">
-          <UiIcon name="log-out" size="1rem" class="rail-account__item-icon" />
+          <KestrelUiIcon name="log-out" size="1rem" class="rail-account__item-icon" />
           <span>{{ t('nav.signOut') }}</span>
         </DropdownMenuItem>
       </DropdownMenuContent>

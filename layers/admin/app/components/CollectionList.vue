@@ -93,7 +93,7 @@ await fetchRows()
 
       <div ref="toolsRef" class="list__tools">
         <div class="list__tool">
-          <UiButton
+          <KestrelUiButton
             type="button"
             size="sm"
             icon="filter"
@@ -103,8 +103,8 @@ await fetchRows()
             @click="togglePanel('filter', $event)"
           >
             {{ t('list.filter') }}<span v-if="activeFilters.length" class="list__tool-count">{{ activeFilters.length }}</span>
-          </UiButton>
-          <CollectionListFilterPanel
+          </KestrelUiButton>
+          <KestrelCollectionListFilterPanel
             v-if="openPanel === 'filter'"
             :columns="filterableColumns"
             :filter="filterDraft"
@@ -113,7 +113,7 @@ await fetchRows()
         </div>
 
         <div class="list__tool">
-          <UiButton
+          <KestrelUiButton
             type="button"
             size="sm"
             icon="columns"
@@ -121,8 +121,8 @@ await fetchRows()
             :aria-expanded="openPanel === 'columns'"
             class="list__tool-btn"
             @click="togglePanel('columns', $event)"
-          >{{ t('list.columns') }}</UiButton>
-          <CollectionListColumnsPanel
+          >{{ t('list.columns') }}</KestrelUiButton>
+          <KestrelCollectionListColumnsPanel
             v-if="openPanel === 'columns'"
             :columns="available"
             :visible-keys="visibleKeys"
@@ -136,7 +136,7 @@ await fetchRows()
       <NuxtLink :to="`/admin/${collection}/new${localeQuery}`" class="list__new">{{ newLabel }}</NuxtLink>
     </div>
 
-    <CollectionListBulkBar
+    <KestrelCollectionListBulkBar
       v-if="selected.size"
       :count="selected.size"
       :has-status="!!schema.status"
@@ -150,20 +150,20 @@ await fetchRows()
       <span v-for="f in activeFilters" :key="f.key" class="list__chip">
         <span class="list__chip-label">{{ f.label }} {{ f.opLabel }}:</span> {{ f.display }}
         <button type="button" class="list__chip-x" :aria-label="t('list.removeFilter', { name: f.label })" @click="filterDraft.clearFilter(f.key)">
-          <UiIcon name="x" :size="12" />
+          <KestrelUiIcon name="x" :size="12" />
         </button>
       </span>
     </div>
 
-    <UiAlert v-if="error" variant="error" class="list__error">
+    <KestrelUiAlert v-if="error" variant="error" class="list__error">
       {{ error }}
-      <UiButton type="button" variant="secondary" size="sm" class="list__retry" @click="fetchRows">{{ t('common.retry') }}</UiButton>
-    </UiAlert>
+      <KestrelUiButton type="button" variant="secondary" size="sm" class="list__retry" @click="fetchRows">{{ t('common.retry') }}</KestrelUiButton>
+    </KestrelUiAlert>
 
     <!-- The one scroll region: the table + its alternate empty-states scroll here while the bar, chips,
          error and pager stay fixed (see the admin layout's scroll-ownership convention). -->
     <div class="list__scroll">
-      <CollectionListTable
+      <KestrelCollectionListTable
         :rows="rows"
         :columns="visibleColumns"
         :collection="collection"
@@ -180,7 +180,7 @@ await fetchRows()
         @delete="askDelete"
       />
 
-      <UiEmptyState
+      <KestrelUiEmptyState
         v-if="!rows.length && !error && activeFilters.length"
         icon="filter"
         :title="t('list.noMatch.title')"
@@ -189,8 +189,8 @@ await fetchRows()
         <template #action>
           <button type="button" class="list__new" @click="filterDraft.clearAll">{{ t('list.filterClearAll') }}</button>
         </template>
-      </UiEmptyState>
-      <UiEmptyState
+      </KestrelUiEmptyState>
+      <KestrelUiEmptyState
         v-else-if="!rows.length && !error"
         icon="file-text"
         :title="t('list.empty.title')"
@@ -199,12 +199,12 @@ await fetchRows()
         <template #action>
           <NuxtLink :to="`/admin/${collection}/new${localeQuery}`" class="list__new">{{ newLabel }}</NuxtLink>
         </template>
-      </UiEmptyState>
+      </KestrelUiEmptyState>
     </div>
 
     <p class="list__sr-status" role="status" aria-live="polite">{{ srStatus }}</p>
 
-    <CollectionListPager
+    <KestrelCollectionListPager
       :page="page"
       :total-pages="totalPages"
       :total="total"
@@ -213,7 +213,7 @@ await fetchRows()
       @update:per-page="setPerPage"
     />
 
-    <CollectionDeleteDialog
+    <KestrelCollectionDeleteDialog
       :open="deleteOpen"
       :report="deleteReport"
       :busy="opsBusy"

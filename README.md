@@ -129,6 +129,7 @@ where to start reading, the cross-layer seams, the gotchas). Then the per-topic 
 | Doc | Covers |
 |-----|--------|
 | [architecture.md](docs/architecture.md) | **Start here** — the layer model, boot order, cross-cutting seams, per-layer guide |
+| [field-types.md](docs/field-types.md) | Every built-in field type with its options, the column it becomes, what the server enforces vs. what only configures the widget |
 | [consuming-kestrel.md](docs/consuming-kestrel.md) | Using Kestrel in your own app: defining collections/fields/blocks, auto-discovery, the schema lifecycle |
 | [configuration.md](docs/configuration.md) | The single config source (`kestrel.config.ts`), every `KESTREL_*` env var, the auth/session env split |
 | [block-editing.md](docs/block-editing.md) | The block content model + the 3-pane block editor (tree · preview · fields) |
@@ -153,7 +154,7 @@ The CMS is split into Nuxt layers under `layers/`:
   lives in the repo root, dev-only, and is **not** shipped in the package.)
 - **`media`** — uploads, pluggable storage, image derivation, the media library + asset viewer.
 - **`admin`** — the editor SPA: collection list, record editor, the 3-pane block editor.
-- **`public`** — the SSG render path: the catch-all page, `BlockRenderer`, the JSON-LD head, the literal-key
+- **`public`** — the SSG render path: the catch-all page, `KestrelBlockRenderer`, the JSON-LD head, the literal-key
   artifacts (sitemap / robots / llms.txt / llms-full.txt / redirects.json), deploy.
 
 `playground/` is a small consuming example. `templates/starter/` is what the scaffolder writes out;

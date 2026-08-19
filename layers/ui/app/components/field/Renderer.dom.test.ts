@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import FieldRenderer from './Renderer.vue'
 import FieldRepeater from './Repeater.vue'
+import { registerFieldComponent, resolveFieldComponent } from '../../utils/field-registry'
 import type { FieldType } from '../../../core/server/utils/defineCollection'
 
 const base = { name: 'X', locale: 'en' }
@@ -47,18 +48,24 @@ describe('FieldRenderer', () => {
   })
 
   it('renders the repeater widget and an Add item button', async () => {
-    // The registry resolves repeater to an async wrapper (cycle break); happy-dom won't settle it without a
-    // Suspense ancestor, so swap in the real sync component to verify the routing. Async resolution itself is
-    // exercised by the nested-repeater case in Repeater.dom.test.ts.
-    const w = mount(FieldRenderer, {
-      props: {
-        ...base,
-        field: { type: 'repeater', options: { fields: { label: { type: 'text' } } } },
-        modelValue: [],
-      },
-      global: { stubs: { FieldRepeater } },
-    })
-    await flushPromises()
-    expect(w.text()).toContain('Add item')
+    // The registry maps repeater to an async wrapper (it breaks the registry→Repeater→Renderer import
+    // cycle), and neither flushPromises nor a Suspense ancestor settles that under happy-dom. Swapping the
+    // registry entry for the sync component keeps the routing itself under test; async resolution is
+    // covered by the nested-repeater case in Repeater.dom.test.ts.
+    const previous = resolveFieldComponent('repeater')
+    registerFieldComponent('repeater', FieldRepeater)
+    try {
+      const w = mount(FieldRenderer, {
+        props: {
+          ...base,
+          field: { type: 'repeater', options: { fields: { label: { type: 'text' } } } },
+          modelValue: [],
+        },
+      })
+      await flushPromises()
+      expect(w.text()).toContain('Add item')
+    } finally {
+      if (previous) registerFieldComponent('repeater', previous)
+    }
   })
 })

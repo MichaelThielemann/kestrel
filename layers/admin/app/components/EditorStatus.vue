@@ -92,7 +92,7 @@ const live = computed<{ tone: 'green' | 'red' | 'amber' | 'blue' | 'neutral'; wo
          Visually hidden; not a tooltip. -->
     <span class="editor-status-sr" role="status" aria-live="polite">{{ save.detail }}</span>
 
-    <UiTooltip side="bottom">
+    <KestrelUiTooltip side="bottom">
       <!-- A focusable status indicator, NOT a <button>: it has no action, and a button whose accessible
            name contains "Saved"/"Unsaved" would collide with `getByRole('button', {name:'Save'})`. aria-label
            leads with the visible word so it stays part of the accessible name, then adds the detail for AT. -->
@@ -105,9 +105,9 @@ const live = computed<{ tone: 'green' | 'red' | 'amber' | 'blue' | 'neutral'; wo
           <strong class="editor-status-tip__detail">{{ save.detail }}</strong>
         </span>
       </template>
-    </UiTooltip>
+    </KestrelUiTooltip>
 
-    <UiTooltip v-if="live" side="bottom">
+    <KestrelUiTooltip v-if="live" side="bottom">
       <span class="editor-status-live" tabindex="0" :data-tone="live.tone" :aria-label="`${live.word} — ${live.detail}`">
         <span class="editor-status-live__dot" aria-hidden="true" />
         <span class="editor-status-live__word">{{ live.word }}</span>
@@ -119,7 +119,7 @@ const live = computed<{ tone: 'green' | 'red' | 'amber' | 'blue' | 'neutral'; wo
           <span v-if="live.tone === 'red' && live.error" class="editor-status-tip__err">{{ live.error }}</span>
         </span>
       </template>
-    </UiTooltip>
+    </KestrelUiTooltip>
   </span>
 </template>
 

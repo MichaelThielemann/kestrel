@@ -13,7 +13,7 @@ const colLabel = (col: ListColumn) => columnLabel(col, t)
   <div id="list-columns-panel" class="list__panel">
     <!-- eslint-disable-next-line vuejs-accessibility/label-has-for -- native wrapping label around a custom UiCheckbox; no `for`/`id` pair needed, invisible to static analysis -->
     <label v-for="c in columns" :key="c.key" class="list__col-row">
-      <UiCheckbox
+      <KestrelUiCheckbox
         class="list__col-check"
         :data-col="c.key"
         :model-value="visibleKeys.includes(c.key)"

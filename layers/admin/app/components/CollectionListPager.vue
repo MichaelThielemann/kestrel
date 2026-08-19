@@ -19,9 +19,9 @@ function next() {
 
 <template>
   <div class="list__pager">
-    <UiButton type="button" size="sm" :disabled="page <= 1" @click="prev">{{ t('list.prev') }}</UiButton>
+    <KestrelUiButton type="button" size="sm" :disabled="page <= 1" @click="prev">{{ t('list.prev') }}</KestrelUiButton>
     <span class="list__page">{{ t('list.page', { page, totalPages, total }) }}</span>
-    <UiButton type="button" size="sm" :disabled="page >= totalPages" @click="next">{{ t('list.next') }}</UiButton>
+    <KestrelUiButton type="button" size="sm" :disabled="page >= totalPages" @click="next">{{ t('list.next') }}</KestrelUiButton>
     <label class="list__perpage" :for="perPageId">
       <span class="list__perpage-label">{{ t('list.perPage') }}</span>
       <select

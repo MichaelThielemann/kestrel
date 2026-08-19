@@ -117,6 +117,12 @@ The things that live *between* layers and bite if you don't know them:
   columns get the `Id` suffix.
 - **`asFieldDef` bridge.** `admin/app/utils/edit-form.ts` casts a wire `SerializedField` back to a
   `FieldDef` (a single cast, not per-arm reconstruction) so widgets can consume the serialized schema.
+- **Component namespace.** Every component the engine ships is registered with a `Kestrel` prefix and an
+  explicit dir priority above the consumer's app directory (`core`'s `component-namespace` module +
+  `kestrelComponents()` in each shipping layer's `nuxt.config`). Nuxt drops a prefix the filename already
+  carries, so `KestrelImg.vue` stays `KestrelImg` while `ui/Button.vue` becomes `KestrelUiButton`. Without
+  it a consumer's `app/components/ui/Icon.vue` claims the same global name as ours and wins, silently
+  replacing the admin's. `app/Kestrel/components/` is the one seam that outranks the layers.
 - **Block components.** `BlockRenderer` resolves `Blocks<PascalType>` by **name string** via
   `resolveDynamicComponent`; the actual components are the block SFCs in `app/blocks/`, registered as
   global `Blocks<Name>` components by the auto-discovery module's `addComponentsDir({ prefix: 'Blocks',

@@ -18,7 +18,7 @@ const usageLines = computed(() => {
 </script>
 
 <template>
-  <UiDialog :open="open" :title="t('common.delete')" @update:open="(v) => emit('update:open', v)">
+  <KestrelUiDialog :open="open" :title="t('common.delete')" @update:open="(v) => emit('update:open', v)">
     <p v-if="report">
       {{ t('media.deleteSummary', {
         files: report.summary.files,
@@ -34,12 +34,12 @@ const usageLines = computed(() => {
         <li v-for="u in usageLines" :key="u.file">{{ u.file }} → {{ u.refs }}</li>
       </ul>
     </div>
-    <UiAlert v-if="error" variant="error">{{ error }}</UiAlert>
+    <KestrelUiAlert v-if="error" variant="error">{{ error }}</KestrelUiAlert>
     <template #footer>
-      <UiButton variant="ghost" :disabled="busy" @click="emit('update:open', false)">{{ t('common.cancel') }}</UiButton>
-      <UiButton variant="danger" :disabled="busy" @click="emit('confirm')">{{ t('common.delete') }}</UiButton>
+      <KestrelUiButton variant="ghost" :disabled="busy" @click="emit('update:open', false)">{{ t('common.cancel') }}</KestrelUiButton>
+      <KestrelUiButton variant="danger" :disabled="busy" @click="emit('confirm')">{{ t('common.delete') }}</KestrelUiButton>
     </template>
-  </UiDialog>
+  </KestrelUiDialog>
 </template>
 
 <style lang="scss" scoped>

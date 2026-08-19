@@ -5,8 +5,8 @@ const { t } = useT()
 </script>
 
 <template>
-  <UiDialog :open="open" size="lg" :title="multiple ? t('media.picker.titleMultiple') : t('media.picker.titleSingle')" @update:open="(v) => emit('update:open', v)">
-    <MediaLibrary
+  <KestrelUiDialog :open="open" size="lg" :title="multiple ? t('media.picker.titleMultiple') : t('media.picker.titleSingle')" @update:open="(v) => emit('update:open', v)">
+    <KestrelMediaLibrary
       pick
       :multiple="multiple"
       :accept="accept ?? 'any'"
@@ -15,5 +15,5 @@ const { t } = useT()
       @confirm="(ids) => { emit('confirm', ids); emit('update:open', false) }"
       @cancel="emit('update:open', false)"
     />
-  </UiDialog>
+  </KestrelUiDialog>
 </template>
