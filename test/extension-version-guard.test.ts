@@ -12,8 +12,8 @@ const root = process.cwd()
 // cutting a release that actually publishes a new extension version — a stale list only makes the guard
 // under-strict, never wrongly red).
 const ALREADY_PUBLISHED: Record<string, string[]> = {
-  'extensions/galleries-secure': ['1.0.0'],
-  'extensions/galleries-secure-proofing': ['1.0.0'],
+  'extensions/galleries-secure': ['1.0.0', '1.0.1'],
+  'extensions/galleries-secure-proofing': ['1.0.0', '1.0.1'],
 }
 
 describe('extension manifest versions — not already shipped', () => {

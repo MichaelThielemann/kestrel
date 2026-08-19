@@ -5,7 +5,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
-## [Unreleased]
+## [3.0.0] — 2026-08-19
 
 Every component Kestrel ships moves into a `Kestrel` namespace, so a consumer project can no longer
 replace an admin component by accident — and gets one deliberate way to replace one on purpose.
@@ -286,6 +286,7 @@ that found *nothing*, because the second one silently overwrites live output wit
 - [consuming-kestrel.md](docs/consuming-kestrel.md) corrects the shipped public-component surface and the
   built-in collection list.
 
+[3.0.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v3.0.0
 [2.1.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v2.1.0
 [2.0.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v2.0.0
 [1.7.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v1.7.0

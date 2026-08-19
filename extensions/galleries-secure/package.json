@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-galleries-secure",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Opt-in Kestrel extension: a zero-knowledge encrypted gallery (images + folder names encrypted client-side with a password; the server only ever stores ciphertext).",
   "type": "module",
   "main": "./nuxt.config.ts",
