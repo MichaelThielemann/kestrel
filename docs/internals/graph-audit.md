@@ -4,7 +4,7 @@ Three stages, run in order. The graph targets, the test suite proves, an agent j
 proven.
 
 1. **Coverage** — `pnpm test:coverage`
-2. **Target** — `pnpm graph:audit --scope <path> [--top N]`, then `pnpm mutation:scope --scope <name> [--dry-run]`
+2. **Target** — `pnpm graph:audit --scope <path> [--top N]`, then `pnpm mutation:scope --scope <path> [--dry-run]` at the same scope
 3. **Judge** — the `graph-audit-review` skill, then `node scripts/graph-audit-record.mjs`
 
 ## Stage 1: coverage
@@ -24,7 +24,7 @@ that must not block the merge. `reports/` is gitignored; nothing from this stage
 
 ## Stage 2: target
 
-### `node scripts/graph-audit.mjs [--scope <path>] [--top N] [--detector <name>] [--all] [--out <dir>] [--graph <dir>] [--ledger <path>] [--no-gate]`
+### `node scripts/graph-audit.mjs [--scope <path>] [--top N] [--detector <name>] [--all] [--out <dir>] [--graph <dir>] [--ledger <path>] [--config <path>] [--no-gate]`
 
 (equivalently `pnpm graph:audit`). Loads `graphify-out/graph.json`, joins it with
 `reports/coverage/coverage-final.json` when present, and runs the detector set over it: `weak-guard`,
@@ -55,12 +55,40 @@ specifiers and does not resolve workspace path aliases — so a clean `layer-cyc
 `layers/*`/`extensions/*` stack, not package-to-package cycles. `import-cycle` is unaffected: it works at
 file level, so a cycle inside one package needs no cross-package edge at all.
 
-### `node scripts/mutation-target.mjs --scope <name> [--dry-run]`
+`--scope <path>` is a prefix match on the source file, and it narrows **`weak-guard` only** — that is the
+detector whose output the mutation step consumes. Every other detector still reports graph-wide, so a run
+under `--scope layers/core` emits the same 300-odd `test-gap` rows an unscoped run does. `--config <path>`
+points at the curated family file, `.graph-audit.json` by default.
+
+The scope the run was given is recorded in `candidates.json`, because the mutation step below refuses to
+mutate candidates that were derived under a different one.
+
+Coverage has its own clock. The graph is gated against HEAD (see below), but
+`reports/coverage/coverage-final.json` can be arbitrarily old, and `test-gap`, `weak-guard` and `orphan`
+are all computed from it. When it predates the newest source file graphify indexed, the run warns and
+`candidates.md` carries the notice — it warns rather than aborts, because a stale coverage report still
+describes the code it ran against, whereas a stale graph's line numbers are simply wrong.
+
+### `node scripts/mutation-target.mjs [--scope <path>] [--dry-run]`
 
 (equivalently `pnpm mutation:scope`). Reads the `weak-guard` candidates out of `docs/parity/candidates.json`,
 generates a Stryker config scoped to exactly those target files, and picks the test files to run by
-following graph edges from test files to the target nodes (falling back to the full suite, with a
-warning, if the graph has no such edge). `--dry-run` writes the Stryker config without invoking Stryker.
+following graph edges from test files to the target nodes (falling back to the full node suite, with a
+warning, if the graph has no such edge).
+
+Its `--scope` must be the one the audit ran under — the same path, or neither given — and the run refuses
+with both values named otherwise. The candidates are whatever the last audit left on disk, so a run under
+a mismatched scope would mutate unrelated files under a label that describes something else. The scope
+also names the output: `packages/kestrel-access` writes `reports/mutation/packages-kestrel-access/`, an
+unscoped run writes `reports/mutation/all/`.
+
+Two files are generated per scope: the Stryker config in `.stryker-tmp/`, and the narrow Vitest config it
+points at, `vitest.stryker.<label>.config.mjs`, whose `include` is the derived test list written out
+literally. Both are gitignored. The test scope lives in that file rather than in an environment variable
+so a hand-run `stryker run <config>` runs the same tests the rail does — with the scope passed out of
+band, the fallback suite covers none of the mutated files and every mutant comes back as uncovered, which
+reads like a finding and is an artefact. `--dry-run` writes both configs, prints the command that runs
+them, and does not invoke Stryker.
 
 A real run mutates the target files, runs the scoped test suite against each mutant, and writes
 `docs/parity/mutants.json`: every mutant that survived or had no coverage, each attributed to "the last

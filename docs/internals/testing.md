@@ -123,22 +123,24 @@ deterministic function of the route — it isn't an end-to-end render proof. It'
 
 ## Mutation testing
 
-A passing test suite that never kills a mutant is verifying nothing. StrykerJS runs against two modules
-today: `access-decide` (`packages/kestrel-access/src/server/utils/**`, config `stryker.access.conf.json`)
-and the slug
-engine (`slugify.ts`, `page-slug.ts`, `page-route.ts`, config `stryker.slug.conf.json`) — each scoped to a
-dedicated narrow Vitest config (`vitest.stryker.{access,slug}.config.ts`) so only that module's own tests
-run against the mutated code. Run them with `pnpm mutation:access` / `pnpm mutation:slug`.
+A passing test suite that never kills a mutant is verifying nothing. StrykerJS no longer runs against a
+hand-written module list: `pnpm mutation:scope` takes its targets from the graph audit's `weak-guard`
+candidates, generates a Stryker config and a matching narrow Vitest config so only the tests the graph
+says reach those targets run against the mutated code, and writes every mutant no test noticed to
+`docs/parity/mutants.json`.
 
-Both configs set `thresholds.break` to **71** — verify it in the config file before relying on this
-number, since either module's baseline can move. A run scoring below the break threshold fails the
-command with a non-zero exit; raising or lowering it is a deliberate, reviewed change to the config file,
-not something to tune ad hoc while chasing a green run.
+It is the second stage of the audit rail, so it needs the coverage artifact and an audit run at the same
+scope ahead of it — the mutation run refuses a scope the candidates were not derived under:
 
 ```bash
-pnpm mutation:access   # StrykerJS run, packages/kestrel-access/src/server/utils/**
-pnpm mutation:slug     # StrykerJS run, slugify.ts / page-slug.ts / page-route.ts
+pnpm test:coverage                                     # reports/coverage/coverage-final.json
+pnpm graph:audit --scope packages/kestrel-access       # weak-guard candidates for that path
+pnpm mutation:scope --scope packages/kestrel-access    # add --dry-run to write the configs only
 ```
+
+There is no break threshold to clear. A surviving mutant is not a score, it is a demonstration that a
+line can change with the suite still green, and it is adjudicated into a defect, a missing test or a
+justified break in the third stage. [graph-audit.md](./graph-audit.md) documents all three.
 
 ## Working on the repo's own schema
 
