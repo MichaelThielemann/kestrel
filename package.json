@@ -147,7 +147,7 @@
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",
     "@vitejs/plugin-vue": "^6.0.8",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "4.1.10",
     "@vue/test-utils": "^2.4.11",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.1",

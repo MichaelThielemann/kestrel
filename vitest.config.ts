@@ -15,7 +15,6 @@ export default defineConfig({
       // from a function whose every path ran.
       include: ['packages/*/src/**/*.ts', 'layers/*/**/*.ts', 'extensions/*/**/*.ts'],
       exclude: ['**/*.test.ts', '**/*.d.ts', '**/node_modules/**', '**/dist/**'],
-      all: false,
       // Unrelated tests (perf budgets, timing-sensitive checks) can fail under the overhead
       // coverage instrumentation adds; the artifact must still be written when that happens.
       reportOnFailure: true,
