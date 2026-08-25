@@ -68,9 +68,7 @@
     "ci:consumer-template": "node scripts/consumer-template-ci.mjs",
     "graph:audit": "node scripts/graph-audit.mjs",
     "dashboard": "npx tsx scripts/dashboard.mjs",
-    "mutation:access": "stryker run stryker.access.conf.json",
-    "mutation:slug": "stryker run stryker.slug.conf.json",
-    "mutation:all": "pnpm mutation:access && pnpm mutation:slug",
+    "mutation:scope": "node scripts/mutation-target.mjs",
     "hash-password": "node scripts/hash-password.mjs"
   },
   "dependencies": {
