@@ -32,10 +32,14 @@ jobs:
         run: pnpm test
       - name: Nuxt environment
         run: pnpm test:nuxt
+      - name: Packages
+        run: pnpm test:packages
       - name: Typecheck
         run: pnpm typecheck
       - name: Lint
         run: pnpm lint
+      - name: API report
+        run: pnpm api:check
       - name: Build
         run: pnpm build
       - name: Static generate
@@ -55,3 +59,24 @@ jobs:
       - name: End-to-end
         if: matrix.node == 24
         run: pnpm test:e2e
+
+  consumer-template:
+    runs-on: ubuntu-latest
+    name: consumer template (real npm install)
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The ONE gate that installs the engine + every @kestrel/* package as a real, standalone external
+      # consumer would — `pnpm pack` each one (the same rewrite `npm publish` needs, workspace:* -> a real
+      # version), scaffold a fresh site from templates/starter via create-kestrel's own CLI, `npm install`
+      # (not a workspace link), build it in production, and hit it over real HTTP through a real admin
+      # login. See scripts/consumer-template-ci.mjs's own header for the full rationale — this is what
+      # first proved the ten @kestrel/* packages had to stop being private:true.
+      - name: Consumer template + real npm install
+        run: pnpm ci:consumer-template

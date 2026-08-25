@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { useDb } from '@kestrel/core'
 
 export default defineNitroPlugin(() => {
   // The committed drizzle-kit migrations only exist in Kestrel's own repo. When Kestrel is consumed as

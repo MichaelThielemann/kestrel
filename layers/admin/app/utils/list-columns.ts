@@ -1,5 +1,6 @@
-import type { SerializedCollection, SerializedField } from '../../../core/server/utils/serialize-collection'
-import { fieldFilterKind, META_FILTER_KIND, type FilterKind } from '../../../core/app/utils/filter-ops'
+import { META_FILTER_KIND, fieldFilterKind } from '@kestrel/core/client'
+import type { FilterKind } from '@kestrel/core/client'
+import type { SerializedCollection, SerializedField } from '@kestrel/core'
 import { jsKey } from './field-keys'
 
 export type ListColumnType = 'meta' | 'field' | 'translations' | 'deadRefs'

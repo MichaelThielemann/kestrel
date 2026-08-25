@@ -1,0 +1,56 @@
+{
+  "name": "@kestrel/fields",
+  "version": "0.1.0",
+  "description": "Kestrel's built-in field-type descriptors, the block-definition helper, and the field/block content-population walkers.",
+  "license": "Apache-2.0",
+  "author": "Michael Thielemann <283621694+MichaelThielemann@users.noreply.github.com>",
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
+    "directory": "packages/kestrel-fields"
+  },
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    }
+  },
+  "sideEffects": [
+    "./dist/server/field-registry/index.js"
+  ],
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "vitest run --typecheck"
+  },
+  "dependencies": {
+    "@kestrel/core": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@kestrel/access": "workspace:*",
+    "@types/node": "^26.2.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

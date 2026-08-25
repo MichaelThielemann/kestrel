@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { rmSync } from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch } from '@nuxt/test-utils/e2e'
-import { hashPassword } from '../../layers/auth/server/utils/password'
+import { hashPassword } from '@kestrel/auth'
 
 const dbPath = join(tmpdir(), `kestrel-e2e-collections-${process.pid}.sqlite`)
 const PW = 'e2e-test-password'
@@ -19,7 +19,7 @@ describe('Collections definitions API (e2e)', async () => {
 
   let cookie = ''
   beforeAll(async () => {
-    const res = await fetch('/api/auth/login', {
+    const res = await fetch('/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ password: PW }),
@@ -37,7 +37,7 @@ describe('Collections definitions API (e2e)', async () => {
     }
   })
 
-  it('lists collection definitions for an admin (static route wins over [collection])', async () => {
+  it('lists collection definitions for an admin', async () => {
     const res = await $fetch('/api/collections', { headers: { cookie } })
     expect(Array.isArray(res.data)).toBe(true)
     const names = res.data.map((c: { name: string }) => c.name)
@@ -49,19 +49,19 @@ describe('Collections definitions API (e2e)', async () => {
   })
 
   it('returns one definition by name', async () => {
-    const pages = await $fetch('/api/collections/pages', { headers: { cookie } })
+    const pages = await $fetch('/api/pages/schema', { headers: { cookie } })
     expect(pages).toMatchObject({ name: 'pages', mode: 'multi' })
     expect(pages.fields.title).toMatchObject({ type: 'text' })
   })
 
   it('404s an unknown collection name', async () => {
-    await expect($fetch('/api/collections/nope', { headers: { cookie } }))
+    await expect($fetch('/api/nope/schema', { headers: { cookie } }))
       .rejects.toMatchObject({ statusCode: 404 })
   })
 
   it('denies anonymous access (default-deny: collections not in the anon grant)', async () => {
     await expect($fetch('/api/collections')).rejects.toMatchObject({ statusCode: 401 })
-    await expect($fetch('/api/collections/pages')).rejects.toMatchObject({ statusCode: 401 })
+    await expect($fetch('/api/pages/schema')).rejects.toMatchObject({ statusCode: 401 })
   })
 
   it('lists block definitions for an admin (fields shaped like collection fields)', async () => {

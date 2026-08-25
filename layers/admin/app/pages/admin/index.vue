@@ -17,7 +17,7 @@ try {
 // Broken-reference count for the alert banner — fire-and-forget so it never delays the dashboard, and a
 // failure (or a not-yet-built index) simply shows no banner.
 const brokenCount = ref(0)
-$fetch<unknown[]>('/api/references/broken')
+$fetch<unknown[]>('/api/brokenRefs')
   .then((r) => { brokenCount.value = r.length })
   .catch(() => { brokenCount.value = 0 })
 </script>

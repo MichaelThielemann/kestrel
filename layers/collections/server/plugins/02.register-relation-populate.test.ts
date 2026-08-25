@@ -1,17 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import Database from 'better-sqlite3'
-import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { getFieldPopulator, clearFieldPopulators } from '../../../core/server/utils/populate'
-import type { FieldDef } from '../../../core/server/utils/defineCollection'
-import { defineCollection } from '../../../core/server/utils/defineCollection'
-import { registerCollection, clearRegistry } from '../../../core/server/utils/registry'
-import { buildCollection } from '../../../fields/server/utils/buildCollection'
-import { create } from '../../../core/server/utils/crud'
-import { desiredSchema } from '../../../core/server/schema/desired'
-import { diffSchema } from '../../../core/server/schema/diff'
-import { renderSqlite } from '../../../core/server/schema/render-sqlite'
-import { publicReadableResources } from '../../../access/server/utils/public-resources'
-import { isPubliclyReadable } from '../../../access/server/utils/policy'
+import type Database from 'better-sqlite3'
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
+import { clearFieldPopulators, clearRegistry, create, defineCollection, desiredSchema, diffSchema, getFieldPopulator, getResolvedKestrelConfig, outboxContent, registerCollection, renderSqlite, resetDbInstance, revisionsTable, setResolvedKestrelConfig, useDb, buildCollection  } from '@kestrel/core'
+import type { FieldDef } from '@kestrel/core'
+import { publicReadableResources, isPubliclyReadable } from '@kestrel/access'
 
 const pages = buildCollection(defineCollection({
   name: 'pages', mode: 'multi', translatable: false, pageLike: true,
@@ -31,13 +23,13 @@ const postsDef = defineCollection({
   },
 })
 
-let db: ReturnType<typeof drizzle>
+let db: BetterSQLite3Database
 
 // The plugin is a Nitro plugin: its auto-imported helpers are plain globals in a node test. The access
 // helpers are bound to the REAL implementations so this proves the populator's public set IS the guard's.
+// `useDb` is the package's real singleton (see beforeEach): the populator reads it internally too.
 Object.assign(globalThis, {
   defineNitroPlugin: (fn: unknown) => fn,
-  useDb: () => db,
   publicReadableResources,
   isPubliclyReadable,
 })
@@ -50,9 +42,11 @@ let pageId: number
 beforeEach(() => {
   clearRegistry()
   clearFieldPopulators()
-  const sqlite = new Database(':memory:')
-  for (const stmt of renderSqlite(diffSchema(desiredSchema([pages.table, authors.table]), {}))) sqlite.exec(stmt)
-  db = drizzle(sqlite)
+  setResolvedKestrelConfig({ ...getResolvedKestrelConfig(), dbPath: ':memory:' })
+  resetDbInstance()
+  db = useDb() as unknown as BetterSQLite3Database
+  const sqlite = (db as unknown as { $client: Database.Database }).$client
+  for (const stmt of renderSqlite(diffSchema(desiredSchema([outboxContent, pages.table, authors.table, revisionsTable('pages'), revisionsTable('authors')]), {}))) sqlite.exec(stmt)
   registerCollection(pages)
   registerCollection(authors)
   authorId = (create(db, authors, { name: 'Ada', email: 'ada@example.com' }) as Record<string, unknown>).id as number

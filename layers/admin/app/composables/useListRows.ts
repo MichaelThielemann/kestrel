@@ -20,12 +20,15 @@ interface ListResponse {
   total: number
   page: number
   perPage: number
+  /** Set by `validateOut` — count of rows in `data` replaced with the quarantine shape. */
+  quarantinedCount?: number
 }
 
 export function useListRows(opts: ListRowsOptions) {
   const { t } = useT()
   const rows = ref<Record<string, unknown>[]>([])
   const total = ref(0)
+  const quarantinedCount = ref(0)
   // Surfaced when a (re)fetch fails — an inline error + Retry, never a silent stale list or a thrown
   // error boundary. Distinct from the empty state (which only shows when the fetch SUCCEEDED with no rows).
   const error = ref<string | null>(null)
@@ -37,12 +40,13 @@ export function useListRows(opts: ListRowsOptions) {
     const mine = ++seq
     const locale = opts.locale()
     try {
-      const res = await $fetch<ListResponse>(`/api/${opts.collection.value}`, {
+      const res = await $fetch<ListResponse>(`/api/${opts.collection.value}/readMany`, {
         query: { ...opts.effectiveQuery.value, ...(locale ? { locale } : {}) },
       })
       if (mine !== seq) return
       rows.value = res.data
       total.value = res.total
+      quarantinedCount.value = res.quarantinedCount ?? 0
       error.value = null
       // A page that emptied out from under us — e.g. bulk-deleting the last rows of the trailing page —
       // would otherwise strand the user on an out-of-range page showing the "create your first" empty
@@ -60,9 +64,10 @@ export function useListRows(opts: ListRowsOptions) {
     }
   }
 
-  return { rows, total, error, totalPages, fetchRows } as {
+  return { rows, total, quarantinedCount, error, totalPages, fetchRows } as {
     rows: Ref<Record<string, unknown>[]>
     total: Ref<number>
+    quarantinedCount: Ref<number>
     error: Ref<string | null>
     totalPages: ComputedRef<number>
     fetchRows: () => Promise<void>

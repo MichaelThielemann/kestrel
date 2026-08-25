@@ -55,7 +55,7 @@ describe('LinkInternalPicker', () => {
 
   it('wraps the collection select + record combobox in the .ui-link-internal stacking container', async () => {
     // The internal arm stacks two block controls; the .ui-link-internal wrapper carries the gap that keeps
-    // them from touching (the bug fix). Nuxt/happy-dom applies no CSS layout, so assert the structural
+    // them from touching. Nuxt/happy-dom applies no CSS layout, so assert the structural
     // contract: the gap-bearing wrapper exists and is the shared parent of both controls.
     const w = await mountSuspended(LinkInternalPicker, {
       props: { locale: 'en', collection: null, recordId: null }, // two collections → the select renders

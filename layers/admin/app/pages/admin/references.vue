@@ -4,7 +4,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 // The global broken-references report: every record that links to a deleted or unpublished target. The
 // referrer keeps its last published output (the stale link stays live) until it is re-edited — this is
 // the editor's queue for fixing those. Derived on read, so an entry clears once the link is fixed or the
-// target restored. Admin-only (the `references` API resource is outside the public set).
+// target restored. Admin-only (the `brokenRefs` pipeline is outside the public set).
 interface BrokenRow {
   source: { collection: string; id: number }
   target: { collection: string; id: number }
@@ -17,7 +17,7 @@ const broken = ref<BrokenRow[]>([])
 // the green all-clear (that would imply a verified-clean site when nothing was actually verified).
 const loadError = ref(false)
 try {
-  broken.value = await $fetch<BrokenRow[]>('/api/references/broken')
+  broken.value = await $fetch<BrokenRow[]>('/api/brokenRefs')
 } catch {
   loadError.value = true
 }

@@ -12,15 +12,15 @@ let sessionFails: boolean
 let loginOk: boolean
 const loginExp = 9_999_999_999_000
 
-registerEndpoint('/api/auth/session', () => {
+registerEndpoint('/api/session', () => {
   if (sessionFails) throw createError({ statusCode: 503, statusMessage: 'Service unavailable' })
   return sessionRes
 })
-registerEndpoint('/api/auth/login', () => {
+registerEndpoint('/api/login', () => {
   if (!loginOk) throw createError({ statusCode: 401, statusMessage: 'Invalid credentials' })
   return { ok: true, exp: loginExp }
 })
-registerEndpoint('/api/auth/logout', () => ({ ok: true }))
+registerEndpoint('/api/logout', () => ({ ok: true }))
 
 beforeEach(() => {
   navigateToMock.mockClear()

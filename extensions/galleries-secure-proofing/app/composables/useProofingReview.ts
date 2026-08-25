@@ -37,7 +37,7 @@ export function useProofingReview(options: UseProofingReviewOptions) {
       // (perPage is capped at 100 server-side) so a busy/multi-gallery deployment never silently drops rows.
       const rows: Record<string, unknown>[] = []
       for (let page = 1; page <= 50; page++) {
-        const res = await $fetch('/api/galleryProofing', { query: { 'filter[gallerySlug]': options.gallerySlug, perPage: 100, page } })
+        const res = await $fetch('/api/galleryProofing/readMany', { query: { 'filter[gallerySlug]': options.gallerySlug, perPage: 100, page } })
         const batch = rowsOf(res)
         rows.push(...batch)
         if (batch.length < 100) break

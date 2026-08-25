@@ -88,7 +88,7 @@ describe('RichtextToolbar', () => {
   })
 
   it('prefills the picker from the marker under the cursor when re-editing an internal link', async () => {
-    const e = createMockEditor({ href: 'kestrel:posts:9' }) // existing internal link selected
+    const e = createMockEditor({ href: 'kestrel:posts:9' })
     const w = mount(RichtextToolbar, { props: { editor: e as never, locale: 'en' }, global: { stubs: { LinkInternalPicker: PickerStub } } })
     await w.find('[aria-label="Internal link"]').trigger('click')
     const picker = w.findComponent(PickerStub)

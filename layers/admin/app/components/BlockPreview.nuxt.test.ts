@@ -37,6 +37,19 @@ const HostWithUrl = defineComponent({
   },
 })
 
+// A reactive `values.layout` stand-in for the shell's context — mirrors the `layout` key read by
+// BlockPreview's own reload watcher, nothing else.
+const HostWithLayout = defineComponent({
+  props: { url: { type: String, required: true }, layout: { type: String, default: '' } },
+  setup(props) {
+    provide(editorFormContextKey, {
+      previewUrl: computed(() => props.url),
+      values: { get layout() { return props.layout } },
+    } as never)
+    return () => h(BlockPreview, { content: [], locale: 'en' })
+  },
+})
+
 describe('BlockPreview (iframe live-preview host)', () => {
   it('mounts an iframe on the dedicated fallback page (with locale) when the record has no public URL', async () => {
     const w = await mountSuspended(BlockPreview, { props: { content: [], locale: 'de' } })
@@ -50,6 +63,19 @@ describe('BlockPreview (iframe live-preview host)', () => {
     const w = await mountSuspended(HostWithUrl, { props: { url: '/about' } })
     await flushPromises()
     expect(w.find('iframe').attributes('src')).toBe(`/about?${PREVIEW_QUERY}=1`)
+  })
+
+  it('forces a fresh navigation when the page-fields layout changes (the layout wraps the frame, out of the postMessage bridge\'s reach)', async () => {
+    const w = await mountSuspended(HostWithLayout, { props: { url: '/about', layout: '' } })
+    await flushPromises()
+    const before = w.find('iframe').attributes('src')
+    expect(before).toBe(`/about?${PREVIEW_QUERY}=1`)
+
+    await w.setProps({ layout: 'alt' })
+    await flushPromises()
+    const after = w.find('iframe').attributes('src')
+    expect(after).not.toBe(before)
+    expect(after).toMatch(new RegExp(`^/about\\?${PREVIEW_QUERY}=1&_r=\\d+$`))
   })
 
   it('renders the frame at a preset resolution (real px) when a device is quick-selected', async () => {

@@ -1,6 +1,5 @@
-import { publishFull, outputDriver } from '../../utils/publish/publisher'
-import { DepsStore } from '../../utils/publish/deps'
-import { createSqlitePersistence } from '../../utils/publish/deps-persistence'
+import { renderRouteLive } from '../../utils/publish/render-live'
+import { publishFull, outputDriver, DepsStore, createSqlitePersistence, usePublishingDb, setRenderRouteLive } from '@kestrel/publishing'
 
 /**
  * The shared publish engine, exposed as a Nitro task. Renders every published page (+ sitemap/robots)
@@ -17,9 +16,15 @@ import { createSqlitePersistence } from '../../utils/publish/deps-persistence'
 export default defineTask({
   meta: { name: 'publish:run', description: 'Render all published pages to the configured static output (HTML + _nuxt + assets)' },
   async run() {
+    // Wired explicitly here (not a module-load side effect): Nitro dev re-evaluates a task's module graph
+    // per invocation for hot-reload, which can give this call and `publisher.ts`'s a differently-scoped
+    // `@kestrel/publishing` instance if the wiring only ran once, earlier, at a boot-time import — calling
+    // the setter fresh, synchronously, right before the only call that needs it removes that dependency on
+    // import-order/instance-identity entirely. Idempotent: safe to call before every run.
+    setRenderRouteLive(renderRouteLive)
     // The same durable store the boot-publish plugin uses, so a manually-triggered run also prunes
     // routes that left the published set and records deps for later incremental publishes.
-    const deps = new DepsStore(createSqlitePersistence(useDb()))
+    const deps = new DepsStore(createSqlitePersistence(usePublishingDb().db))
     const result = await publishFull(outputDriver(), deps)
     console.info(`[kestrel] publish:run rendered ${result.rendered} route(s), pruned ${result.pruned}`)
     return { result }

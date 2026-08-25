@@ -8,7 +8,7 @@ const { navigateToMock } = vi.hoisted(() => ({ navigateToMock: vi.fn() }))
 mockNuxtImport('navigateTo', () => navigateToMock)
 
 let sessionRes: { authenticated: boolean; exp?: number }
-registerEndpoint('/api/auth/session', () => sessionRes)
+registerEndpoint('/api/session', () => sessionRes)
 
 // The middleware only reads `to.fullPath`, so the test route objects are deliberately partial — cast
 // through `unknown` rather than typing `middleware` itself as `any`.

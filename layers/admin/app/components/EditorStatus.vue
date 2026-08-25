@@ -5,7 +5,7 @@
 //             blue   — saved but a Draft, so it is intentionally NOT on the live/static site
 //             green  — saved and (for status collections) published, or just saved (no status field)
 //   RIGHT — the GENERATED state of this record's static page (pageLike collections only), read from
-//           `publish_status` via `/api/publish-status`:
+//           `publish_status` via `/api/publishStatus`:
 //             green   — the route's last publish succeeded (the file is live; the tooltip names local vs S3)
 //             amber   — published but no success row yet — a republish is in flight ("Generating…")
 //             neutral — this environment never produces the file (dev / static output off) → "Not built"
@@ -24,7 +24,7 @@ const props = defineProps<{
   savedStatus?: string
   /** Only pageLike collections produce a static page → only they get the right (live) lamp. */
   pageLike?: boolean
-  /** The record's last publish outcome (from `/api/publish-status`); null/absent while unknown. */
+  /** The record's last publish outcome (from `/api/publishStatus`); null/absent while unknown. */
   live?: PublishStatusData | null
 }>()
 const { t, lang } = useT()
@@ -62,6 +62,11 @@ const live = computed<{ tone: 'green' | 'red' | 'amber' | 'blue' | 'neutral'; wo
   const s = props.live?.status ?? null
   if (s === 'error')
     return { tone: 'red', word: t('editorStatus.word.error'), detail: t('editorStatus.live.error'), when: updatedAtLabel.value, error: props.live?.error ?? '' }
+  // An environment that never generates (dev / static output off) cannot resolve any pending state, so an
+  // alarming "Outdated" would point at a problem no action here can fix — calm neutral, even when an old
+  // success row (e.g. a prod run against the same DB) exists.
+  if (props.live?.generates === false)
+    return { tone: 'neutral', word: t('editorStatus.word.notBuilt'), detail: t('editorStatus.live.notBuilt') }
   if (s === 'success') {
     // Saved after the last publish: the file IS live, but it is an older version of this record. Saving no
     // longer republishes (ADR-0008), so this is the normal state of a page being worked on — amber, not red.
@@ -72,11 +77,7 @@ const live = computed<{ tone: 'green' | 'red' | 'amber' | 'blue' | 'neutral'; wo
     const onS3 = (props.live?.target ?? props.live?.driver) === 's3'
     return { tone: 'green', word: t('editorStatus.word.live'), detail: t(onS3 ? 'editorStatus.live.liveS3' : 'editorStatus.live.liveLocal'), when: updatedAtLabel.value }
   }
-  // No success row yet. Only an explicit generates:false means "this environment produces nothing" (dev /
-  // static output off) → a calm neutral "Not built". Unknown (undefined) → assume a publish is in flight.
-  if (props.live?.generates === false)
-    return { tone: 'neutral', word: t('editorStatus.word.notBuilt'), detail: t('editorStatus.live.notBuilt') }
-  // Never published, and a save no longer enqueues anything (ADR-0008) — so nothing is in flight and
+  // Never published, and a save does not enqueue anything (ADR-0008) — so nothing is in flight and
   // nothing will be until someone presses Publish. Reporting progress here would point the user at a
   // spinner instead of at the one action that changes it. With `publishOnSave` a save DOES republish, so
   // there the in-flight reading is the right one.

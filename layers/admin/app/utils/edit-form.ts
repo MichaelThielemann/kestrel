@@ -1,5 +1,4 @@
-import type { FieldDef } from '../../../core/server/utils/defineCollection'
-import type { SerializedField } from '../../../core/server/utils/serialize-collection'
+import type { FieldDef, SerializedField } from '@kestrel/core'
 import { resolveFieldEmpty } from '../../../ui/app/utils/field-empty'
 
 export interface ServerIssue {
@@ -206,6 +205,39 @@ function flattenBlocksById(blocks: readonly unknown[] | null | undefined, into: 
     const slots = (block as BlockLike | undefined)?.slots
     if (slots) for (const arr of Object.values(slots)) if (Array.isArray(arr)) flattenBlocksById(arr, into)
   }
+}
+
+/** One stale reference a record holds. Wire shape of `DeadRef` (kept structural here so this module stays
+ *  Vue-free and doesn't import the admin-only `dead-refs.ts` type file). */
+interface DeadRefLike {
+  field: string
+  blockId?: string
+}
+
+/**
+ * Carry dead-reference warnings across a `content` change, mirroring `reconcileBlockErrors`: a warning at
+ * a block (by stable id) is dropped once THAT field's value changes (the user swapped the broken
+ * reference) or the block is removed; it survives a pure reorder. Root-level (non-block) dead refs are
+ * untouched here — `setField` drops those directly when their own field is edited.
+ */
+export function reconcileDeadRefs<T extends DeadRefLike>(
+  refs: readonly T[],
+  prev: readonly unknown[] | null | undefined,
+  next: readonly unknown[] | null | undefined,
+): T[] {
+  const prevById = new Map<string, BlockLike>()
+  const nextById = new Map<string, BlockLike>()
+  flattenBlocksById(prev, prevById)
+  flattenBlocksById(next, nextById)
+  return refs.filter((r) => {
+    if (!r.blockId) return true
+    const before = prevById.get(r.blockId)
+    const after = nextById.get(r.blockId)
+    if (!before || !after) return false
+    const beforeVal = (before.props ?? {})[r.field]
+    const afterVal = (after.props ?? {})[r.field]
+    return valuesEqual(beforeVal, afterVal)
+  })
 }
 
 /** Structural deep-equality for the value shapes the editor tracks (primitives, arrays, plain objects). */

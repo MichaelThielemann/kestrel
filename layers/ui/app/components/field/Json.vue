@@ -2,8 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import UiField from '../ui/Field.vue'
 import UiTextarea from '../ui/Textarea.vue'
-import { fieldConstraints } from '../../../../fields/app/utils/field-meta'
-import { tryParseJson } from '../../../../fields/app/utils/field-value'
+import { fieldConstraints, tryParseJson } from '@kestrel/fields/client'
 import type { FieldComponentProps } from '../../utils/field-component'
 
 const props = defineProps<FieldComponentProps>()

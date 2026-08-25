@@ -22,8 +22,9 @@ On boot the schema engine creates Kestrel's built-in tables **and** `products` i
 The playground composes both opt-in extensions (`kestrel-galleries-secure` + `…-proofing`). It defines a
 plain **multi** `galleries` collection (Pruvious-style: a record FORM with `title`, `slug`, a `secureGallery`
 field, and a Public/Not-public `status`). The customer reaches a published gallery via the consumer's own
-route `app/pages/g/[slug].vue`, which reads the (ZK-safe) manifest from `server/api/public-gallery` (opened
-to anonymous read for ONE published gallery via the core access grant seam).
+route `app/pages/galleries/[slug].vue`, which reads the (ZK-safe) manifest from the `publicGallery` pipeline
+(`server/pipelines/public-gallery.ts`, opened to anonymous read for ONE published gallery via its own
+`access: { public: true, scope: 'published' }` declaration).
 
 1. **Editor:** admin → **Galleries** → new gallery. Fill the **form**: a title (the `slug` auto-generates
    from it — the field shows the `/galleries/` prefix and you can override it), set **status = published**.
@@ -36,6 +37,6 @@ to anonymous read for ONE published gallery via the core access grant seam).
 3. **Photographer review:** admin → <http://localhost:3000/review> → pick the gallery → enter the same
    password → each customer's colour/comment marks are overlaid on the photos.
 
-> The proofing back-channel (`POST /api/galleries-secure-proofing/submit`) + the `public-gallery` read need
+> The proofing back-channel (`POST /api/proofingSubmit`) + the `publicGallery` read need
 > the running server — they are NOT part of a pure-static (`nuxt generate`) deployment. The base secure
 > gallery embedded as a block in a static page IS fully static (the scenario the base README documents).

@@ -8,6 +8,6 @@ defineBlock({ label: { en: 'Prose' }, icon: 'file-text' })
 
 <template>
   <!-- richtext is sanitized server-side on write -->
-  <!-- eslint-disable-next-line vue/no-v-html -- sanitized via sanitizeRichtext (sanitize-html allowlist) in layers/fields/server/field-registry/index.ts -->
+  <!-- eslint-disable-next-line vue/no-v-html -- sanitized via sanitizeRichtext (sanitize-html allowlist) in packages/kestrel-fields/src/server/field-registry/index.ts -->
   <div class="block-prose" v-html="body" />
 </template>

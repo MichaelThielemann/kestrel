@@ -1,8 +1,9 @@
-import type { SerializedField } from '../../../core/server/utils/serialize-collection'
-import type { LayoutNode } from '../../../core/server/utils/field-layout'
+import type { LayoutNode, SerializedField } from '@kestrel/core'
+import { isFieldVisible } from '@kestrel/core/client'
+import { validateField } from '@kestrel/fields/client'
 import type { BlockErrorMap } from '../utils/edit-form'
 import type { DeadRef } from '../utils/dead-refs'
-import { asFieldDef, initialValues, mapServerErrors, parseBlockErrors, reconcileBlockErrors, readFetchError } from '../utils/edit-form'
+import { asFieldDef, initialValues, mapServerErrors, parseBlockErrors, reconcileBlockErrors, reconcileDeadRefs, readFetchError } from '../utils/edit-form'
 
 export interface UseEditFormOptions {
   collection: string
@@ -50,6 +51,11 @@ export function useEditForm(opts: UseEditFormOptions) {
   // Which editor body renders (the `editor` type on the serialized collection). The server resolves it,
   // but fall back defensively (blocks → 'blocks', else 'fields') so an older/partial schema still works.
   const editorType = ref('fields')
+
+  // Set when the loaded row is the quarantine shape (`{ id, $quarantined: true }`) — a stored row
+  // that no longer matches its collection's select schema. The form locks read-only; nothing here can
+  // widen what a corrupted row exposes.
+  const quarantined = ref(false)
 
   const values = reactive<Record<string, unknown>>({})
   const errors = reactive<Record<string, string>>({})
@@ -171,16 +177,18 @@ export function useEditForm(opts: UseEditFormOptions) {
 
     let row: Record<string, unknown> | null = null
     if (mode.value === 'single') {
-      row = await $fetch<Record<string, unknown> | null>(`/api/${collection}`, translatable.value ? { query: { locale: requestedLocale } } : {})
+      row = await $fetch<Record<string, unknown> | null>(`/api/${collection}/readOne`, translatable.value ? { query: { locale: requestedLocale } } : {})
       activeLocale.value = requestedLocale
     } else if (id !== 'new') {
-      row = await $fetch<Record<string, unknown>>(`/api/${collection}/${id}`)
-      if (translatable.value) {
+      row = await $fetch<Record<string, unknown>>(`/api/${collection}/readOne/${id}`)
+      // A quarantined row carries none of its normal fields — skip the locale/translations lookups, which
+      // assume a real row, and go straight to the read-only lock.
+      if (row?.$quarantined !== true && translatable.value) {
         if (typeof row?.locale === 'string') activeLocale.value = row.locale
         if (typeof row?.translationGroup === 'string') translationGroup.value = row.translationGroup
         // Supplementary (drives the LocaleBar) — never block editing if it fails.
         try {
-          translations.value = await $fetch<Record<string, number | null>>(`/api/${collection}/${id}/translations`)
+          translations.value = await $fetch<Record<string, number | null>>(`/api/${collection}/translations/${id}`)
         } catch {
           translations.value = {}
         }
@@ -199,18 +207,19 @@ export function useEditForm(opts: UseEditFormOptions) {
         }
       }
     }
+    quarantined.value = row?.$quarantined === true
     rebaseline(row)
 
     // Supplementary dead-reference map (the editor warnings) — for any saved record, never blocks editing.
     const recordId = typeof row?.id === 'number' ? row.id : null
-    if (recordId != null) {
+    if (recordId != null && !quarantined.value) {
       try {
-        deadRefs.value = await $fetch<DeadRef[]>(`/api/${collection}/${recordId}/dead-refs`)
+        deadRefs.value = await $fetch<DeadRef[]>(`/api/${collection}/deadRefs/${recordId}`)
       } catch {
         deadRefs.value = []
       }
     } else {
-      deadRefs.value = [] // a new (unsaved) record has no references — keep it explicit, never stale
+      deadRefs.value = [] // a new (unsaved) or quarantined record has no references — keep it explicit
     }
   }
 
@@ -221,9 +230,14 @@ export function useEditForm(opts: UseEditFormOptions) {
   function setField(name: string, value: unknown, coalesceAs: string = name) {
     // Capture the pre-edit state for undo (coalesced for a same-field typing burst).
     recordHistory(coalesceAs)
-    // Reconcile before overwriting: keep block errors through a reorder, drop them on an edit.
+    // Reconcile before overwriting: keep block errors/dead-ref warnings through a reorder, drop them once
+    // the offending field itself is edited (swapping out a broken reference clears its own warning without
+    // a reload — the dead-ref map is otherwise only refetched on load).
     if (name === 'content') {
       blockErrors.value = reconcileBlockErrors(blockErrors.value, values.content as unknown[], value as unknown[])
+      deadRefs.value = reconcileDeadRefs(deadRefs.value, values.content as unknown[], value as unknown[])
+    } else if (deadRefs.value.some((r) => !r.blockId && r.field === name)) {
+      deadRefs.value = deadRefs.value.filter((r) => r.blockId || r.field !== name)
     }
     values[name] = value
     formError.value = ''
@@ -279,9 +293,9 @@ export function useEditForm(opts: UseEditFormOptions) {
 
   function handleError(e: unknown) {
     const { statusCode, statusMessage, issues, data } = readFetchError(e)
-    // The row WAS written and a follow-up step failed (a write effect — see write-effects.ts), so the
-    // server hands back the new `updatedAt`. Take it as the baseline: the client only rebaselines on
-    // success, and without this the "save again" those errors ask for would 409 on a stale precondition.
+    // The row WAS written and a critical after-step failed (e.g. `writeRedirects`), so the server hands
+    // back the new `updatedAt`. Take it as the baseline: the client only rebaselines on success, and
+    // without this the "save again" those errors ask for would 409 on a stale precondition.
     if (typeof data?.savedUpdatedAt === 'number') baseUpdatedAt.value = data.savedUpdatedAt
     if (statusCode === 400) {
       const mapped = mapServerErrors(issues)
@@ -305,6 +319,9 @@ export function useEditForm(opts: UseEditFormOptions) {
   }
 
   async function submit(): Promise<SubmitResult> {
+    // Sealed at the wire (validateOut) — a quarantined row's fields are unknown, so nothing here may
+    // send a write for it.
+    if (quarantined.value) return { ok: false }
     formError.value = ''
     blockErrors.value = {}
     // Clear the whole map, not just declared-field errors: `path`/`seo`/`status` are system columns
@@ -326,10 +343,10 @@ export function useEditForm(opts: UseEditFormOptions) {
       // `method` cast: Nuxt's typed `$fetch` over-constrains the method for this dynamic (template-literal)
       // admin route to GET; the runtime value is correct, only the static route type can't express it.
       const row = mode.value === 'single'
-        ? await $fetch(`/api/${collection}`, { method: 'PUT' as never, body, headers: ifUnmodified, ...(translatable.value ? { query: { locale: activeLocale.value } } : {}) })
+        ? await $fetch(`/api/${collection}/updateOne`, { method: 'POST' as never, body, headers: ifUnmodified, ...(translatable.value ? { query: { locale: activeLocale.value } } : {}) })
         : id === 'new'
-          ? await $fetch(`/api/${collection}`, { method: 'POST' as never, body })
-          : await $fetch(`/api/${collection}/${id}`, { method: 'PATCH', body, headers: ifUnmodified })
+          ? await $fetch(`/api/${collection}/createOne`, { method: 'POST' as never, body })
+          : await $fetch(`/api/${collection}/updateOne/${id}`, { method: 'POST' as never, body, headers: ifUnmodified })
       rebaseline(row as Record<string, unknown>)
       // `record` is the saved entity at the editor's public boundary; `row` stays the DB-layer term.
       return { ok: true, record: row }
@@ -361,6 +378,7 @@ export function useEditForm(opts: UseEditFormOptions) {
     pageLike,
     hasSeo,
     hasStatus,
+    quarantined,
     values,
     errors,
     formError,

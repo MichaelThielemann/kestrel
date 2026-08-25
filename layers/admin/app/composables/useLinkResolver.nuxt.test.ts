@@ -4,7 +4,7 @@ import { registerEndpoint } from '@nuxt/test-utils/runtime'
 import { useLinkResolver } from './useLinkResolver'
 
 let calls: string[] = []
-registerEndpoint('/api/links/resolve', (event) => {
+registerEndpoint('/api/resolveLinks', (event) => {
   const refs = String(getQuery(event).refs ?? '')
   calls.push(refs)
   const data = refs.split(',').filter(Boolean).flatMap((r) => {

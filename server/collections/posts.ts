@@ -1,5 +1,4 @@
-import { buildCollection } from '../../layers/fields/server/utils/buildCollection'
-import { defineCollection } from '../../layers/core/server/utils/defineCollection'
+import { buildCollection, defineCollection  } from '@kestrel/core'
 
 const built = buildCollection(defineCollection({
   name: 'posts',

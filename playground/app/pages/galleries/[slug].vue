@@ -7,7 +7,7 @@
 // back-channel); for the pure-static enterprise base (no marking), drop 'kestrel-galleries-secure-proofing'
 // from nuxt.config `extends` and render <SecureGalleryView :gallery="data.gallery" /> instead.
 const route = useRoute()
-const { data, error } = await useFetch('/api/public-gallery', { query: { slug: route.params.slug } })
+const { data, error } = await useFetch('/api/publicGallery', { query: { slug: route.params.slug } })
 </script>
 
 <template>

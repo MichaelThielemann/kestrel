@@ -16,7 +16,6 @@ describe('linkToHref', () => {
   it('appends an internal link hash to the resolved path, but never to an unresolved #', () => {
     expect(linkToHref({ type: 'internal', collection: 'pages', id: 5, href: '/', hash: 'about' })).toBe('/#about')
     expect(linkToHref({ type: 'internal', collection: 'pages', id: 5, href: '/history', hash: 'csc23' })).toBe('/history#csc23')
-    // unresolved target stays '#' — the hash must not fabricate a fragment-only link
     expect(linkToHref({ type: 'internal', collection: 'pages', id: 5, hash: 'about' })).toBe('#')
   })
 

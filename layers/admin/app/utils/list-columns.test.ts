@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { SerializedCollection } from '../../../core/server/utils/serialize-collection'
+import type { SerializedCollection } from '@kestrel/core'
 import { availableColumns, defaultVisibleKeys, hasReferenceFields, resolveVisibleColumns, TRANSLATIONS_KEY, DEAD_REFS_KEY } from './list-columns'
 
 const base = (over: Partial<SerializedCollection> = {}): SerializedCollection => ({

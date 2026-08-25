@@ -6,7 +6,7 @@ import References from './references.vue'
 
 // 'ok' = check succeeded, nothing broken; 'fail' = the check itself failed; 'broken' = found a bad ref.
 let refsMode: 'ok' | 'fail' | 'broken' = 'ok'
-registerEndpoint('/api/references/broken', () => {
+registerEndpoint('/api/brokenRefs', () => {
   if (refsMode === 'fail') throw createError({ statusCode: 500, statusMessage: 'Boom' })
   if (refsMode === 'broken') return [{ source: { collection: 'pages', id: 1 }, target: { collection: 'posts', id: 2 }, reason: 'missing' }]
   return []

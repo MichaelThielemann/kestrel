@@ -25,7 +25,7 @@ In scope: the published packages (`@michaelthielemann/kestrel`, `create-kestrel`
 `@michaelthielemann/kestrel-galleries-*` extensions) as used according to the documentation.
 
 Out of scope, because they are documented design decisions rather than defects — see
-[README](./README.md#what-kestrel-is--and-isnt) and [configuration.md](./docs/configuration.md):
+[README](./README.md#what-kestrel-is--and-isnt) and [configuration.md](./docs/guide/configuration.md):
 
 - **Uploaded files are not access-controlled.** With `media.driver: 'local'` they are served from the app
   origin by Nitro's static handler, which runs ahead of every middleware; the admin guard protects the

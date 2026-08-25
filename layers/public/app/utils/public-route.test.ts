@@ -33,7 +33,6 @@ describe('resolvePublicRoute — locale + lookup path from URL segments (mirrors
     // /en/about → en page /about (under prefixPrimary the primary IS prefixed)
     expect(resolvePublicRoute(['en', 'about'], ['en', 'de'], 'en', true)).toEqual({ locale: 'en', path: '/about' })
     expect(resolvePublicRoute(['en'], ['en', 'de'], 'en', true)).toEqual({ locale: 'en', path: '/' })
-    // non-primary still works
     expect(resolvePublicRoute(['de', 'ueber'], ['en', 'de'], 'en', true)).toEqual({ locale: 'de', path: '/ueber' })
     // a bare path with no locale segment falls back to the primary (a soft live alias; not generated statically)
     expect(resolvePublicRoute(['about'], ['en', 'de'], 'en', true)).toEqual({ locale: 'en', path: '/about' })

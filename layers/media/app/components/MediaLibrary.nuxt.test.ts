@@ -27,7 +27,7 @@ registerEndpoint('/api/media/folders', () => { folderPosts++; return { path: 'cr
 let mediaPosts = 0
 let mediaFail = false
 let mediaFailBlank = false
-registerEndpoint('/api/media', (event) => {
+registerEndpoint('/api/media/upload', (event) => {
   mediaPosts++
   // A failure with a blank reason phrase (HTTP/2) and no body message — exercises the localized fallback.
   if (mediaFailBlank) { setResponseStatus(event, 500, ''); return { ok: false } }
@@ -37,8 +37,8 @@ registerEndpoint('/api/media', (event) => {
 
 let lastPatchHeader: string | undefined
 let lastPatchBody: Record<string, unknown> | undefined
-registerEndpoint('/api/media/1', {
-  method: 'PATCH',
+registerEndpoint('/api/media/updateAsset/1', {
+  method: 'POST',
   handler: async (event) => {
     lastPatchHeader = getRequestHeader(event, 'x-kestrel-if-unmodified-since')
     lastPatchBody = await readBody(event)
@@ -93,11 +93,10 @@ describe('MediaLibrary', () => {
     await w.findAll('button').find((b) => /^create$/i.test(b.text().trim()))!.trigger('click')
     await flushPromises(); await nextTick()
     expect(folderPosts).toBe(before + 1)
-    // Dialog closed → its name input is gone.
     expect(w.findAll('input').find((i) => i.attributes('placeholder')?.includes('holiday'))).toBeUndefined()
   })
 
-  it('uploads selected files via the toolbar (POST /api/media)', async () => {
+  it('uploads selected files via the toolbar (POST /api/media/upload)', async () => {
     const before = mediaPosts
     const w = await mountSuspended(MediaLibrary)
     await flushPromises(); await nextTick()

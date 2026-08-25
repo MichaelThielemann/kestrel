@@ -96,7 +96,6 @@ describe('MediaImage', () => {
   it('sharpens in on a real (async) load: no animation class before load, present after, placeholder dropped', async () => {
     const w = mount(MediaImage, { props: { media: { ...base, alt: null, thumbhash: makeThumbhash() } } })
     await nextTick() // the thumbhash placeholder is decoded client-side on mount (kept out of SSR HTML)
-    // Before load: blur placeholder is shown, no animation class.
     expect(w.get('img').classes()).not.toContain('media-image--in')
     expect(w.get('img').attributes('style') ?? '').toContain('background-image')
     // A genuine async load triggers the one-shot sharpen-in and drops the placeholder.
@@ -112,8 +111,8 @@ describe('MediaImage', () => {
     expect(w.get('img').classes()).toContain('media-image--in')
     await w.setProps({ media: { ...base, alt: null, src: '/uploads/b/other.webp', thumbhash: makeThumbhash(200, 90, 40) } })
     await flushPromises()
-    expect(w.get('img').classes()).not.toContain('media-image--in') // reset for the new image
-    expect(w.get('img').attributes('style') ?? '').toContain('background-image') // new placeholder shown again
+    expect(w.get('img').classes()).not.toContain('media-image--in')
+    expect(w.get('img').attributes('style') ?? '').toContain('background-image')
   })
   it('does NOT sharpen a cached image (already complete at mount) — no blur flash on revisit', async () => {
     // Override the suite-wide complete=false pin: force true so onMounted takes the cached short-circuit.
@@ -123,7 +122,7 @@ describe('MediaImage', () => {
     try {
       const w = mount(MediaImage, { props: { media: { ...base, alt: null, thumbhash: makeThumbhash() } } })
       await flushPromises()
-      expect(w.get('img').attributes('style') ?? '').not.toContain('background-image') // placeholder dropped (loaded)
+      expect(w.get('img').attributes('style') ?? '').not.toContain('background-image')
       await w.get('img').trigger('load') // a cached image may still fire load — must not arm the animation
       expect(w.get('img').classes()).not.toContain('media-image--in')
     } finally {

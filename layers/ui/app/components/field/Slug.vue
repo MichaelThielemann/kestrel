@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { slugify } from '../../../../core/app/utils/slugify'
+import { slugify } from '@kestrel/core/client'
+import type { FieldOf } from '@kestrel/core'
 import type { FieldComponentProps } from '../../utils/field-component'
-import type { FieldOf } from '../../../../core/server/utils/defineCollection'
-
 // Editor widget for the `slug` field type. Shows the (display-only) `prefix` before an editable slug input,
 // and normalizes the value to a real slug on blur. Leaving it blank is fine — the server auto-generates it
 // from `options.from` (e.g. the title) on save. `options.from`/`prefix` come from the field def.

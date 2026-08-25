@@ -31,7 +31,7 @@ describe('readCappedBody — bound the buffered request body regardless of conte
   it('stops reading the stream as soon as the cap is exceeded (does not drain the rest)', async () => {
     let pulled = 0
     async function* counting() {
-      for (let i = 0; i < 100; i++) { pulled++; yield Buffer.from('xxxxx') } // 5 bytes each
+      for (let i = 0; i < 100; i++) { pulled++; yield Buffer.from('xxxxx') }
     }
     expect(await readCappedBody(counting(), 10)).toBeNull()
     expect(pulled).toBeLessThan(5) // bailed out near the cap, not after all 100 chunks

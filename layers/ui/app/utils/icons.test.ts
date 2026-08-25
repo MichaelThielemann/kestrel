@@ -41,7 +41,7 @@ describe('sanitizeIconSvg', () => {
   })
 
   it('drops elements that are not on the allowlist, regardless of attribute separator', () => {
-    // these are the exact denylist-bypass vectors a previous regex sanitiser let through
+    // exact denylist-bypass vectors a naive regex/denylist sanitiser would miss
     for (const vector of [
       '<img/onerror=alert(1) src=x>',
       '<image/onerror=alert(1) href=x />',

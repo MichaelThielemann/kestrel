@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { rmSync } from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch, createPage, url } from '@nuxt/test-utils/e2e'
-import { hashPassword } from '../../layers/auth/server/utils/password'
+import Database from 'better-sqlite3'
+import { hashPassword } from '@kestrel/auth'
 import { e2eBrowserOptions } from '../helpers/e2e-browser'
 
 const dbPath = join(tmpdir(), `kestrel-admin-editor-e2e-${process.pid}.sqlite`)
@@ -29,7 +30,7 @@ describe('admin record editor (e2e, browser)', async () => {
   let cookie = ''
   let postId = 0
   beforeAll(async () => {
-    const res = await testFetch('/api/auth/login', {
+    const res = await testFetch('/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ password: PW }),
@@ -39,7 +40,7 @@ describe('admin record editor (e2e, browser)', async () => {
       : [res.headers.get('set-cookie')].filter(Boolean) as string[]
     cookie = set.map((c) => c.split(';')[0]).join('; ')
 
-    const created = await $fetch('/api/posts', {
+    const created = await $fetch('/api/posts/createOne', {
       method: 'POST',
       headers: { cookie },
       body: { title: 'Seed Post', body: '<p>seeded</p>' },
@@ -97,7 +98,7 @@ describe('admin record editor (e2e, browser)', async () => {
     await expect.poll(async () => page.getByLabel('title').inputValue()).toBe('Loop Alpha')
     await page.getByLabel('title').fill('Loop Beta')
     // wait for the save to round-trip (the toast text "Saved" collides with the editor-status ampel label)
-    const savedEdit = page.waitForResponse((r) => /\/api\/posts\/\d+/.test(r.url()) && r.request().method() === 'PATCH')
+    const savedEdit = page.waitForResponse((r) => /\/api\/posts\/updateOne\/\d+/.test(r.url()) && r.request().method() === 'POST')
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await savedEdit
     await page.goto(url('/admin/posts'))
@@ -115,7 +116,7 @@ describe('admin record editor (e2e, browser)', async () => {
   })
 
   it('duplicates via the row quick-action and bulk-deletes via the selection bar', async () => {
-    await $fetch('/api/posts', {
+    await $fetch('/api/posts/createOne', {
       method: 'POST',
       headers: { cookie },
       body: { title: 'Bulk Seed', body: '<p>x</p>' },
@@ -153,8 +154,8 @@ describe('admin record editor (e2e, browser)', async () => {
   it('edits the settings singleton and persists across a reload', async () => {
     const page = await authedPage('/admin/settings')
     await page.getByLabel('Site Name', { exact: true }).fill('Acme Co')
-    // wait for the PUT to round-trip (the toast text "Saved" collides with the editor-status ampel label)
-    const saved = page.waitForResponse((r) => /\/api\/settings/.test(r.url()) && r.request().method() === 'PUT')
+    // wait for the save to round-trip (the toast text "Saved" collides with the editor-status ampel label)
+    const saved = page.waitForResponse((r) => /\/api\/settings\/updateOne/.test(r.url()) && r.request().method() === 'POST')
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await saved
 
@@ -183,7 +184,7 @@ describe('admin record editor (e2e, browser)', async () => {
   })
 
   it('edits page block content: adds a hero block, saves, and persists across reload', async () => {
-    const created = await $fetch('/api/pages', {
+    const created = await $fetch('/api/pages/createOne', {
       method: 'POST',
       headers: { cookie },
       body: { title: 'Block Page', path: '/block-page', status: 'published' },
@@ -196,8 +197,8 @@ describe('admin record editor (e2e, browser)', async () => {
     // Adding a block auto-selects it, so its fields show in the right-hand fields pane. `heading` is
     // required, so its label carries a trailing `*` — match by substring (not exact).
     await page.getByLabel('Heading').fill('My Hero')
-    // wait for the PATCH to round-trip (the toast text "Saved" collides with the editor-status ampel label)
-    const savedPage = page.waitForResponse((r) => /\/api\/pages\/\d+/.test(r.url()) && r.request().method() === 'PATCH')
+    // wait for the save to round-trip (the toast text "Saved" collides with the editor-status ampel label)
+    const savedPage = page.waitForResponse((r) => /\/api\/pages\/updateOne\/\d+/.test(r.url()) && r.request().method() === 'POST')
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await savedPage
 
@@ -209,10 +210,10 @@ describe('admin record editor (e2e, browser)', async () => {
     await expect.poll(async () => reopened.getByLabel('Heading').inputValue()).toBe('My Hero')
   })
 
-  // The feature ADR-0008 exists for: look at work in progress on the real page, in a real tab, without
+  // This feature exists so you can look at work in progress on the real page, in a real tab, without
   // saving it and without publishing it.
   it('previews unsaved changes in a new tab through a ticket — no save, no publish', async () => {
-    const created = await $fetch('/api/pages', {
+    const created = await $fetch('/api/pages/createOne', {
       method: 'POST',
       headers: { cookie },
       body: { title: 'Ticket Page', path: '/ticket-page', status: 'published' },
@@ -243,7 +244,34 @@ describe('admin record editor (e2e, browser)', async () => {
     expect(wrote).toBe(false)
 
     // …and the stored record is untouched.
-    const stored = await $fetch(`/api/pages/${created.id}`, { headers: { cookie } }) as { title: string }
+    const stored = await $fetch(`/api/pages/readOne/${created.id}`, { headers: { cookie } }) as { title: string }
     expect(stored.title).toBe('Ticket Page')
+  })
+
+  // A row that fails its select schema on read is quarantined (validate-out.ts), not silently dropped —
+  // the admin UI must surface it: a badge in the list, and a locked banner in the editor.
+  it('surfaces a quarantined row: badge in the list, banner + no save in the editor', async () => {
+    const created = await $fetch('/api/posts/createOne', {
+      method: 'POST',
+      headers: { cookie },
+      body: { title: 'Corrupt Me', body: '<p>x</p>' },
+    }) as { id: number }
+
+    // Corrupt directly at the SQL level, bypassing the write pipeline entirely — the same pattern
+    // validate-out.test.ts uses. `updated_at` (timestamp_ms) fails the select schema on a non-numeric
+    // stored value (SQLite is dynamically typed, so the raw UPDATE succeeds either way).
+    const sqlite = new Database(dbPath)
+    sqlite.exec(`UPDATE posts SET updated_at = 'nope' WHERE id = ${created.id}`)
+    sqlite.close()
+
+    const list = await authedPage('/admin/posts')
+    const badgeRow = list.locator('tbody tr', { has: list.getByText('Quarantined') })
+    await badgeRow.waitFor()
+
+    const editor = await authedPage(`/admin/posts/${created.id}`)
+    const banner = editor.getByRole('alert').filter({ hasText: 'quarantined' })
+    await banner.waitFor()
+    expect(await editor.locator('input').count()).toBe(0)
+    expect(await editor.getByRole('button', { name: 'Save', exact: true }).count()).toBe(0)
   })
 })

@@ -1,22 +1,19 @@
 import collections from '#kestrel/collections'
 import blocks from '#kestrel/blocks'
-import { registerBlock, type BlockDef } from '../../../fields/server/utils/defineBlock'
-import { ensureBuilt } from '../../../fields/server/utils/buildCollection'
+import { registerBlock, type BlockDef } from '@kestrel/fields'
+import { ensureBuilt, collectionEnabled, registerCollection  } from '@kestrel/core'
 import { resolveServerKestrel, serverRuntimeConfig } from '../../../core/server/utils/server-config'
-import { collectionEnabled } from '../../../core/server/schema/bootstrap'
-import type { CollectionDef } from '../../../core/server/utils/defineCollection'
-import type { BuiltCollection } from '../../../core/server/utils/collection-types'
-
+import type { BuiltCollection, CollectionDef } from '@kestrel/core'
 // Auto-discovered collection files default-export either a plain CollectionDef (the common consumer
 // form, `export default defineCollection(…)`) or an already-built collection (advanced). `ensureBuilt`
 // normalizes both so the registry only ever holds BuiltCollections.
 //
-// NOTE on ordering: the `01.` prefix sorts only WITHIN this (collections) layer. Nitro runs plugins by
-// layer-then-filename, so this plugin does NOT run second — in-repo it runs LAST (after core's
-// 00.migrate/02.schema-sync/03.record-refs), and the cross-layer order differs again for an
-// `extends: ['@michaelthielemann/kestrel']` consumer. That is safe ONLY because nothing reads the registry at plugin init:
-// migrate/schema-sync read the `#kestrel/collections` virtual directly, and the ref/cleanup/publish
-// plugins register deferred listeners. Keep that invariant — do not add an init-time allCollections() read.
+// NOTE on ordering: this plugin's real execution position is declared data now
+// (layers/core/modules/plugin-order/plugin-order.ts), not an accident of filename/layer scan order — it
+// runs after every core plugin (00.migrate/02.schema-sync included), identically in both build contexts.
+// It is order-free regardless: nothing reads the registry at plugin init — migrate/schema-sync read the
+// `#kestrel/collections` virtual directly, and the ref/cleanup/publish plugins register deferred listeners.
+// Keep that invariant — do not add an init-time allCollections() read.
 export default defineNitroPlugin(() => {
   for (const block of blocks as BlockDef[]) registerBlock(block)
   // Built-in collections (`pages`, `media`) register by default but can be disabled per consumer via

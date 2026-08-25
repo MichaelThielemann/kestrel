@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { toQuery, toggleSort, sortDirection, parseListQuery, type ListState } from './list-query'
 import type { ListColumn } from './list-columns'
-import { clampPerPage } from '../../../core/app/utils/list-limits'
+import { clampPerPage } from '@kestrel/core'
 
 describe('toQuery', () => {
   it('serializes sort, page, perPage and an eq filter as a bare filter[field] key (back-compat)', () => {

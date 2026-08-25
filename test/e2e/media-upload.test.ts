@@ -5,7 +5,7 @@ import { rmSync, mkdtempSync } from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, fetch as testFetch, createPage, url } from '@nuxt/test-utils/e2e'
 import sharp from 'sharp'
-import { hashPassword } from '../../layers/auth/server/utils/password'
+import { hashPassword } from '@kestrel/auth'
 import { e2eBrowserOptions } from '../helpers/e2e-browser'
 
 const dbPath = join(tmpdir(), `kestrel-media-upload-e2e-${process.pid}.sqlite`)
@@ -28,7 +28,7 @@ describe('media upload + new-folder + collision (e2e, browser)', async () => {
 
   let cookie = ''
   beforeAll(async () => {
-    const res = await testFetch('/api/auth/login', {
+    const res = await testFetch('/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ password: PW }),
@@ -52,11 +52,9 @@ describe('media upload + new-folder + collision (e2e, browser)', async () => {
     await page.context().addCookies([{ name, value, url: url('/') }])
     await page.goto(url('/admin/media'))
 
-    // The toolbar renders once the library has settled.
     const newFolderBtn = page.getByRole('button', { name: 'New folder' })
     await newFolderBtn.waitFor()
 
-    // 1) New folder: open the dialog, name it, create it, see the tile.
     await newFolderBtn.click()
     const folderName = page.getByPlaceholder('e.g. holiday')
     await folderName.waitFor()
@@ -66,17 +64,14 @@ describe('media upload + new-folder + collision (e2e, browser)', async () => {
     const folderTile = page.locator('[data-test="folder-up-demo"]')
     await folderTile.getByText('up-demo').waitFor()
 
-    // 2) Upload a file: drive the hidden file input directly.
     const png = await sharp({
       create: { width: 32, height: 24, channels: 4, background: { r: 11, g: 22, b: 33, alpha: 1 } },
     }).png().toBuffer()
     const fileInput = page.locator('input[type=file]')
     await fileInput.setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: png })
 
-    // After the upload settles the listing refetches and the tile appears.
     await page.getByText('shot.png').waitFor()
 
-    // 3) Collision: upload the same file again -> conflict dialog -> Overwrite.
     await fileInput.setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: png })
 
     const dialogTitle = page.getByText('Resolve upload conflicts')
@@ -86,10 +81,8 @@ describe('media upload + new-folder + collision (e2e, browser)', async () => {
     const row = page.locator('.media-conflicts__row', { hasText: 'shot.png' })
     await row.getByRole('button', { name: 'Overwrite', exact: true }).click()
 
-    // The dialog closes once the conflict is resolved and the listing refetches.
     await dialogTitle.waitFor({ state: 'hidden' })
 
-    // Exactly one shot.png tile remains (overwrite, not a duplicate).
     const tiles = page.getByText('shot.png')
     await expect.poll(() => tiles.count()).toBe(1)
   })

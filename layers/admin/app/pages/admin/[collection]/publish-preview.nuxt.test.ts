@@ -20,22 +20,20 @@ const calls = vi.hoisted(() => ({
   tickets: [] as Record<string, unknown>[],
 }))
 
-registerEndpoint('/api/pages/1', async (event) => {
-  if (event.method === 'PATCH') {
-    const b = await readBody(event)
-    calls.writes.push(b)
-    return { id: 1, ...b, updatedAt: '2026-08-13T10:00:00.000Z' }
-  }
-  return { id: 1, title: 'Existing', path: '/existing', status: 'draft', updatedAt: '2026-08-13T09:00:00.000Z' }
-})
-registerEndpoint('/api/pages', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
-registerEndpoint('/api/pages/1/dead-refs', () => [])
-registerEndpoint('/api/publish-status', () => ({ route: '/existing', status: 'success', pending: !calls.publishOnSave, generates: true, publishOnSave: calls.publishOnSave, updatedAt: '2026-08-13T09:30:00.000Z' }))
+registerEndpoint('/api/pages/readOne/1', () => ({ id: 1, title: 'Existing', path: '/existing', status: 'draft', updatedAt: '2026-08-13T09:00:00.000Z' }))
+registerEndpoint('/api/pages/updateOne/1', { method: 'POST', handler: async (event) => {
+  const b = await readBody(event)
+  calls.writes.push(b)
+  return { id: 1, ...b, updatedAt: '2026-08-13T10:00:00.000Z' }
+} })
+registerEndpoint('/api/pages/readMany', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
+registerEndpoint('/api/pages/deadRefs/1', () => [])
+registerEndpoint('/api/publishStatus', () => ({ route: '/existing', status: 'success', pending: !calls.publishOnSave, generates: true, publishOnSave: calls.publishOnSave, updatedAt: '2026-08-13T09:30:00.000Z' }))
 registerEndpoint('/api/publish', async (event) => {
   calls.publishes.push(await readBody(event))
   return { queued: true, generates: true, routes: ['/existing'], pruned: [], drafts: [] }
 })
-registerEndpoint('/api/preview', async (event) => {
+registerEndpoint('/api/createPreview', async (event) => {
   if (event.method === 'POST') {
     calls.tickets.push(await readBody(event))
     return { token: 'pv_abc', expiresAt: Date.now() + 600_000 }
@@ -85,7 +83,6 @@ describe('record editor — Save and Publish are separate actions', () => {
     expect(labels.indexOf('Publish')).toBe(labels.indexOf('Save') + 1)
   })
 
-  // `output.publishOnSave` is the way back to the pre-2.0 model, where a save republished on its own.
   it('drops the Publish button when the consumer turned the split off', async () => {
     calls.publishOnSave = true
     const w = await mountSuspended(RecordPage)

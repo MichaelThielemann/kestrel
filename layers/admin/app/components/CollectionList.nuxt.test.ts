@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { getQuery, readBody, createError } from 'h3'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
@@ -15,7 +15,7 @@ const thingsSchema = {
 
 let lastQuery: Record<string, unknown> = {}
 let thingsFetches = 0
-registerEndpoint('/api/things', (event) => {
+registerEndpoint('/api/things/readMany', (event) => {
   lastQuery = getQuery(event)
   thingsFetches++
   return {
@@ -29,18 +29,22 @@ registerEndpoint('/api/things', (event) => {
   }
 })
 
-// Batch endpoint + referrer aggregate the row/bulk actions call.
+// The write pipelines the row/bulk actions call, plus the referrer aggregate.
 let thingsBulk: Record<string, unknown> | null = null
 let bulkDelayMs = 0
-registerEndpoint('/api/things/bulk', async (event) => {
-  thingsBulk = await readBody(event)
-  if (bulkDelayMs) await new Promise((r) => setTimeout(r, bulkDelayMs))
-  const ids = thingsBulk!.action === 'duplicate' ? (thingsBulk!.ids as number[]).map((n) => n + 100) : thingsBulk!.ids
-  return { action: thingsBulk!.action, count: (ids as number[]).length, ids }
-})
+function thingsBatchHandler(op: 'deleteMany' | 'duplicate') {
+  return async (event: Parameters<typeof readBody>[0]) => {
+    thingsBulk = await readBody(event)
+    if (bulkDelayMs) await new Promise((r) => setTimeout(r, bulkDelayMs))
+    if (op === 'duplicate') return (thingsBulk!.ids as number[]).map((n) => ({ id: n + 100 }))
+    return { count: (thingsBulk!.ids as number[]).length, ids: thingsBulk!.ids }
+  }
+}
+registerEndpoint('/api/things/deleteMany', { method: 'POST', handler: thingsBatchHandler('deleteMany') })
+registerEndpoint('/api/things/duplicate', { method: 'POST', handler: thingsBatchHandler('duplicate') })
 let referrersQuery: Record<string, unknown> = {}
 let failReferrers = false
-registerEndpoint('/api/references/referrers', (event) => {
+registerEndpoint('/api/things/referrers', (event) => {
   referrersQuery = getQuery(event)
   if (failReferrers) throw createError({ statusCode: 500, statusMessage: 'ref boom' })
   return { counts: { '1': 2 } }
@@ -48,22 +52,39 @@ registerEndpoint('/api/references/referrers', (event) => {
 
 // A status-bearing collection to prove the bulk bar's Publish/Unpublish are schema-gated.
 let statusBulk: Record<string, unknown> | null = null
-registerEndpoint('/api/statusy', () => ({
+registerEndpoint('/api/statusy/readMany', () => ({
   data: [{ id: 1, title: 'One', status: 'draft' }, { id: 2, title: 'Two', status: 'published' }],
   total: 2, page: 1, perPage: 25,
 }))
-registerEndpoint('/api/statusy/bulk', async (event) => {
+registerEndpoint('/api/statusy/updateMany', { method: 'POST', handler: async (event) => {
   statusBulk = await readBody(event)
-  return { action: statusBulk!.action, count: (statusBulk!.ids as number[]).length, ids: statusBulk!.ids }
-})
+  return { count: (statusBulk!.ids as number[]).length, ids: statusBulk!.ids }
+} })
 const statusSchema = {
   name: 'statusy', mode: 'multi', translatable: false, pageLike: false, seo: false, status: true,
   blocks: { enabled: false }, label: { singular: 'S', plural: 'Ss' },
   fields: { title: { type: 'text', required: true, unique: false } },
 }
 
+// A collection whose schema carries a consumer-registered custom pipeline action — proves the bulk bar
+// and the row-actions cell render it generically from the wire, with no dedicated UI code.
+let customBulk: Record<string, unknown> | null = null
+registerEndpoint('/api/customy/readMany', () => ({
+  data: [{ id: 1, title: 'One' }, { id: 2, title: 'Two' }], total: 2, page: 1, perPage: 25,
+}))
+registerEndpoint('/api/customy/archive', { method: 'POST', handler: async (event) => {
+  customBulk = await readBody(event)
+  return { ok: true }
+} })
+const customSchema = {
+  name: 'customy', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
+  blocks: { enabled: false }, label: { singular: 'Item', plural: 'Items' },
+  fields: { title: { type: 'text', required: true, unique: false } },
+  actions: [{ name: 'archive', route: { url: '/api/customy/archive', method: 'POST' }, kind: 'bulk', label: 'Archive', confirm: true }],
+}
+
 let relQuery: Record<string, unknown> = {}
-registerEndpoint('/api/rel', (event) => {
+registerEndpoint('/api/rel/readMany', (event) => {
   relQuery = getQuery(event)
   return { data: [{ id: 1, title: 'A', authorId: 7 }], total: 1, page: 1, perPage: 25 }
 })
@@ -76,14 +97,14 @@ const relSchema = {
   },
 }
 
-registerEndpoint('/api/cols', () => ({ data: [{ id: 1, title: 'X' }], total: 1, page: 1, perPage: 25 }))
+registerEndpoint('/api/cols/readMany', () => ({ data: [{ id: 1, title: 'X' }], total: 1, page: 1, perPage: 25 }))
 const colsSchema = {
   name: 'cols', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: 'Col', plural: 'Cols' },
   fields: { title: { type: 'text', required: false, unique: false } },
 }
 
-registerEndpoint('/api/transl', () => ({
+registerEndpoint('/api/transl/readMany', () => ({
   data: [
     { id: 1, title: 'Both', translationGroup: 'g1', $translations: { en: 1, de: 2 } },
     { id: 3, title: 'EN only', translationGroup: 'g3', $translations: { en: 3, de: null } },
@@ -98,7 +119,7 @@ const translSchema = {
   fields: { title: { type: 'text', required: true, unique: false } },
 }
 
-registerEndpoint('/api/deadlist', () => ({
+registerEndpoint('/api/deadlist/readMany', () => ({
   data: [
     { id: 1, title: 'Broken', $hasDeadRefs: true },
     { id: 2, title: 'Fine', $hasDeadRefs: false },
@@ -119,7 +140,7 @@ const deadSchema = {
 // A collection spanning the typed value controls: boolean → Yes/No select, single choice → enum select,
 // multi choice (stringSet) → value select, many media (idSet) → number input.
 let typedQuery: Record<string, unknown> = {}
-registerEndpoint('/api/typed', (event) => {
+registerEndpoint('/api/typed/readMany', (event) => {
   typedQuery = getQuery(event)
   return { data: [], total: 0, page: 1, perPage: 25 }
 })
@@ -134,8 +155,33 @@ const typedSchema = {
   },
 }
 
+registerEndpoint('/api/quarant/readMany', () => ({
+  data: [
+    { id: 1, title: 'Fine' },
+    { id: 2, $quarantined: true },
+  ],
+  total: 2,
+  page: 1,
+  perPage: 25,
+  quarantinedCount: 1,
+}))
+const quarantSchema = {
+  name: 'quarant', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
+  blocks: { enabled: false }, label: { singular: 'Item', plural: 'Items' },
+  fields: { title: { type: 'text', required: true, unique: false } },
+}
+
+registerEndpoint('/api/clean/readMany', () => ({
+  data: [{ id: 1, title: 'Fine' }], total: 1, page: 1, perPage: 25, quarantinedCount: 0,
+}))
+const cleanSchema = {
+  name: 'clean', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
+  blocks: { enabled: false }, label: { singular: 'Item', plural: 'Items' },
+  fields: { title: { type: 'text', required: true, unique: false } },
+}
+
 // A localized-label collection with no rows, to assert the label map resolves (not "[object Object]").
-registerEndpoint('/api/locthings', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
+registerEndpoint('/api/locthings/readMany', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
 const localizedSchema = {
   name: 'locthings', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
   blocks: { enabled: false }, label: { singular: { en: 'Thing', de: 'Ding' }, plural: { en: 'Things', de: 'Dinge' } },
@@ -145,7 +191,7 @@ const localizedSchema = {
 // Fails while `failMode` is set, then succeeds — the test flips it before clicking Retry, so the result
 // is deterministic regardless of how many times the component fetches on mount.
 let failMode = true
-registerEndpoint('/api/failing', () => {
+registerEndpoint('/api/failing/readMany', () => {
   if (failMode) throw createError({ statusCode: 500, statusMessage: 'Boom' })
   return { data: [{ id: 1, title: 'Recovered' }], total: 1, page: 1, perPage: 25 }
 })
@@ -185,7 +231,7 @@ describe('CollectionList', () => {
   // The component navigates the shared test router (list state lives in the URL), so reset the route
   // before each case or committed filter/sort/page would leak between tests.
   beforeEach(async () => {
-    thingsBulk = null; statusBulk = null; referrersQuery = {}; thingsFetches = 0; failReferrers = false; bulkDelayMs = 0
+    thingsBulk = null; statusBulk = null; customBulk = null; referrersQuery = {}; thingsFetches = 0; failReferrers = false; bulkDelayMs = 0
     await useRouter().replace({ path: '/', query: {} })
   })
 
@@ -548,7 +594,37 @@ describe('CollectionList', () => {
     expect(unpublish).toBeTruthy()
     await publish!.trigger('click')
     await settle()
-    expect(statusBulk).toEqual({ action: 'publish', ids: [1, 2] })
+    expect(statusBulk).toEqual({ ids: [1, 2], patch: { status: 'published' } })
+  })
+
+  it('renders a schema-driven custom action in the bulk bar and posts {ids} to its own pipeline route', async () => {
+    const confirmSpy = vi.fn().mockReturnValue(true)
+    vi.stubGlobal('confirm', confirmSpy)
+    const w = await mount({ schema: customSchema })
+    await flushPromises()
+    await w.find('.list__select-th input[type="checkbox"]').setValue(true)
+    await flushPromises()
+    const bar = w.find('.list__bulkbar')
+    const archive = bar.find('[data-action="archive"]')
+    expect(archive.exists()).toBe(true)
+    expect(archive.text()).toBe('Archive') // ui.label from the wire, not the raw pipeline name
+    await archive.trigger('click')
+    await settle()
+    expect(confirmSpy).toHaveBeenCalledOnce() // ui.confirm gates the run
+    expect(customBulk).toEqual({ ids: [1, 2] })
+    vi.unstubAllGlobals()
+  })
+
+  it('skips the custom action POST when the confirm prompt is declined', async () => {
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(false))
+    const w = await mount({ schema: customSchema })
+    await flushPromises()
+    await w.find('.list__select-th input[type="checkbox"]').setValue(true)
+    await flushPromises()
+    await w.find('.list__bulkbar [data-action="archive"]').trigger('click')
+    await settle()
+    expect(customBulk).toBeNull()
+    vi.unstubAllGlobals()
   })
 
   it('row Delete opens the confirm dialog (fetching referrers); confirming posts the bulk delete + refetches', async () => {
@@ -562,7 +638,7 @@ describe('CollectionList', () => {
     const confirm = w.findAll('.ui-dialog__content .ui-button').find((b) => /^delete$/i.test(b.text().trim()))!
     await confirm.trigger('click')
     await settle()
-    expect(thingsBulk).toEqual({ action: 'delete', ids: [1] })
+    expect(thingsBulk).toEqual({ ids: [1] })
     expect(thingsFetches).toBeGreaterThan(before)
   })
 
@@ -587,7 +663,7 @@ describe('CollectionList', () => {
     const dup = w.findAll('tbody tr')[0]!.findAll('button.list__action-btn').find((b) => !b.classes().includes('list__action-btn--danger'))!
     await dup.trigger('click')
     await settle()
-    expect(thingsBulk).toEqual({ action: 'duplicate', ids: [1] })
+    expect(thingsBulk).toEqual({ ids: [1] })
     expect(thingsFetches).toBeGreaterThan(before)
   })
 
@@ -661,6 +737,33 @@ describe('CollectionList', () => {
     expect(lastQuery.sort).toBe('title') // the sort landed
     // The in-progress operator choice survives — it was NOT reverted to the default 'eq'.
     expect((w.find('select.list__filter-op[data-filter-op="title"]').element as HTMLSelectElement).value).toBe('contains')
+  })
+})
+
+describe('CollectionList — quarantined rows', () => {
+  it('renders a badge (icon + text, not color alone) on a quarantined row and none on a clean row', async () => {
+    const w = await mount({ schema: quarantSchema })
+    await flushPromises()
+    const rows = w.findAll('tbody tr')
+    const badge = rows[1]!.find('.list__quarantine-badge')
+    expect(badge.exists()).toBe(true)
+    expect(badge.find('.ui-icon').exists()).toBe(true)
+    expect(badge.text()).toContain('Quarantined')
+    expect(rows[0]!.find('.list__quarantine-badge').exists()).toBe(false)
+  })
+
+  it('shows a count chip in the list header when quarantinedCount > 0', async () => {
+    const w = await mount({ schema: quarantSchema })
+    await flushPromises()
+    const chip = w.find('.list__quarantine-chip')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('1')
+  })
+
+  it('renders no count chip when quarantinedCount is 0', async () => {
+    const w = await mount({ schema: cleanSchema })
+    await flushPromises()
+    expect(w.find('.list__quarantine-chip').exists()).toBe(false)
   })
 })
 

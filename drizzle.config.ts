@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'drizzle-kit'
 import kestrelConfig from './kestrel.config'
-import { resolveKestrel } from './layers/core/server/utils/kestrel-config'
+import { resolveKestrel } from '@kestrel/core'
 
 // Anchor relative DB paths on THIS file's directory — the package root the Nuxt app uses as `rootDir` —
 // not on `process.cwd()`. In a pnpm workspace drizzle-kit is often invoked from the workspace root or a

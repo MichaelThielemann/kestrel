@@ -1,6 +1,8 @@
 import { getTableColumns } from 'drizzle-orm'
-import { localePath } from '../../../core/app/utils/locale-path'
-import type { LlmsSection, LlmsEntry } from '../utils/llms'
+import { localePath, useDb, primaryLocale, prefixPrimaryLocale, allCollections } from '@kestrel/core'
+import { isPubliclyReadable, publicReadableResources } from '@kestrel/access'
+import { collectionHeading, buildLlmsTxt, siteBaseUrl, siteName, siteDescription } from '@kestrel/publishing'
+import type { LlmsSection, LlmsEntry } from '@kestrel/publishing'
 
 // Generates an `llms.txt` (llmstxt.org): the site name + description, then one section per pageLike
 // collection listing its published, indexable records — the SAME registry-driven public set the sitemap

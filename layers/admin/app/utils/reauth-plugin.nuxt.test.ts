@@ -10,8 +10,8 @@ const { navigateToMock } = vi.hoisted(() => ({ navigateToMock: vi.fn() }))
 mockNuxtImport('navigateTo', () => navigateToMock)
 
 registerEndpoint('/api/secure', () => { throw createError({ statusCode: 401, statusMessage: 'Authentication required' }) })
-registerEndpoint('/api/auth/session', () => ({ authenticated: false }))
-registerEndpoint('/api/auth/login', () => { throw createError({ statusCode: 401, statusMessage: 'Invalid' }) })
+registerEndpoint('/api/session', () => ({ authenticated: false }))
+registerEndpoint('/api/login', () => { throw createError({ statusCode: 401, statusMessage: 'Invalid' }) })
 
 const runPlugin = () => (plugin as unknown as (app: unknown) => void)(useNuxtApp())
 
@@ -39,7 +39,7 @@ describe('reauth.client plugin', () => {
     await useRouter().push('/admin/login')
     navigateToMock.mockClear()
     runPlugin()
-    await globalThis.$fetch('/api/auth/login', { method: 'POST' }).catch(() => {})
+    await globalThis.$fetch('/api/login', { method: 'POST' }).catch(() => {})
     expect(navigateToMock).not.toHaveBeenCalled()
   })
 })

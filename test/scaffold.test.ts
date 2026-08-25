@@ -267,10 +267,10 @@ describe('diagnoseProject', () => {
   })
 })
 
-// 2.0 turned off publish-on-save by default (ADR-0008); an operator upgrading a 1.x deployment — especially
-// a headless consumer that only PATCHes content and never opens /admin — gets no other signal that saves
-// stopped reaching the static output. `kestrel doctor` names the fact and the opt-out, unconditionally
-// (it is informational, so it never trips the error-only exit code) unless the project explicitly opted in.
+// Publish-on-save is off by default; an operator upgrading an older deployment — especially a headless
+// consumer that only PATCHes content and never opens /admin — gets no other signal that saves stopped
+// reaching the static output. `kestrel doctor` names the fact and the opt-out, unconditionally (it is
+// informational, so it never trips the error-only exit code) unless the project explicitly opted in.
 describe('diagnoseProject — output.publishOnSave', () => {
   const base = {
     packageJson: JSON.stringify({ scripts: { dev: 'nuxt dev' }, dependencies: { [PACKAGE_NAME]: '^1.2.1' }, devDependencies: { nuxt: '^4.4.8' } }),
@@ -603,8 +603,8 @@ describe('kestrel CLI', () => {
     expect(call.slice(0, call.indexOf('}'))).toContain('output: process.stderr')
   })
 
-  // An empty --password (an unset $PW in a script) used to be hashed and written, leaving /admin open to
-  // a login with no password at all while doctor reported the project healthy.
+  // An empty --password (e.g. an unset $PW in a script) must not be silently hashed and written — that
+  // would leave /admin open to a login with no password at all while doctor still reports the project healthy.
   it('refuses an empty or too-short --password instead of provisioning an open admin', () => {
     for (const arg of ['--password=', '--password=short']) {
       const res = run('init', arg)

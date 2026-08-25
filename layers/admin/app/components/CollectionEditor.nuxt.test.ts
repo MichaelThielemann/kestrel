@@ -44,13 +44,16 @@ registerEndpoint('/api/blocks', () => ({
   ],
 }))
 registerEndpoint('/api/media/resolve', () => ({ data: [] }))
-registerEndpoint('/api/pages', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
+registerEndpoint('/api/pages/readMany', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
 
 // An existing EN article (id 1) with a DE sibling (id 2) — drives the LocaleBar copy control.
-registerEndpoint('/api/articles/1', () => ({ id: 1, title: 'English title', locale: 'en', translationGroup: 'grp1' }))
-registerEndpoint('/api/articles/1/translations', () => ({ en: 1, de: 2 }))
-registerEndpoint('/api/articles/1/dead-refs', () => [])
-registerEndpoint('/api/articles/2', () => ({ id: 2, title: 'Deutscher Titel', locale: 'de', translationGroup: 'grp1' }))
+registerEndpoint('/api/articles/readOne/1', () => ({ id: 1, title: 'English title', locale: 'en', translationGroup: 'grp1' }))
+registerEndpoint('/api/articles/translations/1', () => ({ en: 1, de: 2 }))
+registerEndpoint('/api/articles/deadRefs/1', () => [])
+registerEndpoint('/api/articles/readOne/2', () => ({ id: 2, title: 'Deutscher Titel', locale: 'de', translationGroup: 'grp1' }))
+
+// A quarantined row's wire shape: `{ id, $quarantined: true }`, no other fields.
+registerEndpoint('/api/things/readOne/9', () => ({ id: 9, $quarantined: true }))
 
 beforeEach(() => {
   useState('kestrel-collections').value = null
@@ -63,14 +66,12 @@ const settle = async () => {
 }
 
 let posted: Record<string, unknown> | null = null
-registerEndpoint('/api/things', async (event) => {
-  if (event.method === 'POST') {
-    posted = await readBody(event)
-    if (posted!.title === 'dup') throw createError({ statusCode: 409, statusMessage: 'Conflict: duplicate path' })
-    return { id: 1, ...posted }
-  }
-  return { data: [], total: 0, page: 1, perPage: 25 }
-})
+registerEndpoint('/api/things/readMany', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
+registerEndpoint('/api/things/createOne', { method: 'POST', handler: async (event) => {
+  posted = await readBody(event)
+  if (posted!.title === 'dup') throw createError({ statusCode: 409, statusMessage: 'Conflict: duplicate path' })
+  return { id: 1, ...posted }
+} })
 
 describe('CollectionEditor', () => {
   it('renders one field per schema entry', async () => {
@@ -302,5 +303,35 @@ describe('CollectionEditor', () => {
     expect(w.find('.editor3__fields .seo-fields').exists()).toBe(true)
     expect(w.find('.editor__error[role="alert"]').exists()).toBe(true)
     expect(toast.items.some((t) => t.type === 'error')).toBe(true)
+  })
+})
+
+describe('CollectionEditor — quarantined record', () => {
+  it('renders a role=alert banner, no editable body, and no save action', async () => {
+    const w = await mountSuspended(CollectionEditor, { props: { collection: 'things', id: '9' } })
+    await flushPromises()
+    const banner = w.find('.editor__quarantine[role="alert"]')
+    expect(banner.exists()).toBe(true)
+    // no inputs to edit, no way to submit
+    expect(w.findAll('input').length).toBe(0)
+    expect(w.find('.editor__actions').exists()).toBe(false)
+    expect((w.vm as unknown as { quarantined: boolean }).quarantined).toBe(true)
+  })
+
+  it('refuses to submit even if the form is triggered directly', async () => {
+    const w = await mountSuspended(CollectionEditor, { props: { collection: 'things', id: '9' } })
+    await flushPromises()
+    posted = null
+    await w.find('form').trigger('submit')
+    await settle()
+    expect(posted).toBeNull()
+    expect(w.emitted('saved')).toBeFalsy()
+  })
+
+  it('leaves a normal (non-quarantined) record fully editable', async () => {
+    const w = await mountSuspended(CollectionEditor, { props: { collection: 'things', id: 'new' } })
+    await flushPromises()
+    expect(w.find('.editor__quarantine').exists()).toBe(false)
+    expect((w.vm as unknown as { quarantined: boolean }).quarantined).toBe(false)
   })
 })

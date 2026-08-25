@@ -1,10 +1,8 @@
 import { defineNuxtModule } from '@nuxt/kit'
-import { createS3Driver } from '../../../core/server/utils/storage.s3'
-import { resolveOutputCreds, deployStaticOutput, isEnvTrue, planS3Deploy, readRouteDiscovery } from './deploy-output'
-import { resolveKestrel } from '../../../core/server/utils/kestrel-config'
-import type { KestrelConfig } from '../../../core/server/utils/kestrel-config'
-
-
+import { createS3Driver } from '@kestrel/core'
+import { resolveOutputCreds, deployStaticOutput, isEnvTrue, planS3Deploy, readRouteDiscovery } from '@kestrel/delivery-static'
+import { resolveKestrel } from '@kestrel/core'
+import type { KestrelConfig } from '@kestrel/core'
 /**
  * Ships `nuxt generate`'s static output (`.output/public`) to an S3 bucket when `kestrel.output.driver`
  * is `s3` — the deploy half of FEATURES "Output target: local directory or S3 bucket". Runs on Nitro's

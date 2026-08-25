@@ -20,17 +20,18 @@ The customer is anonymous to the server (the gallery password never reaches it).
 them in the backend (`open`). The server never sees plaintext.
 
 ## Deployment — needs a running server (NOT pure-static)
-Unlike the base (which can deploy as a 100%-static site), this extension ships a **public write route**
-(`/api/galleries-secure-proofing/submit`) + a `galleryProofing` table, so it requires a running Node
+Unlike the base (which can deploy as a 100%-static site), this extension ships a **public write pipeline**
+(`/api/proofingSubmit`) + a `galleryProofing` table, so it requires a running Node
 server. Keep it OUT of any deployment that must stay fully static (e.g. an enterprise pilot) — simply don't
-compose this layer there; the base + the core `access` grant seam stay inert without it.
+compose this layer there; the base stays inert without it.
 
 ## What it ships (primitives)
 | Primitive | Role |
 |-----------|------|
 | `galleryProofing` collection | persistence — one (encrypted) submission per (gallery, customer) |
-| `POST /api/galleries-secure-proofing/submit` | public back-channel — same-site + rate-limited + size-capped; stores ciphertext only |
-| access grant (server plugin) | registers `anonymous → write → galleries-secure-proofing` via the core grant seam |
+| `POST /api/proofingSubmit` | public back-channel — same-site + rate-limited + size-capped; stores ciphertext only |
+| `GET /api/proofingSubmission` | public read of one customer's own submission (id-scoped, ciphertext only) |
+| pipeline `access` declarations | `proofingSubmit` (`public: true`) + `proofingSubmission` (`public: true, scope: 'published'`) open exactly these two operations, via the core pipeline engine's own gates |
 | `app/utils/proofing.ts` | pure marks model (`emptyDoc`/`setMark`/validate) — node-tested |
 | `useProofing(...)` | customer: hold marks + debounced encrypted submit (opaque `customerId` in localStorage) |
 | `<SecureGalleryProofingView>` | customer view: base gallery + per-photo colour/comment overlay |

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { asFieldDef, initialValues, mapServerErrors, parseBlockErrors, reconcileBlockErrors, readFetchError, valuesEqual } from './edit-form'
-import type { SerializedField } from '../../../core/server/utils/serialize-collection'
+import { asFieldDef, initialValues, mapServerErrors, parseBlockErrors, reconcileBlockErrors, reconcileDeadRefs, readFetchError, valuesEqual } from './edit-form'
+import type { SerializedField } from '@kestrel/core'
 import { registerFieldEmpty } from '../../../ui/app/utils/field-empty'
 
 function f(partial: Partial<SerializedField> & Pick<SerializedField, 'type'>): SerializedField {
@@ -208,6 +208,34 @@ describe('reconcileBlockErrors', () => {
     ] } }]
     const next = [{ id: 'h', type: 'hero', props: { heading: 'top' }, slots: { default: [] } }]
     expect(reconcileBlockErrors({ c1: { heading: 'Required' } }, prev, next)).toEqual({})
+  })
+})
+
+describe('reconcileDeadRefs', () => {
+  const refs = [
+    { field: 'image', blockId: 'h', collection: 'media', id: 1, reason: 'missing' as const },
+    { field: 'title', collection: 'pages', id: 2, reason: 'missing' as const }, // root-level (no blockId)
+  ]
+  const base = () => [{ id: 'h', type: 'hero', props: { image: 5 } }]
+
+  it('clears a block dead-ref once the offending field is swapped out (an edit)', () => {
+    const prev = base()
+    const next = [{ id: 'h', type: 'hero', props: { image: 9 } }]
+    expect(reconcileDeadRefs(refs, prev, next)).toEqual([refs[1]])
+  })
+
+  it('preserves a block dead-ref across a pure reorder', () => {
+    const prev = [...base(), { id: 'p', type: 'prose', props: { body: '' } }]
+    const next = [prev[1]!, prev[0]!]
+    expect(reconcileDeadRefs(refs, prev, next)).toEqual(refs)
+  })
+
+  it('drops a block dead-ref when its block is removed', () => {
+    expect(reconcileDeadRefs(refs, base(), [])).toEqual([refs[1]])
+  })
+
+  it('leaves root-level dead refs (no blockId) untouched — unrelated to content changes', () => {
+    expect(reconcileDeadRefs([refs[1]!], base(), base())).toEqual([refs[1]])
   })
 })
 

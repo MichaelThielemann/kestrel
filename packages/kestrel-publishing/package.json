@@ -1,0 +1,60 @@
+{
+  "name": "@kestrel/publishing",
+  "version": "0.1.0",
+  "description": "Kestrel's publishing domain: the publish_deps/publish_status/publish_runs/published_snapshots tables, the publishing <Module>Db adapter, the runtime static publisher, the publish orchestrator, and the publish/publishRuns pipelines.",
+  "license": "Apache-2.0",
+  "author": "Michael Thielemann <283621694+MichaelThielemann@users.noreply.github.com>",
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
+    "directory": "packages/kestrel-publishing"
+  },
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "vitest run --typecheck"
+  },
+  "dependencies": {
+    "@kestrel/access": "workspace:*",
+    "@kestrel/contracts": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/fields": "workspace:*",
+    "@kestrel/media": "workspace:*",
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "^0.45.2",
+    "effect": "~3.22.1"
+  },
+  "peerDependencies": {
+    "h3": "^1.15.0 || ^2.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^26.2.0",
+    "h3": "^1.15.11",
+    "nitropack": "^2.13.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

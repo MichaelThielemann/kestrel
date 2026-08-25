@@ -15,14 +15,23 @@
     "!**/*.nuxt.test.ts"
   ],
   "peerDependencies": {
+    "@kestrel/core": "*",
+    "@kestrel/fields": "*",
+    "@kestrel/media": "*",
     "@michaelthielemann/kestrel": "*",
     "drizzle-orm": "^0.45.0",
+    "effect": "~3.22.1",
+    "h3": "^1.15.0 || ^2.0.0",
     "vue": "^3.5.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@kestrel/core": "workspace:*",
+    "@kestrel/fields": "workspace:*",
+    "@kestrel/media": "workspace:*",
     "@michaelthielemann/kestrel": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "effect": "~3.22.1",
     "vue": "3.5.35",
     "zod": "^4.4.3"
   },

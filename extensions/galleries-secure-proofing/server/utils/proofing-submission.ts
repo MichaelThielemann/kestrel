@@ -25,7 +25,7 @@ export const MAX_SEALED_B64 = 64 * 1024
 
 /** Max distinct customers (rows) stored per gallery. Bounds junk-row flooding of one gallery's proofing table
  *  via the anonymous endpoint: an attacker minting fresh `customerId`s for a slug is capped here (and
- *  rate-limited per IP). Generous vs any real proofing audience (a handful of reviewers), so legitimate use is
+ *  rate-limited per IP). Generous vs any real proofing audience (a handful of customers), so legitimate use is
  *  never blocked. This bounds PER-gallery growth only; because `gallerySlug` is attacker-controlled and not
  *  validated against a real gallery, a rotating slug sidesteps it — so `exceedsGlobalQuota` bounds the whole
  *  table, and `newCustomerRateKey` bounds one IP's contribution to any single gallery's cap. (Validating the
@@ -49,8 +49,8 @@ export function exceedsGlobalQuota(totalRows: number): boolean {
 
 /** Blunt a TARGETED lockout: an attacker who knows a real gallery's (semi-public) slug could otherwise mint
  *  ~200 junk `customerId`s from ONE IP to fill that gallery's per-gallery cap, after which every genuinely-new
- *  reviewer is rejected forever. Cap how many NEW identities a single IP may register for a given slug within a
- *  window, so filling a real gallery's cap needs many distinct IPs, not one. A legitimate reviewer registers
+ *  customer is rejected forever. Cap how many NEW identities a single IP may register for a given slug within a
+ *  window, so filling a real gallery's cap needs many distinct IPs, not one. A legitimate customer registers
  *  exactly one identity per (their IP, their gallery), so this never blocks real use. Reuses the generic
  *  `rateLimit(key, now, limit, windowMs)` limiter with a namespaced key. Only NEW customers consume the budget. */
 export const MAX_NEW_CUSTOMERS_PER_IP_PER_SLUG = 5

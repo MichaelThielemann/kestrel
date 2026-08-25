@@ -1,6 +1,10 @@
 name: Release
 
-# Publishes the engine, both extensions and the scaffolder to npm when a v* tag is pushed.
+# Publishes the engine, both extensions, the scaffolder, and all ten @kestrel/* packages to npm when a v*
+# tag is pushed — 14 packages in total. The @kestrel/* packages have to be real, independently published
+# packages: the engine's own `dependencies` reference them by real semver, not a bundled copy — `pnpm pack`
+# on the root rewrites `"@kestrel/core": "workspace:*"` to `"@kestrel/core": "0.1.0"`, which 404s on
+# install unless that version is actually on the registry.
 #
 # Authentication is npm **trusted publishing** (OIDC): npm verifies this workflow's identity against the
 # trusted publisher configured on each package, so no npm token exists in the repository, in the org, or
@@ -8,8 +12,11 @@ name: Release
 # workflow run — which is why `id-token: write` is required.
 #
 # One-time setup per package. A trusted publisher cannot be configured for a package that does not exist,
-# so each one needs a manual `npm publish --access public --no-provenance` first — `--no-provenance`
-# because every manifest here sets `publishConfig.provenance`, which only works inside CI. Then, from npm 11.15:
+# so each one needs a manual `pnpm publish --access public --no-provenance --no-git-checks` first (from
+# the package's own directory) — `--no-provenance` because every manifest here sets
+# `publishConfig.provenance`, which only works inside CI; `pnpm publish`, not `npm publish`, because a
+# package with a real `workspace:*` dependency (the engine root, and every @kestrel/* package depending on
+# another one) needs pnpm's own rewrite to a real version — see `.github/publish-if-new.sh`. Then, from npm 11.15:
 #   npm trust github <package> --file release.yml --repo MichaelThielemann/kestrel --allow-publish
 # `--file` is the workflow FILENAME of THIS repo — not a path, and not the `publish.yml` from npm's own
 # example. A wrong value is accepted silently and only surfaces at the next release, as a 404 on PUT that
@@ -53,11 +60,48 @@ jobs:
       # npm >= 11.5.1 is required for trusted publishing; the runner's bundled npm may be older.
       - run: npm install -g npm@latest
 
-      # Each publish is skipped when that exact version is already on the registry. Four packages go out
+      # Each publish is skipped when that exact version is already on the registry. 14 packages go out
       # per tag, so a failure in one leaves the earlier ones published — without this, re-running the job
       # to finish the release dies on the first already-published package and the rest never ship. It also
       # lets a package that had to be published by hand (the one-time trusted-publisher bootstrap) pass
       # through a tag run cleanly.
+      #
+      # The ten @kestrel/* packages go out BEFORE the engine, in topological order of their own
+      # @kestrel/* dependency lists (each package only after everything it depends on), so no consumer's `pnpm add
+      # @michaelthielemann/kestrel` can land between the engine appearing on the registry and one of its
+      # own real dependencies existing there. Publish order does not affect `npm publish` itself (each
+      # package's manifest is self-contained; nothing here resolves another package's presence to
+      # succeed) — this is a safety margin for installers racing the tag, not a hard requirement.
+      - name: Publish @kestrel/contracts
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
+        working-directory: packages/kestrel-contracts
+      - name: Publish @kestrel/core
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
+        working-directory: packages/kestrel-core
+      - name: Publish @kestrel/auth
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
+        working-directory: packages/kestrel-auth
+      - name: Publish @kestrel/access
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
+        working-directory: packages/kestrel-access
+      - name: Publish @kestrel/fields
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
+        working-directory: packages/kestrel-fields
+      - name: Publish @kestrel/collections
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
+        working-directory: packages/kestrel-collections
+      - name: Publish @kestrel/media
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
+        working-directory: packages/kestrel-media
+      - name: Publish @kestrel/publishing
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
+        working-directory: packages/kestrel-publishing
+      - name: Publish @kestrel/delivery-live
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
+        working-directory: packages/kestrel-delivery-live
+      - name: Publish @kestrel/delivery-static
+        run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
+        working-directory: packages/kestrel-delivery-static
       - name: Publish engine
         run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
       - name: Publish galleries-secure

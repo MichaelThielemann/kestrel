@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, it, expect, beforeEach } from 'vitest'
-import { clearBlocks, registerBlock, allBlocks, buildBlocksSchema } from '../../layers/fields/server/utils/defineBlock'
+import { clearBlocks, registerBlock, allBlocks, buildBlocksSchema } from '@kestrel/fields'
 import { extractBlockDef } from '../../layers/core/modules/auto-discovery/extract-block'
 
 // End-to-end: the demo block SFCs → the build extractor → the block registry → the Zod validator.

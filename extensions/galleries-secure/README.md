@@ -28,7 +28,7 @@ from them (declarative config + a 3-line display wrapper) — and get the full e
 | `secureGallery` **field type** | the admin input widget (set/enter password → pick → encrypt → upload ciphertext → manifest, with decrypted previews) + its storage/validation |
 | `useSecureGallery()` **composable** | the headless core: password in → decrypted folder/file `tree` (or an error) out; plus `key`/`seal`/`open` |
 | `<SecureGalleryView>` **component** | a ready-to-use public display built on the composable (default password form + folder/grid) |
-| ciphertext **upload route** | `POST /api/galleries-secure/upload` — admin-only; stores one opaque blob via `useStorageDriver()` |
+| ciphertext **upload pipeline** | `POST /api/secureGalleryUpload` — admin-only; stores one opaque blob via `useStorageDriver()` |
 | pure **utils** | `crypto`, `manifest`, `gallery` (seal/open), `tree` (folder build), `share-link` (`#key=` parsing) — node-tested |
 
 ### Recipe — a secure-gallery collection reachable by slug

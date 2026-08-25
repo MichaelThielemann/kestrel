@@ -1,10 +1,9 @@
 import { safeRedirect } from './safe-redirect'
 
-// The auth bootstrap endpoints the server always permits (login/session/logout). A 401 from these is
-// not a stale session — a wrong-password login 401s — so it must not trigger a re-auth redirect. Matched
-// exactly (not by `/api/auth/` prefix) so a guarded endpoint under a consumer collection named `auth`
-// (e.g. `/api/auth/5`) still re-authenticates.
-const BOOTSTRAP_PATHS = new Set(['/api/auth/login', '/api/auth/session', '/api/auth/logout'])
+// The auth endpoints (login/session/logout). A 401 from these is not a stale session — a wrong-password
+// login 401s — so it must not trigger a re-auth redirect. Matched exactly, so a guarded endpoint under a
+// consumer collection named `auth` (e.g. `/api/auth/readOne/5`) still re-authenticates.
+const BOOTSTRAP_PATHS = new Set(['/api/login', '/api/session', '/api/logout'])
 
 /**
  * Decide whether a failed `$fetch` should bounce the user to the login screen, and to which URL.
@@ -12,7 +11,7 @@ const BOOTSTRAP_PATHS = new Set(['/api/auth/login', '/api/auth/session', '/api/a
  * Returns the login redirect target for a 401 raised by a guarded `/api/*` call made from inside the
  * admin SPA — but stays null for:
  *  - non-401 statuses and non-`/api` requests (nothing to re-authenticate);
- *  - the auth-bootstrap endpoints (`/api/auth/*`): a wrong-password login 401s and must stay put;
+ *  - the auth endpoints: a wrong-password login 401s and must stay put;
  *  - any location that isn't a safe admin redirect target — which also rules out the login page itself
  *    (no redirect loop) and public/SSG pages (the static site never logs in).
  */

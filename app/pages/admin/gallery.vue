@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { reactive } from 'vue'
-import type { FieldDef } from '../../../layers/core/server/utils/defineCollection'
+import type { FieldDef } from '@kestrel/core'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 

@@ -2,11 +2,9 @@
 import { computed } from 'vue'
 import FieldRenderer from './Renderer.vue'
 import FieldDeadRefNote from './DeadRefNote.vue'
-import { isFieldVisible } from '../../../../fields/app/utils/condition'
+import { isFieldVisible } from '@kestrel/core/client'
+import type { FieldDef, LayoutNode, LayoutTrack, Localized } from '@kestrel/core'
 import { resolveLocalized } from '../../utils/localized'
-import type { FieldDef, Localized } from '../../../../core/server/utils/defineCollection'
-import type { LayoutNode, LayoutTrack } from '../../../../core/server/utils/field-layout'
-
 // The ONE shared field-list renderer, reused by every field-list surface (collection page fields, block
 // fields, repeater sub-fields). A FRAGMENT (no wrapper root) so its rows/groups drop straight into the
 // caller's existing gapped flex column — the per-context vertical rhythm is preserved. Imports are

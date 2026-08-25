@@ -1,13 +1,9 @@
 import collections from '#kestrel/collections'
 import schemaTables from '#kestrel/schema-tables'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
-import type { BuiltCollection } from '../../utils/collection-types'
-import type { CollectionDef } from '../../utils/defineCollection'
+import { describeOp, desiredFromCollections, isDestructive, planOps, sqlite, syncSchema, useDb } from '@kestrel/core'
+import type { BuiltCollection, CollectionDef, SyncDb } from '@kestrel/core'
 import { resolveServerKestrel, serverRuntimeConfig } from '../../utils/server-config'
-import { desiredFromCollections } from '../../schema/bootstrap'
-import { planOps, syncSchema, isDestructive, describeOp, type SyncDb } from '../../schema/sync'
-import { sqlite } from '../../schema/dialect'
-
 // Explicit schema-migrate step for production (ADR-0002). Dev auto-syncs additively at boot
 // (02.schema-sync); prod boot never auto-DDLs, so an operator runs this task. Triggering (Nuxt 4.4 /
 // Nitro 2.13 — there is NO `nuxi task run`):

@@ -9,7 +9,7 @@ const { navigateToMock } = vi.hoisted(() => ({ navigateToMock: vi.fn() }))
 mockNuxtImport('navigateTo', () => navigateToMock)
 
 let loginStatus: number
-registerEndpoint('/api/auth/login', () => {
+registerEndpoint('/api/login', () => {
   if (loginStatus) throw createError({ statusCode: loginStatus })
   return { ok: true, exp: 9_999_999_999_000 }
 })

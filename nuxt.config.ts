@@ -1,5 +1,5 @@
 import kestrel from './kestrel.config'
-import { layerKestrelOption } from './layers/core/server/utils/kestrel-config'
+import { layerKestrelOption } from '@kestrel/core'
 
 // Silence known-harmless, un-actionable THIRD-PARTY build noise (output unaffected — applied to both the
 // Vite client and the Nitro server Rollup passes). Everything else still surfaces — crucially, any

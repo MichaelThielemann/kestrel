@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { nextTick, ref } from 'vue'
 import { useLinkField } from './useLinkField'
-import type { LinkValue, LinkType } from '../../../core/server/utils/defineCollection'
+import type { LinkValue, LinkType } from '@kestrel/core'
 
 const ALL: LinkType[] = ['external', 'email', 'tel', 'internal']
 
@@ -159,7 +159,6 @@ describe('useLinkField', () => {
     const lk = useLinkField(model, ref(ALL))
     lk.typeModel.value = 'email'
     expect(lk.currentType.value).toBe('email')
-    // Setting to falsy does not change the type
     lk.typeModel.value = null as unknown as LinkType
     expect(lk.currentType.value).toBe('email')
   })

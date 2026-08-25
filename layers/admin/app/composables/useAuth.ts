@@ -17,7 +17,7 @@ export function useAuth() {
     // Fail closed: a transient session-endpoint failure (5xx, offline) must read as
     // "not authenticated" so the route guard redirects to login instead of throwing an error page.
     try {
-      const r = await $fetch<{ authenticated: boolean; exp?: number }>('/api/auth/session')
+      const r = await $fetch<{ authenticated: boolean; exp?: number }>('/api/session')
       state.value = { authenticated: r.authenticated, exp: r.exp ?? null, checked: true }
     } catch {
       state.value = { authenticated: false, exp: null, checked: true }
@@ -31,7 +31,7 @@ export function useAuth() {
   }
 
   async function login(password: string) {
-    const r = await $fetch<{ ok: true; exp: number }>('/api/auth/login', {
+    const r = await $fetch<{ ok: true; exp: number }>('/api/login', {
       method: 'POST',
       body: { password },
     })
@@ -48,7 +48,7 @@ export function useAuth() {
     // The desired end state is "logged out" regardless of the response: an expired/rotated
     // session makes the guarded logout endpoint 401, but the local session is still cleared.
     try {
-      await $fetch('/api/auth/logout', { method: 'POST' })
+      await $fetch('/api/logout', { method: 'POST' })
     } catch {
       // already invalid server-side — nothing to clear there
     }

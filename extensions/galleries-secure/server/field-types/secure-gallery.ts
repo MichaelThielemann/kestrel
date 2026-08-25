@@ -1,13 +1,13 @@
 import { text } from 'drizzle-orm/sqlite-core'
 import { z } from 'zod'
+import { defineFieldType, constrain, opt } from '@kestrel/fields'
 import { GALLERY_ID_RE } from '../utils/namespace'
 
 // A `secureGallery` field type. The field value is just a tiny PUBLIC ref (v2): the per-gallery storage
 // namespace id, the PBKDF2 salt, and a sealed verify-token. The actual tree (files + folders) lives in an
 // encrypted INDEX file in storage (`galleries-secure/<galleryId>/index.json`) alongside the ciphertext
 // blobs — so the editor mirrors storage 1:1. Zero-knowledge: without the password the ref reveals nothing.
-// `defineFieldType` / `constrain` / `opt` are auto-imported from Kestrel (the consumer composes kestrel +
-// this layer). The editor widget + the public display are client-side.
+// The editor widget + the public display are client-side.
 const sealedB64 = z.object({ iv: z.string(), data: z.string() })
 
 export default defineFieldType({

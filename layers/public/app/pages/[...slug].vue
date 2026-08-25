@@ -99,7 +99,7 @@ const previewNotice = computed(() => {
 const previewRequested = route.query[PREVIEW_QUERY] === '1'
 const { data: previewSession } = previewRequested
   ? await useAsyncData('kestrel-preview-session', () =>
-      requestFetch('/api/auth/session').catch(() => ({ authenticated: false })))
+      requestFetch<{ authenticated: boolean }>('/api/session').catch(() => ({ authenticated: false })))
   : { data: ref<{ authenticated: boolean } | null>(null) }
 const previewActive = computed(() => previewRequested && previewSession.value?.authenticated === true)
 

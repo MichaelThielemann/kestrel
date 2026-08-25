@@ -1,17 +1,12 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
-import Database from 'better-sqlite3'
-import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { desiredSchema } from '../../../core/server/schema/desired'
-import { diffSchema } from '../../../core/server/schema/diff'
-import { renderSqlite } from '../../../core/server/schema/render-sqlite'
-import { patternToRegexSource } from '../utils/publish/redirect-rules'
-import redirects from '../collections/redirects'
+import type Database from 'better-sqlite3'
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
+import { clearRegistry, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@kestrel/core'
+import { patternToRegexSource, redirectsCollection as redirects } from '@kestrel/publishing'
 
 // A server route driven by auto-imports; stub them as globals (the seam the Nitro build provides) so the
 // handler runs as a plain function.
-let db: BetterSQLite3Database
 let sqlite: Database.Database
-let registered: unknown
 let handler: (event: unknown) => unknown
 let renderRedirects: (read: () => unknown) => string
 const headers: Record<string, string> = {}
@@ -22,8 +17,6 @@ const save = (rules: unknown) =>
 
 beforeAll(async () => {
   vi.stubGlobal('defineEventHandler', (h: (event: unknown) => unknown) => h)
-  vi.stubGlobal('useDb', () => db)
-  vi.stubGlobal('getCollection', (name: string) => (name === 'redirects' ? registered : undefined))
   vi.stubGlobal('setHeader', (_e: unknown, k: string, v: string) => { headers[k] = v })
   const mod = await import('./redirects.json.get')
   handler = mod.default as (event: unknown) => unknown
@@ -31,10 +24,13 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
-  sqlite = new Database(':memory:')
+  setResolvedKestrelConfig({ ...getResolvedKestrelConfig(), dbPath: ':memory:' })
+  resetDbInstance()
+  const db = useDb() as unknown as BetterSQLite3Database
+  sqlite = (db as unknown as { $client: Database.Database }).$client
   for (const stmt of renderSqlite(diffSchema(desiredSchema([redirects.table]), {}))) sqlite.exec(stmt)
-  db = drizzle(sqlite)
-  registered = redirects
+  clearRegistry()
+  registerCollection(redirects)
 })
 
 const parse = () => JSON.parse(handler({}) as string) as unknown[]
@@ -51,7 +47,7 @@ describe('the /redirects.json route', () => {
   })
 
   it('serves `[]` when the collection is not registered at all', () => {
-    registered = undefined
+    clearRegistry()
     expect(handler({})).toBe('[]')
   })
 

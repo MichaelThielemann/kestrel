@@ -29,9 +29,9 @@ describe('collectPageRoutes', () => {
     const routes = collectPageRoutes(db, 'en')
     db.close()
     expect(routes).toEqual(['/', '/about', '/de/ueber', '/guide', '/promo'])
-    expect(routes).not.toContain('/draft') // draft excluded
+    expect(routes).not.toContain('/draft')
     expect(routes).not.toContain('/secret') // draft excluded (non-translatable)
-    expect(routes.some((r) => r.includes('pics'))).toBe(false) // folders excluded
+    expect(routes.some((r) => r.includes('pics'))).toBe(false)
   })
 
   it('always seeds the root and returns it deduped when there are no rows', () => {

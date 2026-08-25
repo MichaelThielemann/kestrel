@@ -1,8 +1,15 @@
 import { getTableColumns } from 'drizzle-orm'
-import { localePath } from '../../../core/app/utils/locale-path'
+import { localePath, useDb, primaryLocale, prefixPrimaryLocale, allCollections, isDeliveryLive } from '@kestrel/core'
+import { isPubliclyReadable, publicReadableResources } from '@kestrel/access'
+import { currentRoutes, usePublishingDb, buildSitemap, withHreflang, siteBaseUrl } from '@kestrel/publishing'
+import type { SitemapCandidate } from '@kestrel/publishing'
 
 // Lists every published, indexable page-like record (across all pageLike collections) as a
-// sitemap. Filters status/noindex itself, so it is safe to serve publicly and to prerender.
+// sitemap. Filters status/noindex itself, so it is safe to serve publicly and to prerender. Under
+// `delivery: 'live'`, a route must ALSO have a current, non-retracted snapshot — the row's own
+// status/noindex fields and the snapshot store are two independent "is this reachable" facts (a direct
+// snapshot retraction leaves the row untouched, see `@kestrel/publishing`'s `server/db/snapshots.ts`), and this route is what a crawler
+// actually finds, so both must agree before a route is listed.
 export default defineEventHandler((event) => {
   const db = useDb()
   const base = siteBaseUrl()
@@ -17,10 +24,11 @@ export default defineEventHandler((event) => {
   const primary = primaryLocale()
   const prefixPrimary = prefixPrimaryLocale()
   const candidates: SitemapCandidate[] = []
+  // One set lookup for the whole candidate list instead of one currentSnapshot query per candidate.
+  const liveRoutes = isDeliveryLive() ? new Set(currentRoutes(usePublishingDb().db)) : null
 
-  // A sitemap must only advertise publicly-reachable URLs. The public render path (anonymous access
-  // policy, prerender seed, catch-all) now renders every pageLike collection, so the sitemap tracks the
-  // SAME registry-driven public set (single source: the auth policy) rather than diverging from it.
+  // A sitemap must only advertise publicly-reachable URLs, so it tracks the SAME registry-driven
+  // public set the public render path uses (single source: the auth policy).
   const pub = publicReadableResources()
   for (const c of allCollections()) {
     if (!c.def.pageLike) continue
@@ -52,8 +60,10 @@ export default defineEventHandler((event) => {
       const seo = (row.seo ?? {}) as { noindex?: boolean }
       if (seo.noindex) continue
       const locale = (row.locale as string | undefined) ?? primary
+      const route = localePath(path, locale, primary, prefixPrimary)
+      if (liveRoutes && !liveRoutes.has(route)) continue
       candidates.push({
-        loc: base + localePath(path, locale, primary, prefixPrimary),
+        loc: base + route,
         lastmod: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : undefined,
         locale,
         group: (row.translationGroup as string | undefined) ?? null,

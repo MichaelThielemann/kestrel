@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
-import type { SerializedBlock } from '../../../core/server/utils/serialize-collection'
+import type { SerializedBlock } from '@kestrel/core'
 import type { BlockRow, BlockTreeCtx } from '../utils/block-tree'
 import BlockTree from './BlockTree.vue'
 

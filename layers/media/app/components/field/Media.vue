@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import type { FieldComponentProps } from '../../../../ui/app/utils/field-component'
-import type { FieldOf } from '../../../../core/server/utils/defineCollection'
+import type { FieldOf } from '@kestrel/core'
 import { reorder } from '../../../../ui/app/utils/reorder'
 import { commonFolder } from '../../utils/library'
 

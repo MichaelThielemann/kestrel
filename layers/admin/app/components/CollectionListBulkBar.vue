@@ -3,10 +3,14 @@
 // than overlaying it. Publish/Unpublish are schema-driven (only when the collection has a status).
 // NOT a live region: the selection count is announced through the list's permanent .list__sr-status
 // region; a v-if-toggled role="status" here would double up and stay silent on first show.
-defineProps<{ count: number; hasStatus: boolean; busy: boolean }>()
-const emit = defineEmits<{ setStatus: [status: 'published' | 'draft']; delete: []; clear: [] }>()
+import { resolveLocalized } from '../../../ui/app/utils/localized'
+import type { SerializedAction } from '@kestrel/core'
 
-const { t } = useT()
+const props = defineProps<{ count: number; hasStatus: boolean; busy: boolean; actions?: SerializedAction[] }>()
+const emit = defineEmits<{ setStatus: [status: 'published' | 'draft']; delete: []; runAction: [action: SerializedAction]; clear: [] }>()
+
+const { t, lang } = useT()
+const actionLabel = (action: SerializedAction) => resolveLocalized(action.label, lang.value) ?? action.name
 </script>
 
 <template>
@@ -17,6 +21,16 @@ const { t } = useT()
         <KestrelUiButton type="button" size="sm" variant="secondary" :disabled="busy" @click="emit('setStatus', 'published')">{{ t('list.bulkPublish') }}</KestrelUiButton>
         <KestrelUiButton type="button" size="sm" variant="secondary" :disabled="busy" @click="emit('setStatus', 'draft')">{{ t('list.bulkUnpublish') }}</KestrelUiButton>
       </template>
+      <KestrelUiButton
+        v-for="action in props.actions"
+        :key="action.name"
+        type="button"
+        size="sm"
+        variant="secondary"
+        :disabled="busy"
+        :data-action="action.name"
+        @click="emit('runAction', action)"
+      >{{ actionLabel(action) }}</KestrelUiButton>
       <KestrelUiButton type="button" size="sm" variant="danger" :disabled="busy" @click="emit('delete')">{{ t('list.bulkDelete') }}</KestrelUiButton>
       <KestrelUiButton type="button" size="sm" variant="ghost" @click="emit('clear')">{{ t('list.clearSelection') }}</KestrelUiButton>
     </div>

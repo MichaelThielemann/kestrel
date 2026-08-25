@@ -27,16 +27,14 @@ let lastPutLocale: unknown = null
 // A REAL updatedAt so the editor's optimistic-concurrency baseline round-trips as a parseable timestamp.
 const POST5_LOADED_AT = '2026-01-02T03:04:05.678Z'
 
-registerEndpoint('/api/posts/5', async (event) => {
-  if (event.method === 'PATCH') {
-    lastPatchBody = await readBody(event)
-    lastPatchIfUnmodified = getHeader(event, 'x-kestrel-if-unmodified-since')
-    return { id: 5, title: lastPatchBody!.title ?? 'Hello', body: lastPatchBody!.body ?? null, status: 'draft', locale: 'en', createdAt: 'x', updatedAt: 'z' }
-  }
-  return { id: 5, title: 'Hello', body: '<p>hi</p>', status: 'draft', locale: 'en', translationGroup: 'grp-5', createdAt: 'x', updatedAt: POST5_LOADED_AT }
-})
+registerEndpoint('/api/posts/readOne/5', () => ({ id: 5, title: 'Hello', body: '<p>hi</p>', status: 'draft', locale: 'en', translationGroup: 'grp-5', createdAt: 'x', updatedAt: POST5_LOADED_AT }))
+registerEndpoint('/api/posts/updateOne/5', { method: 'POST', handler: async (event) => {
+  lastPatchBody = await readBody(event)
+  lastPatchIfUnmodified = getHeader(event, 'x-kestrel-if-unmodified-since')
+  return { id: 5, title: lastPatchBody!.title ?? 'Hello', body: lastPatchBody!.body ?? null, status: 'draft', locale: 'en', createdAt: 'x', updatedAt: 'z' }
+} })
 
-registerEndpoint('/api/posts/5/translations', () => ({ en: 5, de: null }))
+registerEndpoint('/api/posts/translations/5', () => ({ en: 5, de: null }))
 
 // The group-keyed sibling map a NEW translation resolves (it has no id of its own yet). `registerEndpoint`
 // answers this URL whatever Nitro would do with it, so these tests cover only the composable's side: that
@@ -52,16 +50,14 @@ registerEndpoint(GROUP_MAP_URL, (event) => {
   return { en: 5, de: null }
 })
 
-registerEndpoint('/api/posts', async (event) => {
-  if (event.method === 'POST') {
-    lastPostBody = await readBody(event)
-    if (lastPostBody!.title === 'taken') {
-      throw createError({ statusCode: 400, statusMessage: 'Validation failed', data: [{ path: ['title'], message: 'Already taken', code: 'custom' }] })
-    }
-    return { id: 1, title: lastPostBody!.title, body: lastPostBody!.body ?? null, status: 'draft', locale: 'en', createdAt: 'c', updatedAt: 'u' }
+registerEndpoint('/api/posts/readMany', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
+registerEndpoint('/api/posts/createOne', { method: 'POST', handler: async (event) => {
+  lastPostBody = await readBody(event)
+  if (lastPostBody!.title === 'taken') {
+    throw createError({ statusCode: 400, statusMessage: 'Validation failed', data: [{ path: ['title'], message: 'Already taken', code: 'custom' }] })
   }
-  return { data: [], total: 0, page: 1, perPage: 25 }
-})
+  return { id: 1, title: lastPostBody!.title, body: lastPostBody!.body ?? null, status: 'draft', locale: 'en', createdAt: 'c', updatedAt: 'u' }
+} })
 
 const relSchema = {
   name: 'withrel', mode: 'multi', translatable: false, pageLike: false, seo: false, status: false,
@@ -87,47 +83,37 @@ const formsSchema = {
 let lastRelBody: Record<string, unknown> | null = null
 let lastPagesBody: Record<string, unknown> | null = null
 registerEndpoint('/api/collections', () => ({ data: [postsSchema, settingsSchema, relSchema, pagesSchema, formsSchema] }))
-registerEndpoint('/api/forms', async (event) => {
-  if (event.method === 'POST') return { id: 1, format: (await readBody(event)).format ?? null, caption: null, createdAt: 'c', updatedAt: 'u' }
-  return { data: [], total: 0, page: 1, perPage: 25 }
-})
-registerEndpoint('/api/pages/7', async (event) => {
-  if (event.method === 'PATCH') {
-    lastPagesBody = await readBody(event)
-    const content = lastPagesBody!.content as { type: string; props?: { heading?: string } }[] | undefined
-    if (content?.some((b) => b.type === 'hero' && !b.props?.heading)) {
-      throw createError({ statusCode: 400, statusMessage: 'Validation failed', data: [{ path: ['content', 0, 'props', 'heading'], message: 'Required' }] })
-    }
-    if (lastPagesBody!.path === 'taken-slug') {
-      throw createError({ statusCode: 400, statusMessage: 'Validation failed', data: [{ path: ['path'], message: 'Already in use' }] })
-    }
-    return { id: 7, title: lastPagesBody!.title ?? 'P', path: lastPagesBody!.path ?? '/about', seo: lastPagesBody!.seo ?? {}, content: lastPagesBody!.content ?? [], status: lastPagesBody!.status ?? 'draft', createdAt: 'x', updatedAt: 'z' }
+registerEndpoint('/api/forms/readMany', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
+registerEndpoint('/api/forms/createOne', { method: 'POST', handler: async (event) => ({ id: 1, format: (await readBody(event)).format ?? null, caption: null, createdAt: 'c', updatedAt: 'u' }) })
+registerEndpoint('/api/pages/readOne/7', () => ({ id: 7, title: 'P', path: '/about', seo: { title: 'Meta T', description: 'Meta D' }, content: [{ id: 'b1', type: 'prose', props: { body: '<p>hi</p>' } }], status: 'draft', createdAt: 'x', updatedAt: 'y' }))
+registerEndpoint('/api/pages/updateOne/7', { method: 'POST', handler: async (event) => {
+  lastPagesBody = await readBody(event)
+  const content = lastPagesBody!.content as { type: string; props?: { heading?: string } }[] | undefined
+  if (content?.some((b) => b.type === 'hero' && !b.props?.heading)) {
+    throw createError({ statusCode: 400, statusMessage: 'Validation failed', data: [{ path: ['content', 0, 'props', 'heading'], message: 'Required' }] })
   }
-  return { id: 7, title: 'P', path: '/about', seo: { title: 'Meta T', description: 'Meta D' }, content: [{ id: 'b1', type: 'prose', props: { body: '<p>hi</p>' } }], status: 'draft', createdAt: 'x', updatedAt: 'y' }
-})
-registerEndpoint('/api/pages', async (event) => {
-  if (event.method === 'POST') {
-    lastPagesBody = await readBody(event)
-    return { id: 8, title: lastPagesBody!.title ?? 'P', path: lastPagesBody!.path ?? null, content: lastPagesBody!.content ?? [], status: 'draft', createdAt: 'c', updatedAt: 'u' }
+  if (lastPagesBody!.path === 'taken-slug') {
+    throw createError({ statusCode: 400, statusMessage: 'Validation failed', data: [{ path: ['path'], message: 'Already in use' }] })
   }
-  return { data: [], total: 0, page: 1, perPage: 25 }
-})
-registerEndpoint('/api/withrel/9', async (event) => {
-  if (event.method === 'PATCH') {
-    lastRelBody = await readBody(event)
-    return { id: 9, title: lastRelBody!.title ?? 'X', authorId: lastRelBody!.authorId ?? null, createdAt: 'x', updatedAt: 'z' }
-  }
-  return { id: 9, title: 'X', authorId: 3, createdAt: 'x', updatedAt: 'y' }
-})
+  return { id: 7, title: lastPagesBody!.title ?? 'P', path: lastPagesBody!.path ?? '/about', seo: lastPagesBody!.seo ?? {}, content: lastPagesBody!.content ?? [], status: lastPagesBody!.status ?? 'draft', createdAt: 'x', updatedAt: 'z' }
+} })
+registerEndpoint('/api/pages/readMany', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
+registerEndpoint('/api/pages/createOne', { method: 'POST', handler: async (event) => {
+  lastPagesBody = await readBody(event)
+  return { id: 8, title: lastPagesBody!.title ?? 'P', path: lastPagesBody!.path ?? null, content: lastPagesBody!.content ?? [], status: 'draft', createdAt: 'c', updatedAt: 'u' }
+} })
+registerEndpoint('/api/withrel/readOne/9', () => ({ id: 9, title: 'X', authorId: 3, createdAt: 'x', updatedAt: 'y' }))
+registerEndpoint('/api/withrel/updateOne/9', { method: 'POST', handler: async (event) => {
+  lastRelBody = await readBody(event)
+  return { id: 9, title: lastRelBody!.title ?? 'X', authorId: lastRelBody!.authorId ?? null, createdAt: 'x', updatedAt: 'z' }
+} })
 
-registerEndpoint('/api/settings', async (event) => {
-  if (event.method === 'PUT') {
-    lastPutBody = await readBody(event)
-    lastPutLocale = getQuery(event).locale ?? null
-    return { id: 1, data: lastPutBody!.data, locale: lastPutLocale ?? 'en', createdAt: 'c', updatedAt: 'u' }
-  }
-  return null
-})
+registerEndpoint('/api/settings/readOne', () => null)
+registerEndpoint('/api/settings/updateOne', { method: 'POST', handler: async (event) => {
+  lastPutBody = await readBody(event)
+  lastPutLocale = getQuery(event).locale ?? null
+  return { id: 1, data: lastPutBody!.data, locale: lastPutLocale ?? 'en', createdAt: 'c', updatedAt: 'u' }
+} })
 
 beforeEach(() => {
   useState('kestrel-collections').value = null
@@ -251,7 +237,7 @@ describe('useEditForm', () => {
     expect(f.formError.value).toContain('highlighted page fields')
   })
 
-  it('edit mode: loads the row and PATCHes changes', async () => {
+  it('edit mode: loads the row and posts changes to updateOne', async () => {
     const f = useEditForm({ collection: 'posts', id: '5' })
     await f.ready
     expect(f.values.title).toBe('Hello')
@@ -507,7 +493,7 @@ describe('useEditForm', () => {
     expect(f.blockErrors.value).toEqual({})
   })
 
-  it('singleton mode: initializes from a null GET and upserts via PUT with the locale', async () => {
+  it('singleton mode: initializes from a null GET and upserts via updateOne with the locale', async () => {
     const f = useEditForm({ collection: 'settings', id: 'new' })
     await f.ready
     expect(f.mode.value).toBe('single')

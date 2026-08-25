@@ -12,7 +12,7 @@ import { sealToB64, type SecureGalleryRef } from '../../utils/manifest'
 
 // Recovering from the two ways a write can find the STORED index unusable: another writer got there first
 // (409 → merge) and the stored index is not an index at all (422 → deliberate repair). The endpoint below
-// stands in for the real handler, which is node-tested in `server/api/galleries-secure/tree.put.test.ts`;
+// stands in for the real pipeline, which is node-tested in `server/pipelines/tree.test.ts`;
 // what is under test here is what the WIDGET does with each answer. The other writer's stored index is built
 // with the production codecs (sealed + integrity-tagged under the same key), so the widget sees exactly what
 // a second tab would have left behind.
@@ -30,8 +30,8 @@ let conflict = false
 let damaged = false
 let blobN = 0
 
-registerEndpoint('/api/galleries-secure/tree', {
-  method: 'PUT',
+registerEndpoint('/api/secureGalleryTree', {
+  method: 'POST',
   handler: async (event) => {
     const body = await readBody(event) as PutBody
     bodies.push(body)
@@ -45,8 +45,8 @@ registerEndpoint('/api/galleries-secure/tree', {
     return { ok: true, base: BASE }
   },
 })
-registerEndpoint('/api/galleries-secure/base', { method: 'GET', handler: () => ({ base: BASE }) })
-registerEndpoint('/api/galleries-secure/upload', {
+registerEndpoint('/api/secureGalleryBase', { method: 'GET', handler: () => ({ base: BASE }) })
+registerEndpoint('/api/secureGalleryUpload', {
   method: 'POST',
   handler: () => ({ blobId: `b${++blobN}111111-1111-1111-1111-111111111111.bin` }),
 })

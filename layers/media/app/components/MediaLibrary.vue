@@ -62,8 +62,8 @@ async function onSaveMeta(alt: string, ai?: { aiSourceType: string | null; aiNot
     // so it rides alongside as top-level keys — and only when the viewer actually offered it, so a save
     // from a consumer with the feature off never clears a recorded disclosure. The precondition header
     // lets the server 409 instead of silently losing a concurrent edit from another open viewer tab.
-    await $fetch(`/api/media/${f.id}`, {
-      method: 'PATCH',
+    await $fetch(`/api/media/updateAsset/${f.id}`, {
+      method: 'POST',
       body: { translations: { [primary]: { alt } }, ...(ai ?? {}) },
       ...(f.updatedAt ? { headers: { 'x-kestrel-if-unmodified-since': String(new Date(f.updatedAt).getTime()) } } : {}),
     })

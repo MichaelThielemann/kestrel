@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { rmSync } from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch } from '@nuxt/test-utils/e2e'
-import { hashPassword } from '../../layers/auth/server/utils/password'
+import { hashPassword } from '@kestrel/auth'
 
 const dbPath = join(tmpdir(), `kestrel-sitemap-e2e-${process.pid}.sqlite`)
 const PW = 'sitemap-e2e-pw'
@@ -19,7 +19,7 @@ describe('sitemap.xml + robots.txt routes (e2e)', async () => {
   await setup({ rootDir: fileURLToPath(new URL('../../', import.meta.url)), dev: true })
 
   beforeAll(async () => {
-    const res = await testFetch('/api/auth/login', {
+    const res = await testFetch('/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ password: PW }),
@@ -29,10 +29,10 @@ describe('sitemap.xml + robots.txt routes (e2e)', async () => {
       : [res.headers.get('set-cookie')].filter(Boolean) as string[]
     const cookie = set.map((c) => c.split(';')[0]).join('; ')
 
-    await $fetch('/api/pages', { method: 'POST', headers: { cookie }, body: { title: 'About', path: '/about', status: 'published' } })
-    await $fetch('/api/pages', { method: 'POST', headers: { cookie }, body: { title: 'Über uns', path: '/ueber-uns', locale: 'de', status: 'published' } })
-    await $fetch('/api/pages', { method: 'POST', headers: { cookie }, body: { title: 'Secret', path: '/secret', status: 'draft' } })
-    await $fetch('/api/pages', { method: 'POST', headers: { cookie }, body: { title: 'Hidden', path: '/hidden', status: 'published', seo: { noindex: true } } })
+    await $fetch('/api/pages/createOne', { method: 'POST', headers: { cookie }, body: { title: 'About', path: '/about', status: 'published' } })
+    await $fetch('/api/pages/createOne', { method: 'POST', headers: { cookie }, body: { title: 'Über uns', path: '/ueber-uns', locale: 'de', status: 'published' } })
+    await $fetch('/api/pages/createOne', { method: 'POST', headers: { cookie }, body: { title: 'Secret', path: '/secret', status: 'draft' } })
+    await $fetch('/api/pages/createOne', { method: 'POST', headers: { cookie }, body: { title: 'Hidden', path: '/hidden', status: 'published', seo: { noindex: true } } })
   })
 
   afterAll(() => {

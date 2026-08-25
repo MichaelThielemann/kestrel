@@ -70,9 +70,86 @@ export function collectBlockSfcs(layerRoots: string[], subdir = 'app/blocks', li
   return [...byName.values()].sort()
 }
 
+/**
+ * Each layer's OWN `server/db/manifest.ts` (ADR-0012 ownership manifest), one per layer that has one.
+ * Unlike `collectDefinitions`, this does NOT dedupe by basename: every layer's manifest is a distinct
+ * module contribution (no shadow/override semantics — `media`'s manifest and `public`'s manifest both
+ * happen to be named `manifest.ts`, and both must survive). Layer order is whatever `layerRoots` is.
+ */
+export function collectManifestFiles(layerRoots: string[], list?: Lister): string[] {
+  const files: string[] = []
+  for (const root of layerRoots) {
+    for (const file of listDefinitionFiles(join(root, 'server/db'), list)) {
+      if (basename(file) === 'manifest.ts') files.push(file)
+    }
+  }
+  return files
+}
+
 export function renderRegistry(absPaths: string[]): string {
   if (!absPaths.length) return 'export default []'
   const imports = absPaths.map((p, i) => `import _${i} from ${JSON.stringify(p)}`)
   const arr = absPaths.map((_, i) => `_${i}`).join(', ')
   return `${imports.join('\n')}\nexport default [${arr}]`
+}
+
+/**
+ * A registry combining package-provided items (each package's `kestrelDiscovery.<property>`, read via a
+ * bare specifier — no filesystem/`node_modules` guessing) with consumer/layer-scanned files, with a
+ * SAME-NAME layer item overriding a package's (via `mergeKestrelDiscovered`, evaluated at virtual-load
+ * time — package names aren't knowable at codegen time without loading the package, which this
+ * deliberately avoids doing at build time). `nameOfExpr` is a JS arrow-function source string the
+ * generated module evaluates per item (e.g. `'(x) => x.name'` for collections,
+ * `'(x) => __kestrelTableName(x)'` for schema-tables, paired with `extraImports` supplying
+ * `__kestrelTableName`).
+ */
+export function renderPackageMergedRegistry(opts: {
+  packages: string[]
+  property: 'collections' | 'schemaTables'
+  consumerFiles: string[]
+  nameOfExpr: string
+  extraImports?: string
+  preamble?: string
+}): string {
+  const pkgImports = opts.packages.map((spec, i) => `import { kestrelDiscovery as __pkg${i} } from ${JSON.stringify(spec)}`)
+  const pkgSpread = opts.packages.map((_, i) => `...(__pkg${i}.${opts.property} ?? [])`).join(', ')
+  const consumerImports = opts.consumerFiles.map((p, i) => `import _c${i} from ${JSON.stringify(p)}`)
+  const consumerArr = opts.consumerFiles.map((_, i) => `_c${i}`).join(', ')
+  return [
+    opts.preamble ?? '',
+    opts.extraImports ?? '',
+    `import { mergeKestrelDiscovered } from '@kestrel/core'`,
+    ...pkgImports,
+    ...consumerImports,
+    `export default mergeKestrelDiscovered([${pkgSpread}], [${consumerArr}], ${opts.nameOfExpr})`,
+  ].filter(Boolean).join('\n')
+}
+
+/**
+ * A registry concatenating package-provided items (`kestrelDiscovery.<property>`) with consumer/layer-
+ * scanned files — NO dedup (mirrors `collectManifestFiles`'s own "every contribution is distinct, no
+ * shadow semantics" contract; unlike collections/schema-tables, two manifests sharing a name is not a
+ * schema conflict, so there is nothing to override).
+ */
+export function renderPackageConcatRegistry(opts: {
+  packages: string[]
+  property: 'manifest'
+  consumerFiles: string[]
+  preamble?: string
+}): string {
+  const pkgImports = opts.packages.map((spec, i) => `import { kestrelDiscovery as __pkg${i} } from ${JSON.stringify(spec)}`)
+  // `opts.packages` is expected to be pre-filtered to packages that actually contribute this property (the
+  // caller's per-category list), so every `.manifest` read here SHOULD be defined — but the spread stays
+  // conditional (`...(x ? [x] : [])`, not a bare `x`) as a defense-in-depth guard: a package mis-listed in
+  // the wrong `PACKAGE_*` category contributes nothing instead of polluting the array with `undefined`.
+  const pkgItems = opts.packages.map((_, i) => `...(__pkg${i}.${opts.property} ? [__pkg${i}.${opts.property}] : [])`)
+  const consumerImports = opts.consumerFiles.map((p, i) => `import _c${i} from ${JSON.stringify(p)}`)
+  const consumerArr = opts.consumerFiles.map((_, i) => `_c${i}`)
+  const all = [...pkgItems, ...consumerArr].join(', ')
+  return [
+    opts.preamble ?? '',
+    ...pkgImports,
+    ...consumerImports,
+    `export default [${all}]`,
+  ].filter(Boolean).join('\n')
 }

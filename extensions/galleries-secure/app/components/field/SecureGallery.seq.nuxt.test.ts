@@ -15,8 +15,8 @@ let stored: Record<string, unknown> | null = null
 const seqs: unknown[] = []
 let conflict = false
 
-registerEndpoint('/api/galleries-secure/tree', {
-  method: 'PUT',
+registerEndpoint('/api/secureGalleryTree', {
+  method: 'POST',
   handler: async (event) => {
     const body = await readBody(event)
     seqs.push(body?.index?.seq)
@@ -25,8 +25,8 @@ registerEndpoint('/api/galleries-secure/tree', {
     return { ok: true, base: BASE }
   },
 })
-registerEndpoint('/api/galleries-secure/base', { method: 'GET', handler: () => ({ base: BASE }) })
-registerEndpoint('/api/galleries-secure/upload', { method: 'POST', handler: () => ({ blobId: 'b1111111-1111-1111-1111-111111111111.bin' }) })
+registerEndpoint('/api/secureGalleryBase', { method: 'GET', handler: () => ({ base: BASE }) })
+registerEndpoint('/api/secureGalleryUpload', { method: 'POST', handler: () => ({ blobId: 'b1111111-1111-1111-1111-111111111111.bin' }) })
 
 const realFetch = globalThis.fetch
 beforeEach(() => {

@@ -131,7 +131,7 @@ defineExpose({ lang, selectLang, signOut })
   font-weight: var(--weight-medium);
 }
 .rail-account__caret {
-  margin-left: auto; // push the chevron to the right edge of the full-width trigger
+  margin-left: auto;
   flex-shrink: 0;
   color: var(--color-text-muted);
 }

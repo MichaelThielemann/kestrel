@@ -1,7 +1,7 @@
 import { ref, toValue } from 'vue'
 import type { MaybeRefOrGetter } from 'vue'
 
-/** The live publish state of a record's static page, as returned by `GET /api/publish-status`. */
+/** The live publish state of a record's static page, as returned by `GET /api/publishStatus`. */
 export interface PublishStatusData {
   route: string | null
   status: 'success' | 'error' | null
@@ -59,7 +59,7 @@ export function usePublishStatus(args: {
       return
     }
     try {
-      const res = await $fetch<PublishStatusData>('/api/publish-status', {
+      const res = await $fetch<PublishStatusData>('/api/publishStatus', {
         query: { collection: toValue(args.collection), id, locale: toValue(args.locale) },
       })
       if (token === pollToken) data.value = res

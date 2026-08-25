@@ -1,7 +1,8 @@
 import type { H3Event } from 'h3'
-import { deriveOnDemand, variantKeyFromPath } from '../utils/ondemand'
-import { useStorageDriver, mediaRuntimeConfig } from '../../../core/server/utils/storage'
-import { DEFAULT_IMAGE_POLICY } from '../../../core/server/utils/kestrel-config'
+import { clientIp } from '@kestrel/auth'
+import { allowlistMode, ipAllowed, parseAllowlist } from '@kestrel/access'
+import { deriveOnDemand, variantKeyFromPath, useStorageDriver, mediaRuntimeConfig, useMediaDb } from '@kestrel/media'
+import { DEFAULT_IMAGE_POLICY } from '@kestrel/core'
 
 /**
  * Whether the IP allow-list would deny this request, checked directly rather than relied on by ordering:
@@ -21,13 +22,13 @@ export default defineEventHandler(async (event) => {
   if (!import.meta.dev || event.method !== 'GET') return
   if (deniedByAllowlist(event)) return
   const cfg = mediaRuntimeConfig()
-  const key = variantKeyFromPath(event.path, cfg.local.baseUrl)
+  const key = variantKeyFromPath(event.path, cfg.baseUrl)
   if (key == null) return
   const driver = useStorageDriver()
   if (await driver.exists?.(key)) return
   // Dev is the diagnosis environment, so surface a real derive failure (missing original, sharp reject)
   // instead of silently 404ing — a broken preview <img> with no log violates the fail-loud convention.
-  const result = await deriveOnDemand(useDb(), driver, cfg.imagePolicy ?? DEFAULT_IMAGE_POLICY, key).catch((error) => {
+  const result = await deriveOnDemand(useMediaDb().db, driver, cfg.imagePolicy ?? DEFAULT_IMAGE_POLICY, key).catch((error) => {
     console.warn(`[kestrel] on-demand variant derive failed for ${key}:`, (error as Error)?.message ?? error)
     return null
   })

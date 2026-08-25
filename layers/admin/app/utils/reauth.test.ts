@@ -27,9 +27,9 @@ describe('reauthTarget', () => {
   })
 
   it('is null for the auth-bootstrap endpoints (a wrong-password login must not loop)', () => {
-    expect(reauthTarget({ status: 401, url: '/api/auth/login', currentPath: '/admin/login' })).toBeNull()
-    expect(reauthTarget({ status: 401, url: '/api/auth/session', currentPath: '/admin' })).toBeNull()
-    expect(reauthTarget({ status: 401, url: '/api/auth/logout', currentPath: '/admin' })).toBeNull()
+    expect(reauthTarget({ status: 401, url: '/api/login', currentPath: '/admin/login' })).toBeNull()
+    expect(reauthTarget({ status: 401, url: '/api/session', currentPath: '/admin' })).toBeNull()
+    expect(reauthTarget({ status: 401, url: '/api/logout', currentPath: '/admin' })).toBeNull()
   })
 
   it('only the exact bootstrap paths are exempt — a guarded endpoint under an "auth"-named collection still re-auths', () => {
@@ -66,7 +66,7 @@ describe('makeReauthInterceptor', () => {
   it('does nothing for a 401 from the auth endpoints', () => {
     const reset = vi.fn(); const navigate = vi.fn()
     makeReauthInterceptor({ currentPath: () => '/admin/login', reset, navigate })(
-      { request: '/api/auth/login', response: { status: 401 } },
+      { request: '/api/login', response: { status: 401 } },
     )
     expect(reset).not.toHaveBeenCalled()
     expect(navigate).not.toHaveBeenCalled()

@@ -1,6 +1,5 @@
-import { registerFieldPopulator } from '../../../core/server/utils/populate'
-import { buildLinkFieldPopulators } from '../utils/populate-links'
-import { resolveInternalHref } from '../utils/link-resolve'
+import { registerFieldPopulator } from '@kestrel/core'
+import { buildLinkFieldPopulators, resolveInternalHref } from '@kestrel/publishing'
 
 // Resolve internal links to the target record's localized public path at read time (page-like targets;
 // external/email/tel pass through). The resolver IS status-gated: a link to a DRAFT resolves to nothing and

@@ -2,6 +2,8 @@
 import { sortDirection } from '../utils/list-query'
 import { cellDisplay, columnLabel, rowLabel as labelForRow } from '../utils/list-cell'
 import type { ListColumn } from '../utils/list-columns'
+import { resolveLocalized } from '../../../ui/app/utils/localized'
+import type { SerializedAction } from '@kestrel/core'
 
 const props = defineProps<{
   rows: Record<string, unknown>[]
@@ -13,6 +15,8 @@ const props = defineProps<{
   selected: Set<number>
   allSelected: boolean
   headerIndeterminate: boolean
+  /** Schema-driven row actions beyond the built-in edit/duplicate/delete. */
+  actions?: SerializedAction[]
 }>()
 const emit = defineEmits<{
   sort: [key: string]
@@ -20,13 +24,15 @@ const emit = defineEmits<{
   toggleAll: [on: boolean]
   duplicate: [id: number]
   delete: [ids: number[]]
+  runAction: [action: SerializedAction, id: number]
 }>()
 
-const { t } = useT()
+const { t, lang } = useT()
 const { locales } = useContentLocales()
 
 const colLabel = (col: ListColumn) => columnLabel(col, t)
 const rowLabel = (row: Record<string, unknown>) => labelForRow(props.columns, row)
+const actionLabel = (action: SerializedAction) => resolveLocalized(action.label, lang.value) ?? action.name
 
 function arrow(field: string) {
   const dir = sortDirection(props.sort, field)
@@ -99,12 +105,32 @@ function rowTranslations(row: Record<string, unknown>) {
             <button type="button" class="list__action-btn" :disabled="busy" :aria-label="t('list.rowDuplicate', { name: rowLabel(row) })" @click="emit('duplicate', Number(row.id))">
               <KestrelUiIcon name="copy" :size="15" />
             </button>
+            <button
+              v-for="action in actions"
+              :key="action.name"
+              type="button"
+              class="list__action-btn"
+              :disabled="busy"
+              :data-action="action.name"
+              :aria-label="`${actionLabel(action)}: ${rowLabel(row)}`"
+              @click="emit('runAction', action, Number(row.id))"
+            >
+              <KestrelUiIcon :name="action.icon ?? 'zap'" :size="15" />
+            </button>
             <button type="button" class="list__action-btn list__action-btn--danger" :disabled="busy" :aria-label="t('list.rowDelete', { name: rowLabel(row) })" @click="emit('delete', [Number(row.id)])">
               <KestrelUiIcon name="trash" :size="15" />
             </button>
           </div>
         </td>
-        <td v-for="c in columns" :key="c.key" :class="{ 'list__narrow-cell': c.type === 'translations' || c.type === 'deadRefs' }">
+        <!-- A quarantined row carries none of its normal fields — a single spanning cell replaces
+             the per-column cells rather than rendering blanks for data that doesn't exist. -->
+        <td v-if="row.$quarantined === true" :colspan="columns.length">
+          <span class="list__quarantine-badge">
+            <KestrelUiIcon name="triangle-alert" :size="14" role="img" :aria-label="t('list.quarantined')" />
+            {{ t('list.quarantined') }}
+          </span>
+        </td>
+        <td v-else v-for="c in columns" :key="c.key" :class="{ 'list__narrow-cell': c.type === 'translations' || c.type === 'deadRefs' }">
           <span v-if="c.type === 'deadRefs'" class="list__deadrefs">
             <KestrelUiIcon
               v-if="row.$hasDeadRefs"
@@ -194,6 +220,19 @@ function rowTranslations(row: Record<string, unknown>) {
   &__narrow-cell {
     width: 1%;
     white-space: nowrap;
+  }
+
+  // Quarantine badge — icon + text (not color alone, WCAG 1.4.1), replacing a row's normal data cells.
+  &__quarantine-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 2px var(--space-2);
+    border: 1px solid var(--color-danger);
+    border-radius: var(--radius-sm);
+    color: var(--color-danger);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
   }
 
   // Dead-reference warning: an amber triangle, shown only on rows holding a stale reference.

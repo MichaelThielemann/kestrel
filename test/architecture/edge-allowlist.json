@@ -1,0 +1,41 @@
+{
+  "_note": "The one place allowed cross-layer edges live. Both the ESLint boundaries rail (eslint.config.mjs) and the graph rail (layer-edges.test.ts) read this file. Entries derived from graphify-out/graph.json cross-layer imports/calls (test files excluded). No debt edges remain \u2014 no `debt: true` rows. Adding a new edge (debt or not) needs a human decision recorded as an ADR line before it lands here.",
+  "edges": [
+    {
+      "from": "admin",
+      "to": "core"
+    },
+    {
+      "from": "admin",
+      "to": "media"
+    },
+    {
+      "from": "admin",
+      "to": "public"
+    },
+    {
+      "from": "admin",
+      "to": "ui"
+    },
+    {
+      "from": "collections",
+      "to": "core"
+    },
+    {
+      "from": "media",
+      "to": "core"
+    },
+    {
+      "from": "media",
+      "to": "ui"
+    },
+    {
+      "from": "public",
+      "to": "core"
+    },
+    {
+      "from": "ui",
+      "to": "core"
+    }
+  ]
+}

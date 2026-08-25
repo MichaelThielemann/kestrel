@@ -1,3 +1,5 @@
+import { siteBaseUrl, buildRobots, llmsFullEnabled } from '@kestrel/publishing'
+
 export default defineEventHandler((event) => {
   const base = siteBaseUrl()
   setHeader(event, 'content-type', 'text/plain; charset=utf-8')

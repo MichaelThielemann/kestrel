@@ -2,9 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import FieldLayout from './Layout.vue'
-import type { FieldDef } from '../../../../core/server/utils/defineCollection'
-import type { LayoutNode } from '../../../../core/server/utils/field-layout'
-
+import type { FieldDef, LayoutNode } from '@kestrel/core'
 const fields = {
   a: { type: 'text' },
   b: { type: 'text' },

@@ -26,7 +26,7 @@ mockNuxtImport('useRoute', () => () => ({ path: h.path, query: h.query, meta: {}
 // THAT instead of the stored record — no save, no publish (ADR-0008).
 const ticket = { payload: { collection: 'pages', id: 1, values: { title: 'Unsaved title', content: [], layout: 'plain' } } }
 registerEndpoint('/api/preview', defineEventHandler(() => (h.token ? ticket : null)))
-registerEndpoint('/api/auth/session', defineEventHandler(() => ({ authenticated: true })))
+registerEndpoint('/api/session', defineEventHandler(() => ({ authenticated: true })))
 
 beforeEach(() => {
   h.path = '/about'

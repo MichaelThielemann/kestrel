@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { SerializedBlock } from '../../../core/server/utils/serialize-collection'
+import type { SerializedBlock } from '@kestrel/core'
 import { previewSrc, parseFrameMessage, type PreviewBlockNode } from '../../../public/app/utils/preview-protocol'
 import { createPreviewSender, acceptsFrameEvent, type PreviewSender } from '../utils/preview-channel'
 import { editorFormContextKey } from '../utils/editor-form-context'
@@ -21,6 +21,16 @@ const { t } = useT()
 // the component still mounts standalone (tests, storybook-ish usage) — it then always uses the fallback.
 const ctx = inject(editorFormContextKey, null)
 const src = computed(() => previewSrc(ctx?.previewUrl.value ?? null, props.locale ?? ''))
+
+// The layout wraps the frame's own document (`<NuxtLayout>`, a parent the postMessage bridge can't reach
+// from inside its slot), so a layout change can't ride the content push — only a fresh navigation
+// re-resolves it. Forcing one needs an actual URL change (a `src` re-assignment to the same string is a
+// no-op), so a change bumps this counter, which `frameSrc` folds into the URL as a harmless query param.
+const layoutReloadKey = ref(0)
+const frameSrc = computed(() => {
+  if (!layoutReloadKey.value) return src.value
+  return `${src.value}${src.value.includes('?') ? '&' : '?'}_r=${layoutReloadKey.value}`
+})
 
 // ---- populate (pipeline: resolve media ids + internal links into reactive caches) ----
 // Block field schemas (non-blocking: byType fills once loaded, then the next send carries the media).
@@ -84,9 +94,9 @@ function onFrameLoad() {
   if (!el) return
   try {
     const loc = el.contentWindow?.location
-    if (loc && loc.pathname + loc.search !== src.value) el.src = src.value
+    if (loc && loc.pathname + loc.search !== frameSrc.value) el.src = frameSrc.value
   } catch {
-    el.src = src.value // cross-origin navigation — location unreadable, snap back
+    el.src = frameSrc.value // cross-origin navigation — location unreadable, snap back
   }
 }
 
@@ -101,7 +111,7 @@ function refresh() {
   try {
     el.contentWindow?.location.reload() // same URL → onFrameLoad's snap-back check passes
   } catch {
-    el.src = src.value // cross-origin: location unreadable → renavigate
+    el.src = frameSrc.value // cross-origin: location unreadable → renavigate
   }
 }
 
@@ -121,6 +131,8 @@ watch(populated, () => { if (ready.value) pushContent() })
 watch(() => props.selectedId, (id) => { if (ready.value) sender?.sendSelected(id ?? null) })
 // A src change reloads the iframe (locale switch, first save assigning a URL) → wait for its new ready.
 watch(src, () => { ready.value = false })
+// See `layoutReloadKey` above: a layout change forces a fresh navigation, the only way to re-resolve it.
+watch(() => ctx?.values?.layout, () => { layoutReloadKey.value++; ready.value = false })
 
 // ---- responsive preview: device presets (quick-fill) + automatic scale-to-fit + custom W×H ----
 // The iframe renders at the target resolution's REAL px (so the page fires its true breakpoints); a
@@ -281,7 +293,7 @@ onUnmounted(() => { ro?.disconnect(); ro = null })
 
     <div ref="stage" class="block-preview__stage">
       <div class="block-preview__viewport" :style="viewportStyle">
-        <iframe ref="frame" class="block-preview__frame" :src="src" :style="frameStyle" :title="t('preview.label')" @load="onFrameLoad" />
+        <iframe ref="frame" class="block-preview__frame" :src="frameSrc" :style="frameStyle" :title="t('preview.label')" @load="onFrameLoad" />
       </div>
     </div>
   </section>

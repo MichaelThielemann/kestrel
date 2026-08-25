@@ -13,10 +13,8 @@ const settingsSchema = {
 registerEndpoint('/api/collections', () => ({ data: [settingsSchema] }))
 
 let put: Record<string, unknown> | null = null
-registerEndpoint('/api/settings', async (event) => {
-  if (event.method === 'PUT') { put = await readBody(event); return { id: 1, ...put } }
-  return { id: 1, siteName: 'Hello' } // singleton GET returns the row directly (not wrapped)
-})
+registerEndpoint('/api/settings/readOne', () => ({ id: 1, siteName: 'Hello' })) // singleton GET returns the row directly (not wrapped)
+registerEndpoint('/api/settings/updateOne', { method: 'POST', handler: async (event) => { put = await readBody(event); return { id: 1, ...put } } })
 
 beforeEach(() => {
   useState('kestrel-collections').value = null
@@ -41,7 +39,7 @@ describe('SingletonEditor', () => {
     expect(w.find('.editor__actions').exists()).toBe(false)
   })
 
-  it('PUTs the singleton when the form is submitted', async () => {
+  it('posts the singleton to updateOne when the form is submitted', async () => {
     const w = await mountSuspended(SingletonEditor, { props: { collection: 'settings', title: 'Settings' } })
     await flushPromises()
     await w.find('input').setValue('Changed')

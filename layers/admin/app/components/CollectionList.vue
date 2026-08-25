@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { SerializedCollection } from '../../../core/server/utils/serialize-collection'
+import type { SerializedCollection } from '@kestrel/core'
 import { resolveLocalized } from '../../../ui/app/utils/localized'
+import { bulkCustomActions, recordCustomActions } from '../utils/collection-ops'
 
 // `locale` is set only for a translatable collection: it filters the list to that content locale and
 // shows a locale switcher. New records / row links carry it so they open in the same locale.
@@ -33,7 +34,7 @@ const { sort, page, perPage, filter, effectiveQuery, setSort, setPage, clampPage
 const filterDraft = useListFilterDraft({ available, filterableColumns, filter, setFilter })
 const activeFilters = filterDraft.activeFilters
 
-const { rows, total, error, totalPages, fetchRows } = useListRows({
+const { rows, total, quarantinedCount, error, totalPages, fetchRows } = useListRows({
   collection,
   effectiveQuery,
   locale: () => props.locale,
@@ -50,8 +51,13 @@ const { selected, allSelected, headerIndeterminate, toggleRow, toggleAll, clear:
   useListSelection(rows)
 
 // Row action = 1 id, bulk bar = N ids; the server does the batching.
-const { busy: opsBusy, error: opsError, deleteOpen, deleteReport, askDelete, confirmDelete, duplicate: onDuplicate, setStatus } =
+const { busy: opsBusy, error: opsError, deleteOpen, deleteReport, askDelete, confirmDelete, duplicate: onDuplicate, setStatus, runAction } =
   useListBatchActions(collection, fetchRows)
+
+// Schema-driven actions beyond the built-in delete/duplicate/publish: a consumer's `definePipeline` shows
+// up here without any UI code.
+const bulkActions = computed(() => bulkCustomActions(props.schema.actions ?? []))
+const rowActions = computed(() => recordCustomActions(props.schema.actions ?? []))
 
 // Toolbar popovers (filter / columns), including the outside-click and Escape-restores-focus behaviour.
 const { container: toolsRef, open: openPanel, toggle: togglePanel } = useToolbarPanel<'filter' | 'columns'>()
@@ -59,6 +65,9 @@ const { container: toolsRef, open: openPanel, toggle: togglePanel } = useToolbar
 // Polite status announced after every (re)fetch so filter/sort/page changes report their result count
 // to screen readers — WCAG 4.1.3 Status Messages.
 const resultsLabel = computed(() => t(total.value === 1 ? 'list.result' : 'list.results', { total: total.value }))
+// Quarantined rows failed their select schema and would otherwise be silent data loss — a chip in
+// the header surfaces the count whenever it's non-zero.
+const quarantinedLabel = computed(() => t(quarantinedCount.value === 1 ? 'list.quarantinedOne' : 'list.quarantinedCount', { n: quarantinedCount.value }))
 // The ONE permanent live region. A live region only announces MUTATIONS to a node already in the tree, so
 // the selection count is folded in here (mutating this region's text) rather than toggling a second
 // role="status" node into the DOM — inserting an already-populated live node is typically not announced,
@@ -133,6 +142,11 @@ await fetchRows()
         </div>
       </div>
 
+      <span v-if="quarantinedCount > 0" class="list__quarantine-chip">
+        <KestrelUiIcon name="triangle-alert" :size="14" />
+        {{ quarantinedLabel }}
+      </span>
+
       <NuxtLink :to="`/admin/${collection}/new${localeQuery}`" class="list__new">{{ newLabel }}</NuxtLink>
     </div>
 
@@ -141,8 +155,10 @@ await fetchRows()
       :count="selected.size"
       :has-status="!!schema.status"
       :busy="opsBusy"
+      :actions="bulkActions"
       @set-status="(status) => setStatus([...selected], status)"
       @delete="askDelete([...selected])"
+      @run-action="(action) => runAction(action, [...selected])"
       @clear="clearSelection"
     />
 
@@ -173,11 +189,13 @@ await fetchRows()
         :selected="selected"
         :all-selected="allSelected"
         :header-indeterminate="headerIndeterminate"
+        :actions="rowActions"
         @sort="setSort"
         @toggle-row="toggleRow"
         @toggle-all="toggleAll"
         @duplicate="onDuplicate"
         @delete="askDelete"
+        @run-action="(action, id) => runAction(action, [id])"
       />
 
       <KestrelUiEmptyState
@@ -346,6 +364,19 @@ await fetchRows()
     font: inherit;
     font-size: var(--text-sm);
     cursor: pointer;
+  }
+
+  // Quarantine count chip — icon + text (not color alone, WCAG 1.4.1) so it reads even without color.
+  &__quarantine-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-soft, var(--color-surface));
+    color: var(--color-danger);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
   }
 
   &__new {

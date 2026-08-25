@@ -2,8 +2,8 @@
 import { useBlurUp } from '../composables/useBlurUp'
 import { useMediaVariant } from '../composables/useMediaVariant'
 import { aiSourceTypeLabel } from '../utils/ai-disclosure'
-import type { ResolvedMedia } from '../../server/utils/resolve'
-import type { VariantFit, VariantFormat } from '../../../core/server/utils/kestrel-config'
+import type { ResolvedMedia } from '@kestrel/media'
+import type { VariantFit, VariantFormat } from '@kestrel/core'
 
 // The engine's responsive-image component: it renders a <picture> from the media's generated derivatives
 // AND its usage declares (to the generate-time scan) which sizes/formats are actually needed — "not in the
@@ -21,7 +21,7 @@ const props = defineProps<{
   /** Opt into a structurally-present but UNSTYLED EU AI Act disclosure badge (`.kestrel-img__ai-badge`),
    *  rendered only when `media.aiDisclosure` is set. Off by default: Kestrel must never publish a claim
    *  the consumer did not ask for, in a place/language/style it cannot know. The alternative escape hatch
-   *  is to read `media.aiDisclosure` and render your own element — see docs/media-uploads.md. */
+   *  is to read `media.aiDisclosure` and render your own element — see docs/guide/ai-disclosure.md. */
   aiBadge?: boolean
 }>()
 

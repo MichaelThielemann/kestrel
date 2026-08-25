@@ -124,7 +124,6 @@ useHead(() => ({
     min-height: 0;
   }
 
-  // Collapsed rail: narrow to icon-only width.
   &--rail-collapsed &__rail {
     flex-basis: var(--rail-width-collapsed);
     width: var(--rail-width-collapsed);

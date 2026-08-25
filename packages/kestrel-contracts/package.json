@@ -1,0 +1,47 @@
+{
+  "name": "@kestrel/contracts",
+  "version": "0.1.0",
+  "description": "Kestrel's system specification: tagged error unions, branded ids, and event payloads shared between the engine and its consumers.",
+  "license": "Apache-2.0",
+  "author": "Michael Thielemann <283621694+MichaelThielemann@users.noreply.github.com>",
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
+    "directory": "packages/kestrel-contracts"
+  },
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "vitest run --typecheck"
+  },
+  "dependencies": {
+    "effect": "~3.22.1"
+  },
+  "devDependencies": {
+    "@fast-check/vitest": "^0.4.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,75 @@
+import type { DerivedImage } from './derive.js'
+import { mergeTranslations, type Translations } from './translations.js'
+
+/** One generated derivative's storage key and real output dimensions. */
+export interface DerivativeEntry { key: string; width: number; height: number; mime: string }
+/** A media row's `derivatives` column shape, keyed `<name>.<format>`. */
+export type DerivativeManifest = Record<string, DerivativeEntry>
+
+/** The fields `buildMediaValues` needs to build a media row's column values. */
+export interface MediaInput {
+  storageKey: string
+  folder: string
+  filename: string
+  mime: string
+  ext: string
+  size: number
+  checksum: string
+  derived?: DerivedImage
+  translations?: Record<string, { alt?: string; title?: string; description?: string }>
+  /** EU AI Act disclosure to write. Omitted/null ⇒ the column is left out of the values entirely, which is
+   *  what keeps an overwrite from wiping a disclosure the re-upload did not re-send. */
+  aiSourceType?: string | null
+  aiNote?: string | null
+}
+
+/**
+ * Object key for a resized/reformatted variant of an original. The stem is the FULL original key
+ * (extension included), so two same-stem uploads that differ only in extension — `logo.png` and
+ * `logo.jpg`, a designer exporting both formats — never derive the same key and overwrite/cross-delete
+ * each other's variants. `storageKey` is unique, so this stays injective per original.
+ */
+export function derivativeKey(originalKey: string, name: string, format: string): string {
+  return `${originalKey}-${name}.${format}`
+}
+
+/** Builds a media row's column values from `input`, including the derivatives manifest. */
+export function buildMediaValues(input: MediaInput): Record<string, unknown> {
+  const manifest: DerivativeManifest = {}
+  const src = input.derived
+  for (const v of src?.variants ?? []) {
+    // Name-keyed (`<name>.<format>`); height is the variant's REAL output dim (crops break the aspect ratio).
+    manifest[`${v.name}.${v.format}`] = { key: derivativeKey(input.storageKey, v.name, v.format), width: v.width, height: v.height, mime: v.mime }
+  }
+  return {
+    storageKey: input.storageKey,
+    folder: input.folder || null,
+    filename: input.filename,
+    mime: input.mime,
+    ext: input.ext,
+    size: input.size,
+    width: input.derived?.width ?? null,
+    height: input.derived?.height ?? null,
+    checksum: input.checksum,
+    thumbhash: input.derived?.thumbhash ?? null,
+    derivatives: manifest,
+    translations: input.translations ?? {},
+    // Written only when there is something to write: the overwrite path feeds these same values to an
+    // UPDATE, and a null here would silently clear a disclosure an editor set on the existing row.
+    ...(input.aiSourceType != null ? { aiSourceType: input.aiSourceType } : {}),
+    ...(input.aiNote != null ? { aiNote: input.aiNote } : {}),
+  }
+}
+
+/**
+ * On overwrite (re-upload of an existing storageKey) the multipart request rarely re-sends
+ * alt/title/description — the conflict-dialog overwrite path never does — so a bare re-upload must not
+ * wipe the per-locale metadata editors maintain via the viewer. Merge any incoming fields over the
+ * existing map (same semantics as the PATCH endpoint); an empty incoming map leaves the existing intact.
+ */
+export function withPreservedTranslations(
+  values: Record<string, unknown>,
+  existing: { translations?: Translations } | undefined,
+): Record<string, unknown> {
+  return { ...values, translations: mergeTranslations(existing?.translations, (values.translations ?? {}) as Translations) }
+}

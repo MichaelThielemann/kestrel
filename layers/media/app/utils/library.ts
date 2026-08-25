@@ -1,4 +1,4 @@
-import type { LibraryFolder } from '../../server/utils/library'
+import type { LibraryFolder } from '@kestrel/media'
 
 // Re-exported from the server util that produces it (`GET /api/media/library`) so the wire shape is
 // single-sourced.

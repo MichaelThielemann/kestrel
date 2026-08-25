@@ -4,7 +4,6 @@ import type { Catalog } from '../composables/useT'
 // carry `{name}` placeholders interpolated by `useT().t`. Content (collection data) is NOT translated
 // here — only the dashboard chrome. Keep `en` the complete set; other catalogs may be partial.
 export const en: Catalog = {
-  // common / shared
   'common.new': 'New {label}',
   'common.save': 'Save',
   'common.publish': 'Publish',
@@ -14,7 +13,6 @@ export const en: Catalog = {
   'common.close': 'Close',
   'common.retry': 'Retry',
 
-  // navigation rail + shell
   'nav.dashboard': 'Dashboard',
   'nav.signOut': 'Sign out',
   'theme.dark': 'Dark mode',
@@ -27,21 +25,17 @@ export const en: Catalog = {
   'a11y.rowActions': 'Actions',
   'lang.label': 'Language',
 
-  // account menu (rail foot)
   'account.label': 'Account',
   'account.name': 'Admin',
 
-  // text input (password reveal)
   'input.showPassword': 'Show password',
   'input.hidePassword': 'Hide password',
 
-  // login
   'login.signIn': 'Sign in',
   'login.password': 'Password',
   'login.invalid': 'Invalid credentials',
   'login.error': 'Something went wrong — please try again',
 
-  // dashboard
   'dash.title': 'Dashboard',
   'dash.lede': 'Choose a collection to manage its content.',
   'dash.empty.title': 'No collections yet',
@@ -49,10 +43,8 @@ export const en: Catalog = {
   'dash.mode.singleton': 'Singleton',
   'dash.mode.collection': 'Collection',
 
-  // collection (list page wrapper)
   'collection.unknown': 'Unknown collection: {name}',
 
-  // record editor page + toasts
   'editor.back': '{collection}',
   'editor.newRecord': 'New {collection}',
   'editor.editRecord': 'Edit {collection} #{id}',
@@ -61,6 +53,8 @@ export const en: Catalog = {
   'editor.fixBlockContent': 'Some block content is invalid. Check the highlighted block fields.',
   'editor.saveConflict': 'This conflicts with an existing record.',
   'editor.saveFailed': 'Save failed.',
+  'editor.quarantined.title': 'Record quarantined',
+  'editor.quarantined.desc': 'This record no longer matches its collection’s schema and is shown read-only. It cannot be edited or saved until the underlying data is fixed.',
   'toast.saved': 'Saved',
   'toast.deleted': 'Deleted',
   'toast.duplicated': 'Duplicated',
@@ -69,7 +63,6 @@ export const en: Catalog = {
   'toast.region': 'Notifications',
   'toast.dismiss': 'Dismiss',
 
-  // collection list
   'list.translations': 'Translations',
   'list.deadRefs': 'Refs',
   'list.filter': 'Filter',
@@ -113,7 +106,9 @@ export const en: Catalog = {
   'list.result': '{total} result',
   'list.results': '{total} results',
   'list.loadError': "Couldn't load this collection.",
-  // row selection + bulk actions
+  'list.quarantined': 'Quarantined',
+  'list.quarantinedOne': '{n} quarantined record',
+  'list.quarantinedCount': '{n} quarantined records',
   'list.selectAll': 'Select all rows on this page',
   'list.selectRow': 'Select {name}',
   'list.selected': '{n} selected',
@@ -129,8 +124,9 @@ export const en: Catalog = {
   'list.deleteRefsUnverified': 'References could not be verified — some records may be left with a broken link. Proceed with caution.',
   'list.opFailed': 'The action could not be completed.',
   'list.refCheckFailed': 'References could not be checked.',
+  'list.actionConfirm': 'Run "{name}" on {n} record(s)?',
+  'list.actionDone': '{name} done',
 
-  // editor preview pane
   'preview.ariaLabel': 'Live preview',
   'preview.label': 'Preview',
   'preview.deviceLabel': 'Preview size',
@@ -142,7 +138,6 @@ export const en: Catalog = {
   'preview.width': 'Width',
   'preview.height': 'Height',
 
-  // page settings (system fields on pageLike collections)
   'pageSettings.slugLabel': 'Slug',
   'pageSettings.slugHint': 'URL path, e.g. /about (blank = auto-generated from the title)',
   'pageSettings.layoutLabel': 'Layout',
@@ -153,7 +148,6 @@ export const en: Catalog = {
   'pageSettings.statusDraft': 'Draft',
   'pageSettings.statusPublished': 'Published',
 
-  // editor action bar — live preview + status "Ampel"
   'editor.openInNewTab': 'Open in new tab',
   'editor.previewUnsaved': 'Preview unsaved changes in a new tab',
   'editor.previewFailed': 'Could not open the preview.',
@@ -189,7 +183,6 @@ export const en: Catalog = {
   'editorStatus.live.draft': 'Draft — not generated. It stays off the live site until published.',
   'editorStatus.live.updatedAt': 'Last published {time}',
 
-  // SEO section + Google preview
   'seo.sectionLabel': 'SEO',
   'seo.metaTitle': 'Meta title',
   'seo.metaDescription': 'Meta description',
@@ -208,7 +201,6 @@ export const en: Catalog = {
   'seo.keywords': 'Keywords',
   'seo.keywordsHint': 'Comma-separated topics for this page.',
 
-  // locale bar (translations)
   'localeBar.fieldLabel': 'Locale',
   'localeBar.groupLabel': 'Content locale',
   'localeBar.editLocale': 'Edit {loc}',
@@ -216,12 +208,10 @@ export const en: Catalog = {
   'localeBar.createTranslation': 'Create {loc} translation',
   'localeBar.copyFailed': "Couldn't copy from {locale}.",
 
-  // editor history (undo/redo)
   'history.label': 'Edit history',
   'history.undo': 'Undo',
   'history.redo': 'Redo',
 
-  // block editor
   'blocks.empty': 'No blocks yet.',
   'blocks.moveUp': 'Move block {n} up',
   'blocks.moveDown': 'Move block {n} down',
@@ -238,7 +228,6 @@ export const en: Catalog = {
   'blocks.fieldsLabel': 'Block fields',
   'blocks.treeLabel': 'Block structure',
 
-  // dead references (derived stale-reference warnings)
   'deadRefs.listWarning': 'Links to a deleted or unpublished record',
   'deadRefs.blockBadge': 'Broken reference',
   'deadRefs.fieldNote': 'Points at a deleted or unpublished record.',
@@ -256,16 +245,13 @@ export const en: Catalog = {
   'refs.reason.unpublished': 'Unpublished',
   'refs.dashAlert': '{n} broken reference(s) — review',
 
-  // field gallery
   'gallery.title': 'Field gallery',
   'gallery.lede.before': 'Every implemented field widget, live. The relation and internal-link pickers query ',
   'gallery.lede.after': ' — create a post or two to see results.',
 
-  // media library
   'media.title': 'Media',
   'media.picker.titleSingle': 'Select a file',
   'media.picker.titleMultiple': 'Select media',
-  // media — right-click context menu
   'media.menu.cut': 'Cut',
   'media.menu.copy': 'Copy',
   'media.menu.paste': 'Paste',
@@ -295,7 +281,6 @@ export const en: Catalog = {
   'media.selected': 'selected',
   'media.useSelected': 'Use selected',
   'media.dropToUpload': 'Drop files to upload',
-  // media — upload conflict resolution
   'media.conflicts.title': 'Resolve upload conflicts',
   'media.conflicts.desc': '{count} file(s) already exist. Choose how to resolve each.',
   'media.conflicts.applyAll': 'Apply to all:',
@@ -306,20 +291,17 @@ export const en: Catalog = {
   'media.conflicts.overwrite': 'Overwrite',
   'media.conflicts.rename': 'Rename',
   'media.conflicts.skip': 'Skip',
-  // media — new folder / rename dialogs
   'media.newFolder': 'New folder',
   'media.folderName': 'Folder name',
   'media.folderNamePlaceholder': 'e.g. holiday',
   'media.rename': 'Rename',
   'media.newName': 'New name',
-  // media — delete dialog
   'media.deleteSummary': 'Delete {files} {filesUnit} and {folders} {foldersUnit} — {size}.',
   'media.file': 'file',
   'media.files': 'files',
   'media.folder': 'folder',
   'media.folders': 'folders',
   'media.usageWarning': 'These files are used by published content and links will break:',
-  // media — move/copy conflict dialog
   'media.conflictTitleMove': 'Move — conflicts',
   'media.conflictTitleCopy': 'Copy — conflicts',
   'media.conflictItems': '{count} item(s) already exist in "{dest}":',
@@ -329,7 +311,6 @@ export const en: Catalog = {
   'media.skip': 'Skip',
   'media.replace': 'Replace',
   'media.keepBoth': 'Keep both',
-  // media — table view
   'media.colName': 'Name',
   'media.colType': 'Type',
   'media.colSize': 'Size',
@@ -337,7 +318,6 @@ export const en: Catalog = {
   'media.typeFolder': 'Folder',
   'media.parentFolder': 'Go to the parent folder',
 
-  // media — viewer
   'mediaViewer.folder': 'Folder',
   'mediaViewer.uploaded': 'Uploaded',
   'mediaViewer.alt': 'Alt text',
@@ -351,7 +331,6 @@ export const en: Catalog = {
   'mediaViewer.aiNote': 'Disclosure note',
   'mediaViewer.aiNoteHint': 'Free text, e.g. the tool used. Pre-filled with any AI signals found in the file at upload — evidence only, not a verified claim.',
 
-  // richtext toolbar
   'richtext.bold': 'Bold',
   'richtext.italic': 'Italic',
   'richtext.underline': 'Underline',
@@ -386,7 +365,6 @@ export const en: Catalog = {
   'richtext.linkUrl': 'Link URL',
   'richtext.apply': 'Apply',
 
-  // media toolbar
   'mediaToolbar.searchPlaceholder': 'Search…',
   'mediaToolbar.searchAriaLabel': 'Search media',
   'mediaToolbar.viewGrid': 'Grid',
@@ -395,18 +373,14 @@ export const en: Catalog = {
   'mediaToolbar.upload': 'Upload',
   'mediaToolbar.newFolder': 'New folder',
 
-  // media path bar
   'mediaPath.navAriaLabel': 'Path',
   'mediaPath.editAriaLabel': 'Edit path',
   'mediaPath.inputAriaLabel': 'Enter path',
 
-  // collections nav
   'nav.collections': 'Collections',
 
-  // field widgets — datetime
   'field.datetime.range_start': 'Start',
   'field.datetime.range_end': 'End',
-  // field widgets — link
   'field.link.type_internal': 'Internal',
   'field.link.type_url': 'URL',
   'field.link.type_email': 'Email',
@@ -415,14 +389,11 @@ export const en: Catalog = {
   'field.link.url_placeholder': 'https://…',
   'field.link.label_placeholder': 'Link text (optional)',
   'field.link.hash_placeholder': 'Anchor (optional, e.g. section-id)',
-  // field widgets — relation
   'field.relation.placeholder': 'Search…',
-  // field widgets — internal-link picker
   'field.linkPicker.loadError': 'Could not load collections.',
   'field.linkPicker.chooseCollection': 'Choose a collection…',
   'field.linkPicker.collectionLabel': 'Collection',
   'field.linkPicker.searchRecords': 'Search records…',
-  // field widgets — repeater
   'field.repeater.moved': 'Moved item to position {n} of {total}',
   'field.repeater.removed': 'Item {n} removed, {remaining} remaining',
   'field.repeater.duplicated': 'Duplicated item {n}',
@@ -435,7 +406,6 @@ export const en: Catalog = {
   'field.repeater.remove_label': 'Remove item {n}',
   'field.repeater.empty': 'No items yet.',
   'field.repeater.add': 'Add item',
-  // field widgets — media
   'field.media.empty': 'No media selected.',
   'field.media.add': 'Add media',
   'field.media.replace': 'Replace',
@@ -446,7 +416,6 @@ export const en: Catalog = {
   'field.media.move_later': 'Move {name} later',
   'field.media.moved': 'Moved {name} to position {pos} of {total}',
 
-  // combobox
   'combobox.moved': 'Moved {label} to position {pos} of {total}',
   'combobox.move_earlier': 'Move {label} earlier',
   'combobox.move_later': 'Move {label} later',
@@ -456,7 +425,6 @@ export const en: Catalog = {
   'combobox.loading': 'Loading…',
   'combobox.no_results': 'No results',
 
-  // date pickers
   'datePicker.openCalendar': 'Open calendar',
   'datePicker.previousMonth': 'Previous month',
   'datePicker.nextMonth': 'Next month',

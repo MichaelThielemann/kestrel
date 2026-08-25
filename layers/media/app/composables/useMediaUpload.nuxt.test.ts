@@ -8,7 +8,7 @@ import { useMediaUpload, type UploadItem } from './useMediaUpload'
 let mode: 'ok' | 'conflict' | 'error' | 'h2error' | 'unauthorized' = 'ok'
 let errorStatus = 413
 let errorMsg = 'Payload too large'
-registerEndpoint('/api/media', (event) => {
+registerEndpoint('/api/media/upload', (event) => {
   if (mode === 'conflict') throw createError({ statusCode: 409, statusMessage: 'exists', data: { storageKey: 'x', existingId: 5, suggestion: 'a-2.png' } })
   if (mode === 'error') throw createError({ statusCode: errorStatus, statusMessage: errorMsg })
   if (mode === 'unauthorized') throw createError({ statusCode: 401, statusMessage: 'Authentication required' })
@@ -121,7 +121,7 @@ describe('useMediaUpload', () => {
     mode = 'ok'
     await w.vm.up.resolve(id, 'rename'); await flushPromises()  // no name arg → uses suggestion
     const item = w.vm.up.queue.value.find((i) => i.id === id)!
-    expect(item.filename).toBe('a-2.png')   // adopted the suggestion
+    expect(item.filename).toBe('a-2.png')
     expect(item.status).toBe('done')
   })
   it('enqueueUploads places each file in its own folder', async () => {

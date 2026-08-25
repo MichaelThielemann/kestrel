@@ -33,8 +33,22 @@ yarn-error.log*
 # Packaged tarballs (npm pack / release artifacts)
 *.tgz
 
+# Generated API reference (ADR-0015)
+docs/api
+
+# Generated introspection dashboard (pnpm dashboard)
+docs/dashboard.html
+
+# StrykerJS mutation-testing output
+.stryker-tmp
+reports/mutation
+
+# api-extractor's scratch diff output (the accepted report lives in etc/*.api.md, committed)
+packages/*/temp
+
 # create-kestrel's payload — generated from the engine's own copies at pack time
 packages/create-kestrel/templates
 packages/create-kestrel/lib
 packages/create-kestrel/LICENSE
 packages/create-kestrel/NOTICE
+

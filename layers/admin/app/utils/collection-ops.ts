@@ -1,17 +1,42 @@
 // Wire shapes for the collection batch endpoint, shared by the ops composable and the delete dialog.
 // Mirrors media/app/utils/ops.ts: one definition, no drift between the caller and the confirm UI.
+import type { SerializedAction } from '@kestrel/core'
 
 /** The four batch actions the command endpoint accepts (a row action is a bulk op with one id). */
 export type BatchAction = 'delete' | 'publish' | 'unpublish' | 'duplicate'
 
-/** POST /api/{collection}/bulk response. For `duplicate`, `ids` are the CREATED rows. */
+/** The built-in actions the admin renders with its own dedicated presentation (Delete/Duplicate buttons,
+ *  the Publish/Unpublish pair) — always present on the wire, but never re-rendered generically. */
+const BUILTIN_ACTION_NAMES = new Set(['deleteMany', 'duplicate'])
+
+/** The schema-driven actions beyond the built-ins — what a consumer's `definePipeline` adds. */
+export function customActions(actions: SerializedAction[]): SerializedAction[] {
+  return actions.filter((a) => !BUILTIN_ACTION_NAMES.has(a.name))
+}
+
+/** Custom actions invokable from the bulk-selection bar. */
+export function bulkCustomActions(actions: SerializedAction[]): SerializedAction[] {
+  return customActions(actions).filter((a) => a.kind === 'bulk' || a.kind === 'both')
+}
+
+/** Custom actions invokable from a single row. */
+export function recordCustomActions(actions: SerializedAction[]): SerializedAction[] {
+  return customActions(actions).filter((a) => a.kind === 'record' || a.kind === 'both')
+}
+
+/** What a batch pipeline answers with: `deleteMany`/`updateMany` a count plus the ids they touched,
+ *  `duplicate` the created rows. */
+export type BatchPipelineResult = { count: number, ids: number[] } | { id: number }[]
+
+/** The batch outcome the list UI reports. For `duplicate`, `ids` are the CREATED rows. A custom action's
+ *  `action` is its pipeline name — not one of the four built-ins. */
 export interface BulkResult {
-  action: BatchAction
+  action: BatchAction | (string & {})
   count: number
   ids: number[]
 }
 
-/** GET /api/references/referrers?ids=1,2,3 response: id -> how many other records reference it.
+/** GET /api/{collection}/referrers?ids=1,2,3 response: id -> how many other records reference it.
  *  `checked` is false when the index lookup itself failed, in which case `counts` is empty because nothing
  *  could be read — NOT because nothing links to the selection. */
 export interface ReferrerCounts {

@@ -13,9 +13,8 @@ describe('useEchoGuard', () => {
     local = [1]
     model.value = [1]
     await nextTick()
-    expect(reseeds).toEqual([]) // echo skipped
+    expect(reseeds).toEqual([])
 
-    // external change to a new value
     model.value = [2]
     await nextTick()
     expect(local).toEqual([2])

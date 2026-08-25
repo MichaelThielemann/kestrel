@@ -7,7 +7,7 @@ import UiSelect from './Select.vue'
 import UiTextInput from './TextInput.vue'
 import LinkInternalPicker from '../field/LinkInternalPicker.vue'
 import type { IconName } from '../../utils/icons'
-import { richtextLinkHref, parseRichtextLinkHref } from '../../../../fields/app/utils/richtext-links'
+import { richtextLinkHref, parseRichtextLinkHref } from '@kestrel/core/client'
 
 const props = defineProps<{ editor: Editor | undefined; locale?: string; disabled?: boolean }>()
 
@@ -236,8 +236,6 @@ function applyInternalLink() {
     align-items: center;
   }
 
-  // Active toggle: a calm neutral fill with the accent carried only by the icon — matching the
-  // calmed active-nav treatment, instead of a solid-indigo button per active mark.
   &__group .ui-button.rt-on {
     background: var(--color-active, var(--color-surface-2));
     color: var(--color-text);

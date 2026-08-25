@@ -8,7 +8,7 @@ import { Superscript } from '@tiptap/extension-superscript'
 import { TextAlign } from '@tiptap/extension-text-align'
 import RichtextToolbar from './RichtextToolbar.vue'
 import { RichtextSpanClass, RichtextBlockClass } from '../../utils/richtext-preserve-class'
-import { RICHTEXT_LINK_SCHEME } from '../../../../fields/app/utils/richtext-links'
+import { RICHTEXT_LINK_SCHEME } from '@kestrel/core/client'
 
 const props = withDefaults(
   defineProps<{

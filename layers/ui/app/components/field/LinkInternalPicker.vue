@@ -4,7 +4,7 @@ import UiSelect from '../ui/Select.vue'
 import UiCombobox from '../ui/Combobox.vue'
 import { useRecordOptions } from '../../composables/useRecordOptions'
 import { resolveLocalized } from '../../utils/localized'
-import type { SerializedCollection } from '../../../../core/server/utils/serialize-collection'
+import type { SerializedCollection } from '@kestrel/core'
 
 const { t, lang } = useT()
 
@@ -85,8 +85,8 @@ const { options, selected, loading, onSearch } = useRecordOptions(coll, ids, toR
 </template>
 
 <style lang="scss">
-// The internal arm stacks two block controls (collection select + record combobox) plus an error line;
-// without this they touched. Matches the `--space-1` rhythm the hash/label rows already use.
+// The internal arm stacks two block controls (collection select + record combobox) plus an error line.
+// Matches the `--space-1` rhythm the hash/label rows already use.
 .ui-link-internal {
   display: flex;
   flex-direction: column;

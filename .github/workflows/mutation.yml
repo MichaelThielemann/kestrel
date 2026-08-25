@@ -1,0 +1,28 @@
+name: Mutation testing
+
+on:
+  schedule:
+    # Nightly, not per-PR: the vitest runner forces coverageAnalysis 'perTest', which is slow.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm mutation:all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutation-reports
+          path: reports/mutation

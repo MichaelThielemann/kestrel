@@ -2,9 +2,9 @@
 import { computed } from 'vue'
 import UiField from '../ui/Field.vue'
 import UiNumberInput from '../ui/NumberInput.vue'
-import { fieldConstraints } from '../../../../fields/app/utils/field-meta'
+import { fieldConstraints } from '@kestrel/fields/client'
 import type { FieldComponentProps } from '../../utils/field-component'
-import type { FieldOf } from '../../../../core/server/utils/defineCollection'
+import type { FieldOf } from '@kestrel/core'
 
 const props = defineProps<FieldComponentProps>()
 const model = defineModel<number | null>()

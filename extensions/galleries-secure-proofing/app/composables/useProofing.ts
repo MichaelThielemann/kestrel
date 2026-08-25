@@ -91,7 +91,7 @@ export function useProofing(options: UseProofingOptions) {
       // capped individually — refuse locally rather than spend a request the server would reject anyway.
       if (sealedTooLarge(sealed)) { status.value = 'error'; return }
       // keepalive so a flush triggered by tab-close / pagehide still completes the request.
-      await $fetch('/api/galleries-secure-proofing/submit', { method: 'POST', keepalive: true, body: { gallerySlug, customerId, sealed, writeSecret } })
+      await $fetch('/api/proofingSubmit', { method: 'POST', keepalive: true, body: { gallerySlug, customerId, sealed, writeSecret } })
       status.value = 'saved'
     } catch {
       status.value = 'error'
@@ -109,7 +109,7 @@ export function useProofing(options: UseProofingOptions) {
     let res: { sealed: { iv: string; data: string } | null } | undefined
     try {
       res = await $fetch<{ sealed: { iv: string; data: string } | null }>(
-        '/api/galleries-secure-proofing/mine', { query: { gallerySlug, customerId } },
+        '/api/proofingSubmission', { query: { gallerySlug, customerId } },
       )
     } catch {
       // FETCH failed (429 rate-limit / network) — we do NOT know whether saved marks exist. Stay UNLOADED

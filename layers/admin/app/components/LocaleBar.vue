@@ -41,7 +41,9 @@ const { t } = useT()
       >{{ up(loc) }}<KestrelUiIcon name="pencil" :size="14" /></NuxtLink>
 
       <span v-else-if="existingId(loc) !== null" class="locale-bar__item">
-        <NuxtLink class="locale-bar__btn" :to="`/admin/${collection}/${existingId(loc)}?locale=${loc}`" :aria-label="t('localeBar.editLocale', { loc: up(loc) })">{{ up(loc) }}<KestrelUiIcon name="pencil" :size="14" /></NuxtLink>
+        <!-- No `?locale=` here: the target id already IS a specific locale's row (useEditForm reads the
+             active locale off the loaded record, not the query, once an id is known). -->
+        <NuxtLink class="locale-bar__btn" :to="`/admin/${collection}/${existingId(loc)}`" :aria-label="t('localeBar.editLocale', { loc: up(loc) })">{{ up(loc) }}<KestrelUiIcon name="pencil" :size="14" /></NuxtLink>
         <button type="button" class="locale-bar__btn locale-bar__btn--copy" :aria-label="t('localeBar.copyInto', { loc: up(loc), current: up(current) })" @click="emit('copyFrom', loc)"><KestrelUiIcon name="copy" :size="14" /></button>
       </span>
 

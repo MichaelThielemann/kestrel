@@ -41,7 +41,6 @@ describe('UiTextInput', () => {
 
     await toggle.trigger('click')
     expect(w.get('input').attributes('type')).toBe('text')
-    // the action label reflects the new (revealed) state
     expect(toggle.attributes('aria-label')).not.toBe(labelHidden)
 
     await toggle.trigger('click')

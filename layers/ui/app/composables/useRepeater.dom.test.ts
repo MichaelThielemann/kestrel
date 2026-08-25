@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { nextTick, ref } from 'vue'
 import { useRepeater } from './useRepeater'
-import type { FieldDef } from '../../../core/server/utils/defineCollection'
+import type { FieldDef } from '@kestrel/core'
 
 const subFields: Record<string, FieldDef> = {
   label: { type: 'text' },
@@ -98,7 +98,6 @@ describe('useRepeater', () => {
     const { rows, keys, move } = useRepeater(model, ref({ label: { type: 'text' } as FieldDef }))
     const keyA = keys.value[0]!
     move(0, 2)
-    // A moves to last position
     expect(rows.value[2]!.label).toBe('A')
     expect(keys.value[2]).toBe(keyA)
     expect(model.value![2]!.label).toBe('A')
@@ -165,7 +164,6 @@ describe('useRepeater', () => {
     expect(rows.value[2]!.label).toBe('B')
     expect(rows.value[3]!.label).toBe('C')
     expect(keys.value.length).toBe(4)
-    // the key that was at index 1 (B) is now at index 2
     expect(keys.value[2]).toBe(keyB)
     expect(model.value!.length).toBe(4)
   })

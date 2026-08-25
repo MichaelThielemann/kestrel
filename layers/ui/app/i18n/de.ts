@@ -23,11 +23,9 @@ export const de: Catalog = {
   'a11y.rowActions': 'Aktionen',
   'lang.label': 'Sprache',
 
-  // account menu (rail foot)
   'account.label': 'Konto',
   'account.name': 'Admin',
 
-  // text input (password reveal)
   'input.showPassword': 'Passwort anzeigen',
   'input.hidePassword': 'Passwort verbergen',
 
@@ -53,6 +51,8 @@ export const de: Catalog = {
   'editor.fixBlockContent': 'Einige Block-Inhalte sind ungültig. Prüfe die markierten Block-Felder.',
   'editor.saveConflict': 'Das steht im Konflikt mit einem vorhandenen Datensatz.',
   'editor.saveFailed': 'Speichern fehlgeschlagen.',
+  'editor.quarantined.title': 'Datensatz in Quarantäne',
+  'editor.quarantined.desc': 'Dieser Datensatz entspricht nicht mehr dem Schema seiner Collection und wird schreibgeschützt angezeigt. Er kann erst bearbeitet oder gespeichert werden, wenn die zugrunde liegenden Daten korrigiert sind.',
   'toast.saved': 'Gespeichert',
   'toast.deleted': 'Gelöscht',
   'toast.duplicated': 'Dupliziert',
@@ -104,7 +104,9 @@ export const de: Catalog = {
   'list.result': '{total} Ergebnis',
   'list.results': '{total} Ergebnisse',
   'list.loadError': 'Diese Collection konnte nicht geladen werden.',
-  // Zeilenauswahl + Sammelaktionen
+  'list.quarantined': 'In Quarantäne',
+  'list.quarantinedOne': '{n} Datensatz in Quarantäne',
+  'list.quarantinedCount': '{n} Datensätze in Quarantäne',
   'list.selectAll': 'Alle Zeilen auf dieser Seite auswählen',
   'list.selectRow': '{name} auswählen',
   'list.selected': '{n} ausgewählt',
@@ -120,6 +122,8 @@ export const de: Catalog = {
   'list.deleteRefsUnverified': 'Verweise konnten nicht geprüft werden — einige Datensätze könnten mit einem defekten Verweis zurückbleiben. Mit Vorsicht fortfahren.',
   'list.opFailed': 'Die Aktion konnte nicht abgeschlossen werden.',
   'list.refCheckFailed': 'Verweise konnten nicht geprüft werden.',
+  'list.actionConfirm': '"{name}" für {n} Datensatz/-sätze ausführen?',
+  'list.actionDone': '{name} ausgeführt',
 
   'preview.ariaLabel': 'Live-Vorschau',
   'preview.label': 'Vorschau',
@@ -222,7 +226,6 @@ export const de: Catalog = {
   'blocks.fieldsLabel': 'Block-Felder',
   'blocks.treeLabel': 'Block-Struktur',
 
-  // dead references (derived warnings)
   'deadRefs.listWarning': 'Verweist auf einen gelöschten oder unveröffentlichten Datensatz',
   'deadRefs.blockBadge': 'Defekter Verweis',
   'deadRefs.fieldNote': 'Verweist auf einen gelöschten oder unveröffentlichten Datensatz.',
@@ -247,7 +250,6 @@ export const de: Catalog = {
   'media.title': 'Medien',
   'media.picker.titleSingle': 'Datei auswählen',
   'media.picker.titleMultiple': 'Medien auswählen',
-  // media — right-click context menu
   'media.menu.cut': 'Ausschneiden',
   'media.menu.copy': 'Kopieren',
   'media.menu.paste': 'Einfügen',
@@ -327,7 +329,6 @@ export const de: Catalog = {
   'mediaViewer.aiNote': 'Hinweis zur Kennzeichnung',
   'mediaViewer.aiNoteHint': 'Freitext, z. B. das verwendete Werkzeug. Beim Upload gefundene KI-Signale werden vorausgefüllt — nur Indizien, kein geprüfter Nachweis.',
 
-  // richtext toolbar
   'richtext.bold': 'Fett',
   'richtext.italic': 'Kursiv',
   'richtext.underline': 'Unterstrichen',
@@ -362,7 +363,6 @@ export const de: Catalog = {
   'richtext.linkUrl': 'Link-URL',
   'richtext.apply': 'Übernehmen',
 
-  // media toolbar
   'mediaToolbar.searchPlaceholder': 'Suchen…',
   'mediaToolbar.searchAriaLabel': 'Medien durchsuchen',
   'mediaToolbar.viewGrid': 'Raster',

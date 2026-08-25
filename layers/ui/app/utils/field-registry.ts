@@ -1,5 +1,5 @@
 import { defineAsyncComponent, type Component } from 'vue'
-import type { FieldType } from '../../../core/server/utils/defineCollection'
+import type { FieldType } from '@kestrel/core'
 import FieldText from '../components/field/Text.vue'
 import FieldNumber from '../components/field/Number.vue'
 import FieldBoolean from '../components/field/Boolean.vue'

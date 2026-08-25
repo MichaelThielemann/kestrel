@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import { parse } from '@babel/parser'
-import type { FieldDef } from '../../server/utils/defineCollection'
-import * as factoryModule from '../../../fields/app/utils/field-factories'
-import { KESTREL_FIELD } from '../../../fields/app/utils/field-factories'
+import type { FieldDef } from '@kestrel/core'
+import * as factoryModule from '../../app/utils/field-factories'
+import { KESTREL_FIELD } from '../../app/utils/field-factories'
 
 /** The extracted block definition (shape mirrors `BlockDef`, kept structural so this build-time module
  *  needs no `layers/fields` runtime import). */

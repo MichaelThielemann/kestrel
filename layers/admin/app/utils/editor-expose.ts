@@ -31,4 +31,6 @@ export interface EditorExpose {
   /** Open the record in a new tab: the saved URL, or the unsaved state carried by a preview ticket. */
   openPreview: () => Promise<void>
   previewOpening: boolean
+  /** The loaded row is the quarantine shape — read-only, hosts must hide Save/Publish. */
+  quarantined: boolean
 }

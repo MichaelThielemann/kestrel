@@ -1,0 +1,64 @@
+{
+  "name": "@kestrel/media",
+  "version": "0.1.0",
+  "description": "Kestrel's media domain: uploads, storage drivers, derived variants, folders, and the media/media-settings collections.",
+  "license": "Apache-2.0",
+  "author": "Michael Thielemann <283621694+MichaelThielemann@users.noreply.github.com>",
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
+    "directory": "packages/kestrel-media"
+  },
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "vitest run --typecheck"
+  },
+  "dependencies": {
+    "@kestrel/access": "workspace:*",
+    "@kestrel/contracts": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/fields": "workspace:*",
+    "better-sqlite3": "^12.11.1",
+    "dompurify": "^3.4.13",
+    "drizzle-orm": "^0.45.2",
+    "effect": "~3.22.1",
+    "file-type": "^22.0.1",
+    "sharp": "^0.35.3",
+    "thumbhash": "^0.1.1"
+  },
+  "peerDependencies": {
+    "h3": "^1.15.0 || ^2.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/jsdom": "^28.0.3",
+    "@types/node": "^26.2.0",
+    "h3": "^1.15.11",
+    "jsdom": "^29.1.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

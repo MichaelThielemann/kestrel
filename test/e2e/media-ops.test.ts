@@ -5,7 +5,7 @@ import { rmSync, mkdtempSync } from 'node:fs'
 import { describe, it, beforeAll, afterAll } from 'vitest'
 import { setup, fetch as testFetch, createPage, url } from '@nuxt/test-utils/e2e'
 import sharp from 'sharp'
-import { hashPassword } from '../../layers/auth/server/utils/password'
+import { hashPassword } from '@kestrel/auth'
 import { e2eBrowserOptions } from '../helpers/e2e-browser'
 
 const dbPath = join(tmpdir(), `kestrel-media-ops-e2e-${process.pid}.sqlite`)
@@ -28,7 +28,7 @@ describe('media right-click delete (e2e, browser)', async () => {
 
   let cookie = ''
   beforeAll(async () => {
-    const res = await testFetch('/api/auth/login', {
+    const res = await testFetch('/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ password: PW }),
@@ -51,23 +51,18 @@ describe('media right-click delete (e2e, browser)', async () => {
     await page.context().addCookies([{ name, value, url: url('/') }])
     await page.goto(url('/admin/media'))
 
-    // Wait for the toolbar to appear — library has settled.
     await page.getByRole('button', { name: 'New folder' }).waitFor()
 
-    // Upload a file via the hidden file input so there is something to delete.
     const png = await sharp({
       create: { width: 16, height: 16, channels: 4, background: { r: 200, g: 100, b: 50, alpha: 1 } },
     }).png().toBuffer()
     const fileInput = page.locator('input[type=file]')
     await fileInput.setInputFiles({ name: 'to-delete.png', mimeType: 'image/png', buffer: png })
 
-    // After upload the listing refetches and the tile appears.
     await page.getByText('to-delete.png').waitFor()
 
-    // Locate the file tile by its data-test attribute (grid is the default view).
     const fileTile = page.locator('[data-test^="file-"]', { hasText: 'to-delete.png' })
 
-    // Right-click opens the Reka context menu.
     await fileTile.click({ button: 'right' })
 
     // The context menu renders into a portal; scope to [role="menuitem"] to avoid
@@ -85,7 +80,6 @@ describe('media right-click delete (e2e, browser)', async () => {
     await confirmBtn.waitFor()
     await confirmBtn.click()
 
-    // The dialog closes and the file tile is removed from the DOM.
     await dialog.waitFor({ state: 'detached' })
     await fileTile.waitFor({ state: 'detached' })
   })
@@ -97,23 +91,18 @@ describe('media right-click delete (e2e, browser)', async () => {
     await page.context().addCookies([{ name, value, url: url('/') }])
     await page.goto(url('/admin/media'))
 
-    // Wait for the toolbar to appear — library has settled.
     await page.getByRole('button', { name: 'New folder' }).waitFor()
 
-    // Upload a file via the hidden file input so there is something to rename.
     const png = await sharp({
       create: { width: 16, height: 16, channels: 4, background: { r: 50, g: 100, b: 200, alpha: 1 } },
     }).png().toBuffer()
     const fileInput = page.locator('input[type=file]')
     await fileInput.setInputFiles({ name: 'to-rename.png', mimeType: 'image/png', buffer: png })
 
-    // After upload the listing refetches and the tile appears.
     await page.getByText('to-rename.png').waitFor()
 
-    // Locate the file tile by its data-test attribute (grid is the default view).
     const fileTile = page.locator('[data-test^="file-"]', { hasText: 'to-rename.png' })
 
-    // Right-click opens the Reka context menu.
     await fileTile.click({ button: 'right' })
 
     // The context menu renders into a portal; scope to [role="menuitem"] to avoid
@@ -127,18 +116,15 @@ describe('media right-click delete (e2e, browser)', async () => {
     const dialog = page.locator('[role="dialog"]')
     await dialog.waitFor()
 
-    // Clear the seeded name and type the new filename.
     const nameInput = dialog.locator('input[type=text],input:not([type])')
     await nameInput.waitFor()
     await nameInput.clear()
     await nameInput.fill('renamed.png')
 
-    // Click the dialog's own Rename button (scoped within the dialog).
     const confirmBtn = dialog.getByRole('button', { name: 'Rename', exact: true })
     await confirmBtn.waitFor()
     await confirmBtn.click()
 
-    // The dialog closes and the new filename appears while the old one is gone.
     await dialog.waitFor({ state: 'detached' })
     await page.getByText('renamed.png').waitFor()
     await fileTile.waitFor({ state: 'detached' })
@@ -153,7 +139,6 @@ describe('media right-click delete (e2e, browser)', async () => {
 
     await page.getByRole('button', { name: 'New folder' }).waitFor()
 
-    // Upload the file that will be moved.
     const png = await sharp({
       create: { width: 16, height: 16, channels: 4, background: { r: 255, g: 0, b: 128, alpha: 1 } },
     }).png().toBuffer()
@@ -161,7 +146,6 @@ describe('media right-click delete (e2e, browser)', async () => {
     await fileInput.setInputFiles({ name: 'to-cut.png', mimeType: 'image/png', buffer: png })
     await page.getByText('to-cut.png').waitFor()
 
-    // Create the destination folder via the toolbar button.
     await page.getByRole('button', { name: 'New folder' }).click()
     const folderDialog = page.locator('[role="dialog"]')
     await folderDialog.waitFor()
@@ -174,22 +158,17 @@ describe('media right-click delete (e2e, browser)', async () => {
     await folderDialog.waitFor({ state: 'detached' })
     await page.locator('[data-test^="folder-"]', { hasText: 'cut-dest' }).waitFor()
 
-    // Right-click the file tile → Cut.
     const fileTile = page.locator('[data-test^="file-"]', { hasText: 'to-cut.png' })
     await fileTile.click({ button: 'right' })
     const cutMenuItem = page.locator('[role="menuitem"]', { hasText: 'Cut' })
     await cutMenuItem.waitFor()
     await cutMenuItem.click()
 
-    // Navigate into the destination folder by clicking its tile.
     const folderTile = page.locator('[data-test^="folder-"]', { hasText: 'cut-dest' })
     await folderTile.click()
 
-    // Wait for the library to show the folder's contents (empty initially).
-    // The breadcrumb or heading should reflect we are inside 'cut-dest'.
     await page.waitForFunction(() => window.location.href.includes('cut-dest'))
 
-    // Right-click the blank area of the grid container to trigger Paste.
     const itemsGrid = page.locator('.media-library__items')
     await itemsGrid.waitFor()
     await itemsGrid.click({ button: 'right', position: { x: 10, y: 10 } })
@@ -198,10 +177,8 @@ describe('media right-click delete (e2e, browser)', async () => {
     await pasteMenuItem.waitFor()
     await pasteMenuItem.click()
 
-    // The file should now appear inside the folder.
     await page.locator('[data-test^="file-"]', { hasText: 'to-cut.png' }).waitFor()
 
-    // Navigate back to root and verify the file is gone.
     await page.goto(url('/admin/media'))
     await page.getByRole('button', { name: 'New folder' }).waitFor()
     await page.locator('[data-test^="file-"]', { hasText: 'to-cut.png' }).waitFor({ state: 'detached' })
@@ -215,14 +192,12 @@ describe('media right-click delete (e2e, browser)', async () => {
     await page.goto(url('/admin/media'))
     await page.getByRole('button', { name: 'New folder' }).waitFor()
 
-    // Upload a file at root.
     const png = await sharp({
       create: { width: 16, height: 16, channels: 4, background: { r: 0, g: 200, b: 80, alpha: 1 } },
     }).png().toBuffer()
     await page.locator('input[type=file]').setInputFiles({ name: 'to-copy.png', mimeType: 'image/png', buffer: png })
     await page.getByText('to-copy.png').waitFor()
 
-    // Copy it.
     await page.locator('[data-test^="file-"]', { hasText: 'to-copy.png' }).click({ button: 'right' })
     const copyItem = page.locator('[role="menuitem"]', { hasText: 'Copy' })
     await copyItem.waitFor()
@@ -234,14 +209,12 @@ describe('media right-click delete (e2e, browser)', async () => {
     await pasteHere.waitFor()
     await pasteHere.click()
 
-    // The batch conflict dialog appears; Replace (→ overwrite) resolves it.
     const conflictDialog = page.locator('[role="dialog"]')
     await conflictDialog.waitFor()
     await conflictDialog.getByText('already exists').waitFor()
     await conflictDialog.getByRole('button', { name: /^replace$/i }).click()
     await conflictDialog.waitFor({ state: 'detached' })
 
-    // Still exactly one file with that name at root.
     await page.locator('[data-test^="file-"]', { hasText: 'to-copy.png' }).waitFor()
   })
 
@@ -254,7 +227,6 @@ describe('media right-click delete (e2e, browser)', async () => {
 
     await page.getByRole('button', { name: 'New folder' }).waitFor()
 
-    // Create the destination folder via the New folder toolbar button.
     await page.getByRole('button', { name: 'New folder' }).click()
     const folderDialog = page.locator('[role="dialog"]')
     await folderDialog.waitFor()
@@ -267,7 +239,6 @@ describe('media right-click delete (e2e, browser)', async () => {
     await folderDialog.waitFor({ state: 'detached' })
     await page.locator('[data-test^="folder-"]', { hasText: 'drag-dest' }).waitFor()
 
-    // Upload the file that will be dragged.
     const png = await sharp({
       create: { width: 16, height: 16, channels: 4, background: { r: 100, g: 150, b: 200, alpha: 1 } },
     }).png().toBuffer()
@@ -278,7 +249,6 @@ describe('media right-click delete (e2e, browser)', async () => {
     const fileTile = page.locator('[data-test^="file-"]', { hasText: 'to-drag.png' })
     const folderTile = page.locator('[data-test^="folder-"]', { hasText: 'drag-dest' })
 
-    // Drag the file tile onto the folder tile.
     // NOTE: Playwright dragTo fires HTML5 dragstart/dragover/drop via synthetic mouse events
     // and sets the dataTransfer MIME marker ('application/x-kestrel-media') only if the
     // dragstart handler calls e.dataTransfer.setData before the event resolves. Native HTML5
@@ -287,14 +257,11 @@ describe('media right-click delete (e2e, browser)', async () => {
     // DataTransfer and then drop) may be needed as a fallback.
     await fileTile.dragTo(folderTile)
 
-    // Navigate into drag-dest by clicking its tile and wait for the URL to update.
     await folderTile.click()
     await page.waitForFunction(() => window.location.href.includes('drag-dest'))
 
-    // The moved file must be present inside the folder.
     await page.locator('[data-test^="file-"]', { hasText: 'to-drag.png' }).waitFor()
 
-    // Navigate back to root and verify the file is gone from there.
     await page.goto(url('/admin/media'))
     await page.getByRole('button', { name: 'New folder' }).waitFor()
     await page.locator('[data-test^="file-"]', { hasText: 'to-drag.png' }).waitFor({ state: 'detached' })

@@ -1,29 +1,31 @@
+import { Forbidden, Unauthorized } from '@kestrel/contracts'
+import { toHttpError } from '@kestrel/core'
+import { refreshAuthSession } from '@kestrel/auth'
+import { claimedByPipelineRoute, resolveEventPrincipal } from '@kestrel/access'
+
 export default defineEventHandler((event) => {
   if (!event.path.startsWith('/api/')) return // default-deny applies to the API only
-  const settings = sessionSettings()
-  const decision = evaluateAccess({
-    method: getMethod(event),
-    path: event.path,
-    csrf: {
-      secFetchSite: getRequestHeader(event, 'sec-fetch-site'),
-      origin: getRequestHeader(event, 'origin'),
-      referer: getRequestHeader(event, 'referer'),
-      host: getRequestHeader(event, 'host'),
-    },
-    cookie: getCookie(event, settings.cookieName),
-    secret: settings.secret,
-    nowMs: Date.now(),
-    // The renderer principal is granted to build-time prerender AND to the runtime publisher's render
-    // (an in-process ALS context, not a forgeable header) — both render the public site via /api/route.
-    isPrerender: import.meta.prerender === true || isRendererContext(),
-    // Registry-contributed grants (opt-in layers, e.g. a public proofing back-channel) consulted on top of
-    // the hardcoded policy. Empty by default → guard behaviour unchanged.
-  }, publicReadableResources(), registeredGrants())
-  if (!decision.allow) {
-    throw createError({ statusCode: decision.status, statusMessage: decision.message })
+
+  // Authorization itself belongs to the pipeline the URL names — its `access`/`csrf`/`ipAllowlist`
+  // declarations, evaluated by the engine before step 1. Only the principal is resolved here, because the
+  // gates need it and because the session refresh below is a property of the request, not of the route.
+  event.context.principal = resolveEventPrincipal(event)
+
+  // Default-deny for everything no pipeline claims — an unknown name, a wrong verb, a stray route a
+  // consumer mounted under /api without declaring who may run it. The admin falls through instead, so the
+  // router can still answer accurately (404 for an unknown pipeline, 405 for the wrong verb) without that
+  // answer confirming to an anonymous prober which pipelines exist. For the same reason an anonymous
+  // caller gets the access gate's 401 here, not a 403 — a 401/403 split would itself be the oracle.
+  if (!claimedByPipelineRoute(getMethod(event), event.path) && event.context.principal.role !== 'admin') {
+    // toHttpError is the same single translation every pipeline-thrown KestrelError goes through
+    // (core/server/api/[...path].ts's catch) — this middleware runs before any pipeline, so it calls the
+    // map directly instead of growing a second one.
+    if (event.context.principal.role === 'anonymous') {
+      throw toHttpError(new Unauthorized({ reason: 'Authentication required' }))
+    }
+    throw toHttpError(new Forbidden({ reason: 'Forbidden' }))
   }
-  event.context.principal = decision.principal
-  event.context.readScope = decision.readScope
+
   // Sliding-expiry: any authenticated API activity refreshes the session so it stays alive while in use and
   // auto-expires after `maxAge` of inactivity (idle logout). No-op for anonymous/public requests.
   refreshAuthSession(event)

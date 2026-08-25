@@ -93,9 +93,9 @@ describe('FieldMedia', () => {
     // 42 (report.pdf) and 7 (a pic) — 42 has no alt, so its buttons name it by filename, not "media".
     const w = await mountSuspended(FieldMedia, { props: { field: { type: 'media', options: { multiple: true } }, name: 'Gallery', modelValue: [42, 7] } })
     await flushPromises()
-    expect(w.find('[aria-label="Remove report.pdf"]').exists()).toBe(true) // filename fallback, unique
-    expect(w.find('[aria-label="Remove a pic"]').exists()).toBe(true)     // alt when present
-    expect(w.find('[aria-label="Remove media"]').exists()).toBe(false)    // never the generic shared noun
+    expect(w.find('[aria-label="Remove report.pdf"]').exists()).toBe(true)
+    expect(w.find('[aria-label="Remove a pic"]').exists()).toBe(true)
+    expect(w.find('[aria-label="Remove media"]').exists()).toBe(false)
   })
   it('multiple: maps a resolved index back to the model index when a dangling id is present', async () => {
     // 999 has no record → it drops out of `resolved`, so resolved index 1 (id 9) is model index 2.

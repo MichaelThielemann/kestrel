@@ -1,14 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest'
 import { createEvent, defineEventHandler, createError, getRequestHeader, type H3Event } from 'h3'
-import { clientIp } from '../../../auth/server/utils/client-ip'
-import { allowlistMode, parseAllowlist, ipAllowed, ipv4ToInt } from '../utils/ip-allowlist'
-import { isRendererContext, isStageGatePassedContext, markStageGatePassed } from '../utils/render-context'
+import { resetAllowlistConfig } from '@kestrel/access'
 
-// The middleware relies on Nitro auto-imports; bind the real implementations before importing it.
-Object.assign(globalThis, {
-  defineEventHandler, createError, getRequestHeader, clientIp,
-  allowlistMode, parseAllowlist, ipAllowed, ipv4ToInt, isRendererContext, isStageGatePassedContext, markStageGatePassed,
-})
+// defineEventHandler/createError/getRequestHeader remain real Nitro auto-imports; everything else the
+// middleware needs (clientIp, the allowlist/render-context utilities) is an explicit import in
+// 00.ip-allowlist.ts itself, so no global stub is needed for those.
+Object.assign(globalThis, { defineEventHandler, createError, getRequestHeader })
 
 /**
  * `remoteAddress: ''` mirrors the socket Nitro's in-process `localFetch` hands the middleware stack
@@ -23,19 +20,14 @@ function eventFor(remoteAddress: string | undefined, headers: Record<string, str
  * A fresh gate AND a fresh stage-gate storage, so a mark set by an earlier scenario cannot be visible to
  * this one. `enterWith` mutates the current async frame; under Node 22 inside vitest's runner that
  * mutation reaches the root and no `setImmediate` or unrelated `run()` can shed it, so every peerless
- * request after the first admitted one was wrongly exempted. Re-binding the auto-imports to the
- * re-imported module gives each scenario its own `AsyncLocalStorage` instance, which nothing can outlive.
- * A real listener never had this problem — replaying the same sequence outside vitest blocks correctly on
- * both Node 22 and 24.
+ * request after the first admitted one was wrongly exempted. `vi.resetModules()` forces the middleware's
+ * own `@kestrel/access` import to re-evaluate, which gives each scenario its own `AsyncLocalStorage`
+ * instance, which nothing can outlive. A real listener never had this problem — replaying the same
+ * sequence outside vitest blocks correctly on both Node 22 and 24.
  */
 async function loadGate(): Promise<(event: H3Event) => unknown> {
   vi.resetModules()
-  const ctx = await import('../utils/render-context')
-  Object.assign(globalThis, {
-    isRendererContext: ctx.isRendererContext,
-    isStageGatePassedContext: ctx.isStageGatePassedContext,
-    markStageGatePassed: ctx.markStageGatePassed,
-  })
+  resetAllowlistConfig() // the parsed allow-list is a module singleton; every scenario sets its own env
   return (await import('./00.ip-allowlist')).default
 }
 

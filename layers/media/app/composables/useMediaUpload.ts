@@ -35,7 +35,7 @@ export function useMediaUpload(cb: UploadCallbacks = {}) {
     fd.append('filename', opts.filename ?? item.filename)
     if (opts.overwrite) fd.append('overwrite', 'true')
     try {
-      await $fetch('/api/media', { method: 'POST', body: fd })
+      await $fetch('/api/media/upload', { method: 'POST', body: fd })
       item.status = 'done'
     } catch (e) {
       type ConflictData = { suggestion?: string; existingId?: number }

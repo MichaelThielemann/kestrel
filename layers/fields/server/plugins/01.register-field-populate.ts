@@ -1,5 +1,5 @@
-import { registerPopulator } from '../../../core/server/utils/populate'
-import { buildFieldTreePopulator } from '../utils/field-populate'
+import { registerPopulator } from '@kestrel/core'
+import { buildFieldTreePopulator } from '@kestrel/fields'
 
 // The single global row populator: walks a record's fields + block tree and dispatches each field to its
 // per-type populator (media / link / richtext / relation), each registered by its owning layer. It recurses

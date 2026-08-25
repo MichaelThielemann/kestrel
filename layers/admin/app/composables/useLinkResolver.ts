@@ -21,7 +21,7 @@ export function useLinkResolver() {
     for (const k of keys) pending.add(k)
     try {
       const { data } = await $fetch<{ data: { collection: string; id: number; href: string }[] }>(
-        '/api/links/resolve', { query: { refs: keys.join(',') } },
+        '/api/resolveLinks', { query: { refs: keys.join(',') } },
       )
       const got = new Map(data.map((d) => [keyFor(d.collection, d.id), d.href]))
       for (const k of keys) cache.set(k, got.get(k) ?? '') // cache misses too, as '' → no re-fetch

@@ -1,4 +1,4 @@
-import type { Localized } from '../../../core/server/utils/defineCollection'
+import type { Localized } from '@kestrel/core'
 
 /**
  * Resolve a (possibly localized) label for the active admin language. A plain string is returned as-is

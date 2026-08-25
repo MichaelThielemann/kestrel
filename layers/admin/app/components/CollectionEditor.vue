@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { localePath } from '../../../core/app/utils/locale-path'
+import { localePath } from '@kestrel/core/client'
 import { PREVIEW_TOKEN_QUERY, PREVIEW_FALLBACK_PATH } from '../../../public/app/utils/preview-protocol'
 import { resolveCollectionEditor } from '../utils/editor-registry'
 import { editorFormContextKey } from '../utils/editor-form-context'
@@ -23,7 +23,7 @@ const f = useEditForm({ collection: props.collection, id: props.id, locale: prop
 // below, where it originally lived) so `defineExpose` can also run before that same await.
 const {
   formError, saving, submit, dirty, editorType, pageLike, hasStatus,
-  savedStatus, undo, redo, canUndo, canRedo,
+  savedStatus, undo, redo, canUndo, canRedo, quarantined,
 } = f
 
 // Editor → field-widget context. MUST run BEFORE the top-level `await` below — after an await the setup
@@ -91,21 +91,20 @@ const liveStatus = usePublishStatus({
 // Carries "poll the live status on mount" across the create→navigate remount (see usePendingPublishPoll).
 const pendingPoll = usePendingPublishPoll()
 
-// ---- publish + external preview -------------------------------------------------------------------
 // Saving persists to the DB and leaves the live site alone; publishing writes the static file(s). The two
 // are separate buttons because they are separate decisions (ADR-0008) — you can save a page a dozen times
 // while the published version stays exactly as it was.
 const publishing = ref(false)
 const previewOpening = ref(false)
-// `output.publishOnSave` turns the split off again (a save republishes, as before 2.0) — then a Publish
-// button would have nothing to do, so the hosts hide it. Reported by /api/publish-status; unknown (a
+// `output.publishOnSave` turns the split off again (a save republishes) — then a Publish
+// button would have nothing to do, so the hosts hide it. Reported by /api/publishStatus; unknown (a
 // never-saved record, which does not fetch it) reads as the default, i.e. the button stays.
 const publishOnSave = computed(() => liveStatus.data.value.publishOnSave === true)
 const canPublish = computed(() => !publishOnSave.value)
 
 /** Save (a publish publishes what you SEE), promote a draft, then write the output. */
 async function publish() {
-  if (publishing.value || saving.value) return
+  if (publishing.value || saving.value || quarantined.value) return
   publishing.value = true
   try {
     // Pressing Publish IS the publish intent, so a draft is promoted here rather than sending the user to
@@ -159,7 +158,7 @@ async function openPreview() {
   const tab = window.open('', '_blank')
   previewOpening.value = true
   try {
-    const ticket = await $fetch<{ token: string }>('/api/preview', {
+    const ticket = await $fetch<{ token: string }>('/api/createPreview', {
       method: 'POST',
       body: {
         collection: props.collection,
@@ -193,6 +192,7 @@ async function openPreview() {
 defineExpose({
   dirty, saving, undo, redo, canUndo, canRedo, hasStatus, status, savedStatus, previewUrl, pageLike,
   live: liveStatus.data, recordTitle: heading, publish, publishing, canPublish, openPreview, previewOpening,
+  quarantined,
 })
 
 await f.ready
@@ -202,6 +202,7 @@ await f.ready
 const bodyComponent = computed(() => resolveCollectionEditor(editorType.value))
 
 async function onSave() {
+  if (quarantined.value) return
   // Read BEFORE the save: a successful submit rebaselines, after which the saved status is the new one.
   const wasPublished = savedStatus.value === 'published'
   const r = await submit()
@@ -232,7 +233,7 @@ async function onCopyFrom(loc: string) {
   const tid = f.translations.value[loc]
   if (typeof tid !== 'number') return
   try {
-    const row = await $fetch<Record<string, unknown>>(`/api/${props.collection}/${tid}`)
+    const row = await $fetch<Record<string, unknown>>(`/api/${props.collection}/readOne/${tid}`)
     f.applyFrom(row)
   } catch {
     f.formError.value = t('localeBar.copyFailed', { locale: loc.toUpperCase() })
@@ -268,16 +269,27 @@ onUnmounted(() => {
        the submit event and block onSave with a browser bubble — wrongly so on proxy inputs whose text
        doesn't mirror the model (combobox search boxes stay empty although records are selected). -->
   <form :id="formId" class="editor" novalidate @submit.prevent="onSave">
-    <p v-if="formError" class="editor__error" role="alert">{{ formError }}</p>
+    <!-- Quarantined: the row failed its select schema, so its real fields are unknown — no body,
+         no actions, nothing to submit. KestrelUiAlert renders role="alert" for variant="error". -->
+    <KestrelUiAlert v-if="quarantined" variant="error" class="editor__quarantine">
+      <template #title>
+        <KestrelUiIcon name="triangle-alert" :size="16" />
+        {{ t('editor.quarantined.title') }}
+      </template>
+      {{ t('editor.quarantined.desc') }}
+    </KestrelUiAlert>
+    <template v-else>
+      <p v-if="formError" class="editor__error" role="alert">{{ formError }}</p>
 
-    <!-- The editor body is chosen by the collection's `editor` type (fields · blocks · an extension). -->
-    <component :is="bodyComponent" v-if="bodyComponent" />
-    <KestrelEditorUnsupported v-else :editor="editorType" />
+      <!-- The editor body is chosen by the collection's `editor` type (fields · blocks · an extension). -->
+      <component :is="bodyComponent" v-if="bodyComponent" />
+      <KestrelEditorUnsupported v-else :editor="editorType" />
 
-    <div v-if="actions" class="editor__actions">
-      <KestrelUiButton type="submit" variant="primary" icon="check" :loading="saving">{{ t('common.save') }}</KestrelUiButton>
-      <KestrelUiButton type="button" variant="secondary" icon="x" :disabled="saving" @click="emit('cancel')">{{ t('common.cancel') }}</KestrelUiButton>
-    </div>
+      <div v-if="actions" class="editor__actions">
+        <KestrelUiButton type="submit" variant="primary" icon="check" :loading="saving">{{ t('common.save') }}</KestrelUiButton>
+        <KestrelUiButton type="button" variant="secondary" icon="x" :disabled="saving" @click="emit('cancel')">{{ t('common.cancel') }}</KestrelUiButton>
+      </div>
+    </template>
   </form>
 </template>
 
@@ -296,6 +308,13 @@ onUnmounted(() => {
     border-radius: var(--radius-sm);
     color: var(--color-danger);
     font-size: var(--text-sm);
+  }
+  &__quarantine {
+    .ui-alert__title {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
   }
   &__actions {
     display: flex;

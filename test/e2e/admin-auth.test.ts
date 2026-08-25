@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { rmSync } from 'node:fs'
 import { describe, it, expect, afterAll } from 'vitest'
 import { setup, createPage, fetch as testFetch } from '@nuxt/test-utils/e2e'
-import { hashPassword } from '../../layers/auth/server/utils/password'
+import { hashPassword } from '@kestrel/auth'
 import { e2eBrowserOptions } from '../helpers/e2e-browser'
 
 const dbPath = join(tmpdir(), `kestrel-admin-e2e-${process.pid}.sqlite`)
@@ -33,7 +33,7 @@ describe('admin auth flow (e2e, browser)', async () => {
   })
 
   async function login(): Promise<string> {
-    const res = await testFetch('/api/auth/login', {
+    const res = await testFetch('/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ password: PW }),
@@ -45,7 +45,7 @@ describe('admin auth flow (e2e, browser)', async () => {
   }
 
   async function sessionState(cookie: string): Promise<boolean> {
-    const res = await testFetch('/api/auth/session', { headers: { cookie } })
+    const res = await testFetch('/api/session', { headers: { cookie } })
     return ((await res.json()) as { authenticated?: boolean }).authenticated === true
   }
 
@@ -87,7 +87,7 @@ describe('admin auth flow (e2e, browser)', async () => {
 
     // logging out with the FIRST session must revoke the SECOND too — the epoch folds into the
     // signing key, so every token issued before the bump fails verification, not just this one.
-    const out = await testFetch('/api/auth/logout', { method: 'POST', headers: { cookie: first } })
+    const out = await testFetch('/api/logout', { method: 'POST', headers: { cookie: first } })
     expect(out.status).toBeLessThan(400)
     expect(await sessionState(first)).toBe(false)
     expect(await sessionState(second)).toBe(false)

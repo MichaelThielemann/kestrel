@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { SeoMeta } from '../../../core/server/utils/seo'
-import type { FieldDef } from '../../../core/server/utils/defineCollection'
-import { localePath } from '../../../core/app/utils/locale-path'
-
+import { localePath } from '@kestrel/core/client'
+import type { FieldDef, SeoMeta } from '@kestrel/core'
 // The page-level SEO section: edit the meta title/description/noindex (the `seo` system column) with a
 // live Google-result preview. Emits the whole merged SeoMeta so the parent routes it through setField.
 const props = defineProps<{

@@ -5,8 +5,8 @@ import { resolve } from 'node:path'
 // Vitest runs from the package root.
 const root = process.cwd()
 const read = (p: string): string => readFileSync(resolve(root, p), 'utf8')
-const configMd = read('docs/configuration.md')
-const architectureMd = read('docs/architecture.md')
+const configMd = read('docs/guide/configuration.md')
+const architectureMd = read('docs/internals/architecture.md')
 const readme = read('README.md')
 const envExample = read('.env.example')
 

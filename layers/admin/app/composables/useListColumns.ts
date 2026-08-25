@@ -1,5 +1,5 @@
 import type { Ref } from 'vue'
-import type { SerializedCollection } from '../../../core/server/utils/serialize-collection'
+import type { SerializedCollection } from '@kestrel/core'
 import { availableColumns, defaultVisibleKeys, resolveVisibleColumns, type ListColumn } from '../utils/list-columns'
 
 /**

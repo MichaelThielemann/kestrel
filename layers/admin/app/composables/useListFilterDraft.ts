@@ -3,10 +3,11 @@
 // `filter` (from the URL) is the committed state that drives the query; `draft` is what the panel shows
 // while the user is still typing. A value change debounces, an operator change commits at once.
 import { computed, onBeforeUnmount, reactive, watch, type ComputedRef } from 'vue'
-import { DEFAULT_OP, OPS_BY_KIND, type FilterKind, type FilterOp } from '../../../core/app/utils/filter-ops'
+import { DEFAULT_OP, OPS_BY_KIND } from '@kestrel/core/client'
+import type { FilterKind, FilterOp } from '@kestrel/core/client'
+import type { Localized } from '@kestrel/core'
 import { resolveLocalized } from '../../../ui/app/utils/localized'
 import { columnLabel } from '../utils/list-cell'
-import type { Localized } from '../../../core/server/utils/defineCollection'
 import type { ListColumn } from '../utils/list-columns'
 import type { FilterCell } from '../utils/list-query'
 

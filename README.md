@@ -25,14 +25,9 @@ static host. It is deliberately **not**:
   output); everything else stays behind the admin guard. No per-request rate limiting / live API.
 - **No runtime redirect engine** — redirects are *authored* in the CMS and published as a `redirects.json`
   artifact, but Kestrel never answers a 30x itself; an edge (NGINX / njs / CloudFront) has to read it.
-- **No per-file access control on uploads.** The admin guard protects the media *library* — listing,
-  editing, deleting — but not the bytes. With `media.driver: 'local'` the files are served from the app
-  origin by Nitro's static handler, which runs ahead of every middleware, so anyone who knows a URL can
-  fetch it; the optional IP allow-list does not cover them either (see
-  [configuration.md](./docs/configuration.md#ip-allow-list--optional)). That is the intended model — the
-  editing origin is meant to be non-public, and published media is public by definition. If you deploy
-  Kestrel as a general-purpose CMS whose uploads must stay private, restrict them at the reverse proxy or
-  serve media from a private S3 bucket; the app will not do it for you.
+- **No per-file access control on uploads.** The admin guard protects the media *library*, not the
+  bytes; the editing origin is meant to be non-public and published media is public by definition. See
+  [media.md](./docs/guide/media.md).
 
 ## Features
 
@@ -42,9 +37,10 @@ static host. It is deliberately **not**:
 - **Collection-driven** — declare collections + fields in TypeScript; Kestrel derives the SQLite tables, a
   typed CRUD REST API, and the full admin UI. The schema **migrates itself** (additive in dev; explicit
   `db:migrate` in prod).
-- **Field types** — text, textarea, rich-text, number, boolean, choice (select / buttons / checkboxes),
-  date / time, media, relation (single / many), link (internal / external / email / tel), repeater
-  (nestable), JSON — plus per-field `condition` visibility rules.
+- **Field types** — twelve built in: text (single- or multi-line), slug, richtext, number, boolean,
+  datetime (date / time / range), choice (select / buttons / checkboxes), media, relation (single /
+  many), link (internal / external / email / tel), repeater (nestable), JSON — plus per-field `condition`
+  visibility rules. Register your own with `defineFieldType`.
 - **Page-like collections** — give a collection a `path`, SEO meta, and block or flat content; published
   records render to static HTML and join the sitemap. **Singletons** for settings / navigation.
 - **Block page-builder** — a 3-pane editor (tree · live preview · fields) with nestable block slots; each
@@ -119,48 +115,34 @@ content at `/admin`. You bring your own **public layout** and **block SFCs**
 > the file `nuxi init` writes renders `<NuxtWelcome />` instead of your routes — the admin then appears to
 > be missing rather than blank. Kestrel reports this at build time; `kestrel doctor` catches it earlier.
 
-Full guide: **[consuming-kestrel.md](docs/consuming-kestrel.md)**.
+Full walkthrough: **[getting-started.md](docs/guide/getting-started.md)**.
 
 ## Documentation
 
-Start with the **[architecture guide](docs/architecture.md)** — a per-layer map (what each layer owns,
-where to start reading, the cross-layer seams, the gotchas). Then the per-topic docs:
+Two doors, one per audience:
 
-| Doc | Covers |
-|-----|--------|
-| [architecture.md](docs/architecture.md) | **Start here** — the layer model, boot order, cross-cutting seams, per-layer guide |
-| [field-types.md](docs/field-types.md) | Every built-in field type with its options, the column it becomes, what the server enforces vs. what only configures the widget |
-| [consuming-kestrel.md](docs/consuming-kestrel.md) | Using Kestrel in your own app: defining collections/fields/blocks, auto-discovery, the schema lifecycle |
-| [configuration.md](docs/configuration.md) | The single config source (`kestrel.config.ts`), every `KESTREL_*` env var, the auth/session env split |
-| [block-editing.md](docs/block-editing.md) | The block content model + the 3-pane block editor (tree · preview · fields) |
-| [media-uploads.md](docs/media-uploads.md) | Ingest security, storage drivers (local/S3), responsive-image derivation, EU AI Act disclosure |
-| [multilingual.md](docs/multilingual.md) | Content locales, the editor locale flow, locale-prefixed routing |
-| [static-output.md](docs/static-output.md) | `nuxt generate` + the runtime incremental publisher, the live editor preview, `sitemap.xml` / `robots.txt` / `llms.txt` / `llms-full.txt`, the JSON-LD structured data, CMS-managed redirects, the optional S3 deploy |
-| [reference-integrity.md](docs/reference-integrity.md) | How writes invalidate the static site precisely, dead-reference warnings (a dead link renders `#`, and the editor is warned), and required/unique page slugs |
-| [architecture-decisions.md](docs/architecture-decisions.md) | ADRs (the collection-derived schema engine, reference integrity, the auth/password choice) |
+- **[Guide](docs/guide/README.md)** — building a site with the package: collections, fields, blocks,
+  media, publishing, deployment, configuration, extension points.
+- **[Internals](docs/internals/README.md)** — developing Kestrel itself: architecture, layers and
+  packages, the pipeline engine, test rails, releasing, the ADR log.
+
+Most-asked pages: [getting started](docs/guide/getting-started.md) ·
+[field types](docs/guide/field-types.md) · [blocks](docs/guide/blocks.md) ·
+[configuration](docs/guide/configuration.md) · [deploying](docs/guide/deploying.md) ·
+[troubleshooting](docs/guide/troubleshooting.md).
 
 ## Layout
 
-The CMS is split into Nuxt layers under `layers/`:
+The domain/server code lives in ten `@kestrel/*` packages under `packages/` (`contracts`, `core`,
+`fields`, `auth`, `access`, `collections`, `media`, `publishing`, `delivery-live`, `delivery-static`).
+The nine Nuxt layers under `layers/` are thin wiring shells around those packages, except where a surface
+depends on Nuxt's own component resolution and auto-imports: the `ui` and `admin` layers (design system
+and editor SPA) and the `app/` halves of `media` and `public` stay real code in layers. Layers import
+packages by name; packages never import layers.
 
-- **`core`** — the collection/field model, the generic CRUD engine + REST API, def→JSON serialization,
-  the runtime schema-migration engine, config resolution, and the populate registry.
-- **`fields`** — turns a definition into Drizzle tables + Zod schemas (the field-type registry).
-- **`ui`** — the admin design system: schema-driven field widgets, generic primitives, tokens, i18n.
-- **`auth`** — single-user authentication (session cookie, scrypt password, login, CSRF).
-- **`access`** — authorization: a default-deny guard over the entire `/api/` surface + policy/grant registry.
-- **`collections`** — the toggleable built-in `pages` collection + the plugin that registers every
-  discovered collection/block. (Demo content — `posts`/`settings`, the `hero`/`prose` blocks, and a layout —
-  lives in the repo root, dev-only, and is **not** shipped in the package.)
-- **`media`** — uploads, pluggable storage, image derivation, the media library + asset viewer.
-- **`admin`** — the editor SPA: collection list, record editor, the 3-pane block editor.
-- **`public`** — the SSG render path: the catch-all page, `KestrelBlockRenderer`, the JSON-LD head, the literal-key
-  artifacts (sitemap / robots / llms.txt / llms-full.txt / redirects.json), deploy.
-
-`playground/` is a small consuming example. `templates/starter/` is what the scaffolder writes out;
-`scripts/kestrel.mjs` is the engine's CLI and `packages/create-kestrel/` the standalone
-`pnpm create kestrel` front end, which copies the same templates in at pack time rather than keeping
-its own.
+`playground/` is a small consuming example, `templates/starter/` is what the scaffolder writes,
+`scripts/kestrel.mjs` is the CLI, and `packages/create-kestrel/` the `pnpm create kestrel` front end.
+The full map: [layers-and-packages.md](docs/internals/layers-and-packages.md).
 
 ## Development
 
@@ -185,68 +167,9 @@ node scripts/kestrel.mjs init <dir>   # the consumer scaffolder, from a checkout
 node scripts/kestrel.mjs doctor <dir> # diagnose a consumer project
 ```
 
-In dev, the schema auto-syncs from the collection definitions (additive changes only); production applies
-schema changes explicitly via the `db:migrate` task. See
-[architecture-decisions.md](docs/architecture-decisions.md) for the rationale.
-
-### Publishing the static site
-
-Two ways to produce the static output:
-
-- **One-shot:** `pnpm generate` → `.output/public` (the classic full rebuild).
-- **Runtime publisher (default):** a **production** run (`pnpm build && pnpm preview`, or
-  `node .output/server/index.mjs`) publishes on boot and incrementally re-publishes the affected pages when
-  you press **Publish** in the editor, into `output.dir` (default `.data/published`). Saving is a DB write
-  and leaves the live page alone (unpublishing and deleting still take a page down at once) — see
-  [ADR-0008](docs/architecture-decisions.md), or set `output.publishOnSave: true` for the pre-2.0 behaviour
-  where every save republished. Serve that dir with any static server, e.g. `npx serve .data/published`.
-
-The runtime publisher is **intentionally disabled in `pnpm dev`** (a dev render would write un-hashed Vite
-HTML), so the static files only appear on a production run. In dev you instead get the **live preview**:
-public pages render straight from the running server, and an authenticated admin can open an unpublished
-page at its real URL (the "open in new tab" button in the editor) — with unsaved changes that button
-carries them along in a preview ticket rather than saving them. See
-[static-output.md](docs/static-output.md) for the full picture.
-
-### Simulate a production deploy locally
-
-A real deployment is **two processes**: the private CMS server that *renders* the static files, and a
-public static host that *serves* them. Rehearse that split on one machine:
-
-```bash
-# 1. Auth secrets live in .env (pnpm preview loads it). At minimum:
-#      KESTREL_SESSION_SECRET=<≥32 bytes, e.g. `openssl rand -hex 32`>
-#      KESTREL_ADMIN_PASSWORD_HASH=<from `pnpm hash-password <your-password>`>
-#    Leave KESTREL_SECURE_COOKIES at its default — see the note below.
-
-pnpm build
-pnpm preview                 # built Nitro server, NODE_ENV=production → admin at http://localhost:3000/admin
-                             #   boot-publish writes .data/published; editing in /admin re-publishes affected pages
-
-# in a SECOND terminal — serve the generated site like a CDN would:
-npx serve .data/published    # the public static site, exactly as it ships
-```
-
-`pnpm preview` runs the build under `NODE_ENV=production` and **loads `.env`** (running
-`node .output/server/index.mjs` directly does **not** — export the vars yourself if you go that route).
-Note the split: the **auth** vars below are read per request, so exporting them works either way, but the
-non-auth `KESTREL_*` settings are baked in during `pnpm build` — in front of an already-built server they
-are ignored, and you override them with Nuxt's runtime names instead (`NUXT_KESTREL_DB_PATH`,
-`NUXT_KESTREL_SITE_URL`, …; see [configuration.md](docs/configuration.md)).
-Production mode makes the auth guards strict, so for a working local login:
-
-- `KESTREL_SESSION_SECRET` is **required and ≥32 bytes** (dev uses a random per-process secret); the
-  check runs per-request, not at boot, so a deploy that forgets it still starts and binds the port —
-  every `/api/*` request then answers **500** until the secret is set.
-- `KESTREL_ADMIN_PASSWORD_HASH` must be set, or `POST /api/auth/login` answers **503** (“admin login is
-  not configured”) rather than a wrong-password 401.
-- **Keep `KESTREL_SECURE_COOKIES` at its default (`true`).** `=false` is *refused* in production
-  (`KESTREL_SECURE_COOKIES=false is not allowed in production`); you don't need it — the session cookie is
-  `Secure`/`__Host-`, and browsers accept those over plain `http://localhost`, so login works without HTTPS.
-
-Watch the CMS terminal: boot prints `[kestrel] boot publish: N route(s) written, …`, and each save logs
-the routes it re-rendered. Env reference → [configuration.md](docs/configuration.md); publishing internals
-→ [static-output.md](docs/static-output.md).
+Conventions, test rails and the release flow: [internals/testing.md](docs/internals/testing.md) and
+[internals/releasing.md](docs/internals/releasing.md). Running a built site — production env, the static
+publisher, rehearsing a deploy locally: [deploying.md](docs/guide/deploying.md).
 
 ## Configuration
 
@@ -254,7 +177,7 @@ Non-auth settings live in `kestrel.config.ts` (`satisfies KestrelConfig`); each 
 `KESTREL_* env → config → default`, resolved at build/dev start and frozen into `runtimeConfig` (a prebuilt
 server is retuned with the `NUXT_*` runtimeConfig names, not `KESTREL_*`). Auth/session secrets are
 **env-only** and read per request (`KESTREL_SESSION_SECRET`, `KESTREL_ADMIN_PASSWORD_HASH`, …). Full reference:
-[configuration.md](docs/configuration.md).
+[configuration.md](docs/guide/configuration.md).
 
 ## Security
 

@@ -5,7 +5,7 @@ import { rmSync, mkdtempSync, existsSync } from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch } from '@nuxt/test-utils/e2e'
 import sharp from 'sharp'
-import { hashPassword } from '../../layers/auth/server/utils/password'
+import { hashPassword } from '@kestrel/auth'
 
 const dbPath = join(tmpdir(), `kestrel-media-e2e-${process.pid}.sqlite`)
 const uploads = mkdtempSync(join(tmpdir(), 'kestrel-media-up-'))
@@ -22,7 +22,7 @@ describe('media API (e2e)', async () => {
 
   let cookie = ''
   beforeAll(async () => {
-    const res = await testFetch('/api/auth/login', {
+    const res = await testFetch('/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ password: PW }),
@@ -47,7 +47,7 @@ describe('media API (e2e)', async () => {
     form.append('folder', 'seite-a')
     form.append('alt', 'A cat')
 
-    const created = await $fetch('/api/media', {
+    const created = await $fetch('/api/media/upload', {
       method: 'POST',
       headers: { cookie },
       body: form,
@@ -57,10 +57,10 @@ describe('media API (e2e)', async () => {
     expect(created.url).toContain('/uploads/seite-a/pic.png')
     expect(created.storageKey).toBe('seite-a/pic.png')
 
-    const listed = await $fetch('/api/media', { headers: { cookie } }) as { total: number; data: unknown[] }
+    const listed = await $fetch('/api/media/readMany', { headers: { cookie } }) as { total: number; data: unknown[] }
     expect(listed.total).toBeGreaterThanOrEqual(1)
 
-    const got = await $fetch(`/api/media/${created.id}`, { headers: { cookie } }) as { storageKey: string }
+    const got = await $fetch(`/api/media/readOne/${created.id}`, { headers: { cookie } }) as { storageKey: string }
     expect(got.storageKey).toBe(created.storageKey)
 
     // the upload ensured a folder row; the library lists it (root) and the file (inside it)
@@ -78,13 +78,13 @@ describe('media API (e2e)', async () => {
     const form = new FormData()
     form.append('file', svgBlob, 'i.svg')
 
-    const created = await $fetch('/api/media', {
+    const created = await $fetch('/api/media/upload', {
       method: 'POST',
       headers: { cookie },
       body: form,
     }) as { id: number }
 
-    const u = await $fetch(`/api/media/${created.id}/usages`, { headers: { cookie } }) as { usages: unknown[] }
+    const u = await $fetch(`/api/media/usages/${created.id}`, { headers: { cookie } }) as { usages: unknown[] }
     expect(Array.isArray(u.usages)).toBe(true)
   })
 
@@ -100,9 +100,9 @@ describe('media API (e2e)', async () => {
       return f
     }
 
-    await $fetch('/api/media', { method: 'POST', headers: { cookie }, body: mk() })
+    await $fetch('/api/media/upload', { method: 'POST', headers: { cookie }, body: mk() })
     await expect(
-      $fetch('/api/media', { method: 'POST', headers: { cookie }, body: mk() }),
+      $fetch('/api/media/upload', { method: 'POST', headers: { cookie }, body: mk() }),
     ).rejects.toMatchObject({ statusCode: 409 })
   })
 
@@ -110,7 +110,7 @@ describe('media API (e2e)', async () => {
     const f = new FormData()
     f.append('file', new Blob([Buffer.from('x')], { type: 'image/png' }), 'x.png')
     await expect(
-      $fetch('/api/media', { method: 'POST', body: f }),
+      $fetch('/api/media/upload', { method: 'POST', body: f }),
     ).rejects.toMatchObject({ statusCode: 401 })
   })
 
@@ -144,7 +144,7 @@ describe('media API (e2e)', async () => {
     form.append('file', new Blob([png], { type: 'image/png' }), 'pic.png')
     form.append('folder', 'mv-src')
 
-    const { id } = await $fetch('/api/media', {
+    const { id } = await $fetch('/api/media/upload', {
       method: 'POST', headers: { cookie }, body: form,
     }) as { id: number }
 
@@ -154,7 +154,6 @@ describe('media API (e2e)', async () => {
     }) as { item: unknown; status: string; newPath?: string }[]
     expect(moved[0].status).toBe('moved')
 
-    // the file now lists under mv-dst and no longer under mv-src
     const dst = await $fetch('/api/media/library', { headers: { cookie }, query: { folder: 'mv-dst' } }) as { files: { filename: string }[] }
     expect(dst.files.map((f) => f.filename)).toContain('pic.png')
     const src = await $fetch('/api/media/library', { headers: { cookie }, query: { folder: 'mv-src' } }) as { files: { filename: string }[] }

@@ -8,7 +8,7 @@ import PreviewPage from './preview.vue'
 const h = vi.hoisted(() => ({ query: {} as Record<string, string>, authenticated: true }))
 mockNuxtImport('useRoute', () => () => ({ path: '/__kestrel/preview', query: h.query, meta: {} }))
 
-registerEndpoint('/api/auth/session', defineEventHandler(() => ({ authenticated: h.authenticated })))
+registerEndpoint('/api/session', defineEventHandler(() => ({ authenticated: h.authenticated })))
 registerEndpoint('/api/preview', defineEventHandler(() => ({
   payload: { collection: 'pages', id: null, values: { content: [{ id: 'b1', type: 'hero', props: {} }] } },
 })))

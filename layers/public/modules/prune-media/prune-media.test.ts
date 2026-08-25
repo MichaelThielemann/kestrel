@@ -71,8 +71,8 @@ describe('pruneUnreferencedMedia (integration)', () => {
       writeFileSync(join(up, 'a', 'keep-w640.webp'), 'x')
       writeFileSync(join(up, 'docs', 'paper.pdf'), 'x')
       writeFileSync(join(up, 'bg', 'hero.png'), 'x')
-      writeFileSync(join(up, 'a', 'orphan.webp'), 'x') // unreferenced
-      writeFileSync(join(up, 'gone', 'deleted-page.webp'), 'x') // unreferenced
+      writeFileSync(join(up, 'a', 'orphan.webp'), 'x')
+      writeFileSync(join(up, 'gone', 'deleted-page.webp'), 'x')
 
       const res = pruneUnreferencedMedia(publicDir, '/uploads')
       expect(res).toEqual({ kept: 4, pruned: 2 })

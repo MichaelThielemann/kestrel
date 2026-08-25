@@ -1,19 +1,22 @@
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest'
-import Database from 'better-sqlite3'
-import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
+import type Database from 'better-sqlite3'
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { createError } from 'h3'
-import { buildCollection } from '../../../fields/server/utils/buildCollection'
-import { defineCollection } from '../../../core/server/utils/defineCollection'
-import { desiredSchema } from '../../../core/server/schema/desired'
-import { diffSchema } from '../../../core/server/schema/diff'
-import { renderSqlite } from '../../../core/server/schema/render-sqlite'
-import { collectionHeading } from '../utils/llms'
-import { buildLlmsFullTxt, recordMarkdown } from '../utils/llms-full'
-import { registerBlock, clearBlocks } from '../../../fields/server/utils/defineBlock'
-import type { BuiltCollection } from '../../../core/server/utils/collection-types'
-
-// The route is a server route driven by auto-imports; stub them as globals (the same seam the Nitro
-// build provides) so the handler can be exercised as a plain function.
+import { buildCollection } from '@kestrel/core'
+import { clearRegistry, defineCollection, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@kestrel/core'
+import { registerBlock, clearBlocks } from '@kestrel/fields'
+// The route is a server route driven by auto-imports (Nitro's `server/utils` convention); stub those as
+// globals so the handler can be exercised as a plain function. `siteBaseUrl`/`siteName`/`siteDescription`/
+// `llmsFullEnabled` are explicit `@kestrel/publishing` imports, mocked as `vi.fn()`s so individual tests
+// can override their return value.
+vi.mock('@kestrel/publishing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@kestrel/publishing')>()),
+  llmsFullEnabled: vi.fn(() => true),
+  siteBaseUrl: vi.fn(() => 'https://example.test'),
+  siteName: vi.fn(() => 'Example'),
+  siteDescription: vi.fn(() => ''),
+}))
+const publishing = await import('@kestrel/publishing')
 const pages = buildCollection(defineCollection({
   name: 'pages', mode: 'multi', translatable: true, pageLike: true, status: true, seo: true,
   blocks: { enabled: true }, fields: { title: { type: 'text' }, lead: { type: 'text' }, hero: { type: 'media' } },
@@ -28,7 +31,6 @@ let db: BetterSQLite3Database
 let sqlite: Database.Database
 const selectArgs: unknown[][] = []
 let handler: (event: unknown) => unknown
-let enabled = true
 
 function insert(row: { path: string; status: string; locale?: string; content?: string; seo?: string; lead?: string }): number {
   return sqlite.prepare(
@@ -39,38 +41,41 @@ function insert(row: { path: string; status: string; locale?: string; content?: 
 const wipe = () => sqlite.exec('DELETE FROM pages')
 
 beforeAll(async () => {
-  sqlite = new Database(':memory:')
+  setResolvedKestrelConfig({ ...getResolvedKestrelConfig(), dbPath: ':memory:' })
+  resetDbInstance()
+  db = useDb() as unknown as BetterSQLite3Database
+  sqlite = (db as unknown as { $client: Database.Database }).$client
   const desired = desiredSchema(
     [pages.table, drifted.table],
     new Map([[pages.def.name, pages.def], [drifted.def.name, drifted.def]]),
   )
   for (const stmt of renderSqlite(diffSchema(desired, {}))) sqlite.exec(stmt)
-  db = drizzle(sqlite)
-  const spyDb = { select: (...args: unknown[]) => { selectArgs.push(args); return (db.select as (...a: unknown[]) => unknown)(...args) } }
+  vi.spyOn(db, 'select').mockImplementation((...args: unknown[]) => {
+    selectArgs.push(args)
+    return (Object.getPrototypeOf(db).select as (...a: unknown[]) => unknown).apply(db, args)
+  })
+  clearRegistry()
+  registerCollection(pages)
   vi.stubGlobal('defineEventHandler', (h: (event: unknown) => unknown) => h)
   vi.stubGlobal('createError', createError)
-  vi.stubGlobal('useDb', () => spyDb)
-  vi.stubGlobal('llmsFullEnabled', () => enabled)
-  vi.stubGlobal('siteBaseUrl', () => 'https://example.test')
-  vi.stubGlobal('siteName', () => 'Example')
-  vi.stubGlobal('siteDescription', () => '')
   vi.stubGlobal('primaryLocale', () => 'en')
   vi.stubGlobal('prefixPrimaryLocale', () => false)
-  vi.stubGlobal('allCollections', (): BuiltCollection[] => [pages])
   vi.stubGlobal('publicReadableResources', () => ['pages'])
   vi.stubGlobal('isPubliclyReadable', () => true)
-  vi.stubGlobal('buildLlmsFullTxt', buildLlmsFullTxt)
-  vi.stubGlobal('recordMarkdown', recordMarkdown)
-  vi.stubGlobal('collectionHeading', collectionHeading)
   vi.stubGlobal('setHeader', () => {})
   handler = (await import('./llms-full.txt.get')).default as (event: unknown) => unknown
 })
 
-afterEach(() => { wipe(); clearBlocks(); enabled = true })
+afterEach(() => {
+  wipe()
+  clearBlocks()
+  vi.mocked(publishing.llmsFullEnabled).mockReturnValue(true)
+  vi.mocked(publishing.siteBaseUrl).mockReturnValue('https://example.test')
+})
 
 describe('llms-full.txt route', () => {
   it('404s while the feature is off — the default', () => {
-    enabled = false
+    vi.mocked(publishing.llmsFullEnabled).mockReturnValue(false)
     expect(() => handler({})).toThrowError(expect.objectContaining({ statusCode: 404 }))
   })
 
@@ -130,14 +135,13 @@ describe('llms-full.txt route', () => {
 
   it('emits the site header alone when the site url is unset — a relative Source: line resolves nowhere', () => {
     insert({ path: '/about', status: 'published' })
-    vi.stubGlobal('siteBaseUrl', () => '')
+    vi.mocked(publishing.siteBaseUrl).mockReturnValue('')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       expect(handler({}) as string).toBe('# Example\n')
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('llms-full.txt: siteUrl is unset'))
     } finally {
       warn.mockRestore()
-      vi.stubGlobal('siteBaseUrl', () => 'https://example.test')
     }
   })
 
@@ -146,7 +150,9 @@ describe('llms-full.txt route', () => {
     sqlite.prepare(`INSERT INTO drifted (path, status, title, seo, created_at, updated_at) VALUES ('/gone', 'published', 'T', '{}', 0, 1000)`).run()
     sqlite.exec('ALTER TABLE drifted DROP COLUMN seo')
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.stubGlobal('allCollections', (): BuiltCollection[] => [pages, drifted])
+    clearRegistry()
+    registerCollection(pages)
+    registerCollection(drifted)
     try {
       const txt = handler({}) as string
       expect(txt).not.toContain('/gone') // the gap itself stays — a bare prerender DB must not fail the publish
@@ -154,7 +160,8 @@ describe('llms-full.txt route', () => {
       expect(error).toHaveBeenCalledWith(expect.stringContaining('llms-full.txt: skipped collection drifted'), expect.anything())
     } finally {
       error.mockRestore()
-      vi.stubGlobal('allCollections', (): BuiltCollection[] => [pages])
+      clearRegistry()
+      registerCollection(pages)
       sqlite.exec('DELETE FROM drifted')
     }
   })

@@ -29,7 +29,7 @@ const DEFAULT_LABELS: Required<SecureGalleryLabels> = {
 }
 
 // `gallery` is the public field ref PLUS the storage `base` URL (the consumer's endpoint supplies both,
-// e.g. the playground's `/api/public-gallery`).
+// e.g. the playground's `/api/publicGallery`).
 const props = defineProps<{ gallery?: GalleryViewRef | null; labels?: SecureGalleryLabels }>()
 const l = computed<Required<SecureGalleryLabels>>(() => ({ ...DEFAULT_LABELS, ...(props.labels ?? {}) }))
 const { state, error, tree, unlock } = useSecureGallery(() => props.gallery, { autoFromHash: true })

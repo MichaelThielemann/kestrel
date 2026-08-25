@@ -1,4 +1,4 @@
-import type { VariantFit } from '../../../core/server/utils/kestrel-config'
+import type { VariantFit } from '@kestrel/core'
 
 export interface VariantShape {
   width: number

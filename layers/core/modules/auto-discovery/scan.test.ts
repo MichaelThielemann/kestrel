@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { listDefinitionFiles, collectDefinitions, renderRegistry, listVueFiles, collectBlockSfcs } from './scan'
+import { listDefinitionFiles, collectDefinitions, collectManifestFiles, renderRegistry, renderPackageMergedRegistry, renderPackageConcatRegistry, listVueFiles, collectBlockSfcs } from './scan'
 
 // fake fs: dir -> entries
 const fakeList = (tree: Record<string, string[]>) => (dir: string): string[] => {
@@ -52,6 +52,32 @@ describe('collectDefinitions', () => {
   })
 })
 
+describe('collectManifestFiles', () => {
+  it('collects each layer\'s server/db/manifest.ts, one per layer, no basename dedup', () => {
+    const list = fakeList({
+      '/media/server/db': ['manifest.ts', 'media-db.ts'],
+      '/public/server/db': ['manifest.ts', 'publishing-db.ts'],
+    })
+    // both layers' manifest.ts survive despite the identical basename — unlike collectDefinitions
+    expect(collectManifestFiles(['/media', '/public'], list)).toEqual([
+      '/media/server/db/manifest.ts',
+      '/public/server/db/manifest.ts',
+    ])
+  })
+
+  it('skips a layer with no server/db dir and one with a server/db dir but no manifest.ts', () => {
+    const list = fakeList({
+      '/core/server/db': ['content-manifest.ts', 'module-db.ts'],
+      '/media/server/db': ['manifest.ts'],
+    })
+    expect(collectManifestFiles(['/core', '/media', '/no-db-dir'], list)).toEqual(['/media/server/db/manifest.ts'])
+  })
+
+  it('returns [] when no layer has one', () => {
+    expect(collectManifestFiles(['/a', '/b'], fakeList({}))).toEqual([])
+  })
+})
+
 describe('renderRegistry', () => {
   it('emits one import per file plus a default-export array', () => {
     const code = renderRegistry(['/a/pages.ts', '/b/media.ts'])
@@ -61,6 +87,79 @@ describe('renderRegistry', () => {
   })
   it('emits an empty array for no files', () => {
     expect(renderRegistry([])).toBe('export default []')
+  })
+})
+
+describe('renderPackageMergedRegistry', () => {
+  it('imports each package\'s kestrelDiscovery, each consumer file, and merges via mergeKestrelDiscovered', () => {
+    const code = renderPackageMergedRegistry({
+      packages: ['@kestrel/media', '@kestrel/publishing'],
+      property: 'collections',
+      consumerFiles: ['/l/posts.ts'],
+      nameOfExpr: '(x) => x.name',
+    })
+    expect(code).toContain(`import { kestrelDiscovery as __pkg0 } from "@kestrel/media"`)
+    expect(code).toContain(`import { kestrelDiscovery as __pkg1 } from "@kestrel/publishing"`)
+    expect(code).toContain(`import _c0 from "/l/posts.ts"`)
+    expect(code).toContain(`import { mergeKestrelDiscovered } from '@kestrel/core'`)
+    expect(code).toContain(`mergeKestrelDiscovered([...(__pkg0.collections ?? []), ...(__pkg1.collections ?? [])], [_c0], (x) => x.name)`)
+  })
+
+  it('includes extraImports and preamble, in order, before the package imports', () => {
+    const code = renderPackageMergedRegistry({
+      packages: ['@kestrel/media'],
+      property: 'schemaTables',
+      consumerFiles: [],
+      nameOfExpr: '(x) => __t(x)',
+      extraImports: `import { getTableName as __t } from 'drizzle-orm'`,
+      preamble: '/* seed */',
+    })
+    const preambleIdx = code.indexOf('/* seed */')
+    const extraIdx = code.indexOf(`import { getTableName as __t }`)
+    const pkgIdx = code.indexOf('__pkg0')
+    expect(preambleIdx).toBeGreaterThanOrEqual(0)
+    expect(preambleIdx).toBeLessThan(extraIdx)
+    expect(extraIdx).toBeLessThan(pkgIdx)
+  })
+
+  it('emits a merge over two empty arrays with zero packages/files', () => {
+    const code = renderPackageMergedRegistry({ packages: [], property: 'collections', consumerFiles: [], nameOfExpr: '(x) => x.name' })
+    expect(code).toContain('mergeKestrelDiscovered([], [], (x) => x.name)')
+  })
+})
+
+describe('renderPackageConcatRegistry', () => {
+  it('concatenates every package manifest with every consumer manifest file, no dedup', () => {
+    const code = renderPackageConcatRegistry({
+      packages: ['@kestrel/media', '@kestrel/publishing'],
+      property: 'manifest',
+      consumerFiles: ['/l/manifest.ts'],
+    })
+    expect(code).toContain(`import { kestrelDiscovery as __pkg0 } from "@kestrel/media"`)
+    expect(code).toContain(`import { kestrelDiscovery as __pkg1 } from "@kestrel/publishing"`)
+    expect(code).toContain(`import _c0 from "/l/manifest.ts"`)
+    expect(code).toContain(
+      'export default [...(__pkg0.manifest ? [__pkg0.manifest] : []), ...(__pkg1.manifest ? [__pkg1.manifest] : []), _c0]',
+    )
+  })
+
+  it('generates the ternary guard, not a bare property read, for every package item', () => {
+    const code = renderPackageConcatRegistry({
+      packages: ['@kestrel/no-manifest-here'],
+      property: 'manifest',
+      consumerFiles: [],
+    })
+    // The guard is what makes a mis-listed package (one without `.manifest`) contribute nothing at
+    // virtual-load time instead of an `undefined` entry — asserted structurally here (the exact runtime
+    // behavior of `x ? [x] : []` needs no re-proof, it's a one-line JS ternary); the real end-to-end
+    // proof is the e2e boot suite building a real `#kestrel/module-manifests` virtual.
+    expect(code).toContain('export default [...(__pkg0.manifest ? [__pkg0.manifest] : [])]')
+    expect(code).not.toContain('export default [__pkg0.manifest]')
+  })
+
+  it('emits an empty array with nothing to contribute', () => {
+    const code = renderPackageConcatRegistry({ packages: [], property: 'manifest', consumerFiles: [] })
+    expect(code).toContain('export default []')
   })
 })
 

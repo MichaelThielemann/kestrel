@@ -6,8 +6,8 @@ import BlockFields from '../components/BlockFields.vue'
 import { useEditForm } from './useEditForm'
 import { useBlockTree } from './useBlockTree'
 // The REAL write-path normalizer, so the mocked endpoint answers exactly what the server would.
-import { sanitizeRichtext } from '../../../fields/server/field-registry/sanitize'
-import type { SerializedBlock } from '../../../core/server/utils/serialize-collection'
+import { sanitizeRichtext } from '@kestrel/core'
+import type { SerializedBlock } from '@kestrel/core'
 
 // The editor is only clean after a save if NOTHING writes to `values` once `rebaseline` has taken the
 // baseline. The mounted block pane is the hard case: it holds a live richtext widget whose serialization
@@ -40,20 +40,18 @@ function freshRow(): Row {
 }
 
 registerEndpoint('/api/collections', () => ({ data: [pagesSchema] }))
-registerEndpoint('/api/pages/1/dead-refs', () => [])
-registerEndpoint('/api/pages/1', async (event) => {
-  if (event.method === 'PATCH') {
-    const body = await readBody(event) as Row
-    // crud: the body is parsed by the collection's update schema (which runs the richtext transform on
-    // every block prop) and the STORED row is what comes back.
-    const content = (body.content as { props: Record<string, unknown> }[]).map((b) => ({
-      ...b, props: { ...b.props, body: sanitizeRichtext(String(b.props.body ?? '')) },
-    }))
-    stored = { ...stored, ...body, content, updatedAt: new Date().toISOString() }
-    return stored
-  }
+registerEndpoint('/api/pages/deadRefs/1', () => [])
+registerEndpoint('/api/pages/readOne/1', () => stored)
+registerEndpoint('/api/pages/updateOne/1', { method: 'POST', handler: async (event) => {
+  const body = await readBody(event) as Row
+  // crud: the body is parsed by the collection's update schema (which runs the richtext transform on
+  // every block prop) and the STORED row is what comes back.
+  const content = (body.content as { props: Record<string, unknown> }[]).map((b) => ({
+    ...b, props: { ...b.props, body: sanitizeRichtext(String(b.props.body ?? '')) },
+  }))
+  stored = { ...stored, ...body, content, updatedAt: new Date().toISOString() }
   return stored
-})
+} })
 
 let form: ReturnType<typeof useEditForm>
 let tree: ReturnType<typeof useBlockTree>

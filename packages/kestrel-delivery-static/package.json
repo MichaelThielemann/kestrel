@@ -1,0 +1,50 @@
+{
+  "name": "@kestrel/delivery-static",
+  "version": "0.1.0",
+  "description": "The static delivery adapter: writes/prunes published snapshots through a StorageDriver (the build-time deploy target), plus the S3 static-output shipper.",
+  "license": "Apache-2.0",
+  "author": "Michael Thielemann <283621694+MichaelThielemann@users.noreply.github.com>",
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
+    "directory": "packages/kestrel-delivery-static"
+  },
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "vitest run --typecheck"
+  },
+  "dependencies": {
+    "@kestrel/contracts": "workspace:*",
+    "@kestrel/core": "workspace:*",
+    "@kestrel/delivery-live": "workspace:*",
+    "@kestrel/publishing": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

@@ -5,8 +5,8 @@ import { resolve } from 'node:path'
 // Vitest runs from the package root.
 const root = process.cwd()
 const read = (p: string): string => readFileSync(resolve(root, p), 'utf8')
-const fieldTypesMd = read('docs/field-types.md')
-const defineCollectionTs = read('layers/core/server/utils/defineCollection.ts')
+const fieldTypesMd = read('docs/guide/field-types.md')
+const defineCollectionTs = read('packages/kestrel-core/src/server/utils/defineCollection.ts')
 
 /** The built-in arms of the `FieldType` union — the open `(string & {})` arm is the consumer escape hatch. */
 const builtinTypes = (): string[] => {
@@ -21,7 +21,7 @@ describe('docs — field types', () => {
     const types = builtinTypes()
     expect(types.length).toBe(12)
     for (const type of types) {
-      expect(fieldTypesMd, `docs/field-types.md is missing a "## ${type}" section`).toMatch(
+      expect(fieldTypesMd, `docs/guide/field-types.md is missing a "## ${type}" section`).toMatch(
         new RegExp(`^## ${type}$`, 'm'),
       )
     }
@@ -42,8 +42,8 @@ describe('docs — field types', () => {
     expect(fieldTypesMd).toMatch(/advisory/i)
   })
 
-  it('is reachable from the README and the consuming guide', () => {
-    expect(read('README.md')).toMatch(/\(docs\/field-types\.md\)/)
-    expect(read('docs/consuming-kestrel.md')).toMatch(/\(\.\/field-types\.md\)/)
+  it('is reachable from the README and the collections guide', () => {
+    expect(read('README.md')).toMatch(/\(docs\/guide\/field-types\.md\)/)
+    expect(read('docs/guide/collections.md')).toMatch(/\(\.\/field-types\.md\)/)
   })
 })

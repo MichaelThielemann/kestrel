@@ -14,8 +14,8 @@ function authenticate() {
 
 describe('admin layout', () => {
   it('hides the account control (home of sign-out) when unauthenticated', async () => {
-    // Sign-out now lives inside the account menu (teleported, so not in happy-dom); the avatar
-    // trigger is the rendered, auth-gated control standing in for it.
+    // Sign-out lives inside the account menu, which is teleported and not rendered in happy-dom;
+    // the avatar trigger stands in as the auth-gated proxy.
     const w = await mountSuspended(AdminLayout)
     expect(w.find('button.rail-account__trigger').exists()).toBe(false)
   })

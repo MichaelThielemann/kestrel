@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "pnpm",
+  "plugins": ["@stryker-mutator/vitest-runner"],
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.stryker.access.config.ts"
+  },
+  "mutate": ["packages/kestrel-access/src/server/utils/**/*.ts", "!packages/kestrel-access/src/server/utils/**/*.test.ts"],
+  "ignorePatterns": ["dist", ".output", "playground", "docs", "graphify-out", ".desk", "test/e2e", "extensions"],
+  "coverageAnalysis": "perTest",
+  "incremental": true,
+  "incrementalFile": ".stryker-tmp/access.incremental.json",
+  "tempDirName": ".stryker-tmp/access",
+  "reporters": ["html", "clear-text", "progress", "json"],
+  "htmlReporter": {
+    "fileName": "reports/mutation/access/index.html"
+  },
+  "jsonReporter": {
+    "fileName": "reports/mutation/access/mutation-report.json"
+  },
+  "thresholds": {
+    "high": 90,
+    "low": 70,
+    "break": 71
+  },
+  "timeoutMS": 15000,
+  "concurrency": 4
+}

@@ -5,30 +5,15 @@
 // when `media.driver: 'local'`) — the `00.` prefix only orders files within this layer, while Nitro's own
 // static handler is unconditionally unshifted to the front of the whole handler list. `off` when no list
 // is set → zero cost on PROD/local.
-function loadConfig() {
-  const listRaw = process.env.KESTREL_IP_ALLOWLIST
-  const mode = allowlistMode(process.env.KESTREL_IP_ALLOWLIST_MODE, listRaw)
-  // Named per-token, not just a "0 valid CIDRs" count — a mixed list (one good entry, one IPv6 CIDR this
-  // IPv4-only parser can never match) would otherwise silently under-enforce with no diagnostic at all.
-  const cidrs = parseAllowlist(listRaw, (token) => {
-    console.warn(`[ip-allowlist] dropping unparseable/unsupported allow-list entry "${token}" (IPv4/CIDR only)`)
-  })
-  if (mode !== 'off' && cidrs.length === 0) {
-    console.warn('[ip-allowlist] KESTREL_IP_ALLOWLIST is set but parsed to 0 valid CIDRs — enforce mode will block ALL traffic')
-  }
-  return { mode, cidrs }
-}
-
-// Env is fixed for the process lifetime → parse the (up to a few hundred) CIDRs once, not per request.
-let configured: ReturnType<typeof loadConfig> | undefined
+import { clientIp } from '@kestrel/auth'
+import { allowlistConfig, ipAllowed, ipv4ToInt, isRendererContext, isStageGatePassedContext, markStageGatePassed } from '@kestrel/access'
 
 // A listener that never shows the gate a usable client address blocks everything, which looks like an
 // outage rather than a misconfiguration unless we say once what to set.
 let warnedUnresolvable = false
 
 export default defineEventHandler((event) => {
-  configured ??= loadConfig()
-  const { mode, cidrs } = configured
+  const { mode, cidrs } = allowlistConfig()
   if (mode === 'off') return
 
   // The runtime publisher renders the public site via a nested in-process $fetch (renderer principal), and

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { defineNuxtModule } from '@nuxt/kit'
-import { resolveKestrel, type KestrelConfig } from '../../server/utils/kestrel-config'
+import { resolveKestrel, type KestrelConfig } from '@kestrel/core'
 import { diagnoseAppShell } from './app-shell'
 
 /**
@@ -78,6 +78,11 @@ export default defineNuxtModule<KestrelConfig>({
     srv.aiDisclosure = c.aiDisclosure
     // Answer-engine toggles; `llmsFull` is server-only (it gates a Nitro route and what the publisher writes).
     srv.seo = c.seo
+    // Read by delivery-live's catch-all/read pipeline (see `KestrelConfig.delivery`'s own TSDoc) to
+    // decide whether to answer at all — everything else about it stays 'static'-shaped either way.
+    srv.delivery = c.delivery
+    // Extra path prefixes the live catch-all must fall through on (see `KestrelConfig.deliveryExempt`).
+    srv.deliveryExempt = c.deliveryExempt
     // Static-publish target for the runtime publisher (server-only). S3 creds are env-only; prefer the
     // output-specific creds, fall back to the shared media creds so a single S3 account "just works".
     srv.output = {

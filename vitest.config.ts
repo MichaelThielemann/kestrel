@@ -14,6 +14,7 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           globals: true,
+          setupFiles: ['./test/setup.node.ts'],
           include: ['layers/**/*.test.ts', 'test/**/*.test.ts', 'app/**/*.test.ts', 'server/**/*.test.ts', 'extensions/**/*.test.ts'],
           exclude: ['**/node_modules/**', 'test/e2e/**', '**/*.dom.test.ts', '**/*.nuxt.test.ts'],
         },

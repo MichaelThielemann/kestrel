@@ -17,8 +17,8 @@ describe('parseSubmission — public back-channel guard', () => {
     expect(parseSubmission({ ...ok, gallerySlug: '' })).toBeNull()
     expect(parseSubmission({ ...ok, customerId: undefined })).toBeNull()
     expect(parseSubmission({ ...ok, sealed: undefined })).toBeNull()
-    expect(parseSubmission({ ...ok, sealed: { iv: 'x' } })).toBeNull() // missing data
-    expect(parseSubmission({ ...ok, sealed: { iv: 1, data: 2 } })).toBeNull() // wrong types
+    expect(parseSubmission({ ...ok, sealed: { iv: 'x' } })).toBeNull()
+    expect(parseSubmission({ ...ok, sealed: { iv: 1, data: 2 } })).toBeNull()
     expect(parseSubmission({ ...ok, writeSecret: undefined })).toBeNull() // required possession credential
     expect(parseSubmission({ ...ok, writeSecret: '' })).toBeNull()
   })

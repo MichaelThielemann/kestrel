@@ -1,15 +1,24 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import kestrelModule from '../layers/core/modules/kestrel/index'
 
 // Vitest runs from the package root.
 const root = process.cwd()
 const read = (p: string): string => readFileSync(resolve(root, p), 'utf8')
-const configMd = read('docs/configuration.md')
-const staticMd = read('docs/static-output.md')
+const configMd = read('docs/guide/configuration.md')
+const deployMd = read('docs/guide/deploying.md')
 const readme = read('README.md')
 const envExample = read('.env.example')
+
+/** Every hand-written doc page, so a future re-split cannot drop a page out of the NUXT_* check. */
+function docPages(dir: string): string[] {
+  return readdirSync(resolve(root, dir)).flatMap((name) => {
+    const rel = `${dir}/${name}`
+    if (statSync(resolve(root, rel)).isDirectory()) return name === 'api' || name === 'superpowers' ? [] : docPages(rel)
+    return name.endsWith('.md') ? [rel] : []
+  })
+}
 
 /** The runtimeConfig the `kestrel` module freezes at setup — i.e. everything a prebuilt server reads. */
 async function moduleRuntimeConfig(): Promise<Record<string, unknown>> {
@@ -51,7 +60,7 @@ describe('docs — when the environment is actually read', () => {
 
   it('names only NUXT_* vars that map onto a runtimeConfig key the module writes', async () => {
     const valid = new Set(envNames(await moduleRuntimeConfig()))
-    const cited = [configMd, staticMd, readme, envExample]
+    const cited = [readme, envExample, ...docPages('docs').map(read)]
       .flatMap((md) => md.match(/\bNUXT_[A-Z0-9_]+/g) ?? [])
     expect(cited.length).toBeGreaterThan(0)
     expect([...new Set(cited)].filter((name) => !valid.has(name))).toEqual([])
@@ -69,8 +78,8 @@ describe('docs — when the environment is actually read', () => {
   })
 
   it('points the prebuilt-server deploy paths at the runtime names', () => {
-    expect(readme).toMatch(/\bNUXT_[A-Z0-9_]+/)
-    expect(staticMd).toMatch(/NUXT_KESTREL_SITE_URL/)
+    expect(deployMd).toMatch(/\bNUXT_[A-Z0-9_]+/)
+    expect(deployMd).toMatch(/NUXT_KESTREL_SITE_URL/)
     expect(envExample).toMatch(/\bNUXT_[A-Z0-9_]+/)
   })
 })

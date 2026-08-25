@@ -6,7 +6,7 @@ import { usePublishStatus } from './usePublishStatus'
 
 let calls: Array<{ collection: string; id: string; locale: string }> = []
 const idCalls = (id: string) => calls.filter((c) => c.id === id).length
-registerEndpoint('/api/publish-status', (event) => {
+registerEndpoint('/api/publishStatus', (event) => {
   const q = getQuery(event)
   const id = String(q.id ?? '')
   calls.push({ collection: String(q.collection ?? ''), id, locale: String(q.locale ?? '') })

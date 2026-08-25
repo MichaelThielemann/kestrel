@@ -48,7 +48,6 @@ describe('KestrelImg — optional EU AI Act badge', () => {
   const badge = (props: Record<string, unknown>) => mount(KestrelImg, { props: { widths: [320], ...props } }).find('.kestrel-img__ai-badge')
 
   it('renders NOTHING unless the consumer explicitly asks for it', () => {
-    // Kestrel must never surface a disclosure the consumer did not opt into.
     expect(badge({ media: disclosed }).exists()).toBe(false)
     expect(badge({ media: disclosed, aiBadge: false }).exists()).toBe(false)
   })

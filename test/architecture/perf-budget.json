@@ -1,0 +1,14 @@
+{
+  "_note": "Per-op p95 budget (ms) over N=50 runs against a seeded fixture DB, measured from the pipeline's own trace total (test/architecture/perf-budget.test.ts). Initial values = measured p95 x 1.5 (max across repeated full-suite runs, to absorb CI worker contention), rounded up to a whole even ms. Loosening a value here requires an ADR entry in docs/internals/decisions.md — a note in this file is not sufficient — referenced from a matching '_adr_<op>' key below.",
+  "_adr_readOut": "ADR-0016",
+  "_adr_createOne": "ADR-0016",
+  "_adr_updateOne": "ADR-0016",
+  "createOne": 20,
+  "createMany": 14,
+  "readOne": 4,
+  "readMany": 12,
+  "updateOne": 12,
+  "updateMany": 4,
+  "delete": 2,
+  "duplicate": 4
+}

@@ -4,7 +4,7 @@
 // the session; the field value holds just the public ref ({ galleryId, salt, verify }). The tree (sealed
 // file names + folder paths) is the encrypted index file at `galleries-secure/<galleryId>/index.json`; the
 // ciphertext blobs sit beside it. Every op (upload / new folder / delete) persists to storage IMMEDIATELY
-// (POST blob + PUT index), so what the picker shows mirrors storage. Presentation reuses Kestrel's media
+// (POST blob + POST index), so what the picker shows mirrors storage. Presentation reuses Kestrel's media
 // components (`MediaToolbar`/`MediaGrid`/`MediaTable`) fed a `LibraryItem[]` adapter. `UiField`/`UiButton`/
 // `UiIcon` + the media components + `recordEditContextKey` are auto-imported.
 import { ref, computed, onBeforeUnmount, inject } from 'vue'
@@ -110,8 +110,8 @@ async function putIndex(opts: { repair?: boolean } = {}) {
   const index: GalleryIndex & { seq: number } = { ...encoded, seq: next }
   const authed = await authenticateIndex(index, key.value!)
   try {
-    const res = await $fetch<{ base: string }>('/api/galleries-secure/tree', {
-      method: 'PUT',
+    const res = await $fetch<{ base: string }>('/api/secureGalleryTree', {
+      method: 'POST',
       body: { galleryId: model.value!.galleryId, index: authed, ...(opts.repair ? { repair: true } : {}) },
     })
     base.value = res.base
@@ -146,7 +146,7 @@ async function mergeStored() {
   notice.value = null
   busy.value = true
   try {
-    const newBase = (await $fetch<{ base: string }>('/api/galleries-secure/base', { query: { galleryId: model.value.galleryId } })).base
+    const newBase = (await $fetch<{ base: string }>('/api/secureGalleryBase', { query: { galleryId: model.value.galleryId } })).base
     const index = await fetchGalleryIndex(newBase)
     if (model.value.authIndex && !(await verifyIndexAuth(index, key.value))) throw new Error('The gallery index failed its integrity check.')
     const current = await decodeIndex(index, (s) => decryptString(key.value!, sealFromB64(s)))
@@ -239,7 +239,7 @@ async function unlock() {
     // over an empty model and the next putIndex() would persist that empty index over the real one, orphaning
     // every blob (their IVs/names are gone, so the ciphertext becomes undecryptable). Decode with the local
     // key `k` — `key.value` is committed only after the load succeeds.
-    newBase = (await $fetch<{ base: string }>('/api/galleries-secure/base', { query: { galleryId: ref0.galleryId } })).base
+    newBase = (await $fetch<{ base: string }>('/api/secureGalleryBase', { query: { galleryId: ref0.galleryId } })).base
     const index = await fetchGalleryIndex(newBase)
     // Enforce the index integrity tag when the (trusted) ref says this gallery has one — a tamper/strip fails here.
     if (ref0.authIndex && !(await verifyIndexAuth(index, k))) throw new Error('The gallery index failed its integrity check.')
@@ -364,7 +364,7 @@ async function addUploads(uploads: { file: File; dir: string }[]) {
     const fresh: WorkingFile[] = []
     for (const { file, dir } of uploads) {
       const { ciphertext, ivB64 } = await sealBlob(key.value, new Uint8Array(await file.arrayBuffer()))
-      const { blobId } = await $fetch<{ blobId: string }>('/api/galleries-secure/upload', {
+      const { blobId } = await $fetch<{ blobId: string }>('/api/secureGalleryUpload', {
         method: 'POST',
         query: { galleryId: model.value.galleryId },
         body: new Blob([ciphertext as BlobPart], { type: 'application/octet-stream' }),
@@ -424,7 +424,7 @@ async function onDelete() {
     catch (err) { files.value = prev.files; folders.value = prev.folders; throw err }
 
     for (const blobId of blobIds) {
-      try { await $fetch('/api/galleries-secure/blob', { method: 'DELETE', body: { galleryId: model.value.galleryId, blobId } }) } catch { /* orphan ciphertext is harmless */ }
+      try { await $fetch('/api/secureGalleryBlobDelete', { method: 'POST', body: { galleryId: model.value.galleryId, blobId } }) } catch { /* orphan ciphertext is harmless */ }
       const p = previews.value[blobId]
       if (p?.src) URL.revokeObjectURL(p.src)
       const next = { ...previews.value }; Reflect.deleteProperty(next, blobId); previews.value = next
@@ -533,7 +533,7 @@ async function maybeCleanupDraft() {
   // Without the edit context we can't tell whether the record was saved → default to KEEP (never destroy a
   // namespace on a guess). With it: keep once the record is no longer a fresh unsaved draft.
   if (!ctx || ctx.id.value !== 'new' || ctx.saved.value) return
-  try { await $fetch('/api/galleries-secure/namespace', { method: 'DELETE', body: { galleryId: model.value.galleryId } }) } catch { /* best-effort */ }
+  try { await $fetch('/api/secureGalleryNamespaceDelete', { method: 'POST', body: { galleryId: model.value.galleryId } }) } catch { /* best-effort */ }
 }
 
 // Breadcrumb segments of the current folder, each with its navigable path.

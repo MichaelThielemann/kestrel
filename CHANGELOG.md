@@ -5,6 +5,146 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
+## [4.0.0] — 2026-08-21
+
+Every `/api/` endpoint is now a **pipeline** — a named, declarative step list fronted by structurally
+enforced `access`/`csrf`/`ipAllowlist` gates. The CRUD engine, login/logout, media upload, publish/preview
+and every extension route are all pipelines now; `server/api/` holds exactly one route file. See
+[docs/internals/decisions.md](docs/internals/decisions.md) (ADR-0010) for the full design and
+[docs/guide/extending.md](docs/guide/extending.md) for the how-to.
+
+> ### ⚠ Breaking — URL scheme (verb-in-path)
+>
+> Every REST-shaped route is replaced by **`/api/<collection>/<pipelineName>[/<id>]`** — `GET` for a read
+> pipeline, `POST` for a write. The pipeline name is now the one identity a route, a trace entry, an
+> after-step registration and an admin action all share.
+>
+> | Old | New |
+> | --- | --- |
+> | `GET /api/<c>` | `GET /api/<c>/readMany` |
+> | `GET /api/<c>` (singleton) | `GET /api/<c>/readOne` |
+> | `GET /api/<c>/<id>` | `GET /api/<c>/readOne/<id>` |
+> | `POST /api/<c>` | `POST /api/<c>/createOne` (still 201) |
+> | `PATCH /api/<c>/<id>` | `POST /api/<c>/updateOne/<id>` |
+> | `PUT /api/<c>` | `POST /api/<c>/updateOne` |
+> | `DELETE /api/<c>/<id>` | `POST /api/<c>/deleteOne/<id>` |
+> | `POST /api/<c>/bulk {action:'delete'}` | `POST /api/<c>/deleteMany {ids}` |
+> | `POST /api/<c>/bulk {action:'publish'\|'unpublish'}` | `POST /api/<c>/updateMany {ids, patch:{status}}` |
+> | `POST /api/<c>/bulk {action:'duplicate'}` | `POST /api/<c>/duplicate {ids}` (answers the created rows) |
+> | `GET /api/<c>/<id>/translations` | `GET /api/<c>/translations/<id>` |
+> | `GET /api/<c>/<id>/dead-refs` | `GET /api/<c>/deadRefs/<id>` |
+> | `GET /api/collections/<name>` | `GET /api/<c>/schema` |
+> | `GET /api/references/broken` | `GET /api/brokenRefs` |
+> | `GET /api/references/referrers?collection=X` | `GET /api/X/referrers` |
+> | `POST /api/auth/login` | `POST /api/login` |
+> | `POST /api/auth/logout` | `POST /api/logout` |
+> | `GET /api/auth/session` | `GET /api/session` |
+> | `POST /api/preview` | `POST /api/createPreview` |
+> | `GET /api/publish-status` | `GET /api/publishStatus` |
+> | `GET /api/links/resolve` | `GET /api/resolveLinks` |
+> | `GET /api/media` | `GET /api/media/readMany` |
+> | `GET /api/media/<id>` | `GET /api/media/readOne/<id>` |
+> | `POST /api/media` | `POST /api/media/upload` |
+> | `PATCH /api/media/<id>` | `POST /api/media/updateAsset/<id>` |
+> | `DELETE /api/media/<id>` | `POST /api/media/deleteAsset/<id>` |
+> | `GET /api/media/<id>/usages` | `GET /api/media/usages/<id>` |
+>
+> Unchanged: `GET /api/<c>/options`, `GET /api/<c>/translations?group=`, `GET /api/collections`,
+> `GET /api/blocks`, `GET /api/route`, `GET /api/preview`, `POST /api/publish`,
+> `GET /api/media/{library,resolve,folders,backfill}` and the media `move`/`copy`/`rename`/`delete`
+> per-id routes, sitemap/robots/llms.
+>
+> **Old → new URL map (4.0 break).** `GET /api/<c>` → `GET /api/<c>/readMany` ·
+> `GET /api/<c>/<id>` → `GET /api/<c>/readOne/<id>` · `POST /api/<c>` → `POST /api/<c>/createOne` ·
+> `PATCH /api/<c>/<id>` → `POST /api/<c>/updateOne/<id>` · `PUT /api/<c>` → `POST /api/<c>/updateOne` ·
+> `DELETE /api/<c>/<id>` → `POST /api/<c>/deleteOne/<id>` ·
+> `POST /api/<c>/bulk {action:'delete'}` → `POST /api/<c>/deleteMany {ids}` ·
+> `{action:'publish'|'unpublish'}` → `POST /api/<c>/updateMany {ids, patch:{status}}` ·
+> `{action:'duplicate'}` → `POST /api/<c>/duplicate {ids}` · `GET /api/<c>/options` unchanged ·
+> `GET /api/<c>/translations?group=` unchanged · `GET /api/<c>/<id>/translations` →
+> `GET /api/<c>/translations/<id>` · `GET /api/<c>/<id>/dead-refs` → `GET /api/<c>/deadRefs/<id>` ·
+> `GET /api/collections/<name>` → `GET /api/<c>/schema` ·
+> `GET /api/references/referrers?collection=X` → `GET /api/X/referrers` ·
+> `GET /api/references/broken` → `GET /api/brokenRefs` · `POST /api/auth/login` → `POST /api/login` ·
+> `POST /api/auth/logout` → `POST /api/logout` · `GET /api/auth/session` → `GET /api/session` ·
+> `POST /api/preview` → `POST /api/createPreview` · `GET /api/publish-status` → `GET /api/publishStatus` ·
+> `GET /api/links/resolve` → `GET /api/resolveLinks` · `GET /api/media` → `GET /api/media/readMany` ·
+> `GET /api/media/<id>` → `GET /api/media/readOne/<id>` · `POST /api/media` → `POST /api/media/upload` ·
+> `PATCH /api/media/<id>` → `POST /api/media/updateAsset/<id>` · `DELETE /api/media/<id>` →
+> `POST /api/media/deleteAsset/<id>` · `GET /api/media/<id>/usages` → `GET /api/media/usages/<id>`.
+> Unchanged: `GET /api/collections`, `GET /api/blocks`, `GET /api/route`, `GET /api/preview`,
+> `POST /api/publish`, `GET /api/media/{library,resolve,folders,backfill}`, the media
+> `move`/`copy`/`rename`/`delete` per-id routes, sitemap/robots/llms.
+>
+> **Action required:** update every client that calls the API directly (custom admin code, scripts,
+> integrations) to the new grammar. The admin UI itself needs no change — it already goes through
+> `useCollectionOps`/`useMediaLibrary`, which were migrated with this release.
+>
+> ### ⚠ Breaking — batch actions
+>
+> The single `POST /api/<c>/bulk {action, ids}` envelope is gone. Each action is now its own pipeline
+> (`deleteMany`, `updateMany`, `duplicate` — see table above); `core/app/utils/bulk-actions.ts`'s action
+> allow-list is removed along with it.
+>
+> ### ⚠ Breaking — write-event/write-effect buses removed
+>
+> `registerWriteListener` and `registerWriteEffect` are gone. Register a named **after-step** instead —
+> `registerAfterStep({ step, critical, ops?, on? })`, auto-imported from `server/utils/after-steps.ts`
+> exactly where the old functions were. `critical: false` is what a write listener used to be (logged,
+> save stays green); `critical: true` is what a write effect used to be (a failure becomes the response).
+> Unlike a bus subscription, every after-step is named and appears in `?debug=pipeline` and
+> `GET /api/_pipelines`.
+
+### Added
+
+- The **pipeline engine** (`layers/core/server/pipeline/`) — `definePipeline`, a step-composition
+  registry with anchor-based patching (`before`/`after`/`replace`), sealed steps (`unsafeReplace` to
+  override), a checked synchronous critical section (`assertUnique → persist` can never contain an
+  `await`), and declarative `access`/`csrf`/`ipAllowlist` gates evaluated once, before step 1.
+- **Traceability.** `GET /api/_pipelines` (admin-only) statically lists every routable pipeline — route,
+  gates, every step and after-step, composed live from the registry. `?debug=pipeline` embeds a run's
+  trace (`$pipeline`) into the response for an admin caller. A one-line dev-mode log
+  (`[kestrel] pipeline <collection>/<op> step=Xms ... total=Yms`) covers every run, including a failed one.
+- **Schema-driven admin actions.** A custom write pipeline's `ui: { kind?, label?, icon?, confirm? }`
+  surfaces it in the collection list — a bulk-bar button, a row action, or both — with no admin-side code.
+- Reads are pipelines too: `readOne`/`readMany` compose from named steps (`parseQuery`/`fetch`/`populate`/
+  `attachMeta`), so a consumer's own custom read gets the same patching and access-declaration machinery a
+  write does.
+- `login`/`logout` are now ordinary pipelines (`layers/auth/server/pipelines/auth.ts`), registered the same
+  way a consumer's own extension would register one.
+
+### Changed
+
+- `layers/core/server/utils/crud.ts`'s `create`/`update`/`remove`/`list`/`getOne`/`getSingleton` are now
+  thin delegates over the pipeline engine (`runWrite`/`runRead`) — behavior is unchanged for a
+  zero-config project (no `definePipeline` anywhere behaves exactly like 3.x's CRUD).
+- The access-guard middleware (`layers/access/server/middleware/access-guard.ts`) shrank to 21 lines:
+  resolve the principal, default-deny anything no pipeline claims, refresh the session. Authorization for
+  every pipeline-claimed path now lives on that pipeline's own `access`/`csrf`/`ipAllowlist` declaration.
+- `publicReadableResources()` (the anonymous-read set the sitemap and the relation populator consult) is
+  now derived directly from read pipelines' `access` declarations — one statement of public reachability,
+  not a separate `pageLike` derivation.
+
+### Removed
+
+- `registerWriteListener`, `registerWriteEffect`, and the two event buses behind them — replaced by
+  `registerAfterStep` (see Breaking, above).
+- `requireAdmin`, `evaluateAccess`, `resourceForPath`, `isBootstrapPath`, `isPublicRenderPath` — the
+  route-level authorization helpers a pipeline's `access` gate now replaces.
+- `core/app/utils/bulk-actions.ts` — its action allow-list was the wire contract of the deleted
+  `POST /api/<c>/bulk` envelope.
+
+### Documentation
+
+- The hand-written docs are split by audience: [`docs/guide/`](docs/guide/README.md) for people building
+  a site with the package (one page per feature area, a configuration reference, a deployment page and a
+  troubleshooting page) and [`docs/internals/`](docs/internals/README.md) for people developing Kestrel
+  (architecture, layers and packages, the pipeline engine, extension points, test rails, releasing, the
+  ADR log). The old flat `docs/*.md` files and `docs/engineering/` are gone; links into them now point at
+  the new pages.
+- A `docs-hygiene` architecture test checks every relative link and anchor across the docs and keeps
+  internal working vocabulary and source paths out of the consumer guide.
+
 ## [3.0.1] — 2026-08-19
 
 ### Fixed
@@ -48,8 +188,8 @@ replace an admin component by accident — and gets one deliberate way to replac
 
 - `app/Kestrel/components/` — the one supported way to replace a shipped admin component. A file there
   mirroring Kestrel's own path (`app/Kestrel/components/ui/Button.vue`) outranks the layer's; anywhere
-  else loses. Documented in [consuming-kestrel.md](docs/consuming-kestrel.md).
-- [docs/field-types.md](docs/field-types.md) — a reference for all twelve built-in field types: every
+  else loses. Documented in [docs/guide/collections.md](docs/guide/collections.md).
+- [docs/guide/field-types.md](docs/guide/field-types.md) — a reference for all twelve built-in field types: every
   option, the column it becomes, and whether the server enforces it or it only configures the widget.
   Covers what was previously undocumented, including the `json` type, `text.multiline`,
   `number.decimals`/`unit`, `datetime.precision`/`range`, `choice.display`, `link.types`,
@@ -80,8 +220,8 @@ migrations mean an existing project needs a `db:migrate` before it boots — see
   the publish cycle, so a redirect goes live without a full republish (where the output target is what the
   site is served from: `output.auto: true`, or `auto: false` + `driver: 's3'`). Kestrel serves no
   redirects itself; an edge (NGINX/njs, CloudFront) reads the artifact. If the write fails, the save fails
-  and says the artifact is stale. See [`docs/static-output.md` › Redirects](docs/static-output.md#redirects)
-  and [ADR-0009](docs/architecture-decisions.md).
+  and says the artifact is stale. See [docs/guide/redirects.md](docs/guide/redirects.md)
+  and [ADR-0009](docs/internals/decisions.md).
 - **`CollectionDef.validate`** — whole-record, pre-write validation for what a per-field Zod validator
   cannot see (it only ever sees one field's value). Issues are keyed by field, so they land on the field
   in the editor like any other 400.
@@ -92,7 +232,7 @@ migrations mean an existing project needs a `db:migrate` before it boots — see
   (`KESTREL_SEO_ARTICLE_META`) offers editors author / publication date / keywords and promotes the page's
   node to `Article`, and `seo.llmsFull` (`KESTREL_SEO_LLMS_FULL`) serves and publishes `/llms-full.txt`,
   every published, indexable page's full body as Markdown in one document. `noindex` removes a page from
-  all of it consistently. See [`docs/static-output.md` › Structured data](docs/static-output.md#structured-data-json-ld).
+  all of it consistently. See [docs/guide/seo.md](docs/guide/seo.md).
 - **EU AI Act (Art. 50) disclosure on media assets** — opt-in via `aiDisclosure.enabled`
   (`KESTREL_AI_DISCLOSURE`), off by default. Two nullable columns (`aiSourceType`, `aiNote`) record how an
   asset was produced; with the flag on, the media viewer gains the controls and each upload is scanned for
@@ -102,7 +242,7 @@ migrations mean an existing project needs a `db:migrate` before it boots — see
   C2PA manifest, and emits nothing into public output on its own. `ResolvedMedia.aiDisclosure` is always
   resolved, so turning the flag back off keeps existing data. `<KestrelImg ai-badge>` renders an optional,
   deliberately unstyled badge. See
-  [`docs/media-uploads.md` › EU AI Act disclosure](docs/media-uploads.md#eu-ai-act-art-50-disclosure).
+  [docs/guide/ai-disclosure.md](docs/guide/ai-disclosure.md).
 
 ### Fixed
 
@@ -136,7 +276,7 @@ else in this release — the richtext fixes below — would have been 1.8.0; it 
 >
 > **Unaffected:** unpublishing and deleting still take a page down immediately, `nuxt generate` still
 > builds the whole site from the current DB, and the sitemap/`status` semantics are unchanged.
-> Rationale and the full model: [ADR-0008](docs/architecture-decisions.md).
+> Rationale and the full model: [ADR-0008](docs/internals/decisions.md).
 
 ### Changed
 
@@ -151,7 +291,7 @@ else in this release — the richtext fixes below — would have been 1.8.0; it 
   rendered, so a first deploy behaves as before. `nuxt generate` is unchanged: it builds the whole site from
   the current DB.
   Upgrading an existing project: nothing breaks, but content edits now need the Publish step. See
-  [ADR-0008](docs/architecture-decisions.md). To keep the old behaviour, set **`output.publishOnSave: true`**
+  [ADR-0008](docs/internals/decisions.md). To keep the old behaviour, set **`output.publishOnSave: true`**
   (env `KESTREL_OUTPUT_PUBLISH_ON_SAVE=1`): every save republishes as before, the Publish button disappears,
   and a full publish holds nothing back.
 
@@ -238,7 +378,7 @@ that found *nothing*, because the second one silently overwrites live output wit
   Note the boundary this does *not* cover: the render entry `/api/route` still populates in full for every
   principal, and populated relations are serialised into each generated page's hydration payload. **Any
   collection reachable from a page-like record's relations is public data regardless of its access grant** —
-  see [static-output.md](docs/static-output.md) and [population.md](docs/population.md), and project the
+  see [docs/guide/deploying.md](docs/guide/deploying.md) and [docs/guide/querying.md](docs/guide/querying.md), and project the
   relation if it holds columns that must not ship.
 - **The IP allow-list no longer widens a malformed entry to `0.0.0.0/0`.** A token whose prefix was empty or
   non-numeric (`203.0.113.10/`, `/0x10`, `/1e1`) parsed to a zero mask and admitted the entire IPv4
@@ -292,12 +432,12 @@ that found *nothing*, because the second one silently overwrites live output wit
 
 ### Documentation
 
-- [static-output.md](docs/static-output.md) documents what a generated page actually contains, including
+- [docs/guide/deploying.md](docs/guide/deploying.md) documents what a generated page actually contains, including
   the hydration payload and the exposure boundary it creates.
-- [population.md](docs/population.md) explains how to project a relation, and why such an override must
+- [docs/guide/querying.md](docs/guide/querying.md) explains how to project a relation, and why such an override must
   delegate to the type populator — one that re-reads the table instead loses `captureRead` and silently
   disables the invalidation that re-publishes the page.
-- [consuming-kestrel.md](docs/consuming-kestrel.md) corrects the shipped public-component surface and the
+- [docs/guide/collections.md](docs/guide/collections.md) corrects the shipped public-component surface and the
   built-in collection list.
 
 [3.0.1]: https://github.com/MichaelThielemann/kestrel/releases/tag/v3.0.1

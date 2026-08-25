@@ -5,7 +5,7 @@ import { rmSync, mkdtempSync } from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch } from '@nuxt/test-utils/e2e'
 import sharp from 'sharp'
-import { hashPassword } from '../../layers/auth/server/utils/password'
+import { hashPassword } from '@kestrel/auth'
 
 const dbPath = join(tmpdir(), `kestrel-render-e2e-${process.pid}.sqlite`)
 const uploads = mkdtempSync(join(tmpdir(), 'kestrel-render-up-'))
@@ -22,7 +22,7 @@ describe('public rendering (e2e)', async () => {
 
   let cookie = ''
   beforeAll(async () => {
-    const res = await testFetch('/api/auth/login', {
+    const res = await testFetch('/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ password: PW }),
@@ -35,17 +35,17 @@ describe('public rendering (e2e)', async () => {
     const png = await sharp({ create: { width: 320, height: 200, channels: 4, background: { r: 9, g: 9, b: 9, alpha: 1 } } }).png().toBuffer()
     const form = new FormData()
     form.append('file', new Blob([png], { type: 'image/png' }), 'hero.png')
-    const media = await $fetch('/api/media', { method: 'POST', headers: { cookie }, body: form }) as { id: number }
+    const media = await $fetch('/api/media/upload', { method: 'POST', headers: { cookie }, body: form }) as { id: number }
 
-    await $fetch('/api/pages', {
+    await $fetch('/api/pages/createOne', {
       method: 'POST', headers: { cookie },
       body: { title: 'Home', path: '/', status: 'published', content: [{ id: 'h', type: 'hero', props: { heading: 'Welcome home', image: media.id } }] },
     })
-    await $fetch('/api/pages', {
+    await $fetch('/api/pages/createOne', {
       method: 'POST', headers: { cookie },
       body: { title: 'Hallo', path: '/willkommen', locale: 'de', status: 'published', content: [{ id: 'p', type: 'prose', props: { body: '<p>Servus</p>' } }] },
     })
-    await $fetch('/api/pages', {
+    await $fetch('/api/pages/createOne', {
       method: 'POST', headers: { cookie },
       body: { title: 'Secret', path: '/secret', status: 'draft' },
     })
@@ -57,12 +57,12 @@ describe('public rendering (e2e)', async () => {
   })
 
   it('composes the title from the site singleton and falls back to its description', async () => {
-    await $fetch('/api/site?locale=en', {
-      method: 'PUT',
+    await $fetch('/api/site/updateOne?locale=en', {
+      method: 'POST',
       headers: { cookie },
       body: { baseTitle: 'Acme Docs', titleSeparator: '·', titlePosition: 'after', description: 'Site-wide blurb' },
     })
-    await $fetch('/api/pages', { method: 'POST', headers: { cookie }, body: { title: 'Pricing', path: '/pricing', status: 'published' } })
+    await $fetch('/api/pages/createOne', { method: 'POST', headers: { cookie }, body: { title: 'Pricing', path: '/pricing', status: 'published' } })
 
     const html = await $fetch('/pricing') as string
     expect(html).toContain('<title>Pricing · Acme Docs</title>')
@@ -72,7 +72,7 @@ describe('public rendering (e2e)', async () => {
   })
 
   it('lets a page override the site description without losing the composed title', async () => {
-    await $fetch('/api/pages', {
+    await $fetch('/api/pages/createOne', {
       method: 'POST',
       headers: { cookie },
       body: { title: 'Own', path: '/own-seo', status: 'published', seo: { description: 'Page blurb' } },
@@ -89,8 +89,8 @@ describe('public rendering (e2e)', async () => {
   it('renders a page in the layout it selects, and the default when it selects none', async () => {
     // `app/layouts/alt.vue` marks itself with data-layout; the default layout does not. Exactly one <main>
     // per page also proves `layout: false` stopped the route-meta layout from wrapping it a second time.
-    await $fetch('/api/pages', { method: 'POST', headers: { cookie }, body: { title: 'Alt', path: '/alt-layout', status: 'published', layout: 'alt' } })
-    await $fetch('/api/pages', { method: 'POST', headers: { cookie }, body: { title: 'Plain', path: '/plain-layout', status: 'published' } })
+    await $fetch('/api/pages/createOne', { method: 'POST', headers: { cookie }, body: { title: 'Alt', path: '/alt-layout', status: 'published', layout: 'alt' } })
+    await $fetch('/api/pages/createOne', { method: 'POST', headers: { cookie }, body: { title: 'Plain', path: '/plain-layout', status: 'published' } })
 
     const alt = await $fetch('/alt-layout') as string
     expect(alt).toContain('data-layout="alt"')
@@ -104,7 +104,7 @@ describe('public rendering (e2e)', async () => {
   it('still renders a page whose selected layout no longer exists', async () => {
     // The column is deliberately not an enum, so a consumer deleting a layout file must degrade to the
     // default rather than blank the page — that is what NuxtLayout's `fallback` is for.
-    await $fetch('/api/pages', { method: 'POST', headers: { cookie }, body: { title: 'Gone', path: '/gone-layout', status: 'published', layout: 'deleted-layout' } })
+    await $fetch('/api/pages/createOne', { method: 'POST', headers: { cookie }, body: { title: 'Gone', path: '/gone-layout', status: 'published', layout: 'deleted-layout' } })
     const html = await $fetch('/gone-layout') as string
     expect(html).toContain('<main>')
     expect(html).toContain('Gone')
@@ -124,8 +124,6 @@ describe('public rendering (e2e)', async () => {
   it('404s a draft (unpublished) path', async () => {
     await expect($fetch('/secret')).rejects.toMatchObject({ statusCode: 404 })
   })
-
-  // ---- editor live-preview mode (?kestrel-preview=1 + the dedicated fallback page) ----
 
   it('serves the plain page (no marker chrome) to an anonymous visitor with the preview flag', async () => {
     const html = await $fetch('/?kestrel-preview=1') as string

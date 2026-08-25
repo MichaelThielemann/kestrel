@@ -19,7 +19,7 @@ describe('useMediaDnd', () => {
   it('shows the upload overlay only for file drags, not internal drags', () => {
     const a = base()
     a.onDragEnter(dragEvent({ types: MEDIA }))
-    expect(a.dragActive.value).toBe(false) // internal drag → no overlay
+    expect(a.dragActive.value).toBe(false)
     const b = base()
     b.onDragEnter(dragEvent({ types: FILES }))
     expect(b.dragActive.value).toBe(true)

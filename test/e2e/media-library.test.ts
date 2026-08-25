@@ -5,7 +5,7 @@ import { rmSync, mkdtempSync } from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch, createPage, url } from '@nuxt/test-utils/e2e'
 import sharp from 'sharp'
-import { hashPassword } from '../../layers/auth/server/utils/password'
+import { hashPassword } from '@kestrel/auth'
 import { e2eBrowserOptions } from '../helpers/e2e-browser'
 
 const dbPath = join(tmpdir(), `kestrel-media-lib-e2e-${process.pid}.sqlite`)
@@ -29,7 +29,7 @@ describe('media library browse (e2e, browser)', async () => {
   let cookie = ''
   let fileId = 0
   beforeAll(async () => {
-    const res = await testFetch('/api/auth/login', {
+    const res = await testFetch('/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ password: PW }),
@@ -46,7 +46,7 @@ describe('media library browse (e2e, browser)', async () => {
     form.append('file', new Blob([png], { type: 'image/png' }), 'demo.png')
     form.append('folder', 'lib-demo')
 
-    const created = await $fetch('/api/media', {
+    const created = await $fetch('/api/media/upload', {
       method: 'POST',
       headers: { cookie },
       body: form,
@@ -68,11 +68,9 @@ describe('media library browse (e2e, browser)', async () => {
     await page.context().addCookies([{ name, value, url: url('/') }])
     await page.goto(url('/admin/media'))
 
-    // the root listing renders the uploaded folder (default view is grid)
     const folderTile = page.locator('[data-test="folder-lib-demo"]')
     await folderTile.getByText('lib-demo').waitFor()
 
-    // navigating into the folder (URL-driven) reveals the uploaded file
     await folderTile.click()
     await page.waitForURL(/folder=lib-demo/)
     const fileTile = page.locator(`[data-test="file-${fileId}"]`)

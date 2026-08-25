@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import prerenderRoutesModule, { discoverRoutes } from './index'
-import { readRouteDiscovery } from '../deploy-output/deploy-output'
+import { readRouteDiscovery } from '@kestrel/delivery-static'
 
 const dir = (): string => mkdtempSync(join(tmpdir(), 'kestrel-prerender-'))
 

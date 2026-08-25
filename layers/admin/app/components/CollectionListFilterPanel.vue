@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { FilterOp } from '../../../core/app/utils/filter-ops'
+import type { FilterOp } from '@kestrel/core'
 import type { ListFilterDraft } from '../composables/useListFilterDraft'
 import { columnLabel } from '../utils/list-cell'
 import type { ListColumn } from '../utils/list-columns'

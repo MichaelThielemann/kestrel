@@ -1,4 +1,4 @@
-import { localePath } from '../../../core/app/utils/locale-path'
+import { localePath } from '@kestrel/core/client'
 
 export interface PageHeadImage { src: string; width?: number | null; height?: number | null }
 export interface PageHeadAlternate { locale: string; path: string }

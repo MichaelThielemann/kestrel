@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import type { Ref } from 'vue'
-import type { FieldDef } from '../../../core/server/utils/defineCollection'
+import type { FieldDef } from '@kestrel/core'
 import { reorder } from '../utils/reorder'
 import { useEchoGuard } from './useEchoGuard'
 

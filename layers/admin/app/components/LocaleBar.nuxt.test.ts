@@ -17,7 +17,9 @@ describe('LocaleBar', () => {
     const w = await mountSuspended(LocaleBar, {
       props: { collection: 'posts', id: '5', mode: 'multi', current: 'en', translations: { en: 5, de: 12 }, group: 'grp1' },
     })
-    expect(w.findAll('a').some((a) => a.attributes('href') === '/admin/posts/12?locale=de')).toBe(true)
+    // No `?locale=` — the target id already IS the sibling's row; the editor reads its locale off the
+    // loaded record, not the query (see useEditForm).
+    expect(w.findAll('a').some((a) => a.attributes('href') === '/admin/posts/12')).toBe(true)
     expect(w.find('.locale-bar__btn--add').exists()).toBe(false)
     const copy = w.find('.locale-bar__btn--copy')
     expect(copy.exists()).toBe(true)

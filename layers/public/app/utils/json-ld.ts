@@ -1,4 +1,4 @@
-import { localePath } from '../../../core/app/utils/locale-path'
+import { localePath } from '@kestrel/core/client'
 
 /** One published ancestor of the rendered page, outermost first — the breadcrumb trail. */
 export interface JsonLdAncestor {

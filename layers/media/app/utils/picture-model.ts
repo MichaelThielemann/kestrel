@@ -1,5 +1,5 @@
-import type { ResolvedMedia } from '../../server/utils/resolve'
-import type { VariantFit, VariantFormat, ResolvedVariant } from '../../../core/server/utils/kestrel-config'
+import type { ResolvedMedia } from '@kestrel/media'
+import type { VariantFit, VariantFormat, ResolvedVariant } from '@kestrel/core'
 import { variantName } from './variant-name'
 
 /** What a `KestrelImg` / `useMediaVariant` call declares it needs. One call may declare MULTIPLE sizes and

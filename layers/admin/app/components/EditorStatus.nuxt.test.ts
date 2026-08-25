@@ -85,7 +85,7 @@ describe('EditorStatus — right dot (live / generated state, pageLike only)', (
     expect(liveTone(w)).toBe('amber')
   })
 
-  // Saving no longer republishes, so "published page, newer saved content" is the normal working state.
+  // Saving does not republish, so "published page, newer saved content" is the normal working state.
   it('amber "Outdated" when the record was saved after its page was last published', async () => {
     const w = await mountSuspended(EditorStatus, {
       props: { dirty: false, pageLike: true, hasStatus: true, status: 'published', live: { route: '/about', status: 'success', pending: true } },
@@ -148,7 +148,7 @@ describe('EditorStatus — right dot (live / generated state, pageLike only)', (
     expect(liveWord(err)).toBe('Error')
   })
 
-  // A save no longer enqueues anything, so "no status row" stopped meaning "a publish is running". Claiming
+  // A save does not enqueue anything, so "no status row" does not mean "a publish is running". Claiming
   // progress here points the user at a spinner instead of at the Publish button they actually need.
   it('blue "Not published" for a page that has never been published', async () => {
     const w = await mountSuspended(EditorStatus, {
@@ -175,6 +175,14 @@ describe('EditorStatus — right dot (live / generated state, pageLike only)', (
   it('neutral "Not built" when this environment does not generate (dev / static output off)', async () => {
     const w = await mountSuspended(EditorStatus, {
       props: { dirty: false, pageLike: true, hasStatus: true, status: 'published', live: { route: '/about', status: null, generates: false } },
+    })
+    expect(liveTone(w)).toBe('neutral')
+    expect(liveWord(w)).toBe('Not built')
+  })
+
+  it('stays neutral in a non-generating environment even over a stale success row (never amber "Outdated")', async () => {
+    const w = await mountSuspended(EditorStatus, {
+      props: { dirty: false, pageLike: true, hasStatus: true, status: 'published', live: { route: '/about', status: 'success', pending: true, generates: false } },
     })
     expect(liveTone(w)).toBe('neutral')
     expect(liveWord(w)).toBe('Not built')

@@ -17,28 +17,24 @@ const articlesSchema = {
   fields: { title: { type: 'text', required: true, unique: false } },
 }
 registerEndpoint('/api/collections', () => ({ data: [thingsSchema, articlesSchema] }))
-registerEndpoint('/api/articles', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
+registerEndpoint('/api/articles/readMany', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
 
 let patched: Record<string, unknown> | null = null
 let posted: Record<string, unknown> | null = null
-registerEndpoint('/api/things/1', async (event) => {
-  if (event.method === 'PATCH') { patched = await readBody(event); return { id: 1, ...patched } }
-  return { id: 1, title: 'Existing' }
-})
+registerEndpoint('/api/things/readOne/1', () => ({ id: 1, title: 'Existing' }))
+registerEndpoint('/api/things/updateOne/1', { method: 'POST', handler: async (event) => { patched = await readBody(event); return { id: 1, ...patched } } })
 // A record whose title field is blank — the heading must fall back to the generic "#id" phrase.
-registerEndpoint('/api/things/2', () => ({ id: 2, title: '   ' }))
-registerEndpoint('/api/things', async (event) => {
-  if (event.method === 'POST') { posted = await readBody(event); return { id: 7, ...posted } }
-  return { data: [], total: 0, page: 1, perPage: 25 }
-})
+registerEndpoint('/api/things/readOne/2', () => ({ id: 2, title: '   ' }))
+registerEndpoint('/api/things/readMany', () => ({ data: [], total: 0, page: 1, perPage: 25 }))
+registerEndpoint('/api/things/createOne', { method: 'POST', handler: async (event) => { posted = await readBody(event); return { id: 7, ...posted } } })
 
-// The editor's Delete flows through the shared batch endpoint + the referrer-aggregate preview.
+// The editor's Delete flows through the shared batch pipeline + the referrer-aggregate preview.
 let bulkBody: Record<string, unknown> | null = null
-registerEndpoint('/api/things/bulk', async (event) => {
+registerEndpoint('/api/things/deleteMany', { method: 'POST', handler: async (event) => {
   bulkBody = await readBody(event)
-  return { action: bulkBody!.action, count: 1, ids: bulkBody!.ids }
-})
-registerEndpoint('/api/references/referrers', () => ({ counts: {} }))
+  return { count: 1, ids: bulkBody!.ids }
+} })
+registerEndpoint('/api/things/referrers', () => ({ counts: {} }))
 
 // Route + navigation are mocked so the page reads collection/id from `h.params` and navigations are captured.
 const h = vi.hoisted(() => ({ params: { collection: 'things', id: '1' }, nav: [] as unknown[] }))
@@ -171,7 +167,7 @@ describe('record editor page header', () => {
     const confirm = w.findAll('.ui-dialog__content .ui-button').find((b) => /^delete$/i.test(b.text().trim()))!
     await confirm.trigger('click')
     await settle()
-    expect(bulkBody).toEqual({ action: 'delete', ids: [1] })
+    expect(bulkBody).toEqual({ ids: [1] })
     expect(h.nav).toContain('/admin/things')
   })
 

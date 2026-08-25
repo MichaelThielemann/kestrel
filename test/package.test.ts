@@ -182,7 +182,7 @@ describe('kestrel core — the framework/utility packages layer sources import a
     { file: 'layers/core/modules/kestrel/index.ts', pkg: '@nuxt/kit' },
     { file: 'layers/core/modules/auto-discovery/index.ts', pkg: '@nuxt/kit' },
     { file: 'layers/core/modules/auto-discovery/extract-block.ts', pkg: '@babel/parser' },
-    { file: 'layers/core/server/utils/crud.ts', pkg: 'h3' },
+    { file: 'layers/public/server/delivery-live/serve.ts', pkg: 'h3' },
     { file: 'layers/admin/app/composables/useUnsavedGuard.ts', pkg: 'vue-router' },
     { file: 'layers/admin/app/composables/useLinkResolver.ts', pkg: 'vue' },
   ]

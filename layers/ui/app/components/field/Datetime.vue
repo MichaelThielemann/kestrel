@@ -6,7 +6,7 @@ import UiTimeInput from '../ui/TimeInput.vue'
 import UiDatePicker from '../ui/DatePicker.vue'
 import UiDateRangePicker from '../ui/DateRangePicker.vue'
 import type { FieldComponentProps } from '../../utils/field-component'
-import type { FieldOf } from '../../../../core/server/utils/defineCollection'
+import type { FieldOf } from '@kestrel/core'
 
 const { t } = useT()
 const props = defineProps<FieldComponentProps>()

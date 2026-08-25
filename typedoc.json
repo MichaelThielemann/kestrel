@@ -1,0 +1,16 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "packages/kestrel-core/src/server/utils/defineCollection.ts",
+    "packages/kestrel-core/src/server/pipeline/types.ts",
+    "packages/kestrel-core/src/server/utils/serialize-collection.ts",
+    "packages/kestrel-fields/src/server/field-registry/index.ts",
+    "packages/kestrel-contracts/src/index.ts"
+  ],
+  "tsconfig": "tsconfig.typedoc.json",
+  "out": "docs/api",
+  "treatValidationWarningsAsErrors": true,
+  "excludeExternals": true,
+  "excludePrivate": true,
+  "excludeInternal": true
+}

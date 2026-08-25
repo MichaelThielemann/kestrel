@@ -1,11 +1,10 @@
-export { pages } from '../../layers/collections/server/collections/pages'
+export { pages } from '@kestrel/collections'
 export { posts } from '../collections/posts'
 export { settings } from '../collections/settings'
-export { media } from '../../layers/media/server/collections/media'
-export { mediaSettings } from '../../layers/media/server/collections/media-settings'
-export { site } from '../../layers/public/server/collections/site'
-export { redirects } from '../../layers/public/server/collections/redirects'
-export { folders } from '../../layers/media/server/database/folders'
-export { publishDeps } from '../../layers/public/server/database/publish-deps'
-export { publishStatus } from '../../layers/public/server/database/publish-status'
-export { recordRefs } from '../../layers/core/server/database/record-refs'
+export { media, mediaSettings, folders } from '@kestrel/media'
+// The table only — never `snapshots.ts`'s read/write API — for drizzle-kit's schema discovery and
+// `schema.test.ts`'s parity check. `published-snapshots.test.ts` §F's source scan carries a documented,
+// specific exemption for this whole file.
+export { site, redirects, publishDeps, publishStatus, publishRuns, publishedSnapshots } from '@kestrel/publishing'
+export { recordRefs } from '@kestrel/core'
+export { outboxContent } from '@kestrel/core'
