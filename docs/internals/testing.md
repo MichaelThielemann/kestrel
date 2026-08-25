@@ -123,24 +123,8 @@ deterministic function of the route — it isn't an end-to-end render proof. It'
 
 ## Mutation testing
 
-A passing test suite that never kills a mutant is verifying nothing. StrykerJS no longer runs against a
-hand-written module list: `pnpm mutation:scope` takes its targets from the graph audit's `weak-guard`
-candidates, generates a Stryker config and a matching narrow Vitest config so only the tests the graph
-says reach those targets run against the mutated code, and writes every mutant no test noticed to
-`docs/parity/mutants.json`.
-
-It is the second stage of the audit rail, so it needs the coverage artifact and an audit run at the same
-scope ahead of it — the mutation run refuses a scope the candidates were not derived under:
-
-```bash
-pnpm test:coverage                                     # reports/coverage/coverage-final.json
-pnpm graph:audit --scope packages/kestrel-access       # weak-guard candidates for that path
-pnpm mutation:scope --scope packages/kestrel-access    # add --dry-run to write the configs only
-```
-
-There is no break threshold to clear. A surviving mutant is not a score, it is a demonstration that a
-line can change with the suite still green, and it is adjudicated into a defect, a missing test or a
-justified break in the third stage. [graph-audit.md](./graph-audit.md) documents all three.
+A passing test suite that never kills a mutant is verifying nothing, but mutation testing here is done
+with local tooling that is not part of this repository — there is no `pnpm` command a clone can run for it.
 
 ## Working on the repo's own schema
 
@@ -161,9 +145,9 @@ release/API-surface ones live in [releasing.md](./releasing.md)):
   regenerate any time), by booting the same registries the architecture tests do. No dev server needed.
   The static build additionally folds in a repo-only graph section — the edge allowlist and API-surface
   ceilings — that the live route never renders.
-- **`pnpm graph:audit`** — derives review candidates from the knowledge graph: sibling paths that differ,
-  call-order and position anomalies, import cycles, duplicated modules, coverage gaps. It reports places
-  to look, never defects — judging a candidate needs the source, which the graph doesn't hold.
+- **`pnpm test:coverage`** (`node scripts/coverage-all.mjs`) — runs the root suite plus each per-package
+  suite and merges the results into `reports/coverage/coverage-final.json`. Exits non-zero if any suite
+  fails, but still writes the merged artifact.
 
 ## See also
 
