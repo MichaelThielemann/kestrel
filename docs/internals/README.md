@@ -41,6 +41,7 @@ A productive reading path for a newcomer:
 - [Effect in this codebase](./effect-usage.md) — the runtime singleton, where Promises take over, the service pattern, and three runtime gotchas no type signature carries.
 - [Per-layer guide](./layer-guide.md) — for each of the nine layers: what it owns, which file to open first, and the traps.
 - [Testing and conventions](./testing.md) — TDD, the branch/merge convention, which runner picks up which test file, and what the architecture test suite proves.
+- [The graph-grounded code audit](./graph-audit.md) — the three-stage rail (coverage, graph-and-mutation targeting, agent judgement), the two gates that refuse a stale or reshaped graph, and what the graph cannot see.
 - [Releasing and dependencies](./releasing.md) — how the packages ship to npm, the release gates, the generated-docs pipeline, and the `package.json` policy.
 - [Architecture Decisions](./decisions.md) — the ADR log, one file, newest first.
 
