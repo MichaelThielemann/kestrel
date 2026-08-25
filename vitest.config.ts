@@ -7,6 +7,19 @@ const require2 = createRequire(import.meta.url)
 export default defineConfig({
   resolve: { alias: { h3: require2.resolve('h3') } },
   test: {
+    coverage: {
+      provider: 'v8',
+      reporter: ['json'],
+      reportsDirectory: 'reports/coverage',
+      // Branch counts are the whole point: line coverage cannot separate a function that ran
+      // from a function whose every path ran.
+      include: ['packages/*/src/**/*.ts', 'layers/*/**/*.ts', 'extensions/*/**/*.ts'],
+      exclude: ['**/*.test.ts', '**/*.d.ts', '**/node_modules/**', '**/dist/**'],
+      all: false,
+      // Unrelated tests (perf budgets, timing-sensitive checks) can fail under the overhead
+      // coverage instrumentation adds; the artifact must still be written when that happens.
+      reportOnFailure: true,
+    },
     projects: [
       {
         resolve: { alias: { h3: require2.resolve('h3') } },

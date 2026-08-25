@@ -41,7 +41,13 @@ docs/dashboard.html
 
 # StrykerJS mutation-testing output
 .stryker-tmp
-reports/mutation
+reports/
+docs/parity/candidates.md
+docs/parity/candidates.json
+docs/parity/agenda.json
+docs/parity/mutants.json
+docs/parity/verdicts.jsonl
+.audit-history/
 
 # api-extractor's scratch diff output (the accepted report lives in etc/*.api.md, committed)
 packages/*/temp
