@@ -12,7 +12,7 @@
 // via `syncStep(name, ...)`) into an ordered step chain, and exposes `stepOrderRespectsInvariant` for
 // querying it.
 import ts from 'typescript'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -320,7 +320,9 @@ function main() {
   const totalPorts = new Set(functions.flatMap((f) => f.ports)).size
 
   const emitted = buildEmittedGraph({ functions, bindings, pipelines })
-  const outPath = join(graphOutDir, 'port-graph.json')
+  const reportDir = join(root, 'reports/graph')
+  mkdirSync(reportDir, { recursive: true })
+  const outPath = join(reportDir, 'port-graph.json')
   writeFileSync(outPath, JSON.stringify({ generated_at: new Date().toISOString(), nodes: emitted.nodes, links: emitted.links }, null, 2))
 
   console.log(`port-graph: scanned ${scanned} exported functions in packages/kestrel-core/src`)
