@@ -53,7 +53,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "node scripts/coverage-all.mjs",
     "test:watch": "vitest",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:nuxt": "vitest run --config vitest.nuxt.config.ts",
