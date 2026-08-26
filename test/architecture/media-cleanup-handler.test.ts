@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { createTestDb } from '../helpers/db'
-import { clearOutboxHandlers, clearRegistry, create, outboxHandlersFor, pollOnce, readOutbox, recordRefs, registerCollection, registerReindexRefs, remove, createLocalDriver, getResolvedKestrelConfig, setResolvedKestrelConfig, DEFAULT_IMAGE_POLICY } from '@kestrel/core'
+import { allCollections, clearOutboxHandlers, clearRegistry, create, ensureRevisionsTable, outboxHandlersFor, pollOnce, readOutbox, recordRefs, registerCollection, registerReindexRefs, remove, createLocalDriver, getResolvedKestrelConfig, resetDbInstance, setResolvedKestrelConfig, useDb, DEFAULT_IMAGE_POLICY } from '@kestrel/core'
 import * as outboxDb from '@kestrel/core'
 import {
   registerMediaCleanup,
@@ -30,17 +31,27 @@ let uploadsDir: string
 let driver: ReturnType<typeof createLocalDriver>
 
 const ORIG_CONFIG = getResolvedKestrelConfig()
+const migrationsFolder = resolve(fileURLToPath(new URL('../../', import.meta.url)), 'server/database/migrations')
 
-function setupRuntime(): void {
+// reindexRefs (via useContentDb) reads the shared useDb() singleton, not an injectable port — point the
+// singleton itself at a fresh in-memory db instead of stubbing a global, which useDb() never reads
+// (mirrors reindex-refs-handler.test.ts's freshDb()).
+function setupRuntime(): BetterSQLite3Database {
   uploadsDir = mkdtempSync(join(tmpdir(), 'kestrel-media-cleanup-'))
   driver = createLocalDriver({ dir: uploadsDir, baseUrl: '/uploads' })
   // The handler's own useStorageDriver() (@kestrel/media, an explicit import there) reads the config
   // provider, so seed it to point at the same uploadsDir the test's own `driver` uses for fileExists checks.
   setResolvedKestrelConfig({
     ...ORIG_CONFIG,
+    dbPath: ':memory:',
     media: { dir: uploadsDir, baseUrl: '/uploads', driver: 'local', maxUploadBytes: 10_000_000, allowedMimes: '', s3: { bucket: '', region: '', endpoint: '', prefix: '', publicBaseUrl: '' }, imagePolicy: DEFAULT_IMAGE_POLICY },
   })
-  Object.assign(globalThis, { useDb: () => db })
+  resetDbInstance()
+  const freshDb = useDb() as unknown as BetterSQLite3Database
+  migrate(freshDb, { migrationsFolder })
+  const sqlite = (freshDb as unknown as { $client: { exec: (sql: string) => void } }).$client
+  for (const c of allCollections()) ensureRevisionsTable(sqlite as never, c.def.name)
+  return freshDb
 }
 
 function seedMediaRow(storageKey: string, derivativeKey?: string): { id: number } {
@@ -72,14 +83,13 @@ function mediaRowExists(id: number): boolean {
 beforeEach(() => {
   clearRegistry()
   registerCollection(mediaCollection)
-  db = createTestDb()
-  setupRuntime()
+  db = setupRuntime()
 })
 afterEach(() => {
   clearOutboxHandlers()
   clearRegistry()
-  delete (globalThis as Record<string, unknown>).useDb
   setResolvedKestrelConfig(ORIG_CONFIG)
+  resetDbInstance()
   rmSync(uploadsDir, { recursive: true, force: true })
   vi.restoreAllMocks()
 })
@@ -294,5 +304,5 @@ describe('convergence with reindexRefs: a media write also reaches the *.updated
     const edges = db.select().from(recordRefs).all()
       .filter((r: { sourceColl: string }) => r.sourceColl === 'media')
     expect(edges).toEqual([]) // media carries no ref-bearing field — reindexing it is a documented no-op
-  }, 15000)
+  })
 })
