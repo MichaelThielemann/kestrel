@@ -194,7 +194,7 @@ describe('every generated virtual that can reach a package barrel seeds field ty
   })
 
   it('every field-types-dependent seed is a used binding (`fieldTypes` referenced, never a bare import)', () => {
-    expect(indexTs).toMatch(/import \{ fieldTypes as __kestrelSeed \} from '@michaelthielemann\/kestrel-fields'/)
+    expect(indexTs).toMatch(/import \{ fieldTypes as __kestrelSeed \} from \$\{JSON\.stringify\(resolvePackageEntry\('@michaelthielemann\/kestrel-fields'\)\)\}/)
     expect(indexTs).toMatch(/if \(!__kestrelSeed \|\| typeof __kestrelSeed !== 'object'\) throw/)
   })
 

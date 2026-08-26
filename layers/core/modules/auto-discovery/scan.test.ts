@@ -101,7 +101,8 @@ describe('renderPackageMergedRegistry', () => {
     expect(code).toContain(`import { kestrelDiscovery as __pkg0 } from "@michaelthielemann/kestrel-media"`)
     expect(code).toContain(`import { kestrelDiscovery as __pkg1 } from "@michaelthielemann/kestrel-publishing"`)
     expect(code).toContain(`import _c0 from "/l/posts.ts"`)
-    expect(code).toContain(`import { mergeKestrelDiscovered } from '@michaelthielemann/kestrel-core'`)
+    // Resolved to a real file path, not left as the bare specifier — see resolvePackageEntry's TSDoc for why.
+    expect(code).toMatch(/import \{ mergeKestrelDiscovered \} from ".*kestrel-core.*"/)
     expect(code).toContain(`mergeKestrelDiscovered([...(__pkg0.collections ?? []), ...(__pkg1.collections ?? [])], [_c0], (x) => x.name)`)
   })
 

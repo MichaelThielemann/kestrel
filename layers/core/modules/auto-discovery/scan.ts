@@ -1,8 +1,23 @@
 import { readdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { blockNameFromFile } from './extract-block'
 
 type Lister = (dir: string) => string[]
+
+/**
+ * Resolves a bare `@michaelthielemann/kestrel-*` package specifier to its real entry FILE PATH, via Node's
+ * own ESM resolution from THIS module's own location — not the bare specifier itself, which a Nitro
+ * virtual module (no real file path of its own) cannot resolve reliably: Rollup falls back to resolving a
+ * virtual's imports from the project root, and under pnpm's isolated `node_modules` a package the
+ * CONSUMER never declared a direct dependency on (only the engine did, transitively) is invisible there —
+ * observed as `Cannot find package` at runtime, npm's flat hoisting having accidentally masked it in
+ * testing. This module's own file, once installed, sits inside the engine's package tree, so resolving
+ * from here walks the engine's OWN nested `node_modules`, where pnpm DID link the real dependency.
+ */
+export function resolvePackageEntry(spec: string): string {
+  return fileURLToPath(import.meta.resolve(spec))
+}
 
 const isDefinition = (name: string) =>
   name.endsWith('.ts') && !name.endsWith('.test.ts') && !name.endsWith('.d.ts')
@@ -118,7 +133,7 @@ export function renderPackageMergedRegistry(opts: {
   return [
     opts.preamble ?? '',
     opts.extraImports ?? '',
-    `import { mergeKestrelDiscovered } from '@michaelthielemann/kestrel-core'`,
+    `import { mergeKestrelDiscovered } from ${JSON.stringify(resolvePackageEntry('@michaelthielemann/kestrel-core'))}`,
     ...pkgImports,
     ...consumerImports,
     `export default mergeKestrelDiscovered([${pkgSpread}], [${consumerArr}], ${opts.nameOfExpr})`,

@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { addComponentsDir, addTemplate, addTypeTemplate, createResolver, defineNuxtModule } from '@nuxt/kit'
-import { collectBlockSfcs, collectDefinitions, collectManifestFiles, renderPackageConcatRegistry, renderPackageMergedRegistry, renderRegistry } from './scan'
+import { collectBlockSfcs, collectDefinitions, collectManifestFiles, renderPackageConcatRegistry, renderPackageMergedRegistry, renderRegistry, resolvePackageEntry } from './scan'
 import { renderBlockRegistry } from './extract-block'
 import { offerableLayouts, renderLayoutRegistry } from '../../app/utils/layouts'
 import { PACKAGE_COLLECTIONS, PACKAGE_MANIFESTS, PACKAGE_SCHEMA_TABLES } from './package-registry'
@@ -38,9 +38,10 @@ export default defineNuxtModule({
       nitro.virtual ||= {}
       // `@michaelthielemann/kestrel-fields`'s built-in descriptors (text/richtext/number/…) seed `core`'s field-type registry
       // as a side effect of importing the package itself — core cannot import fields, so this is the one
-      // place that import happens. A bare package specifier: no filesystem path-guessing across
-      // `nuxt.options._layers` for a `layers/fields` root — the package IS the seed's real, resolvable
-      // location, so there is nothing left to guess. Prepended so it always runs, even with zero consumer
+      // place that import happens. Resolved to a real file path (`resolvePackageEntry`), not left as the
+      // bare specifier: a Nitro virtual module has no real file of its own for a bundler to resolve a bare
+      // import FROM, so it falls back to the project root — where, under a real consumer's pnpm install,
+      // this package isn't visible (only the engine directly depends on it). Prepended so it always runs, even with zero consumer
       // field types (an empty `collectDefinitions` result would otherwise generate `export default []`,
       // importing nothing). Consumer field types register as a side effect on import too, and the schema
       // engine builds a table the moment a collection/block module loads — so the collections/blocks/
@@ -48,7 +49,7 @@ export default defineNuxtModule({
       // now reach a package's `buildCollection()` call transitively via `kestrelDiscovery`, per ADR-0029 —
       // an ESM barrel is an eager, whole-module-graph load — so all four need the same guard, not only the
       // two that directly build collections themselves).
-      const importFieldTypesSeed = `import { fieldTypes as __kestrelSeed } from '@michaelthielemann/kestrel-fields'\n`
+      const importFieldTypesSeed = `import { fieldTypes as __kestrelSeed } from ${JSON.stringify(resolvePackageEntry('@michaelthielemann/kestrel-fields'))}\n`
         + `if (!__kestrelSeed || typeof __kestrelSeed !== 'object') throw new Error('[kestrel] built-in field types failed to seed')\n`
       // A real runtime check on the imported binding, not a bare `import "path"` or a discarded `void x`
       // — Nitro's dev build tree-shakes an import whose binding has no provable effect, silently dropping
@@ -68,7 +69,7 @@ export default defineNuxtModule({
 
       nitro.virtual['#kestrel/collections'] = () =>
         renderPackageMergedRegistry({
-          packages: PACKAGE_COLLECTIONS,
+          packages: PACKAGE_COLLECTIONS.map(resolvePackageEntry),
           property: 'collections',
           consumerFiles: collectDefinitions(roots, 'server/collections'),
           nameOfExpr: '(x) => x.name',
@@ -87,7 +88,7 @@ export default defineNuxtModule({
       // hardcoding upper-layer tables.
       nitro.virtual['#kestrel/schema-tables'] = () =>
         renderPackageMergedRegistry({
-          packages: PACKAGE_SCHEMA_TABLES,
+          packages: PACKAGE_SCHEMA_TABLES.map(resolvePackageEntry),
           property: 'schemaTables',
           consumerFiles: collectDefinitions(roots, 'server/schema-tables'),
           nameOfExpr: '(x) => __kestrelTableName(x)',
@@ -101,7 +102,7 @@ export default defineNuxtModule({
       // distinct module (see `collectManifestFiles`'s own TSDoc).
       nitro.virtual['#kestrel/module-manifests'] = () =>
         renderPackageConcatRegistry({
-          packages: PACKAGE_MANIFESTS,
+          packages: PACKAGE_MANIFESTS.map(resolvePackageEntry),
           property: 'manifest',
           consumerFiles: collectManifestFiles(roots),
           preamble: importFieldTypesVirtual,
