@@ -440,6 +440,7 @@ that found *nothing*, because the second one silently overwrites live output wit
 - [docs/guide/collections.md](docs/guide/collections.md) corrects the shipped public-component surface and the
   built-in collection list.
 
+[4.0.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v4.0.0
 [3.0.1]: https://github.com/MichaelThielemann/kestrel/releases/tag/v3.0.1
 [3.0.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v3.0.0
 [2.1.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v2.1.0
