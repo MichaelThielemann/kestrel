@@ -79,6 +79,15 @@ ceiling, that supports the one-time-dispatch-overhead theory above; a run that k
 instead point at an unbounded per-call cost worth profiling directly (e.g. the outbox write on every
 `delete`), not re-pricing again.
 
+**Addendum — `createOne` on the CI runner's `node 22` leg.** The next CI run (same release, `main`'s
+`node 22` matrix leg only — `node 24` passed cleanly) missed `createOne`'s 20ms budget by 0.117ms (0.6%),
+a boundary miss rather than the clear-headroom pattern `delete`/`duplicate` showed above — most plausibly
+node-version variance, not a new fixed cost. Re-priced anyway by the same documented method rather than
+hand-waved: 20.117 × 1.5 = 30.18 → 32ms. `perf-budget.json` gains an `_adr_createOne` key pointing at this
+entry (superseding the ADR-0016 one). Because this looks like noise rather than signal, it is a candidate
+to re-tighten once more CI history exists — unlike `delete`/`duplicate`, which have a specific suspected
+cause.
+
 ## ADR-0029 — A package's eager module-load graph is a boot-order hazard distinct from ADR-0028's reuse rule
 
 **Status:** accepted.

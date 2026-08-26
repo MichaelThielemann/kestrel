@@ -27,8 +27,11 @@ log(`work dir: ${work}`)
 
 let server
 try {
+  // `pnpm --filter "@michaelthielemann/kestrel-*" -r build` does NOT reliably respect the dependency
+  // graph (observed: kestrel-access started before kestrel-core/kestrel-auth finished) — `build:packages`
+  // builds in explicit topological order instead.
   log('building @michaelthielemann/kestrel-* packages (dist/ must exist before pnpm pack)')
-  run('pnpm', ['--filter', '@michaelthielemann/kestrel-*', '-r', 'build'], { cwd: root })
+  run('pnpm', ['build:packages'], { cwd: root })
 
   log('packing the engine + every @michaelthielemann/kestrel-* package as npm publish would')
   const tarball = {}
