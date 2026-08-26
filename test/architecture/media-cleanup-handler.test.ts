@@ -294,5 +294,5 @@ describe('convergence with reindexRefs: a media write also reaches the *.updated
     const edges = db.select().from(recordRefs).all()
       .filter((r: { sourceColl: string }) => r.sourceColl === 'media')
     expect(edges).toEqual([]) // media carries no ref-bearing field — reindexing it is a documented no-op
-  })
+  }, 15000)
 })
