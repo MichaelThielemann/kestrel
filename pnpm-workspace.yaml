@@ -44,6 +44,13 @@ overrides:
   # dev-server advisory) next to vite's own copy; the override collapses both onto one current build.
   # Smoke-test drizzle-kit after touching it.
   esbuild: ^0.28.1
+  # vitest-openapi -> jest-openapi -> openapi-validator pins axios@0.21.4 (24 advisories, several high) and
+  # a stryker-mutator dependency chain pins qs@6.15.1 (a DoS advisory) — neither is a runtime dependency of
+  # any published package, but both get patched here rather than left in the dev/CI dependency tree.
+  # 0.33.0 is axios's own maintained legacy 0.x line (its dist-tag `v0x`), not the current 1.x major — kept
+  # deliberately, since 1.x is a real breaking change these libraries were never written against.
+  axios: 0.33.0
+  qs: 6.15.3
 
 allowBuilds:
   '@parcel/watcher': true
