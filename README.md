@@ -1,5 +1,7 @@
 # Kestrel
 
+**Please be aware that this project is under rapid development and may not be suitable for long-term projects.**
+
 A slim, **static-site-generator CMS**: a generic collection-driven CRUD core with a schema-driven admin
 editor. You declare collections and fields in TypeScript; Kestrel derives the database, a typed CRUD API,
 and a full admin UI from those definitions, and renders published content to static HTML via
