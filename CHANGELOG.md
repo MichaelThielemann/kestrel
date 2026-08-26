@@ -5,6 +5,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
+## [4.0.1] — 2026-08-26
+
+### Fixed
+
+- A real `pnpm install` of the packaged engine crashed on server boot with
+  `ERR_MODULE_NOT_FOUND: @michaelthielemann/kestrel-fields`. The `#kestrel/*` Nitro virtuals (collections,
+  schema-tables, blocks, module-manifests, field-types) generated bare `import ... from
+  '@michaelthielemann/kestrel-fields'` (and `-core`/`-media`/`-collections`/`-publishing`) statements — a
+  virtual module has no real file of its own for a bundler to resolve a bare import from, so resolution
+  fell back to the project root, where a package only the engine itself depends on (never the consumer
+  directly) is invisible under pnpm's isolated `node_modules`. npm's flat hoisting had masked this in every
+  prior consumer test. Every such import is now resolved to its real entry file path at build time instead
+  of left as a bare specifier.
+
 ## [4.0.0] — 2026-08-21
 
 Every `/api/` endpoint is now a **pipeline** — a named, declarative step list fronted by structurally
@@ -440,6 +454,7 @@ that found *nothing*, because the second one silently overwrites live output wit
 - [docs/guide/collections.md](docs/guide/collections.md) corrects the shipped public-component surface and the
   built-in collection list.
 
+[4.0.1]: https://github.com/MichaelThielemann/kestrel/releases/tag/v4.0.1
 [4.0.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v4.0.0
 [3.0.1]: https://github.com/MichaelThielemann/kestrel/releases/tag/v3.0.1
 [3.0.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v3.0.0
