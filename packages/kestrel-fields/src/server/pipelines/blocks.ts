@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
-import { definePipeline, serializeBlock, syncStep } from '@kestrel/core'
-import type { PipelineDef, StepDef } from '@kestrel/core'
+import { definePipeline, serializeBlock, syncStep } from '@michaelthielemann/kestrel-core'
+import type { PipelineDef, StepDef } from '@michaelthielemann/kestrel-core'
 import { allBlocks } from '../utils/defineBlock.js'
 type Query = Record<string, unknown>
 

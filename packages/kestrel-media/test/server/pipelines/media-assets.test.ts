@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import type { ValidationFailed } from '@kestrel/contracts'
+import type { ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 import { eq, getTableColumns } from 'drizzle-orm'
 import { createTestDb } from '../../../../../test/helpers/db.js'
 import { runStepAsync } from '../../../../../test/helpers/run-effect.js'
-import { create, createPipelineContext, ensureRevisionsTable, sqliteClientOf } from '@kestrel/core'
+import { create, createPipelineContext, ensureRevisionsTable, sqliteClientOf } from '@michaelthielemann/kestrel-core'
 import builtMedia, { media } from '../../../src/server/collections/media.js'
 import { buildMediaAssetPipelines } from '../../../src/server/pipelines/media-assets.js'
 let db: ReturnType<typeof createTestDb>

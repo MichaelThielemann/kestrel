@@ -1,4 +1,4 @@
-import { getResolvedKestrelConfig } from '@kestrel/core'
+import { getResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
 
 /**
  * Whether the EU AI Act disclosure feature is switched on for this consumer (`aiDisclosure.enabled`).

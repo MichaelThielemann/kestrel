@@ -1,4 +1,4 @@
-import { getCollection, isRoutablePipeline, parsePipelineRoute, tryResolveDefaultPipeline } from '@kestrel/core'
+import { getCollection, isRoutablePipeline, parsePipelineRoute, tryResolveDefaultPipeline } from '@michaelthielemann/kestrel-core'
 /**
  * Whether the pipeline router — not the legacy route guard — is the authority for this request. True only
  * when the URL parses as a pipeline route, names a registered collection (or none at all), resolves to a

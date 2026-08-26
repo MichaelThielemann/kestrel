@@ -1,4 +1,4 @@
-import type { FieldDef } from '@kestrel/core'
+import type { FieldDef } from '@michaelthielemann/kestrel-core'
 import { getBlock } from './defineBlock.js'
 
 /** A per-block-props mutation: populate/resolve one block's props in place, given its field defs.

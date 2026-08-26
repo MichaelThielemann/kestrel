@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
-import { definePipeline, eventOf, syncStep } from '@kestrel/core'
-import type { PipelineDef, StepDef } from '@kestrel/core'
+import { definePipeline, eventOf, syncStep } from '@michaelthielemann/kestrel-core'
+import type { PipelineDef, StepDef } from '@michaelthielemann/kestrel-core'
 import { getAuthSession } from '../utils/session-cookie.js'
 const readSession: StepDef = syncStep('readSession', (ctx) => Effect.sync(() => {
   ctx.output = getAuthSession(eventOf(ctx))

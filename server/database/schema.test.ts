@@ -5,7 +5,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { is } from 'drizzle-orm'
 import { SQLiteTable } from 'drizzle-orm/sqlite-core'
-import { desiredSchema, diffSchema, introspect } from '@kestrel/core'
+import { desiredSchema, diffSchema, introspect } from '@michaelthielemann/kestrel-core'
 import * as schema from './schema'
 
 // Every layer's committed table lives here (this file, not any one layer, is the app's full

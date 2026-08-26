@@ -1,4 +1,4 @@
-import { verifySession } from '@kestrel/auth'
+import { verifySession } from '@michaelthielemann/kestrel-auth'
 import type { Principal } from './policy.js'
 
 /** The inputs `derivePrincipal` needs to resolve a request's principal.

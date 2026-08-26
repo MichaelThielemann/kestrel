@@ -1,5 +1,5 @@
 {
-  "name": "@kestrel/delivery-live",
+  "name": "@michaelthielemann/kestrel-delivery-live",
   "version": "0.1.0",
   "description": "The live delivery adapter: serves published content from published_snapshots at request time (redirects, the read pipeline, and the DeliveryPort).",
   "license": "Apache-2.0",
@@ -37,9 +37,9 @@
     "test": "vitest run --typecheck"
   },
   "dependencies": {
-    "@kestrel/contracts": "workspace:*",
-    "@kestrel/core": "workspace:*",
-    "@kestrel/publishing": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-core": "workspace:*",
+    "@michaelthielemann/kestrel-publishing": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "effect": "~3.22.1"
   },

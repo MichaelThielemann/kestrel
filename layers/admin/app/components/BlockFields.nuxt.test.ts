@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
-import type { SerializedBlock } from '@kestrel/core'
+import type { SerializedBlock } from '@michaelthielemann/kestrel-core'
 import type { BlockRow } from '../utils/block-tree'
 import BlockFields from './BlockFields.vue'
 

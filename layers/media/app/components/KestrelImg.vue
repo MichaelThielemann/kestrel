@@ -2,8 +2,8 @@
 import { useBlurUp } from '../composables/useBlurUp'
 import { useMediaVariant } from '../composables/useMediaVariant'
 import { aiSourceTypeLabel } from '../utils/ai-disclosure'
-import type { ResolvedMedia } from '@kestrel/media'
-import type { VariantFit, VariantFormat } from '@kestrel/core'
+import type { ResolvedMedia } from '@michaelthielemann/kestrel-media'
+import type { VariantFit, VariantFormat } from '@michaelthielemann/kestrel-core'
 
 // The engine's responsive-image component: it renders a <picture> from the media's generated derivatives
 // AND its usage declares (to the generate-time scan) which sizes/formats are actually needed — "not in the

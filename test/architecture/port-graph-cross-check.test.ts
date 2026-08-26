@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { buildPipelineIndex, clearPipelines, clearRegistry, registerCollection } from '@kestrel/core'
-import type { PipelineDescriptor } from '@kestrel/core'
-import { pagesCollection as pages } from '@kestrel/collections'
+import { buildPipelineIndex, clearPipelines, clearRegistry, registerCollection } from '@michaelthielemann/kestrel-core'
+import type { PipelineDescriptor } from '@michaelthielemann/kestrel-core'
+import { pagesCollection as pages } from '@michaelthielemann/kestrel-collections'
 import { extractPortGraph, stepOrderRespectsInvariant, VALIDATING_WRITE_OPS } from '../../scripts/port-graph.mjs'
 
 // Boots the real registered pipelines exactly like pipeline-invariants.test.ts, so `index` reflects the

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { getTableConfig } from 'drizzle-orm/sqlite-core'
-import { buildCollection, defineCollection } from '@kestrel/core'
+import { buildCollection, defineCollection } from '@michaelthielemann/kestrel-core'
 import { defineBlock, registerBlock, clearBlocks } from '../../../src/server/utils/defineBlock.js'
 
 beforeEach(() => clearBlocks())

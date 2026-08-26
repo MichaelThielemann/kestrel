@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
-import { getCollection, useDb } from '@kestrel/core'
-import { compilePublishableRedirects, serializeRedirects, REDIRECTS_COLLECTION, REDIRECTS_FIELD } from '@kestrel/publishing'
+import { getCollection, useDb } from '@michaelthielemann/kestrel-core'
+import { compilePublishableRedirects, serializeRedirects, REDIRECTS_COLLECTION, REDIRECTS_FIELD } from '@michaelthielemann/kestrel-publishing'
 
 /**
  * The redirect artifact the edge polls. A save publishes it directly (see `plugins/03.redirects.ts`);

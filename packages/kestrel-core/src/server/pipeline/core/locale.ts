@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { ValidationFailed } from '@kestrel/contracts'
+import { ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 
 /** @public */
 export interface LocaleConfig {

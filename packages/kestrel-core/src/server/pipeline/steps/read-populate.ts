@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { populateRow, resolveBudgetFor, withResolveScope } from '@kestrel/core'
+import { populateRow, resolveBudgetFor, withResolveScope } from '@michaelthielemann/kestrel-core'
 import { collectionOf, type Row } from './shared.js'
 import type { ParsedListQuery } from './read-parse-query.js'
 import { clampDepth, publicOnlyOf, type ListResult } from './read-shared.js'

@@ -1,4 +1,4 @@
-import { setResolvedKestrelConfig } from '@kestrel/core'
+import { setResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
 import { resolveServerKestrelConfig } from '../utils/server-config'
 
 // Runs before every other core plugin (00.migrate.ts included — it calls useDb(), which now reads the

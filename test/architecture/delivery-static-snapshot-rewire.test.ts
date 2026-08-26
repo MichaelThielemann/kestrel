@@ -56,9 +56,9 @@ describe('the static route-render entrypoint reads through the snapshot store', 
     const hit = files.find((f) => /export\s+(async\s+)?function\s+renderRoute\b/.test(readFileSync(f, 'utf8')))
     expect(hit).toBeDefined()
     const text = readFileSync(hit!, 'utf8')
-    // The snapshot store now lives at `@kestrel/publishing` — a relative `.../snapshots(.ts)`
+    // The snapshot store now lives at `@michaelthielemann/kestrel-publishing` — a relative `.../snapshots(.ts)`
     // specifier is still accepted for any file that legitimately imports it from inside the package itself.
-    const importsSnapshotRead = /import\s*\{[^}]*\b(currentSnapshot|currentRoutes)\b[^}]*\}\s*from\s*['"](?:[^'"]*\/snapshots(?:\.ts)?|@kestrel\/publishing)['"]/.test(text)
+    const importsSnapshotRead = /import\s*\{[^}]*\b(currentSnapshot|currentRoutes)\b[^}]*\}\s*from\s*['"](?:[^'"]*\/snapshots(?:\.ts)?|@michaelthielemann\/kestrel-publishing)['"]/.test(text)
     expect(importsSnapshotRead, `${hit} must import currentSnapshot/currentRoutes from the snapshot store — the static render path may not read the live populate/render path directly`).toBe(true)
   })
 
@@ -73,25 +73,25 @@ describe('the static route-render entrypoint reads through the snapshot store', 
 
 describe("kestrel.config's delivery option (default 'static', normalized by resolveKestrel)", () => {
   it("resolveKestrel defaults delivery to 'static' when unset", async () => {
-    const { resolveKestrel } = await import('@kestrel/core')
+    const { resolveKestrel } = await import('@michaelthielemann/kestrel-core')
     const resolved = resolveKestrel({}, {}, '/root') as unknown as { delivery?: string }
     expect(resolved.delivery).toBe('static')
   })
 
   it("resolveKestrel honors an explicit config value ('live')", async () => {
-    const { resolveKestrel } = await import('@kestrel/core')
+    const { resolveKestrel } = await import('@michaelthielemann/kestrel-core')
     const resolved = resolveKestrel({ delivery: 'live' } as never, {}, '/root') as unknown as { delivery?: string }
     expect(resolved.delivery).toBe('live')
   })
 
   it('KESTREL_DELIVERY env overrides config, mirroring every other resolveKestrel setting (env → config → default)', async () => {
-    const { resolveKestrel } = await import('@kestrel/core')
+    const { resolveKestrel } = await import('@michaelthielemann/kestrel-core')
     const resolved = resolveKestrel({ delivery: 'static' } as never, { KESTREL_DELIVERY: 'live' }, '/root') as unknown as { delivery?: string }
     expect(resolved.delivery).toBe('live')
   })
 
   it('an invalid delivery value fails safe — either falls back to the default or throws, never passes through unnormalized', async () => {
-    const { resolveKestrel } = await import('@kestrel/core')
+    const { resolveKestrel } = await import('@michaelthielemann/kestrel-core')
     let result: { delivery?: string } | undefined
     let threw = false
     try {

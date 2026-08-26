@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { nextTick, ref } from 'vue'
 import { useLinkField } from './useLinkField'
-import type { LinkValue, LinkType } from '@kestrel/core'
+import type { LinkValue, LinkType } from '@michaelthielemann/kestrel-core'
 
 const ALL: LinkType[] = ['external', 'email', 'tel', 'internal']
 

@@ -9,7 +9,7 @@
 
 // Curated surface. A module is star-exported only while every symbol it exports belongs on the public
 // API; otherwise it is exported by NAME. A symbol earns a name here iff a consumer outside the package
-// imports it from `@kestrel/core` (tests count), or it is intended extension/contract surface, or it
+// imports it from `@michaelthielemann/kestrel-core` (tests count), or it is intended extension/contract surface, or it
 // appears in the signature of another public export. Everything else stays reachable package-internally
 // via relative imports but is not public API.
 

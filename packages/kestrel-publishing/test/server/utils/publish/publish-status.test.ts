@@ -3,7 +3,7 @@ import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { eq } from 'drizzle-orm'
 import { recordPublishStatus, clearPublishStatus, renderOutcome, type PublishStatusDb } from '../../../../src/server/utils/publish/publish-status.js'
-import { publishStatus } from '@kestrel/publishing'
+import { publishStatus } from '@michaelthielemann/kestrel-publishing'
 
 // Exercises the writers against a raw, unwrapped drizzle instance (unchecked — no `<Module>Db` ownership
 // adapter, on purpose: it's the pure-logic suite, not the ownership suite). `PublishStatusDb` is branded so

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { PublishedSnapshot } from '@kestrel/contracts'
+import type { PublishedSnapshot } from '@michaelthielemann/kestrel-contracts'
 import { createLiveDeliveryPort } from '../../src/server/port.js'
 
 function snapshot(route: string): PublishedSnapshot {

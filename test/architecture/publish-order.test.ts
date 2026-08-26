@@ -5,7 +5,7 @@ import { resolve, join } from 'node:path'
 const root = process.cwd()
 
 /**
- * The @kestrel/* publish/install order appears in two hand-written lists — the release.yml publish
+ * The @michaelthielemann/kestrel-* publish/install order appears in two hand-written lists — the release.yml publish
  * steps and consumer-template-ci.mjs's PACKAGES array. This rail derives the real dependency graph
  * from the packages' own manifests on disk and asserts both lists are complete, mutually consistent,
  * and topologically valid (every package listed only after everything it depends on).
@@ -22,10 +22,10 @@ function kestrelPackages(): Map<string, string[]> {
       name?: string
       dependencies?: Record<string, string>
     }
-    if (!manifest.name?.startsWith('@kestrel/')) continue
+    if (!manifest.name?.startsWith('@michaelthielemann/kestrel-')) continue
     graph.set(
       manifest.name,
-      Object.keys(manifest.dependencies ?? {}).filter((dep) => dep.startsWith('@kestrel/')),
+      Object.keys(manifest.dependencies ?? {}).filter((dep) => dep.startsWith('@michaelthielemann/kestrel-')),
     )
   }
   return graph
@@ -34,7 +34,7 @@ function kestrelPackages(): Map<string, string[]> {
 function releaseYmlOrder(): string[] {
   const yml = readFileSync(resolve(root, '.github/workflows/release.yml'), 'utf8')
   return [...yml.matchAll(/working-directory: packages\/kestrel-([a-z0-9-]+)/g)].map(
-    (m) => `@kestrel/${m[1]}`,
+    (m) => `@michaelthielemann/kestrel-${m[1]}`,
   )
 }
 
@@ -42,11 +42,11 @@ function ciScriptOrder(): string[] {
   const source = readFileSync(resolve(root, 'scripts/consumer-template-ci.mjs'), 'utf8')
   const match = source.match(/const PACKAGES = \[([^\]]+)\]/)
   expect(match, 'consumer-template-ci.mjs must declare a PACKAGES array literal').not.toBeNull()
-  return [...match![1].matchAll(/'([a-z0-9-]+)'/g)].map((m) => `@kestrel/${m[1]}`)
+  return [...match![1].matchAll(/'([a-z0-9-]+)'/g)].map((m) => `@michaelthielemann/kestrel-${m[1]}`)
 }
 
 function assertTopological(order: string[], graph: Map<string, string[]>, label: string): void {
-  expect([...graph.keys()].sort(), `${label} must list every @kestrel/* package exactly once`).toEqual(
+  expect([...graph.keys()].sort(), `${label} must list every @michaelthielemann/kestrel-* package exactly once`).toEqual(
     [...order].sort(),
   )
   const position = new Map(order.map((name, i) => [name, i]))
@@ -60,7 +60,7 @@ function assertTopological(order: string[], graph: Map<string, string[]>, label:
   }
 }
 
-describe('@kestrel/* publish order is topologically valid', () => {
+describe('@michaelthielemann/kestrel-* publish order is topologically valid', () => {
   const graph = kestrelPackages()
 
   it('sanity: the graph derivation is not vacuous', () => {

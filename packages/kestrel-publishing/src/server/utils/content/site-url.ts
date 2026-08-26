@@ -1,4 +1,4 @@
-import { getResolvedKestrelConfig } from '@kestrel/core'
+import { getResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
 import { normalizeBase } from './sitemap.js'
 
 /**

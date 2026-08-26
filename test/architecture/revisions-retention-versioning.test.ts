@@ -7,10 +7,10 @@ import {
   makeTicker, registerCollection, remove, renderSqlite, runWrite, setResolvedKestrelConfig, sqliteClientOf,
   ensureRevisionsTable, revisionsTable, revisionsTableName, readRevisions, schemaVersionOf,
   registerRevisionUpcast, clearRevisionUpcasts, insertRevisionRow, clearPruneCursors, applyRevisionUpcast,
-} from '@kestrel/core'
+} from '@michaelthielemann/kestrel-core'
 import { resolveServerKestrelConfig } from '../../layers/core/server/utils/server-config'
 import { createTestDb } from '../helpers/db'
-import { pagesCollection } from '@kestrel/collections'
+import { pagesCollection } from '@michaelthielemann/kestrel-collections'
 
 /**
  * Retention pruning + revision schema versioning + upcast-on-rollback.
@@ -31,7 +31,7 @@ import { pagesCollection } from '@kestrel/collections'
  * this on an idle tick) is not independently pinned here.
  *
  * Revision upcast surface: a dedicated `registerRevisionUpcast(collection, fromVersion, { toVersion, fn })`
- * registry local to `revisions.ts`, not a reuse of `@kestrel/contracts`' `registerUpcast`/`upcastToLatest`
+ * registry local to `revisions.ts`, not a reuse of `@michaelthielemann/kestrel-contracts`' `registerUpcast`/`upcastToLatest`
  * — that walker presumes sequential author-assigned versions (it stops at `max(registered) + 1`), which a
  * def-hash (unordered 32-bit value) cannot satisfy. `fromVersion` is read back off a real recorded
  * revision's `schemaVersion` (never hardcoded); `toVersion` is read off `schemaVersionOf(currentDef)`.
@@ -89,14 +89,14 @@ afterEach(() => {
 
 describe('revision retention config resolution', () => {
   it('defaults to keep: "all" (nothing pruned) when the consumer configures nothing', async () => {
-    const { resolveKestrel } = await import('@kestrel/core')
+    const { resolveKestrel } = await import('@michaelthielemann/kestrel-core')
     const resolved = resolveKestrel({}, {}, process.cwd()) as unknown as { revisions?: { keep: number | 'all', maxAgeDays?: number } }
     expect(resolved.revisions).toBeDefined()
     expect(resolved.revisions!.keep).toBe('all')
   })
 
   it('a configured keep: N round-trips through resolveKestrel', async () => {
-    const { resolveKestrel } = await import('@kestrel/core')
+    const { resolveKestrel } = await import('@michaelthielemann/kestrel-core')
     const resolved = resolveKestrel({ revisions: { keep: 5 } } as never, {}, process.cwd()) as unknown as { revisions?: { keep: number | 'all' } }
     expect(resolved.revisions!.keep).toBe(5)
   })
@@ -112,7 +112,7 @@ describe('revision retention config resolution', () => {
   })
 
   it('revisionRetentionPolicy normalizes whatever the provider carries, defaulting to keep: "all"', async () => {
-    const { revisionRetentionPolicy } = await import('@kestrel/core')
+    const { revisionRetentionPolicy } = await import('@michaelthielemann/kestrel-core')
     setResolvedKestrelConfig({ ...resolveServerKestrelConfig(), revisions: undefined as never })
     expect(revisionRetentionPolicy('pages')).toEqual({ keep: 'all' })
 
@@ -121,7 +121,7 @@ describe('revision retention config resolution', () => {
   })
 
   it('a garbage/negative keep reaching the provider UNVALIDATED (the runtimeConfig path) fails safe to "all" rather than reaching prune arithmetic', async () => {
-    const { revisionRetentionPolicy } = await import('@kestrel/core')
+    const { revisionRetentionPolicy } = await import('@michaelthielemann/kestrel-core')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       setResolvedKestrelConfig({ ...resolveServerKestrelConfig(), revisions: { keep: -5 } as never })
@@ -155,8 +155,8 @@ function seedPages(): BetterSQLite3Database {
 
 describe('pruneRevisions: keep: N retains the newest N, pins the two protections', () => {
   it('keep: "all" (default) prunes nothing, however many revisions exist', async () => {
-    const { pruneRevisions } = await import('@kestrel/core')
-    const { update } = await import('@kestrel/core')
+    const { pruneRevisions } = await import('@michaelthielemann/kestrel-core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     const db = seedPages()
     const row = create(db, pagesCollection, { title: 'A', path: '/a', status: 'draft' }) as Row
     for (let i = 0; i < 5; i++) update(db, pagesCollection, row.id as number, { title: `A v${i}` })
@@ -167,8 +167,8 @@ describe('pruneRevisions: keep: N retains the newest N, pins the two protections
   })
 
   it('keep: 2 with 5 revisions deletes 3, retains the newest 2 by revision number', async () => {
-    const { pruneRevisions } = await import('@kestrel/core')
-    const { update } = await import('@kestrel/core')
+    const { pruneRevisions } = await import('@michaelthielemann/kestrel-core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     const db = seedPages()
     const row = create(db, pagesCollection, { title: 'A', path: '/a', status: 'draft' }) as Row
     for (let i = 0; i < 4; i++) update(db, pagesCollection, row.id as number, { title: `A v${i}` })
@@ -181,8 +181,8 @@ describe('pruneRevisions: keep: N retains the newest N, pins the two protections
   })
 
   it('pin: the LAST revision is never pruned even with keep: 1 collapsing everything else', async () => {
-    const { pruneRevisions } = await import('@kestrel/core')
-    const { update } = await import('@kestrel/core')
+    const { pruneRevisions } = await import('@michaelthielemann/kestrel-core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     const db = seedPages()
     const row = create(db, pagesCollection, { title: 'A', path: '/a', status: 'draft' }) as Row
     for (let i = 0; i < 4; i++) update(db, pagesCollection, row.id as number, { title: `A v${i}` })
@@ -194,8 +194,8 @@ describe('pruneRevisions: keep: N retains the newest N, pins the two protections
   })
 
   it('pin: a TOMBSTONE last revision is never pruned, even with keep: 1', async () => {
-    const { pruneRevisions } = await import('@kestrel/core')
-    const { update } = await import('@kestrel/core')
+    const { pruneRevisions } = await import('@michaelthielemann/kestrel-core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     const db = seedPages()
     const row = create(db, pagesCollection, { title: 'A', path: '/a', status: 'draft' }) as Row
     update(db, pagesCollection, row.id as number, { title: 'A v2' })
@@ -209,8 +209,8 @@ describe('pruneRevisions: keep: N retains the newest N, pins the two protections
   })
 
   it('pin: sequence numbers of retained revisions are untouched — no renumbering, gaps are legal', async () => {
-    const { pruneRevisions } = await import('@kestrel/core')
-    const { update } = await import('@kestrel/core')
+    const { pruneRevisions } = await import('@michaelthielemann/kestrel-core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     const db = seedPages()
     const row = create(db, pagesCollection, { title: 'A', path: '/a', status: 'draft' }) as Row
     for (let i = 0; i < 4; i++) update(db, pagesCollection, row.id as number, { title: `A v${i}` })
@@ -222,8 +222,8 @@ describe('pruneRevisions: keep: N retains the newest N, pins the two protections
   })
 
   it('pin: pruning never breaks rollback to a retained revision, across the gap it created', async () => {
-    const { pruneRevisions } = await import('@kestrel/core')
-    const { update, getOne } = await import('@kestrel/core')
+    const { pruneRevisions } = await import('@michaelthielemann/kestrel-core')
+    const { update, getOne } = await import('@michaelthielemann/kestrel-core')
     clearPipelines()
     const db = seedPages()
     const row = create(db, pagesCollection, { title: 'A', path: '/a', status: 'draft' }) as Row
@@ -240,8 +240,8 @@ describe('pruneRevisions: keep: N retains the newest N, pins the two protections
   })
 
   it('maxAgeDays: revisions older than the cutoff are pruned, same LAST/tombstone protections apply', async () => {
-    const { pruneRevisions } = await import('@kestrel/core')
-    const { update } = await import('@kestrel/core')
+    const { pruneRevisions } = await import('@michaelthielemann/kestrel-core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     const db = seedPages()
     const row = create(db, pagesCollection, { title: 'A', path: '/a', status: 'draft' }) as Row
     update(db, pagesCollection, row.id as number, { title: 'A v2' })
@@ -258,7 +258,7 @@ describe('pruneRevisions: keep: N retains the newest N, pins the two protections
   })
 
   it('maxAgeDays: an old LAST revision still survives (the last-revision pin outranks age)', async () => {
-    const { pruneRevisions } = await import('@kestrel/core')
+    const { pruneRevisions } = await import('@michaelthielemann/kestrel-core')
     const db = seedPages()
     const row = create(db, pagesCollection, { title: 'A', path: '/a', status: 'draft' }) as Row
     const client = sqliteClientOf(db)
@@ -273,8 +273,8 @@ describe('pruneRevisions: keep: N retains the newest N, pins the two protections
 
 describe('pruneAllDueRevisions: the entry point an idle outbox tick would call', () => {
   it('prunes every registered collection\'s revisions per its own resolved retention policy', async () => {
-    const { pruneAllDueRevisions } = await import('@kestrel/core')
-    const { update } = await import('@kestrel/core')
+    const { pruneAllDueRevisions } = await import('@michaelthielemann/kestrel-core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     setResolvedKestrelConfig({ ...resolveServerKestrelConfig(), revisions: { keep: 1 } })
     const db = seedPages()
     const row = create(db, pagesCollection, { title: 'A', path: '/a', status: 'draft' }) as Row
@@ -295,7 +295,7 @@ describe('pruneAllDueRevisions: the entry point an idle outbox tick would call',
   })
 
   it('a backlog bigger than the batch limit drains across MULTIPLE calls via cursor pagination — not the same first batch forever, starving everything past it', async () => {
-    const { pruneAllDueRevisions } = await import('@kestrel/core')
+    const { pruneAllDueRevisions } = await import('@michaelthielemann/kestrel-core')
     setResolvedKestrelConfig({ ...resolveServerKestrelConfig(), revisions: { keep: 1 } })
     const db = seedPages()
     const client = sqliteClientOf(db)
@@ -540,7 +540,7 @@ describe('restoring a TOMBSTONED record to a now-noncompliant published snapshot
 // a tagged Quarantined error, never a raw write of the old shape.
 describe('rebuildFromRevisions ALSO applies the upcast chain, strict', () => {
   it('without a registered chain, rebuilding an old-version revision throws the tagged Quarantined error, no row written', async () => {
-    const { rebuildFromRevisions } = await import('@kestrel/core')
+    const { rebuildFromRevisions } = await import('@michaelthielemann/kestrel-core')
     clearRegistry()
     const v1 = seedGadgets(false)
     const db = createTestDb()
@@ -567,7 +567,7 @@ describe('rebuildFromRevisions ALSO applies the upcast chain, strict', () => {
   })
 
   it('with a registered chain, rebuilding an old-version revision applies it and writes the upcasted row', async () => {
-    const { rebuildFromRevisions } = await import('@kestrel/core')
+    const { rebuildFromRevisions } = await import('@michaelthielemann/kestrel-core')
     clearRegistry()
     const v1 = seedGadgets(false)
     const db = createTestDb()
@@ -591,7 +591,7 @@ describe('rebuildFromRevisions ALSO applies the upcast chain, strict', () => {
   })
 
   it('same schemaVersion (no drift) still rebuilds the raw snapshot untouched — the common case pays no upcast cost', async () => {
-    const { rebuildFromRevisions } = await import('@kestrel/core')
+    const { rebuildFromRevisions } = await import('@michaelthielemann/kestrel-core')
     const db = seedPages()
     const row = create(db, pagesCollection, { title: 'A', path: '/a', status: 'draft' }) as Row
     sqliteClientOf(db).prepare('DELETE FROM pages WHERE id = ?').run(row.id)
@@ -604,8 +604,8 @@ describe('rebuildFromRevisions ALSO applies the upcast chain, strict', () => {
 // keep + maxAgeDays together combine as a union of prunability.
 describe('keep + maxAgeDays together prune the UNION (either criterion alone would leave some)', () => {
   it('a revision beyond keep OR older than the cutoff is pruned, even though neither policy alone would remove both', async () => {
-    const { pruneRevisions } = await import('@kestrel/core')
-    const { update } = await import('@kestrel/core')
+    const { pruneRevisions } = await import('@michaelthielemann/kestrel-core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     const db = seedPages()
     const row = create(db, pagesCollection, { title: 'A', path: '/a', status: 'draft' }) as Row
     for (let i = 0; i < 4; i++) update(db, pagesCollection, row.id as number, { title: `A v${i}` })
@@ -623,8 +623,8 @@ describe('keep + maxAgeDays together prune the UNION (either criterion alone wou
   })
 
   it('pin: an ancient LAST revision survives even among several OTHER prunable ones (last-revision protection outranks age generally, not just in the single-revision case)', async () => {
-    const { pruneRevisions } = await import('@kestrel/core')
-    const { update } = await import('@kestrel/core')
+    const { pruneRevisions } = await import('@michaelthielemann/kestrel-core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     const db = seedPages()
     const row = create(db, pagesCollection, { title: 'A', path: '/a', status: 'draft' }) as Row
     update(db, pagesCollection, row.id as number, { title: 'A v2' })

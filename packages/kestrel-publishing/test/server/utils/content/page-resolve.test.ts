@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { buildCollection, defineCollection, desiredSchema, diffSchema, renderSqlite  } from '@kestrel/core'
-import type { BuiltCollection } from '@kestrel/core'
+import { buildCollection, defineCollection, desiredSchema, diffSchema, renderSqlite  } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { resolvePage } from '../../../../src/server/utils/content/page-resolve.js'
 
 const def = (name: string) => buildCollection(defineCollection({
@@ -76,7 +76,7 @@ describe('resolvePage', () => {
   })
 
   it('excludes a noindexed sibling from the hreflang alternates (matches the sitemap)', async () => {
-    const { withReadCapture } = await import('@kestrel/core')
+    const { withReadCapture } = await import('@michaelthielemann/kestrel-core')
     const { db, sqlite } = build([seoP])
     const insSeo = (path: string, locale: string, noindex: boolean) =>
       sqlite.prepare(`INSERT INTO seop (locale, translation_group, path, status, title, seo, created_at, updated_at) VALUES (?, 'g1', ?, 'published', 'T', ?, 0, 0)`)
@@ -108,7 +108,7 @@ describe('resolvePage', () => {
   })
 
   it('captures a DRAFT sibling as a publish dependency (publishing it must re-render this page)', async () => {
-    const { withReadCapture } = await import('@kestrel/core')
+    const { withReadCapture } = await import('@michaelthielemann/kestrel-core')
     const { db, sqlite } = build([p1])
     insert(sqlite, 'p1', { path: '/about', status: 'published', locale: 'en', group: 'g1' })
     insert(sqlite, 'p1', { path: '/ueber-uns', status: 'draft', locale: 'de', group: 'g1' })
@@ -179,9 +179,9 @@ describe('resolvePage', () => {
   })
 
   it('subscribes the rendered page to its translation group, so any sibling write re-renders it', async () => {
-    const { withReadCapture } = await import('@kestrel/core')
-    const { DepsStore } = await import('@kestrel/publishing')
-    const { classifyWrite, planInvalidation } = await import('@kestrel/publishing')
+    const { withReadCapture } = await import('@michaelthielemann/kestrel-core')
+    const { DepsStore } = await import('@michaelthielemann/kestrel-publishing')
+    const { classifyWrite, planInvalidation } = await import('@michaelthielemann/kestrel-publishing')
     const { db, sqlite } = build([p1])
     // /about renders while it is the ONLY member of its group — nothing it captures can name a sibling yet
     insert(sqlite, 'p1', { path: '/about', status: 'published', locale: 'en', group: 'g1' })
@@ -275,7 +275,7 @@ describe('resolvePage ancestors (the breadcrumb trail)', () => {
   // parent/child relation, so an ancestor that does not exist yet has no id to capture, and a page
   // created there later is precisely the change the trail is waiting for.
   it('subscribes to every ancestor PATH it looked in, including the ones with no page', async () => {
-    const { withReadCapture } = await import('@kestrel/core')
+    const { withReadCapture } = await import('@michaelthielemann/kestrel-core')
     const { db, sqlite } = build([p1])
     insert(sqlite, 'p1', { path: '/blog', status: 'published' })
     insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
@@ -292,7 +292,7 @@ describe('resolvePage ancestors (the breadcrumb trail)', () => {
   })
 
   it('captures a currently-invisible ancestor too, so its removal can repair the trail', async () => {
-    const { withReadCapture } = await import('@kestrel/core')
+    const { withReadCapture } = await import('@michaelthielemann/kestrel-core')
     const { db, sqlite } = build([p1])
     insert(sqlite, 'p1', { path: '/blog', status: 'draft' })
     insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
@@ -303,7 +303,7 @@ describe('resolvePage ancestors (the breadcrumb trail)', () => {
   })
 
   it('subscribes even when the ancestor lookup could not complete, so a repair can still reach it', async () => {
-    const { withReadCapture } = await import('@kestrel/core')
+    const { withReadCapture } = await import('@michaelthielemann/kestrel-core')
     const { db, sqlite } = build([p1, p2])
     insert(sqlite, 'p2', { path: '/blog/hello', status: 'published' })
     sqlite.exec('DROP TABLE p1')
@@ -320,8 +320,8 @@ describe('resolvePage ancestors (the breadcrumb trail)', () => {
   // the descendant captured can carry it.
   describe('the edges a descendant captures reach the write that changes its trail', () => {
     const deps = async (db: BetterSQLite3Database, path: string, route: string) => {
-      const { withReadCapture } = await import('@kestrel/core')
-      const { DepsStore } = await import('@kestrel/publishing')
+      const { withReadCapture } = await import('@michaelthielemann/kestrel-core')
+      const { DepsStore } = await import('@michaelthielemann/kestrel-publishing')
       const { tags } = await withReadCapture(() => resolvePage(db, [p1], path, 'en').page!)
       const store = new DepsStore()
       store.record(route, tags)
@@ -329,7 +329,7 @@ describe('resolvePage ancestors (the breadcrumb trail)', () => {
     }
     /** What the editor's Publish button plans for a record in its current state. */
     const publishOf = async (row: Record<string, unknown>) => {
-      const { classifyWrite, planInvalidation } = await import('@kestrel/publishing')
+      const { classifyWrite, planInvalidation } = await import('@michaelthielemann/kestrel-publishing')
       return planInvalidation(classifyWrite(p1.def, row, row, 'en'))
     }
 
@@ -337,7 +337,7 @@ describe('resolvePage ancestors (the breadcrumb trail)', () => {
       const { db, sqlite } = build([p1])
       insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
       const store = await deps(db, '/blog/hello', '/blog/hello')
-      const { classifyWrite, planInvalidation } = await import('@kestrel/publishing')
+      const { classifyWrite, planInvalidation } = await import('@michaelthielemann/kestrel-publishing')
       const inv = planInvalidation(classifyWrite(p1.def, null, { id: 42, path: '/blog', locale: 'en', status: 'published', seo: {} }, 'en'))
       expect(inv.type === 'tags' && store.routesForTags(inv.tags)).toContain('/blog/hello')
     })
@@ -360,9 +360,9 @@ describe('resolvePage ancestors (the breadcrumb trail)', () => {
           .run(`g-${path}`, path)
       insSeo('/blog')
       insSeo('/blog/hello')
-      const { withReadCapture } = await import('@kestrel/core')
-      const { DepsStore } = await import('@kestrel/publishing')
-      const { classifyWrite, planInvalidation } = await import('@kestrel/publishing')
+      const { withReadCapture } = await import('@michaelthielemann/kestrel-core')
+      const { DepsStore } = await import('@michaelthielemann/kestrel-publishing')
+      const { classifyWrite, planInvalidation } = await import('@michaelthielemann/kestrel-publishing')
       const { tags } = await withReadCapture(() => resolvePage(db, [seoP], '/blog/hello', 'en').page!)
       const store = new DepsStore()
       store.record('/blog/hello', tags)
@@ -378,7 +378,7 @@ describe('resolvePage ancestors (the breadcrumb trail)', () => {
       insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
       const store = await deps(db, '/blog/hello', '/blog/hello')
       const id = (sqlite.prepare(`SELECT id FROM p1 WHERE path = '/blog'`).get() as { id: number }).id
-      const { classifyWrite, planInvalidation } = await import('@kestrel/publishing')
+      const { classifyWrite, planInvalidation } = await import('@michaelthielemann/kestrel-publishing')
       const inv = planInvalidation(classifyWrite(p1.def, { id, path: '/blog', locale: 'en', status: 'published' }, { id, path: '/blog', locale: 'en', status: 'draft' }, 'en'))
       expect(inv.type === 'tags' && store.routesForTags(inv.tags)).toContain('/blog/hello')
     })
@@ -389,9 +389,9 @@ describe('resolvePage ancestors (the breadcrumb trail)', () => {
       insert(sqlite, 'p1', { path: '/blog', status: 'draft' })
       insert(sqlite, 'p2', { path: '/blog', status: 'published' })
       insert(sqlite, 'p1', { path: '/blog/hello', status: 'published' })
-      const { withReadCapture } = await import('@kestrel/core')
-      const { DepsStore } = await import('@kestrel/publishing')
-      const { classifyWrite, planInvalidation } = await import('@kestrel/publishing')
+      const { withReadCapture } = await import('@michaelthielemann/kestrel-core')
+      const { DepsStore } = await import('@michaelthielemann/kestrel-publishing')
+      const { classifyWrite, planInvalidation } = await import('@michaelthielemann/kestrel-publishing')
       const { result, tags } = await withReadCapture(() => resolvePage(db, [p1, p2], '/blog/hello', 'en').page!)
       expect(result.ancestors).toEqual([]) // the draft shadows it
       const store = new DepsStore()

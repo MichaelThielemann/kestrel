@@ -21,8 +21,8 @@ import { diffSchema } from '../../../src/server/schema/diff.js'
 import { renderSqlite } from '../../../src/server/schema/render-sqlite.js'
 import { ensureRevisionsTable, revisionsTable } from '../../../src/server/db/revisions.js'
 import { sqliteClientOf } from '../../../src/server/db/outbox.js'
-import { pagesCollection } from '@kestrel/collections'
-import { mediaCollection } from '@kestrel/media'
+import { pagesCollection } from '@michaelthielemann/kestrel-collections'
+import { mediaCollection } from '@michaelthielemann/kestrel-media'
 
 type Row = Record<string, unknown>
 

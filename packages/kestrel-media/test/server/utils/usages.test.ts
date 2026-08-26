@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { sql } from 'drizzle-orm'
 import { createTestDb } from '../../../../../test/helpers/db.js'
-import { clearRegistry, defineCollection, registerCollection, buildCollection  } from '@kestrel/core'
-import { clearBlocks, registerBlock, defineBlock } from '@kestrel/fields'
+import { clearRegistry, defineCollection, registerCollection, buildCollection  } from '@michaelthielemann/kestrel-core'
+import { clearBlocks, registerBlock, defineBlock } from '@michaelthielemann/kestrel-fields'
 import { findMediaUsages, findMediaUsagesForMany } from '../../../src/server/utils/usages.js'
 
 let db: ReturnType<typeof createTestDb>

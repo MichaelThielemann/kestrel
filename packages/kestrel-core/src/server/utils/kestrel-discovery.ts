@@ -1,6 +1,6 @@
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
-import type { OwnershipManifest } from '@kestrel/contracts'
-import type { BuiltCollection, CollectionDef } from '@kestrel/core'
+import type { OwnershipManifest } from '@michaelthielemann/kestrel-contracts'
+import type { BuiltCollection, CollectionDef } from '@michaelthielemann/kestrel-core'
 
 /**
  * The shape a Kestrel package exports (as a named `kestrelDiscovery` export from its barrel) so
@@ -8,7 +8,7 @@ import type { BuiltCollection, CollectionDef } from '@kestrel/core'
  * filesystem or `node_modules` scanning — the module imports the bare package specifier and reads this
  * object directly, the same way it already reads a consumer layer's `server/collections/*.ts` default
  * exports. Every field is optional: most packages contribute to only one or two categories, and several
- * (`@kestrel/core`, `@kestrel/fields`, `@kestrel/access`, `@kestrel/auth`) contribute to none at all.
+ * (`@michaelthielemann/kestrel-core`, `@michaelthielemann/kestrel-fields`, `@michaelthielemann/kestrel-access`, `@michaelthielemann/kestrel-auth`) contribute to none at all.
  *
  * This is a FIRST-PARTY, internal discovery contract — the packages Kestrel itself ships are the only
  * intended producers, wired together by `kestrel-nuxt`'s own hardcoded `PACKAGE_*` lists (see

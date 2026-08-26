@@ -1,7 +1,7 @@
 import { eq, ne, lt, lte, gt, gte, sql, or, isNull, type SQL } from 'drizzle-orm'
 import { createError } from 'h3'
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
-import { escapeLike } from '@kestrel/core'
+import { escapeLike } from '@michaelthielemann/kestrel-core'
 import type { FilterKind, FilterOp } from '../../app/utils/filter-ops.js'
 
 /** Coerce a (stringified) filter value to the target COLUMN's storage type before the predicate. Keyed on

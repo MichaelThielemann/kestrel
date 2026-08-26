@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { clearPipelines, clearRegistry, defineCollection, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, registerPipeline, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb, buildCollection } from '@kestrel/core'
+import { clearPipelines, clearRegistry, defineCollection, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, registerPipeline, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb, buildCollection } from '@michaelthielemann/kestrel-core'
 import { callPipelineRoute, usePipelineRouteDb } from '../../../../../test/helpers/pipeline-route.js'
-import { DepsStore, setPublishRuntime, type Invalidation } from '@kestrel/publishing'
+import { DepsStore, setPublishRuntime, type Invalidation } from '@michaelthielemann/kestrel-publishing'
 import { buildPublishPipelines } from '../../../src/server/pipelines/publish.js'
 
 // The pipeline asks the publisher which routes are live (to spot a record's abandoned old URL); the real
 // module reaches for the storage drivers and the built output, none of which a node test has. Mocked by
-// RESOLVED path (not the `@kestrel/publishing` barrel) so it intercepts the SAME module `publish.ts`'s own
+// RESOLVED path (not the `@michaelthielemann/kestrel-publishing` barrel) so it intercepts the SAME module `publish.ts`'s own
 // relative `../utils/publish/publisher.js` import resolves to.
 const live = { routes: ['/', '/kept'], savedAt: new Map<string, number>(), failed: [] as string[] }
 vi.mock('../../../src/server/utils/publish/publisher.js', () => ({ allPublishedRoutes: () => live }))
@@ -163,7 +163,7 @@ describe('POST /api/publish — the explicit "write the static file" action', ()
     expect(res.queued).toBe(false)
   })
 
-  // isDevMode() is fail-safe-to-PRODUCTION (adopts @kestrel/auth's session.ts own `explicitDev` polarity):
+  // isDevMode() is fail-safe-to-PRODUCTION (adopts @michaelthielemann/kestrel-auth's session.ts own `explicitDev` polarity):
   // an omitted NODE_ENV (a common slip when launching `.output/server/index.mjs`) must read as production,
   // never silently downgrade to "nothing generates here". Vitest itself sets NODE_ENV='test' (an explicit
   // dev signal by design — every OTHER test in this file relies on that), so this one test deliberately

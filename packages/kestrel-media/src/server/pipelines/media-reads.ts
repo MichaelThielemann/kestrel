@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
-import { MAX_BULK_IDS, dbOf, definePipeline, parseIdList, primaryLocale, requireRecordId } from '@kestrel/core'
-import type { PipelineDef } from '@kestrel/core'
+import { MAX_BULK_IDS, dbOf, definePipeline, parseIdList, primaryLocale, requireRecordId } from '@michaelthielemann/kestrel-core'
+import type { PipelineDef } from '@michaelthielemann/kestrel-core'
 import { useStorageDriver } from '../utils/storage.js'
 import { useMediaDbFor } from '../db/media-db.js'
 import { listLibrary } from '../utils/library.js'

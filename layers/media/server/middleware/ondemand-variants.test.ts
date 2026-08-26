@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createEvent, defineEventHandler, getRequestHeader, type H3Event } from 'h3'
-import { clientIp } from '@kestrel/auth'
-import { allowlistMode, parseAllowlist, ipAllowed } from '@kestrel/access'
+import { clientIp } from '@michaelthielemann/kestrel-auth'
+import { allowlistMode, parseAllowlist, ipAllowed } from '@michaelthielemann/kestrel-access'
 
 // The middleware relies on Nitro auto-imports for these; bind the real implementations, same idiom as
 // access/00.ip-allowlist.test.ts. Must run BEFORE the module is imported (a static top-level import would

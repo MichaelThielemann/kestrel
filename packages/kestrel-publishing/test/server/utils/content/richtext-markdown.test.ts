@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { richtextToMarkdown } from '../../../../src/server/utils/content/richtext-markdown.js'
-import { sanitizeRichtext } from '@kestrel/core'
-import { resolveRichtextLinks } from '@kestrel/core/client'
+import { sanitizeRichtext } from '@michaelthielemann/kestrel-core'
+import { resolveRichtextLinks } from '@michaelthielemann/kestrel-core/client'
 
 describe('richtextToMarkdown', () => {
   it('renders paragraphs separated by a blank line', () => {

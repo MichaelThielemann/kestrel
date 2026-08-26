@@ -1,4 +1,4 @@
-import { buildCollection, defineCollection  } from '@kestrel/core'
+import { buildCollection, defineCollection  } from '@michaelthielemann/kestrel-core'
 
 /**
  * `siteUrl`/`siteName` stay in `kestrel.config` on purpose: the build needs them for canonical URLs, the

@@ -24,7 +24,7 @@ populate runs only at `depth>0`; the `02.schema-sync` plugin only auto-DDLs in d
 runs a read-only drift check at boot and `console.warn`s any missing additive change (the app may error
 until `db:migrate` runs); destructive schema ops are gated (rebuild needs `force`, drop needs explicit
 `dropTables`); the seam runs the other way from what the package layout suggests —
-`fields`/`media`/`collections`/`publishing` all depend on `@kestrel/core`, and `core` exports a mutable
+`fields`/`media`/`collections`/`publishing` all depend on `@michaelthielemann/kestrel-core`, and `core` exports a mutable
 `fieldTypes` registry (`server/registries/field-types.ts`) that `kestrel-fields` seeds at module load — the only
 place `core` still reaches toward the other packages is the *layer's* codegen: a generated import string
 in `layers/core/modules/auto-discovery/index.ts` and the package name lists in
@@ -49,12 +49,12 @@ applies it, via the richtext field's Zod `.transform`.
 
 **Start:** `packages/kestrel-fields/src/server/field-registry/index.ts` (the `fieldTypes` `{column,
 validator}` registry — the single source of truth for column types; `registerFieldType`/`getFieldType`
-open it to consumer types; its richtext `validator` imports `sanitizeRichtext` from `@kestrel/core`) →
+open it to consumer types; its richtext `validator` imports `sanitizeRichtext` from `@michaelthielemann/kestrel-core`) →
 `packages/kestrel-core/src/server/utils/naming.ts` (`resolveColumnName`) →
 `kestrel-core/src/server/utils/buildTable.ts` → `kestrel-core/src/server/schema/buildCollection.ts` (
 `buildFieldSchema`) → `kestrel-core/src/server/blocks/registry.ts` (`buildBlocksSchema`, `registerBlock`).
 `kestrel-fields/src/server/utils/defineBlock.ts` is only the authoring-side `defineBlock` identity helper —
-it re-exports the block registry functions from `@kestrel/core` rather than implementing them. See
+it re-exports the block registry functions from `@michaelthielemann/kestrel-core` rather than implementing them. See
 `kestrel-fields/test/server/utils/integration.test.ts` for end-to-end wiring.
 
 **Gotchas:** the built-in registry lives in `field-registry/` (explicit-import only) — deliberately **not**
@@ -161,7 +161,7 @@ viewer.
 
 **Start:** `packages/kestrel-media/src/server/collections/media.ts` (the data model) →
 `server/pipelines/media-upload.ts` (the whole ingest pipeline in one step) → `server/utils/storage.ts`
-(`useStorageDriver`, wrapping the `StorageDriver` contract exported from `@kestrel/core`) →
+(`useStorageDriver`, wrapping the `StorageDriver` contract exported from `@michaelthielemann/kestrel-core`) →
 `server/utils/resolve.ts` (`resolveMedia`/`ResolvedMedia`) → `server/utils/populate.ts` +
 `layers/media/server/plugins/02.register-media.ts` (the `$media` seam) → `server/utils/library.ts`
 (`listLibrary`: paginate/sort/exists/recursive sizes) →
@@ -204,7 +204,7 @@ singletons, the SSG artifacts (sitemap/robots/llms/redirects.json, one `META_KEY
 agent-facing head (JSON-LD), build-time prerender route discovery, internal-link resolution, and the
 optional S3 deploy of the output — plus, on the publish/delivery half, the runtime publisher, the
 `publish`/`publishRuns` pipelines and tasks, and the live-delivery adapter under `server/delivery-live/`
-(backed by `@kestrel/publishing`/`@kestrel/delivery-live`/`@kestrel/delivery-static`; see
+(backed by `@michaelthielemann/kestrel-publishing`/`@michaelthielemann/kestrel-delivery-live`/`@michaelthielemann/kestrel-delivery-static`; see
 [Publishing](./publishing.md) for the mechanics).
 
 **Start:** `layers/public/app/pages/[...slug].vue` (the catch-all) resolves a path to the first published
@@ -248,7 +248,7 @@ mechanism from the `link` field; the catch-all declares `layout: false` and moun
 so the layout is a CHILD of the page and an unset/blank `layout` must be coalesced to `default`
 (`resolvePageLayout`) — `NuxtLayout`'s own `fallback="default"` prop covers the other case, a
 truthy-but-unregistered layout name, but cannot help with the literal `false` that `layout: false` leaves
-in the route meta; the artifacts published at literal keys are ONE list (`META_KEYS` in `@kestrel/core`) because four
+in the route meta; the artifacts published at literal keys are ONE list (`META_KEYS` in `@michaelthielemann/kestrel-core`) because four
 call sites must agree on it — the publisher renders them, the asset mirror must skip the build's stale
 copies, the prerender module seeds them as routes, and the cache policy keys off the same names (only the
 prerender seeding is flag-aware: `llms-full.txt` 404s unless `kestrel.seo.llmsFull` is on, and a prerender
@@ -269,5 +269,5 @@ renamed or newly-hidden ancestor USED to be.
 - [Data model](./data-model.md) — reference integrity, populate, and the record-ref index the `core`/`public` gotchas above assume.
 - [Admin UI](./admin-ui.md) — the `ui` layer's editing-surface internals in full.
 - [Publishing](./publishing.md) — the delivery split and redirects mechanics the `public` layer's Start section only summarizes.
-- [Layers and packages](./layers-and-packages.md) — the layer↔package cut, the ten `@kestrel/*` packages, and the dependency rule the ownership statements throughout this page assume.
+- [Layers and packages](./layers-and-packages.md) — the layer↔package cut, the ten `@michaelthielemann/kestrel-*` packages, and the dependency rule the ownership statements throughout this page assume.
 - [Architecture](./architecture.md) — boot/plugin order and the cross-cutting seams several Gotchas here assume.

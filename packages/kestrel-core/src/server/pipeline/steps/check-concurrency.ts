@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { Conflict } from '@kestrel/contracts'
+import { Conflict } from '@michaelthielemann/kestrel-contracts'
 import { unitsOf } from './shared.js'
 import { syncStep, type StepDef } from '../types.js'
 

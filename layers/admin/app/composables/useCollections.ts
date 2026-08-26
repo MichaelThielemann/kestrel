@@ -1,4 +1,4 @@
-import type { SerializedCollection } from '@kestrel/core'
+import type { SerializedCollection } from '@michaelthielemann/kestrel-core'
 
 export function useCollections() {
   const { state: collections, load } = useCachedResource<SerializedCollection>('kestrel-collections', '/api/collections')

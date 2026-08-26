@@ -1,9 +1,9 @@
 import collections from '#kestrel/collections'
 import blocks from '#kestrel/blocks'
-import { registerBlock, type BlockDef } from '@kestrel/fields'
-import { ensureBuilt, collectionEnabled, registerCollection  } from '@kestrel/core'
+import { registerBlock, type BlockDef } from '@michaelthielemann/kestrel-fields'
+import { ensureBuilt, collectionEnabled, registerCollection  } from '@michaelthielemann/kestrel-core'
 import { resolveServerKestrel, serverRuntimeConfig } from '../../../core/server/utils/server-config'
-import type { BuiltCollection, CollectionDef } from '@kestrel/core'
+import type { BuiltCollection, CollectionDef } from '@michaelthielemann/kestrel-core'
 // Auto-discovered collection files default-export either a plain CollectionDef (the common consumer
 // form, `export default defineCollection(…)`) or an already-built collection (advanced). `ensureBuilt`
 // normalizes both so the registry only ever holds BuiltCollections.

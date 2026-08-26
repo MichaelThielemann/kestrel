@@ -1,11 +1,11 @@
 import { text } from 'drizzle-orm/sqlite-core'
 import { z } from 'zod'
-import { isHardRequired, seedBuiltinFieldTypes, resolveKestrel, setResolvedKestrelConfig } from '@kestrel/core'
-import type { FieldTypeDescriptor } from '@kestrel/core'
+import { isHardRequired, seedBuiltinFieldTypes, resolveKestrel, setResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
+import type { FieldTypeDescriptor } from '@michaelthielemann/kestrel-core'
 
 // `pipeline-claim.test.ts` builds a real collection (via buildCollection) to exercise route-claiming
 // against genuine op paths — it only needs the 'text' type to do that. The real built-in descriptors live
-// in `@kestrel/fields`, which this package does not depend on (wrong direction, same reasoning as
+// in `@michaelthielemann/kestrel-fields`, which this package does not depend on (wrong direction, same reasoning as
 // kestrel-core's own test/setup.ts), so this seeds just the one type this package's tests actually use.
 seedBuiltinFieldTypes({
   text: {

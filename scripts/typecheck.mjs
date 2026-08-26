@@ -45,14 +45,14 @@ pass('server (Nitro) project', 'tsc', ['--noEmit', '-p', gateConfig])
 pass('app + .vue (vue-tsc)', 'nuxt', ['typecheck'])
 
 // 4. Standalone workspace packages have their own tsconfig, outside the playground project. Globbed by
-// pnpm's own filter (topological order, every current and future `@kestrel/*` package, `create-kestrel`
+// pnpm's own filter (topological order, every current and future `@michaelthielemann/kestrel-*` package, `create-kestrel`
 // excluded by name) rather than a hand-written list per package — the class of drift a hand list invites
 // (a package silently missing from this one script) is the exact failure mode this rail exists to avoid.
-console.log('› typechecking packages (@kestrel/*)…')
+console.log('› typechecking packages (@michaelthielemann/kestrel-*)…')
 try {
-  execFileSync('pnpm', ['--filter', '@kestrel/*', '-r', 'typecheck'], { cwd: root, stdio: 'inherit', env })
+  execFileSync('pnpm', ['--filter', '@michaelthielemann/kestrel-*', '-r', 'typecheck'], { cwd: root, stdio: 'inherit', env })
 } catch {
-  failed.push('packages (@kestrel/*)')
+  failed.push('packages (@michaelthielemann/kestrel-*)')
 }
 
 if (failed.length) {

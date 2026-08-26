@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue'
 import type { Ref } from 'vue'
 import { useEchoGuard } from '../../../ui/app/composables/useEchoGuard'
-import type { SerializedBlock } from '@kestrel/core'
+import type { SerializedBlock } from '@michaelthielemann/kestrel-core'
 import {
   type BlockRow,
   findInTree,

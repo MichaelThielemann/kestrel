@@ -1,8 +1,8 @@
 import { Effect } from 'effect'
-import { collectionOf, registerAfterStep } from '@kestrel/core'
-import type { StepDef } from '@kestrel/core'
-import { outputDriver, REDIRECTS_COLLECTION, REDIRECTS_FIELD, writeRedirectsArtifact } from '@kestrel/publishing'
-import { invalidateLiveRedirects } from '@kestrel/delivery-live'
+import { collectionOf, registerAfterStep } from '@michaelthielemann/kestrel-core'
+import type { StepDef } from '@michaelthielemann/kestrel-core'
+import { outputDriver, REDIRECTS_COLLECTION, REDIRECTS_FIELD, writeRedirectsArtifact } from '@michaelthielemann/kestrel-publishing'
+import { invalidateLiveRedirects } from '@michaelthielemann/kestrel-delivery-live'
 
 /**
  * Publish `redirects.json` on every save of the redirects singleton — deliberately decoupled from the

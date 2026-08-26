@@ -1,8 +1,8 @@
 import { getQuery } from 'h3'
 import { Effect } from 'effect'
-import { definePipeline, eventOf } from '@kestrel/core'
-import type { StepDef } from '@kestrel/core'
-import { useStorageDriver } from '@kestrel/media'
+import { definePipeline, eventOf } from '@michaelthielemann/kestrel-core'
+import type { StepDef } from '@michaelthielemann/kestrel-core'
+import { useStorageDriver } from '@michaelthielemann/kestrel-media'
 import { galleryNamespace } from '../utils/namespace'
 
 // Return the public `base` URL of a gallery's namespace so the editor knows where to fetch the encrypted

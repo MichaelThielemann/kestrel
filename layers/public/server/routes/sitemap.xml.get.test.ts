@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest'
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { buildCollection } from '@kestrel/core'
-import { clearRegistry, defineCollection, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@kestrel/core'
+import { buildCollection } from '@michaelthielemann/kestrel-core'
+import { clearRegistry, defineCollection, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@michaelthielemann/kestrel-core'
 // The route is a server route driven by auto-imports (Nitro's `server/utils` convention); stub those as
 // globals so the handler can be exercised as a plain function. `siteBaseUrl` is an explicit
-// `@kestrel/publishing` import, mocked accordingly.
-vi.mock('@kestrel/publishing', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@kestrel/publishing')>()),
+// `@michaelthielemann/kestrel-publishing` import, mocked accordingly.
+vi.mock('@michaelthielemann/kestrel-publishing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@michaelthielemann/kestrel-publishing')>()),
   siteBaseUrl: () => 'https://example.test',
 }))
 const pages = buildCollection(defineCollection({

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { aggregateKeyOf, buildEnvelope, insertOutboxRow, nextSequence, runWriteAfterStepsSync } from '@kestrel/core'
+import { aggregateKeyOf, buildEnvelope, insertOutboxRow, nextSequence, runWriteAfterStepsSync } from '@michaelthielemann/kestrel-core'
 import mediaCollection from '../collections/media.js'
 import { sqliteClientOfMediaDb, type MediaDb } from '../db/media-db.js'
 

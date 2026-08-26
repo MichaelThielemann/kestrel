@@ -3,7 +3,7 @@ import { Effect } from 'effect'
 import { buildEnvelope, insertOutboxRow, nextSequence } from '../../db/outbox.js'
 import { collectionOf, eventsOf, unitsOf, type Row, type WriteUnit } from './shared.js'
 import { syncStep, type PipelineContext, type StepDef } from '../types.js'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 
 /** `<collection>.created` (no prior row), `<collection>.updated` (both present), `<collection>.deleted`
  *  (no surviving row) — the only taxonomy this codebase has ever needed a write event to carry. */

@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { callPipelineRoute, usePipelineRouteDb } from '../helpers/pipeline-route'
-import { buildCollection, buildIntrospectionPipelines, clearFieldPopulators, clearPipelines, clearPopulator, clearRegistry, create, defineCollection, desiredSchema, diffSchema, getCollection, getOne, outboxContent, registerCollection, registerFieldPopulator, registerPipeline, registerPopulator, renderSqlite, revisionsTable  } from '@kestrel/core'
-import type { PipelineDescriptor } from '@kestrel/core'
-import { buildFieldTreePopulator } from '@kestrel/fields'
-import { buildRelationFieldPopulator, skipMissing } from '@kestrel/collections'
+import { buildCollection, buildIntrospectionPipelines, clearFieldPopulators, clearPipelines, clearPopulator, clearRegistry, create, defineCollection, desiredSchema, diffSchema, getCollection, getOne, outboxContent, registerCollection, registerFieldPopulator, registerPipeline, registerPopulator, renderSqlite, revisionsTable  } from '@michaelthielemann/kestrel-core'
+import type { PipelineDescriptor } from '@michaelthielemann/kestrel-core'
+import { buildFieldTreePopulator } from '@michaelthielemann/kestrel-fields'
+import { buildRelationFieldPopulator, skipMissing } from '@michaelthielemann/kestrel-collections'
 // A `number` field lets a raw SQL write store a non-numeric string without tripping SQLite's NOT NULL
 // constraint (unlike a required text column, which SQLite itself refuses to null out) — the select
 // schema (createSelectSchema, z.number()) rejects the string on read, which is the quarantine trigger.

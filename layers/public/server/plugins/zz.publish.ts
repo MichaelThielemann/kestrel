@@ -11,7 +11,7 @@ import {
   startPublishRun,
   setRenderRouteLive,
   type PublishDelivery,
-} from '@kestrel/publishing'
+} from '@michaelthielemann/kestrel-publishing'
 
 /**
  * The in-server publish runtime (the production operation model). Wires the queue + deps index and gates
@@ -49,7 +49,7 @@ export default defineNitroPlugin(() => {
 
   // Wired explicitly here (not a module-load side effect) — see tasks/publish/run.ts's own comment for
   // why: it removes any dependency on import-order/instance-identity between this plugin's own
-  // `@kestrel/publishing` import and the one `publisher.ts`'s internals resolve. Idempotent.
+  // `@michaelthielemann/kestrel-publishing` import and the one `publisher.ts`'s internals resolve. Idempotent.
   setRenderRouteLive(renderRouteLive)
 
   // `output.verbose`: on top of the one-line summary, itemise each incremental republish with a

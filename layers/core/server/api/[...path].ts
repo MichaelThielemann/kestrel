@@ -2,9 +2,9 @@ import { getRequestHeader } from 'h3'
 import {
   MAX_JSON_BODY, assertBodyLimit, isRoutablePipeline, toHttpError, tryResolveDefaultPipeline,
   parseFilter, parsePipelineRoute, getCollectionOr404, useDb, readIfUnmodifiedSince,
-} from '@kestrel/core'
-import type { PipelineContext, PipelineTrace } from '@kestrel/core'
-import { runPipelineForEventAuto, resolveEventPrincipal } from '@kestrel/access'
+} from '@michaelthielemann/kestrel-core'
+import type { PipelineContext, PipelineTrace } from '@michaelthielemann/kestrel-core'
+import { runPipelineForEventAuto, resolveEventPrincipal } from '@michaelthielemann/kestrel-access'
 // The one handler behind the whole pipeline URL scheme:
 //
 //   GET  /api/<collection>/<readPipeline>[/<id>]

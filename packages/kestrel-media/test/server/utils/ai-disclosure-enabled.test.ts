@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { getResolvedKestrelConfig, setResolvedKestrelConfig } from '@kestrel/core'
+import { getResolvedKestrelConfig, setResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
 import { aiDisclosureEnabled } from '../../../src/server/utils/ai-disclosure-enabled.js'
 
 const ORIG = getResolvedKestrelConfig()

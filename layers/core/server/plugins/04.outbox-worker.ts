@@ -1,4 +1,4 @@
-import { buildOutboxPipelines, makeTicker, registerPipeline, useDb } from '@kestrel/core'
+import { buildOutboxPipelines, makeTicker, registerPipeline, useDb } from '@michaelthielemann/kestrel-core'
 /** Hard-coded to `content` — the only module with an outbox table today; extend alongside
  *  `pipelines/outbox.ts` if a second module gets one. */
 const OUTBOX_MODULE = 'content'

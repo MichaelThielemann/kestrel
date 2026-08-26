@@ -11,7 +11,7 @@ afterEach(() => {
  * Pins the media namespace's merge precedence: `runtimeConfig.media` (what a real Nitro boot already
  * resolved — the kestrel module's build-time `KESTREL_S3_*` write, itself overridable at server start via
  * Nitro's own `NUXT_MEDIA_S3_*` env convention, see docs/guide/configuration.md) must win over
- * `resolveKestrel`'s own raw-env fallback, which `useStorageDriver` (`@kestrel/media`) only reaches when
+ * `resolveKestrel`'s own raw-env fallback, which `useStorageDriver` (`@michaelthielemann/kestrel-media`) only reaches when
  * no runtimeConfig was ever seeded (a package test, a script).
  */
 describe('resolveServerKestrelConfig — media namespace precedence', () => {

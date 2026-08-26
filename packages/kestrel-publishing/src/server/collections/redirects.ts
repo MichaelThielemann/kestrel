@@ -1,4 +1,4 @@
-import { buildCollection, defineCollection  } from '@kestrel/core'
+import { buildCollection, defineCollection  } from '@michaelthielemann/kestrel-core'
 import { compileRedirects } from '../utils/publish/redirect-rules.js'
 
 /**

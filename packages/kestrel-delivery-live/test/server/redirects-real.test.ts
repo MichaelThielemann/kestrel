@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { clearRegistry, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@kestrel/core'
-import { redirectsCollection } from '@kestrel/publishing'
+import { clearRegistry, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@michaelthielemann/kestrel-core'
+import { redirectsCollection } from '@michaelthielemann/kestrel-publishing'
 import { liveRedirectFor, invalidateLiveRedirects } from '../../src/server/redirects.js'
 
-// No @kestrel/core mock here — a real in-memory DB + the real redirectsCollection, through
+// No @michaelthielemann/kestrel-core mock here — a real in-memory DB + the real redirectsCollection, through
 // liveRedirectFor's actual compileFromDb/matchRedirect path (mirrors layers/public/server/routes/
 // redirects.json.get.test.ts's own fixture for the static artifact's sibling read path).
 function save(sqlite: Database.Database, rules: unknown): void {

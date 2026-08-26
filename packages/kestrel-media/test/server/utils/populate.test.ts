@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { buildMediaFieldPopulator } from '../../../src/server/utils/populate.js'
-import { buildFieldTreePopulator, defineBlock, registerBlock, clearBlocks  } from '@kestrel/fields'
-import { defineCollection, withReadCapture } from '@kestrel/core'
-import type { FieldPopulator } from '@kestrel/core'
+import { buildFieldTreePopulator, defineBlock, registerBlock, clearBlocks  } from '@michaelthielemann/kestrel-fields'
+import { defineCollection, withReadCapture } from '@michaelthielemann/kestrel-core'
+import type { FieldPopulator } from '@michaelthielemann/kestrel-core'
 import type { ResolvedMedia } from '../../../src/server/utils/resolve.js'
 
 beforeEach(() => clearBlocks())

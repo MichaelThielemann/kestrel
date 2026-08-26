@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
-import { definePipeline } from '@kestrel/core'
-import type { StepDef } from '@kestrel/core'
-import { useStorageDriver } from '@kestrel/media'
+import { definePipeline } from '@michaelthielemann/kestrel-core'
+import type { StepDef } from '@michaelthielemann/kestrel-core'
+import { useStorageDriver } from '@michaelthielemann/kestrel-media'
 import { galleryNamespace } from '../utils/namespace'
 
 // Recursively delete a whole gallery namespace (`galleries-secure/<galleryId>/` — all blobs + the index).

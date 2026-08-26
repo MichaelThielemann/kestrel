@@ -1,8 +1,8 @@
 import { createError, getQuery, getRequestHeader, readRawBody } from 'h3'
 import { Effect } from 'effect'
-import { assertBodyLimit, definePipeline, eventOf } from '@kestrel/core'
-import type { StepDef } from '@kestrel/core'
-import { mediaRuntimeConfig, useStorageDriver } from '@kestrel/media'
+import { assertBodyLimit, definePipeline, eventOf } from '@michaelthielemann/kestrel-core'
+import type { StepDef } from '@michaelthielemann/kestrel-core'
+import { mediaRuntimeConfig, useStorageDriver } from '@michaelthielemann/kestrel-media'
 import { galleryNamespace } from '../utils/namespace'
 
 // Store one CIPHERTEXT image blob in a gallery's namespace. The editor encrypted it client-side, so the

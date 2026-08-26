@@ -1,8 +1,8 @@
 import collections from '#kestrel/collections'
 import schemaTables from '#kestrel/schema-tables'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
-import { describeOp, desiredFromCollections, isDestructive, planOps, runDevSchemaSync, sqlite, useDb } from '@kestrel/core'
-import type { BuiltCollection, CollectionDef, SyncDb } from '@kestrel/core'
+import { describeOp, desiredFromCollections, isDestructive, planOps, runDevSchemaSync, sqlite, useDb } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection, CollectionDef, SyncDb } from '@michaelthielemann/kestrel-core'
 import { resolveServerKestrel, serverRuntimeConfig } from '../utils/server-config'
 // Dev-only schema auto-sync (ADR-0002). Runs after 00.migrate, so built-in collections are already
 // migrated and this is a no-op on them; it additively reconciles the live DB to whatever the registered

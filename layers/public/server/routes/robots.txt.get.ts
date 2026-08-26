@@ -1,4 +1,4 @@
-import { siteBaseUrl, buildRobots, llmsFullEnabled } from '@kestrel/publishing'
+import { siteBaseUrl, buildRobots, llmsFullEnabled } from '@michaelthielemann/kestrel-publishing'
 
 export default defineEventHandler((event) => {
   const base = siteBaseUrl()

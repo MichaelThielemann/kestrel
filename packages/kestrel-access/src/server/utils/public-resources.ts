@@ -1,4 +1,4 @@
-import { allCollections, pipelineAccess } from '@kestrel/core'
+import { allCollections, pipelineAccess } from '@michaelthielemann/kestrel-core'
 /**
  * Collections an anonymous visitor may read (published only). Derived from the read pipelines' own `access`
  * declarations, so there is ONE statement of public reachability: the declaration that admits an anonymous

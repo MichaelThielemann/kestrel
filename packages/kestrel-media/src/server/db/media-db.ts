@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { Effect } from 'effect'
-import { makeModuleDb, rawSqliteClientOf, useDb, type ModuleDbService } from '@kestrel/core'
+import { makeModuleDb, rawSqliteClientOf, useDb, type ModuleDbService } from '@michaelthielemann/kestrel-core'
 import { mediaOwnershipManifest } from './manifest.js'
 import { media } from '../collections/media.js'
 import { mediaSettings } from '../collections/media-settings.js'

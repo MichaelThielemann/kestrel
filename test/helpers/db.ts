@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
-import { allCollections, ensureRevisionsTable } from '@kestrel/core'
+import { allCollections, ensureRevisionsTable } from '@michaelthielemann/kestrel-core'
 const migrationsFolder = resolve(fileURLToPath(new URL('../../', import.meta.url)), 'server/database/migrations')
 
 /** `<collection>_revisions` tables have no committed migration (they are dynamic, provisioned in

@@ -3,10 +3,10 @@ import { existsSync } from 'node:fs'
 import { defineNuxtModule } from '@nuxt/kit'
 import Database from 'better-sqlite3'
 import { collectPageRoutes, pageLikeTables } from './discover'
-import { localePath, resolveKestrel } from '@kestrel/core'
-import type { KestrelConfig } from '@kestrel/core'
-import { META_KEYS } from '@kestrel/core'
-import { recordRouteDiscovery, type RouteDiscovery } from '@kestrel/delivery-static'
+import { localePath, resolveKestrel } from '@michaelthielemann/kestrel-core'
+import type { KestrelConfig } from '@michaelthielemann/kestrel-core'
+import { META_KEYS } from '@michaelthielemann/kestrel-core'
+import { recordRouteDiscovery, type RouteDiscovery } from '@michaelthielemann/kestrel-delivery-static'
 // Read published paths from EVERY page-like collection straight from the DB at build time so
 // `nuxt generate` prerenders one HTML file per page (see `collectPageRoutes` for how pageLike tables
 // are identified). The server's migrate-on-boot hasn't run yet at this point, so a DB that isn't there

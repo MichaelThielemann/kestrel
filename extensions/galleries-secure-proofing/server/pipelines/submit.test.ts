@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 import { createEvent, type H3Event } from 'h3'
-import { clearPipelines, registerPipeline } from '@kestrel/core'
-import { runPipelineForEventAsync } from '@kestrel/access'
+import { clearPipelines, registerPipeline } from '@michaelthielemann/kestrel-core'
+import { runPipelineForEventAsync } from '@michaelthielemann/kestrel-access'
 import { clearRateLimits } from '../utils/rate-limit'
 import { proofingSubmitPipeline } from './submit'
 

@@ -1,4 +1,4 @@
-import type { SerializedField } from '@kestrel/core'
+import type { SerializedField } from '@michaelthielemann/kestrel-core'
 
 /**
  * The jsKey (wire key) for a field — NOT a DB column name. The server marks single relation/media fields

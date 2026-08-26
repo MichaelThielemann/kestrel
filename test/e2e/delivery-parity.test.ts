@@ -5,11 +5,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch } from '@nuxt/test-utils/e2e'
 import sharp from 'sharp'
-import { hashPassword } from '@kestrel/auth'
+import { hashPassword } from '@michaelthielemann/kestrel-auth'
 import { normalizeStaticOutput } from './fixtures/normalize-static-output'
 
 /**
- * One running instance, `delivery: 'live'`. `@kestrel/delivery-static`'s `port.ts` records that the
+ * One running instance, `delivery: 'live'`. `@michaelthielemann/kestrel-delivery-static`'s `port.ts` records that the
  * runtime publisher still writes through `StorageDriver` directly regardless of the `delivery`
  * selection — so a single `delivery: 'live'` instance produces BOTH surfaces from one `publish:run`: the
  * static file under `KESTREL_OUTPUT_DIR`, and the live-served response through the catch-all. That lets

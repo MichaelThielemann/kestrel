@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import type { ValidationFailed } from '@kestrel/contracts'
+import type { ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 import Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { clearPipelines, desiredSchema, diffSchema, getSingleton, outboxContent, putSingleton, renderSqlite, revisionsTable } from '@kestrel/core'
+import { clearPipelines, desiredSchema, diffSchema, getSingleton, outboxContent, putSingleton, renderSqlite, revisionsTable } from '@michaelthielemann/kestrel-core'
 import built from '../../../src/server/collections/redirects.js'
 
 const rules = (v: unknown) => built.insert.safeParse({ rules: v })

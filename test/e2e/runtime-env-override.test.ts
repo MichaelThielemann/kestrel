@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { existsSync, rmSync } from 'node:fs'
 import { describe, it, expect, afterAll } from 'vitest'
 import { setup, startServer } from '@nuxt/test-utils/e2e'
-import { hashPassword } from '@kestrel/auth'
+import { hashPassword } from '@michaelthielemann/kestrel-auth'
 
 // The build-time default DB path (baked into runtimeConfig by the `kestrel` module at `nuxt build`) vs.
 // the path a `NUXT_KESTREL_DB_PATH` override — set ONLY on the already-built server's process, never seen

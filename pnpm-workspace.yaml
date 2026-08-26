@@ -12,29 +12,29 @@ packages:
   # The server domain package (content model, registries, schema-building pure functions).
   - packages/kestrel-core
   # The built-in field-type descriptors, block-definition helper, and field/block population walkers —
-  # depends on @kestrel/core.
+  # depends on @michaelthielemann/kestrel-core.
   - packages/kestrel-fields
-  # The stateless single-admin session/auth domain — depends on @kestrel/core.
+  # The stateless single-admin session/auth domain — depends on @michaelthielemann/kestrel-core.
   - packages/kestrel-auth
   # The authorization (authz) domain: principal/policy/CSRF/IP-allowlist and the pipeline access gates —
-  # depends on @kestrel/core and @kestrel/auth.
+  # depends on @michaelthielemann/kestrel-core and @michaelthielemann/kestrel-auth.
   - packages/kestrel-access
   # The media domain: uploads, storage drivers, derived variants, folders, and the media collections —
-  # depends on @kestrel/core and @kestrel/access.
+  # depends on @michaelthielemann/kestrel-core and @michaelthielemann/kestrel-access.
   - packages/kestrel-media
-  # The built-in content collections (pages) and the relation field populator — depends on @kestrel/core.
+  # The built-in content collections (pages) and the relation field populator — depends on @michaelthielemann/kestrel-core.
   - packages/kestrel-collections
   # The publishing domain: the publish_deps/publish_status/publish_runs/published_snapshots tables, the
   # publishing <Module>Db adapter, the runtime static publisher, the publish orchestrator, and the
-  # publish/publishRuns pipelines — depends on @kestrel/core, @kestrel/access and @kestrel/media.
+  # publish/publishRuns pipelines — depends on @michaelthielemann/kestrel-core, @michaelthielemann/kestrel-access and @michaelthielemann/kestrel-media.
   - packages/kestrel-publishing
   # The live delivery adapter (no-op DeliveryPort — published_snapshots is already the persistence), the
-  # deliverySnapshot read pipeline, and the live redirect lookup — depends on @kestrel/core and
-  # @kestrel/publishing.
+  # deliverySnapshot read pipeline, and the live redirect lookup — depends on @michaelthielemann/kestrel-core and
+  # @michaelthielemann/kestrel-publishing.
   - packages/kestrel-delivery-live
   # The static delivery adapter (writes through a StorageDriver), the static per-route render lookup, and
-  # the build-time S3 output deploy — depends on @kestrel/core, @kestrel/publishing and
-  # @kestrel/delivery-live (for the delivery: 'live' branch of deliveryPortFor).
+  # the build-time S3 output deploy — depends on @michaelthielemann/kestrel-core, @michaelthielemann/kestrel-publishing and
+  # @michaelthielemann/kestrel-delivery-live (for the delivery: 'live' branch of deliveryPortFor).
   - packages/kestrel-delivery-static
 
 overrides:

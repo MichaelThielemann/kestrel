@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SerializedCollection } from '@kestrel/core'
+import type { SerializedCollection } from '@michaelthielemann/kestrel-core'
 import { resolveLocalized } from '../../../ui/app/utils/localized'
 import { bulkCustomActions, recordCustomActions } from '../utils/collection-ops'
 

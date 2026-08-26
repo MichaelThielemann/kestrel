@@ -1,4 +1,4 @@
-import type { AiSourceType } from '@kestrel/media'
+import type { AiSourceType } from '@michaelthielemann/kestrel-media'
 
 /**
  * Default human-readable label for an EU AI Act source type — the badge text when no editor note was

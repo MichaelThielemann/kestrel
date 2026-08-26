@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { FieldDef, LayoutNode, SeoMeta } from '@kestrel/core'
-import { slugify } from '@kestrel/core/client'
+import type { FieldDef, LayoutNode, SeoMeta } from '@michaelthielemann/kestrel-core'
+import { slugify } from '@michaelthielemann/kestrel-core/client'
 // The collection (page) field list — delegates to the shared <KestrelFieldLayout> renderer (rows / groups /
 // widths, or one field per row when the collection declares no layout), shared by the flat-collection
 // form and the 3-pane editor's root-selected pane so the wiring lives in exactly one place. pageLike

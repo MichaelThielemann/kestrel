@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { asFieldDef, initialValues, mapServerErrors, parseBlockErrors, reconcileBlockErrors, reconcileDeadRefs, readFetchError, valuesEqual } from './edit-form'
-import type { SerializedField } from '@kestrel/core'
+import type { SerializedField } from '@michaelthielemann/kestrel-core'
 import { registerFieldEmpty } from '../../../ui/app/utils/field-empty'
 
 function f(partial: Partial<SerializedField> & Pick<SerializedField, 'type'>): SerializedField {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, useSlots } from 'vue'
-import type { LinkValue } from '@kestrel/core'
+import type { LinkValue } from '@michaelthielemann/kestrel-core'
 import { linkToHref, linkLabel } from '../utils/link-href'
 
 // Generic renderer for the `link` field type, for consumer projects + blocks. Renders an <a> for any

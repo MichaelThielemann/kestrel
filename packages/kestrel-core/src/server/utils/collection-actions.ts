@@ -1,6 +1,6 @@
 import { consumerPipelineTargets, ensureDefaultPipelines, isRoutablePipeline, resolvePipeline } from '../pipeline/registry.js'
 import { STANDARD_OPS, TOOLING_READ_OPS, type ResolvedPipeline } from '../pipeline/types.js'
-import type { Localized } from '@kestrel/core'
+import type { Localized } from '@michaelthielemann/kestrel-core'
 
 /** @public */
 export interface SerializedAction {

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { clearFieldPopulators, clearRegistry, create, defineCollection, desiredSchema, diffSchema, getFieldPopulator, getResolvedKestrelConfig, outboxContent, registerCollection, renderSqlite, resetDbInstance, revisionsTable, setResolvedKestrelConfig, useDb, buildCollection  } from '@kestrel/core'
-import type { FieldDef } from '@kestrel/core'
-import { publicReadableResources, isPubliclyReadable } from '@kestrel/access'
+import { clearFieldPopulators, clearRegistry, create, defineCollection, desiredSchema, diffSchema, getFieldPopulator, getResolvedKestrelConfig, outboxContent, registerCollection, renderSqlite, resetDbInstance, revisionsTable, setResolvedKestrelConfig, useDb, buildCollection  } from '@michaelthielemann/kestrel-core'
+import type { FieldDef } from '@michaelthielemann/kestrel-core'
+import { publicReadableResources, isPubliclyReadable } from '@michaelthielemann/kestrel-access'
 
 const pages = buildCollection(defineCollection({
   name: 'pages', mode: 'multi', translatable: false, pageLike: true,

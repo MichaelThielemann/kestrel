@@ -18,7 +18,7 @@ export function usePipelineRouteDb(next: BetterSQLite3Database): void {
   db = next
 }
 
-vi.mock('@kestrel/core', async (importOriginal) => ({
+vi.mock('@michaelthielemann/kestrel-core', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useDb: () => db,
   readIfUnmodifiedSince: (event: H3Event) => preconditions.get(event),

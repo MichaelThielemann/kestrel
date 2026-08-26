@@ -118,7 +118,7 @@ export function renderPackageMergedRegistry(opts: {
   return [
     opts.preamble ?? '',
     opts.extraImports ?? '',
-    `import { mergeKestrelDiscovered } from '@kestrel/core'`,
+    `import { mergeKestrelDiscovered } from '@michaelthielemann/kestrel-core'`,
     ...pkgImports,
     ...consumerImports,
     `export default mergeKestrelDiscovered([${pkgSpread}], [${consumerArr}], ${opts.nameOfExpr})`,

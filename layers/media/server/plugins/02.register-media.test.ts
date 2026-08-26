@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { getFieldPopulator, clearFieldPopulators, getResolvedKestrelConfig, setResolvedKestrelConfig, resolveKestrel } from '@kestrel/core'
+import { getFieldPopulator, clearFieldPopulators, getResolvedKestrelConfig, setResolvedKestrelConfig, resolveKestrel } from '@michaelthielemann/kestrel-core'
 
 // The plugin is a Nitro plugin: its auto-imported helpers are plain globals in a node test.
 Object.assign(globalThis, {

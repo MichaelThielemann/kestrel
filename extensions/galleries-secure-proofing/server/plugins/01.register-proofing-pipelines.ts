@@ -1,4 +1,4 @@
-import { registerPipeline } from '@kestrel/core'
+import { registerPipeline } from '@michaelthielemann/kestrel-core'
 import { proofingSubmissionPipeline } from '../pipelines/mine'
 import { proofingSubmitPipeline } from '../pipelines/submit'
 

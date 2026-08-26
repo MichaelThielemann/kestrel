@@ -1,6 +1,6 @@
 import { reactive, toValue } from 'vue'
 import type { MaybeRefOrGetter } from 'vue'
-import type { ResolvedMedia } from '@kestrel/media'
+import type { ResolvedMedia } from '@michaelthielemann/kestrel-media'
 
 // The client-facing resolved-media shape (`GET /api/media/resolve`) is the server resolver's own
 // return type — re-exported so consumers keep importing it from here, single-sourced so it can't drift.

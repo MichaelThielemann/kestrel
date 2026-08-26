@@ -7,7 +7,7 @@ import UiButtonGroup from '../ui/ButtonGroup.vue'
 import UiCheckboxGroup from '../ui/CheckboxGroup.vue'
 import { resolveLocalized } from '../../utils/localized'
 import type { FieldComponentProps } from '../../utils/field-component'
-import type { FieldOf } from '@kestrel/core'
+import type { FieldOf } from '@michaelthielemann/kestrel-core'
 
 const props = defineProps<FieldComponentProps>()
 const model = defineModel<string | string[] | null>()

@@ -1,6 +1,6 @@
 import { createError } from 'h3'
 import { globalPipelineNames, invalidatePipelineCache, nameCollision, setCollectionProbe } from '../pipeline/registry.js'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 
 const registry = new Map<string, BuiltCollection>()
 

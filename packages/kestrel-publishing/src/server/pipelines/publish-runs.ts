@@ -1,7 +1,7 @@
 import { desc } from 'drizzle-orm'
 import { Effect } from 'effect'
-import { definePipeline, syncStep } from '@kestrel/core'
-import type { PipelineDef, StepDef } from '@kestrel/core'
+import { definePipeline, syncStep } from '@michaelthielemann/kestrel-core'
+import type { PipelineDef, StepDef } from '@michaelthielemann/kestrel-core'
 import { publishRuns, PUBLISH_RUNS_RETENTION } from '../database/publish-runs.js'
 import { usePublishingDb } from '../db/publishing-db.js'
 

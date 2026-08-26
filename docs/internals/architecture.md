@@ -40,7 +40,7 @@ The real, current sequence, derived from `PLUGIN_ORDER` (`find layers -path '*/s
 `*.test.ts` siblings that `isPluginFile` in `plugin-order.ts` excludes):
 
 1. `core/server/plugins/00.config.ts` — resolves the config once (`runtimeConfig` preferred, Kestrel's own
-   config file + env as fallback) and pushes it into `@kestrel/core`'s config provider
+   config file + env as fallback) and pushes it into `@michaelthielemann/kestrel-core`'s config provider
    (`setResolvedKestrelConfig`); ordered before `00.migrate.ts`, whose `useDb()` needs the provider
    populated already. Package code never calls `useRuntimeConfig()` itself — it can't, since it doesn't
    live inside the Nuxt app — so `locale.ts`, `db.ts`, `revision-retention.ts`, `delivery.ts` and
@@ -119,10 +119,10 @@ through Kestrel" has one place to check instead of re-deriving it per file:
   before it ships). This is the correct mechanism for a Nuxt *build*-time module — `plugin-order` governs
   Nitro *server* plugins specifically and has no jurisdiction here. `deploy-output`'s Nuxt module wrapper
   stays where it is — a build-time module can only be registered from a layer's `nuxt.config.ts`, never
-  from a package — but its S3 upload/reconcile logic lives in `@kestrel/delivery-static`, the same
+  from a package — but its S3 upload/reconcile logic lives in `@michaelthielemann/kestrel-delivery-static`, the same
   layer/package split every other server-side extraction uses. `contentTypeFor`/`cacheControlFor` (the
   content-type and cache-control rules for static output) are not part of that split: they're defined in
-  `@kestrel/core` and imported by `@kestrel/delivery-static`, the same way any other package consumes them.
+  `@michaelthielemann/kestrel-core` and imported by `@michaelthielemann/kestrel-delivery-static`, the same way any other package consumes them.
 - **Nitro's own disk-scanned directories** (`server/tasks/**` — db-migration, media-backfill
   (`media/server/tasks/media/backfill.ts`) and publish tasks (`public/server/tasks/publish/run.ts`, the
   operator-triggered manual publish run `public/server/plugins/zz.publish.ts` names as a documented

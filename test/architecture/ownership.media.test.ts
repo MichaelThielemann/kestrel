@@ -4,8 +4,8 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 import type { Layer, Context } from 'effect'
-import { OwnershipViolation, desiredSchema, diffSchema, ensureOutboxTable, makeModuleDb, recordRefs, renderSqlite, createLocalDriver } from '@kestrel/core'
-import type { ModuleDbService } from '@kestrel/core'
+import { OwnershipViolation, desiredSchema, diffSchema, ensureOutboxTable, makeModuleDb, recordRefs, renderSqlite, createLocalDriver } from '@michaelthielemann/kestrel-core'
+import type { ModuleDbService } from '@michaelthielemann/kestrel-core'
 import {
   mediaOwnershipManifest,
   media as mediaTable,
@@ -15,7 +15,7 @@ import {
   listLibrary,
   deleteAffected,
   findMediaUsages,
-} from '@kestrel/media'
+} from '@michaelthielemann/kestrel-media'
 import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

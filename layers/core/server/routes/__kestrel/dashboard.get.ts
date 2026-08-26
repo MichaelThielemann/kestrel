@@ -1,4 +1,4 @@
-import { allCollections, buildPipelineIndex, renderDashboard } from '@kestrel/core'
+import { allCollections, buildPipelineIndex, renderDashboard } from '@michaelthielemann/kestrel-core'
 import { PLUGIN_ORDER } from '../../../modules/plugin-order/plugin-order'
 
 /**

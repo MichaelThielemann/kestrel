@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { LinkValue } from '@kestrel/core'
-import { defineBlock } from '@kestrel/fields/client'
+import type { LinkValue } from '@michaelthielemann/kestrel-core'
+import { defineBlock } from '@michaelthielemann/kestrel-fields/client'
 
 interface ResolvedMedia { src: string; srcset: { url: string; width: number }[]; alt: string | null; width: number | null; height: number | null; thumbhash: string | null }
 

@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { definePipeline } from '../pipeline/define.js'
 import { readDeadLetters } from '../db/outbox.js'
-import { useDb } from '@kestrel/core'
+import { useDb } from '@michaelthielemann/kestrel-core'
 import { syncStep, type PipelineDef, type StepDef } from '../pipeline/types.js'
 
 /** Hard-coded to `content` — the only module with an outbox table (see `04.outbox-worker.ts`'s own note).

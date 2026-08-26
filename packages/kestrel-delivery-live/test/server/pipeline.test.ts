@@ -4,11 +4,11 @@ import { Effect } from 'effect'
 const isDeliveryLive = vi.fn(() => false)
 const currentSnapshot = vi.fn()
 
-vi.mock('@kestrel/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@kestrel/core')>()
+vi.mock('@michaelthielemann/kestrel-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@michaelthielemann/kestrel-core')>()
   return { ...actual, isDeliveryLive: () => isDeliveryLive() }
 })
-vi.mock('@kestrel/publishing', () => ({
+vi.mock('@michaelthielemann/kestrel-publishing', () => ({
   usePublishingDb: () => ({ db: {} }),
   currentSnapshot: (...args: unknown[]) => currentSnapshot(...args),
 }))

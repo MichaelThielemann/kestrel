@@ -1,4 +1,4 @@
-import type { ModuleDbBrand } from '@kestrel/core'
+import type { ModuleDbBrand } from '@michaelthielemann/kestrel-core'
 import type { PublishingDb } from '../src/server/db/publishing-db.js'
 import type { SnapshotsDb } from '../src/server/db/snapshots.js'
 import type { DepsPersistenceDb } from '../src/server/utils/publish/deps-persistence.js'
@@ -24,8 +24,8 @@ declare const raw: {
 const _asPublishingDb: PublishingDb = raw
 
 // The brand survives Pick-narrowing ONLY when the narrowed type re-intersects it (Pick alone drops any key
-// outside the ones it names) — this pins that pattern for each of `@kestrel/publishing`'s own narrowed Db
-// types, mirroring `record-ref-index.ts`'s own DB/WriteDB/RebuildDB and `@kestrel/core`'s own
+// outside the ones it names) — this pins that pattern for each of `@michaelthielemann/kestrel-publishing`'s own narrowed Db
+// types, mirroring `record-ref-index.ts`'s own DB/WriteDB/RebuildDB and `@michaelthielemann/kestrel-core`'s own
 // `types.test-d.ts` pin for the same shape.
 
 // @ts-expect-error the narrowed type still requires the brand; an unbranded value doesn't carry it
@@ -55,7 +55,7 @@ void _orchestratorViaBranded
 // The brand itself is the same symbol every narrowed type re-intersects — a value branded for ONE module's
 // db (any of them; there is only one ModuleDbBrand, shared package-wide) satisfies all of them structurally
 // once it also carries the required members; this is not a per-module brand, only a "genuinely built by
-// makeModuleDb" one. Referencing the symbol here pins that it is actually re-exported from `@kestrel/core`,
+// makeModuleDb" one. Referencing the symbol here pins that it is actually re-exported from `@michaelthielemann/kestrel-core`,
 // not merely inferred.
 declare const brandKey: typeof ModuleDbBrand
 void brandKey

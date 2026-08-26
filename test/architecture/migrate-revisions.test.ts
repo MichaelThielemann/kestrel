@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { sql } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { buildCollection, clearRegistry, create, defineCollection, desiredSchema, diffSchema, ensureOutboxTable, getOne, readRevisions, registerCollection, renderSqlite, revisionsTable, revisionsTableName, schemaVersionOf, sqliteClientOf  } from '@kestrel/core'
-import type { BuiltCollection } from '@kestrel/core'
+import { buildCollection, clearRegistry, create, defineCollection, desiredSchema, diffSchema, ensureOutboxTable, getOne, readRevisions, registerCollection, renderSqlite, revisionsTable, revisionsTableName, schemaVersionOf, sqliteClientOf  } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { createTestDb } from '../helpers/db'
 // DESIGN: a plain function in `layers/core/server/db/revision-migration.ts`, separate from the `defineTask`
 // wrapper at `layers/core/server/tasks/db/migrate-revisions.ts` — mirrors the sync.ts (core)/migrate.ts
@@ -84,7 +84,7 @@ function insertRawRow(db: BetterSQLite3Database, collection: BuiltCollection, ti
 
 describe('db:migrate-revisions (core): explicit-flag gate', () => {
   it('refuses to run without the explicit flag, naming it', async () => {
-    const { migrateRevisions } = await import('@kestrel/core')
+    const { migrateRevisions } = await import('@michaelthielemann/kestrel-core')
     const widgets = widgetsCollection()
     const db = seedDb([widgets])
     insertRawRow(db, widgets, 'a', new Date('2020-01-01'), new Date('2020-01-02'))
@@ -95,7 +95,7 @@ describe('db:migrate-revisions (core): explicit-flag gate', () => {
   })
 
   it('runs and seeds when the flag is explicitly set', async () => {
-    const { migrateRevisions } = await import('@kestrel/core')
+    const { migrateRevisions } = await import('@michaelthielemann/kestrel-core')
     const widgets = widgetsCollection()
     const db = seedDb([widgets])
     const row = insertRawRow(db, widgets, 'a', new Date('2020-01-01'), new Date('2020-01-02'))
@@ -108,7 +108,7 @@ describe('db:migrate-revisions (core): missing-revisions-table pre-check', () =>
   it('a missing revisions table on ANY registered collection refuses the whole run up front, naming '
     + 'db:migrate as the remedy, never leaking a raw "no such table" — and seeds nothing at all, not even '
     + 'for a collection whose own table is fine', async () => {
-    const { migrateRevisions } = await import('@kestrel/core')
+    const { migrateRevisions } = await import('@michaelthielemann/kestrel-core')
     clearRegistry()
     const widgets = widgetsCollection()
     const gizmos = gizmosCollection()
@@ -142,7 +142,7 @@ describe('db:migrate-revisions (core): missing-revisions-table pre-check', () =>
 describe('db:migrate-revisions (core): seeding semantics', () => {
   it('seeds revision 1 = the full persisted row, schema_version from the current def, tombstone false, '
     + 'created_at = the row\'s own updatedAt (not migration wall-clock)', async () => {
-    const { migrateRevisions } = await import('@kestrel/core')
+    const { migrateRevisions } = await import('@michaelthielemann/kestrel-core')
     const widgets = widgetsCollection()
     const db = seedDb([widgets])
     const createdAt = new Date('2020-01-01T00:00:00.000Z')
@@ -163,7 +163,7 @@ describe('db:migrate-revisions (core): seeding semantics', () => {
   })
 
   it('seeds one revision 1 per existing row, independently, across multiple rows in one collection', async () => {
-    const { migrateRevisions } = await import('@kestrel/core')
+    const { migrateRevisions } = await import('@michaelthielemann/kestrel-core')
     const widgets = widgetsCollection()
     const db = seedDb([widgets])
     const a = insertRawRow(db, widgets, 'a', new Date('2020-01-01'), new Date('2020-01-01'))
@@ -225,7 +225,7 @@ describe('db:migrate-revisions (core): one transaction per collection, resumable
 
   it('a mid-collection failure rolls back that collection\'s seeds entirely, leaving an earlier '
     + 'collection\'s already-committed seeds untouched', async () => {
-    const { migrateRevisions } = await import('@kestrel/core')
+    const { migrateRevisions } = await import('@michaelthielemann/kestrel-core')
     const { db, wa, wb, ga } = poisonedFixture()
 
     expect(() => migrateRevisions(db, { force: true })).toThrow()
@@ -242,7 +242,7 @@ describe('db:migrate-revisions (core): one transaction per collection, resumable
 
   it('is resumable: fixing the failure and re-running completes the failed collection without '
     + 'duplicating the collection that already succeeded', async () => {
-    const { migrateRevisions } = await import('@kestrel/core')
+    const { migrateRevisions } = await import('@michaelthielemann/kestrel-core')
     const { db, wa, wb, ga, gb } = poisonedFixture()
 
     expect(() => migrateRevisions(db, { force: true })).toThrow()
@@ -258,7 +258,7 @@ describe('db:migrate-revisions (core): one transaction per collection, resumable
 
 describe('db:migrate-revisions (core): rerun is a no-op', () => {
   it('a second run after a clean completion changes nothing — no revision-2s appear, counts identical', async () => {
-    const { migrateRevisions } = await import('@kestrel/core')
+    const { migrateRevisions } = await import('@michaelthielemann/kestrel-core')
     const widgets = widgetsCollection()
     const db = seedDb([widgets])
     const a = insertRawRow(db, widgets, 'a', new Date('2020-01-01'), new Date('2020-01-01'))
@@ -279,7 +279,7 @@ describe('db:migrate-revisions (core): rerun is a no-op', () => {
 
 describe('db:migrate-revisions (core): reads identical before/after', () => {
   it('row counts and a representative read are byte-identical pre/post migration', async () => {
-    const { migrateRevisions } = await import('@kestrel/core')
+    const { migrateRevisions } = await import('@michaelthielemann/kestrel-core')
     const widgets = widgetsCollection()
     const db = seedDb([widgets])
     const a = insertRawRow(db, widgets, 'a', new Date('2020-01-01'), new Date('2020-01-01'))
@@ -301,7 +301,7 @@ describe('db:migrate-revisions (core): reads identical before/after', () => {
 
 describe('db:migrate-revisions (core): rows already carrying a revision from the ordinary write path', () => {
   it('a row written after Phase-6 code (already has revision 1 from persist) is not double-seeded', async () => {
-    const { migrateRevisions } = await import('@kestrel/core')
+    const { migrateRevisions } = await import('@michaelthielemann/kestrel-core')
     const widgets = widgetsCollection()
     const db = seedDb([widgets])
     const created = create(db, widgets, { title: 'already seeded' }) as Row
@@ -318,7 +318,7 @@ describe('db:migrate-revisions (core): rows already carrying a revision from the
 
 describe('db:migrate-revisions (core): deleted-record ghosts', () => {
   it('only seeds rows that still exist — a gap from a long-gone delete gets no fabricated tombstone', async () => {
-    const { migrateRevisions } = await import('@kestrel/core')
+    const { migrateRevisions } = await import('@michaelthielemann/kestrel-core')
     const widgets = widgetsCollection()
     const db = seedDb([widgets])
     const keep = insertRawRow(db, widgets, 'keep', new Date('2020-01-01'), new Date('2020-01-01'))

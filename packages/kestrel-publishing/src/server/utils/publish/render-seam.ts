@@ -7,7 +7,7 @@
  * `tasks/publish/run.ts`'s task body) calls {@link setRenderRouteLive} explicitly, synchronously, right
  * before the only call that needs it — NOT as a module-load side effect: Nitro dev can re-evaluate a
  * task's module graph independently of a plugin's, so a boot-time-only wiring call would not reliably
- * reach the specific `@kestrel/publishing` instance a later task invocation resolves against. Mirrors the
+ * reach the specific `@michaelthielemann/kestrel-publishing` instance a later task invocation resolves against. Mirrors the
  * config-provider seam's own set/get/clear shape.
  * @public
  */

@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch } from '@nuxt/test-utils/e2e'
-import { hashPassword } from '@kestrel/auth'
+import { hashPassword } from '@michaelthielemann/kestrel-auth'
 import { normalizeStaticOutput } from './fixtures/normalize-static-output'
 import baseline from './fixtures/delivery-static-baseline.json'
 

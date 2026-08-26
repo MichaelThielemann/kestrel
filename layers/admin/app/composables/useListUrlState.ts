@@ -1,7 +1,7 @@
 import type { Ref } from 'vue'
 import type { ListColumn } from '../utils/list-columns'
 import { toQuery, toggleSort, parseListQuery, type FilterCell, type ListState } from '../utils/list-query'
-import { clampPerPage, DEFAULT_PER_PAGE } from '@kestrel/core/client'
+import { clampPerPage, DEFAULT_PER_PAGE } from '@michaelthielemann/kestrel-core/client'
 
 /**
  * The URL is the SINGLE SOURCE OF TRUTH for a collection list's committed state (sort · page · perPage ·

@@ -1,8 +1,8 @@
 import { getTableConfig, SQLiteSyncDialect, type SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { SQL, is } from 'drizzle-orm'
-import { fieldIs, resolveColumnName } from '@kestrel/core'
+import { fieldIs, resolveColumnName } from '@michaelthielemann/kestrel-core'
 import { toSnakeCase } from '../utils/naming.js'
-import type { CollectionDef } from '@kestrel/core'
+import type { CollectionDef } from '@michaelthielemann/kestrel-core'
 import type { ColumnShape, IndexShape, TableShape, SchemaSnapshot } from './model.js'
 
 // Build the *desired* schema snapshot from the Drizzle tables that collections compile to (the

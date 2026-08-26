@@ -5,7 +5,7 @@ import { rmSync } from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, fetch } from '@nuxt/test-utils/e2e'
 import vitestOpenAPI from 'vitest-openapi'
-import { hashPassword } from '@kestrel/auth'
+import { hashPassword } from '@michaelthielemann/kestrel-auth'
 
 const dbPath = join(tmpdir(), `kestrel-openapi-contract-${process.pid}.sqlite`)
 const PW = 'openapi-contract-test-password'

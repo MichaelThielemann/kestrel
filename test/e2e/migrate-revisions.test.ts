@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { rmSync } from 'node:fs'
 import { describe, it, expect, afterAll } from 'vitest'
 import { setup, fetch as testFetch } from '@nuxt/test-utils/e2e'
-import { hashPassword } from '@kestrel/auth'
+import { hashPassword } from '@michaelthielemann/kestrel-auth'
 
 // Thin wiring smoke test — the actual seeding/transaction/resumability contract is unit-tested directly
 // against the core function in `test/architecture/migrate-revisions.test.ts` (defineTask/useDb() are

@@ -5,7 +5,7 @@ import { rmSync, mkdtempSync } from 'node:fs'
 import { describe, it, beforeAll, afterAll } from 'vitest'
 import { setup, fetch as testFetch, createPage, url } from '@nuxt/test-utils/e2e'
 import sharp from 'sharp'
-import { hashPassword } from '@kestrel/auth'
+import { hashPassword } from '@michaelthielemann/kestrel-auth'
 import { e2eBrowserOptions } from '../helpers/e2e-browser'
 
 const dbPath = join(tmpdir(), `kestrel-media-ops-e2e-${process.pid}.sqlite`)

@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 
 /**
  * Contract tests for delivery-live. The real logic (`port.ts`, `pipeline.ts`, `redirects.ts`) lives in
- * `@kestrel/delivery-live`'s own `src/`; only `serve.ts` (the request-handling entry point the Nitro
+ * `@michaelthielemann/kestrel-delivery-live`'s own `src/`; only `serve.ts` (the request-handling entry point the Nitro
  * middleware calls) stays a layer file — see `docs/internals/publishing.md`. `moduleFiles()`
  * scans BOTH locations, so the B3 "never reads content the wrong way" contract still covers the real logic
  * wherever it lives, not just what happens to still be in the layer.
@@ -50,7 +50,7 @@ describe('delivery-live exists (layer + package) and exports a DeliveryPort fact
   })
 
   it('deliveryPortFor("live", driver) returns a working port instead of throwing (port.ts\'s own documented seam)', async () => {
-    const { deliveryPortFor } = await import('@kestrel/delivery-static')
+    const { deliveryPortFor } = await import('@michaelthielemann/kestrel-delivery-static')
     const stubDriver = {
       put: async () => {}, delete: async () => {}, exists: async () => false, list: async () => [], publicUrl: (k: string) => k,
     }
@@ -71,9 +71,9 @@ describe('delivery-live never reads content tables or the live-render/populate p
     for (const f of files) {
       const text = readFileSync(f, 'utf8')
       if (!/\bcurrentSnapshot\b|\bcurrentRoutes\b/.test(text)) continue
-      // The snapshot store now lives at `@kestrel/publishing` — a relative `.../snapshots(.ts)`
+      // The snapshot store now lives at `@michaelthielemann/kestrel-publishing` — a relative `.../snapshots(.ts)`
       // specifier is still accepted for any file that legitimately imports it from inside the package itself.
-      const importsFromStore = /import\s*\{[^}]*\b(currentSnapshot|currentRoutes)\b[^}]*\}\s*from\s*['"](?:[^'"]*\/snapshots(?:\.ts)?|@kestrel\/publishing)['"]/.test(text)
+      const importsFromStore = /import\s*\{[^}]*\b(currentSnapshot|currentRoutes)\b[^}]*\}\s*from\s*['"](?:[^'"]*\/snapshots(?:\.ts)?|@michaelthielemann\/kestrel-publishing)['"]/.test(text)
       expect(importsFromStore, `${f} references currentSnapshot/currentRoutes but does not import them from the snapshot store`).toBe(true)
     }
   })

@@ -1,5 +1,5 @@
 import { createError } from 'h3'
-import type { KestrelError } from '@kestrel/contracts'
+import type { KestrelError } from '@michaelthielemann/kestrel-contracts'
 
 /** The one status/message map a `KestrelError` a step threw is translated through — called from exactly
  *  one place in production (`core/server/api/[...path].ts`'s `toHttpError`), factored out here so a test

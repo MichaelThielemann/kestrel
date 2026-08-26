@@ -36,7 +36,7 @@ export default defineNuxtModule({
 
     nuxt.hook('nitro:config', (nitro) => {
       nitro.virtual ||= {}
-      // `@kestrel/fields`'s built-in descriptors (text/richtext/number/…) seed `core`'s field-type registry
+      // `@michaelthielemann/kestrel-fields`'s built-in descriptors (text/richtext/number/…) seed `core`'s field-type registry
       // as a side effect of importing the package itself — core cannot import fields, so this is the one
       // place that import happens. A bare package specifier: no filesystem path-guessing across
       // `nuxt.options._layers` for a `layers/fields` root — the package IS the seed's real, resolvable
@@ -48,7 +48,7 @@ export default defineNuxtModule({
       // now reach a package's `buildCollection()` call transitively via `kestrelDiscovery`, per ADR-0029 —
       // an ESM barrel is an eager, whole-module-graph load — so all four need the same guard, not only the
       // two that directly build collections themselves).
-      const importFieldTypesSeed = `import { fieldTypes as __kestrelSeed } from '@kestrel/fields'\n`
+      const importFieldTypesSeed = `import { fieldTypes as __kestrelSeed } from '@michaelthielemann/kestrel-fields'\n`
         + `if (!__kestrelSeed || typeof __kestrelSeed !== 'object') throw new Error('[kestrel] built-in field types failed to seed')\n`
       // A real runtime check on the imported binding, not a bare `import "path"` or a discarded `void x`
       // — Nitro's dev build tree-shakes an import whose binding has no provable effect, silently dropping
@@ -57,7 +57,7 @@ export default defineNuxtModule({
       // every static import of the same module has already evaluated (ESM linking order), which would run
       // it too late — after a collection's own static import has already tried to build its table. A static
       // import evaluates before any sibling static import declared after it, which is what orders this
-      // correctly. Every virtual below imports `@kestrel/fields` directly for this reason (on top of, not
+      // correctly. Every virtual below imports `@michaelthielemann/kestrel-fields` directly for this reason (on top of, not
       // instead of, `#kestrel/field-types` for collections/blocks — chaining virtual-imports-virtual was
       // unreliable in Nitro dev, so the real package import stays even where the virtual ALSO gets imported).
       const importFieldTypesVirtual = `${importFieldTypesSeed}import { default as __kestrelFieldTypes } from '#kestrel/field-types'\n`

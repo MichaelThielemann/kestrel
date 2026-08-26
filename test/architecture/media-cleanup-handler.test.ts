@@ -5,8 +5,8 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { allCollections, clearOutboxHandlers, clearRegistry, create, ensureRevisionsTable, outboxHandlersFor, pollOnce, readOutbox, recordRefs, registerCollection, registerReindexRefs, remove, createLocalDriver, getResolvedKestrelConfig, resetDbInstance, setResolvedKestrelConfig, useDb, DEFAULT_IMAGE_POLICY } from '@kestrel/core'
-import * as outboxDb from '@kestrel/core'
+import { allCollections, clearOutboxHandlers, clearRegistry, create, ensureRevisionsTable, outboxHandlersFor, pollOnce, readOutbox, recordRefs, registerCollection, registerReindexRefs, remove, createLocalDriver, getResolvedKestrelConfig, resetDbInstance, setResolvedKestrelConfig, useDb, DEFAULT_IMAGE_POLICY } from '@michaelthielemann/kestrel-core'
+import * as outboxDb from '@michaelthielemann/kestrel-core'
 import {
   registerMediaCleanup,
   mediaCollection,
@@ -15,7 +15,7 @@ import {
   deleteAffected,
   relocateMedia,
   duplicateMedia,
-} from '@kestrel/media'
+} from '@michaelthielemann/kestrel-media'
 import { getTableColumns, eq } from 'drizzle-orm'
 
 /**
@@ -39,7 +39,7 @@ const migrationsFolder = resolve(fileURLToPath(new URL('../../', import.meta.url
 function setupRuntime(): BetterSQLite3Database {
   uploadsDir = mkdtempSync(join(tmpdir(), 'kestrel-media-cleanup-'))
   driver = createLocalDriver({ dir: uploadsDir, baseUrl: '/uploads' })
-  // The handler's own useStorageDriver() (@kestrel/media, an explicit import there) reads the config
+  // The handler's own useStorageDriver() (@michaelthielemann/kestrel-media, an explicit import there) reads the config
   // provider, so seed it to point at the same uploadsDir the test's own `driver` uses for fileExists checks.
   setResolvedKestrelConfig({
     ...ORIG_CONFIG,

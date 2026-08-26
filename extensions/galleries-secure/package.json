@@ -15,9 +15,9 @@
     "!**/*.nuxt.test.ts"
   ],
   "peerDependencies": {
-    "@kestrel/core": "*",
-    "@kestrel/fields": "*",
-    "@kestrel/media": "*",
+    "@michaelthielemann/kestrel-core": "*",
+    "@michaelthielemann/kestrel-fields": "*",
+    "@michaelthielemann/kestrel-media": "*",
     "@michaelthielemann/kestrel": "*",
     "drizzle-orm": "^0.45.0",
     "effect": "~3.22.1",
@@ -26,9 +26,9 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@kestrel/core": "workspace:*",
-    "@kestrel/fields": "workspace:*",
-    "@kestrel/media": "workspace:*",
+    "@michaelthielemann/kestrel-core": "workspace:*",
+    "@michaelthielemann/kestrel-fields": "workspace:*",
+    "@michaelthielemann/kestrel-media": "workspace:*",
     "@michaelthielemann/kestrel": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "effect": "~3.22.1",

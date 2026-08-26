@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
-import type { SerializedBlock } from '@kestrel/core'
+import type { SerializedBlock } from '@michaelthielemann/kestrel-core'
 import { previewSrc, parseFrameMessage, type PreviewBlockNode } from '../../../public/app/utils/preview-protocol'
 import { createPreviewSender, acceptsFrameEvent, type PreviewSender } from '../utils/preview-channel'
 import { editorFormContextKey } from '../utils/editor-form-context'

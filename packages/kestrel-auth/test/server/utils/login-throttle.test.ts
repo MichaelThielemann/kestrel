@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { assertBodyLimit } from '@kestrel/core'
+import { assertBodyLimit } from '@michaelthielemann/kestrel-core'
 import {
   acquireHashSlot, releaseHashSlot, MAX_INFLIGHT_HASHES, MAX_LOGIN_BODY,
   assertNotLockedOut, recordFailedLogin, clearLoginFailures, reserveLoginAttempt, releaseLoginAttempt,

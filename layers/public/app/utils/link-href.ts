@@ -1,4 +1,4 @@
-import type { LinkValue } from '@kestrel/core'
+import type { LinkValue } from '@michaelthielemann/kestrel-core'
 
 // The server link populator (depth > 0) resolves an internal link's localized target path and attaches
 // it as `href`. Until that populator runs (or for a not-yet-resolved value), internal links fall back

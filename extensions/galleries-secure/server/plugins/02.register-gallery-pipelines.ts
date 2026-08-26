@@ -1,4 +1,4 @@
-import { registerPipeline } from '@kestrel/core'
+import { registerPipeline } from '@michaelthielemann/kestrel-core'
 import { secureGalleryBasePipeline } from '../pipelines/base'
 import { secureGalleryBlobDeletePipeline } from '../pipelines/blob-delete'
 import { secureGalleryNamespaceDeletePipeline } from '../pipelines/namespace-delete'

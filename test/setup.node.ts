@@ -6,14 +6,14 @@
 // side-effect import is exactly what once let a bundler prove the module's other top-level statements
 // (the seeding call) were unneeded and tree-shake them away in production — referencing the binding here
 // is the same defense.
-import { fieldTypes } from '@kestrel/fields'
+import { fieldTypes } from '@michaelthielemann/kestrel-fields'
 
 // In the real app, `00.config.ts` (the earliest core plugin) resolves the config ONCE at boot and pushes
 // it into the config provider before anything reads it. A node test that calls `locale.ts`/`db.ts`/
 // `revision-retention.ts` (or their future package-side homes) directly, with no Nuxt boot, has no such
 // guarantee — seed it here the same way, with the SAME fallback (env + the committed `kestrel.config.ts`)
 // those readers already got when this ran lazily per-call.
-import { setResolvedKestrelConfig } from '@kestrel/core'
+import { setResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
 import { resolveServerKestrelConfig } from '../layers/core/server/utils/server-config'
 
 void fieldTypes

@@ -1,9 +1,9 @@
-import { runAsRenderer } from '@kestrel/access'
+import { runAsRenderer } from '@michaelthielemann/kestrel-access'
 
 /** Render a public route via the in-process server, returning its HTML buffer (200) or a null body with the
  *  HTTP status, so the caller can tell a broken page (5xx — a server-error RESPONSE, not a throw) from an
  *  expected non-200 (a draft / unpublish race → 404 / redirect). The PRODUCER's own render primitive — the
- *  delivery-static side never calls this; see `@kestrel/delivery-static`'s `render-route.ts`. `@kestrel/publishing`
+ *  delivery-static side never calls this; see `@michaelthielemann/kestrel-delivery-static`'s `render-route.ts`. `@michaelthielemann/kestrel-publishing`
  *  never imports this directly (a package cannot reach `useNitroApp`) — each real
  *  entry point (`zz.publish.ts`, `tasks/publish/run.ts`) instead calls `setRenderRouteLive(renderRouteLive)`
  *  itself, right before the call that needs it (see either file's own comment for why NOT a module-load

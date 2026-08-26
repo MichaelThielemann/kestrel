@@ -1,7 +1,7 @@
 /**
  * Kestrel's stateless single-admin session/auth domain: password hashing (scrypt), the signed session
  * cookie and its revocation epoch, login-throttling, and the `login`/`logout`/`session` pipelines.
- * Depends on `@kestrel/core` for the pipeline engine and the resolved-config seam.
+ * Depends on `@michaelthielemann/kestrel-core` for the pipeline engine and the resolved-config seam.
  *
  * @packageDocumentation
  */

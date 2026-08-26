@@ -105,7 +105,7 @@ const TABLE_CHECKS: readonly TableCheck[] = [
 //
 // 2, not 3: publish_deps/publish_status only have ONE direct relative-import consumer inside
 // their own package (publishing-db.ts) plus the package barrel's own re-export edge — every consumer
-// outside the package reaches the table through the `@kestrel/publishing` bare specifier, which the graph
+// outside the package reaches the table through the `@michaelthielemann/kestrel-publishing` bare specifier, which the graph
 // resolves to the BARREL node (index.ts), not transitively through to the deep table symbol. media's
 // folders (8 edges) differs because several of ITS OWN internal files import the table via a relative
 // path, not because of any drift here — the floor is the honest minimum for a package whose external

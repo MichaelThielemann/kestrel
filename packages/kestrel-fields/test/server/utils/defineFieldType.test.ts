@@ -4,7 +4,7 @@ import { text } from 'drizzle-orm/sqlite-core'
 import { defineFieldType, constrain, opt, optArr } from '../../../src/server/utils/defineFieldType.js'
 import type { FieldTypeDescriptor } from '../../../src/server/utils/defineFieldType.js'
 import { getFieldType, fieldTypes } from '../../../src/server/field-registry/index.js'
-import { buildCollection, defineCollection } from '@kestrel/core'
+import { buildCollection, defineCollection } from '@michaelthielemann/kestrel-core'
 
 type ColumnFn = FieldTypeDescriptor['column']
 type ValidatorFn = FieldTypeDescriptor['validator']

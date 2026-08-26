@@ -5,7 +5,7 @@
 // route `app/pages/galleries/[slug].vue` (which fetches the manifest from the `publicGallery` pipeline —
 // see `server/pipelines/public-gallery.ts` — opened to anonymous read for ONE published gallery via its own
 // `access: { public: true, scope: 'published' }` declaration).
-import { defineCollection } from '@kestrel/core'
+import { defineCollection } from '@michaelthielemann/kestrel-core'
 
 export default defineCollection({
   name: 'galleries',

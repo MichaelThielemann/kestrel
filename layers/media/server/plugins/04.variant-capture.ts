@@ -1,5 +1,5 @@
-import { isRendererContext } from '@kestrel/access'
-import { recordVariants, saveDiscoveredVariants, useMediaDb } from '@kestrel/media'
+import { isRendererContext } from '@michaelthielemann/kestrel-access'
+import { recordVariants, saveDiscoveredVariants, useMediaDb } from '@michaelthielemann/kestrel-media'
 
 /**
  * Auto-discovery capture. `KestrelImg`/`useMediaVariant` stash their concrete specs on the render's

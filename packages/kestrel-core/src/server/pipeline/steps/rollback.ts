@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
-import { Quarantined, ValidationFailed } from '@kestrel/contracts'
+import { Quarantined, ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 import { applyRevisionUpcast, readRevisions } from '../../db/revisions.js'
 import { decodeInput } from '../core/validate.js'
 import { asValidated, collectionOf, columns, dbOf, requireRecordId, table, unitsOf, type Row } from './shared.js'
@@ -18,7 +18,7 @@ import { syncStep, type StepDef } from '../types.js'
  *   failure.
  * - The snapshot is upcast (`applyRevisionUpcast`, `revisions.ts`) BEFORE anything else — a history row
  *   recorded under an older `schemaVersion` is walked forward by `registerRevisionUpcast`'s dedicated,
- *   per-collection registry (local to `revisions.ts`, NOT `@kestrel/contracts`' `registerUpcast` — that
+ *   per-collection registry (local to `revisions.ts`, NOT `@michaelthielemann/kestrel-contracts`' `registerUpcast` — that
  *   walker assumes sequential author-assigned versions, which a def-hash is not; see
  *   `applyRevisionUpcast`'s TSDoc for why the two can't share a mechanism).
  * - Only THEN is the (possibly-upcast) snapshot decoded against the collection's CURRENT `select` schema.

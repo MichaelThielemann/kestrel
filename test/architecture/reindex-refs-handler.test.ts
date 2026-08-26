@@ -4,9 +4,9 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { allCollections, clearOutboxHandlers, clearRegistry, create, ensureOutboxTable, ensureRevisionsTable, findReferrers, getResolvedKestrelConfig, outboxHandlersFor, pollOnce, readOutbox, rebuildRecordRefs, recordRefs, registerCollection, registerReindexRefs, remove, resetDbInstance, setResolvedKestrelConfig, update, useContentDbFor, useDb } from '@kestrel/core'
-import { richtextLinkHref } from '@kestrel/core/client'
-import { pagesCollection } from '@kestrel/collections'
+import { allCollections, clearOutboxHandlers, clearRegistry, create, ensureOutboxTable, ensureRevisionsTable, findReferrers, getResolvedKestrelConfig, outboxHandlersFor, pollOnce, readOutbox, rebuildRecordRefs, recordRefs, registerCollection, registerReindexRefs, remove, resetDbInstance, setResolvedKestrelConfig, update, useContentDbFor, useDb } from '@michaelthielemann/kestrel-core'
+import { richtextLinkHref } from '@michaelthielemann/kestrel-core/client'
+import { pagesCollection } from '@michaelthielemann/kestrel-collections'
 import postsCollection from '../../server/collections/posts'
 
 const migrationsFolder = resolve(fileURLToPath(new URL('../../', import.meta.url)), 'server/database/migrations')

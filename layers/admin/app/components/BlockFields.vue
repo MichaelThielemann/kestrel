@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { LayoutNode, SerializedBlock } from '@kestrel/core'
+import type { LayoutNode, SerializedBlock } from '@michaelthielemann/kestrel-core'
 import type { BlockRow } from '../utils/block-tree'
 import { resolveLocalized } from '../../../ui/app/utils/localized'
 

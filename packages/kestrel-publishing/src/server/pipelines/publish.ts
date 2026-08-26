@@ -1,10 +1,10 @@
 import { eq, getTableColumns, inArray } from 'drizzle-orm'
 import { createError } from 'h3'
 import { Effect } from 'effect'
-import { NotFound } from '@kestrel/contracts'
+import { NotFound } from '@michaelthielemann/kestrel-contracts'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
-import { MAX_BULK_IDS, OwnershipViolation, definePipeline, getCollection, getResolvedKestrelConfig, parseIdList, prefixPrimaryLocale, primaryLocale, syncStep, useDb } from '@kestrel/core'
-import type { PipelineDef, StepDef } from '@kestrel/core'
+import { MAX_BULK_IDS, OwnershipViolation, definePipeline, getCollection, getResolvedKestrelConfig, parseIdList, prefixPrimaryLocale, primaryLocale, syncStep, useDb } from '@michaelthielemann/kestrel-core'
+import type { PipelineDef, StepDef } from '@michaelthielemann/kestrel-core'
 import { publishStatus } from '../database/publish-status.js'
 import { usePublishingDbFor } from '../db/publishing-db.js'
 import { staleRoutes } from '../utils/publish/deps.js'
@@ -22,7 +22,7 @@ interface OutputConfig {
 
 /** Substitutes for Nitro's `import.meta.dev` (a build-time-replaced constant, unavailable to a package —
  *  same class of gap as `useRuntimeConfig()`, see `outputConfig()`'s own TSDoc below). Fail-safe-to-
- *  PRODUCTION, not fail-safe-to-dev: adopts `@kestrel/auth`'s `session.ts`'s own `explicitDev` polarity
+ *  PRODUCTION, not fail-safe-to-dev: adopts `@michaelthielemann/kestrel-auth`'s `session.ts`'s own `explicitDev` polarity
  *  (`NODE_ENV === 'development' || 'test'`, or the `KESTREL_DEV=1` escape hatch) rather than
  *  `module-db.ts`'s `NODE_ENV !== 'production'` — that check gates MORE validation on an ambiguous
  *  environment (safe to over-check), where this one gates what the editor reports as "generating" (safe to
@@ -32,7 +32,7 @@ function isDevMode(): boolean {
   return process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test' || process.env.KESTREL_DEV === '1'
 }
 
-/** Reads off the config-provider seam (`@kestrel/core`'s `getResolvedKestrelConfig`) — a package cannot
+/** Reads off the config-provider seam (`@michaelthielemann/kestrel-core`'s `getResolvedKestrelConfig`) — a package cannot
  *  reach the layer-only `serverRuntimeConfig()`/`useRuntimeConfig()` this used before the move. Same
  *  seam `publisher.ts`'s own `outputConfig()` uses; see its TSDoc for why this is behavior-identical. */
 function outputConfig(): OutputConfig | undefined {

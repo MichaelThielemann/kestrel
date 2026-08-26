@@ -1,7 +1,7 @@
-import { Forbidden, Unauthorized } from '@kestrel/contracts'
-import { toHttpError } from '@kestrel/core'
-import { refreshAuthSession } from '@kestrel/auth'
-import { claimedByPipelineRoute, resolveEventPrincipal } from '@kestrel/access'
+import { Forbidden, Unauthorized } from '@michaelthielemann/kestrel-contracts'
+import { toHttpError } from '@michaelthielemann/kestrel-core'
+import { refreshAuthSession } from '@michaelthielemann/kestrel-auth'
+import { claimedByPipelineRoute, resolveEventPrincipal } from '@michaelthielemann/kestrel-access'
 
 export default defineEventHandler((event) => {
   if (!event.path.startsWith('/api/')) return // default-deny applies to the API only

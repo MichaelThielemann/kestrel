@@ -1,4 +1,4 @@
-import { registerPlanPublish } from '@kestrel/publishing'
+import { registerPlanPublish } from '@michaelthielemann/kestrel-publishing'
 
 export default defineNitroPlugin(() => {
   registerPlanPublish()

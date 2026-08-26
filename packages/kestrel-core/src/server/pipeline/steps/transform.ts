@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
-import { getBlock, getFieldType } from '@kestrel/core'
-import type { BuiltCollection } from '@kestrel/core'
+import { getBlock, getFieldType } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { applyFieldTransforms as applyFieldTransformsCore, type TransformLookups } from '../core/validate.js'
 import { collectionOf, isSingletonWrite, unitsOf, type Row } from './shared.js'
 import { syncStep, type StepDef } from '../types.js'

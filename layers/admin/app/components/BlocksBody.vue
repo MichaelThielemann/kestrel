@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SerializedBlock } from '@kestrel/core'
+import type { SerializedBlock } from '@michaelthielemann/kestrel-core'
 import type { BlockTreeCtx } from '../utils/block-tree'
 
 // The page-builder editor body: hierarchy · live preview · contextual fields. All form state comes from

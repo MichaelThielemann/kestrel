@@ -17,10 +17,10 @@ class FakeDepsStore {
   constructor(persistence: unknown) { this.persistence = persistence }
 }
 
-// publisher/deps/deps-persistence all live in @kestrel/publishing — one mock covers all
+// publisher/deps/deps-persistence all live in @michaelthielemann/kestrel-publishing — one mock covers all
 // three (vi.mock only takes one factory per specifier), preserving every OTHER real export (incl.
 // usePublishingDb, which run.ts also imports and this test does not stub) via importOriginal.
-vi.mock('@kestrel/publishing', async (importOriginal) => ({
+vi.mock('@michaelthielemann/kestrel-publishing', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   publishFull,
   outputDriver: () => 'THE_DRIVER',

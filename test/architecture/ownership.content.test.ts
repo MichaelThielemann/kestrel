@@ -3,13 +3,13 @@ import { eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { Effect } from 'effect'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
-import type { OwnershipManifest } from '@kestrel/contracts'
+import type { OwnershipManifest } from '@michaelthielemann/kestrel-contracts'
 import { createTestDb } from '../helpers/db'
-import { buildCollection, OwnershipViolation, buildContentManifest, clearRegistry, create, defineCollection, desiredSchema, diffSchema, findBrokenRefs, findReferrers, maintainRecordRefs, makeModuleDb, rebuildRecordRefs, recordRefs, registerCollection, renderSqlite, useContentDbFor  } from '@kestrel/core'
-import { richtextLinkHref } from '@kestrel/core/client'
-import { pagesCollection } from '@kestrel/collections'
+import { buildCollection, OwnershipViolation, buildContentManifest, clearRegistry, create, defineCollection, desiredSchema, diffSchema, findBrokenRefs, findReferrers, maintainRecordRefs, makeModuleDb, rebuildRecordRefs, recordRefs, registerCollection, renderSqlite, useContentDbFor  } from '@michaelthielemann/kestrel-core'
+import { richtextLinkHref } from '@michaelthielemann/kestrel-core/client'
+import { pagesCollection } from '@michaelthielemann/kestrel-collections'
 import postsCollection from '../../server/collections/posts'
-import { folders } from '@kestrel/media'
+import { folders } from '@michaelthielemann/kestrel-media'
 
 function seed() {
   clearRegistry()

@@ -1,5 +1,5 @@
 {
-  "name": "@kestrel/fields",
+  "name": "@michaelthielemann/kestrel-fields",
   "version": "0.1.0",
   "description": "Kestrel's built-in field-type descriptors, the block-definition helper, and the field/block content-population walkers.",
   "license": "Apache-2.0",
@@ -43,12 +43,12 @@
     "test": "vitest run --typecheck"
   },
   "dependencies": {
-    "@kestrel/core": "workspace:*",
+    "@michaelthielemann/kestrel-core": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@kestrel/access": "workspace:*",
+    "@michaelthielemann/kestrel-access": "workspace:*",
     "@types/node": "^26.2.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

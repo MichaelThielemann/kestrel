@@ -93,21 +93,21 @@ describe('renderRegistry', () => {
 describe('renderPackageMergedRegistry', () => {
   it('imports each package\'s kestrelDiscovery, each consumer file, and merges via mergeKestrelDiscovered', () => {
     const code = renderPackageMergedRegistry({
-      packages: ['@kestrel/media', '@kestrel/publishing'],
+      packages: ['@michaelthielemann/kestrel-media', '@michaelthielemann/kestrel-publishing'],
       property: 'collections',
       consumerFiles: ['/l/posts.ts'],
       nameOfExpr: '(x) => x.name',
     })
-    expect(code).toContain(`import { kestrelDiscovery as __pkg0 } from "@kestrel/media"`)
-    expect(code).toContain(`import { kestrelDiscovery as __pkg1 } from "@kestrel/publishing"`)
+    expect(code).toContain(`import { kestrelDiscovery as __pkg0 } from "@michaelthielemann/kestrel-media"`)
+    expect(code).toContain(`import { kestrelDiscovery as __pkg1 } from "@michaelthielemann/kestrel-publishing"`)
     expect(code).toContain(`import _c0 from "/l/posts.ts"`)
-    expect(code).toContain(`import { mergeKestrelDiscovered } from '@kestrel/core'`)
+    expect(code).toContain(`import { mergeKestrelDiscovered } from '@michaelthielemann/kestrel-core'`)
     expect(code).toContain(`mergeKestrelDiscovered([...(__pkg0.collections ?? []), ...(__pkg1.collections ?? [])], [_c0], (x) => x.name)`)
   })
 
   it('includes extraImports and preamble, in order, before the package imports', () => {
     const code = renderPackageMergedRegistry({
-      packages: ['@kestrel/media'],
+      packages: ['@michaelthielemann/kestrel-media'],
       property: 'schemaTables',
       consumerFiles: [],
       nameOfExpr: '(x) => __t(x)',
@@ -131,12 +131,12 @@ describe('renderPackageMergedRegistry', () => {
 describe('renderPackageConcatRegistry', () => {
   it('concatenates every package manifest with every consumer manifest file, no dedup', () => {
     const code = renderPackageConcatRegistry({
-      packages: ['@kestrel/media', '@kestrel/publishing'],
+      packages: ['@michaelthielemann/kestrel-media', '@michaelthielemann/kestrel-publishing'],
       property: 'manifest',
       consumerFiles: ['/l/manifest.ts'],
     })
-    expect(code).toContain(`import { kestrelDiscovery as __pkg0 } from "@kestrel/media"`)
-    expect(code).toContain(`import { kestrelDiscovery as __pkg1 } from "@kestrel/publishing"`)
+    expect(code).toContain(`import { kestrelDiscovery as __pkg0 } from "@michaelthielemann/kestrel-media"`)
+    expect(code).toContain(`import { kestrelDiscovery as __pkg1 } from "@michaelthielemann/kestrel-publishing"`)
     expect(code).toContain(`import _c0 from "/l/manifest.ts"`)
     expect(code).toContain(
       'export default [...(__pkg0.manifest ? [__pkg0.manifest] : []), ...(__pkg1.manifest ? [__pkg1.manifest] : []), _c0]',
@@ -145,7 +145,7 @@ describe('renderPackageConcatRegistry', () => {
 
   it('generates the ternary guard, not a bare property read, for every package item', () => {
     const code = renderPackageConcatRegistry({
-      packages: ['@kestrel/no-manifest-here'],
+      packages: ['@michaelthielemann/kestrel-no-manifest-here'],
       property: 'manifest',
       consumerFiles: [],
     })

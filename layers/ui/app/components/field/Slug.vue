@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { slugify } from '@kestrel/core/client'
-import type { FieldOf } from '@kestrel/core'
+import { slugify } from '@michaelthielemann/kestrel-core/client'
+import type { FieldOf } from '@michaelthielemann/kestrel-core'
 import type { FieldComponentProps } from '../../utils/field-component'
 // Editor widget for the `slug` field type. Shows the (display-only) `prefix` before an editable slug input,
 // and normalizes the value to a real slug on blur. Leaving it blank is fine — the server auto-generates it

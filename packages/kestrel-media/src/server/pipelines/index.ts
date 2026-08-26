@@ -1,4 +1,4 @@
-import type { PipelineDef } from '@kestrel/core'
+import type { PipelineDef } from '@michaelthielemann/kestrel-core'
 import { buildMediaAssetPipelines } from './media-assets.js'
 import { buildMediaOpPipelines } from './media-ops.js'
 import { buildMediaReadPipelines } from './media-reads.js'

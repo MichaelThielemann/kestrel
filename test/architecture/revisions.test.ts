@@ -6,8 +6,8 @@ import {
   buildContentManifest, clearRegistry, create, desiredSchema, ensureOutboxTable, getOne, isDestructive,
   planOps, readOutbox, registerCollection, runWrite, setStatusMany, sqliteClientOf, syncSchema, update,
   ensureRevisionsTable, revisionsTableName, revisionsTable, readRevisions, rebuildFromRevisions,
-} from '@kestrel/core'
-import { pagesCollection } from '@kestrel/collections'
+} from '@michaelthielemann/kestrel-core'
+import { pagesCollection } from '@michaelthielemann/kestrel-collections'
 import postsCollection from '../../server/collections/posts'
 
 /**

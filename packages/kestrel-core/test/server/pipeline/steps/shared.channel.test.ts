@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { Effect } from 'effect'
-import { NotFound } from '@kestrel/contracts'
+import { NotFound } from '@michaelthielemann/kestrel-contracts'
 import { fromThrowing, fromThrowingAsync } from '../../../../src/server/pipeline/steps/shared.js'
 import { runStepAsync, runStepSync } from '../../../../../../test/helpers/run-effect.js'
 

@@ -1,5 +1,5 @@
 import { eq, getTableColumns } from 'drizzle-orm'
-import { registerFieldPopulator } from '@kestrel/core'
+import { registerFieldPopulator } from '@michaelthielemann/kestrel-core'
 import {
   media as mediaTable,
   buildMediaFieldPopulator,
@@ -7,7 +7,7 @@ import {
   useStorageDriver,
   mediaCollectionEnabled,
   useMediaDb,
-} from '@kestrel/media'
+} from '@michaelthielemann/kestrel-media'
 
 export default defineNitroPlugin(() => {
   // A consumer who turned the built-in off has no `media` table, so a row that still carries a media id

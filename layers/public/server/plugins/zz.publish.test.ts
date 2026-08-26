@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { usePublishRuntime, setPublishRuntime } from '@kestrel/publishing'
+import { usePublishRuntime, setPublishRuntime } from '@michaelthielemann/kestrel-publishing'
 
 /**
  * Exercises what zz.publish.ts still owns directly: building (or not building) the publish runtime off

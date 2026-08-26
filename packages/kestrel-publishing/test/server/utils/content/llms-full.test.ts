@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { buildLlmsFullTxt, recordMarkdown } from '../../../../src/server/utils/content/llms-full.js'
-import { registerBlock, clearBlocks } from '@kestrel/fields'
-import type { CollectionDef } from '@kestrel/core'
+import { registerBlock, clearBlocks } from '@michaelthielemann/kestrel-fields'
+import type { CollectionDef } from '@michaelthielemann/kestrel-core'
 
 afterEach(() => clearBlocks())
 

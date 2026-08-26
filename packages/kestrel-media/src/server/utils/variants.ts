@@ -1,6 +1,6 @@
 import { eq, getTableColumns } from 'drizzle-orm'
 import type { MediaDb } from '../db/media-db.js'
-import type { ResolvedVariant, VariantFit } from '@kestrel/core'
+import type { ResolvedVariant, VariantFit } from '@michaelthielemann/kestrel-core'
 import { mediaSettings } from '../collections/media-settings.js'
 
 const VARIANT_FITS = new Set<VariantFit>(['cover', 'contain', 'inside', 'outside', 'fill'])

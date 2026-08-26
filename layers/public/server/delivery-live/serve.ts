@@ -1,12 +1,12 @@
 import { getMethod, getRequestHeader, sendRedirect, send, setHeader, setResponseStatus, type H3Event } from 'h3'
-import { isRendererContext } from '@kestrel/access'
-import { cacheControlFor, isDeliveryExemptPath, isDeliveryLive } from '@kestrel/core'
-import { usePublishingDb, currentSnapshot, htmlKeyForRoute } from '@kestrel/publishing'
-import { liveRedirectFor } from '@kestrel/delivery-live'
+import { isRendererContext } from '@michaelthielemann/kestrel-access'
+import { cacheControlFor, isDeliveryExemptPath, isDeliveryLive } from '@michaelthielemann/kestrel-core'
+import { usePublishingDb, currentSnapshot, htmlKeyForRoute } from '@michaelthielemann/kestrel-publishing'
+import { liveRedirectFor } from '@michaelthielemann/kestrel-delivery-live'
 
 // Requests this adapter must never answer, whatever `currentSnapshot` says: the admin app, the pipeline
 // API, Nitro's own internals (tasks — e.g. the manual `publish:run` trigger), built assets, and the
-// editor's preview ticket flow. `META_ROUTES` mirrors `@kestrel/core`'s own `META_KEYS`
+// editor's preview ticket flow. `META_ROUTES` mirrors `@michaelthielemann/kestrel-core`'s own `META_KEYS`
 // (sitemap/robots/llms/redirects) — those are rendered by their own routes, not snapshots. Every prefix
 // is slash-terminated (`normalizeExemptPrefix`'s own rule): a bare `/admin` would also match `/admin-guide`
 // — a DIFFERENT, publishable route this adapter must still serve from its own snapshot.

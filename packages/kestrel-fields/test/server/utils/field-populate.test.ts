@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { buildFieldTreePopulator } from '../../../src/server/utils/field-populate.js'
-import { defineCollection } from '@kestrel/core'
-import type { FieldPopulator } from '@kestrel/core'
+import { defineCollection } from '@michaelthielemann/kestrel-core'
+import type { FieldPopulator } from '@michaelthielemann/kestrel-core'
 import { defineBlock, registerBlock, clearBlocks } from '../../../src/server/utils/defineBlock.js'
 
 beforeEach(() => clearBlocks())

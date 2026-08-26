@@ -4,8 +4,8 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 import type { Layer, Context } from 'effect'
-import { OwnershipViolation, desiredSchema, diffSchema, makeModuleDb, recordRefs, renderSqlite } from '@kestrel/core'
-import type { ModuleDbService } from '@kestrel/core'
+import { OwnershipViolation, desiredSchema, diffSchema, makeModuleDb, recordRefs, renderSqlite } from '@michaelthielemann/kestrel-core'
+import type { ModuleDbService } from '@michaelthielemann/kestrel-core'
 import {
   publishingOwnershipManifest,
   usePublishingDbFor,
@@ -19,7 +19,7 @@ import {
   lastPublishedAt,
   type DepsPersistenceDb,
   type PublishStatusDb,
-} from '@kestrel/publishing'
+} from '@michaelthielemann/kestrel-publishing'
 const publishingTables = { publish_deps: publishDeps, publish_status: publishStatus }
 const publishingTablesWithRuns = { publish_deps: publishDeps, publish_status: publishStatus, publish_runs: publishRuns }
 

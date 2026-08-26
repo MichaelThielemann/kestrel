@@ -22,7 +22,7 @@ built-in default; where a value differs it is called out.
 
 ```ts
 // nuxt.config.ts — the value of the `kestrel: { … }` key (or of an extracted kestrel.config.ts)
-import type { KestrelConfig } from '@kestrel/core'
+import type { KestrelConfig } from '@michaelthielemann/kestrel-core'
 
 export default {
   db: '.data/db.sqlite',              // relative → resolved against the project root; ':memory:' allowed

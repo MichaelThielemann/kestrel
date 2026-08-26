@@ -9,7 +9,7 @@ import { desiredSchema } from '../../../src/server/schema/desired.js'
 import { diffSchema } from '../../../src/server/schema/diff.js'
 import { renderSqlite } from '../../../src/server/schema/render-sqlite.js'
 import { makeModuleDb, OwnershipViolation } from '../../../src/server/db/module-db.js'
-import type { OwnershipManifest } from '@kestrel/contracts'
+import type { OwnershipManifest } from '@michaelthielemann/kestrel-contracts'
 
 // Contract under test:
 //   makeModuleDb(manifest, sqlite, tables) -> { layer: Layer.Layer<ModuleDbTag>, tag }
@@ -22,7 +22,7 @@ import type { OwnershipManifest } from '@kestrel/contracts'
 // tests below). `tables` is the concrete Drizzle table objects for `manifest.tables`
 // (`Record<string, AnySQLiteTable>`), since `OwnershipManifest` carries table *names* only.
 //
-// `OwnershipViolation` is module-local (exported from `module-db.ts`, not `@kestrel/contracts`): it is a
+// `OwnershipViolation` is module-local (exported from `module-db.ts`, not `@michaelthielemann/kestrel-contracts`): it is a
 // dev/test-only enforcement guard, never part of the public consumer error channel (`KestrelError`) and
 // never crosses the Promise/HTTP boundary, so it does not need `Schema.TaggedError`'s encode/decode — a
 // plain `Data.TaggedError` is enough.

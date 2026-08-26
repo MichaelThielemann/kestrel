@@ -5,8 +5,8 @@ This page covers how the packages ship to npm, the gates a release must pass, th
 ## Publishing the packages
 
 A `v*` tag push runs `.github/workflows/release.yml`, which publishes the engine, both extensions, the
-scaffolder, and all ten `@kestrel/*` packages to npm — the ten packages first, in topological order of
-their own `@kestrel/*` dependency lists (each one only after everything it depends on), so no installer
+scaffolder, and all ten `@michaelthielemann/kestrel-*` packages to npm — the ten packages first, in topological order of
+their own `@michaelthielemann/kestrel-*` dependency lists (each one only after everything it depends on), so no installer
 racing the tag can land between the engine appearing on the registry and one of its own real dependencies
 existing there.
 
@@ -19,7 +19,7 @@ the TSDoc lint block's `files` glob in `eslint.config.mjs`, and the one-time boo
 
 Cutting a release: bump the root manifest and `packages/create-kestrel/package.json` together — the tag
 guard below reads only the root manifest, but `create-kestrel`'s own `prepack` refuses to pack a version
-that disagrees with it. Bump a `@kestrel/*` package's manifest, or an extension's (`extensions/galleries-secure*`
+that disagrees with it. Bump a `@michaelthielemann/kestrel-*` package's manifest, or an extension's (`extensions/galleries-secure*`
 carry their own line, currently at `2.0.0` against the engine's `3.0.1`), only when that package itself
 changed. Commit, then tag:
 
@@ -42,7 +42,7 @@ that has never been published has nothing for npm to attach the trust relationsh
 ```bash
 cd packages/kestrel-contracts
 pnpm publish --access public --no-provenance --no-git-checks
-npm trust github @kestrel/contracts --file release.yml --repo MichaelThielemann/kestrel --allow-publish
+npm trust github @michaelthielemann/kestrel-contracts --file release.yml --repo MichaelThielemann/kestrel --allow-publish
 ```
 
 `--no-provenance` because every manifest sets `publishConfig.provenance: true`, which only works inside CI.
@@ -54,20 +54,20 @@ bundled npm may be older than the 11.5.1 trusted publishing requires.
 
 Each publish step runs `.github/publish-if-new.sh`, which skips a package whose exact `name@version` is
 already on the registry — a mid-release failure can be re-run without dying on the first already-published
-package, and an ordinary engine release republishes only what actually changed: the ten `@kestrel/*`
+package, and an ordinary engine release republishes only what actually changed: the ten `@michaelthielemann/kestrel-*`
 packages version independently of the engine (all at `0.1.0` while the engine is well past that), so most
 tags skip most of them. `create-kestrel`, the scaffolder, publishes last; its `prepack` copies the engine's
 templates in from the repo root and `postpack` removes them again, and `prepack` refuses to pack a version
 differing from the root manifest — the tag guard above compares the tag only to the root manifest, so
 `test/create-kestrel.test.ts` is what actually keeps `create-kestrel`'s version pinned to the engine's.
 
-The script calls `pnpm publish`, not `npm publish`: the engine root and most `@kestrel/*` packages carry a
-real `workspace:*` dependency on another workspace package (`@kestrel/contracts` and `create-kestrel` are
+The script calls `pnpm publish`, not `npm publish`: the engine root and most `@michaelthielemann/kestrel-*` packages carry a
+real `workspace:*` dependency on another workspace package (`@michaelthielemann/kestrel-contracts` and `create-kestrel` are
 the exceptions), and only pnpm's publish/pack step rewrites that to the real resolved semver before upload
 — `npm publish` would ship the literal, unresolvable string `"workspace:*"`. What makes a package a real,
 independently installable dependency rather than something bundled into the engine is that it is published
 at all and the engine's `dependencies` reference it by that resolved semver — `pnpm pack` on the root turns
-`"@kestrel/core": "workspace:*"` into `"@kestrel/core": "0.1.0"`, which 404s on install unless that version
+`"@michaelthielemann/kestrel-core": "workspace:*"` into `"@michaelthielemann/kestrel-core": "0.1.0"`, which 404s on install unless that version
 is on the registry. `publishConfig: { access: "public", provenance: true }` only makes public publishing
 and provenance possible; it does not itself create the dependency.
 
@@ -82,7 +82,7 @@ pnpm typecheck
 
 `scripts/typecheck.mjs` prepares the playground (engine layers, both extensions, and a consumer app) and
 runs three passes: `tsc` over the Nitro server project, `vue-tsc` (via `nuxt typecheck`) over the
-app/`.vue`/config aggregator, and `pnpm --filter '@kestrel/*' -r typecheck` over the standalone workspace
+app/`.vue`/config aggregator, and `pnpm --filter '@michaelthielemann/kestrel-*' -r typecheck` over the standalone workspace
 packages, whose tsconfigs sit outside the playground project — it is the only pass that type-checks
 `packages/*/src` at all. All three always run and the gate fails at the end, so a red server pass never
 hides app or package errors. Both app and server tests are excluded. A consumer composing
@@ -93,7 +93,7 @@ override in their own config — `typescript.tsConfig` is not inherited from an 
 
 Documentation of the public API is generated and checked, not hand-written prose trusted on faith.
 
-TSDoc is mandatory on every export of the ten `@kestrel/*` packages — the TSDoc lint block in
+TSDoc is mandatory on every export of the ten `@michaelthielemann/kestrel-*` packages — the TSDoc lint block in
 `eslint.config.mjs` lists each `packages/kestrel-*/src/**/*.ts` glob. Each export documents its purpose,
 its error union, its invariants, and carries an `@example`. Two lint plugins enforce it, because neither
 covers both halves: `eslint-plugin-jsdoc`'s `require-jsdoc` with `publicOnly` checks that a doc comment
@@ -163,7 +163,7 @@ manifest, or an extension manifest under `extensions/*`. `playground` is out of 
 | `@tiptap/extension-text-align` | runtime | Richtext node attribute: text alignment. |
 | `@types/better-sqlite3` | runtime | Types for the database driver; shipped because consumer type-checks need them. |
 | `@types/jsdom` | runtime | Types for the server-side DOM used by richtext sanitizing. |
-| `@types/node` | dev | Node builtin types for nine `@kestrel/*` packages' standalone `tsc` builds. |
+| `@types/node` | dev | Node builtin types for nine `@michaelthielemann/kestrel-*` packages' standalone `tsc` builds. |
 | `@types/sanitize-html` | runtime | Types for the sanitizer. |
 | `aws4fetch` | runtime | SigV4 signing for the S3 output and media drivers, without the AWS SDK. |
 | `better-sqlite3` | runtime | The database. Synchronous writes are what make the critical section race-free. |
@@ -172,11 +172,11 @@ manifest, or an extension manifest under `extensions/*`. `playground` is out of 
 | `drizzle-zod` | runtime | Derives Zod validators from the generated table schema. |
 | `effect` | runtime | The core runtime. Pinned to 3.22.x; no Effect-4-only API. |
 | `exifr` | runtime | Reads EXIF metadata from uploaded images. |
-| `fast-check` | dev | Property-test arbitraries, used directly by `@kestrel/core` and `@kestrel/access`. |
+| `fast-check` | dev | Property-test arbitraries, used directly by `@michaelthielemann/kestrel-core` and `@michaelthielemann/kestrel-access`. |
 | `file-type` | runtime | Sniffs the real content type of an upload rather than trusting its extension. |
 | `jsdom` | runtime | Server-side DOM for sanitizing richtext outside the browser. |
 | `nanoid` | runtime | Translation-group candidate ids in the locale-resolution step. |
-| `nitropack` | runtime | Nitro server runtime; also a direct dependency of `@kestrel/publishing`. |
+| `nitropack` | runtime | Nitro server runtime; also a direct dependency of `@michaelthielemann/kestrel-publishing`. |
 | `nuxt` | runtime | The framework this layer extends. |
 | `reka-ui` | runtime | Accessible unstyled primitives behind the admin components. |
 | `sanitize-html` | runtime | Sanitizes richtext HTML on the server. |
@@ -226,6 +226,6 @@ landed in any manifest yet.
 
 - [Decisions](./decisions.md) — ADR-0004 (the typecheck gate) and ADR-0015 (documentation as a verified contract).
 - [Architecture](./architecture.md) — how the packages fit into the layer model this release process ships.
-- [Layers and packages](./layers-and-packages.md) — what each of the ten `@kestrel/*` packages contains.
+- [Layers and packages](./layers-and-packages.md) — what each of the ten `@michaelthielemann/kestrel-*` packages contains.
 - [Testing and conventions](./testing.md) — which runner picks up which test file, and what each suite proves.
 - [Pipeline engine](./pipeline-engine.md) — the `_pipelines` index and request trace the OpenAPI spec is derived from.

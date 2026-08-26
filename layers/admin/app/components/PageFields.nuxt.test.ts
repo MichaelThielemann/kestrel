@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
-import type { FieldDef } from '@kestrel/core'
+import type { FieldDef } from '@michaelthielemann/kestrel-core'
 import PageFields from './PageFields.vue'
 
 // The offerable set is a build-time constant; drive it from the test so the ≤1 case is reachable.

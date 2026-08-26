@@ -11,7 +11,7 @@ declare module '#kestrel/schema-tables' {
   export default tables
 }
 declare module '#kestrel/module-manifests' {
-  import type { OwnershipManifest } from '@kestrel/contracts'
+  import type { OwnershipManifest } from '@michaelthielemann/kestrel-contracts'
   const manifests: OwnershipManifest[]
   export default manifests
 }

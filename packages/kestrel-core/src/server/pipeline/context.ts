@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { H3Event } from 'h3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { TraceCollector } from './trace.js'
 import {
   READ_OPS, type ExecPlane, type PipelineContext, type PipelinePorts, type PipelinePrincipal,

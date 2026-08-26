@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PER_PAGE_OPTIONS } from '@kestrel/core/client'
+import { PER_PAGE_OPTIONS } from '@michaelthielemann/kestrel-core/client'
 
 const props = defineProps<{ page: number; totalPages: number; total: number; perPage: number }>()
 const emit = defineEmits<{ 'update:page': [page: number]; 'update:perPage': [perPage: number] }>()

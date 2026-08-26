@@ -5,7 +5,7 @@
 import { ref, type ComputedRef } from 'vue'
 import { resolveLocalized } from '../../../ui/app/utils/localized'
 import type { BatchDeleteReport } from '../utils/collection-ops'
-import type { SerializedAction } from '@kestrel/core'
+import type { SerializedAction } from '@michaelthielemann/kestrel-core'
 
 export function useListBatchActions(collection: ComputedRef<string>, refetch: () => void | Promise<void>) {
   const { t, lang } = useT()

@@ -8,7 +8,7 @@
 
 import { Effect, Schedule } from 'effect'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { type EventEnvelope, upcastToLatest } from '@kestrel/contracts'
+import { type EventEnvelope, upcastToLatest } from '@michaelthielemann/kestrel-contracts'
 import {
   claimOutboxRow,
   incrementOutboxAttempts,

@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 import sanitizeHtml from 'sanitize-html'
-import { SanitizedRichtext } from '@kestrel/contracts'
+import { SanitizedRichtext } from '@michaelthielemann/kestrel-contracts'
 import { RICHTEXT_LINK_SCHEME } from '../../app/utils/richtext-links.js'
 
 // Kept deliberately in step with the editor's schema (`ui/Richtext.vue`): a tag allowed here that no

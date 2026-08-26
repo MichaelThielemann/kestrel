@@ -1,5 +1,5 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import type { BuiltCollection, CollectionDef } from '@kestrel/core'
+import type { BuiltCollection, CollectionDef } from '@michaelthielemann/kestrel-core'
 import { nextSlugCandidate, normalizeSlugPath } from '../pipeline/core/slug.js'
 import { routeOf, findRouteConflict } from './page-route.js'
 

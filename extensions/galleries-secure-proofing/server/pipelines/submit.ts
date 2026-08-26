@@ -2,9 +2,9 @@ import { and, desc, eq, sql, getTableColumns } from 'drizzle-orm'
 import { createError, getRequestHeader } from 'h3'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { Effect } from 'effect'
-import { clientIp, throttleKey } from '@kestrel/auth'
-import { create, definePipeline, eventOf, fromThrowing, requireRegisteredCollection, update, useDb } from '@kestrel/core'
-import type { StepDef } from '@kestrel/core'
+import { clientIp, throttleKey } from '@michaelthielemann/kestrel-auth'
+import { create, definePipeline, eventOf, fromThrowing, requireRegisteredCollection, update, useDb } from '@michaelthielemann/kestrel-core'
+import type { StepDef } from '@michaelthielemann/kestrel-core'
 import { readCappedBody } from '../utils/read-capped-body'
 import {
   exceedsGalleryQuota, exceedsGlobalQuota, MAX_NEW_CUSTOMERS_PER_IP_PER_SLUG, MAX_TOTAL_ROWS,

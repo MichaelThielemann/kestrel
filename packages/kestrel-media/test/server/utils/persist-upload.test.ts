@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { sql } from 'drizzle-orm'
 import { createTestDb } from '../../../../../test/helpers/db.js'
-import { createLocalDriver } from '@kestrel/core'
+import { createLocalDriver } from '@michaelthielemann/kestrel-core'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { persistUpload } from '../../../src/server/utils/persist-upload.js'
 import { buildMediaValues } from '../../../src/server/utils/record.js'
 import { NO_PIPELINE_CTX } from '../../../src/server/utils/media-write.js'
-import type { StorageDriver } from '@kestrel/core'
+import type { StorageDriver } from '@michaelthielemann/kestrel-core'
 import type { MediaDb } from '../../../src/server/db/media-db.js'
 
 function asMediaDb(db: ReturnType<typeof createTestDb>): MediaDb {

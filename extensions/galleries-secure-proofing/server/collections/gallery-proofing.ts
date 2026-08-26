@@ -2,7 +2,7 @@
 // CLIENT-ENCRYPTED marks (`sealed`, a json SealedB64). The schema engine creates + migrates the table. It is
 // WRITTEN by the public back-channel route (server-side upsert, bypassing the admin CRUD) and READ admin-gated
 // by the photographer's review. Not pageLike, no status — internal storage, not public content.
-import { defineCollection } from '@kestrel/core'
+import { defineCollection } from '@michaelthielemann/kestrel-core'
 
 export default defineCollection({
   name: 'galleryProofing',

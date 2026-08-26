@@ -1,8 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { setTimeout as sleepFor } from 'node:timers/promises'
-import { resolveS3Settings, contentTypeFor, cacheControlFor } from '@kestrel/core'
-import type { StorageDriver } from '@kestrel/core'
+import { resolveS3Settings, contentTypeFor, cacheControlFor } from '@michaelthielemann/kestrel-core'
+import type { StorageDriver } from '@michaelthielemann/kestrel-core'
 
 /** A boolean env flag is on for any of the common truthy spellings (case-insensitive, trimmed).
  * @public */

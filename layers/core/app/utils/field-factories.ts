@@ -1,4 +1,4 @@
-import type { FieldDef } from '@kestrel/core'
+import type { FieldDef } from '@michaelthielemann/kestrel-core'
 
 /**
  * Field factories for single-file (SFC) block authoring, à la Pruvious. A block's schema is declared as its

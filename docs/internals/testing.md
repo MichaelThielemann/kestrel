@@ -31,7 +31,7 @@ directories (for example directly under `test/`) matches no project's `include` 
 `packages/**` is a separate territory: `pnpm test`'s root config never scans it. Each `packages/*` has its
 own `vitest.config.ts` (`include: ['test/**/*.test.ts']`, with `typecheck` enabled, so type-level
 assertions count) and its own `test` script. Run every package's suite with `pnpm test:packages`
-(`pnpm --filter "@kestrel/*" -r test`); a test added under `packages/*/test/` and only checked with
+(`pnpm --filter "@michaelthielemann/kestrel-*" -r test`); a test added under `packages/*/test/` and only checked with
 `pnpm test` silently never runs, the same trap as the `*.dom.test.ts` case above.
 
 ## Two gotchas

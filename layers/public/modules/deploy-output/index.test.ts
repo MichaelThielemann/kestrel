@@ -8,12 +8,12 @@ import Database from 'better-sqlite3'
 const { deploySpy } = vi.hoisted(() => ({
   deploySpy: vi.fn(async (_dir: string, _driver: unknown, _opts?: { incomplete?: string }) => ({ pruned: 0, keys: [] as string[] })),
 }))
-vi.mock('@kestrel/delivery-static', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@kestrel/delivery-static')>()),
+vi.mock('@michaelthielemann/kestrel-delivery-static', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@michaelthielemann/kestrel-delivery-static')>()),
   deployStaticOutput: deploySpy,
 }))
 
-import { deployStaticOutput } from '@kestrel/delivery-static'
+import { deployStaticOutput } from '@michaelthielemann/kestrel-delivery-static'
 import deployOutputModule from './index'
 import prerenderRoutesModule from '../prerender-routes/index'
 
@@ -61,11 +61,11 @@ const compiledHooks = (hooks: Map<string, NitroHook[]>): CompiledHook[] => (hook
 describe('kestrel-deploy-output module', () => {
   let logs: string[]
   beforeEach(() => {
-    // Guards against the `vi.mock('@kestrel/delivery-static', ...)` specifier above silently going dark
+    // Guards against the `vi.mock('@michaelthielemann/kestrel-delivery-static', ...)` specifier above silently going dark
     // (e.g. drifting back to a relative path that no longer resolves to the real import): if this ever
     // stops being the spy, every test below runs the REAL deployStaticOutput unmocked against a fake
     // rootDir instead of catching the gating logic this suite exists to test — fail loudly here instead.
-    expect(vi.isMockFunction(deployStaticOutput), '@kestrel/delivery-static\'s deployStaticOutput is not mocked — the vi.mock specifier above no longer intercepts the real import').toBe(true)
+    expect(vi.isMockFunction(deployStaticOutput), '@michaelthielemann/kestrel-delivery-static\'s deployStaticOutput is not mocked — the vi.mock specifier above no longer intercepts the real import').toBe(true)
     logs = []
     vi.spyOn(console, 'log').mockImplementation((m: unknown) => { logs.push(String(m)) })
     deploySpy.mockClear()
@@ -133,7 +133,7 @@ describe('prerender + deploy modules together', () => {
   const s3 = { output: { driver: 's3', auto: false, s3: { bucket: 'b', prefix: 'site' } } }
 
   beforeEach(() => {
-    expect(vi.isMockFunction(deployStaticOutput), '@kestrel/delivery-static\'s deployStaticOutput is not mocked — the vi.mock specifier above no longer intercepts the real import').toBe(true)
+    expect(vi.isMockFunction(deployStaticOutput), '@michaelthielemann/kestrel-delivery-static\'s deployStaticOutput is not mocked — the vi.mock specifier above no longer intercepts the real import').toBe(true)
     vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     deploySpy.mockClear()

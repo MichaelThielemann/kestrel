@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { mkdir, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { clearPipelines, registerPipeline, createLocalDriver  } from '@kestrel/core'
-import { runPipelineForEventAsync } from '@kestrel/access'
+import { clearPipelines, registerPipeline, createLocalDriver  } from '@michaelthielemann/kestrel-core'
+import { runPipelineForEventAsync } from '@michaelthielemann/kestrel-access'
 import { secureGalleryTreePipeline } from './tree'
 
 // The pipeline calls `useStorageDriver()` (an explicit import from core/utils/storage), so the module is
@@ -37,7 +37,7 @@ function makeDriver(overrides: Record<string, unknown> = {}) {
   }
 }
 
-vi.mock('@kestrel/media', () => ({
+vi.mock('@michaelthielemann/kestrel-media', () => ({
   useStorageDriver: () => driver,
   mediaRuntimeConfig: () => ({ maxUploadBytes: 10_000_000 }),
 }))

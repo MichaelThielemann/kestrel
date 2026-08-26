@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest'
 import { createEvent, defineEventHandler, createError, getRequestHeader, type H3Event } from 'h3'
-import { resetAllowlistConfig } from '@kestrel/access'
+import { resetAllowlistConfig } from '@michaelthielemann/kestrel-access'
 
 // defineEventHandler/createError/getRequestHeader remain real Nitro auto-imports; everything else the
 // middleware needs (clientIp, the allowlist/render-context utilities) is an explicit import in
@@ -21,7 +21,7 @@ function eventFor(remoteAddress: string | undefined, headers: Record<string, str
  * this one. `enterWith` mutates the current async frame; under Node 22 inside vitest's runner that
  * mutation reaches the root and no `setImmediate` or unrelated `run()` can shed it, so every peerless
  * request after the first admitted one was wrongly exempted. `vi.resetModules()` forces the middleware's
- * own `@kestrel/access` import to re-evaluate, which gives each scenario its own `AsyncLocalStorage`
+ * own `@michaelthielemann/kestrel-access` import to re-evaluate, which gives each scenario its own `AsyncLocalStorage`
  * instance, which nothing can outlive. A real listener never had this problem — replaying the same
  * sequence outside vitest blocks correctly on both Node 22 and 24.
  */

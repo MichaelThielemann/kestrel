@@ -1,8 +1,8 @@
 import type { H3Event } from 'h3'
-import { clientIp } from '@kestrel/auth'
-import { allowlistMode, ipAllowed, parseAllowlist } from '@kestrel/access'
-import { deriveOnDemand, variantKeyFromPath, useStorageDriver, mediaRuntimeConfig, useMediaDb } from '@kestrel/media'
-import { DEFAULT_IMAGE_POLICY } from '@kestrel/core'
+import { clientIp } from '@michaelthielemann/kestrel-auth'
+import { allowlistMode, ipAllowed, parseAllowlist } from '@michaelthielemann/kestrel-access'
+import { deriveOnDemand, variantKeyFromPath, useStorageDriver, mediaRuntimeConfig, useMediaDb } from '@michaelthielemann/kestrel-media'
+import { DEFAULT_IMAGE_POLICY } from '@michaelthielemann/kestrel-core'
 
 /**
  * Whether the IP allow-list would deny this request, checked directly rather than relied on by ordering:

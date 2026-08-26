@@ -1,4 +1,4 @@
-import { getResolvedKestrelConfig, type ResolvedKestrel } from '@kestrel/core'
+import { getResolvedKestrelConfig, type ResolvedKestrel } from '@michaelthielemann/kestrel-core'
 
 type RawPolicy = { keep?: unknown; maxAgeDays?: unknown } | undefined
 

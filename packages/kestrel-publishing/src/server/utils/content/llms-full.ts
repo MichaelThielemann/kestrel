@@ -1,7 +1,7 @@
-import { fieldIs } from '@kestrel/core'
-import type { CollectionDef, FieldDef } from '@kestrel/core'
-import { getBlock } from '@kestrel/fields'
-import { resolveRichtextLinks } from '@kestrel/core/client'
+import { fieldIs } from '@michaelthielemann/kestrel-core'
+import type { CollectionDef, FieldDef } from '@michaelthielemann/kestrel-core'
+import { getBlock } from '@michaelthielemann/kestrel-fields'
+import { resolveRichtextLinks } from '@michaelthielemann/kestrel-core/client'
 import { escapeMarkdownBlock, richtextToMarkdown } from './richtext-markdown.js'
 
 /** One published page rendered in full: what `llms.txt` links to, plus the body it links to. */

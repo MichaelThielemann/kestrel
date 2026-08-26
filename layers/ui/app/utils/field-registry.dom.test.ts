@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { defineComponent } from 'vue'
 import { fieldComponents, resolveFieldComponent, registerFieldComponent } from './field-registry'
-import type { FieldType } from '@kestrel/core'
+import type { FieldType } from '@michaelthielemann/kestrel-core'
 import FieldText from '../components/field/Text.vue'
 import FieldLink from '../components/field/Link.vue'
 

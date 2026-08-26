@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { createEvent, type H3Event } from 'h3'
 import { Effect } from 'effect'
-import { asyncStep, clearPipelines, registerDefaultPipelines, syncStep } from '@kestrel/core'
-import type { PipelineDef } from '@kestrel/core'
+import { asyncStep, clearPipelines, registerDefaultPipelines, syncStep } from '@michaelthielemann/kestrel-core'
+import type { PipelineDef } from '@michaelthielemann/kestrel-core'
 import { runPipelineForEventAuto } from '../../../src/server/utils/pipeline-run.js'
 
 function eventFor(): H3Event {

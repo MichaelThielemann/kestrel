@@ -1,4 +1,4 @@
-import { currentSnapshot, usePublishingDb } from '@kestrel/publishing'
+import { currentSnapshot, usePublishingDb } from '@michaelthielemann/kestrel-publishing'
 
 /**
  * The static delivery adapter's per-route content lookup: reads the route's current published snapshot

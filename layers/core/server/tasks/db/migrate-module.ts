@@ -2,9 +2,9 @@ import collections from '#kestrel/collections'
 import schemaTables from '#kestrel/schema-tables'
 import moduleManifests from '#kestrel/module-manifests'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
-import type { OwnershipManifest } from '@kestrel/contracts'
-import { buildContentManifest, describeOp, desiredFromCollections, isDestructive, opTable, orderManifests, planOps, sqlite, syncSchema, useDb } from '@kestrel/core'
-import type { BuiltCollection, CollectionDef, Dialect, SchemaSnapshot, SyncDb } from '@kestrel/core'
+import type { OwnershipManifest } from '@michaelthielemann/kestrel-contracts'
+import { buildContentManifest, describeOp, desiredFromCollections, isDestructive, opTable, orderManifests, planOps, sqlite, syncSchema, useDb } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection, CollectionDef, Dialect, SchemaSnapshot, SyncDb } from '@michaelthielemann/kestrel-core'
 import { resolveServerKestrel, serverRuntimeConfig } from '../../utils/server-config'
 // The per-module counterpart to `db:migrate` (ADR-0012): runs the SAME diff/apply engine, but scoped to
 // one ownership manifest's tables at a time, in a fixed order — `content` (the collection/base schema

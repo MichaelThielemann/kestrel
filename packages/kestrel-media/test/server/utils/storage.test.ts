@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { DEFAULT_IMAGE_POLICY, getResolvedKestrelConfig, setResolvedKestrelConfig } from '@kestrel/core'
+import { DEFAULT_IMAGE_POLICY, getResolvedKestrelConfig, setResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
 import { useStorageDriver } from '../../../src/server/utils/storage.js'
 
 const ORIG_CONFIG = getResolvedKestrelConfig()

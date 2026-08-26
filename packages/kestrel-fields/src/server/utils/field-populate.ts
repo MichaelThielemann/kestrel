@@ -1,5 +1,5 @@
-import { fieldIs, getFieldPopulator, seoPopulateFields } from '@kestrel/core'
-import type { FieldDef, FieldPopulator, KeyMode, PopulateCtx, Populator } from '@kestrel/core'
+import { fieldIs, getFieldPopulator, seoPopulateFields } from '@michaelthielemann/kestrel-core'
+import type { FieldDef, FieldPopulator, KeyMode, PopulateCtx, Populator } from '@michaelthielemann/kestrel-core'
 import { buildBlockPopulator } from './block-populate.js'
 
 /** How the walker finds the populator for a field type — the global registry by default, or an explicit

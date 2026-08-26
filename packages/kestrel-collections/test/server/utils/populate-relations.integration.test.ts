@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { clearFieldPopulators, clearPopulator, clearRegistry, create, defineCollection, desiredSchema, diffSchema, getCollection, getOne, outboxContent, populateRow, registerCollection, registerFieldPopulator, registerPopulator, renderSqlite, revisionsTable, buildCollection  } from '@kestrel/core'
-import { buildFieldTreePopulator } from '@kestrel/fields'
-import { buildMediaFieldPopulator } from '@kestrel/media'
+import { clearFieldPopulators, clearPopulator, clearRegistry, create, defineCollection, desiredSchema, diffSchema, getCollection, getOne, outboxContent, populateRow, registerCollection, registerFieldPopulator, registerPopulator, renderSqlite, revisionsTable, buildCollection  } from '@michaelthielemann/kestrel-core'
+import { buildFieldTreePopulator } from '@michaelthielemann/kestrel-fields'
+import { buildMediaFieldPopulator } from '@michaelthielemann/kestrel-media'
 import { buildRelationFieldPopulator, skipMissing } from '../../../src/server/utils/populate-relations.js'
-import type { ResolvedMedia } from '@kestrel/media'
+import type { ResolvedMedia } from '@michaelthielemann/kestrel-media'
 
 // End-to-end with a REAL sqlite + the REAL getOne wiring (the plugin's resolveRecord), proving the relation
 // populator composes with getOne's recursion (nested media resolves), respects the depth cycle-guard, and
@@ -39,7 +39,7 @@ let adaId: number
 let dossierId: number
 
 // create()/getOne() take the narrower `BetterSQLite3Database<Record<string, never>>` DB type
-// internal to @kestrel/core; the test's plain drizzle() instance is structurally compatible.
+// internal to @michaelthielemann/kestrel-core; the test's plain drizzle() instance is structurally compatible.
 function asDb(db: ReturnType<typeof drizzle>): Parameters<typeof create>[0] {
   return db as unknown as Parameters<typeof create>[0]
 }

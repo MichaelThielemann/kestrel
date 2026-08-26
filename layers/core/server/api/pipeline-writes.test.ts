@@ -4,8 +4,8 @@ import { Effect } from 'effect'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { callPipelineRoute, pipelineEvent, pipelineRouteHandler, statusOf, usePipelineRouteDb } from '../../../../test/helpers/pipeline-route'
-import { buildCollection, clearPipelines, clearRegistry, create, defineCollection, desiredSchema, diffSchema, outboxContent, registerAfterStep, registerCollection, renderSqlite, revisionsTable  } from '@kestrel/core'
-import type { StepDef } from '@kestrel/core'
+import { buildCollection, clearPipelines, clearRegistry, create, defineCollection, desiredSchema, diffSchema, outboxContent, registerAfterStep, registerCollection, renderSqlite, revisionsTable  } from '@michaelthielemann/kestrel-core'
+import type { StepDef } from '@michaelthielemann/kestrel-core'
 const notes = buildCollection(defineCollection({
   name: 'notes', mode: 'multi', translatable: false, status: true,
   fields: { title: { type: 'text', required: true } },

@@ -1,9 +1,9 @@
 import { createError } from 'h3'
-import { createLocalDriver, createS3Driver, getResolvedKestrelConfig } from '@kestrel/core'
-import type { ResolvedImagePolicy, StorageDriver } from '@kestrel/core'
+import { createLocalDriver, createS3Driver, getResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
+import type { ResolvedImagePolicy, StorageDriver } from '@michaelthielemann/kestrel-core'
 
 /** The resolved `media` namespace this package reads — the SAME config-provider seam every other package
- *  extraction uses (`@kestrel/core`'s `getResolvedKestrelConfig`), consumed via its own `media` namespace
+ *  extraction uses (`@michaelthielemann/kestrel-core`'s `getResolvedKestrelConfig`), consumed via its own `media` namespace
  *  rather than a second provider. `s3`'s credential fields are optional: they are populated ONLY by a real
  *  Nitro boot's seed (`resolveServerKestrelConfig`, which merges `useRuntimeConfig().media.s3` — the kestrel
  *  module's `KESTREL_S3_*`-at-build-time write, itself overridable at server start via Nitro's

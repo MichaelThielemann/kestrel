@@ -1,7 +1,7 @@
 import { defineNuxtModule } from '@nuxt/kit'
 import Database from 'better-sqlite3'
-import { resolveKestrel, type KestrelConfig } from '@kestrel/core'
-import { isEnvTrue } from '@kestrel/delivery-static'
+import { resolveKestrel, type KestrelConfig } from '@michaelthielemann/kestrel-core'
+import { isEnvTrue } from '@michaelthielemann/kestrel-delivery-static'
 import { pruneUnreferencedMedia, mediaOwnedKeys } from './prune-media'
 
 // The set of storage keys the media library owns (originals + derivatives), read straight from the DB at

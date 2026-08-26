@@ -22,8 +22,8 @@ import { assertEffectiveOrderMatches, resolvePluginOrder, validatePluginOrder } 
  * actually proves "declared order ≡ effective order".
  *
  * The ADR-0029 eager-barrel-load guard for a future `00.*` plugin: NOT a mechanism in this module. It
- * doesn't need to be — `@kestrel/media`/`@kestrel/collections`/`@kestrel/publishing`'s own barrels now
- * self-guard (a used-binding `@kestrel/fields` import, first), so importing ANY of them is safe from ANY
+ * doesn't need to be — `@michaelthielemann/kestrel-media`/`@michaelthielemann/kestrel-collections`/`@michaelthielemann/kestrel-publishing`'s own barrels now
+ * self-guard (a used-binding `@michaelthielemann/kestrel-fields` import, first), so importing ANY of them is safe from ANY
  * plugin position, including a hypothetical new `00.*` file. The computed rail proving this
  * (`test/architecture/kestrel-discovery.test.ts`'s "every package whose OWN module graph reaches
  * buildCollection()...") already re-checks every package on every test run, so a FUTURE package that

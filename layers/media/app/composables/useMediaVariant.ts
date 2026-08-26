@@ -1,6 +1,6 @@
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
-import type { ResolvedMedia } from '@kestrel/media'
-import type { ResolvedVariant } from '@kestrel/core'
+import type { ResolvedMedia } from '@michaelthielemann/kestrel-media'
+import type { ResolvedVariant } from '@michaelthielemann/kestrel-core'
 import { buildPictureModel, requestVariantSpecs, type VariantRequest, type PictureModel } from '../utils/picture-model'
 
 /**

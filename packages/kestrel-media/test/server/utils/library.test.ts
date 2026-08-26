@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { listLibrary } from '../../../src/server/utils/library.js'
 import { ensureFolder } from '../../../src/server/utils/folders.js'
-import { create, ensureRevisionsTable, sqliteClientOf } from '@kestrel/core'
+import { create, ensureRevisionsTable, sqliteClientOf } from '@michaelthielemann/kestrel-core'
 import media from '../../../src/server/collections/media.js'
 import { createTestDb } from '../../../../../test/helpers/db.js'
 import type { MediaDb } from '../../../src/server/db/media-db.js'

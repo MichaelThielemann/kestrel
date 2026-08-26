@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createEvent, type H3Event } from 'h3'
-import { clearPipelines, clearRegistry, defineCollection, registerCollection, registerPipeline, toHttpError, buildCollection  } from '@kestrel/core'
-import { runPipelineForEvent } from '@kestrel/access'
-import { clearBlocks, registerBlock } from '@kestrel/fields'
+import { clearPipelines, clearRegistry, defineCollection, registerCollection, registerPipeline, toHttpError, buildCollection  } from '@michaelthielemann/kestrel-core'
+import { runPipelineForEvent } from '@michaelthielemann/kestrel-access'
+import { clearBlocks, registerBlock } from '@michaelthielemann/kestrel-fields'
 import { callPipelineRoute } from '../../../../../test/helpers/pipeline-route.js'
 import { buildPreviewPipelines } from '../../../src/server/pipelines/preview.js'
 

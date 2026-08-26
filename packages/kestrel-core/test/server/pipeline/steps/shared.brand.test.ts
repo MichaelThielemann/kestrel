@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { ValidatedInput } from '@kestrel/contracts'
+import type { ValidatedInput } from '@michaelthielemann/kestrel-contracts'
 import { asValidated, type Row, type WriteUnit } from '../../../../src/server/pipeline/steps/shared.js'
 
 describe('WriteUnit.values — the ValidatedInput brand gate persist reads through', () => {

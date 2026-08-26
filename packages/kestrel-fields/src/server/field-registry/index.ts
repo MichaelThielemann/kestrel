@@ -2,8 +2,8 @@ import { integer, real, text } from 'drizzle-orm/sqlite-core'
 import type { SQLiteColumnBuilder } from 'drizzle-orm/sqlite-core'
 import { sql } from 'drizzle-orm'
 import { z } from 'zod'
-import { fieldCanEnforceUnique, getFieldType, isHardRequired, refineConditionalRequired, registerFieldType, seedBuiltinFieldTypes, slugify, sanitizeRichtext } from '@kestrel/core'
-import type { FieldDef, FieldType, FieldTypeDescriptor, LinkValue } from '@kestrel/core'
+import { fieldCanEnforceUnique, getFieldType, isHardRequired, refineConditionalRequired, registerFieldType, seedBuiltinFieldTypes, slugify, sanitizeRichtext } from '@michaelthielemann/kestrel-core'
+import type { FieldDef, FieldType, FieldTypeDescriptor, LinkValue } from '@michaelthielemann/kestrel-core'
 import { choiceValues, numberIsInteger } from '../../app/utils/field-constraints.js'
 export { isHardRequired, fieldCanEnforceUnique, registerFieldType, getFieldType, type FieldTypeDescriptor }
 

@@ -1,6 +1,6 @@
 import { createError } from 'h3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { buildDuplicateBody } from './duplicate.js'
 import { runRead, runWrite, runWriteAsync } from '../pipeline/defaults.js'
 import type { BatchResult } from '../pipeline/steps/persist.js'

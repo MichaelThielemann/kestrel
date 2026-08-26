@@ -5,11 +5,11 @@ A collection is a table plus its schema, its admin UI, and its CRUD API, all dec
 ## Define a collection
 
 Drop a file in `server/collections/` and default-export a `defineCollection(...)`, imported from
-`@kestrel/core`:
+`@michaelthielemann/kestrel-core`:
 
 ```ts
 // server/collections/products.ts
-import { defineCollection } from '@kestrel/core'
+import { defineCollection } from '@michaelthielemann/kestrel-core'
 
 export default defineCollection({
   name: 'products',
@@ -188,7 +188,7 @@ explicitly and export the table:
 
 ```ts
 // server/collections/products.ts
-import { buildCollection, defineCollection } from '@kestrel/core'
+import { buildCollection, defineCollection } from '@michaelthielemann/kestrel-core'
 
 const built = buildCollection(defineCollection({ name: 'products', mode: 'multi', fields: { /* … */ } }))
 export const products = built.table   // import { products } in your own server code

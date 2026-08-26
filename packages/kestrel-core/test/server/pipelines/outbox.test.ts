@@ -3,12 +3,12 @@ import { createEvent, type H3Event } from 'h3'
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 // This suite exercises the real cross-package flow through `access`'s `runPipelineForEvent` (not yet
-// moved into this package), which imports `@kestrel/core` by its bare specifier — mirrored here (instead
+// moved into this package), which imports `@michaelthielemann/kestrel-core` by its bare specifier — mirrored here (instead
 // of the relative `src/` paths most other suites in this package use) for readability; the package's own
 // `vitest.config.ts` aliases the bare specifier to `src/index.ts`, so both resolve to the identical module
 // regardless.
-import { clearPipelines, registerPipeline, insertOutboxRow, buildEnvelope, ensureOutboxTable, buildOutboxPipelines, useDb, getResolvedKestrelConfig, setResolvedKestrelConfig } from '@kestrel/core'
-import { runPipelineForEvent } from '@kestrel/access'
+import { clearPipelines, registerPipeline, insertOutboxRow, buildEnvelope, ensureOutboxTable, buildOutboxPipelines, useDb, getResolvedKestrelConfig, setResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
+import { runPipelineForEvent } from '@michaelthielemann/kestrel-access'
 
 // `pipelines/outbox.ts` reads the shared `useDb()` singleton (its own real dependency, not an injectable
 // port) — no clean seam to swap it per-test, so this suite points the singleton at an in-memory db by

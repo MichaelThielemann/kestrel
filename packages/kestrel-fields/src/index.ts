@@ -1,8 +1,8 @@
 /**
  * Kestrel's built-in field-type descriptors, the block-definition helper, and the field/block content-
- * population walkers. Depends on `@kestrel/core` for the registries and content-model types; core never
+ * population walkers. Depends on `@michaelthielemann/kestrel-core` for the registries and content-model types; core never
  * depends back (the package graph is acyclic by design). Server-only entry — browser-safe pieces (consumed
- * directly by admin/ui components) are re-exported from `@kestrel/fields/client` instead.
+ * directly by admin/ui components) are re-exported from `@michaelthielemann/kestrel-fields/client` instead.
  *
  * @packageDocumentation
  */

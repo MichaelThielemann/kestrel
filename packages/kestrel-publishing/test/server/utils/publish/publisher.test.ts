@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
-import { clearRegistry, getResolvedKestrelConfig, registerCollection, resetDbInstance, setResolvedKestrelConfig, useDb, type BuiltCollection, type StorageDriver } from '@kestrel/core'
+import { clearRegistry, getResolvedKestrelConfig, registerCollection, resetDbInstance, setResolvedKestrelConfig, useDb, type BuiltCollection, type StorageDriver } from '@michaelthielemann/kestrel-core'
 import { DepsStore } from '../../../../src/server/utils/publish/deps.js'
 import { currentSnapshot, type SnapshotsDb } from '../../../../src/server/db/snapshots.js'
 import { setRenderRouteLive } from '../../../../src/server/utils/publish/render-seam.js'
@@ -28,10 +28,10 @@ setRenderRouteLive(async (route) => {
   return { body: Buffer.from(await res.arrayBuffer()), status: res.status }
 })
 
-// clearVariants/saveDiscoveredVariants are explicit @kestrel/media imports in publisher.ts —
+// clearVariants/saveDiscoveredVariants are explicit @michaelthielemann/kestrel-media imports in publisher.ts —
 // saveDiscovered is assigned fresh in beforeEach, referenced lazily here so this
 // factory (evaluated once, at import time) always calls whichever fn the current test set up.
-vi.mock('@kestrel/media', async (importOriginal) => ({
+vi.mock('@michaelthielemann/kestrel-media', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   clearVariants: () => {},
   saveDiscoveredVariants: (...args: unknown[]) => saveDiscovered(...args),
@@ -58,7 +58,7 @@ let saveDiscovered: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>
 let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 let driver: ReturnType<typeof fakeDriver>
 
-/** `allCollections` is an explicit `@kestrel/core` import in `publisher.ts` now (real registry), not a
+/** `allCollections` is an explicit `@michaelthielemann/kestrel-core` import in `publisher.ts` now (real registry), not a
  *  stubbable auto-import — route each test's fixture set through the real registry instead. */
 function setCollections(list: BuiltCollection[]): void {
   clearRegistry()

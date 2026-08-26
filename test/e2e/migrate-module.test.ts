@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { rmSync } from 'node:fs'
 import { describe, it, expect, afterAll } from 'vitest'
 import { setup, fetch as testFetch } from '@nuxt/test-utils/e2e'
-import { hashPassword } from '@kestrel/auth'
+import { hashPassword } from '@michaelthielemann/kestrel-auth'
 
 const dbPath = join(tmpdir(), `kestrel-migrate-module-e2e-${process.pid}.sqlite`)
 const PW = 'e2e-migrate-module-pw'

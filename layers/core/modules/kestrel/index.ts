@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { defineNuxtModule } from '@nuxt/kit'
-import { resolveKestrel, type KestrelConfig } from '@kestrel/core'
+import { resolveKestrel, type KestrelConfig } from '@michaelthielemann/kestrel-core'
 import { diagnoseAppShell } from './app-shell'
 
 /**

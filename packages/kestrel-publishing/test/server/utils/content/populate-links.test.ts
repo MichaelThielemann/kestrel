@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { buildLinkFieldPopulators } from '../../../../src/server/utils/content/populate-links.js'
-import { buildFieldTreePopulator, defineBlock, registerBlock, clearBlocks  } from '@kestrel/fields'
-import { defineCollection, pageRowHref, withReadCaptureSync, withResolveScope } from '@kestrel/core'
-import type { FieldPopulator } from '@kestrel/core'
+import { buildFieldTreePopulator, defineBlock, registerBlock, clearBlocks  } from '@michaelthielemann/kestrel-fields'
+import { defineCollection, pageRowHref, withReadCaptureSync, withResolveScope } from '@michaelthielemann/kestrel-core'
+import type { FieldPopulator } from '@michaelthielemann/kestrel-core'
 beforeEach(() => clearBlocks())
 
 // pageRowHref is the pure route builder — it is NOT where the status gate lives (that is

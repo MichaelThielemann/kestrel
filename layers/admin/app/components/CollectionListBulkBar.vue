@@ -4,7 +4,7 @@
 // NOT a live region: the selection count is announced through the list's permanent .list__sr-status
 // region; a v-if-toggled role="status" here would double up and stay silent on first show.
 import { resolveLocalized } from '../../../ui/app/utils/localized'
-import type { SerializedAction } from '@kestrel/core'
+import type { SerializedAction } from '@michaelthielemann/kestrel-core'
 
 const props = defineProps<{ count: number; hasStatus: boolean; busy: boolean; actions?: SerializedAction[] }>()
 const emit = defineEmits<{ setStatus: [status: 'published' | 'draft']; delete: []; runAction: [action: SerializedAction]; clear: [] }>()

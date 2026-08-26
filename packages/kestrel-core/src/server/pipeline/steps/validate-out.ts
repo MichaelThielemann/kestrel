@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { collectionOf, type Row } from './shared.js'
 import type { ListResult } from './read-shared.js'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { syncStep, type StepDef } from '../types.js'
 
 /** Replace a row that no longer matches its collection's select schema with the quarantine shape. The

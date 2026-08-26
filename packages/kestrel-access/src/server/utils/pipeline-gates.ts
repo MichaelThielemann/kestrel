@@ -1,6 +1,6 @@
 import { getCookie, getMethod, getRequestHeader, type H3Event } from 'h3'
-import { clientIp, sessionSettings } from '@kestrel/auth'
-import type { AccessSpec, GateEvaluators, GateOutcome, PipelineContext } from '@kestrel/core'
+import { clientIp, sessionSettings } from '@michaelthielemann/kestrel-auth'
+import type { AccessSpec, GateEvaluators, GateOutcome, PipelineContext } from '@michaelthielemann/kestrel-core'
 import { isCrossSiteWrite } from './csrf.js'
 import { registeredGrants } from './grant-registry.js'
 import { derivePrincipal } from './guard.js'

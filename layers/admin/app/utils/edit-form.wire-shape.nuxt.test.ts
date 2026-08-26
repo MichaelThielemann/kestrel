@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { registerEndpoint } from '@nuxt/test-utils/runtime'
-import { ValidationFailed } from '@kestrel/contracts'
+import { ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 import { readFetchError, mapServerErrors, parseBlockErrors } from './edit-form'
-import { toHttpError } from '@kestrel/core'
+import { toHttpError } from '@michaelthielemann/kestrel-core'
 
 // Binds the REAL server error shape to the admin consumer end to end: a real ValidationFailed instance,
 // through the real edge translation (toHttpError — the same function core/server/api/[...path].ts uses),

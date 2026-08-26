@@ -1,8 +1,8 @@
 import { createError } from 'h3'
 import { Effect } from 'effect'
-import { isRendererContext } from '@kestrel/access'
-import { allCollections, definePipeline, getCollection, getSingleton, isDeliveryExemptPath, isDeliveryLive, syncStep, useDb } from '@kestrel/core'
-import type { PipelineDef, StepDef } from '@kestrel/core'
+import { isRendererContext } from '@michaelthielemann/kestrel-access'
+import { allCollections, definePipeline, getCollection, getSingleton, isDeliveryExemptPath, isDeliveryLive, syncStep, useDb } from '@michaelthielemann/kestrel-core'
+import type { PipelineDef, StepDef } from '@michaelthielemann/kestrel-core'
 import { resolvePage } from '../utils/content/page-resolve.js'
 
 /** Substitutes for Nitro's `import.meta.prerender` (a build-time-replaced constant, unavailable to a
@@ -31,7 +31,7 @@ const resolveRoute: StepDef = syncStep('resolveRoute', (ctx) => Effect.sync(() =
     const isStaticRender = isPrerenderMode() || isRendererContext()
     const publishedOnly = isStaticRender || ctx.facts.readScope !== 'all'
     // A `deliveryExempt` path reserves that URL for the consumer's own runtime route under `delivery:
-    // 'live'` (see `@kestrel/core`'s `delivery.ts`) — public/static resolution must not fill it in with a
+    // 'live'` (see `@michaelthielemann/kestrel-core`'s `delivery.ts`) — public/static resolution must not fill it in with a
     // page-like record either, or a page saved at the same path would still shadow that route the same
     // way the live catch-all is built to avoid. Scoped to `publishedOnly`: an authenticated admin's own
     // preview of a record saved at that path is unaffected.

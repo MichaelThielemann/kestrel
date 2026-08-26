@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { derivePrincipal, type PrincipalInput } from '../../../src/server/utils/guard.js'
-import { signSession } from '@kestrel/auth'
+import { signSession } from '@michaelthielemann/kestrel-auth'
 
 const SECRET = 'guard-secret-at-least-32-bytes-long-xxx'
 const now = 1_000_000_000_000

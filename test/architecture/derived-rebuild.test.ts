@@ -10,13 +10,13 @@ import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
 import sharp from 'sharp'
 import { sql, eq, getTableColumns } from 'drizzle-orm'
 import { createTestDb } from '../helpers/db'
-import { DEFAULT_IMAGE_POLICY, clearOutboxHandlers, clearPipelines, clearRegistry, create, createLocalDriver, ensureRevisionsTable, findReferrers, getResolvedKestrelConfig, pollOnce, rebuildRecordRefs, recordRefs, registerCollection, registerReindexRefs, resetDbInstance, setResolvedKestrelConfig, sqliteClientOf, useContentDbFor, useDb } from '@kestrel/core'
-import type { BuiltCollection, StorageDriver } from '@kestrel/core'
-import { richtextLinkHref } from '@kestrel/core/client'
-import { pagesCollection } from '@kestrel/collections'
+import { DEFAULT_IMAGE_POLICY, clearOutboxHandlers, clearPipelines, clearRegistry, create, createLocalDriver, ensureRevisionsTable, findReferrers, getResolvedKestrelConfig, pollOnce, rebuildRecordRefs, recordRefs, registerCollection, registerReindexRefs, resetDbInstance, setResolvedKestrelConfig, sqliteClientOf, useContentDbFor, useDb } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection, StorageDriver } from '@michaelthielemann/kestrel-core'
+import { richtextLinkHref } from '@michaelthielemann/kestrel-core/client'
+import { pagesCollection } from '@michaelthielemann/kestrel-collections'
 import postsCollection from '../../server/collections/posts'
-import { DepsStore, publishDeps } from '@kestrel/publishing'
-import { runBackfill, media } from '@kestrel/media'
+import { DepsStore, publishDeps } from '@michaelthielemann/kestrel-publishing'
+import { runBackfill, media } from '@michaelthielemann/kestrel-media'
 
 // Per-route data tags the mocked render below should report as "read" — set by the publish_deps block so
 // its renders produce non-trivial deps captures (the other blocks leave this empty: no tags captured).
@@ -34,7 +34,7 @@ vi.mock('nitropack/runtime', () => ({
     localFetch: async (route: string) => {
       const tags = routeTags.current.get(route)
       if (tags?.length) {
-        const { captureRead } = await import('@kestrel/core')
+        const { captureRead } = await import('@michaelthielemann/kestrel-core')
         for (const tag of tags) {
           const [coll, id] = tag.split(':')
           captureRead(coll!, id ? Number(id) : undefined)
@@ -44,13 +44,13 @@ vi.mock('nitropack/runtime', () => ({
     },
   }),
 }))
-// Wires the real renderRouteLive into @kestrel/publishing's render seam (against the mocked
+// Wires the real renderRouteLive into @michaelthielemann/kestrel-publishing's render seam (against the mocked
 // nitropack/runtime above) — the same explicit setRenderRouteLive call zz.publish.ts/tasks/publish/run.ts
 // make in production (not a module-load side effect — see either file's own comment for why). Both
 // dynamically imported (not at module top) for the same reason nitropack is mocked above the file's own
 // hoisted imports.
 const { renderRouteLive } = await import('../../layers/public/server/utils/publish/render-live')
-const { setRenderRouteLive } = await import('@kestrel/publishing')
+const { setRenderRouteLive } = await import('@michaelthielemann/kestrel-publishing')
 setRenderRouteLive(renderRouteLive)
 
 /**
@@ -118,14 +118,14 @@ describe('derived: record_refs — reindex rebuild', () => {
 // REAL `publishFull` (the same function the boot publish and the reconciler task call) against a real
 // local StorageDriver (real filesystem, not a fake).
 describe('derived: publish output (+ sitemap/robots/redirects) — publishFull rebuild', () => {
-  let publishFull: typeof import('@kestrel/publishing').publishFull
+  let publishFull: typeof import('@michaelthielemann/kestrel-publishing').publishFull
   let sqlite: Database.Database
   let db: BetterSQLite3Database
   let dir: string
   let driver: StorageDriver & { list: () => Promise<string[]>; get: (key: string) => Promise<Buffer> }
 
   beforeEach(async () => {
-    ;({ publishFull } = await import('@kestrel/publishing'))
+    ;({ publishFull } = await import('@michaelthielemann/kestrel-publishing'))
     const output = { driver: 'local' as const, dir: '', publicDir: '/kestrel-no-such-public-dir', auto: false, publishOnSave: false, reconcileMinutes: 0, verbose: false, s3: { bucket: '', region: '', endpoint: '', prefix: '', accessKeyId: '', secretAccessKey: '', sessionToken: '' } }
     setResolvedKestrelConfig({ ...getResolvedKestrelConfig(), dbPath: ':memory:', primaryLocale: 'en', prefixPrimary: false, supportedLocales: ['en'], output })
     resetDbInstance()
@@ -183,15 +183,15 @@ describe('derived: publish output (+ sitemap/robots/redirects) — publishFull r
 // against a `DepsStore` wired with the REAL `createSqlitePersistence` port — exactly as
 // `layers/public/server/plugins/zz.publish.ts` constructs it at boot.
 describe('derived: publish_deps (route -> tag index) — republish rebuild', () => {
-  let publishFull: typeof import('@kestrel/publishing').publishFull
-  let createSqlitePersistence: typeof import('@kestrel/publishing').createSqlitePersistence
+  let publishFull: typeof import('@michaelthielemann/kestrel-publishing').publishFull
+  let createSqlitePersistence: typeof import('@michaelthielemann/kestrel-publishing').createSqlitePersistence
   let sqlite: Database.Database
   let db: BetterSQLite3Database
   let dir: string
   let driver: StorageDriver
 
   beforeEach(async () => {
-    ;({ publishFull, createSqlitePersistence } = await import('@kestrel/publishing'))
+    ;({ publishFull, createSqlitePersistence } = await import('@michaelthielemann/kestrel-publishing'))
     const output = { driver: 'local' as const, dir: '', publicDir: '/kestrel-no-such-public-dir', auto: false, publishOnSave: false, reconcileMinutes: 0, verbose: false, s3: { bucket: '', region: '', endpoint: '', prefix: '', accessKeyId: '', secretAccessKey: '', sessionToken: '' } }
     setResolvedKestrelConfig({ ...getResolvedKestrelConfig(), dbPath: ':memory:', primaryLocale: 'en', prefixPrimary: false, supportedLocales: ['en'], output })
     resetDbInstance()
@@ -233,7 +233,7 @@ describe('derived: publish_deps (route -> tag index) — republish rebuild', () 
     // suite exercises the derived-rebuild story end to end, not the ownership adapter. `DepsPersistenceDb`
     // is branded, so the cast at this crossing is required (mirrors `record-ref-index.test.ts`'s own
     // `asContentDb` helper).
-    const deps = new DepsStore(createSqlitePersistence(db as unknown as import('@kestrel/publishing').DepsPersistenceDb))
+    const deps = new DepsStore(createSqlitePersistence(db as unknown as import('@michaelthielemann/kestrel-publishing').DepsPersistenceDb))
     await publishFull(driver, deps)
 
     expect(deps.routes().sort()).toEqual(['/', '/a', '/b'])
@@ -247,7 +247,7 @@ describe('derived: publish_deps (route -> tag index) — republish rebuild', () 
 
     // Simulate the restart `zz.publish.ts` does at boot: a FRESH DepsStore rehydrated from the (now empty)
     // persisted store.
-    const rehydrated = new DepsStore(createSqlitePersistence(db as unknown as import('@kestrel/publishing').DepsPersistenceDb))
+    const rehydrated = new DepsStore(createSqlitePersistence(db as unknown as import('@michaelthielemann/kestrel-publishing').DepsPersistenceDb))
     expect(rehydrated.routes()).toEqual([]) // proves the kill: rehydration finds nothing
 
     // The rebuild: the production republish path — a full publish re-captures + persists deps as it renders.

@@ -30,8 +30,8 @@ import { sqliteTable, integer, text, uniqueIndex } from 'drizzle-orm/sqlite-core
 import type { AnySQLiteColumn, AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { Quarantined } from '@kestrel/contracts'
-import type { BuiltCollection, CollectionDef } from '@kestrel/core'
+import { Quarantined } from '@michaelthielemann/kestrel-contracts'
+import type { BuiltCollection, CollectionDef } from '@michaelthielemann/kestrel-core'
 import { allCollections } from '../utils/registry.js'
 import { revisionRetentionPolicy } from '../utils/revision-retention.js'
 import { sqliteClientOf } from './outbox.js'
@@ -271,7 +271,7 @@ function canonicalize(value: unknown): unknown {
  * wall-clock time); a structurally different def ⇒ a different version.
  *
  * Stored as a plain `number` in the existing `schema_version INTEGER` column — chosen over a string hash
- * specifically because `registerUpcast`'s `fromVersion` (`@kestrel/contracts`) is `number`-typed;
+ * specifically because `registerUpcast`'s `fromVersion` (`@michaelthielemann/kestrel-contracts`) is `number`-typed;
  * keying upcast chains on this value needs no contracts-package change and no separate
  * hash-to-sequence-number registry.
  */
@@ -300,7 +300,7 @@ export function schemaVersionOf(def: CollectionDef): number {
 }
 
 // -------------------------------------------------------------------------------------------------------
-// Revision upcasting: a DEDICATED registry, local to this module — NOT `@kestrel/contracts`'
+// Revision upcasting: a DEDICATED registry, local to this module — NOT `@michaelthielemann/kestrel-contracts`'
 // `registerUpcast`/`upcastToLatest` (retired for this purpose; see the TSDoc on `registerRevisionUpcast`
 // for why that reuse doesn't work for a hash-versioned chain).
 // -------------------------------------------------------------------------------------------------------
@@ -318,7 +318,7 @@ const revisionUpcastRegistry = new Map<string, Map<number, RevisionUpcastStep>>(
  * same collection compose into a chain by matching `toVersion` of one step to `fromVersion` of the next —
  * see {@link applyRevisionUpcast} for the walk.
  *
- * Distinct from `@kestrel/contracts`' `registerUpcast`/`upcastToLatest`, and NOT built on it,
+ * Distinct from `@michaelthielemann/kestrel-contracts`' `registerUpcast`/`upcastToLatest`, and NOT built on it,
  * despite the earlier design intending exactly that reuse. The contracts
  * walker assumes AUTHOR-ASSIGNED, sequential versions — it stops at
  * `Math.max(...registeredFromVersions) + 1`, i.e. "the next integer past the highest registered step". A

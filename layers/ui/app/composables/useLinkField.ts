@@ -1,7 +1,7 @@
 import { ref, computed, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useEchoGuard } from './useEchoGuard'
-import type { LinkValue, LinkType } from '@kestrel/core'
+import type { LinkValue, LinkType } from '@michaelthielemann/kestrel-core'
 
 export function useLinkField(
   model: Ref<LinkValue | null | undefined>,

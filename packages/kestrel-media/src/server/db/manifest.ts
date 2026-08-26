@@ -1,4 +1,4 @@
-import type { OwnershipManifest } from '@kestrel/contracts'
+import type { OwnershipManifest } from '@michaelthielemann/kestrel-contracts'
 
 /**
  * The media module's table ownership (ADR-0012): every table `media`'s own code writes/reads directly,

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createTestDb } from '../../../../../test/helpers/db.js'
 import { runStepAsync } from '../../../../../test/helpers/run-effect.js'
-import { DEFAULT_IMAGE_POLICY, createPipelineContext, getResolvedKestrelConfig, setResolvedKestrelConfig } from '@kestrel/core'
+import { DEFAULT_IMAGE_POLICY, createPipelineContext, getResolvedKestrelConfig, setResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
 import { folders } from '../../../src/server/database/folders.js'
 import { buildMediaOpPipelines } from '../../../src/server/pipelines/media-ops.js'
 

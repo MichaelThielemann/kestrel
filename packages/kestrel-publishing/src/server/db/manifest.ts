@@ -1,4 +1,4 @@
-import type { OwnershipManifest } from '@kestrel/contracts'
+import type { OwnershipManifest } from '@michaelthielemann/kestrel-contracts'
 
 /**
  * The publishing module's table ownership (ADR-0012): the hand-authored system tables the runtime

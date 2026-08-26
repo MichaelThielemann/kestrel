@@ -1,5 +1,5 @@
-import { runBackfill, useStorageDriver, mediaRuntimeConfig, useMediaDb } from '@kestrel/media'
-import { DEFAULT_IMAGE_POLICY } from '@kestrel/core'
+import { runBackfill, useStorageDriver, mediaRuntimeConfig, useMediaDb } from '@michaelthielemann/kestrel-media'
+import { DEFAULT_IMAGE_POLICY } from '@michaelthielemann/kestrel-core'
 
 /**
  * Reconcile every media row's derivatives to the active variant registry: generate the missing sizes/formats

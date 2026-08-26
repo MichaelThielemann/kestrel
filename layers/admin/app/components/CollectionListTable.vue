@@ -3,7 +3,7 @@ import { sortDirection } from '../utils/list-query'
 import { cellDisplay, columnLabel, rowLabel as labelForRow } from '../utils/list-cell'
 import type { ListColumn } from '../utils/list-columns'
 import { resolveLocalized } from '../../../ui/app/utils/localized'
-import type { SerializedAction } from '@kestrel/core'
+import type { SerializedAction } from '@michaelthielemann/kestrel-core'
 
 const props = defineProps<{
   rows: Record<string, unknown>[]

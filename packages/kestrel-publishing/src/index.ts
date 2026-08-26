@@ -1,17 +1,17 @@
-// Registers the built-in field types (module-load side effect in `@kestrel/fields` itself). Must run
+// Registers the built-in field types (module-load side effect in `@michaelthielemann/kestrel-fields` itself). Must run
 // before this barrel's own `buildCollection()` calls (site.js, redirects.js) evaluate — an ESM barrel is
 // an eager, whole-module-graph load (ADR-0029), so ANY consumer importing anything at all from this
 // package — even an early boot-phase plugin that only wants `ensureSnapshotTriggers` — would otherwise
 // reach those collection definitions before the registry has "text" et al. Placed first so file order (not
 // what the consumer actually imports) is what guarantees the ordering.
 //
-// Imported as a USED BINDING, not a bare side-effect import (`import '@kestrel/fields'`) — this package
+// Imported as a USED BINDING, not a bare side-effect import (`import '@michaelthielemann/kestrel-fields'`) — this package
 // declares `"sideEffects": false` in package.json, so a bare import is exactly what would let a compliant
 // bundler prove the registration call unneeded and tree-shake it away (fields' own `sideEffects` array
 // names only its `field-registry` entry point, not the bare barrel this resolves to). Referencing the
 // binding defeats that (mirrors `test/setup.ts`'s own `fieldTypes` idiom, one file over).
-import { fieldTypes } from '@kestrel/fields'
-import type { KestrelPackageDiscovery } from '@kestrel/core'
+import { fieldTypes } from '@michaelthielemann/kestrel-fields'
+import type { KestrelPackageDiscovery } from '@michaelthielemann/kestrel-core'
 import { publishingOwnershipManifest as manifest } from './server/db/manifest.js'
 import { publishedSnapshots } from './server/db/snapshots.js'
 import { publishDeps } from './server/database/publish-deps.js'
@@ -22,7 +22,7 @@ import redirectsCollectionDefault from './server/collections/redirects.js'
 
 void fieldTypes
 
-/** `kestrel-nuxt`'s auto-discovery reads this — see `@kestrel/core`'s `KestrelPackageDiscovery` TSDoc.
+/** `kestrel-nuxt`'s auto-discovery reads this — see `@michaelthielemann/kestrel-core`'s `KestrelPackageDiscovery` TSDoc.
  * First-party discovery contract — consumers extend Kestrel via layer directories, see
  * `docs/guide/publishing.md`.
  * @alpha

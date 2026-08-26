@@ -1,6 +1,6 @@
 import type { SerializedAction } from './collection-actions.js'
-import { fieldIs, isSingleRefColumn, resolveFieldLayout } from '@kestrel/core'
-import type { CollectionDef, Condition, FieldDef, FieldType, LayoutNode, Localized } from '@kestrel/core'
+import { fieldIs, isSingleRefColumn, resolveFieldLayout } from '@michaelthielemann/kestrel-core'
+import type { CollectionDef, Condition, FieldDef, FieldType, LayoutNode, Localized } from '@michaelthielemann/kestrel-core'
 /** The wire shape of a `FieldDef` after `serializeField` — what the admin client actually receives.
  *  Server-only concerns (`populate`, `renamedFrom`) are stripped; everything left is JSON-safe by
  * @public

@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import FieldRenderer from './Renderer.vue'
 import FieldRepeater from './Repeater.vue'
 import { registerFieldComponent, resolveFieldComponent } from '../../utils/field-registry'
-import type { FieldType } from '@kestrel/core'
+import type { FieldType } from '@michaelthielemann/kestrel-core'
 
 const base = { name: 'X', locale: 'en' }
 

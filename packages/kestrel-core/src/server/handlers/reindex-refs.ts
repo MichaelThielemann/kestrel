@@ -1,6 +1,6 @@
 import { eq, getTableColumns } from 'drizzle-orm'
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
-import type { EventEnvelope } from '@kestrel/contracts'
+import type { EventEnvelope } from '@michaelthielemann/kestrel-contracts'
 import { useContentDb } from '../db/content-db.js'
 import { getCollection } from '../utils/registry.js'
 import { maintainRecordRefs } from '../utils/record-ref-index.js'

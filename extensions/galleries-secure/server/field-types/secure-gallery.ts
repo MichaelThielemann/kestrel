@@ -1,6 +1,6 @@
 import { text } from 'drizzle-orm/sqlite-core'
 import { z } from 'zod'
-import { defineFieldType, constrain, opt } from '@kestrel/fields'
+import { defineFieldType, constrain, opt } from '@michaelthielemann/kestrel-fields'
 import { GALLERY_ID_RE } from '../utils/namespace'
 
 // A `secureGallery` field type. The field value is just a tiny PUBLIC ref (v2): the per-gallery storage

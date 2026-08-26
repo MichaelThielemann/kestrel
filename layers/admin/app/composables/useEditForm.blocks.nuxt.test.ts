@@ -6,8 +6,8 @@ import BlockFields from '../components/BlockFields.vue'
 import { useEditForm } from './useEditForm'
 import { useBlockTree } from './useBlockTree'
 // The REAL write-path normalizer, so the mocked endpoint answers exactly what the server would.
-import { sanitizeRichtext } from '@kestrel/core'
-import type { SerializedBlock } from '@kestrel/core'
+import { sanitizeRichtext } from '@michaelthielemann/kestrel-core'
+import type { SerializedBlock } from '@michaelthielemann/kestrel-core'
 
 // The editor is only clean after a save if NOTHING writes to `values` once `rebaseline` has taken the
 // baseline. The mounted block pane is the hard case: it holds a live richtext widget whose serialization

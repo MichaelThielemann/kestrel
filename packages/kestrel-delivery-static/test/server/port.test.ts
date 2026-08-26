@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import type { StorageDriver } from '@kestrel/core'
-import type { PublishedSnapshot } from '@kestrel/contracts'
+import type { StorageDriver } from '@michaelthielemann/kestrel-core'
+import type { PublishedSnapshot } from '@michaelthielemann/kestrel-contracts'
 import { createStaticDeliveryPort, deliveryPortFor } from '../../src/server/port.js'
 
 function snapshot(route: string, html = '<p/>'): PublishedSnapshot {

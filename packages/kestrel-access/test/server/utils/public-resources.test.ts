@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { publicReadableResources } from '../../../src/server/utils/public-resources.js'
-import { clearPipelines, clearRegistry, registerCollection, registerPipeline } from '@kestrel/core'
-import type { BuiltCollection } from '@kestrel/core'
+import { clearPipelines, clearRegistry, registerCollection, registerPipeline } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 const stub = (name: string, pageLike: boolean): BuiltCollection =>
   ({ name, def: { name, pageLike } } as unknown as BuiltCollection)
 

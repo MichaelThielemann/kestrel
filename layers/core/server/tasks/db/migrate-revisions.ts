@@ -1,4 +1,4 @@
-import { migrateRevisions, useDb, type MigrateRevisionsResult } from '@kestrel/core'
+import { migrateRevisions, useDb, type MigrateRevisionsResult } from '@michaelthielemann/kestrel-core'
 
 // Thin Nitro wrapper (defineTask is a runtime global) around the core, independently-unit-tested
 // `migrateRevisions` (db/revision-migration.ts) — same sync/task split as db:migrate (schema/sync.ts +

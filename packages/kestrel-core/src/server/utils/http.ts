@@ -1,6 +1,6 @@
 import { createError, getRouterParam, type H3Event } from 'h3'
 import { getCollection } from './registry.js'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 
 /** @public */
 export function getCollectionOr404(name: string): BuiltCollection {

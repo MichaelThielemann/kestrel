@@ -1,4 +1,4 @@
-import { registerMediaCleanup } from '@kestrel/media'
+import { registerMediaCleanup } from '@michaelthielemann/kestrel-media'
 
 export default defineNitroPlugin(() => {
   registerMediaCleanup()

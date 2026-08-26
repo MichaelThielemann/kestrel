@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createEvent, type H3Event } from 'h3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { clearPipelines, desiredSchema, diffSchema, getResolvedKestrelConfig, registerPipeline, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@kestrel/core'
-import { runPipelineForEvent } from '@kestrel/access'
-import { publishDeps, publishStatus, publishRuns, usePublishingDbFor, startPublishRun, buildPublishRunsPipelines } from '@kestrel/publishing'
+import { clearPipelines, desiredSchema, diffSchema, getResolvedKestrelConfig, registerPipeline, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@michaelthielemann/kestrel-core'
+import { runPipelineForEvent } from '@michaelthielemann/kestrel-access'
+import { publishDeps, publishStatus, publishRuns, usePublishingDbFor, startPublishRun, buildPublishRunsPipelines } from '@michaelthielemann/kestrel-publishing'
 
 /**
  * A tooling read pipeline exposes `publish_runs` state, gated like the `_outbox/dead` precedent

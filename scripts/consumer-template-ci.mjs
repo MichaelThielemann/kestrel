@@ -1,6 +1,6 @@
 // The ONLY real package-consumption test. Every earlier gate (api:check, pkg:lint) inspects one
 // package's own tarball in isolation; this script is the one that scaffolds an actual consumer from
-// templates/starter (via create-kestrel's real CLI), packs the engine + every @kestrel/* package the way
+// templates/starter (via create-kestrel's real CLI), packs the engine + every @michaelthielemann/kestrel-* package the way
 // `npm publish` would, installs them into that consumer with a real `npm install` (no workspace protocol,
 // no symlinks back into this repo), builds it, boots the production server, and hits it over real HTTP.
 //
@@ -15,7 +15,7 @@ const root = process.cwd()
 const log = (msg) => console.log(`[consumer-template-ci] ${msg}`)
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: 'inherit', ...opts })
 
-// @kestrel/* in the order `pnpm --filter "@kestrel/*" -r exec` resolves them (a real topological walk of
+// @michaelthielemann/kestrel-* in the order `pnpm --filter "@michaelthielemann/kestrel-*" -r exec` resolves them (a real topological walk of
 // the workspace graph, not a hand guess) — mirrors the publish order in .github/workflows/release.yml.
 const PACKAGES = ['contracts', 'core', 'auth', 'access', 'fields', 'collections', 'media', 'publishing', 'delivery-live', 'delivery-static']
 
@@ -27,10 +27,10 @@ log(`work dir: ${work}`)
 
 let server
 try {
-  log('building @kestrel/* packages (dist/ must exist before pnpm pack)')
-  run('pnpm', ['--filter', '@kestrel/*', '-r', 'build'], { cwd: root })
+  log('building @michaelthielemann/kestrel-* packages (dist/ must exist before pnpm pack)')
+  run('pnpm', ['--filter', '@michaelthielemann/kestrel-*', '-r', 'build'], { cwd: root })
 
-  log('packing the engine + every @kestrel/* package as npm publish would')
+  log('packing the engine + every @michaelthielemann/kestrel-* package as npm publish would')
   const tarball = {}
   for (const dir of ['.', ...PACKAGES.map((n) => `packages/kestrel-${n}`)]) {
     const out = execFileSync('pnpm', ['pack', '--pack-destination', tarballDir], { cwd: join(root, dir) }).toString().trim()
@@ -49,12 +49,12 @@ try {
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
   pkg.dependencies['@michaelthielemann/kestrel'] = `file:${tarball['@michaelthielemann/kestrel']}`
   // npm's `overrides` redirects a dependency AT ANY DEPTH — the engine tarball's own manifest declares
-  // "@kestrel/core": "0.1.0" etc. (pnpm pack already rewrote the workspace:* protocol to that real
+  // "@michaelthielemann/kestrel-core": "0.1.0" etc. (pnpm pack already rewrote the workspace:* protocol to that real
   // version), which would otherwise 404 against the real registry since these packages are not published
   // yet in this checkout's tag. This is what actually forces npm's resolver to read each package's real
   // `exports` map / `main` / `types` from a standalone tarball, the same way a real end user's install
   // would — not a symlink into this repo's own packages/*/src.
-  pkg.overrides = Object.fromEntries(PACKAGES.map((n) => [`@kestrel/${n}`, `file:${tarball[`@kestrel/${n}`]}`]))
+  pkg.overrides = Object.fromEntries(PACKAGES.map((n) => [`@michaelthielemann/kestrel-${n}`, `file:${tarball[`@michaelthielemann/kestrel-${n}`]}`]))
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
 
   // The runner's ambient npm (10.9.8 as of this writing) hits a real npm/arborist bug resolving nuxt's
@@ -65,17 +65,17 @@ try {
   log('npm install (real npm 11 via npx — the most representative simulation of an actual end user)')
   run('npx', ['--yes', 'npm@11', 'install'], { cwd: consumerDir })
 
-  log('verifying no @kestrel/* dependency resolved back into this repo (would prove nothing)')
+  log('verifying no @michaelthielemann/kestrel-* dependency resolved back into this repo (would prove nothing)')
   for (const n of PACKAGES) {
     let resolved = ''
     try {
-      resolved = execFileSync('npm', ['ls', `@kestrel/${n}`, '--json'], { cwd: consumerDir }).toString()
+      resolved = execFileSync('npm', ['ls', `@michaelthielemann/kestrel-${n}`, '--json'], { cwd: consumerDir }).toString()
     } catch (err) {
       // `npm ls` exits non-zero on a peer-dep mismatch warning even when the tree itself resolved fine;
       // its stdout (on the error object) still carries the real tree, which is what matters here.
       resolved = err.stdout?.toString() ?? ''
     }
-    if (resolved.includes(root)) throw new Error(`@kestrel/${n} resolved into ${root} — the override did not take effect`)
+    if (resolved.includes(root)) throw new Error(`@michaelthielemann/kestrel-${n} resolved into ${root} — the override did not take effect`)
   }
 
   log('reading the .env create-kestrel wrote (session secret + admin password hash)')
@@ -135,7 +135,7 @@ try {
     body: JSON.stringify({ password }),
   })
   if (loginRes.status !== 200) throw new Error(`POST /api/login -> ${loginRes.status}, expected 200 (the packed admin auth stack did not resolve)`)
-  log('  POST /api/login -> 200 OK (the packed @kestrel/auth + @kestrel/access stack authenticates for real)')
+  log('  POST /api/login -> 200 OK (the packed @michaelthielemann/kestrel-auth + @michaelthielemann/kestrel-access stack authenticates for real)')
 
   log('PASS — a real npm install of the packed engine + packages boots and serves under production, and login round-trips through the packed auth stack.')
 } finally {

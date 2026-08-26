@@ -31,9 +31,9 @@ A productive reading path for a newcomer:
 ## Pages
 
 - [Architecture overview](./architecture.md) — the boot sequence, the registration mechanisms that govern what runs when, and the seams that bite when a change crosses a layer boundary.
-- [Layers and packages](./layers-and-packages.md) — the Nuxt layer diagram, the ten `@kestrel/*` packages, the dependency rule between them, and how a package is discovered at runtime.
+- [Layers and packages](./layers-and-packages.md) — the Nuxt layer diagram, the ten `@michaelthielemann/kestrel-*` packages, the dependency rule between them, and how a package is discovered at runtime.
 - [The pipeline engine](./pipeline-engine.md) — every `/api/` endpoint as a named, declarative step list fronted by structurally enforced gates.
-- [Extension points and ports](./extension-points.md) — the catalog of seams a consumer or another module plugs into, and the rule that every extension is data or an adapter against a `@kestrel/contracts` interface.
+- [Extension points and ports](./extension-points.md) — the catalog of seams a consumer or another module plugs into, and the rule that every extension is data or an adapter against a `@michaelthielemann/kestrel-contracts` interface.
 - [Publishing and delivery internals](./publishing.md) — the immutable snapshot store, the delivery-port seam, and invalidation.
 - [The data model and schema engine](./data-model.md) — how a `defineCollection` call becomes real tables and back, and the one SQLite file with per-module ownership.
 - [Read-time population](./populate.md) — how a record read at `depth > 0` resolves media, links, and relations per-field-type and recursively.

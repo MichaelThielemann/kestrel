@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
-import { useDb } from '@kestrel/core'
-import { ensureSnapshotTriggers } from '@kestrel/publishing'
+import { useDb } from '@michaelthielemann/kestrel-core'
+import { ensureSnapshotTriggers } from '@michaelthielemann/kestrel-publishing'
 
 // Layer order puts every core-layer plugin (00.migrate, 02.schema-sync) before this layer's, so
 // `published_snapshots` already exists here for either provisioning path (a committed migration inside

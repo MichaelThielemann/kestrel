@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, utimesSync, readFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { currentSessionEpoch, bumpSessionEpoch, _resetSessionEpochCache } from '../../../src/server/utils/session-epoch.js'
-import { getResolvedKestrelConfig, setResolvedKestrelConfig } from '@kestrel/core'
+import { getResolvedKestrelConfig, setResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
 
 let dir: string
 const ORIG = { ...process.env }

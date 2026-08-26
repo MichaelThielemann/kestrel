@@ -7,7 +7,7 @@ import UiSelect from './Select.vue'
 import UiTextInput from './TextInput.vue'
 import LinkInternalPicker from '../field/LinkInternalPicker.vue'
 import type { IconName } from '../../utils/icons'
-import { richtextLinkHref, parseRichtextLinkHref } from '@kestrel/core/client'
+import { richtextLinkHref, parseRichtextLinkHref } from '@michaelthielemann/kestrel-core/client'
 
 const props = defineProps<{ editor: Editor | undefined; locale?: string; disabled?: boolean }>()
 

@@ -2,7 +2,7 @@
 
 The catalog of seams a consumer or another module plugs into, and the rule that governs all of
 them: no consumer-supplied function may return an unvalidated value into content. Most rows are
-data or an adapter against an interface in `@kestrel/contracts`; a few — populators, outbox
+data or an adapter against an interface in `@michaelthielemann/kestrel-contracts`; a few — populators, outbox
 handlers, event upcasts — are a bare function with a fixed signature instead, each constrained a
 different way: a populator mutates an already-cloned bag and runs only at `depth > 0`; a handler's
 input is a decoded, upcast envelope and its failure path is the retry/dead-letter ladder; an
@@ -15,7 +15,7 @@ upcast step is a pure payload transform with no ambient state.
 | Field types (`registerFieldType`) | Data: column + validator + optional transform | Thrown error on a malformed descriptor at registration; a name collision warns |
 | Collections and blocks (`defineCollection`, SFC blocks) | Data — the def **is** the spec | Boot-time schema validation |
 | Pipelines (`definePipeline`, patches, after-steps) | A step is an Effect run against engine-resolved ports | Sealed steps; `validateOut` quarantines a bad row on the read paths |
-| Storage, media store, identity (`@kestrel/contracts` ports) | Adapter interface + per-method schema, paired at compile time | No implementation exists yet; the driver actually in use (`StorageDriver`) is a separate, unrelated interface |
+| Storage, media store, identity (`@michaelthielemann/kestrel-contracts` ports) | Adapter interface + per-method schema, paired at compile time | No implementation exists yet; the driver actually in use (`StorageDriver`) is a separate, unrelated interface |
 | Populators (`registerPopulator`, `registerFieldPopulator`) | Registered functions that mutate a cloned bag in place | Runs only at `depth > 0` |
 | Delivery (`DeliveryPort`) | Adapter that publishes an already-populated snapshot | Never reads a draft — the caller hands it the rendered snapshot |
 | Policies and workflow | Rows in a table, not a code path | Property tests of the table's invariants |
@@ -26,7 +26,7 @@ upcast step is a pure payload transform with no ambient state.
 
 Every row except Discovery is decided by [ADR-0014](./decisions.md): an extension point is either
 data a consumer supplies (a def, a descriptor, a manifest) or an adapter implementing an interface
-exported from `@kestrel/contracts` — never a bare callback with no runtime contract. A callback is
+exported from `@michaelthielemann/kestrel-contracts` — never a bare callback with no runtime contract. A callback is
 invisible to the graph and whatever it returns lands in the system unchecked; a port pairs its
 interface with a `Schema` per method in an `AdapterContract<T>` record, so adding a method without
 a matching schema entry is a compile error rather than something a reviewer has to notice by eye.
@@ -210,8 +210,8 @@ Revisions have their own separate `registerRevisionUpcast` registry (see
 
 A package that owns collections, standalone schema tables, or an [ADR-0012](./decisions.md)
 ownership manifest exports a `kestrelDiscovery: KestrelPackageDiscovery` object from its barrel.
-Unlike the other rows in the catalog, this interface lives in `@kestrel/core`
-(`packages/kestrel-core/src/server/utils/kestrel-discovery.ts`), not `@kestrel/contracts`, and it
+Unlike the other rows in the catalog, this interface lives in `@michaelthielemann/kestrel-core`
+(`packages/kestrel-core/src/server/utils/kestrel-discovery.ts`), not `@michaelthielemann/kestrel-contracts`, and it
 is marked `@alpha` rather than `@public` — explicitly not part of the supported external API
 surface, free to change shape without a major version bump, and not the seam a third-party
 consumer uses; a consumer extends Kestrel through the ordinary layer-directory scan

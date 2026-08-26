@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { getTableConfig } from 'drizzle-orm/sqlite-core'
 import built from '../../../src/server/collections/site.js'
-import { collectionEnabled } from '@kestrel/core'
+import { collectionEnabled } from '@michaelthielemann/kestrel-core'
 
 const cols = () => getTableConfig(built.table).columns
 

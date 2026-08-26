@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import Richtext from './Richtext.vue'
-import { richtextLinkHref } from '@kestrel/core/client'
-import { RICHTEXT_ALLOWLIST } from '@kestrel/core'
+import { richtextLinkHref } from '@michaelthielemann/kestrel-core/client'
+import { RICHTEXT_ALLOWLIST } from '@michaelthielemann/kestrel-core'
 
 type LiveEditor = {
   commands: { insertContent: (s: string) => boolean }

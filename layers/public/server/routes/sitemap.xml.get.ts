@@ -1,14 +1,14 @@
 import { getTableColumns } from 'drizzle-orm'
-import { localePath, useDb, primaryLocale, prefixPrimaryLocale, allCollections, isDeliveryLive } from '@kestrel/core'
-import { isPubliclyReadable, publicReadableResources } from '@kestrel/access'
-import { currentRoutes, usePublishingDb, buildSitemap, withHreflang, siteBaseUrl } from '@kestrel/publishing'
-import type { SitemapCandidate } from '@kestrel/publishing'
+import { localePath, useDb, primaryLocale, prefixPrimaryLocale, allCollections, isDeliveryLive } from '@michaelthielemann/kestrel-core'
+import { isPubliclyReadable, publicReadableResources } from '@michaelthielemann/kestrel-access'
+import { currentRoutes, usePublishingDb, buildSitemap, withHreflang, siteBaseUrl } from '@michaelthielemann/kestrel-publishing'
+import type { SitemapCandidate } from '@michaelthielemann/kestrel-publishing'
 
 // Lists every published, indexable page-like record (across all pageLike collections) as a
 // sitemap. Filters status/noindex itself, so it is safe to serve publicly and to prerender. Under
 // `delivery: 'live'`, a route must ALSO have a current, non-retracted snapshot — the row's own
 // status/noindex fields and the snapshot store are two independent "is this reachable" facts (a direct
-// snapshot retraction leaves the row untouched, see `@kestrel/publishing`'s `server/db/snapshots.ts`), and this route is what a crawler
+// snapshot retraction leaves the row untouched, see `@michaelthielemann/kestrel-publishing`'s `server/db/snapshots.ts`), and this route is what a crawler
 // actually finds, so both must agree before a route is listed.
 export default defineEventHandler((event) => {
   const db = useDb()

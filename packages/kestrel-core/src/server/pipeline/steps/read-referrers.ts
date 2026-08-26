@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { ValidationFailed } from '@kestrel/contracts'
+import { ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 import { MAX_BULK_IDS } from '../../../app/utils/list-limits.js'
 import { parseIdList } from '../../utils/http.js'
 import { findReferrers, findReferrersForMany } from '../../utils/record-ref-index.js'

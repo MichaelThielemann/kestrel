@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { clearRegistry, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@kestrel/core'
-import { patternToRegexSource, redirectsCollection as redirects } from '@kestrel/publishing'
+import { clearRegistry, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@michaelthielemann/kestrel-core'
+import { patternToRegexSource, redirectsCollection as redirects } from '@michaelthielemann/kestrel-publishing'
 
 // A server route driven by auto-imports; stub them as globals (the seam the Nitro build provides) so the
 // handler runs as a plain function.

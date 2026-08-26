@@ -1,5 +1,5 @@
 import type { ComputedRef, InjectionKey, Ref } from 'vue'
-import type { FieldDef, LayoutNode } from '@kestrel/core'
+import type { FieldDef, LayoutNode } from '@michaelthielemann/kestrel-core'
 import type { BlockErrorMap } from './edit-form'
 import type { DeadRef } from './dead-refs'
 

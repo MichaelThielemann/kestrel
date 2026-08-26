@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
-import { getCollection, useDb } from '@kestrel/core'
-import { compilePublishableRedirects, matchRedirect, REDIRECTS_COLLECTION, REDIRECTS_FIELD } from '@kestrel/publishing'
-import type { RedirectRule } from '@kestrel/publishing'
+import { getCollection, useDb } from '@michaelthielemann/kestrel-core'
+import { compilePublishableRedirects, matchRedirect, REDIRECTS_COLLECTION, REDIRECTS_FIELD } from '@michaelthielemann/kestrel-publishing'
+import type { RedirectRule } from '@michaelthielemann/kestrel-publishing'
 
 /** In-memory compiled cache — `null` means "not compiled yet / invalidated", not "zero redirects" (an
  *  empty list is `[]`, a valid cached value). `invalidateLiveRedirects` drops it back to `null`. Per

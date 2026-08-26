@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { NotFound } from '@kestrel/contracts'
+import { NotFound } from '@michaelthielemann/kestrel-contracts'
 import { buildRelationFieldPopulator, skipMissing, type ResolveRecord } from '../../../src/server/utils/populate-relations.js'
-import { buildFieldTreePopulator, defineBlock, registerBlock, clearBlocks  } from '@kestrel/fields'
-import { defineCollection, withResolveScope } from '@kestrel/core'
-import type { FieldPopulator } from '@kestrel/core'
+import { buildFieldTreePopulator, defineBlock, registerBlock, clearBlocks  } from '@michaelthielemann/kestrel-fields'
+import { defineCollection, withResolveScope } from '@michaelthielemann/kestrel-core'
+import type { FieldPopulator } from '@michaelthielemann/kestrel-core'
 
 beforeEach(() => clearBlocks())
 

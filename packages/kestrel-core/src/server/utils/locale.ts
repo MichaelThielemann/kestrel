@@ -1,5 +1,5 @@
 import { createError } from 'h3'
-import { getResolvedKestrelConfig } from '@kestrel/core'
+import { getResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
 
 // Website/content locales — the languages published *content* exists in. NOT the admin-UI language
 // (that stays single-language English for now). Read from the config the boot-time wiring plugin

@@ -2,8 +2,8 @@ import { sqliteTable, integer, text, index, uniqueIndex } from 'drizzle-orm/sqli
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import type Database from 'better-sqlite3'
 import { Schema } from 'effect'
-import { PublishedSnapshot } from '@kestrel/contracts'
-import { rawSqliteClientOf, type ModuleDbService, type ModuleDbBrand } from '@kestrel/core'
+import { PublishedSnapshot } from '@michaelthielemann/kestrel-contracts'
+import { rawSqliteClientOf, type ModuleDbService, type ModuleDbBrand } from '@michaelthielemann/kestrel-core'
 
 /**
  * The publishing module's per-route publish history: one row per published state of a route. UPDATE-proof

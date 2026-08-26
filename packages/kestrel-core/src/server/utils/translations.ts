@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { createError } from 'h3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { supportedLocales } from './locale.js'
 import { columns, table } from '../pipeline/steps/shared.js'
 

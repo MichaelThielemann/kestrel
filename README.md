@@ -135,7 +135,7 @@ Most-asked pages: [getting started](docs/guide/getting-started.md) ·
 
 ## Layout
 
-The domain/server code lives in ten `@kestrel/*` packages under `packages/` (`contracts`, `core`,
+The domain/server code lives in ten `@michaelthielemann/kestrel-*` packages under `packages/` (`contracts`, `core`,
 `fields`, `auth`, `access`, `collections`, `media`, `publishing`, `delivery-live`, `delivery-static`).
 The nine Nuxt layers under `layers/` are thin wiring shells around those packages, except where a surface
 depends on Nuxt's own component resolution and auto-imports: the `ui` and `admin` layers (design system

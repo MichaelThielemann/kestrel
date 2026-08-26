@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { publishRuns, PUBLISH_RUNS_RETENTION } from '../../database/publish-runs.js'
 import { usePublishingDb, type PublishingDb } from '../../db/publishing-db.js'
-import { OwnershipViolation, type ModuleDbBrand } from '@kestrel/core'
+import { OwnershipViolation, type ModuleDbBrand } from '@michaelthielemann/kestrel-core'
 
 /** A `publish_runs` row as the orchestrator's Promise-facing consumers see it — plain data, no Effect
  *  type. `error` is set only on a `failed` row.

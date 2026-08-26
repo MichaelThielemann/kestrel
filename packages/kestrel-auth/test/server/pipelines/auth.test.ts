@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createEvent, type H3Event } from 'h3'
-import { clearPipelines, registerPipeline } from '@kestrel/core'
-import { runPipelineForEventAsync, runPipelineForEvent } from '@kestrel/access'
+import { clearPipelines, registerPipeline } from '@michaelthielemann/kestrel-core'
+import { runPipelineForEventAsync, runPipelineForEvent } from '@michaelthielemann/kestrel-access'
 import {
   clearAllLoginFailures, loginFailIpCount, acquireHashSlot, releaseHashSlot,
   MAX_LOGIN_FAILS, MAX_INFLIGHT_HASHES,

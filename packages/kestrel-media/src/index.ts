@@ -1,17 +1,17 @@
-// Registers the built-in field types (module-load side effect in `@kestrel/fields` itself). Must run
+// Registers the built-in field types (module-load side effect in `@michaelthielemann/kestrel-fields` itself). Must run
 // before this barrel's own `buildCollection()` calls (media.js, media-settings.js) evaluate — an ESM
 // barrel is an eager, whole-module-graph load (ADR-0029), so ANY consumer importing anything at all from
 // this package — including a direct import that bypasses `kestrel-nuxt`'s own `#kestrel/collections`
-// virtual guard entirely, e.g. a plugin reaching straight into `@kestrel/media` for its own reasons — would
+// virtual guard entirely, e.g. a plugin reaching straight into `@michaelthielemann/kestrel-media` for its own reasons — would
 // otherwise reach those collection definitions before the registry has "text" et al. Placed first so file
 // order (not what the consumer actually imports) is what guarantees the ordering.
 //
-// Imported as a USED BINDING, not a bare side-effect import (`import '@kestrel/fields'`) — this package
+// Imported as a USED BINDING, not a bare side-effect import (`import '@michaelthielemann/kestrel-fields'`) — this package
 // declares `"sideEffects": false` in package.json, so a bare import is exactly what would let a compliant
-// bundler prove the registration call unneeded and tree-shake it away. Mirrors `@kestrel/publishing`'s own
+// bundler prove the registration call unneeded and tree-shake it away. Mirrors `@michaelthielemann/kestrel-publishing`'s own
 // barrel (see its TSDoc for the full reasoning) and `test/setup.ts`'s own `fieldTypes` idiom.
-import { fieldTypes } from '@kestrel/fields'
-import type { KestrelPackageDiscovery } from '@kestrel/core'
+import { fieldTypes } from '@michaelthielemann/kestrel-fields'
+import type { KestrelPackageDiscovery } from '@michaelthielemann/kestrel-core'
 import mediaCollectionDefault from './server/collections/media.js'
 import mediaSettingsCollectionDefault from './server/collections/media-settings.js'
 import { folders as foldersTable } from './server/database/folders.js'
@@ -24,7 +24,7 @@ export { mediaSettings, default as mediaSettingsCollection } from './server/coll
 export { folders } from './server/database/folders.js'
 export { mediaOwnershipManifest } from './server/db/manifest.js'
 
-/** `kestrel-nuxt`'s auto-discovery reads this — see `@kestrel/core`'s `KestrelPackageDiscovery` TSDoc.
+/** `kestrel-nuxt`'s auto-discovery reads this — see `@michaelthielemann/kestrel-core`'s `KestrelPackageDiscovery` TSDoc.
  * First-party discovery contract — consumers extend Kestrel via layer directories, see
  * `docs/guide/media.md`.
  * @alpha

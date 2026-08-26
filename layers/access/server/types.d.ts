@@ -1,4 +1,4 @@
-import type { Principal } from '@kestrel/access'
+import type { Principal } from '@michaelthielemann/kestrel-access'
 
 declare module 'h3' {
   interface H3EventContext {

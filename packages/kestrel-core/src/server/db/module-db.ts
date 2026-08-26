@@ -2,7 +2,7 @@ import { Context, Data, Layer } from 'effect'
 import type Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
-import type { OwnershipManifest } from '@kestrel/contracts'
+import type { OwnershipManifest } from '@michaelthielemann/kestrel-contracts'
 
 /**
  * Thrown in dev/test mode when a `<Module>Db` adapter issues a statement that references a table
@@ -383,7 +383,7 @@ export function makeModuleDb(
 ): { layer: Layer.Layer<ModuleDbService>; tag: Context.Tag<ModuleDbService, ModuleDbService> } {
   const owned = new Set(manifest.tables)
   const devMode = process.env.NODE_ENV !== 'production'
-  const tag = Context.GenericTag<ModuleDbService>(`@kestrel/ModuleDb/${manifest.module}`)
+  const tag = Context.GenericTag<ModuleDbService>(`@michaelthielemann/kestrel-ModuleDb/${manifest.module}`)
   const service: ModuleDbService = {
     db: buildDb(manifest, sqlite, owned, devMode),
     tables,

@@ -5,7 +5,7 @@ import FieldLayout from './Layout.vue'
 import { useRepeater } from '../../composables/useRepeater'
 import { useFieldA11y } from '../../utils/useFieldA11y'
 import type { FieldComponentProps } from '../../utils/field-component'
-import type { FieldDef, FieldOf, LayoutNode } from '@kestrel/core'
+import type { FieldDef, FieldOf, LayoutNode } from '@michaelthielemann/kestrel-core'
 const props = defineProps<FieldComponentProps>()
 const model = defineModel<Record<string, unknown>[] | null>()
 

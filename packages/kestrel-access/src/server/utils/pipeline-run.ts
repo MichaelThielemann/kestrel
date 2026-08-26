@@ -1,7 +1,7 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type { H3Event } from 'h3'
-import { createPipelineContext, resolveDefaultPipeline, runPipeline, runPipelineSync } from '@kestrel/core'
-import type { BuiltCollection, PipelineContext } from '@kestrel/core'
+import { createPipelineContext, resolveDefaultPipeline, runPipeline, runPipelineSync } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection, PipelineContext } from '@michaelthielemann/kestrel-core'
 import { pipelineRequestFor, realGateEvaluators, resolveEventPrincipal } from './pipeline-gates.js'
 
 /** What `runPipelineForEvent*` needs to run a pipeline against an incoming HTTP request.

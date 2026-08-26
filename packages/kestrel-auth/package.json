@@ -1,5 +1,5 @@
 {
-  "name": "@kestrel/auth",
+  "name": "@michaelthielemann/kestrel-auth",
   "version": "0.1.0",
   "description": "Kestrel's stateless single-admin session/auth domain: password hashing, the signed session cookie, revocation epoch, and login-throttle pipelines.",
   "license": "Apache-2.0",
@@ -37,15 +37,15 @@
     "test": "vitest run --typecheck"
   },
   "dependencies": {
-    "@kestrel/contracts": "workspace:*",
-    "@kestrel/core": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-core": "workspace:*",
     "effect": "~3.22.1"
   },
   "peerDependencies": {
     "h3": "^1.15.0 || ^2.0.0"
   },
   "devDependencies": {
-    "@kestrel/access": "workspace:*",
+    "@michaelthielemann/kestrel-access": "workspace:*",
     "@types/node": "^26.2.0",
     "h3": "^1.15.11",
     "typescript": "^6.0.3",

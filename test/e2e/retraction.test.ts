@@ -6,7 +6,7 @@ import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch } from '@nuxt/test-utils/e2e'
-import { hashPassword } from '@kestrel/auth'
+import { hashPassword } from '@michaelthielemann/kestrel-auth'
 
 /**
  * DESIGN — one running instance, `delivery: 'live'`: the runtime publisher writes static output through
@@ -115,10 +115,10 @@ describe('retraction: an unpublished record is unreachable in both adapters and 
     expect(staticSitemapAfter, 'the static sitemap file must not list it after retraction').not.toContain(`<loc>https://example.test${path}</loc>`)
 
     // The snapshot store itself: no current (non-superseded, non-retracted) row.
-    const { currentSnapshot } = await import('@kestrel/publishing')
+    const { currentSnapshot } = await import('@michaelthielemann/kestrel-publishing')
     const sqlite = rawDb()
     // `SnapshotsDb` is branded — cast at the crossing (mirrors `record-ref-index.test.ts`'s `asContentDb`).
-    const current = currentSnapshot(drizzle(sqlite) as unknown as import('@kestrel/publishing').SnapshotsDb, path)
+    const current = currentSnapshot(drizzle(sqlite) as unknown as import('@michaelthielemann/kestrel-publishing').SnapshotsDb, path)
     sqlite.close()
     expect(current, 'retraction must leave no current snapshot for the route').toBeNull()
   })
@@ -180,10 +180,10 @@ describe('retraction: an unpublished record is unreachable in both adapters and 
     const sitemapBefore = await $fetch('/sitemap.xml') as string
     expect(sitemapBefore, 'the live sitemap must list the route before its snapshot is retracted').toContain(`<loc>https://example.test${path}</loc>`)
 
-    const { retractSnapshot } = await import('@kestrel/publishing')
+    const { retractSnapshot } = await import('@michaelthielemann/kestrel-publishing')
     const sqlite = rawDb()
     const row = sqlite.prepare('SELECT status FROM pages WHERE path = ?').get(path) as { status: string }
-    retractSnapshot(drizzle(sqlite) as unknown as import('@kestrel/publishing').SnapshotsDb, path)
+    retractSnapshot(drizzle(sqlite) as unknown as import('@michaelthielemann/kestrel-publishing').SnapshotsDb, path)
     sqlite.close()
     expect(row.status, 'the row itself is untouched by a direct snapshot retraction').toBe('published')
 

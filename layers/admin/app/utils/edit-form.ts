@@ -1,4 +1,4 @@
-import type { FieldDef, SerializedField } from '@kestrel/core'
+import type { FieldDef, SerializedField } from '@michaelthielemann/kestrel-core'
 import { resolveFieldEmpty } from '../../../ui/app/utils/field-empty'
 
 export interface ServerIssue {

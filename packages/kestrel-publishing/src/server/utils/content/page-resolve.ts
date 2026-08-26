@@ -1,6 +1,6 @@
 import { and, asc, eq, getTableColumns } from 'drizzle-orm'
-import { captureRead, list, pagePathTag, translationGroupTag } from '@kestrel/core'
-import type { BuiltCollection } from '@kestrel/core'
+import { captureRead, list, pagePathTag, translationGroupTag } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 
 /** @public */

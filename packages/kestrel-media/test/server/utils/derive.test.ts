@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import sharp from 'sharp'
 import { deriveImage } from '../../../src/server/utils/derive.js'
-import { DEFAULT_IMAGE_POLICY } from '@kestrel/core'
+import { DEFAULT_IMAGE_POLICY } from '@michaelthielemann/kestrel-core'
 
 async function makePng(w: number, h: number): Promise<Buffer> {
   return sharp({ create: { width: w, height: h, channels: 4, background: { r: 10, g: 20, b: 30, alpha: 1 } } }).png().toBuffer()

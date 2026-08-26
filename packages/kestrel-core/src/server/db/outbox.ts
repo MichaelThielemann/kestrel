@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { Schema } from 'effect'
-import { EventEnvelope } from '@kestrel/contracts'
+import { EventEnvelope } from '@michaelthielemann/kestrel-contracts'
 
 /** One outbox row, `envelope` already decoded against `EventEnvelope` — a malformed stored row
  * @public

@@ -1,8 +1,8 @@
-import type { DeliveryPort, PublishedSnapshot } from '@kestrel/contracts'
-import type { StorageDriver } from '@kestrel/core'
-import { contentTypeFor, cacheControlFor } from '@kestrel/core'
-import { createLiveDeliveryPort } from '@kestrel/delivery-live'
-import { htmlKeyForRoute } from '@kestrel/publishing'
+import type { DeliveryPort, PublishedSnapshot } from '@michaelthielemann/kestrel-contracts'
+import type { StorageDriver } from '@michaelthielemann/kestrel-core'
+import { contentTypeFor, cacheControlFor } from '@michaelthielemann/kestrel-core'
+import { createLiveDeliveryPort } from '@michaelthielemann/kestrel-delivery-live'
+import { htmlKeyForRoute } from '@michaelthielemann/kestrel-publishing'
 
 /**
  * The static delivery adapter's `DeliveryPort` (ADR-0013 §3.3): writes/prunes files through a

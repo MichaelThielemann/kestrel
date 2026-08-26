@@ -1,6 +1,6 @@
 import { inArray, getTableColumns } from 'drizzle-orm'
 import type { MediaDb } from '../db/media-db.js'
-import { primaryLocale } from '@kestrel/core'
+import { primaryLocale } from '@michaelthielemann/kestrel-core'
 import { media } from '../collections/media.js'
 import type { DerivativeManifest } from './record.js'
 

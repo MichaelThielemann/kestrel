@@ -1,9 +1,9 @@
 import { getTableColumns } from 'drizzle-orm'
-import { localePath, useDb, primaryLocale, prefixPrimaryLocale, allCollections } from '@kestrel/core'
-import type { BuiltCollection } from '@kestrel/core'
-import { isPubliclyReadable, publicReadableResources } from '@kestrel/access'
-import { LLMS_FULL_HEADING_OFFSET, buildLlmsFullTxt, recordMarkdown, collectionHeading, siteBaseUrl, siteName, siteDescription, llmsFullEnabled } from '@kestrel/publishing'
-import type { LlmsFullSection, LlmsFullPage } from '@kestrel/publishing'
+import { localePath, useDb, primaryLocale, prefixPrimaryLocale, allCollections } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
+import { isPubliclyReadable, publicReadableResources } from '@michaelthielemann/kestrel-access'
+import { LLMS_FULL_HEADING_OFFSET, buildLlmsFullTxt, recordMarkdown, collectionHeading, siteBaseUrl, siteName, siteDescription, llmsFullEnabled } from '@michaelthielemann/kestrel-publishing'
+import type { LlmsFullSection, LlmsFullPage } from '@michaelthielemann/kestrel-publishing'
 // The long form of llms.txt: every published, indexable page's full Markdown body in one document, so an
 // answer engine can ground on the site without crawling it. Same registry-driven public set and the same
 // status/noindex filters as `llms.txt` and the sitemap (single source: the auth policy).

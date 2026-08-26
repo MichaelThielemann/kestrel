@@ -1,5 +1,5 @@
 {
-  "name": "@kestrel/publishing",
+  "name": "@michaelthielemann/kestrel-publishing",
   "version": "0.1.0",
   "description": "Kestrel's publishing domain: the publish_deps/publish_status/publish_runs/published_snapshots tables, the publishing <Module>Db adapter, the runtime static publisher, the publish orchestrator, and the publish/publishRuns pipelines.",
   "license": "Apache-2.0",
@@ -37,11 +37,11 @@
     "test": "vitest run --typecheck"
   },
   "dependencies": {
-    "@kestrel/access": "workspace:*",
-    "@kestrel/contracts": "workspace:*",
-    "@kestrel/core": "workspace:*",
-    "@kestrel/fields": "workspace:*",
-    "@kestrel/media": "workspace:*",
+    "@michaelthielemann/kestrel-access": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-core": "workspace:*",
+    "@michaelthielemann/kestrel-fields": "workspace:*",
+    "@michaelthielemann/kestrel-media": "workspace:*",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
     "effect": "~3.22.1"

@@ -1,5 +1,5 @@
-import type { EventEnvelope } from '@kestrel/contracts'
-import { registerOutboxHandler } from '@kestrel/core'
+import type { EventEnvelope } from '@michaelthielemann/kestrel-contracts'
+import { registerOutboxHandler } from '@michaelthielemann/kestrel-core'
 import type { DerivativeManifest } from '../utils/record.js'
 import { useStorageDriver } from '../utils/storage.js'
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createEvent, type H3Event } from 'h3'
-import { DEFAULT_IMAGE_POLICY, createPipelineContext, getResolvedKestrelConfig, setResolvedKestrelConfig } from '@kestrel/core'
-import type { PipelineDef } from '@kestrel/core'
+import { DEFAULT_IMAGE_POLICY, createPipelineContext, getResolvedKestrelConfig, setResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
+import type { PipelineDef } from '@michaelthielemann/kestrel-core'
 import { runStepAsync } from '../../../../../test/helpers/run-effect.js'
 import { buildMediaPipelines } from '../../../src/server/pipelines/index.js'
 

@@ -1,4 +1,4 @@
-import type { FieldDef, FieldOf } from '@kestrel/core'
+import type { FieldDef, FieldOf } from '@michaelthielemann/kestrel-core'
 import { numberIsInteger } from './field-constraints.js'
 
 /** Input-relevant HTML attributes derived from a `FieldDef` — what a field widget binds directly to its

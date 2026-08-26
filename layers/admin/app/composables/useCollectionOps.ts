@@ -1,6 +1,6 @@
 import { ref, toValue, type MaybeRefOrGetter } from 'vue'
 import { buildDeleteReport, type BatchAction, type BatchDeleteReport, type BatchPipelineResult, type BulkResult, type ReferrerCounts } from '../utils/collection-ops'
-import type { SerializedAction } from '@kestrel/core'
+import type { SerializedAction } from '@michaelthielemann/kestrel-core'
 
 /** Which write pipeline each batch action runs, and the body it takes. A publish/unpublish is an
  *  `updateMany` with a status patch — the same pipeline any other field-wide edit would use. */

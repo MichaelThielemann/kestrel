@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { getTableConfig } from 'drizzle-orm/sqlite-core'
-import { buildTable, defineCollection } from '@kestrel/core'
-import type { CollectionDef } from '@kestrel/core'
+import { buildTable, defineCollection } from '@michaelthielemann/kestrel-core'
+import type { CollectionDef } from '@michaelthielemann/kestrel-core'
 // `defineCollection` is auto-imported at runtime; stub it before importing the module directly, the same
 // shape a Nitro/Vue auto-import would provide.
 let galleryProofing: CollectionDef

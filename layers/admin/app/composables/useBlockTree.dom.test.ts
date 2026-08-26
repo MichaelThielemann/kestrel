@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { ref, nextTick } from 'vue'
-import type { SerializedBlock } from '@kestrel/core'
+import type { SerializedBlock } from '@michaelthielemann/kestrel-core'
 import type { BlockRow } from '../utils/block-tree'
 import { useBlockTree } from './useBlockTree'
 

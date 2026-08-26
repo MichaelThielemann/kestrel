@@ -75,11 +75,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      # The ONE gate that installs the engine + every @kestrel/* package as a real, standalone external
+      # The ONE gate that installs the engine + every @michaelthielemann/kestrel-* package as a real, standalone external
       # consumer would — `pnpm pack` each one (the same rewrite `npm publish` needs, workspace:* -> a real
       # version), scaffold a fresh site from templates/starter via create-kestrel's own CLI, `npm install`
       # (not a workspace link), build it in production, and hit it over real HTTP through a real admin
       # login. See scripts/consumer-template-ci.mjs's own header for the full rationale — this is what
-      # first proved the ten @kestrel/* packages had to stop being private:true.
+      # first proved the ten @michaelthielemann/kestrel-* packages had to stop being private:true.
       - name: Consumer template + real npm install
         run: pnpm ci:consumer-template

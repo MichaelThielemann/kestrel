@@ -1,5 +1,5 @@
 import { createError } from 'h3'
-import { collectionEnabled, getResolvedKestrelConfig } from '@kestrel/core'
+import { collectionEnabled, getResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
 import mediaCollection from '../collections/media.js'
 
 /**

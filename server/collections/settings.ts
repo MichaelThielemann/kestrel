@@ -1,4 +1,4 @@
-import { buildCollection, defineCollection  } from '@kestrel/core'
+import { buildCollection, defineCollection  } from '@michaelthielemann/kestrel-core'
 
 const built = buildCollection(defineCollection({
   name: 'settings',

@@ -1,5 +1,5 @@
 {
-  "name": "@kestrel/access",
+  "name": "@michaelthielemann/kestrel-access",
   "version": "0.1.0",
   "description": "Kestrel's authorization (authz) domain: the request principal, policy decisions, CSRF, the IP allowlist, and the pipeline access/csrf/ipAllowlist gates.",
   "license": "Apache-2.0",
@@ -37,9 +37,9 @@
     "test": "vitest run --typecheck"
   },
   "dependencies": {
-    "@kestrel/auth": "workspace:*",
-    "@kestrel/contracts": "workspace:*",
-    "@kestrel/core": "workspace:*",
+    "@michaelthielemann/kestrel-auth": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-core": "workspace:*",
     "effect": "~3.22.1"
   },
   "peerDependencies": {

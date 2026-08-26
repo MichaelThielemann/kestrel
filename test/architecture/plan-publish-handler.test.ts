@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { allCollections, clearOutboxHandlers, clearRegistry, create, createLocalDriver, ensureOutboxTable, ensureRevisionsTable, getCollection, getResolvedKestrelConfig, outboxHandlersFor, pollOnce, prefixPrimaryLocale, primaryLocale, readOutbox, registerCollection, remove, resetDbInstance, setResolvedKestrelConfig, useDb } from '@kestrel/core'
+import { allCollections, clearOutboxHandlers, clearRegistry, create, createLocalDriver, ensureOutboxTable, ensureRevisionsTable, getCollection, getResolvedKestrelConfig, outboxHandlersFor, pollOnce, prefixPrimaryLocale, primaryLocale, readOutbox, registerCollection, remove, resetDbInstance, setResolvedKestrelConfig, useDb } from '@michaelthielemann/kestrel-core'
 import {
   registerPlanPublish,
   setPublishRuntime,
@@ -15,9 +15,9 @@ import {
   type Invalidation,
   type WriteCollection,
   type PublishQueue,
-} from '@kestrel/publishing'
-import { pagesCollection } from '@kestrel/collections'
-import { mediaCollection, useMediaDbFor, deleteAffected } from '@kestrel/media'
+} from '@michaelthielemann/kestrel-publishing'
+import { pagesCollection } from '@michaelthielemann/kestrel-collections'
+import { mediaCollection, useMediaDbFor, deleteAffected } from '@michaelthielemann/kestrel-media'
 
 /**
  * Contract under test: planPublish moves from an inline, non-critical after-step (the `planPublishStep`
@@ -303,7 +303,7 @@ describe('plan-publish handler: real before/after diffing through the outbox (no
     await pollOnce(db, 'content')
     calls.length = 0
 
-    const { update } = await import('@kestrel/core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     update(db, pagesCollection, target.id as number, { status: 'draft' })
     const result = await pollOnce(db, 'content')
     expect(result.deadLettered).toBe(0)
@@ -326,7 +326,7 @@ describe('plan-publish handler: real before/after diffing through the outbox (no
     await pollOnce(db, 'content')
     calls.length = 0
 
-    const { update } = await import('@kestrel/core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     update(db, pagesCollection, target.id as number, { path: '/spk/new' })
     const result = await pollOnce(db, 'content')
     expect(result.deadLettered).toBe(0)
@@ -354,7 +354,7 @@ describe('plan-publish handler: output.publishOnSave (the pre-2.0 escape hatch)'
     await pollOnce(db, 'content')
     calls.length = 0
 
-    const { update } = await import('@kestrel/core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     const updated = update(db, pagesCollection, target.id as number, { title: 'edited' }) as Record<string, unknown>
     await pollOnce(db, 'content')
 
@@ -380,7 +380,7 @@ describe('plan-publish handler: defensive fallback for a stale (pre-shape-change
     // the fallback is that a handler with no reliable `before` must not silently miss the AVAILABILITY
     // change (hence still non-noop) — but it also must not synthesize a `prune` route it cannot actually
     // vouch for (hence `prune: []`, never a guessed route).
-    const { update } = await import('@kestrel/core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     update(db, pagesCollection, target.id as number, { status: 'draft' })
 
     const row = readOutbox(db, 'content').find((r) => r.envelope.name === 'pages.updated')!
@@ -407,7 +407,7 @@ describe('plan-publish handler: defensive fallback for a stale (pre-shape-change
     await pollOnce(db, 'content')
     calls.length = 0
 
-    const { update } = await import('@kestrel/core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     update(db, pagesCollection, target.id as number, { title: 'T2' })
 
     const row = readOutbox(db, 'content').find((r) => r.envelope.name === 'pages.updated')!
@@ -436,7 +436,7 @@ describe('plan-publish handler: defensive fallback for a stale (pre-shape-change
     await pollOnce(db, 'content')
     calls.length = 0
 
-    const { update } = await import('@kestrel/core')
+    const { update } = await import('@michaelthielemann/kestrel-core')
     update(db, pagesCollection, target.id as number, { title: 'T2' })
 
     const row = readOutbox(db, 'content').find((r) => r.envelope.name === 'pages.updated')!

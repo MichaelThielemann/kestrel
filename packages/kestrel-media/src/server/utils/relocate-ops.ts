@@ -11,8 +11,8 @@ import { relocateMedia, duplicateMedia } from './storage-relocate.js'
 import { ensureFolder } from './folders.js'
 import { collectAffected, deleteAffected, type OpItem, type AffectedSet } from './media-ops.js'
 import { useStorageDriver } from './storage.js'
-import type { StorageDriver } from '@kestrel/core'
-import { escapeLike } from '@kestrel/core'
+import type { StorageDriver } from '@michaelthielemann/kestrel-core'
+import { escapeLike } from '@michaelthielemann/kestrel-core'
 
 /** The kind of relocation a `MediaOp` performs.
  * @public

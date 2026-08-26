@@ -4,9 +4,9 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { createTestDb } from '../helpers/db'
-import { buildCollection, TraceCollector, clearPipelines, clearRegistry, defineCollection, desiredSchema, diffSchema, ensureRevisionsTable, outboxContent, registerCollection, renderSqlite, revisionsTable, runRead, runWrite, sqliteClientOf  } from '@kestrel/core'
-import type { BatchResult, ListResult } from '@kestrel/core'
-import { pagesCollection } from '@kestrel/collections'
+import { buildCollection, TraceCollector, clearPipelines, clearRegistry, defineCollection, desiredSchema, diffSchema, ensureRevisionsTable, outboxContent, registerCollection, renderSqlite, revisionsTable, runRead, runWrite, sqliteClientOf  } from '@michaelthielemann/kestrel-core'
+import type { BatchResult, ListResult } from '@michaelthielemann/kestrel-core'
+import { pagesCollection } from '@michaelthielemann/kestrel-collections'
 
 type Row = Record<string, unknown>
 

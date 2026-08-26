@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { sql } from 'drizzle-orm'
 import { createTestDb } from '../../../../../test/helpers/db.js'
-import type { ResolvedVariant } from '@kestrel/core'
+import type { ResolvedVariant } from '@michaelthielemann/kestrel-core'
 import { resolveActiveVariants, activeVariants, type StoredVariant } from '../../../src/server/utils/variants.js'
 import type { MediaDb } from '../../../src/server/db/media-db.js'
 

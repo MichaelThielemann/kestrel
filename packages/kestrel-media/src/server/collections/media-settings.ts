@@ -1,4 +1,4 @@
-import { buildCollection, defineCollection  } from '@kestrel/core'
+import { buildCollection, defineCollection  } from '@michaelthielemann/kestrel-core'
 
 // The usage-driven variant REGISTRY: a single-row store of the active image-variant set (name × size ×
 // format presets) that the upload path derives and the generate-time scan reconciles. A singleton so it

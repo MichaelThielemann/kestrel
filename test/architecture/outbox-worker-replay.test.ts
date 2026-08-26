@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
-import { allCollections, clearOutboxHandlers, clearRegistry, create, ensureRevisionsTable, pollOnce, readOutbox, registerCollection, registerOutboxHandler } from '@kestrel/core'
-import { pagesCollection } from '@kestrel/collections'
+import { allCollections, clearOutboxHandlers, clearRegistry, create, ensureRevisionsTable, pollOnce, readOutbox, registerCollection, registerOutboxHandler } from '@michaelthielemann/kestrel-core'
+import { pagesCollection } from '@michaelthielemann/kestrel-collections'
 
 // `outbox-durability.test.ts` proves the STORAGE layer survives SIGKILL, with a hand-rolled child
 // re-deriving the write shape. This proves the other half — that a row written by the REAL pipeline write

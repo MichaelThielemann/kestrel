@@ -6,7 +6,7 @@ import UiTextInput from '../ui/TextInput.vue'
 import LinkInternalPicker from './LinkInternalPicker.vue'
 import { useLinkField } from '../../composables/useLinkField'
 import type { FieldComponentProps } from '../../utils/field-component'
-import type { FieldOf, LinkType, LinkValue } from '@kestrel/core'
+import type { FieldOf, LinkType, LinkValue } from '@michaelthielemann/kestrel-core'
 
 const ALL: LinkType[] = ['external', 'email', 'tel', 'internal']
 const TYPE_KEYS: Record<LinkType, string> = {

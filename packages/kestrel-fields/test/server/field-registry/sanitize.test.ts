@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sanitizeRichtext } from '@kestrel/core'
+import { sanitizeRichtext } from '@michaelthielemann/kestrel-core'
 
 describe('sanitizeRichtext', () => {
   it('keeps allowed markup', () => {

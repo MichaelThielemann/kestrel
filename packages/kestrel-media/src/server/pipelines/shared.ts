@@ -1,4 +1,4 @@
-import type { AccessSpec } from '@kestrel/core'
+import type { AccessSpec } from '@michaelthielemann/kestrel-core'
 
 /** `resource` stays unset: it defaults to the collection name (`media`), which is what the role policy and
  *  the registered grants are keyed on. */

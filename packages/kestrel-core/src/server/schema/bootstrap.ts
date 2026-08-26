@@ -1,5 +1,5 @@
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
-import type { BuiltCollection, CollectionDef } from '@kestrel/core'
+import type { BuiltCollection, CollectionDef } from '@michaelthielemann/kestrel-core'
 import { ensureBuilt } from './buildCollection.js'
 import { recordRefs } from '../database/record-refs.js'
 import { outboxContent } from '../database/outbox-content.js'

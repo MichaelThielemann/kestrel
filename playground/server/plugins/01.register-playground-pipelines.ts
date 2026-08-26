@@ -1,4 +1,4 @@
-import { registerPipeline } from '@kestrel/core'
+import { registerPipeline } from '@michaelthielemann/kestrel-core'
 import { publicGalleryPipeline } from '../pipelines/public-gallery'
 
 // Registration only — nothing resolves a pipeline here; the registry is read on the first request. This is

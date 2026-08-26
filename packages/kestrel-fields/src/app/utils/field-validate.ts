@@ -1,4 +1,4 @@
-import type { FieldDef, FieldOf } from '@kestrel/core'
+import type { FieldDef, FieldOf } from '@michaelthielemann/kestrel-core'
 import { choiceValues, numberIsInteger } from './field-constraints.js'
 
 function isEmpty(value: unknown): boolean {

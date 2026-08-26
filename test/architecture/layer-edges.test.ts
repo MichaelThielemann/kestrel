@@ -4,8 +4,8 @@ import { resolve, join } from 'node:path'
 
 const root = process.cwd()
 
-/** Every `@kestrel/*` workspace package with a `src/` dir — computed from `packages/*` on disk, so a new
- *  extraction (or `create-kestrel`, which has neither a `src/` dir nor an `@kestrel/*` name) needs no
+/** Every `@michaelthielemann/kestrel-*` workspace package with a `src/` dir — computed from `packages/*` on disk, so a new
+ *  extraction (or `create-kestrel`, which has neither a `src/` dir nor an `@michaelthielemann/kestrel-*` name) needs no
  *  edit here. */
 function kestrelPackageDirs(): Array<{ name: string; dir: string }> {
   const base = resolve(root, 'packages')
@@ -14,7 +14,7 @@ function kestrelPackageDirs(): Array<{ name: string; dir: string }> {
     .map((e) => resolve(base, e.name))
     .filter((dir) => existsSync(join(dir, 'src')))
     .map((dir) => ({ name: JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).name as string, dir }))
-    .filter((p) => p.name.startsWith('@kestrel/'))
+    .filter((p) => p.name.startsWith('@michaelthielemann/kestrel-'))
 }
 
 interface GraphNode {
@@ -114,8 +114,8 @@ const APPROVED_DEBT_EDGES = new Set<string>()
 // would make layerOf() return undefined everywhere, silently emptying crossLayerEdges — and then "every
 // edge is in the allowlist" would pass on zero edges. These two checks fail loud on that instead.
 // Was 15 before the fields extraction: 5 `X->fields` edges (admin/collections/media/public/ui) went
-// from layer-relative imports to a package dependency (@kestrel/fields) — 10 real edges remained. The one
-// remaining `public->access` edge was retired the same way (@kestrel/access) — 9 real edges remain now.
+// from layer-relative imports to a package dependency (@michaelthielemann/kestrel-fields) — 10 real edges remained. The one
+// remaining `public->access` edge was retired the same way (@michaelthielemann/kestrel-access) — 9 real edges remain now.
 // Lowered with margin below that, not raised back to cover a count this rail is
 // never going to see again.
 const MIN_EXPECTED_CROSS_LAYER_EDGES = 8
@@ -152,10 +152,10 @@ describe.skipIf(!graphExists)('layer boundaries — graph rail', () => {
 })
 
 // Package-era boundary rules: layers may depend on a package (that's the whole point of the
-// cut — `layers/**` importing `@kestrel/core` is expected and unrestricted, not allowlisted edge-by-edge
+// cut — `layers/**` importing `@michaelthielemann/kestrel-core` is expected and unrestricted, not allowlisted edge-by-edge
 // the way risky cross-LAYER deps are), but never the reverse, and never by reaching past the package's
 // public entry into its internals. Both are plain source scans, not graph-derived: the graph resolves a
-// bare `@kestrel/core` import and a relative `packages/kestrel-core/src/...` reach-in to the SAME target
+// bare `@michaelthielemann/kestrel-core` import and a relative `packages/kestrel-core/src/...` reach-in to the SAME target
 // file, so only the import SPECIFIER'S OWN TEXT (not its resolved target) can tell them apart.
 function walkTsFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -194,18 +194,18 @@ describe('package boundaries (post-cut)', () => {
     ).toEqual([])
   })
 
-  it('no file under packages/kestrel-publishing/src/** carries a STATIC import of @kestrel/media', () => {
-    // publisher.ts's own @kestrel/media need (clearVariants/saveDiscoveredVariants) is a DYNAMIC
-    // `await import('@kestrel/media')` inside publishFull() specifically to avoid this — a static import
+  it('no file under packages/kestrel-publishing/src/** carries a STATIC import of @michaelthielemann/kestrel-media', () => {
+    // publisher.ts's own @michaelthielemann/kestrel-media need (clearVariants/saveDiscoveredVariants) is a DYNAMIC
+    // `await import('@michaelthielemann/kestrel-media')` inside publishFull() specifically to avoid this — a static import
     // anywhere in this package's module-load graph would make an early-boot loader of the package barrel
-    // (e.g. the pipeline registration plugin) eagerly load @kestrel/media before field types are
+    // (e.g. the pipeline registration plugin) eagerly load @michaelthielemann/kestrel-media before field types are
     // registered (a real e2e-only failure this rail now guards against). A dynamic `import(` call is
-    // NOT flagged — only a static `import ... from '@kestrel/media'` clause is.
-    const staticMediaImport = /(?:^|\n)\s*import\s+(?:type\s+)?(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)\s+from\s+['"]@kestrel\/media['"]/
+    // NOT flagged — only a static `import ... from '@michaelthielemann/kestrel-media'` clause is.
+    const staticMediaImport = /(?:^|\n)\s*import\s+(?:type\s+)?(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)\s+from\s+['"]@michaelthielemann\/kestrel-media['"]/
     const offenders: string[] = []
     for (const file of walkTsFiles(resolve(root, 'packages/kestrel-publishing/src'))) {
       if (staticMediaImport.test(readFileSync(file, 'utf8'))) offenders.push(file)
     }
-    expect(offenders, `static @kestrel/media import found (must be dynamic): ${offenders.join(', ')}`).toEqual([])
+    expect(offenders, `static @michaelthielemann/kestrel-media import found (must be dynamic): ${offenders.join(', ')}`).toEqual([])
   })
 })

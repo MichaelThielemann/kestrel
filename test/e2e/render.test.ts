@@ -5,7 +5,7 @@ import { rmSync, mkdtempSync } from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch } from '@nuxt/test-utils/e2e'
 import sharp from 'sharp'
-import { hashPassword } from '@kestrel/auth'
+import { hashPassword } from '@michaelthielemann/kestrel-auth'
 
 const dbPath = join(tmpdir(), `kestrel-render-e2e-${process.pid}.sqlite`)
 const uploads = mkdtempSync(join(tmpdir(), 'kestrel-render-up-'))

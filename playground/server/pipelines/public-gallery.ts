@@ -1,9 +1,9 @@
 import { and, eq, getTableColumns } from 'drizzle-orm'
 import { getQuery, createError } from 'h3'
 import { Effect } from 'effect'
-import { definePipeline, eventOf, requireRegisteredCollection, useDb } from '@kestrel/core'
-import type { StepDef } from '@kestrel/core'
-import { useStorageDriver } from '@kestrel/media'
+import { definePipeline, eventOf, requireRegisteredCollection, useDb } from '@michaelthielemann/kestrel-core'
+import type { StepDef } from '@michaelthielemann/kestrel-core'
+import { useStorageDriver } from '@michaelthielemann/kestrel-media'
 
 // Public endpoint so an anonymous customer can fetch ONE published gallery by exact slug. Scoped on purpose:
 // returns only the ZK-safe field ref (salt + sealed verify-token + the unguessable namespace id) PLUS the

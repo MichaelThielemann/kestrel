@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createEvent, type H3Event } from 'h3'
-import { createPipelineContext } from '@kestrel/core'
-import type { AccessSpec, BuiltCollection, PipelineContext } from '@kestrel/core'
-import { sessionSettings } from '@kestrel/auth'
+import { createPipelineContext } from '@michaelthielemann/kestrel-core'
+import type { AccessSpec, BuiltCollection, PipelineContext } from '@michaelthielemann/kestrel-core'
+import { sessionSettings } from '@michaelthielemann/kestrel-auth'
 import { clearAccessGrants, registerAccessGrant } from '../../../src/server/utils/grant-registry.js'
 import {
   evaluateAccessGate, evaluateCsrfGate, evaluateIpAllowlistGate, pipelineRequestFor, resolveEventPrincipal,

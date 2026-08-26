@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { localePath } from '@kestrel/core/client'
+import { localePath } from '@michaelthielemann/kestrel-core/client'
 import { PREVIEW_TOKEN_QUERY, PREVIEW_FALLBACK_PATH } from '../../../public/app/utils/preview-protocol'
 import { resolveCollectionEditor } from '../utils/editor-registry'
 import { editorFormContextKey } from '../utils/editor-form-context'

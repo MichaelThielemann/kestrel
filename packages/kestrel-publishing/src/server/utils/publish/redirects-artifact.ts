@@ -1,5 +1,5 @@
-import type { StorageDriver } from '@kestrel/core'
-import { contentTypeFor, cacheControlFor } from '@kestrel/core'
+import type { StorageDriver } from '@michaelthielemann/kestrel-core'
+import { contentTypeFor, cacheControlFor } from '@michaelthielemann/kestrel-core'
 import { compileRedirects, serializeRedirects } from './redirect-rules.js'
 
 /** The collection and the repeater field the artifact is compiled from, named once. */

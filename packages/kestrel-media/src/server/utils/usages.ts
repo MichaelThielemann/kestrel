@@ -1,7 +1,7 @@
 import { sql, getTableColumns, getTableName, type SQL } from 'drizzle-orm'
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { allCollections, fieldIs, resolveColumnName  } from '@kestrel/core'
+import { allCollections, fieldIs, resolveColumnName  } from '@michaelthielemann/kestrel-core'
 
 /** One reference to a media id: which collection/record/field holds it.
  * @public

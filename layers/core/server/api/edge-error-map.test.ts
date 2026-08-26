@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { Conflict, Forbidden, Locked, NotFound, Quarantined, Unauthorized, ValidationFailed } from '@kestrel/contracts'
+import { Conflict, Forbidden, Locked, NotFound, Quarantined, Unauthorized, ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 import { callPipelineRoute, usePipelineRouteDb } from '../../../../test/helpers/pipeline-route'
-import { buildCollection, clearPipelines, clearRegistry, defineCollection, desiredSchema, diffSchema, registerCollection, registerPipeline, renderSqlite, syncStep  } from '@kestrel/core'
+import { buildCollection, clearPipelines, clearRegistry, defineCollection, desiredSchema, diffSchema, registerCollection, registerPipeline, renderSqlite, syncStep  } from '@michaelthielemann/kestrel-core'
 const notes = buildCollection(defineCollection({
   name: 'notes', mode: 'multi', translatable: false, status: true,
   fields: { title: { type: 'text', required: true } },

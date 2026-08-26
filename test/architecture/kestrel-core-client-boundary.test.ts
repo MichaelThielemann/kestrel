@@ -11,7 +11,7 @@ const entry = resolve(srcRoot, 'client.ts')
 const RELATIVE_IMPORT_RE = /(?:^|\n)[ \t]*(?:import|export)(?:\s+type)?\s*(?:[^'"\n]*?\s+from\s+)?['"](\.[^'"\n]+)['"]/g
 const ANY_IMPORT_SPEC_RE = /(?:^|\n)[ \t]*(?:import|export)(?:\s+type)?\s*(?:[^'"\n]*?\s+from\s+)?['"]([^'"\n]+)['"]/g
 
-/** `@kestrel/core/client` is the browser-bundling boundary: a client file importing a runtime value from it
+/** `@michaelthielemann/kestrel-core/client` is the browser-bundling boundary: a client file importing a runtime value from it
  *  must never transitively pull in a Node builtin — Vite externalizes an unresolvable `node:` specifier to
  *  an empty stub, and a NAMED import against that stub throws at module link time, before any application
  *  code runs. */
@@ -40,7 +40,7 @@ function transitiveFileSet(entryFile: string): Map<string, string> {
   return files
 }
 
-describe('@kestrel/core/client — browser-safety boundary', () => {
+describe('@michaelthielemann/kestrel-core/client — browser-safety boundary', () => {
   it('client.ts and everything it transitively imports carry no `node:` specifier', () => {
     const files = transitiveFileSet(entry)
     expect(files.size, 'expected client.ts to resolve to at least one file').toBeGreaterThan(0)

@@ -4,7 +4,7 @@ Every `/api/` endpoint, including the eight CRUD operations on your own collecti
 
 ## What a pipeline is
 
-A pipeline is a named step list fronted by declarative `access`/`csrf`/`ipAllowlist` gates. Instead of forking the CRUD engine, hook your own logic in with `definePipeline` and `registerPipeline`, both exported from `@kestrel/core`. Full design: [Pipeline engine](../internals/pipeline-engine.md).
+A pipeline is a named step list fronted by declarative `access`/`csrf`/`ipAllowlist` gates. Instead of forking the CRUD engine, hook your own logic in with `definePipeline` and `registerPipeline`, both exported from `@michaelthielemann/kestrel-core`. Full design: [Pipeline engine](../internals/pipeline-engine.md).
 
 Every pipeline resolves to a URL under `/api/`: `/api/<pipeline>` for a collection-less pipeline, `/api/<collection>/<pipeline>[/<id>]` for one scoped to a collection. A path segment is read as a record id only when it is a positive integer, and only in the third position — the second segment is always the pipeline name, never an id, so `/api/pages/42` 404s rather than reading record `42`. A record read looks like `/api/pages/readOne/42`.
 
@@ -14,7 +14,7 @@ Drop a file under `server/pipelines/` — in your project, an extension, or any 
 
 ```ts
 // server/pipelines/notes.ts
-import { definePipeline, syncStep } from '@kestrel/core'
+import { definePipeline, syncStep } from '@michaelthielemann/kestrel-core'
 import { Effect } from 'effect'
 
 export function buildNotePipelines() {
@@ -36,7 +36,7 @@ export function buildNotePipelines() {
 
 ```ts
 // server/plugins/01.register-note-pipelines.ts
-import { registerPipeline } from '@kestrel/core'
+import { registerPipeline } from '@michaelthielemann/kestrel-core'
 import { buildNotePipelines } from '../pipelines/notes'
 
 export default defineNitroPlugin(() => {
@@ -50,7 +50,7 @@ export default defineNitroPlugin(() => {
 
 If you genuinely need your plugin to run *before* Kestrel's — the boot order above is otherwise fixed — register it via your own Nuxt module's `nitro:config` hook instead of a `server/plugins/` file: `nuxt.hook('nitro:config', (nitro) => { nitro.plugins ||= []; nitro.plugins.unshift(yourResolvedPluginPath) })`. That hook fires at the same phase Kestrel's own module uses, and an `unshift` lands your plugin ahead of Kestrel's block regardless of your module's position in `nuxt.config`'s `modules` array — Kestrel's own order-assertion tolerates it, since it only requires its block to stay contiguous and in order, not to start at index 0.
 
-`registerAfterStep` (below) and its `eventsOf` helper are imported from `@kestrel/core` the same way as `definePipeline` and `registerPipeline` — no separate convention to learn.
+`registerAfterStep` (below) and its `eventsOf` helper are imported from `@michaelthielemann/kestrel-core` the same way as `definePipeline` and `registerPipeline` — no separate convention to learn.
 
 ## Patching a default pipeline
 
@@ -85,7 +85,7 @@ A def whose `name` is not one of the eight standard ops, carrying a full `steps`
 A custom pipeline is a write (`POST`) unless it declares `read: true`, which routes it as `GET` instead and exempts it from the CSRF gate — the right shape for something like an export a browser can navigate to directly.
 
 ```ts
-import { definePipeline, registerPipeline, syncStep } from '@kestrel/core'
+import { definePipeline, registerPipeline, syncStep } from '@michaelthielemann/kestrel-core'
 import { Effect } from 'effect'
 
 const exportCsvPipeline = definePipeline({
@@ -109,7 +109,7 @@ Registered this way — typically from a Nitro plugin, as with `archiveNote` abo
 Run something after a write commits, without touching the main step list:
 
 ```ts
-import { registerAfterStep, asyncStep, eventsOf } from '@kestrel/core'
+import { registerAfterStep, asyncStep, eventsOf } from '@michaelthielemann/kestrel-core'
 import { Effect } from 'effect'
 
 registerAfterStep({
@@ -144,10 +144,10 @@ definePipeline({
 
 A custom write pipeline gets the `csrf` gate by default — set `csrf: false` to opt out, which is what you want for a webhook or another server calling in without a browser session, since there's no same-origin cookie to check. It also inherits the global IP allowlist unless the def sets `ipAllowlist: false` to exempt itself from it.
 
-The same rule applies to `registerAccessGrant`, imported from `@kestrel/access`, the server-plugin seam an opt-in extension uses to open a narrow hole in the default-deny guard: a read grant for any non-admin role must set `scope: 'published'` explicitly — an omitted or `'all'` scope throws at registration, since every non-admin role is read-limited to published content regardless of what the grant says.
+The same rule applies to `registerAccessGrant`, imported from `@michaelthielemann/kestrel-access`, the server-plugin seam an opt-in extension uses to open a narrow hole in the default-deny guard: a read grant for any non-admin role must set `scope: 'published'` explicitly — an omitted or `'all'` scope throws at registration, since every non-admin role is read-limited to published content regardless of what the grant says.
 
 ```ts
-import { registerAccessGrant } from '@kestrel/access'
+import { registerAccessGrant } from '@michaelthielemann/kestrel-access'
 
 registerAccessGrant('editor', { action: 'read', resource: 'announcements/audit', scope: 'published' })
 ```

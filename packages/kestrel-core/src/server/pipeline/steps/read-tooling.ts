@@ -1,7 +1,7 @@
 import { eq, getTableColumns } from 'drizzle-orm'
 import { createError } from 'h3'
 import { Effect } from 'effect'
-import { ValidationFailed } from '@kestrel/contracts'
+import { ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 import { MAX_BULK_IDS } from '../../../app/utils/list-limits.js'
 import { resolveTranslations } from '../../utils/translations.js'

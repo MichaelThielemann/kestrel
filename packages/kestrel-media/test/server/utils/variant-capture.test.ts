@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm'
 import { createTestDb } from '../../../../../test/helpers/db.js'
 import { recordVariants, collectVariants, clearVariants, saveDiscoveredVariants } from '../../../src/server/utils/variant-capture.js'
 import { activeVariants } from '../../../src/server/utils/variants.js'
-import type { ResolvedVariant } from '@kestrel/core'
+import type { ResolvedVariant } from '@michaelthielemann/kestrel-core'
 import type { MediaDb } from '../../../src/server/db/media-db.js'
 
 function asMediaDb(db: ReturnType<typeof createTestDb>): MediaDb {

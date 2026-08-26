@@ -5,7 +5,7 @@ import { rmSync } from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch, createPage, url } from '@nuxt/test-utils/e2e'
 import Database from 'better-sqlite3'
-import { hashPassword } from '@kestrel/auth'
+import { hashPassword } from '@michaelthielemann/kestrel-auth'
 import { e2eBrowserOptions } from '../helpers/e2e-browser'
 
 const dbPath = join(tmpdir(), `kestrel-admin-editor-e2e-${process.pid}.sqlite`)

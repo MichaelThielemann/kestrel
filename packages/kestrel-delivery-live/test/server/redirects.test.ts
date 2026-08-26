@@ -3,8 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const getCollection = vi.fn()
 const select = vi.fn()
 
-vi.mock('@kestrel/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@kestrel/core')>()
+vi.mock('@michaelthielemann/kestrel-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@michaelthielemann/kestrel-core')>()
   return { ...actual, getCollection: (...args: unknown[]) => getCollection(...args), useDb: () => ({ select }) }
 })
 

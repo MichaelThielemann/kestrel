@@ -8,8 +8,8 @@ import { folders } from '../database/folders.js'
 import { isUnder } from './folder-paths.js'
 import type { DerivativeManifest } from './record.js'
 import { emitMediaOutbox, emitMediaWrite, NO_PIPELINE_CTX } from './media-write.js'
-import type { StorageDriver } from '@kestrel/core'
-import { escapeLike } from '@kestrel/core'
+import type { StorageDriver } from '@michaelthielemann/kestrel-core'
+import { escapeLike } from '@michaelthielemann/kestrel-core'
 
 /** One target of a bulk media operation: a single file (by id) or a folder (by path, with its descendants).
  * @public

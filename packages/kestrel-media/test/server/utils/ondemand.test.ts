@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createTestDb } from '../../../../../test/helpers/db.js'
-import { createLocalDriver, DEFAULT_IMAGE_POLICY  } from '@kestrel/core'
+import { createLocalDriver, DEFAULT_IMAGE_POLICY  } from '@michaelthielemann/kestrel-core'
 import { parseVariantName, deriveOnDemand, variantKeyFromPath } from '../../../src/server/utils/ondemand.js'
 import type { MediaDb } from '../../../src/server/db/media-db.js'
 

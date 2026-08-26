@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { Schema } from 'effect'
-import { SanitizedRichtext } from '@kestrel/contracts'
+import { SanitizedRichtext } from '@michaelthielemann/kestrel-contracts'
 import { sanitizeRichtext } from '../../../src/server/core/sanitize.js'
 
 const isValidSanitized = Schema.is(SanitizedRichtext)

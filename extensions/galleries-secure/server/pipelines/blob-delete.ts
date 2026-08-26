@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
-import { definePipeline } from '@kestrel/core'
-import type { StepDef } from '@kestrel/core'
-import { useStorageDriver } from '@kestrel/media'
+import { definePipeline } from '@michaelthielemann/kestrel-core'
+import type { StepDef } from '@michaelthielemann/kestrel-core'
+import { useStorageDriver } from '@michaelthielemann/kestrel-media'
 import { blobName, galleryNamespace } from '../utils/namespace'
 
 // Delete one ciphertext blob from a gallery's namespace (so removing an image leaves no orphan — storage

@@ -1,4 +1,4 @@
-import type { VariantFit } from '@kestrel/core'
+import type { VariantFit } from '@michaelthielemann/kestrel-core'
 
 export interface VariantShape {
   width: number

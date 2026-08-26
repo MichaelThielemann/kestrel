@@ -1,5 +1,5 @@
-import { fieldIs, memoDuringPrerender, memoResolver } from '@kestrel/core'
-import type { FieldPopulator } from '@kestrel/core'
+import { fieldIs, memoDuringPrerender, memoResolver } from '@michaelthielemann/kestrel-core'
+import type { FieldPopulator } from '@michaelthielemann/kestrel-core'
 /** Fetches a related record FULLY populated (its own media / links / nested relations resolved), or null
  *  when the id is stale / deleted / draft. Injected so the populator stays pure + unit-testable; the plugin
  *  wires the real `getOne`. `depth` is the ALREADY-decremented depth for the related read (the cycle guard).

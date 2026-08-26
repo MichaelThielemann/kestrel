@@ -1,5 +1,5 @@
 import { eq, getTableColumns } from 'drizzle-orm'
-import { getCollection, pageRowHref, prefixPrimaryLocale, primaryLocale, useDb } from '@kestrel/core'
+import { getCollection, pageRowHref, prefixPrimaryLocale, primaryLocale, useDb } from '@michaelthielemann/kestrel-core'
 /** Whether a fetched target row may be linked from PUBLIC output: it must exist and — if its collection has a
  *  status column — be published. A draft target is NOT linkable, so its slug never leaks into published HTML
  *  (the caller maps the unresolved link to `'#'`). Pure (no DB) → unit-tested. */

@@ -1,9 +1,9 @@
 import { and, desc, eq, getTableColumns } from 'drizzle-orm'
 import { createError, getQuery } from 'h3'
 import { Effect } from 'effect'
-import { clientIp } from '@kestrel/auth'
-import { definePipeline, eventOf, requireRegisteredCollection, useDb } from '@kestrel/core'
-import type { StepDef } from '@kestrel/core'
+import { clientIp } from '@michaelthielemann/kestrel-auth'
+import { definePipeline, eventOf, requireRegisteredCollection, useDb } from '@michaelthielemann/kestrel-core'
+import type { StepDef } from '@michaelthielemann/kestrel-core'
 import { rateLimit } from '../utils/rate-limit'
 
 // Public read of ONE proofing submission, so the customer view can restore its marks after a page reload.

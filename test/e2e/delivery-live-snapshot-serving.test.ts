@@ -6,7 +6,7 @@ import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch } from '@nuxt/test-utils/e2e'
-import { hashPassword } from '@kestrel/auth'
+import { hashPassword } from '@michaelthielemann/kestrel-auth'
 
 /**
  * Delivery-live: real entrypoint. `KESTREL_DELIVERY=live` selects the live adapter. Content is
@@ -64,10 +64,10 @@ describe('delivery-live serves published snapshots at runtime, never drafts, nev
   }
 
   async function snapshotHtml(route: string): Promise<string | null> {
-    const { currentSnapshot } = await import('@kestrel/publishing')
+    const { currentSnapshot } = await import('@michaelthielemann/kestrel-publishing')
     const sqlite = rawDb()
     // `SnapshotsDb` is branded — cast at the crossing (mirrors `record-ref-index.test.ts`'s `asContentDb`).
-    const db = drizzle(sqlite) as unknown as import('@kestrel/publishing').SnapshotsDb
+    const db = drizzle(sqlite) as unknown as import('@michaelthielemann/kestrel-publishing').SnapshotsDb
     const snap = currentSnapshot(db, route)
     sqlite.close()
     return snap ? snap.html : null
@@ -239,9 +239,9 @@ describe('delivery-live serves published snapshots at runtime, never drafts, nev
     // underlying read) gates purely on the row's status, not on the snapshot store; it has no way to know
     // this route's snapshot is gone. The catch-all's own "no current snapshot" 404 is the only thing that
     // covers this case, which is the point of testing it directly.
-    const { retractSnapshot } = await import('@kestrel/publishing')
+    const { retractSnapshot } = await import('@michaelthielemann/kestrel-publishing')
     const retractSqlite = rawDb()
-    retractSnapshot(drizzle(retractSqlite) as unknown as import('@kestrel/publishing').SnapshotsDb, '/live-h')
+    retractSnapshot(drizzle(retractSqlite) as unknown as import('@michaelthielemann/kestrel-publishing').SnapshotsDb, '/live-h')
     retractSqlite.close()
 
     const sqlite = rawDb()

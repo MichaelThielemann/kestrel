@@ -1,6 +1,6 @@
-import type { SerializedBlock, SerializedField } from '@kestrel/core'
+import type { SerializedBlock, SerializedField } from '@michaelthielemann/kestrel-core'
 import type { ResolvedMedia } from '../../../media/app/composables/useMediaResolver'
-import { collectRichtextRefs, resolveRichtextLinks } from '@kestrel/core/client'
+import { collectRichtextRefs, resolveRichtextLinks } from '@michaelthielemann/kestrel-core/client'
 
 // Single source of truth for the resolved-media shape lives in the media layer (admin → media).
 export type { ResolvedMedia }

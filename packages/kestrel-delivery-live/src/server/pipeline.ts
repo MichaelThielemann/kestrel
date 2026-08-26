@@ -1,8 +1,8 @@
 import { createError } from 'h3'
 import { Effect } from 'effect'
-import { definePipeline, syncStep, isDeliveryLive } from '@kestrel/core'
-import type { PipelineDef, StepDef } from '@kestrel/core'
-import { usePublishingDb, currentSnapshot } from '@kestrel/publishing'
+import { definePipeline, syncStep, isDeliveryLive } from '@michaelthielemann/kestrel-core'
+import type { PipelineDef, StepDef } from '@michaelthielemann/kestrel-core'
+import { usePublishingDb, currentSnapshot } from '@michaelthielemann/kestrel-publishing'
 
 /** Intentionally does not set an ETag/304 response header: the snapshot's `fingerprint` travels in the
  *  JSON payload itself for this read pipeline, so callers compare it there rather than via HTTP caching. */

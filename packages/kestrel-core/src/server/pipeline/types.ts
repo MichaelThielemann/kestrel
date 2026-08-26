@@ -1,12 +1,12 @@
 import type { H3Event } from 'h3'
 import type { Effect, Schema } from 'effect'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import type { KestrelError } from '@kestrel/contracts'
-import type { BuiltCollection, Localized } from '@kestrel/core'
+import type { KestrelError } from '@michaelthielemann/kestrel-contracts'
+import type { BuiltCollection, Localized } from '@michaelthielemann/kestrel-core'
 import type { TraceCollector } from './trace.js'
 
 /** Loose on purpose: `core` documents a pipeline's wire shape for OpenAPI generation without depending on
- *  `@kestrel/contracts` or any concrete field-set type.
+ *  `@michaelthielemann/kestrel-contracts` or any concrete field-set type.
  * @public */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AnySchema = Schema.Schema<any, any, any>

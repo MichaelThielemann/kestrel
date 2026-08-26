@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { getFieldType } from '../../../src/server/field-registry/index.js'
-import type { FieldDef } from '@kestrel/core'
+import type { FieldDef } from '@michaelthielemann/kestrel-core'
 
 const slug = getFieldType('slug')
 const def = { type: 'slug', options: { from: 'title' } } as unknown as FieldDef

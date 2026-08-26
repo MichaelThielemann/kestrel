@@ -1,6 +1,6 @@
 // Wire shapes for the collection batch endpoint, shared by the ops composable and the delete dialog.
 // Mirrors media/app/utils/ops.ts: one definition, no drift between the caller and the confirm UI.
-import type { SerializedAction } from '@kestrel/core'
+import type { SerializedAction } from '@michaelthielemann/kestrel-core'
 
 /** The four batch actions the command endpoint accepts (a row action is a bulk op with one id). */
 export type BatchAction = 'delete' | 'publish' | 'unpublish' | 'duplicate'

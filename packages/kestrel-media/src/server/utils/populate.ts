@@ -1,5 +1,5 @@
-import { captureRead, fieldIs, memoDuringPrerender, memoResolver } from '@kestrel/core'
-import type { FieldPopulator } from '@kestrel/core'
+import { captureRead, fieldIs, memoDuringPrerender, memoResolver } from '@michaelthielemann/kestrel-core'
+import type { FieldPopulator } from '@michaelthielemann/kestrel-core'
 import type { ResolvedMedia } from './resolve.js'
 
 /** Resolves one media id to its `ResolvedMedia` shape, threaded into `buildMediaFieldPopulator`.

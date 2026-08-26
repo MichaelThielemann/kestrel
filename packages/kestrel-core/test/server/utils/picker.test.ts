@@ -5,7 +5,7 @@ import { createTestDb } from '../../../../../test/helpers/db.js'
 import { ensureRevisionsTable } from '../../../src/server/db/revisions.js'
 import { sqliteClientOf } from '../../../src/server/db/outbox.js'
 import posts from '../../../../../server/collections/posts.js'
-import { mediaCollection as media } from '@kestrel/media'
+import { mediaCollection as media } from '@michaelthielemann/kestrel-media'
 
 let db: ReturnType<typeof createTestDb>
 beforeEach(() => {

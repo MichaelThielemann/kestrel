@@ -1,8 +1,8 @@
 import { getRequestHeader, readBody } from 'h3'
 import { Effect } from 'effect'
-import { Unauthorized } from '@kestrel/contracts'
-import { assertBodyLimit, definePipeline, eventOf } from '@kestrel/core'
-import type { PipelineDef, StepDef } from '@kestrel/core'
+import { Unauthorized } from '@michaelthielemann/kestrel-contracts'
+import { assertBodyLimit, definePipeline, eventOf } from '@michaelthielemann/kestrel-core'
+import type { PipelineDef, StepDef } from '@michaelthielemann/kestrel-core'
 import { requireAdminHash } from '../utils/admin-credential.js'
 import { clientIp, throttleKey } from '../utils/client-ip.js'
 import {

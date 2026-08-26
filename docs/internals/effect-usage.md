@@ -43,7 +43,7 @@ Effect stops at the response boundary, not at the package boundary. A step body 
 Effect offers two supported service idioms — the `Effect.Service` sugar class and the separate tag/layer form. This codebase uses the separate form: the tag is the contract, the layer is the wiring, and neither is implied by the other. `packages/kestrel-core/src/server/db/module-db.ts` builds one per module:
 
 ```ts
-const tag = Context.GenericTag<ModuleDbService>(`@kestrel/ModuleDb/${manifest.module}`)
+const tag = Context.GenericTag<ModuleDbService>(`@michaelthielemann/kestrel-ModuleDb/${manifest.module}`)
 const service: ModuleDbService = { /* ... */ }
 return { layer: Layer.succeed(tag, service), tag }
 ```

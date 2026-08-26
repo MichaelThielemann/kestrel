@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { callPipelineRoute, usePipelineRouteDb } from '../../../../test/helpers/pipeline-route'
-import { buildCollection, clearPipelines, clearPopulator, clearRegistry, create, defineCollection, desiredSchema, diffSchema, outboxContent, putSingleton, registerCollection, registerPopulator, renderSqlite, resolveTranslations, revisionsTable  } from '@kestrel/core'
-import type { PopulateCtx } from '@kestrel/core'
+import { buildCollection, clearPipelines, clearPopulator, clearRegistry, create, defineCollection, desiredSchema, diffSchema, outboxContent, putSingleton, registerCollection, registerPopulator, renderSqlite, resolveTranslations, revisionsTable  } from '@michaelthielemann/kestrel-core'
+import type { PopulateCtx } from '@michaelthielemann/kestrel-core'
 // pageLike ⇒ its read pipelines declare public published-only access, which is what makes an anonymous
 // read of this collection reach the handler at all.
 const posts = buildCollection(defineCollection({

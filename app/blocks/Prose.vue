@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineBlock } from '@kestrel/fields/client'
+import { defineBlock } from '@michaelthielemann/kestrel-fields/client'
 
 // Schema: a single required richtext field (extracted at build). No display-only props needed.
 defineProps({

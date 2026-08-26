@@ -1,6 +1,6 @@
-import { fieldIs, resolveColumnName , sanitizeRichtext  } from '@kestrel/core'
-import type { BuiltCollection, FieldDef } from '@kestrel/core'
-import { getBlock } from '@kestrel/fields'
+import { fieldIs, resolveColumnName , sanitizeRichtext  } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection, FieldDef } from '@michaelthielemann/kestrel-core'
+import { getBlock } from '@michaelthielemann/kestrel-fields'
 
 /**
  * Sanitize every richtext leaf reachable from `scope` (top-level fields + nested repeater entries), in

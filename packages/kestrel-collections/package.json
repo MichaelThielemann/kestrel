@@ -1,5 +1,5 @@
 {
-  "name": "@kestrel/collections",
+  "name": "@michaelthielemann/kestrel-collections",
   "version": "0.1.0",
   "description": "Kestrel's built-in content collections (pages) and the relation field populator.",
   "license": "Apache-2.0",
@@ -37,12 +37,12 @@
     "test": "vitest run --typecheck"
   },
   "dependencies": {
-    "@kestrel/core": "workspace:*",
-    "@kestrel/fields": "workspace:*"
+    "@michaelthielemann/kestrel-core": "workspace:*",
+    "@michaelthielemann/kestrel-fields": "workspace:*"
   },
   "devDependencies": {
-    "@kestrel/contracts": "workspace:*",
-    "@kestrel/media": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-media": "workspace:*",
     "@types/node": "^26.2.0",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",

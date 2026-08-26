@@ -1,4 +1,4 @@
-import type { FieldTypeDescriptor } from '@kestrel/core'
+import type { FieldTypeDescriptor } from '@michaelthielemann/kestrel-core'
 import { registerFieldType } from '../field-registry/index.js'
 
 export type { FieldTypeDescriptor }

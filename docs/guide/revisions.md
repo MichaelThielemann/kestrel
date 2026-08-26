@@ -28,10 +28,10 @@ A delete appends a **tombstone** revision instead of removing anything — `snap
 
 ## Browsing history
 
-`readRevisions(db, collection, recordId)` is exported from `@kestrel/core` and returns every revision for a record, oldest first, with `snapshot` already JSON-decoded and its timestamps revived to `Date`:
+`readRevisions(db, collection, recordId)` is exported from `@michaelthielemann/kestrel-core` and returns every revision for a record, oldest first, with `snapshot` already JSON-decoded and its timestamps revived to `Date`:
 
 ```ts
-import { readRevisions, useDb } from '@kestrel/core'
+import { readRevisions, useDb } from '@michaelthielemann/kestrel-core'
 
 const history = readRevisions(useDb(), 'posts', 42)
 ```
@@ -58,7 +58,7 @@ A rollback is a new write, not a rewind — it appends a fresh revision describi
 ## Upcasting an older snapshot
 
 ```ts
-import { registerRevisionUpcast } from '@kestrel/core'
+import { registerRevisionUpcast } from '@michaelthielemann/kestrel-core'
 
 registerRevisionUpcast('posts', fromVersion, {
   toVersion,

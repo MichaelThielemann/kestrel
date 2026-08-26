@@ -5,7 +5,7 @@ import { media } from '../collections/media.js'
 import { folders as foldersTable } from '../database/folders.js'
 import { resolveMedia } from './resolve.js'
 import { childName, isImmediateChild } from './folder-paths.js'
-import { escapeLike, primaryLocale } from '@kestrel/core'
+import { escapeLike, primaryLocale } from '@michaelthielemann/kestrel-core'
 /** Query params `listLibrary` accepts: folder scope, search, type filter, pagination, and sort.
  * @public
  */

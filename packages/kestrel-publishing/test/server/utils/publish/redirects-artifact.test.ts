@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { StorageDriver } from '@kestrel/core'
+import type { StorageDriver } from '@michaelthielemann/kestrel-core'
 import { patternToRegexSource } from '../../../../src/server/utils/publish/redirect-rules.js'
 import { REDIRECTS_KEY, writeRedirectsArtifact } from '../../../../src/server/utils/publish/redirects-artifact.js'
 

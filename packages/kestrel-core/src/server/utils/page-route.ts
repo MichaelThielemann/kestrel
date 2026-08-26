@@ -1,6 +1,6 @@
 import { getTableColumns } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { localePath } from '../../app/utils/locale-path.js'
 
 /**

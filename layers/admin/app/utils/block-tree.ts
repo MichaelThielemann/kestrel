@@ -1,4 +1,4 @@
-import type { SerializedBlock } from '@kestrel/core'
+import type { SerializedBlock } from '@michaelthielemann/kestrel-core'
 import { reorder } from '../../../ui/app/utils/reorder'
 import { initialValues } from './edit-form'
 

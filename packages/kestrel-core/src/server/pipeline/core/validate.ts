@@ -1,8 +1,8 @@
 import { Effect } from 'effect'
-import { ValidationFailed } from '@kestrel/contracts'
+import { ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 import type { ZodType } from 'zod'
-import { fieldIs, resolveColumnName } from '@kestrel/core'
-import type { FieldDef } from '@kestrel/core'
+import { fieldIs, resolveColumnName } from '@michaelthielemann/kestrel-core'
+import type { FieldDef } from '@michaelthielemann/kestrel-core'
 /** @public */
 export interface Issue { path: PropertyKey[], message: string, code?: string }
 

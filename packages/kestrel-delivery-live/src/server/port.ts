@@ -1,4 +1,4 @@
-import type { DeliveryPort } from '@kestrel/contracts'
+import type { DeliveryPort } from '@michaelthielemann/kestrel-contracts'
 
 /**
  * The live delivery adapter's `DeliveryPort`: published content is served straight from

@@ -1,6 +1,6 @@
-import { getCollection, getOne, registerFieldPopulator, useDb } from '@kestrel/core'
-import { isPubliclyReadable, publicReadableResources } from '@kestrel/access'
-import { buildRelationFieldPopulator, skipMissing } from '@kestrel/collections'
+import { getCollection, getOne, registerFieldPopulator, useDb } from '@michaelthielemann/kestrel-core'
+import { isPubliclyReadable, publicReadableResources } from '@michaelthielemann/kestrel-access'
+import { buildRelationFieldPopulator, skipMissing } from '@michaelthielemann/kestrel-collections'
 // Expand relation fields to the fully-populated related record(s) under `$<name>` at read time (depth ≥ 1).
 // The related read is published-only (a draft target is skipped, never leaked to a public read), tolerates a
 // stale/deleted id (getOne 404 → null via `skipMissing`, other errors propagate — fail-loud), and runs at

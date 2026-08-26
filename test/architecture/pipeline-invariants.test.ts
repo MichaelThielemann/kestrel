@@ -3,13 +3,13 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { WRITE_OPS, allCollections, buildPipelineIndex, clearPipelines, clearRegistry, defaultCollectionOps, registerCollection } from '@kestrel/core'
-import type { PipelineDescriptor } from '@kestrel/core'
-import { pagesCollection as pages } from '@kestrel/collections'
+import { WRITE_OPS, allCollections, buildPipelineIndex, clearPipelines, clearRegistry, defaultCollectionOps, registerCollection } from '@michaelthielemann/kestrel-core'
+import type { PipelineDescriptor } from '@michaelthielemann/kestrel-core'
+import { pagesCollection as pages } from '@michaelthielemann/kestrel-collections'
 import posts from '../../server/collections/posts'
 import settings from '../../server/collections/settings'
-import { mediaCollection as media, mediaSettingsCollection as mediaSettings } from '@kestrel/media'
-import { redirectsCollection as redirects, siteCollection as site } from '@kestrel/publishing'
+import { mediaCollection as media, mediaSettingsCollection as mediaSettings } from '@michaelthielemann/kestrel-media'
+import { redirectsCollection as redirects, siteCollection as site } from '@michaelthielemann/kestrel-publishing'
 
 /**
  * Boots the real registered-after-step plugins (not a parallel description) the same way

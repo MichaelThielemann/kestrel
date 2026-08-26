@@ -1,6 +1,6 @@
 import { inArray, getTableColumns } from 'drizzle-orm'
 import type { MediaDb } from '../db/media-db.js'
-import type { ResolvedImagePolicy, VariantFit, StorageDriver  } from '@kestrel/core'
+import type { ResolvedImagePolicy, VariantFit, StorageDriver  } from '@michaelthielemann/kestrel-core'
 import { media } from '../collections/media.js'
 import { deriveImage, RASTER } from './derive.js'
 

@@ -1,5 +1,5 @@
 {
-  "name": "@kestrel/contracts",
+  "name": "@michaelthielemann/kestrel-contracts",
   "version": "0.1.0",
   "description": "Kestrel's system specification: tagged error unions, branded ids, and event payloads shared between the engine and its consumers.",
   "license": "Apache-2.0",

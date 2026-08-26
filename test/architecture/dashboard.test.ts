@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { buildIntrospectionPipelines, buildPipelineIndex, clearPipelines, clearRegistry, registerCollection, registerPipeline, renderDashboard, syncStep } from '@kestrel/core'
-import { pagesCollection as pages } from '@kestrel/collections'
+import { buildIntrospectionPipelines, buildPipelineIndex, clearPipelines, clearRegistry, registerCollection, registerPipeline, renderDashboard, syncStep } from '@michaelthielemann/kestrel-core'
+import { pagesCollection as pages } from '@michaelthielemann/kestrel-collections'
 import posts from '../../server/collections/posts'
 
 Object.assign(globalThis, {

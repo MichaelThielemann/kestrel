@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { nextTick, ref } from 'vue'
 import { useRepeater } from './useRepeater'
-import type { FieldDef } from '@kestrel/core'
+import type { FieldDef } from '@michaelthielemann/kestrel-core'
 
 const subFields: Record<string, FieldDef> = {
   label: { type: 'text' },

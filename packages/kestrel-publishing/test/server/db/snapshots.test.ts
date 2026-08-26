@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { desiredSchema, diffSchema, renderSqlite } from '@kestrel/core'
+import { desiredSchema, diffSchema, renderSqlite } from '@michaelthielemann/kestrel-core'
 import { publishedSnapshots, recordSnapshot, republishSnapshot, retractSnapshot, currentSnapshot, ensureSnapshotTriggers, type SnapshotsDb } from '../../../src/server/db/snapshots.js'
 
 /**

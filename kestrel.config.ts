@@ -1,4 +1,4 @@
-import type { KestrelConfig } from '@kestrel/core'
+import type { KestrelConfig } from '@michaelthielemann/kestrel-core'
 
 /**
  * Central Kestrel configuration (everything except auth/session, which stays env-only because secrets

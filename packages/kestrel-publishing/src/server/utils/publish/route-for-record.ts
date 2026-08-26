@@ -1,4 +1,4 @@
-import { pageRowHref } from '@kestrel/core'
+import { pageRowHref } from '@michaelthielemann/kestrel-core'
 
 /**
  * The static route a page-like record publishes to, or null when it has none — a non-pageLike collection,

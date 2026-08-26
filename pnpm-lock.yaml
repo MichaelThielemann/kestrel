@@ -17,34 +17,34 @@ importers:
       '@internationalized/date':
         specifier: ^3.12.3
         version: 3.12.3
-      '@kestrel/access':
+      '@michaelthielemann/kestrel-access':
         specifier: workspace:*
         version: link:packages/kestrel-access
-      '@kestrel/auth':
+      '@michaelthielemann/kestrel-auth':
         specifier: workspace:*
         version: link:packages/kestrel-auth
-      '@kestrel/collections':
+      '@michaelthielemann/kestrel-collections':
         specifier: workspace:*
         version: link:packages/kestrel-collections
-      '@kestrel/contracts':
+      '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:packages/kestrel-contracts
-      '@kestrel/core':
+      '@michaelthielemann/kestrel-core':
         specifier: workspace:*
         version: link:packages/kestrel-core
-      '@kestrel/delivery-live':
+      '@michaelthielemann/kestrel-delivery-live':
         specifier: workspace:*
         version: link:packages/kestrel-delivery-live
-      '@kestrel/delivery-static':
+      '@michaelthielemann/kestrel-delivery-static':
         specifier: workspace:*
         version: link:packages/kestrel-delivery-static
-      '@kestrel/fields':
+      '@michaelthielemann/kestrel-fields':
         specifier: workspace:*
         version: link:packages/kestrel-fields
-      '@kestrel/media':
+      '@michaelthielemann/kestrel-media':
         specifier: workspace:*
         version: link:packages/kestrel-media
-      '@kestrel/publishing':
+      '@michaelthielemann/kestrel-publishing':
         specifier: workspace:*
         version: link:packages/kestrel-publishing
       '@tiptap/extension-highlight':
@@ -226,18 +226,18 @@ importers:
         specifier: ^1.15.0 || ^2.0.0
         version: 1.15.11
     devDependencies:
-      '@kestrel/core':
-        specifier: workspace:*
-        version: link:../../packages/kestrel-core
-      '@kestrel/fields':
-        specifier: workspace:*
-        version: link:../../packages/kestrel-fields
-      '@kestrel/media':
-        specifier: workspace:*
-        version: link:../../packages/kestrel-media
       '@michaelthielemann/kestrel':
         specifier: workspace:*
         version: link:../..
+      '@michaelthielemann/kestrel-core':
+        specifier: workspace:*
+        version: link:../../packages/kestrel-core
+      '@michaelthielemann/kestrel-fields':
+        specifier: workspace:*
+        version: link:../../packages/kestrel-fields
+      '@michaelthielemann/kestrel-media':
+        specifier: workspace:*
+        version: link:../../packages/kestrel-media
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)
@@ -257,15 +257,15 @@ importers:
         specifier: ^1.15.0 || ^2.0.0
         version: 1.15.11
     devDependencies:
-      '@kestrel/auth':
-        specifier: workspace:*
-        version: link:../../packages/kestrel-auth
-      '@kestrel/core':
-        specifier: workspace:*
-        version: link:../../packages/kestrel-core
       '@michaelthielemann/kestrel':
         specifier: workspace:*
         version: link:../..
+      '@michaelthielemann/kestrel-auth':
+        specifier: workspace:*
+        version: link:../../packages/kestrel-auth
+      '@michaelthielemann/kestrel-core':
+        specifier: workspace:*
+        version: link:../../packages/kestrel-core
       '@michaelthielemann/kestrel-galleries-secure':
         specifier: workspace:*
         version: link:../galleries-secure
@@ -283,13 +283,13 @@ importers:
 
   packages/kestrel-access:
     dependencies:
-      '@kestrel/auth':
+      '@michaelthielemann/kestrel-auth':
         specifier: workspace:*
         version: link:../kestrel-auth
-      '@kestrel/contracts':
+      '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../kestrel-contracts
-      '@kestrel/core':
+      '@michaelthielemann/kestrel-core':
         specifier: workspace:*
         version: link:../kestrel-core
       effect:
@@ -314,17 +314,17 @@ importers:
 
   packages/kestrel-auth:
     dependencies:
-      '@kestrel/contracts':
+      '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../kestrel-contracts
-      '@kestrel/core':
+      '@michaelthielemann/kestrel-core':
         specifier: workspace:*
         version: link:../kestrel-core
       effect:
         specifier: ~3.22.1
         version: 3.22.1
     devDependencies:
-      '@kestrel/access':
+      '@michaelthielemann/kestrel-access':
         specifier: workspace:*
         version: link:../kestrel-access
       '@types/node':
@@ -342,17 +342,17 @@ importers:
 
   packages/kestrel-collections:
     dependencies:
-      '@kestrel/core':
+      '@michaelthielemann/kestrel-core':
         specifier: workspace:*
         version: link:../kestrel-core
-      '@kestrel/fields':
+      '@michaelthielemann/kestrel-fields':
         specifier: workspace:*
         version: link:../kestrel-fields
     devDependencies:
-      '@kestrel/contracts':
+      '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../kestrel-contracts
-      '@kestrel/media':
+      '@michaelthielemann/kestrel-media':
         specifier: workspace:*
         version: link:../kestrel-media
       '@types/node':
@@ -389,7 +389,7 @@ importers:
 
   packages/kestrel-core:
     dependencies:
-      '@kestrel/contracts':
+      '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../kestrel-contracts
       '@types/better-sqlite3':
@@ -423,10 +423,10 @@ importers:
       '@fast-check/vitest':
         specifier: ^0.4.1
         version: 0.4.1(vitest@4.1.10)
-      '@kestrel/access':
+      '@michaelthielemann/kestrel-access':
         specifier: workspace:*
         version: link:../kestrel-access
-      '@kestrel/media':
+      '@michaelthielemann/kestrel-media':
         specifier: workspace:*
         version: link:../kestrel-media
       '@types/node':
@@ -450,13 +450,13 @@ importers:
 
   packages/kestrel-delivery-live:
     dependencies:
-      '@kestrel/contracts':
+      '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../kestrel-contracts
-      '@kestrel/core':
+      '@michaelthielemann/kestrel-core':
         specifier: workspace:*
         version: link:../kestrel-core
-      '@kestrel/publishing':
+      '@michaelthielemann/kestrel-publishing':
         specifier: workspace:*
         version: link:../kestrel-publishing
       drizzle-orm:
@@ -487,16 +487,16 @@ importers:
 
   packages/kestrel-delivery-static:
     dependencies:
-      '@kestrel/contracts':
+      '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../kestrel-contracts
-      '@kestrel/core':
+      '@michaelthielemann/kestrel-core':
         specifier: workspace:*
         version: link:../kestrel-core
-      '@kestrel/delivery-live':
+      '@michaelthielemann/kestrel-delivery-live':
         specifier: workspace:*
         version: link:../kestrel-delivery-live
-      '@kestrel/publishing':
+      '@michaelthielemann/kestrel-publishing':
         specifier: workspace:*
         version: link:../kestrel-publishing
     devDependencies:
@@ -512,7 +512,7 @@ importers:
 
   packages/kestrel-fields:
     dependencies:
-      '@kestrel/core':
+      '@michaelthielemann/kestrel-core':
         specifier: workspace:*
         version: link:../kestrel-core
       drizzle-orm:
@@ -522,7 +522,7 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
-      '@kestrel/access':
+      '@michaelthielemann/kestrel-access':
         specifier: workspace:*
         version: link:../kestrel-access
       '@types/node':
@@ -537,16 +537,16 @@ importers:
 
   packages/kestrel-media:
     dependencies:
-      '@kestrel/access':
+      '@michaelthielemann/kestrel-access':
         specifier: workspace:*
         version: link:../kestrel-access
-      '@kestrel/contracts':
+      '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../kestrel-contracts
-      '@kestrel/core':
+      '@michaelthielemann/kestrel-core':
         specifier: workspace:*
         version: link:../kestrel-core
-      '@kestrel/fields':
+      '@michaelthielemann/kestrel-fields':
         specifier: workspace:*
         version: link:../kestrel-fields
       better-sqlite3:
@@ -595,19 +595,19 @@ importers:
 
   packages/kestrel-publishing:
     dependencies:
-      '@kestrel/access':
+      '@michaelthielemann/kestrel-access':
         specifier: workspace:*
         version: link:../kestrel-access
-      '@kestrel/contracts':
+      '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../kestrel-contracts
-      '@kestrel/core':
+      '@michaelthielemann/kestrel-core':
         specifier: workspace:*
         version: link:../kestrel-core
-      '@kestrel/fields':
+      '@michaelthielemann/kestrel-fields':
         specifier: workspace:*
         version: link:../kestrel-fields
-      '@kestrel/media':
+      '@michaelthielemann/kestrel-media':
         specifier: workspace:*
         version: link:../kestrel-media
       better-sqlite3:

@@ -1,12 +1,12 @@
-import type { PipelineDef } from '@kestrel/core'
+import type { PipelineDef } from '@michaelthielemann/kestrel-core'
 import {
   buildPublishPipelines,
   buildPublishRunsPipelines,
   buildLinkPipelines,
   buildPreviewPipelines,
   buildRoutePipelines,
-} from '@kestrel/publishing'
-import { buildDeliveryLivePipelines } from '@kestrel/delivery-live'
+} from '@michaelthielemann/kestrel-publishing'
+import { buildDeliveryLivePipelines } from '@michaelthielemann/kestrel-delivery-live'
 
 /** The public layer's own API surface: the render entry, the preview ticket pair, the publish action and
  *  its status read, the orchestrator's admin progress read, the editor's link resolver, and the

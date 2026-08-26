@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const currentSnapshot = vi.fn()
 
-vi.mock('@kestrel/publishing', () => ({
+vi.mock('@michaelthielemann/kestrel-publishing', () => ({
   usePublishingDb: () => ({ db: {} }),
   currentSnapshot: (...args: unknown[]) => currentSnapshot(...args),
 }))

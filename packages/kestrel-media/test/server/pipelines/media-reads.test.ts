@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { callPipelineRoute, usePipelineRouteDb } from '../../../../../test/helpers/pipeline-route.js'
 import { createTestDb } from '../../../../../test/helpers/db.js'
-import { DEFAULT_IMAGE_POLICY, clearPipelines, clearRegistry, create, ensureRevisionsTable, registerCollection, registerPipeline, sqliteClientOf } from '@kestrel/core'
+import { DEFAULT_IMAGE_POLICY, clearPipelines, clearRegistry, create, ensureRevisionsTable, registerCollection, registerPipeline, sqliteClientOf } from '@michaelthielemann/kestrel-core'
 import builtMedia from '../../../src/server/collections/media.js'
 import { buildMediaPipelines } from '../../../src/server/pipelines/index.js'
 let db: ReturnType<typeof createTestDb>

@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { Schema } from 'effect'
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { EventEnvelope } from '@kestrel/contracts'
+import { EventEnvelope } from '@michaelthielemann/kestrel-contracts'
 import { createTestDb } from '../helpers/db'
-import { OwnershipViolation, clearRegistry, create, ensureOutboxTable, outboxTableName, readOutbox, registerCollection, remove, update, useContentDbFor } from '@kestrel/core'
-import { pagesCollection } from '@kestrel/collections'
+import { OwnershipViolation, clearRegistry, create, ensureOutboxTable, outboxTableName, readOutbox, registerCollection, remove, update, useContentDbFor } from '@michaelthielemann/kestrel-core'
+import { pagesCollection } from '@michaelthielemann/kestrel-collections'
 import postsCollection from '../../server/collections/posts'
 
 /**

@@ -2,21 +2,21 @@ import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest'
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { createError } from 'h3'
-import { buildCollection } from '@kestrel/core'
-import { clearRegistry, defineCollection, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@kestrel/core'
-import { registerBlock, clearBlocks } from '@kestrel/fields'
+import { buildCollection } from '@michaelthielemann/kestrel-core'
+import { clearRegistry, defineCollection, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@michaelthielemann/kestrel-core'
+import { registerBlock, clearBlocks } from '@michaelthielemann/kestrel-fields'
 // The route is a server route driven by auto-imports (Nitro's `server/utils` convention); stub those as
 // globals so the handler can be exercised as a plain function. `siteBaseUrl`/`siteName`/`siteDescription`/
-// `llmsFullEnabled` are explicit `@kestrel/publishing` imports, mocked as `vi.fn()`s so individual tests
+// `llmsFullEnabled` are explicit `@michaelthielemann/kestrel-publishing` imports, mocked as `vi.fn()`s so individual tests
 // can override their return value.
-vi.mock('@kestrel/publishing', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@kestrel/publishing')>()),
+vi.mock('@michaelthielemann/kestrel-publishing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@michaelthielemann/kestrel-publishing')>()),
   llmsFullEnabled: vi.fn(() => true),
   siteBaseUrl: vi.fn(() => 'https://example.test'),
   siteName: vi.fn(() => 'Example'),
   siteDescription: vi.fn(() => ''),
 }))
-const publishing = await import('@kestrel/publishing')
+const publishing = await import('@michaelthielemann/kestrel-publishing')
 const pages = buildCollection(defineCollection({
   name: 'pages', mode: 'multi', translatable: true, pageLike: true, status: true, seo: true,
   blocks: { enabled: true }, fields: { title: { type: 'text' }, lead: { type: 'text' }, hero: { type: 'media' } },

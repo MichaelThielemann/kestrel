@@ -1,8 +1,8 @@
 import { eq, getTableColumns } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type { MediaDb } from '../db/media-db.js'
-import { OwnershipViolation } from '@kestrel/core'
-import type { ResolvedVariant } from '@kestrel/core'
+import { OwnershipViolation } from '@michaelthielemann/kestrel-core'
+import type { ResolvedVariant } from '@michaelthielemann/kestrel-core'
 import { mediaSettings } from '../collections/media-settings.js'
 import { reconcileVariants, type StoredVariant } from './variants.js'
 

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import { parse } from '@babel/parser'
-import type { FieldDef } from '@kestrel/core'
+import type { FieldDef } from '@michaelthielemann/kestrel-core'
 import * as factoryModule from '../../app/utils/field-factories'
 import { KESTREL_FIELD } from '../../app/utils/field-factories'
 

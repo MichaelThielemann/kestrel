@@ -1,9 +1,9 @@
-import { pageRowHref, translationGroupTag, pagePathTag } from '@kestrel/core'
+import { pageRowHref, translationGroupTag, pagePathTag } from '@michaelthielemann/kestrel-core'
 
-// Re-exported unchanged: `translationGroupTag`/`pagePathTag` live in @kestrel/core so
+// Re-exported unchanged: `translationGroupTag`/`pagePathTag` live in @michaelthielemann/kestrel-core so
 // page-resolve.ts (a layer file used on EVERY page request) can reach them without also pulling in this
-// package's own barrel — which eagerly loads publisher.ts's @kestrel/media dependency, a cost a plain tag
-// builder must never carry. Every existing `@kestrel/publishing` consumer of these two keeps working
+// package's own barrel — which eagerly loads publisher.ts's @michaelthielemann/kestrel-media dependency, a cost a plain tag
+// builder must never carry. Every existing `@michaelthielemann/kestrel-publishing` consumer of these two keeps working
 // unchanged via this re-export.
 export { translationGroupTag, pagePathTag }
 

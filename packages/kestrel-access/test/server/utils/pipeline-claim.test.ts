@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Effect } from 'effect'
-import { buildCollection, clearPipelines, clearRegistry, defineCollection, definePipeline, registerCollection, registerPipeline  } from '@kestrel/core'
+import { buildCollection, clearPipelines, clearRegistry, defineCollection, definePipeline, registerCollection, registerPipeline  } from '@michaelthielemann/kestrel-core'
 import { claimedByPipelineRoute } from '../../../src/server/utils/pipeline-claim.js'
 
 const pages = buildCollection(defineCollection({

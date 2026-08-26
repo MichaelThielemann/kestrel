@@ -1,6 +1,6 @@
 import sharp from 'sharp'
 import { rgbaToThumbHash } from 'thumbhash'
-import type { ResolvedImagePolicy } from '@kestrel/core'
+import type { ResolvedImagePolicy } from '@michaelthielemann/kestrel-core'
 
 // The derivation policy is resolved once from kestrel config (KESTREL_MEDIA_IMAGE_* env → config → default)
 // and threaded in by the upload handler. `DEFAULT_IMAGE_POLICY` is auto-imported from kestrel-config

@@ -1,9 +1,9 @@
 import { and, eq, ne } from 'drizzle-orm'
 import { Effect } from 'effect'
-import { ValidationFailed } from '@kestrel/contracts'
+import { ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
-import { resolveColumnName } from '@kestrel/core'
-import type { BuiltCollection } from '@kestrel/core'
+import { resolveColumnName } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { collectionOf, columns, dbOf, table, unitsOf, type DB, type Row } from './shared.js'
 import { syncStep, type StepDef } from '../types.js'
 

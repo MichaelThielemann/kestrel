@@ -1,4 +1,4 @@
-import type { OwnershipManifest } from '@kestrel/contracts'
+import type { OwnershipManifest } from '@michaelthielemann/kestrel-contracts'
 
 /**
  * Canonical per-module migration order (ADR-0012 domains). `content` is the collection/base schema

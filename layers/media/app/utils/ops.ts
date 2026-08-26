@@ -1,5 +1,5 @@
 import type { LibraryItem } from './library'
-import type { OpItem, DeleteReport, Conflict, RelocationReport, MediaUsage } from '@kestrel/media'
+import type { OpItem, DeleteReport, Conflict, RelocationReport, MediaUsage } from '@michaelthielemann/kestrel-media'
 
 // Single-source the HTTP wire shapes from the server utils that own them — one definition, no drift.
 export type { OpItem, DeleteReport, Conflict, RelocationReport, MediaUsage }

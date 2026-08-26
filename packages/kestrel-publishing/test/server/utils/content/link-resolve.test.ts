@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { buildCollection, clearRegistry, defineCollection, registerCollection  } from '@kestrel/core'
+import { buildCollection, clearRegistry, defineCollection, registerCollection  } from '@michaelthielemann/kestrel-core'
 import { isPubliclyLinkable, resolveInternalHref } from '../../../../src/server/utils/content/link-resolve.js'
 
 describe('isPubliclyLinkable — status-gate internal link targets (no draft slug leak)', () => {

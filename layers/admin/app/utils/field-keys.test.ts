@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { jsKey } from './field-keys'
-import type { SerializedField } from '@kestrel/core'
+import type { SerializedField } from '@michaelthielemann/kestrel-core'
 
 function f(partial: Partial<SerializedField> & Pick<SerializedField, 'type'>): SerializedField {
   return { required: false, unique: false, ...partial }

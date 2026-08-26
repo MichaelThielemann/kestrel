@@ -1,5 +1,5 @@
-import { FILTER_RE, clampPerPage, isFilterOp, opAllowed } from '@kestrel/core/client'
-import type { FilterOp } from '@kestrel/core/client'
+import { FILTER_RE, clampPerPage, isFilterOp, opAllowed } from '@michaelthielemann/kestrel-core/client'
+import type { FilterOp } from '@michaelthielemann/kestrel-core/client'
 import type { ListColumn } from './list-columns'
 
 // The page-size bounds live in ONE shared module (core/app/utils/list-limits) so the client list, the

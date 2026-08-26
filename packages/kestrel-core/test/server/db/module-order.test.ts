@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { OwnershipManifest } from '@kestrel/contracts'
+import type { OwnershipManifest } from '@michaelthielemann/kestrel-contracts'
 import { orderManifests, MODULE_MIGRATION_ORDER } from '../../../src/server/db/module-order.js'
 
 const m = (module: string): OwnershipManifest => ({ module, tables: [] })

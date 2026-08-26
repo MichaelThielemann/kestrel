@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { Effect } from 'effect'
-import { makeModuleDb, useDb, type ModuleDbService } from '@kestrel/core'
+import { makeModuleDb, useDb, type ModuleDbService } from '@michaelthielemann/kestrel-core'
 import { publishingOwnershipManifest } from './manifest.js'
 import { publishDeps } from '../database/publish-deps.js'
 import { publishStatus } from '../database/publish-status.js'

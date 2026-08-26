@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { getResolvedKestrelConfig } from '@kestrel/core'
+import { getResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
 
 // The session REVOCATION epoch: a monotonic counter folded into the signing key (see deriveSigningKey), so
 // bumping it invalidates every outstanding token at once — the stateless model's server-side "hard logout".

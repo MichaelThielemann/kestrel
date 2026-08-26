@@ -1,4 +1,4 @@
-import type { FieldDef } from '@kestrel/core'
+import type { FieldDef } from '@michaelthielemann/kestrel-core'
 
 /** A record reference: its id plus a human label. Shared by UiCombobox and FieldRelation. */
 export interface FieldOption { value: number; label: string }

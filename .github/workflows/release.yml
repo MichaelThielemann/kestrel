@@ -1,9 +1,9 @@
 name: Release
 
-# Publishes the engine, both extensions, the scaffolder, and all ten @kestrel/* packages to npm when a v*
-# tag is pushed — 14 packages in total. The @kestrel/* packages have to be real, independently published
+# Publishes the engine, both extensions, the scaffolder, and all ten @michaelthielemann/kestrel-* packages to npm when a v*
+# tag is pushed — 14 packages in total. The @michaelthielemann/kestrel-* packages have to be real, independently published
 # packages: the engine's own `dependencies` reference them by real semver, not a bundled copy — `pnpm pack`
-# on the root rewrites `"@kestrel/core": "workspace:*"` to `"@kestrel/core": "0.1.0"`, which 404s on
+# on the root rewrites `"@michaelthielemann/kestrel-core": "workspace:*"` to `"@michaelthielemann/kestrel-core": "0.1.0"`, which 404s on
 # install unless that version is actually on the registry.
 #
 # Authentication is npm **trusted publishing** (OIDC): npm verifies this workflow's identity against the
@@ -15,7 +15,7 @@ name: Release
 # so each one needs a manual `pnpm publish --access public --no-provenance --no-git-checks` first (from
 # the package's own directory) — `--no-provenance` because every manifest here sets
 # `publishConfig.provenance`, which only works inside CI; `pnpm publish`, not `npm publish`, because a
-# package with a real `workspace:*` dependency (the engine root, and every @kestrel/* package depending on
+# package with a real `workspace:*` dependency (the engine root, and every @michaelthielemann/kestrel-* package depending on
 # another one) needs pnpm's own rewrite to a real version — see `.github/publish-if-new.sh`. Then, from npm 11.15:
 #   npm trust github <package> --file release.yml --repo MichaelThielemann/kestrel --allow-publish
 # `--file` is the workflow FILENAME of THIS repo — not a path, and not the `publish.yml` from npm's own
@@ -68,40 +68,40 @@ jobs:
       # lets a package that had to be published by hand (the one-time trusted-publisher bootstrap) pass
       # through a tag run cleanly.
       #
-      # The ten @kestrel/* packages go out BEFORE the engine, in topological order of their own
-      # @kestrel/* dependency lists (each package only after everything it depends on), so no consumer's `pnpm add
+      # The ten @michaelthielemann/kestrel-* packages go out BEFORE the engine, in topological order of their own
+      # @michaelthielemann/kestrel-* dependency lists (each package only after everything it depends on), so no consumer's `pnpm add
       # @michaelthielemann/kestrel` can land between the engine appearing on the registry and one of its
       # own real dependencies existing there. Publish order does not affect `npm publish` itself (each
       # package's manifest is self-contained; nothing here resolves another package's presence to
       # succeed) — this is a safety margin for installers racing the tag, not a hard requirement.
-      - name: Publish @kestrel/contracts
+      - name: Publish @michaelthielemann/kestrel-contracts
         run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
         working-directory: packages/kestrel-contracts
-      - name: Publish @kestrel/core
+      - name: Publish @michaelthielemann/kestrel-core
         run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
         working-directory: packages/kestrel-core
-      - name: Publish @kestrel/auth
+      - name: Publish @michaelthielemann/kestrel-auth
         run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
         working-directory: packages/kestrel-auth
-      - name: Publish @kestrel/access
+      - name: Publish @michaelthielemann/kestrel-access
         run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
         working-directory: packages/kestrel-access
-      - name: Publish @kestrel/fields
+      - name: Publish @michaelthielemann/kestrel-fields
         run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
         working-directory: packages/kestrel-fields
-      - name: Publish @kestrel/collections
+      - name: Publish @michaelthielemann/kestrel-collections
         run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
         working-directory: packages/kestrel-collections
-      - name: Publish @kestrel/media
+      - name: Publish @michaelthielemann/kestrel-media
         run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
         working-directory: packages/kestrel-media
-      - name: Publish @kestrel/publishing
+      - name: Publish @michaelthielemann/kestrel-publishing
         run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
         working-directory: packages/kestrel-publishing
-      - name: Publish @kestrel/delivery-live
+      - name: Publish @michaelthielemann/kestrel-delivery-live
         run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
         working-directory: packages/kestrel-delivery-live
-      - name: Publish @kestrel/delivery-static
+      - name: Publish @michaelthielemann/kestrel-delivery-static
         run: "$GITHUB_WORKSPACE/.github/publish-if-new.sh"
         working-directory: packages/kestrel-delivery-static
       - name: Publish engine

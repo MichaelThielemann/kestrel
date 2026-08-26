@@ -15,8 +15,8 @@
     "!**/*.nuxt.test.ts"
   ],
   "peerDependencies": {
-    "@kestrel/auth": "*",
-    "@kestrel/core": "*",
+    "@michaelthielemann/kestrel-auth": "*",
+    "@michaelthielemann/kestrel-core": "*",
     "@michaelthielemann/kestrel": "*",
     "@michaelthielemann/kestrel-galleries-secure": "*",
     "drizzle-orm": "^0.45.0",
@@ -25,8 +25,8 @@
     "vue": "^3.5.0"
   },
   "devDependencies": {
-    "@kestrel/auth": "workspace:*",
-    "@kestrel/core": "workspace:*",
+    "@michaelthielemann/kestrel-auth": "workspace:*",
+    "@michaelthielemann/kestrel-core": "workspace:*",
     "@michaelthielemann/kestrel": "workspace:*",
     "@michaelthielemann/kestrel-galleries-secure": "workspace:*",
     "drizzle-orm": "^0.45.2",

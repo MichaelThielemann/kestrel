@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { callPipelineRoute, usePipelineRouteDb } from '../../../../test/helpers/pipeline-route'
-import { buildCollection, buildIntrospectionPipelines, clearPipelines, clearRegistry, create, defaultCollectionOps, defineCollection, desiredSchema, diffSchema, outboxContent, registerCollection, registerPipeline, renderSqlite, revisionsTable, syncStep  } from '@kestrel/core'
-import type { PipelineDescriptor } from '@kestrel/core'
+import { buildCollection, buildIntrospectionPipelines, clearPipelines, clearRegistry, create, defaultCollectionOps, defineCollection, desiredSchema, diffSchema, outboxContent, registerCollection, registerPipeline, renderSqlite, revisionsTable, syncStep  } from '@michaelthielemann/kestrel-core'
+import type { PipelineDescriptor } from '@michaelthielemann/kestrel-core'
 const notes = buildCollection(defineCollection({
   name: 'notes', mode: 'multi', translatable: false, status: true,
   fields: { title: { type: 'text', required: true } },

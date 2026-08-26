@@ -1,7 +1,7 @@
 import { eq, getTableColumns } from 'drizzle-orm'
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
-import type { EventEnvelope } from '@kestrel/contracts'
-import { getCollection, getResolvedKestrelConfig, prefixPrimaryLocale, primaryLocale, registerOutboxHandler, useContentDb } from '@kestrel/core'
+import type { EventEnvelope } from '@michaelthielemann/kestrel-contracts'
+import { getCollection, getResolvedKestrelConfig, prefixPrimaryLocale, primaryLocale, registerOutboxHandler, useContentDb } from '@michaelthielemann/kestrel-core'
 import { usePublishRuntime } from '../utils/publish/publish-runtime.js'
 import { classifyWrite, planWrite, type WriteClassification, type WriteCollection } from '../utils/publish/invalidation.js'
 

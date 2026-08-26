@@ -1,5 +1,5 @@
 {
-  "name": "@kestrel/media",
+  "name": "@michaelthielemann/kestrel-media",
   "version": "0.1.0",
   "description": "Kestrel's media domain: uploads, storage drivers, derived variants, folders, and the media/media-settings collections.",
   "license": "Apache-2.0",
@@ -37,10 +37,10 @@
     "test": "vitest run --typecheck"
   },
   "dependencies": {
-    "@kestrel/access": "workspace:*",
-    "@kestrel/contracts": "workspace:*",
-    "@kestrel/core": "workspace:*",
-    "@kestrel/fields": "workspace:*",
+    "@michaelthielemann/kestrel-access": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-core": "workspace:*",
+    "@michaelthielemann/kestrel-fields": "workspace:*",
     "better-sqlite3": "^12.11.1",
     "dompurify": "^3.4.13",
     "drizzle-orm": "^0.45.2",

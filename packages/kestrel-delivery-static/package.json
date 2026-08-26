@@ -1,5 +1,5 @@
 {
-  "name": "@kestrel/delivery-static",
+  "name": "@michaelthielemann/kestrel-delivery-static",
   "version": "0.1.0",
   "description": "The static delivery adapter: writes/prunes published snapshots through a StorageDriver (the build-time deploy target), plus the S3 static-output shipper.",
   "license": "Apache-2.0",
@@ -37,10 +37,10 @@
     "test": "vitest run --typecheck"
   },
   "dependencies": {
-    "@kestrel/contracts": "workspace:*",
-    "@kestrel/core": "workspace:*",
-    "@kestrel/delivery-live": "workspace:*",
-    "@kestrel/publishing": "workspace:*"
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-core": "workspace:*",
+    "@michaelthielemann/kestrel-delivery-live": "workspace:*",
+    "@michaelthielemann/kestrel-publishing": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

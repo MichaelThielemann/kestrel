@@ -5,8 +5,8 @@
 // when `media.driver: 'local'`) — the `00.` prefix only orders files within this layer, while Nitro's own
 // static handler is unconditionally unshifted to the front of the whole handler list. `off` when no list
 // is set → zero cost on PROD/local.
-import { clientIp } from '@kestrel/auth'
-import { allowlistConfig, ipAllowed, ipv4ToInt, isRendererContext, isStageGatePassedContext, markStageGatePassed } from '@kestrel/access'
+import { clientIp } from '@michaelthielemann/kestrel-auth'
+import { allowlistConfig, ipAllowed, ipv4ToInt, isRendererContext, isStageGatePassedContext, markStageGatePassed } from '@michaelthielemann/kestrel-access'
 
 // A listener that never shows the gate a usable client address blocks everything, which looks like an
 // outage rather than a misconfiguration unless we say once what to set.

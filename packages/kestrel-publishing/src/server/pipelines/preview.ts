@@ -1,8 +1,8 @@
 import { createError } from 'h3'
 import { Effect } from 'effect'
-import { ValidationFailed } from '@kestrel/contracts'
-import { definePipeline, eventOf, getCollection, populateRow, primaryLocale, resolveBudgetFor, syncStep, withResolveScope } from '@kestrel/core'
-import type { BuiltCollection, PipelineDef, StepDef } from '@kestrel/core'
+import { ValidationFailed } from '@michaelthielemann/kestrel-contracts'
+import { definePipeline, eventOf, getCollection, populateRow, primaryLocale, resolveBudgetFor, syncStep, withResolveScope } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection, PipelineDef, StepDef } from '@michaelthielemann/kestrel-core'
 import { sanitizePreviewValues } from '../utils/content/preview-sanitize.js'
 import { previewOwner, usePreviewStore, type PreviewPayload } from '../utils/content/preview-token.js'
 

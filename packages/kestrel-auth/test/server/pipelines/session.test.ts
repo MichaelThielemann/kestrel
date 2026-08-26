@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createEvent, type H3Event } from 'h3'
-import { clearPipelines, registerPipeline } from '@kestrel/core'
-import { runPipelineForEvent } from '@kestrel/access'
+import { clearPipelines, registerPipeline } from '@michaelthielemann/kestrel-core'
+import { runPipelineForEvent } from '@michaelthielemann/kestrel-access'
 import { buildSessionPipelines } from '../../../src/server/pipelines/session.js'
 
 let sessionResult: { authenticated: boolean, exp?: number }

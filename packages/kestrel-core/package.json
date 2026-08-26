@@ -1,5 +1,5 @@
 {
-  "name": "@kestrel/core",
+  "name": "@michaelthielemann/kestrel-core",
   "version": "0.1.0",
   "description": "Kestrel's server domain code: content model types, field-type/block registries, schema-building pure functions, and request-scoped read primitives.",
   "license": "Apache-2.0",
@@ -44,7 +44,7 @@
     "test": "vitest run --typecheck"
   },
   "dependencies": {
-    "@kestrel/contracts": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "aws4fetch": "^1.0.20",
     "better-sqlite3": "^12.11.1",
@@ -65,8 +65,8 @@
   },
   "devDependencies": {
     "@fast-check/vitest": "^0.4.1",
-    "@kestrel/access": "workspace:*",
-    "@kestrel/media": "workspace:*",
+    "@michaelthielemann/kestrel-access": "workspace:*",
+    "@michaelthielemann/kestrel-media": "workspace:*",
     "@types/node": "^26.2.0",
     "@types/sanitize-html": "^2.16.1",
     "fast-check": "^4.9.0",

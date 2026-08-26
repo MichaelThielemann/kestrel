@@ -2,16 +2,16 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Effect, TestClock, TestContext } from 'effect'
 import Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { registerUpcast, clearUpcasts } from '@kestrel/contracts'
+import { registerUpcast, clearUpcasts } from '@michaelthielemann/kestrel-contracts'
 import {
   buildEnvelope, clearPruneCursors, clearRegistry, create, ensureOutboxTable, ensureRevisionsTable,
   insertOutboxRow, readOutbox, readPendingOutbox, readRevisions, registerCollection,
   setResolvedKestrelConfig, sqliteClientOf, update,
   clearOutboxHandlers, makeTicker, outboxHandlersFor, pollOnceEffect, pollOnce, registerOutboxHandler,
-} from '@kestrel/core'
+} from '@michaelthielemann/kestrel-core'
 import { resolveServerKestrelConfig } from '../../layers/core/server/utils/server-config'
 import { createTestDb } from '../helpers/db'
-import { pagesCollection } from '@kestrel/collections'
+import { pagesCollection } from '@michaelthielemann/kestrel-collections'
 
 function seed(): BetterSQLite3Database {
   const sqlite = new Database(':memory:')

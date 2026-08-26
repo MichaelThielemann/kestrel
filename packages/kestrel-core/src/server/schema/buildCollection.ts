@@ -1,8 +1,8 @@
 import { createInsertSchema, createUpdateSchema, createSelectSchema } from 'drizzle-zod'
 import { z } from 'zod'
 import type { ZodType } from 'zod'
-import { allBlocks, buildBlocksSchema, buildFieldSchema, buildTable, evaluateCondition, isEmptyValue, resolveColumnName, seoSchema } from '@kestrel/core'
-import type { BuiltCollection, CollectionDef, CollectionSchema } from '@kestrel/core'
+import { allBlocks, buildBlocksSchema, buildFieldSchema, buildTable, evaluateCondition, isEmptyValue, resolveColumnName, seoSchema } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection, CollectionDef, CollectionSchema } from '@michaelthielemann/kestrel-core'
 /** A page path is consumed verbatim at build time to derive prerender routes / output file paths,
  * @public
  *  so it must be incapable of traversal: url-path-safe charset only, no `.`/`..` segments. */

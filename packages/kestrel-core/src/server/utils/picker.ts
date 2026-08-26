@@ -2,8 +2,8 @@ import { and, count, eq, getTableColumns, inArray, sql } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
 import { MAX_BULK_IDS } from '../../app/utils/list-limits.js'
-import { escapeLike } from '@kestrel/core'
-import type { BuiltCollection } from '@kestrel/core'
+import { escapeLike } from '@michaelthielemann/kestrel-core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { resolveLocale } from './locale.js'
 type DB = BetterSQLite3Database
 

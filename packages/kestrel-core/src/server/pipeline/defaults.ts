@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
-import { ValidationFailed } from '@kestrel/contracts'
-import type { KestrelError } from '@kestrel/contracts'
+import { ValidationFailed } from '@michaelthielemann/kestrel-contracts'
+import type { KestrelError } from '@michaelthielemann/kestrel-contracts'
 import { MAX_BULK_IDS } from '../../app/utils/list-limits.js'
 import { buildDuplicateBody } from '../utils/duplicate.js'
 import { parseIdList } from '../utils/http.js'
@@ -28,7 +28,7 @@ import { assertNotSingleton, collectionOf, dbOf, fromThrowing, type Row, type Wr
 import { transformStep } from './steps/transform.js'
 import { patchOf, validateCreateStep, validatePatchStep, validateUpdateStep } from './steps/validate.js'
 import { validateOutManyStep, validateOutOneStep } from './steps/validate-out.js'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { syncStep, type AccessSpec, type PipelineContext, type PipelineDef, type ResolvedPipeline, type StepDef } from './types.js'
 
 /** Every write is admin-only. The evaluators that turn a declaration into an answer are injected: an

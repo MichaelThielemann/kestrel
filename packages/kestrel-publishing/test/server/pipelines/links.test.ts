@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import type Database from 'better-sqlite3'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { clearPipelines, clearRegistry, defineCollection, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, registerPipeline, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb, buildCollection  } from '@kestrel/core'
+import { clearPipelines, clearRegistry, defineCollection, desiredSchema, diffSchema, getResolvedKestrelConfig, registerCollection, registerPipeline, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb, buildCollection  } from '@michaelthielemann/kestrel-core'
 import { callPipelineRoute, usePipelineRouteDb } from '../../../../../test/helpers/pipeline-route.js'
 import { buildLinkPipelines } from '../../../src/server/pipelines/links.js'
 

@@ -220,7 +220,7 @@ export interface ResolvedKestrel {
     // sets them — they are env-only and NUXT_-override-aware, so only the runtimeConfig-merging seed
     // (`resolveServerKestrelConfig`) ever populates them. A package reading this seam falls back to a raw
     // `process.env.KESTREL_S3_*` read for the non-Nitro case (scripts, package tests) where that merge
-    // never ran — see @kestrel/media's `useStorageDriver`.
+    // never ran — see @michaelthielemann/kestrel-media's `useStorageDriver`.
     s3: { bucket: string; region: string; endpoint: string; prefix: string; publicBaseUrl: string; accessKeyId?: string; secretAccessKey?: string; sessionToken?: string }
     imagePolicy: ResolvedImagePolicy
   }

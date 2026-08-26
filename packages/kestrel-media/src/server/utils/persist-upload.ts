@@ -3,7 +3,7 @@ import type { MediaDb } from '../db/media-db.js'
 import { media } from '../collections/media.js'
 import { derivativeKey, withPreservedTranslations, type DerivativeManifest } from './record.js'
 import type { DerivedImage } from './derive.js'
-import type { StorageDriver } from '@kestrel/core'
+import type { StorageDriver } from '@michaelthielemann/kestrel-core'
 import type { Translations } from './translations.js'
 import { emitMediaOutbox, type EmitFacts, type NO_PIPELINE_CTX } from './media-write.js'
 

@@ -5,8 +5,8 @@ import { buildKey } from './naming.js'
 import { derivativeKey, type DerivativeManifest } from './record.js'
 import { media } from '../collections/media.js'
 import { emitMediaOutbox, emitMediaWrite, NO_PIPELINE_CTX } from './media-write.js'
-import type { StorageDriver } from '@kestrel/core'
-import { withLock, mediaLockKey } from '@kestrel/core'
+import type { StorageDriver } from '@michaelthielemann/kestrel-core'
+import { withLock, mediaLockKey } from '@michaelthielemann/kestrel-core'
 
 /** The new storage key, rewritten derivative manifest, and object copies a relocation needs.
  * @public

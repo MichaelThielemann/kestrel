@@ -6,9 +6,9 @@ import { resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { Effect, type Layer, type Context } from 'effect'
-import { OwnershipViolation, desiredSchema, diffSchema, makeModuleDb, recordRefs, renderSqlite } from '@kestrel/core'
-import type { ModuleDbService } from '@kestrel/core'
-import { publishingOwnershipManifest, type SnapshotsDb } from '@kestrel/publishing'
+import { OwnershipViolation, desiredSchema, diffSchema, makeModuleDb, recordRefs, renderSqlite } from '@michaelthielemann/kestrel-core'
+import type { ModuleDbService } from '@michaelthielemann/kestrel-core'
+import { publishingOwnershipManifest, type SnapshotsDb } from '@michaelthielemann/kestrel-publishing'
 /**
  * Contract tests for the snapshot store + DeliveryPort wiring.
  *
@@ -65,12 +65,12 @@ function fixturePayload(n: number): Record<string, unknown> {
 
 describe('published_snapshots table (static, 4-place parity)', () => {
   it('the drizzle table module exports publishedSnapshots with the contracted columns', async () => {
-    const mod = await import('@kestrel/publishing')
+    const mod = await import('@michaelthielemann/kestrel-publishing')
     expect(mod.publishedSnapshots).toBeDefined()
   })
 
   it('desired schema for publishedSnapshots renders and diffs clean against a fresh db (schema-engine parity)', async () => {
-    const { publishedSnapshots } = await import('@kestrel/publishing')
+    const { publishedSnapshots } = await import('@michaelthielemann/kestrel-publishing')
     const desired = desiredSchema([publishedSnapshots])
     const sqlite = new Database(':memory:')
     for (const stmt of renderSqlite(diffSchema(desired, {}))) sqlite.exec(stmt)
@@ -95,7 +95,7 @@ describe('published_snapshots table (static, 4-place parity)', () => {
   })
 
   it('own-table access to published_snapshots succeeds through the module-db adapter', async () => {
-    const { publishedSnapshots } = await import('@kestrel/publishing')
+    const { publishedSnapshots } = await import('@michaelthielemann/kestrel-publishing')
     const sqlite = new Database(':memory:')
     const desired = desiredSchema([publishedSnapshots])
     for (const stmt of renderSqlite(diffSchema(desired, {}))) sqlite.exec(stmt)
@@ -107,7 +107,7 @@ describe('published_snapshots table (static, 4-place parity)', () => {
   })
 
   it('a cross-module raw-SQL access to published_snapshots throws OwnershipViolation', async () => {
-    const { publishedSnapshots } = await import('@kestrel/publishing')
+    const { publishedSnapshots } = await import('@michaelthielemann/kestrel-publishing')
     const sqlite = new Database(':memory:')
     const desired = desiredSchema([publishedSnapshots, recordRefs])
     for (const stmt of renderSqlite(diffSchema(desired, {}))) sqlite.exec(stmt)
@@ -209,7 +209,7 @@ describe('snapshot rows are insert-only except the superseded_by pointer', () =>
 
 describe('recordSnapshot writes one row per published route, with fingerprint dedupe', () => {
   it('recording a route for the first time inserts a current row', async () => {
-    const { recordSnapshot, publishedSnapshots } = await import('@kestrel/publishing')
+    const { recordSnapshot, publishedSnapshots } = await import('@michaelthielemann/kestrel-publishing')
     const db = migratedDb()
     // `SnapshotsDb` is branded — cast at the crossing (mirrors `record-ref-index.test.ts`'s `asContentDb`).
     const snapshotsDb = db as unknown as SnapshotsDb
@@ -223,7 +223,7 @@ describe('recordSnapshot writes one row per published route, with fingerprint de
   })
 
   it('recording the same route with an unchanged fingerprint does NOT write a new row', async () => {
-    const { recordSnapshot, publishedSnapshots } = await import('@kestrel/publishing')
+    const { recordSnapshot, publishedSnapshots } = await import('@michaelthielemann/kestrel-publishing')
     const db = migratedDb()
     const snapshotsDb = db as unknown as SnapshotsDb
 
@@ -238,7 +238,7 @@ describe('recordSnapshot writes one row per published route, with fingerprint de
 
 describe('publishing a changed route supersedes the old row instead of mutating it', () => {
   it('a changed fingerprint inserts a new row and points the old row at it; the old payload stays readable', async () => {
-    const { recordSnapshot, publishedSnapshots } = await import('@kestrel/publishing')
+    const { recordSnapshot, publishedSnapshots } = await import('@michaelthielemann/kestrel-publishing')
     const { eq } = await import('drizzle-orm')
     const db = migratedDb()
     const snapshotsDb = db as unknown as SnapshotsDb
@@ -263,7 +263,7 @@ describe('publishing a changed route supersedes the old row instead of mutating 
 
 describe('republishSnapshot creates a new current row instead of mutating the old one', () => {
   it('republishing an old snapshot creates a NEW row with equal content, new id, new published_at; the old row is untouched', async () => {
-    const { recordSnapshot, republishSnapshot, publishedSnapshots } = await import('@kestrel/publishing')
+    const { recordSnapshot, republishSnapshot, publishedSnapshots } = await import('@michaelthielemann/kestrel-publishing')
     const { eq } = await import('drizzle-orm')
     const db = migratedDb()
     const snapshotsDb = db as unknown as SnapshotsDb
@@ -311,7 +311,7 @@ describe('published_snapshots is read only through the publishing module / Deliv
       // `server/database/schema.test.ts`'s own parity check.
     ])
 
-    // Derived, not hand-listed: `@kestrel/publishing` itself, plus every `@kestrel/*` package that
+    // Derived, not hand-listed: `@michaelthielemann/kestrel-publishing` itself, plus every `@michaelthielemann/kestrel-*` package that
     // declares it as a real `dependencies` entry — a DeliveryPort implementation (or anything else that
     // legitimately reads snapshots) necessarily takes that dependency, so a new one is exempted the moment
     // it depends on publishing, with no edit to this file.
@@ -321,7 +321,7 @@ describe('published_snapshots is read only through the publishing module / Deliv
       .map((e) => resolve(packagesDir, e.name))
       .filter((dir) => existsSync(join(dir, 'package.json')))
       .map((dir) => ({ dir, pkg: JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: string; dependencies?: Record<string, string> } }))
-      .filter(({ pkg }) => pkg.name === '@kestrel/publishing' || pkg.dependencies?.['@kestrel/publishing'] !== undefined)
+      .filter(({ pkg }) => pkg.name === '@michaelthielemann/kestrel-publishing' || pkg.dependencies?.['@michaelthielemann/kestrel-publishing'] !== undefined)
       .map(({ dir }) => `${dir.slice(root.length + 1)}/`)
 
     const violations: string[] = []

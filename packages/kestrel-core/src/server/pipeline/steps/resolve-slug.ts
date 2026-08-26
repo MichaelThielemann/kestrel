@@ -1,12 +1,12 @@
 import { Effect } from 'effect'
-import type { Conflict, ValidationFailed } from '@kestrel/contracts'
+import type { Conflict, ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 import { prefixPrimaryLocale, primaryLocale } from '../../utils/locale.js'
 import { allCollections } from '../../utils/registry.js'
 import { findRouteConflict, routeOf } from '../../utils/page-route.js'
 import { dedupeAgainstConflicts, slugSourceValue } from '../../utils/page-slug.js'
 import { decideAutoSlugBase, decideExplicitSlug, normalizeSlugPath, slugLocale } from '../core/slug.js'
 import { collectionOf, dbOf, isSingletonWrite, unitsOf, type DB, type Row, type WriteUnit } from './shared.js'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { syncStep, type PipelineContext, type StepDef } from '../types.js'
 
 /** An update re-resolves the route when it changes it — either `path` directly, OR the `locale` (the route

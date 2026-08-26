@@ -4,7 +4,7 @@ import UiSelect from '../ui/Select.vue'
 import UiCombobox from '../ui/Combobox.vue'
 import { useRecordOptions } from '../../composables/useRecordOptions'
 import { resolveLocalized } from '../../utils/localized'
-import type { SerializedCollection } from '@kestrel/core'
+import type { SerializedCollection } from '@michaelthielemann/kestrel-core'
 
 const { t, lang } = useT()
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import type { ValidationFailed } from '@kestrel/contracts'
+import type { ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 import { sql } from 'drizzle-orm'
 import { getSingleton, putSingleton, update, remove } from '../../../src/server/utils/crud.js'
 import { buildCollection } from '../../../src/server/schema/buildCollection.js'

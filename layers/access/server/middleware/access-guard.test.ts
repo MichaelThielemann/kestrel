@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createEvent, createError, getMethod, type H3Event } from 'h3'
-import { clearPipelines, clearRegistry } from '@kestrel/core'
+import { clearPipelines, clearRegistry } from '@michaelthielemann/kestrel-core'
 // access-guard.ts is Nitro middleware: `getMethod`/`createError`/`defineEventHandler` resolve as
-// auto-imported globals, stubbed below as plain globals. `resolveEventPrincipal` (`@kestrel/access`) and
-// `refreshAuthSession` (`@kestrel/auth`) are EXPLICIT imports, so overriding them needs real module mocks.
+// auto-imported globals, stubbed below as plain globals. `resolveEventPrincipal` (`@michaelthielemann/kestrel-access`) and
+// `refreshAuthSession` (`@michaelthielemann/kestrel-auth`) are EXPLICIT imports, so overriding them needs real module mocks.
 let principal: { userId: string | null; role: string }
 
 Object.assign(globalThis, {
@@ -12,12 +12,12 @@ Object.assign(globalThis, {
   createError,
 })
 
-vi.mock('@kestrel/access', async (importOriginal) => ({
+vi.mock('@michaelthielemann/kestrel-access', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   resolveEventPrincipal: () => principal,
 }))
 
-vi.mock('@kestrel/auth', async (importOriginal) => ({
+vi.mock('@michaelthielemann/kestrel-auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   refreshAuthSession: () => {},
 }))

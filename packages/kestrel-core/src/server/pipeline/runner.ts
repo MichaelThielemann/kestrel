@@ -1,6 +1,6 @@
 import { Cause, Effect, Layer, ManagedRuntime } from 'effect'
 import { FiberFailureCauseId, isAsyncFiberException, isFiberFailure } from 'effect/Runtime'
-import { Forbidden, Unauthorized } from '@kestrel/contracts'
+import { Forbidden, Unauthorized } from '@michaelthielemann/kestrel-contracts'
 import type { AccessSpec, PipelineContext, RequestFacts, ResolvedPipeline, StepDef } from './types.js'
 
 /** @public */

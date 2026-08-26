@@ -4,7 +4,7 @@ import UiField from '../ui/Field.vue'
 import UiCombobox from '../ui/Combobox.vue'
 import { useRecordOptions } from '../../composables/useRecordOptions'
 import type { FieldComponentProps } from '../../utils/field-component'
-import type { FieldOf } from '@kestrel/core'
+import type { FieldOf } from '@michaelthielemann/kestrel-core'
 
 const props = defineProps<FieldComponentProps>()
 const model = defineModel<number | number[] | null>()

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { z } from 'zod'
 import { text } from 'drizzle-orm/sqlite-core'
 import { fieldTypes, registerFieldType, getFieldType } from '../../../src/server/field-registry/index.js'
-import type { FieldType } from '@kestrel/core'
+import type { FieldType } from '@michaelthielemann/kestrel-core'
 
 const ALL: FieldType[] = [
   'text', 'slug', 'richtext', 'number', 'boolean', 'datetime', 'choice', 'link',

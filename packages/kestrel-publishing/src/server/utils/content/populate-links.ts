@@ -1,6 +1,6 @@
-import { captureRead, memoDuringPrerender, memoResolver } from '@kestrel/core'
-import type { FieldPopulator } from '@kestrel/core'
-import { collectRichtextRefs, resolveRichtextLinks } from '@kestrel/core/client'
+import { captureRead, memoDuringPrerender, memoResolver } from '@michaelthielemann/kestrel-core'
+import type { FieldPopulator } from '@michaelthielemann/kestrel-core'
+import { collectRichtextRefs, resolveRichtextLinks } from '@michaelthielemann/kestrel-core/client'
 
 // The localized-href-for-a-page-row rule lives once in core (`pageRowHref`); the link populator/resolver
 // use it as the target-row href. The resolver (link-resolve) STATUS-GATES: a missing OR draft target

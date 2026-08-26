@@ -117,7 +117,7 @@ describe('bidirectional consistency: PACKAGE_* vs. every real workspace package\
 describe('every package whose OWN module graph reaches buildCollection() guards its barrel with the used-binding fields import, first', () => {
   // COMPUTED, not a hand-list of "media/collections/publishing" — a package earns this requirement by
   // ACTUALLY calling `buildCollection(` AT MODULE TOP LEVEL somewhere its own `src/index.ts` transitively
-  // reaches via relative imports (bare specifiers like `@kestrel/core`, where `buildCollection` is only
+  // reaches via relative imports (bare specifiers like `@michaelthielemann/kestrel-core`, where `buildCollection` is only
   // DEFINED — never called at module load — are deliberately not followed). The pattern is column-0
   // `const X = buildCollection(`, matching every real collection file (site.ts/media.ts/pages.ts/…);
   // this deliberately does NOT match a helper like `ensureBuilt`'s internal, indented, only-runs-when-
@@ -126,7 +126,7 @@ describe('every package whose OWN module graph reaches buildCollection() guards 
   // importing ANY export from a package's barrel loads its whole module graph, so any such package needs
   // the guard regardless of whether `kestrel-nuxt`'s own virtuals happen to be the thing that imports it —
   // a plugin reaching in directly (as `extensions/galleries-secure/server/plugins/01.gallery-cleanup.ts`
-  // does for `@kestrel/media`) hits the exact same "field types not registered yet" crash otherwise.
+  // does for `@michaelthielemann/kestrel-media`) hits the exact same "field types not registered yet" crash otherwise.
   const BUILD_COLLECTION_CALL = /^const \w+ = buildCollection\(/m
 
   function resolveRelativeImport(fromFile: string, spec: string): string | null {
@@ -168,7 +168,7 @@ describe('every package whose OWN module graph reaches buildCollection() guards 
   it.each(candidates.map((c) => c.entry))('%s opens with the used-binding fields guard', (entry) => {
     const src = readFileSync(entry, 'utf8')
     const firstImport = /^import\b.*$/m.exec(src)?.[0]
-    expect(firstImport, `${entry}: no import statement found at all`).toBe("import { fieldTypes } from '@kestrel/fields'")
+    expect(firstImport, `${entry}: no import statement found at all`).toBe("import { fieldTypes } from '@michaelthielemann/kestrel-fields'")
     expect(src, `${entry}: the imported binding must be referenced (used-binding, not a bare side-effect import)`).toMatch(/\nvoid fieldTypes\n/)
   })
 })
@@ -194,11 +194,11 @@ describe('every generated virtual that can reach a package barrel seeds field ty
   })
 
   it('every field-types-dependent seed is a used binding (`fieldTypes` referenced, never a bare import)', () => {
-    expect(indexTs).toMatch(/import \{ fieldTypes as __kestrelSeed \} from '@kestrel\/fields'/)
+    expect(indexTs).toMatch(/import \{ fieldTypes as __kestrelSeed \} from '@michaelthielemann\/kestrel-fields'/)
     expect(indexTs).toMatch(/if \(!__kestrelSeed \|\| typeof __kestrelSeed !== 'object'\) throw/)
   })
 
-  it('the field-types seed reads @kestrel/fields by BARE SPECIFIER — no layer filesystem path is constructed', () => {
+  it('the field-types seed reads @michaelthielemann/kestrel-fields by BARE SPECIFIER — no layer filesystem path is constructed', () => {
     expect(indexTs).not.toMatch(/roots\.find/)
     expect(indexTs).not.toMatch(/layers.*fields.*field-registry/)
   })

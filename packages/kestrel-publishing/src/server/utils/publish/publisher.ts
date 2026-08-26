@@ -2,9 +2,9 @@ import { readdir, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { getTableColumns } from 'drizzle-orm'
-import { contentTypeFor, cacheControlFor, precompressedEncoding, META_KEYS, isMetaKey, localePath, pageRowHref, withReadCapture, withResolveScope, useDb, primaryLocale, prefixPrimaryLocale, allCollections, createLocalDriver, createS3Driver, getResolvedKestrelConfig } from '@kestrel/core'
-import type { StorageDriver } from '@kestrel/core'
-import { isPubliclyReadable, publicReadableResources } from '@kestrel/access'
+import { contentTypeFor, cacheControlFor, precompressedEncoding, META_KEYS, isMetaKey, localePath, pageRowHref, withReadCapture, withResolveScope, useDb, primaryLocale, prefixPrimaryLocale, allCollections, createLocalDriver, createS3Driver, getResolvedKestrelConfig } from '@michaelthielemann/kestrel-core'
+import type { StorageDriver } from '@michaelthielemann/kestrel-core'
+import { isPubliclyReadable, publicReadableResources } from '@michaelthielemann/kestrel-access'
 import { usePublishingDb } from '../../db/publishing-db.js'
 import { recordSnapshot, currentSnapshot, retractSnapshot } from '../../db/snapshots.js'
 import { htmlKeyForRoute } from './route-keys.js'
@@ -18,7 +18,7 @@ import { pendingRoutes, heldRoutes } from './pending.js'
  * The runtime static publisher: producer + delivery-static, wired together. The PRODUCER
  * (`renderRouteLive` + `recordSnapshot`) renders public routes from the LIVE server (`localFetch`, the
  * same handler `nuxt generate` uses) and records their published state; the DELIVERY side
- * (`@kestrel/delivery-static`'s `render-route.ts`'s `renderRoute`) reads that recorded state back
+ * (`@michaelthielemann/kestrel-delivery-static`'s `render-route.ts`'s `renderRoute`) reads that recorded state back
  * and writes it — plus the built `_nuxt` bundle + assets — through the configured output StorageDriver
  * (local dir or S3). This is the engine the manual `publish:run` task and (later) the auto-trigger queue
  * both drive. NOT unit-tested (needs a running build); the pure pieces it composes (route-keys,
@@ -39,7 +39,7 @@ export interface OutputRc {
   s3: { bucket: string; region: string; endpoint: string; prefix: string; accessKeyId: string; secretAccessKey: string; sessionToken: string }
 }
 
-/** Reads the resolved `output` namespace off the config-provider seam (`@kestrel/core`'s
+/** Reads the resolved `output` namespace off the config-provider seam (`@michaelthielemann/kestrel-core`'s
  *  `getResolvedKestrelConfig`) instead of `useRuntimeConfig()` — a package cannot reach the latter (it is a
  *  Nuxt/Nitro auto-import, unavailable outside a layer's own build graph). `resolveServerKestrelConfig()`
  *  already merges `runtimeConfig.kestrel.output` wholesale (S3 credentials included — the kestrel module's
@@ -371,12 +371,12 @@ export async function publishFull(driver: StorageDriver = outputDriver(), deps?:
 
   const renderRoutes = routes.filter((route) => !hold.has(route))
 
-  // Dynamic, not a static top-level import: `@kestrel/media`'s collections build EAGERLY at its own
+  // Dynamic, not a static top-level import: `@michaelthielemann/kestrel-media`'s collections build EAGERLY at its own
   // module's first import (needs the field-type registry already seeded) — a static import here would make
   // ANY early-boot loader of this module (this package's own barrel, pulled in by e.g. the pipeline
   // registration plugin) also eagerly load media, racing the registry's own boot-time seed. Deferred to
   // first actual publish, well after boot either way.
-  const { clearVariants, saveDiscoveredVariants } = await import('@kestrel/media')
+  const { clearVariants, saveDiscoveredVariants } = await import('@michaelthielemann/kestrel-media')
 
   // Reset the discovery accumulator so this full run reconciles ONLY what it actually renders — an earlier
   // incremental (tag) publish also feeds the accumulator, and a variant it recorded whose usage was later

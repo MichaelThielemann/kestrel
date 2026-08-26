@@ -6,7 +6,7 @@ import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { setup, $fetch, fetch as testFetch } from '@nuxt/test-utils/e2e'
-import { hashPassword } from '@kestrel/auth'
+import { hashPassword } from '@michaelthielemann/kestrel-auth'
 
 /**
  * Delivery-static against snapshots: real entrypoint. The static-output artifact producer is exercised
@@ -101,12 +101,12 @@ describe('delivery-static reads exclusively from the snapshot store (e2e)', asyn
     rmSync(outputDir, { recursive: true, force: true })
     expect(existsSync(outputDir)).toBe(false)
 
-    const { currentRoutes, currentSnapshot } = await import('@kestrel/publishing')
-    const { createStaticDeliveryPort } = await import('@kestrel/delivery-static')
-    const { createLocalDriver } = await import('@kestrel/core')
+    const { currentRoutes, currentSnapshot } = await import('@michaelthielemann/kestrel-publishing')
+    const { createStaticDeliveryPort } = await import('@michaelthielemann/kestrel-delivery-static')
+    const { createLocalDriver } = await import('@michaelthielemann/kestrel-core')
 
     // `SnapshotsDb` is branded — cast at the crossing (mirrors `record-ref-index.test.ts`'s `asContentDb`).
-    const readDb = drizzle(rawDb()) as unknown as import('@kestrel/publishing').SnapshotsDb
+    const readDb = drizzle(rawDb()) as unknown as import('@michaelthielemann/kestrel-publishing').SnapshotsDb
     const routes = currentRoutes(readDb)
     async function* snapshots() {
       for (const route of routes) {
@@ -143,9 +143,9 @@ describe('delivery-static reads exclusively from the snapshot store (e2e)', asyn
     const file = join(outputDir, 'parity-retract', 'index.html')
     expect(existsSync(file), 'the pruned route must not still have a static output file').toBe(false)
 
-    const { currentSnapshot } = await import('@kestrel/publishing')
+    const { currentSnapshot } = await import('@michaelthielemann/kestrel-publishing')
     const sqlite = rawDb()
-    const db = drizzle(sqlite) as unknown as import('@kestrel/publishing').SnapshotsDb
+    const db = drizzle(sqlite) as unknown as import('@michaelthielemann/kestrel-publishing').SnapshotsDb
     const current = currentSnapshot(db, '/parity-retract')
     sqlite.close()
     expect(current, 'the retracted route must have no current (non-superseded) snapshot').toBeNull()

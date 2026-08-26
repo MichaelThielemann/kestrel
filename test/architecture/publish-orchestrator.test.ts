@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { desiredSchema, diffSchema, getResolvedKestrelConfig, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@kestrel/core'
-import { publishDeps, publishStatus, publishRuns, usePublishingDbFor, startPublishRun, resumePublishRuns, type PublishRunRecord, type PublishDelivery } from '@kestrel/publishing'
+import { desiredSchema, diffSchema, getResolvedKestrelConfig, renderSqlite, resetDbInstance, setResolvedKestrelConfig, useDb } from '@michaelthielemann/kestrel-core'
+import { publishDeps, publishStatus, publishRuns, usePublishingDbFor, startPublishRun, resumePublishRuns, type PublishRunRecord, type PublishDelivery } from '@michaelthielemann/kestrel-publishing'
 
 /**
  * A publish run is an owned sequence — command -> snapshot -> delivery -> done — persisted in

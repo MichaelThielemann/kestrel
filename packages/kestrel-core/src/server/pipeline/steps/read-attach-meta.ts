@@ -7,7 +7,7 @@ import { useContentDbFor, type ContentDb } from '../../db/content-db.js'
 import { OwnershipViolation } from '../../db/module-db.js'
 import { collectionOf, columns, dbOf, table, type Row } from './shared.js'
 import { publishedOnlyOf, type ListResult } from './read-shared.js'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 import { syncStep, type StepDef } from '../types.js'
 
 type DB = ContentDb

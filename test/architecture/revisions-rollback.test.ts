@@ -5,11 +5,11 @@ import { join } from 'node:path'
 import fc from 'fast-check'
 import { sql } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import { buildCollection, buildPipelineIndex, clearPipelines, clearRegistry, create, defineCollection, desiredSchema, diffSchema, ensureOutboxTable, ensureRevisionsTable, getOne, putSingleton, readRevisions, rebuildFromRevisions, registerCollection, remove, removeMany, renderSqlite, revisionsTable, revisionsTableName, runWrite, sqliteClientOf, update  } from '@kestrel/core'
-import type { PipelineDescriptor } from '@kestrel/core'
+import { buildCollection, buildPipelineIndex, clearPipelines, clearRegistry, create, defineCollection, desiredSchema, diffSchema, ensureOutboxTable, ensureRevisionsTable, getOne, putSingleton, readRevisions, rebuildFromRevisions, registerCollection, remove, removeMany, renderSqlite, revisionsTable, revisionsTableName, runWrite, sqliteClientOf, update  } from '@michaelthielemann/kestrel-core'
+import type { PipelineDescriptor } from '@michaelthielemann/kestrel-core'
 import { createTestDb } from '../helpers/db'
 import { callPipelineRoute, usePipelineRouteDb } from '../helpers/pipeline-route'
-import { pagesCollection } from '@kestrel/collections'
+import { pagesCollection } from '@michaelthielemann/kestrel-collections'
 
 /**
  * Delete tombstones + the rollback pipeline.
@@ -256,7 +256,7 @@ describe('property: every write op is reversible via rollback', () => {
 
 describe('time-to-rollback measurement', () => {
   it('recordTimeToRollback appends one ndjson row with a recognizable timeToRollbackSec key to the given file', async () => {
-    const { recordTimeToRollback } = await import('@kestrel/core')
+    const { recordTimeToRollback } = await import('@michaelthielemann/kestrel-core')
     const dir = mkdtempSync(join(tmpdir(), 'kestrel-rollback-metric-'))
     const file = join(dir, 'metrics.ndjson')
 
@@ -270,7 +270,7 @@ describe('time-to-rollback measurement', () => {
   })
 
   it('a second call appends rather than overwrites — the file is append-only, like metrics.ndjson itself', async () => {
-    const { recordTimeToRollback } = await import('@kestrel/core')
+    const { recordTimeToRollback } = await import('@michaelthielemann/kestrel-core')
     const dir = mkdtempSync(join(tmpdir(), 'kestrel-rollback-metric-'))
     const file = join(dir, 'metrics.ndjson')
 

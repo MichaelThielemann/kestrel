@@ -5,7 +5,7 @@ import { makeModuleDb, type ModuleDbService } from './module-db.js'
 import { buildContentManifest, contentTables } from './content-manifest.js'
 import { registryVersion } from '../utils/registry.js'
 import { useDb } from '../utils/db.js'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 
 /** The `db` surface content call sites take instead of the raw drizzle instance — enforced against the
  * @public

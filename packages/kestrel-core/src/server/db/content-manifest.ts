@@ -1,12 +1,12 @@
 import { getTableName } from 'drizzle-orm'
 import type { AnySQLiteTable } from 'drizzle-orm/sqlite-core'
-import type { OwnershipManifest } from '@kestrel/contracts'
+import type { OwnershipManifest } from '@michaelthielemann/kestrel-contracts'
 import { recordRefs } from '../database/record-refs.js'
 import { outboxContent } from '../database/outbox-content.js'
 import { outboxTableName } from './outbox.js'
 import { revisionsTable, revisionsTableName } from './revisions.js'
 import { allCollections, registryVersion } from '../utils/registry.js'
-import type { BuiltCollection } from '@kestrel/core'
+import type { BuiltCollection } from '@michaelthielemann/kestrel-core'
 
 /** A CRUD call site (`create`/`list`/`getOne`/…) takes an explicit `BuiltCollection`, independent of the
  *  global registry — the registry is for HTTP routing only, and plenty of production and test code builds

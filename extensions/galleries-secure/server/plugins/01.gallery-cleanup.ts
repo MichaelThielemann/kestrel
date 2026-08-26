@@ -3,8 +3,8 @@
 // (output ≡ storage, on every path). Fire-and-forget; removeDir is idempotent, errors logged. Mirrors the
 // media-cleanup plugin. `planGalleryDeletion` / `referencedGalleryIds` (this layer) are auto-imported.
 import { Effect } from 'effect'
-import { registerAfterStep, eventsOf, useDb, allCollections } from '@kestrel/core'
-import { useStorageDriver } from '@kestrel/media'
+import { registerAfterStep, eventsOf, useDb, allCollections } from '@michaelthielemann/kestrel-core'
+import { useStorageDriver } from '@michaelthielemann/kestrel-media'
 
 export default defineNitroPlugin(() => {
   registerAfterStep({

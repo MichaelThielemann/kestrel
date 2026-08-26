@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { OwnershipViolation, type ModuleDbBrand } from '@kestrel/core'
+import { OwnershipViolation, type ModuleDbBrand } from '@michaelthielemann/kestrel-core'
 import { publishDeps } from '../../database/publish-deps.js'
 import type { PublishingDb } from '../../db/publishing-db.js'
 import type { DepsPersistence } from './deps.js'

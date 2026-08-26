@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { coerceFilterValue } from '@kestrel/core'
+import { coerceFilterValue } from '@michaelthielemann/kestrel-core'
 
 // A minimal stand-in for the bits of a Drizzle column that coerceFilterValue inspects.
 const col = (sqlType: string, mode?: string) => ({ getSQLType: () => sqlType, mode })

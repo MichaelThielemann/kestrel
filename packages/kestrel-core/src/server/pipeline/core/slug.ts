@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { Conflict, ValidationFailed } from '@kestrel/contracts'
+import { Conflict, ValidationFailed } from '@michaelthielemann/kestrel-contracts'
 import { slugify } from '../../../app/utils/slugify.js'
 
 // Canonicalise to exactly what the render-side resolver looks up: lowercase, drop empty segments

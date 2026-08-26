@@ -1,5 +1,5 @@
 import { renderRouteLive } from '../../utils/publish/render-live'
-import { publishFull, outputDriver, DepsStore, createSqlitePersistence, usePublishingDb, setRenderRouteLive } from '@kestrel/publishing'
+import { publishFull, outputDriver, DepsStore, createSqlitePersistence, usePublishingDb, setRenderRouteLive } from '@michaelthielemann/kestrel-publishing'
 
 /**
  * The shared publish engine, exposed as a Nitro task. Renders every published page (+ sitemap/robots)
@@ -18,7 +18,7 @@ export default defineTask({
   async run() {
     // Wired explicitly here (not a module-load side effect): Nitro dev re-evaluates a task's module graph
     // per invocation for hot-reload, which can give this call and `publisher.ts`'s a differently-scoped
-    // `@kestrel/publishing` instance if the wiring only ran once, earlier, at a boot-time import — calling
+    // `@michaelthielemann/kestrel-publishing` instance if the wiring only ran once, earlier, at a boot-time import — calling
     // the setter fresh, synchronously, right before the only call that needs it removes that dependency on
     // import-order/instance-identity entirely. Idempotent: safe to call before every run.
     setRenderRouteLive(renderRouteLive)

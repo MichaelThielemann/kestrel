@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
-import { definePipeline, syncStep, useDb } from '@kestrel/core'
-import type { PipelineDef, StepDef } from '@kestrel/core'
+import { definePipeline, syncStep, useDb } from '@michaelthielemann/kestrel-core'
+import type { PipelineDef, StepDef } from '@michaelthielemann/kestrel-core'
 import { resolveInternalHref } from '../utils/content/link-resolve.js'
 
 // Batch-resolve internal link refs (`?refs=collection:id,collection:id`) to public hrefs for the admin

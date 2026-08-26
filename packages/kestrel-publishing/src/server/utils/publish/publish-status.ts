@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { OwnershipViolation, type ModuleDbBrand } from '@kestrel/core'
+import { OwnershipViolation, type ModuleDbBrand } from '@michaelthielemann/kestrel-core'
 import { publishStatus } from '../../database/publish-status.js'
 import type { PublishingDb } from '../../db/publishing-db.js'
 

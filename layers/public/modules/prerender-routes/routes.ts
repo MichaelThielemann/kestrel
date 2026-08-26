@@ -1,4 +1,4 @@
-import { localePath } from '@kestrel/core'
+import { localePath } from '@michaelthielemann/kestrel-core'
 
 export interface PageRouteRow {
   path: string | null

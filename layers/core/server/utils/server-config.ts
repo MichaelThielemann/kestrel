@@ -1,5 +1,5 @@
 import kestrelConfig from '../../../../kestrel.config'
-import { resolveKestrel, type ResolvedKestrel } from '@kestrel/core'
+import { resolveKestrel, type ResolvedKestrel } from '@michaelthielemann/kestrel-core'
 
 /**
  * The Nitro runtimeConfig, or `undefined` for non-Nitro callers (node scripts, build) so they don't
