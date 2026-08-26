@@ -48,6 +48,7 @@
   "scripts": {
     "dev": "nuxt dev",
     "build": "nuxt build",
+    "build:packages": "pnpm -F @kestrel/contracts build && pnpm -F @kestrel/core build && pnpm -F @kestrel/fields build && pnpm -F @kestrel/auth build && pnpm -F @kestrel/access build && pnpm -F @kestrel/media build && pnpm -F @kestrel/collections build && pnpm -F @kestrel/publishing build && pnpm -F @kestrel/delivery-live build && pnpm -F @kestrel/delivery-static build",
     "preview": "nuxt preview",
     "generate": "nuxt generate",
     "db:generate": "drizzle-kit generate",
