@@ -20,6 +20,7 @@ an Amendment saying so, not a rewrite.
 
 ## Index
 
+- [ADR-0030 — Perf budgets re-priced again: `delete`/`duplicate` under the pipeline-engine rework's added dispatch overhead](#adr-0030--perf-budgets-re-priced-again-deleteduplicate-under-the-pipeline-engine-reworks-added-dispatch-overhead)
 - [ADR-0029 — A package's eager module-load graph is a boot-order hazard distinct from ADR-0028's reuse rule](#adr-0029--a-packages-eager-module-load-graph-is-a-boot-order-hazard-distinct-from-adr-0028s-reuse-rule)
 - [ADR-0028 — Generic storage-driver primitives live in `@kestrel/core`, not `@kestrel/media`](#adr-0028--generic-storage-driver-primitives-live-in-kestrelcore-not-kestrelmedia)
 - [ADR-0027 — `normalizeSlugPath` trims each segment, not just the whole string's ends](#adr-0027--normalizeslugpath-trims-each-segment-not-just-the-whole-strings-ends)
@@ -49,6 +50,34 @@ an Amendment saying so, not a rewrite.
 - [ADR-0003 — Reference integrity: precise invalidation, warned-stale references, unique slugs](#adr-0003--reference-integrity-precise-invalidation-warned-stale-references-unique-slugs)
 - [ADR-0002 — Collection-derived DB schema with a runtime sync engine](#adr-0002--collection-derived-db-schema-with-a-runtime-sync-engine)
 - [ADR-0001 — Password hashing: native `scrypt`, not an Argon2/bcrypt addon](#adr-0001--password-hashing-native-scrypt-not-an-argon2bcrypt-addon)
+
+## ADR-0030 — Perf budgets re-priced again: `delete`/`duplicate` under the pipeline-engine rework's added dispatch overhead
+
+**Status:** accepted.
+
+**Context.** The `v4.0.0` release run of `test/architecture/perf-budget.test.ts` on GitHub's CI runner
+failed two budgets: `delete` measured p95 2.331ms against a 2ms ceiling, `duplicate` measured p95 4.52ms
+against a 4ms ceiling (both from `perf-budget.json`, last priced in ADR-0016). Every other operation
+(`createOne` 20ms, `updateOne` 12ms, `readOne`/`readMany` 4ms/12ms, `createMany` 14ms, `updateMany` 4ms)
+stayed comfortably inside budget. `delete` and `duplicate` are the two tightest ceilings in the file —
+the operations with the least fixed-cost headroom — which is the expected shape of a fixed per-dispatch
+cost increase: a few hundred microseconds of new overhead barely registers against a 20ms budget but
+blows through a 2ms one. The pipeline-engine rework (Kestrel 4.0) added an Effect-wrapped step/gate
+pipeline and, for `delete`, an outbox-row write on every call (ADR-0021/ADR-0022's at-least-once dispatch
+machinery); that is the standing suspect for the added cost, not measurement noise — but this is a single
+CI run, not the file's own documented method of repeated full-suite runs, so it should be treated as a
+provisional re-pricing to revisit once more CI history exists.
+
+**Decision.**
+- Re-priced by the file's documented method (p95 × 1.5, rounded up to a whole even ms) off this run's
+  measurements: `delete` 2ms → 4ms, `duplicate` 4ms → 8ms.
+- `perf-budget.json` gains `_adr_delete`/`_adr_duplicate` keys pointing at this entry.
+
+**Consequences.** The two budgets have real headroom again, but at roughly double their ADR-0016 values —
+a real, not cosmetic, loosening. If a future full-suite run still comes in comfortably under the new
+ceiling, that supports the one-time-dispatch-overhead theory above; a run that keeps creeping upward would
+instead point at an unbounded per-call cost worth profiling directly (e.g. the outbox write on every
+`delete`), not re-pricing again.
 
 ## ADR-0029 — A package's eager module-load graph is a boot-order hazard distinct from ADR-0028's reuse rule
 

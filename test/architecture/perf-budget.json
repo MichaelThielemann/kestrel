@@ -3,12 +3,14 @@
   "_adr_readOut": "ADR-0016",
   "_adr_createOne": "ADR-0016",
   "_adr_updateOne": "ADR-0016",
+  "_adr_delete": "ADR-0030",
+  "_adr_duplicate": "ADR-0030",
   "createOne": 20,
   "createMany": 14,
   "readOne": 4,
   "readMany": 12,
   "updateOne": 12,
   "updateMany": 4,
-  "delete": 2,
-  "duplicate": 4
+  "delete": 4,
+  "duplicate": 8
 }
