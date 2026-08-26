@@ -1,14 +1,14 @@
 {
-  "packages/kestrel-access/etc/access.api.md": 41,
-  "packages/kestrel-auth/etc/auth.api.md": 11,
-  "packages/kestrel-collections/etc/collections.api.md": 6,
-  "packages/kestrel-contracts/etc/contracts.api.md": 45,
+  "packages/kestrel-access/etc/kestrel-access.api.md": 41,
+  "packages/kestrel-auth/etc/kestrel-auth.api.md": 11,
+  "packages/kestrel-collections/etc/kestrel-collections.api.md": 6,
+  "packages/kestrel-contracts/etc/kestrel-contracts.api.md": 45,
   "packages/kestrel-core/etc/core-client.api.md": 24,
-  "packages/kestrel-core/etc/core.api.md": 351,
-  "packages/kestrel-delivery-live/etc/delivery-live.api.md": 4,
-  "packages/kestrel-delivery-static/etc/delivery-static.api.md": 18,
+  "packages/kestrel-core/etc/kestrel-core.api.md": 351,
+  "packages/kestrel-delivery-live/etc/kestrel-delivery-live.api.md": 4,
+  "packages/kestrel-delivery-static/etc/kestrel-delivery-static.api.md": 18,
   "packages/kestrel-fields/etc/fields-client.api.md": 5,
-  "packages/kestrel-fields/etc/fields.api.md": 13,
-  "packages/kestrel-media/etc/media.api.md": 70,
-  "packages/kestrel-publishing/etc/publishing.api.md": 127
+  "packages/kestrel-fields/etc/kestrel-fields.api.md": 13,
+  "packages/kestrel-media/etc/kestrel-media.api.md": 70,
+  "packages/kestrel-publishing/etc/kestrel-publishing.api.md": 127
 }

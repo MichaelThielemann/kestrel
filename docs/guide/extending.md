@@ -181,7 +181,7 @@ Some features ship as separate, opt-in extension layers — their own packages, 
 
 ```ts
 // nuxt.config.ts
-export default defineNuxtConfig({ extends: ['@michaelthielemann/kestrel', '@michaelthielemann/kestrel-galleries-secure'] })
+export default defineNuxtConfig({ extends: ['@michaelthielemann/kestrel', '@michaelthielemann/galleries-secure'] })
 ```
 
 `kestrel-galleries-secure` is one example: the foundation for zero-knowledge encrypted galleries (images and folder names encrypted client-side with a password; the server only ever stores ciphertext). It ships primitives — a `secureGallery` field type, the `useSecureGallery` composable, and a `<SecureGalleryView>` component — not a finished collection or block, so you assemble your own around them.

@@ -1,5 +1,5 @@
 {
-  "name": "@michaelthielemann/kestrel-galleries-secure-proofing",
+  "name": "@michaelthielemann/galleries-secure-proofing",
   "version": "2.0.0",
   "description": "Opt-in Kestrel extension: client proofing (Lightroom-style colour flags + comments) on top of kestrel-galleries-secure. Customer marks are encrypted client-side; a public back-channel stores only ciphertext. Requires a running server (not pure-static).",
   "type": "module",
@@ -18,7 +18,7 @@
     "@michaelthielemann/kestrel-auth": "*",
     "@michaelthielemann/kestrel-core": "*",
     "@michaelthielemann/kestrel": "*",
-    "@michaelthielemann/kestrel-galleries-secure": "*",
+    "@michaelthielemann/galleries-secure": "*",
     "drizzle-orm": "^0.45.0",
     "effect": "~3.22.1",
     "h3": "^1.15.0 || ^2.0.0",
@@ -28,7 +28,7 @@
     "@michaelthielemann/kestrel-auth": "workspace:*",
     "@michaelthielemann/kestrel-core": "workspace:*",
     "@michaelthielemann/kestrel": "workspace:*",
-    "@michaelthielemann/kestrel-galleries-secure": "workspace:*",
+    "@michaelthielemann/galleries-secure": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "effect": "~3.22.1",
     "vue": "3.5.35"

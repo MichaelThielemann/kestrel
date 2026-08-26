@@ -8,8 +8,8 @@
   },
   "dependencies": {
     "@michaelthielemann/kestrel": "workspace:*",
-    "@michaelthielemann/kestrel-galleries-secure": "workspace:*",
-    "@michaelthielemann/kestrel-galleries-secure-proofing": "workspace:*"
+    "@michaelthielemann/galleries-secure": "workspace:*",
+    "@michaelthielemann/galleries-secure-proofing": "workspace:*"
   },
   "devDependencies": {
     "nuxt": "^4.5.2"

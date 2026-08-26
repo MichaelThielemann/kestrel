@@ -257,6 +257,9 @@ importers:
         specifier: ^1.15.0 || ^2.0.0
         version: 1.15.11
     devDependencies:
+      '@michaelthielemann/galleries-secure':
+        specifier: workspace:*
+        version: link:../galleries-secure
       '@michaelthielemann/kestrel':
         specifier: workspace:*
         version: link:../..
@@ -266,9 +269,6 @@ importers:
       '@michaelthielemann/kestrel-core':
         specifier: workspace:*
         version: link:../../packages/kestrel-core
-      '@michaelthielemann/kestrel-galleries-secure':
-        specifier: workspace:*
-        version: link:../galleries-secure
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)
@@ -641,15 +641,15 @@ importers:
 
   playground:
     dependencies:
+      '@michaelthielemann/galleries-secure':
+        specifier: workspace:*
+        version: link:../extensions/galleries-secure
+      '@michaelthielemann/galleries-secure-proofing':
+        specifier: workspace:*
+        version: link:../extensions/galleries-secure-proofing
       '@michaelthielemann/kestrel':
         specifier: workspace:*
         version: link:..
-      '@michaelthielemann/kestrel-galleries-secure':
-        specifier: workspace:*
-        version: link:../extensions/galleries-secure
-      '@michaelthielemann/kestrel-galleries-secure-proofing':
-        specifier: workspace:*
-        version: link:../extensions/galleries-secure-proofing
     devDependencies:
       nuxt:
         specifier: ^4.5.2

@@ -10,7 +10,7 @@ This is **not** part of the core `kestrel` package. A consumer opts in by compos
 ```ts
 // nuxt.config.ts
 export default defineNuxtConfig({
-  extends: ['@michaelthielemann/kestrel', '@michaelthielemann/kestrel-galleries-secure'], // core first, then the extension
+  extends: ['@michaelthielemann/kestrel', '@michaelthielemann/galleries-secure'], // core first, then the extension
 })
 ```
 

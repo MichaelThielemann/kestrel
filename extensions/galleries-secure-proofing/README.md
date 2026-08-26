@@ -9,7 +9,7 @@ Compose it **after** the core and the base:
 ```ts
 // nuxt.config.ts
 export default defineNuxtConfig({
-  extends: ['@michaelthielemann/kestrel', '@michaelthielemann/kestrel-galleries-secure', '@michaelthielemann/kestrel-galleries-secure-proofing'],
+  extends: ['@michaelthielemann/kestrel', '@michaelthielemann/galleries-secure', '@michaelthielemann/galleries-secure-proofing'],
 })
 ```
 
@@ -61,7 +61,7 @@ defineProps(['heading', 'gallery', 'slug'])
 ```
 
 **Photographer review** — nothing to wire. Just compose this extension (`extends: ['@michaelthielemann/kestrel',
-'@michaelthielemann/kestrel-galleries-secure', '@michaelthielemann/kestrel-galleries-secure-proofing']`): it overrides the `secureGallery` editor
+'@michaelthielemann/galleries-secure', '@michaelthielemann/galleries-secure-proofing']`): it overrides the `secureGallery` editor
 widget, so in the normal record editor the photographer enters the gallery password (the same unlock that
 shows folders/files), and then sees each customer's colour flags on the photos, the comments in the
 lightbox, and a colour filter — all read-only, in the same place they manage the gallery. The gallery key is

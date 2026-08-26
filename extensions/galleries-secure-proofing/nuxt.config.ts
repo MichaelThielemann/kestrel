@@ -1,7 +1,7 @@
 // Kestrel extension layer — client PROOFING on top of kestrel-galleries-secure. OPT-IN, composed AFTER the
 // base (and core):
 //
-//   extends: ['@michaelthielemann/kestrel', '@michaelthielemann/kestrel-galleries-secure', '@michaelthielemann/kestrel-galleries-secure-proofing']
+//   extends: ['@michaelthielemann/kestrel', '@michaelthielemann/galleries-secure', '@michaelthielemann/galleries-secure-proofing']
 //
 // Adds the photographer/customer proofing workflow: a public back-channel (`/api/proofingSubmit`, plus the
 // `/api/proofingSubmission` read-back) where the customer POSTs CLIENT-ENCRYPTED colour/comment marks (server
@@ -12,6 +12,6 @@
 export default defineNuxtConfig({
   // Compose the base gallery layer underneath, so this layer's editor-widget override + the useSecureGallery
   // seam are always present regardless of how the consumer orders `extends`. Nuxt dedupes layers by resolved
-  // path, so a consumer that also lists '@michaelthielemann/kestrel-galleries-secure' is harmless.
-  extends: ['@michaelthielemann/kestrel-galleries-secure'],
+  // path, so a consumer that also lists '@michaelthielemann/galleries-secure' is harmless.
+  extends: ['@michaelthielemann/galleries-secure'],
 })
