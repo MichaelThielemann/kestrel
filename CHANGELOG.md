@@ -5,6 +5,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
+## [4.0.2] — 2026-08-27
+
+### Fixed
+
+- Clicking "Add block" in the admin editor silently did nothing — no error shown — for any block type
+  whose schema carries an array/object field `default` (a `repeaterField`, a multi `relationField`/
+  `mediaField`, …). The block picker reads that `default` off a Vue reactive Proxy (`useBlocks()`'s
+  `useState`-backed list); `structuredClone` cannot clone a Proxy and threw `DataCloneError`, deterministically,
+  on every affected block. `toRaw()` now unwraps the Proxy first — the same fix `cloneBlockTree` already
+  used (via a JSON round-trip) for the identical Proxy/`structuredClone` mismatch.
+
 ## [4.0.1] — 2026-08-26
 
 ### Fixed
@@ -454,6 +465,7 @@ that found *nothing*, because the second one silently overwrites live output wit
 - [docs/guide/collections.md](docs/guide/collections.md) corrects the shipped public-component surface and the
   built-in collection list.
 
+[4.0.2]: https://github.com/MichaelThielemann/kestrel/releases/tag/v4.0.2
 [4.0.1]: https://github.com/MichaelThielemann/kestrel/releases/tag/v4.0.1
 [4.0.0]: https://github.com/MichaelThielemann/kestrel/releases/tag/v4.0.0
 [3.0.1]: https://github.com/MichaelThielemann/kestrel/releases/tag/v3.0.1
