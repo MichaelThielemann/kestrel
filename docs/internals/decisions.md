@@ -20,6 +20,7 @@ an Amendment saying so, not a rewrite.
 
 ## Index
 
+- [ADR-0031 — Perf budget re-priced: `updateMany`, the ceiling with the least headroom, under CI worker contention](#adr-0031--perf-budget-re-priced-updatemany-the-ceiling-with-the-least-headroom-under-ci-worker-contention)
 - [ADR-0030 — Perf budgets re-priced again: `delete`/`duplicate` under the pipeline-engine rework's added dispatch overhead](#adr-0030--perf-budgets-re-priced-again-deleteduplicate-under-the-pipeline-engine-reworks-added-dispatch-overhead)
 - [ADR-0029 — A package's eager module-load graph is a boot-order hazard distinct from ADR-0028's reuse rule](#adr-0029--a-packages-eager-module-load-graph-is-a-boot-order-hazard-distinct-from-adr-0028s-reuse-rule)
 - [ADR-0028 — Generic storage-driver primitives live in `@kestrel/core`, not `@kestrel/media`](#adr-0028--generic-storage-driver-primitives-live-in-kestrelcore-not-kestrelmedia)
@@ -50,6 +51,31 @@ an Amendment saying so, not a rewrite.
 - [ADR-0003 — Reference integrity: precise invalidation, warned-stale references, unique slugs](#adr-0003--reference-integrity-precise-invalidation-warned-stale-references-unique-slugs)
 - [ADR-0002 — Collection-derived DB schema with a runtime sync engine](#adr-0002--collection-derived-db-schema-with-a-runtime-sync-engine)
 - [ADR-0001 — Password hashing: native `scrypt`, not an Argon2/bcrypt addon](#adr-0001--password-hashing-native-scrypt-not-an-argon2bcrypt-addon)
+
+## ADR-0031 — Perf budget re-priced: `updateMany`, the ceiling with the least headroom, under CI worker contention
+
+**Status:** accepted.
+
+**Context.** A re-run of the `main` CI suite at `adf808b` (the 4.1.0 fix commit) failed one budget on the
+Node 24 leg: `updateMany` measured p95 4.041ms against a 4ms ceiling — 1% over. The run was heavily
+contended (vitest reported 205s of setup time for a 121s wall-clock suite, i.e. workers waiting on each
+other). The same file, same commit, run in isolation on Node 24.19 five times, measures `updateMany` at
+0.69ms — the CI figure is ~6× the uncontended one, the shape of scheduler noise, not of added per-call
+cost (contrast ADR-0030, where a fixed dispatch increase moved two ceilings at once). What singled out
+`updateMany` is headroom: uncontended p95 against budget is 5.8× for `updateMany`, against 7–20× for
+every other operation (`createOne` 3.18/32, `updateOne` 1.70/12, `createMany` 1.59/14, `readMany`
+0.87/12, `delete` 0.29/4, `readOne` 0.20/4, `duplicate` inside 8). The tightest multiple trips first
+whenever the runner is slow enough, and 4ms is the file's minimum granularity.
+
+**Decision.**
+- Re-priced by the file's documented method (p95 × 1.5, rounded up to a whole even ms) off the CI
+  measurement: `updateMany` 4ms → 8ms (4.041 × 1.5 = 6.06 → 8). Headroom becomes ~11.6× uncontended,
+  in line with the rest of the file.
+- `perf-budget.json` gains an `_adr_updateMany` key pointing at this entry.
+
+**Consequences.** One budget is looser; the loosening is contention headroom, not a concession on cost — the
+uncontended number did not move. If `updateMany` climbs toward 8ms in a run whose other operations sit at
+their usual multiples, that is a real per-call regression to profile, not a reason to re-price again.
 
 ## ADR-0030 — Perf budgets re-priced again: `delete`/`duplicate` under the pipeline-engine rework's added dispatch overhead
 
