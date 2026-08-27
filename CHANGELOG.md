@@ -5,6 +5,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
+## [4.1.1] — 2026-08-27
+
+### Fixed
+
+- A freshly created record could carry a `createdAt` one millisecond older than its `updatedAt`. The two
+  columns each had their own `$defaultFn(() => new Date())`, i.e. two separate clock reads per insert; on a
+  slow host (GC pause, contended CI runner) those reads can straddle a millisecond. Every consumer of the
+  row then saw two distinct timestamps instead of one — the SSR payload no longer deduplicated them, so the
+  rendered bytes and the delivery fingerprint of an otherwise identical page differed run to run. Both
+  stamps now come from the pipeline's single `facts.now`, as the update path already did.
+
 ## [4.1.0] — 2026-08-27
 
 ### Added
