@@ -5,6 +5,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
+## [4.1.3] — 2026-08-27
+
+### Fixed
+
+- 4.1.2 broke a consumer's production server at boot with `ReferenceError: defineNitroPlugin is not
+  defined`. It excluded `node_modules` from Nitro's auto-import transform as a "restated default" that had
+  never actually been in effect — and in a consumer the engine's own layers live under `node_modules`, so
+  their server plugins lost the transform that supplies `defineNitroPlugin`. Only the `kestrel-*` packages'
+  compiled output is excluded now. Do not deploy 4.1.2.
+
 ## [4.1.2] — 2026-08-27
 
 ### Fixed
