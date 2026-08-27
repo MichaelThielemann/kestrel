@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { addImports, addServerImports, defineNuxtModule } from '@nuxt/kit'
+import { defineNuxtModule } from '@nuxt/kit'
 import { resolveKestrel, type KestrelConfig } from '@michaelthielemann/kestrel-core'
 import { diagnoseAppShell } from './app-shell'
 import { appAutoImports, serverAutoImports } from './auto-imports'
@@ -16,8 +16,16 @@ export default defineNuxtModule<KestrelConfig>({
   setup(options, nuxt) {
     const c = resolveKestrel(options, process.env, nuxt.options.rootDir)
 
-    addServerImports(serverAutoImports)
-    addImports(appAutoImports)
+    // Registered through hooks rather than `addImports`/`addServerImports`, which need an active Kit
+    // instance (`useNuxt()`) that plain `setup()` callers (tests) do not provide.
+    nuxt.hook('imports:extend', (imports) => {
+      imports.push(...appAutoImports)
+    })
+    nuxt.hook('nitro:config', (config) => {
+      config.imports ||= {}
+      config.imports.imports ||= []
+      config.imports.imports.push(...serverAutoImports)
+    })
 
     // `app:resolve` is the first hook where `mainComponent` is settled across all layers. In dev it fires
     // on every watched change, so an unfixed problem would repaint the whole message on each keystroke.
