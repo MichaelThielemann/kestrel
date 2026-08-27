@@ -5,10 +5,8 @@ A collection is a table plus its schema, its admin UI, and its CRUD API, all dec
 ## Define a collection
 
 Drop a file in `server/collections/` and default-export a `defineCollection(...)`. `defineCollection` is
-auto-imported in a Kestrel-based site; import it explicitly from `@michaelthielemann/kestrel-core` only
-outside a Kestrel app (e.g. standalone scripts, tests). This applies to the rest of Kestrel's server-side
-authoring API too (`buildCollection`, `definePipeline`, `defineFieldType`, etc.) — see
-[extending.md](./extending.md).
+auto-imported like the rest of Kestrel's server API; import it explicitly from `@michaelthielemann/kestrel-core`
+only outside a Kestrel app (e.g. standalone scripts, tests). See [extending.md](./extending.md).
 
 ```ts
 // server/collections/products.ts

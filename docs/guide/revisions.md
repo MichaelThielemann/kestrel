@@ -28,7 +28,7 @@ A delete appends a **tombstone** revision instead of removing anything — `snap
 
 ## Browsing history
 
-`readRevisions(db, collection, recordId)` is auto-imported in a Kestrel-based site (explicit import from `@michaelthielemann/kestrel-core` only outside a Kestrel app) and returns every revision for a record, oldest first, with `snapshot` already JSON-decoded and its timestamps revived to `Date`:
+`readRevisions(db, collection, recordId)` is auto-imported like the rest of Kestrel's server API (explicit import from `@michaelthielemann/kestrel-core` only outside a Kestrel app) and returns every revision for a record, oldest first, with `snapshot` already JSON-decoded and its timestamps revived to `Date`:
 
 ```ts
 const history = readRevisions(useDb(), 'posts', 42)

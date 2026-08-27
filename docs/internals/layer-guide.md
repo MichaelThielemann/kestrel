@@ -18,8 +18,10 @@ semantics) → `layers/core/server/api/[...path].ts` → `packages/kestrel-core/
 thin delegate over `runWrite`/`runRead`) → `utils/serialize-collection.ts`. Schema engine:
 `server/schema/{model,desired,introspect,diff,dialect,render-sqlite,sync}.ts`. Config:
 `server/utils/kestrel-config.ts` + `layers/core/modules/kestrel/index.ts` (this module also
-registers Kestrel's authoring API — `defineCollection`, `definePipeline`, `defineFieldType`, etc. — as
-Nuxt/Nitro auto-imports, see `layers/core/modules/kestrel/auto-imports.ts`).
+registers Kestrel's authoring API as Nuxt/Nitro auto-imports: the list is derived from the server/client
+packages' real exports at build time, not hand-picked, and the packages' own compiled `dist` output is
+excluded from the auto-import transform so it isn't rewritten — see
+`layers/core/modules/kestrel/auto-imports.ts`).
 
 **Gotchas:** singletons (`mode:'single'`) reject `create`/`update`/`remove` with 405 — use `updateOne`;
 populate runs only at `depth>0`; the `02.schema-sync` plugin only auto-DDLs in dev — production instead

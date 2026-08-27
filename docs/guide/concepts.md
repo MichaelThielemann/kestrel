@@ -18,6 +18,10 @@ Other standing limits worth knowing up front, all deliberate rather than acciden
 
 These are not omissions to be filled in later; they follow from the same premise as the publish model — a private single-editor origin that produces a public artifact, whether served as static files or through the live delivery port — and a site that needs multi-user roles, a live database-backed API, or a different storage engine is outside that premise entirely.
 
+## Auto-imports
+
+Kestrel auto-imports every public function and constant exported by its server packages (`kestrel-core`, `-fields`, `-contracts`, `-auth`, `-access`, `-media`, `-collections`, `-publishing`, `-delivery-live`, `-delivery-static`) into `server/` code, and every export of `kestrel-core/client` and `kestrel-fields/client` into `app/` code — not a curated shortlist. Explicit imports from the package still work and are required outside a Nuxt/Nitro context (standalone scripts, tests). The package a name belongs to is whichever one its guide page shows.
+
 ## Collections, fields, blocks
 
 A **collection** is a content type, defined once with `defineCollection`:

@@ -4,7 +4,7 @@ Every `/api/` endpoint, including the eight CRUD operations on your own collecti
 
 ## What a pipeline is
 
-A pipeline is a named step list fronted by declarative `access`/`csrf`/`ipAllowlist` gates. Instead of forking the CRUD engine, hook your own logic in with `definePipeline` and `registerPipeline`, both auto-imported in a Kestrel-based site (import explicitly from `@michaelthielemann/kestrel-core` only outside a Kestrel app). Full design: [Pipeline engine](../internals/pipeline-engine.md).
+A pipeline is a named step list fronted by declarative `access`/`csrf`/`ipAllowlist` gates. Instead of forking the CRUD engine, hook your own logic in with `definePipeline` and `registerPipeline`, both auto-imported like the rest of Kestrel's server API (import explicitly from `@michaelthielemann/kestrel-core` only outside a Kestrel app). Full design: [Pipeline engine](../internals/pipeline-engine.md).
 
 Every pipeline resolves to a URL under `/api/`: `/api/<pipeline>` for a collection-less pipeline, `/api/<collection>/<pipeline>[/<id>]` for one scoped to a collection. A path segment is read as a record id only when it is a positive integer, and only in the third position — the second segment is always the pipeline name, never an id, so `/api/pages/42` 404s rather than reading record `42`. A record read looks like `/api/pages/readOne/42`.
 
@@ -140,7 +140,7 @@ definePipeline({
 
 A custom write pipeline gets the `csrf` gate by default — set `csrf: false` to opt out, which is what you want for a webhook or another server calling in without a browser session, since there's no same-origin cookie to check. It also inherits the global IP allowlist unless the def sets `ipAllowlist: false` to exempt itself from it.
 
-The same rule applies to `registerAccessGrant`, auto-imported (explicit import from `@michaelthielemann/kestrel-access` only outside a Kestrel app), the server-plugin seam an opt-in extension uses to open a narrow hole in the default-deny guard: a read grant for any non-admin role must set `scope: 'published'` explicitly — an omitted or `'all'` scope throws at registration, since every non-admin role is read-limited to published content regardless of what the grant says.
+The same rule applies to `registerAccessGrant`, auto-imported like the rest of Kestrel's server API (explicit import from `@michaelthielemann/kestrel-access` only outside a Kestrel app), the server-plugin seam an opt-in extension uses to open a narrow hole in the default-deny guard: a read grant for any non-admin role must set `scope: 'published'` explicitly — an omitted or `'all'` scope throws at registration, since every non-admin role is read-limited to published content regardless of what the grant says.
 
 ```ts
 registerAccessGrant('editor', { action: 'read', resource: 'announcements/audit', scope: 'published' })

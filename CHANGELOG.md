@@ -5,6 +5,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
+## [4.1.2] — 2026-08-27
+
+### Fixed
+
+- 4.1.0 auto-imported a hand-picked seventeen names; a site calling anything else a 3.x site had
+  unimported — `getCollection`, `resolvePage`, `list`, `requireCollection`, … — still failed with
+  `ReferenceError: getCollection is not defined`. The auto-import list is now derived from the packages'
+  real exports at build time: every runtime export of the ten server packages is available unimported in
+  `server/` code, every export of the `/client` entry points in app code, the same surface the layers'
+  `server/utils` gave before 4.0. The packages' own compiled output is excluded from the import transform
+  (in a workspace checkout it does not live under `node_modules`, so the default exclusion missed it).
+
 ## [4.1.1] — 2026-08-27
 
 ### Fixed

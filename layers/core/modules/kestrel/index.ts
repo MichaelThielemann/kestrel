@@ -13,18 +13,30 @@ import { appAutoImports, serverAutoImports } from './auto-imports'
  */
 export default defineNuxtModule<KestrelConfig>({
   meta: { name: 'kestrel', configKey: 'kestrel' },
-  setup(options, nuxt) {
+  async setup(options, nuxt) {
     const c = resolveKestrel(options, process.env, nuxt.options.rootDir)
 
     // Registered through hooks rather than `addImports`/`addServerImports`, which need an active Kit
     // instance (`useNuxt()`) that plain `setup()` callers (tests) do not provide.
+    const [app, server] = await Promise.all([appAutoImports(), serverAutoImports()])
+    // The packages' own compiled output must not be rewritten by the auto-import transform: it would
+    // inject an import for a symbol a dist file declares itself. Under `node_modules` the default exclusion
+    // covers that; in a workspace checkout the packages resolve to `packages/*/dist`, which it does not.
+    // Nitro REPLACES its `node_modules` default with any non-empty `exclude`, so that one is restated.
+    const ownDist = /[\\/](node_modules|packages)[\\/](@michaelthielemann[\\/])?kestrel-[^\\/]+[\\/]/
+    const imports = (nuxt.options.imports ||= {} as typeof nuxt.options.imports)
+    imports.transform ||= {}
+    imports.transform.exclude = [...(imports.transform.exclude ?? []), ownDist]
     nuxt.hook('imports:extend', (imports) => {
-      imports.push(...appAutoImports)
+      imports.push(...app)
     })
     nuxt.hook('nitro:config', (config) => {
       config.imports ||= {}
       config.imports.imports ||= []
-      config.imports.imports.push(...serverAutoImports)
+      config.imports.imports.push(...server)
+      const prior = config.imports.exclude
+      const excluded = Array.isArray(prior) ? [...prior] : prior ? [prior] : []
+      config.imports.exclude = [...excluded, /node_modules/, ownDist]
     })
 
     // `app:resolve` is the first hook where `mainComponent` is settled across all layers. In dev it fires

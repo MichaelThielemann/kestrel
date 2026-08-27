@@ -103,7 +103,7 @@ Kestrel checks this at build time and prints the fix; `kestrel doctor` reports i
 
 ## Your first collection
 
-Drop a file in `server/collections/` and default-export `defineCollection(...)`, auto-imported in a Kestrel-based site:
+Drop a file in `server/collections/` and default-export `defineCollection(...)`, auto-imported like the rest of Kestrel's server API:
 
 ```ts
 // server/collections/products.ts

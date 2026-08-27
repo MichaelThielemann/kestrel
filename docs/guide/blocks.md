@@ -8,11 +8,12 @@ A collection with `blocks: { enabled: true }` (e.g. `pages`) stores its body as 
 `{ id, type, props, slots? }`. Each block **type** is authored as a single Vue SFC in `app/blocks/<Name>.vue`
 — the SFC is both the schema source and the display component:
 
-- **Schema** = its `defineProps({ … })` using the auto-imported field factories (`textField`, `mediaField`,
-  `relationField`, `repeaterField`, …). Each factory returns a Vue prop descriptor that carries the same
-  `FieldDef` a collection field would.
-- **Metadata** = `defineBlock({ label?, slots?, icon? })`, auto-imported; import it explicitly from
-  `@michaelthielemann/kestrel-fields/client` only outside a Kestrel app. `label` is either a string or a per-locale map
+- **Schema** = its `defineProps({ … })` using the field factories (`textField`, `mediaField`,
+  `relationField`, `repeaterField`, …), auto-imported like the rest of Kestrel's server API. Each factory returns a
+  Vue prop descriptor that carries the same `FieldDef` a collection field would.
+- **Metadata** = `defineBlock({ label?, slots?, icon? })`, auto-imported like the rest of Kestrel's server API;
+  import it explicitly from `@michaelthielemann/kestrel-fields/client` only outside a Kestrel app. `label` is
+  either a string or a per-locale map
   (`{ en: 'Hero', de: 'Held' }`), resolved against the admin interface language, not the content locale. A
   preview picture for the block picker (e.g. `/block-previews/hero.png`) can be set via `image` in the same
   object literal — the build-time extractor reads it statically, though the typed client helper's signature
@@ -33,8 +34,8 @@ that type's field schema (with depth/size guards), on create and update.
 
 ## Adding a block type
 
-`defineBlock` is auto-imported; import it explicitly from `@michaelthielemann/kestrel-fields/client` only
-outside a Kestrel app.
+`defineBlock` is auto-imported like the rest of Kestrel's server API; import it explicitly from
+`@michaelthielemann/kestrel-fields/client` only outside a Kestrel app.
 
 ```ts
 // app/blocks/Hero.vue
