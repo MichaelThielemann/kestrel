@@ -5,6 +5,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 1.7.0 are documented by their tags and commit history.
 
+## [4.1.0] — 2026-08-27
+
+### Added
+
+- The authoring API is auto-imported again in a site built on Kestrel, as it was before 4.0. Server-side:
+  `defineCollection`, `buildCollection`, `definePipeline`, `registerPipeline`, `registerAfterStep`,
+  `syncStep`, `asyncStep`, `eventsOf`, `getFieldPopulator`, `readRevisions`, `registerRevisionUpcast`,
+  `useDb`, `defineFieldType`, `constrain`, `opt`, `registerAccessGrant`; app-side: `defineBlock`. The 4.0
+  package cut moved these out of `server/utils/` (which Nitro scans) into `@michaelthielemann/kestrel-*`
+  (which nothing scans), so every consumer file had to import them by hand. The `kestrel` module now
+  registers them, types included. Explicit imports keep working; they are still required outside a
+  Nuxt/Nitro context (standalone scripts, tests).
+
 ## [4.0.2] — 2026-08-27
 
 ### Fixed
