@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { Effect } from 'effect'
 import { sql } from 'drizzle-orm'
 import { buildDefaultWritePipelines, resolveReadPipeline, resolveWritePipeline, runWrite } from '../../../src/server/pipeline/defaults.js'
@@ -209,5 +209,27 @@ describe('default read pipelines — trace', () => {
     const ctx = createPipelineContext({ op: 'readMany', collection: notes, db, input: { locale: 'all', depth: 1 }, principal: ADMIN })
     runPipelineSync(resolveReadPipeline('notes', 'readMany'), ctx)
     expect(ctx.trace.toJSON().steps.find((s) => s.name === 'populate')!.status).toBe('ok')
+  })
+})
+
+describe('default write pipelines — timestamps', () => {
+  it('stamps createdAt and updatedAt from the one pipeline clock, not from separate column defaults', () => {
+    // Every argument-less `new Date()` lands one millisecond later than the previous one, so any two
+    // independent clock reads inside the write are guaranteed to disagree.
+    const RealDate = Date
+    let tick = 0
+    vi.stubGlobal('Date', class extends RealDate {
+      constructor(...args: unknown[]) {
+        if (args.length) super(...(args as [string | number | Date]))
+        else super(RealDate.now() + tick++)
+      }
+    })
+    try {
+      const row = runWrite<Row>('createOne', { collection: notes, db, input: { title: 'A' } })
+      expect(row.createdAt).toBeInstanceOf(RealDate)
+      expect(row.updatedAt).toEqual(row.createdAt)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

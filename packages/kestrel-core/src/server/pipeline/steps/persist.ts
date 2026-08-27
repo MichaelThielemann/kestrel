@@ -22,11 +22,18 @@ function emitOutbox(ctx: PipelineContext, c: BuiltCollection, unit: WriteUnit): 
   emitOutboxForUnit(sqliteClientOf(dbOf(ctx)), OUTBOX_MODULE, ctx, c, unit)
 }
 
+/** A create's `createdAt`/`updatedAt`, both from the pipeline clock. The table's per-column defaults would
+ *  read `new Date()` twice, and on a slow host those two reads can straddle a millisecond — a fresh row
+ *  whose two stamps disagree, which every consumer of the row (revision, payload, fingerprint) then sees. */
+function stampCreate(ctx: PipelineContext, values: Row): Row {
+  const now = new Date(ctx.facts.now)
+  return { ...values, createdAt: now, updatedAt: now }
+}
+
 /** Appends one revision row for `unit`'s just-persisted result, in the same transaction as the record
  *  write (mirrors `emitOutbox`'s atomicity). `created_at` is the row's own timestamp for this version —
- *  `createdAt` on a create, `updatedAt` on an update — both of which already trace back to `ctx.facts.now`
- *  (directly for an update's `updatedAt`, via the DB default for a create's `createdAt`), never a fresh
- *  `Date.now()` read of this function's own.
+ *  `createdAt` on a create, `updatedAt` on an update — both stamped from `ctx.facts.now` (`stampCreate` /
+ *  the update's `set`), never a fresh `Date.now()` read of this function's own.
  *  `snapshot` is `unit.row` as-is, which for every shape but `updateMany` is the real, re-read stored row —
  *  `updateMany` has no `RETURNING`, so its `unit.row` (and so this snapshot) is the client-side synthesis
  *  `{...before, ...patchValues}` this same step already builds for the outbox payload, not a re-read; see
@@ -152,10 +159,8 @@ export function persistStep(kind: PersistKind): StepDef {
       if (kind === 'createOne' || kind === 'createMany') {
         const insert = (values: Row): Row => {
           delete values.id
-          delete values.createdAt
-          delete values.updatedAt
           brandRichtextColumns(c, values)
-          return db.insert(table(c)).values(values).returning().get() as Row
+          return db.insert(table(c)).values(stampCreate(ctx, values)).returning().get() as Row
         }
         // One atomic block, always: record write(s) and their outbox envelope(s) land or roll back
         // together. A failing element rolls the whole insert back, and the write events (emitted by the
@@ -183,7 +188,7 @@ export function persistStep(kind: PersistKind): StepDef {
           db.transaction(() => {
             unit.row = runCatchingUnique(() => (unit.before
               ? db.update(table(c)).set({ ...values, updatedAt: new Date(ctx.facts.now) }).where(eq(cols.id, unit.before.id)).returning().get()
-              : db.insert(table(c)).values(values).returning().get()) as Row, values)
+              : db.insert(table(c)).values(stampCreate(ctx, values)).returning().get()) as Row, values)
             emitOutbox(ctx, c, unit)
             appendRevision(ctx, c, unit)
           })
