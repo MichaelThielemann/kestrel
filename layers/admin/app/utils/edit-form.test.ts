@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { reactive } from 'vue'
 import { asFieldDef, initialValues, mapServerErrors, parseBlockErrors, reconcileBlockErrors, reconcileDeadRefs, readFetchError, valuesEqual } from './edit-form'
 import type { SerializedField } from '@michaelthielemann/kestrel-core'
 import { registerFieldEmpty } from '../../../ui/app/utils/field-empty'
@@ -70,6 +71,17 @@ describe('initialValues', () => {
     const values = initialValues(fields)
     ;(values.tags as string[]).push('b')
     expect(shared).toEqual(['a'])
+  })
+
+  // The block picker reads `field.default` off `useBlocks()`'s `useState`-backed list — a Vue reactive
+  // Proxy for any object/array value. `structuredClone` throws `DataCloneError` on a Proxy; a plain array
+  // (the case above) never exercises that path since it was never wrapped.
+  it('clones a reactive (Proxy-wrapped) object/array default without throwing', () => {
+    const fields: Record<string, SerializedField> = {
+      rows: f({ type: 'repeater', options: { fields: {} }, default: reactive([{ a: 1 }]) }),
+    }
+    expect(() => initialValues(fields)).not.toThrow()
+    expect(initialValues(fields)).toEqual({ rows: [{ a: 1 }] })
   })
 })
 

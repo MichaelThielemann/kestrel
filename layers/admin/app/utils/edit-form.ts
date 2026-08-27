@@ -1,3 +1,4 @@
+import { toRaw } from 'vue'
 import type { FieldDef, SerializedField } from '@michaelthielemann/kestrel-core'
 import { resolveFieldEmpty } from '../../../ui/app/utils/field-empty'
 
@@ -42,8 +43,12 @@ export function readFetchError(e: unknown): FetchErrorInfo {
   }
 }
 
+// `field.default` on a block-picker's field comes from `useBlocks()`'s `useState`-backed list — a Vue
+// reactive Proxy for any object/array value. `structuredClone` cannot clone a Proxy (`DataCloneError`,
+// deterministic, not a race) — `toRaw` unwraps it first, same fix `cloneBlockTree` reaches for via a JSON
+// round-trip; `toRaw` + `structuredClone` keeps real Date/Map values a JSON round-trip would mangle.
 function cloneDefault(value: unknown): unknown {
-  return value !== null && typeof value === 'object' ? structuredClone(value) : value
+  return value !== null && typeof value === 'object' ? structuredClone(toRaw(value)) : value
 }
 
 function emptyForField(field: SerializedField): unknown {
