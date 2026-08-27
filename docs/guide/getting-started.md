@@ -103,12 +103,10 @@ Kestrel checks this at build time and prints the fix; `kestrel doctor` reports i
 
 ## Your first collection
 
-Drop a file in `server/collections/` and default-export `defineCollection(...)`, imported from `@michaelthielemann/kestrel-core`:
+Drop a file in `server/collections/` and default-export `defineCollection(...)`, auto-imported in a Kestrel-based site:
 
 ```ts
 // server/collections/products.ts
-import { defineCollection } from '@michaelthielemann/kestrel-core'
-
 export default defineCollection({
   name: 'products',
   mode: 'multi',

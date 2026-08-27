@@ -8,11 +8,10 @@ A field type needs a **server descriptor** (storage column + validation) and a *
 
 Both halves live outside the framework's own source: the server descriptor is auto-discovered from a project directory, and the widget registers itself from an ordinary Nuxt plugin. Neither requires touching a built-in field type or forking anything — a new type is additive.
 
-Drop a file in `server/field-types/` that default-exports `defineFieldType`. It is auto-discovered and registered before any table is built. `constrain` (column nullable/unique/default) and `opt` (Zod optionality) are the helpers the built-in types use — reach for them instead of hand-rolling nullability, or the flags every field accepts stop working for your type. All three are package exports of `@michaelthielemann/kestrel-fields`, not auto-imported, so import them explicitly:
+Drop a file in `server/field-types/` that default-exports `defineFieldType`. It is auto-discovered and registered before any table is built. `constrain` (column nullable/unique/default) and `opt` (Zod optionality) are the helpers the built-in types use — reach for them instead of hand-rolling nullability, or the flags every field accepts stop working for your type. All three are auto-imported in a Kestrel-based site; import them explicitly from `@michaelthielemann/kestrel-fields` only outside a Nuxt/Nitro context (standalone scripts, tests):
 
 ```ts
 // server/field-types/color.ts
-import { defineFieldType, constrain, opt } from '@michaelthielemann/kestrel-fields'
 import { text } from 'drizzle-orm/sqlite-core'
 import { z } from 'zod'
 
@@ -85,11 +84,9 @@ The empty-value function takes no arguments and returns whatever shape the widge
 
 Every built-in reference-bearing type (`media`, `link`, `relation`, `richtext`) already populates on read — resolving ids into usable data before the record reaches the render or the editor preview. Most fields need nothing beyond that default. A field's definition may carry an inline `populate` function that runs instead of the type's default populator for that one field — for example a relation that should project only a couple of columns on read. It is server-only: a function, so it is never serialized to the admin. It replaces the type populator wholesale, so an override that expands a reference owns the `ctx.publicOnly` check too — the type populator would otherwise have applied that read-scoping itself. (`publicOnly` reaches the override at runtime but is absent from the inline `populate` type on `FieldDef` — widen it locally or cast if it doesn't type-check yet.)
 
-Nothing server-side is auto-imported — import `defineCollection` and `getFieldPopulator` from `@michaelthielemann/kestrel-core` explicitly, the same as `defineFieldType` from `@michaelthielemann/kestrel-fields` above.
+`defineCollection` and `getFieldPopulator` are auto-imported in a Kestrel-based site, the same as `defineFieldType` from `@michaelthielemann/kestrel-fields` above; import them explicitly from `@michaelthielemann/kestrel-core` only outside a Nuxt/Nitro context.
 
 ```ts
-import { defineCollection } from '@michaelthielemann/kestrel-core'
-
 defineCollection({
   name: 'posts', mode: 'multi', translatable: false,
   fields: {
@@ -106,8 +103,6 @@ defineCollection({
 **To narrow a relation, delegate first — do not re-read the table.** Run the registered populator, then trim what it attached:
 
 ```ts
-import { getFieldPopulator } from '@michaelthielemann/kestrel-core'
-
 populate: (bag, key, field, ctx, keyMode) => {
   getFieldPopulator('relation')?.(bag, key, field, ctx, keyMode)
   const rel = bag['$' + key] as { id: number; name: string } | null

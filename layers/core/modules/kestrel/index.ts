@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
-import { defineNuxtModule } from '@nuxt/kit'
+import { addImports, addServerImports, defineNuxtModule } from '@nuxt/kit'
 import { resolveKestrel, type KestrelConfig } from '@michaelthielemann/kestrel-core'
 import { diagnoseAppShell } from './app-shell'
+import { appAutoImports, serverAutoImports } from './auto-imports'
 
 /**
  * The `kestrel` config namespace (`kestrel: { … }` in nuxt.config, sourced from `kestrel.config.ts`).
@@ -14,6 +15,9 @@ export default defineNuxtModule<KestrelConfig>({
   meta: { name: 'kestrel', configKey: 'kestrel' },
   setup(options, nuxt) {
     const c = resolveKestrel(options, process.env, nuxt.options.rootDir)
+
+    addServerImports(serverAutoImports)
+    addImports(appAutoImports)
 
     // `app:resolve` is the first hook where `mainComponent` is settled across all layers. In dev it fires
     // on every watched change, so an unfixed problem would repaint the whole message on each keystroke.

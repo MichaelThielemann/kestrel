@@ -4,13 +4,14 @@ A collection is a table plus its schema, its admin UI, and its CRUD API, all dec
 
 ## Define a collection
 
-Drop a file in `server/collections/` and default-export a `defineCollection(...)`, imported from
-`@michaelthielemann/kestrel-core`:
+Drop a file in `server/collections/` and default-export a `defineCollection(...)`. `defineCollection` is
+auto-imported in a Kestrel-based site; import it explicitly from `@michaelthielemann/kestrel-core` only
+outside a Kestrel app (e.g. standalone scripts, tests). This applies to the rest of Kestrel's server-side
+authoring API too (`buildCollection`, `definePipeline`, `defineFieldType`, etc.) — see
+[extending.md](./extending.md).
 
 ```ts
 // server/collections/products.ts
-import { defineCollection } from '@michaelthielemann/kestrel-core'
-
 export default defineCollection({
   name: 'products',
   mode: 'multi',          // 'single' for a singleton
@@ -188,8 +189,6 @@ explicitly and export the table:
 
 ```ts
 // server/collections/products.ts
-import { buildCollection, defineCollection } from '@michaelthielemann/kestrel-core'
-
 const built = buildCollection(defineCollection({ name: 'products', mode: 'multi', fields: { /* … */ } }))
 export const products = built.table   // import { products } in your own server code
 export default built                  // discovery accepts a built collection too

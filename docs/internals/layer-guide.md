@@ -17,7 +17,9 @@ auto-discovery Nuxt modules.
 semantics) → `layers/core/server/api/[...path].ts` → `packages/kestrel-core/src/server/utils/crud.ts` (a
 thin delegate over `runWrite`/`runRead`) → `utils/serialize-collection.ts`. Schema engine:
 `server/schema/{model,desired,introspect,diff,dialect,render-sqlite,sync}.ts`. Config:
-`server/utils/kestrel-config.ts` + `layers/core/modules/kestrel/index.ts`.
+`server/utils/kestrel-config.ts` + `layers/core/modules/kestrel/index.ts` (this module also
+registers Kestrel's authoring API — `defineCollection`, `definePipeline`, `defineFieldType`, etc. — as
+Nuxt/Nitro auto-imports, see `layers/core/modules/kestrel/auto-imports.ts`).
 
 **Gotchas:** singletons (`mode:'single'`) reject `create`/`update`/`remove` with 405 — use `updateOne`;
 populate runs only at `depth>0`; the `02.schema-sync` plugin only auto-DDLs in dev — production instead
