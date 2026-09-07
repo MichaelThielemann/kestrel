@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "settings.navigation",
+  "type": "array",
+  "items": { "$ref": "#/$defs/item" },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/item" } }
+      },
+      "required": ["label", "path"],
+      "additionalProperties": false
+    }
+  }
+}

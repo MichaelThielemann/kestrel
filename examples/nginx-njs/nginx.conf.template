@@ -1,0 +1,64 @@
+load_module modules/ngx_http_js_module.so;
+
+# `env` is a core (main-context) directive, not http-level: it must sit here,
+# before `events {}`, to pass REDIRECTS_URL through to process.env in the njs
+# VM (nginx otherwise strips all inherited env vars except TZ).
+env REDIRECTS_URL;
+
+error_log /dev/stderr warn;
+
+events {}
+
+http {
+  js_path "/etc/nginx/njs/";
+  js_import redirects from redirects.js;
+
+  # Shared across all worker processes; the js_periodic handlers below run on
+  # worker 0 only (nginx default) and write here, every worker reads from here.
+  js_shared_dict_zone zone=redirects:1m;
+
+  # ngx.fetch() needs an explicit resolver (it does not consult /etc/hosts).
+  # 127.0.0.11 is Docker's embedded DNS; adjust for your runtime (e.g. a
+  # cluster DNS address, or point REDIRECTS_URL at a literal IP to skip DNS).
+  resolver 127.0.0.11 valid=10s ipv6=off;
+
+  server {
+    listen 8080;
+
+    # Without this, nginx absolutises any relative redirect target using the
+    # inbound request's scheme/host - wrong behind a TLS-terminating edge
+    # (would emit "http://..." for a request that arrived as https). Emit
+    # Location exactly as authored in redirects.json instead.
+    absolute_redirect off;
+
+    # Named locations are never reachable by an external request; js_periodic
+    # (njs >= 0.8.1, "location" context only) runs here on a timer instead.
+    location @redirects_poll_cold {
+      # Cold-start burst: polls every 2s until the first well-formed response
+      # sets the "ready" flag in the shared dict, then fetchRulesCold becomes
+      # a no-op on every later run. js_periodic has no stop/restart API, so
+      # "fast only until ready" has to live in the handler, not the directive.
+      js_periodic redirects.fetchRulesCold interval=2s;
+    }
+
+    location @redirects_poll {
+      # REDIRECTS_INTERVAL_MS is substituted by envsubst at container start
+      # (see Dockerfile) - js_periodic's interval is fixed at config-load
+      # time, nginx directives are not re-read from process.env at runtime.
+      js_periodic redirects.fetchRules interval=${REDIRECTS_INTERVAL_MS}ms;
+    }
+
+    location / {
+      js_content redirects.redirect;
+    }
+
+    location @origin {
+      # proxy_pass with a literal hostname is resolved once, at config load;
+      # if the origin isn't in DNS yet at that point nginx refuses to start.
+      # Routing through a variable defers resolution to request time via the
+      # `resolver` directive above - the idiomatic fix for this nginx gotcha.
+      set $origin_upstream "${ORIGIN_UPSTREAM}";
+      proxy_pass http://$origin_upstream;
+    }
+  }
+}

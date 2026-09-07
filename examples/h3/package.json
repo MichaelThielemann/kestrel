@@ -1,0 +1,17 @@
+{
+  "name": "kestrel-example-h3",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node --disable-warning=ExperimentalWarning main.ts" },
+  "dependencies": {
+    "@michaelthielemann/kestrel": "workspace:*",
+    "@michaelthielemann/kestrel-h3": "workspace:*",
+    "@michaelthielemann/kestrel-events-inmemory": "workspace:*",
+    "@michaelthielemann/kestrel-persistence-sqlite": "workspace:*",
+    "@michaelthielemann/kestrel-authn-single": "workspace:*",
+    "@michaelthielemann/kestrel-authz-roles": "workspace:*",
+    "@michaelthielemann/kestrel-content-default": "workspace:*",
+    "@michaelthielemann/kestrel-site-default": "workspace:*",
+    "h3": "^1.15.11"
+  }
+}

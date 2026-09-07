@@ -1,0 +1,86 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/audit-persistence"
+    },
+    {
+      "path": "./packages/authn-multi"
+    },
+    {
+      "path": "./packages/authn-single"
+    },
+    {
+      "path": "./packages/authz-roles"
+    },
+    {
+      "path": "./packages/backup-blobstore"
+    },
+    {
+      "path": "./packages/blobstore-filesystem"
+    },
+    {
+      "path": "./packages/blobstore-s3"
+    },
+    {
+      "path": "./packages/content-default"
+    },
+    {
+      "path": "./packages/contracts"
+    },
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./packages/delivery-static"
+    },
+    {
+      "path": "./packages/events-inmemory"
+    },
+    {
+      "path": "./packages/h3"
+    },
+    {
+      "path": "./packages/images-default"
+    },
+    {
+      "path": "./packages/links-default"
+    },
+    {
+      "path": "./packages/media-default"
+    },
+    {
+      "path": "./packages/migrations-default"
+    },
+    {
+      "path": "./packages/openapi"
+    },
+    {
+      "path": "./packages/persistence-sqlite"
+    },
+    {
+      "path": "./packages/ratelimit-memory"
+    },
+    {
+      "path": "./packages/redirects-default"
+    },
+    {
+      "path": "./packages/references-default"
+    },
+    {
+      "path": "./packages/renderer-plain"
+    },
+    {
+      "path": "./packages/replication-sqlite"
+    },
+    {
+      "path": "./packages/sanitize-svg"
+    },
+    {
+      "path": "./packages/site-default"
+    },
+    {
+      "path": "./packages/validate-jsonschema"
+    }
+  ]
+}

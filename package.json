@@ -1,0 +1,26 @@
+{
+  "name": "kestrel-workspace",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "pnpm --filter kestrel-example-minimal start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:s3": "node scripts/s3-minio.mjs",
+    "test:contracts": "vitest run impl.test",
+    "build": "tsc -b tsconfig.build.json",
+    "clean": "rm -rf packages/*/dist packages/*/tsconfig.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.5.0",
+    "eslint": "^10.9.1",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.68.0",
+    "vitest": "^3.2.0"
+  }
+}
