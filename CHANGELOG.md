@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `replication-sqlite`: `replication.snapshot` and `replication.prepareRestore` called before the
+  first sync of a process no longer ship WAL segments into a `gen/null/` generation (the frames are
+  covered by the snapshot the call takes); `replication.listPoints`, retention and restore ignore
+  objects under a generation that is not a timestamp, so stray `gen/null/` segments written by
+  earlier versions are invisible — delete them from the blobstore by hand.
 ## 5.0.3 – 2026-09-07
 
 - `core`: `http.proxyHops` (default 1) and `http.trustedHeader`. With `trustProxy` the client address

@@ -89,7 +89,7 @@ async function listPoints(blobs: Blobstore, prefix: string): Promise<Result<Poin
   if (isErr(list)) return list;
   const out: Point[] = [];
   for (const info of list.value) {
-    const m = /gen\/([^/]+)\/(snapshot\.db|wal\/(\d+)-(\d+)-([0-9TZ]+)\.wal)$/.exec(info.key);
+    const m = /gen\/(\d{8}T\d{6}Z)\/(snapshot\.db|wal\/(\d+)-(\d+)-([0-9TZ]+)\.wal)$/.exec(info.key);
     if (!m) continue;
     const generation = m[1] as string;
     if (m[2] === "snapshot.db") out.push({ generation, at: unstamp(generation), kind: "snapshot", key: info.key });
@@ -149,8 +149,10 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     return ok({ generation: gen, bytes: data.byteLength });
   };
 
+  // Frames written before this process took its first snapshot are covered by that snapshot; without a
+  // generation there is nowhere to ship them to.
   const shipNewFrames = async (): Promise<Result<{ bytes: number; frames: number }, BlobstoreError>> => {
-    if (!existsSync(walFile)) return ok({ bytes: 0, frames: 0 });
+    if (generation === null || !existsSync(walFile)) return ok({ bytes: 0, frames: 0 });
     const wal = new Uint8Array(readFileSync(walFile));
     const current = parseWalHeader(wal);
     if (!current) return ok({ bytes: 0, frames: 0 });
