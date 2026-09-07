@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 5.0.1 – 2026-09-07
+
+- `validate-jsonschema`: a `schemas` entry may be the JSON Schema object itself instead of a file
+  path, so a bundled build needs no schema files on disk. Inline schemas compile, sanitize and
+  report exactly like file schemas; `watch` applies to files only.
+
 ## 5.0.0 – 2026-09-07
 
 5.0.0 is a rewrite that replaces the 4.x line of `@michaelthielemann/kestrel` with

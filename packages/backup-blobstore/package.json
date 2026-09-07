@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-backup-blobstore",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "description": "Backs up and restores a local file (e.g. the SQLite database) via blobstore@1.",
   "type": "module",
   "license": "Apache-2.0",
