@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-authn-multi",
-  "version": "5.0.2",
+  "version": "5.0.3",
   "description": "authn@1 with users and sessions stored via persistence@1; user management steps.",
   "type": "module",
   "license": "Apache-2.0",

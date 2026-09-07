@@ -2,15 +2,22 @@
 
 ## Unreleased
 
+## 5.0.3 – 2026-09-07
+
 - `core`: `http.proxyHops` (default 1) and `http.trustedHeader`. With `trustProxy` the client address
   is now the `X-Forwarded-For` entry counted `proxyHops` from the right (the end proxies append to)
   instead of the spoofable left end, and a chain shorter than `proxyHops` yields no address; a
   `trustedHeader` names the client outright and a missing header yields no address. Without an
   address `http.allow` refuses the request and `ctx.ip` is absent. `clientIp(req, options)` takes an
   options object (the boolean form still works).
-- `h3`: `createKestrelHandler(kestrel, { trustProxy, proxyHops, trustedHeader })` derives `ctx.ip`
-  through the core's `clientIp()` with the same precedence, instead of h3's left-most
-  `X-Forwarded-For` entry.
+- `h3`: new handler options `proxyHops` and `trustedHeader` next to `trustProxy`;
+  `createKestrelHandler` now derives `ctx.ip` through the core's `clientIp()` with the same
+  precedence (trusted header, then the `X-Forwarded-For` entry `proxyHops` from the right, then
+  the socket peer) instead of h3's left-most `X-Forwarded-For` entry. Behind a proxy that appends
+  to the chain, `ratelimit.check` therefore buckets per real client again.
+- `ratelimit-memory`: a request without a derivable client address is counted in one shared key
+  `"unknown"` per bucket (documented; the behaviour itself is unchanged).
+
 ## 5.0.2 – 2026-09-07
 
 5.0.1 was tagged but never published to npm; this release carries both changes.
