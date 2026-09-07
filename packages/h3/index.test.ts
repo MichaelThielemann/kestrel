@@ -93,6 +93,22 @@ describe("kestrel-h3", () => {
     expect(((await (await fetch(`${base}/site/en/about`)).json()) as { params: unknown }).params).toEqual({ path: "en/about" });
   });
 
+  it("derives the client ip with the core policy: trusted header, then X-Forwarded-For from the right, then the peer", async () => {
+    const ipVia = async (options: Parameters<typeof createKestrelHandler>[1], headers: Record<string, string>) => {
+      await close?.();
+      await kestrel?.stop();
+      const base = await serve(options);
+      return ((await (await fetch(`${base}/echo/1`, { headers })).json()) as { ip: string | null }).ip;
+    };
+    expect(await ipVia({}, { "x-forwarded-for": "203.0.113.9" })).toBe("127.0.0.1");
+    expect(await ipVia({ trustProxy: true }, { "x-forwarded-for": "203.0.113.9, 10.0.0.1" })).toBe("10.0.0.1");
+    expect(await ipVia({ trustProxy: true, proxyHops: 2 }, { "x-forwarded-for": "203.0.113.9, 10.0.0.1" })).toBe("203.0.113.9");
+    expect(await ipVia({ trustProxy: true, proxyHops: 3 }, { "x-forwarded-for": "203.0.113.9, 10.0.0.1" })).toBeNull();
+    expect(await ipVia({ trustProxy: true }, {})).toBeNull();
+    expect(await ipVia({ trustedHeader: "Trusted-Client-IP", trustProxy: true }, { "trusted-client-ip": "198.51.100.7", "x-forwarded-for": "203.0.113.9" })).toBe("198.51.100.7");
+    expect(await ipVia({ trustedHeader: "Trusted-Client-IP" }, { "x-forwarded-for": "203.0.113.9" })).toBeNull();
+  });
+
   it("groups repeated query keys into arrays, keeps single values as strings", async () => {
     const base = await serve();
     const res = await fetch(`${base}/echo/1?tag=a&tag=b`);

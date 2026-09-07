@@ -8,6 +8,9 @@
   `trustedHeader` names the client outright and a missing header yields no address. Without an
   address `http.allow` refuses the request and `ctx.ip` is absent. `clientIp(req, options)` takes an
   options object (the boolean form still works).
+- `h3`: `createKestrelHandler(kestrel, { trustProxy, proxyHops, trustedHeader })` derives `ctx.ip`
+  through the core's `clientIp()` with the same precedence, instead of h3's left-most
+  `X-Forwarded-For` entry.
 ## 5.0.2 – 2026-09-07
 
 5.0.1 was tagged but never published to npm; this release carries both changes.

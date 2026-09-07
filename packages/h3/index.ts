@@ -1,10 +1,9 @@
-import { eventHandler, getRequestHeaders, getRequestIP, getRequestURL, readRawBody, setResponseHeaders, setResponseStatus, type EventHandler, type H3Event } from "h3";
-import { BodyTooLarge, errorResponse, matchRoute, parseQuery, parseRequestBody, requestIdOf, responseForRun, type ContextInput, type HttpResponse, type Kestrel } from "@michaelthielemann/kestrel";
+import { eventHandler, getRequestHeaders, getRequestURL, readRawBody, setResponseHeaders, setResponseStatus, type EventHandler, type H3Event } from "h3";
+import { BodyTooLarge, clientIp, errorResponse, matchRoute, parseQuery, parseRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type HttpResponse, type Kestrel } from "@michaelthielemann/kestrel";
 
-export interface KestrelHandlerOptions {
+export interface KestrelHandlerOptions extends ClientIpOptions {
   mountPath?: string;
   maxBodyBytes?: number;
-  trustProxy?: boolean;
   inlineTypes?: readonly string[];
 }
 
@@ -27,6 +26,7 @@ async function respond(event: H3Event, response: HttpResponse): Promise<Buffer |
 export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHandlerOptions = {}): EventHandler {
   const mountPath = (options.mountPath ?? "").replace(/\/+$/, "");
   const maxBodyBytes = options.maxBodyBytes ?? 10 * 1024 * 1024;
+  const peer: ClientIpOptions = { trustProxy: options.trustProxy ?? false, proxyHops: options.proxyHops ?? 1, ...(options.trustedHeader === undefined ? {} : { trustedHeader: options.trustedHeader }) };
 
   return eventHandler(async (event) => {
     const url = getRequestURL(event);
@@ -61,7 +61,7 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
       headers,
       files: parsed.files,
     };
-    const ip = getRequestIP(event, { xForwardedFor: options.trustProxy ?? false });
+    const ip = clientIp(event.node.req, peer);
     if (ip !== undefined) input.ip = ip;
 
     return respond(event, responseForRun(await kestrel.run(match.route.pipeline, input), options.inlineTypes));
