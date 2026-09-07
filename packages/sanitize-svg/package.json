@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-sanitize-svg",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "Step sanitize.svg: strips scripts, event handlers and external references from uploaded SVG files.",
   "type": "module",
   "license": "Apache-2.0",

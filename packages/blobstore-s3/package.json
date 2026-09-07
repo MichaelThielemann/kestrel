@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-blobstore-s3",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "blobstore@1 on Amazon S3 or any S3-compatible store.",
   "type": "module",
   "license": "Apache-2.0",

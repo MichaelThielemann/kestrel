@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-replication-sqlite",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "Continuous SQLite replication to blobstore@1 (snapshots + WAL segments), point-in-time restore, retention.",
   "type": "module",
   "license": "Apache-2.0",

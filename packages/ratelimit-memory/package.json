@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-ratelimit-memory",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "Step ratelimit.check:<bucket>: fixed-window rate limiting per client ip, in memory.",
   "type": "module",
   "license": "Apache-2.0",
