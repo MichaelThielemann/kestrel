@@ -127,6 +127,24 @@ describe("replication/sqlite", () => {
     expect(expectOk(await repl.sync()).frames).toBe(0);
   });
 
+  it("a snapshot or restore before the first sync never ships segments into a null generation", async () => {
+    const { repl, blobs, insert, clock, restoreResult } = setup();
+    insert(3);
+    expectErr(await repl.prepareRestore({}), "NOT_FOUND");
+    const snap = expectOk(await repl.snapshot());
+    expect(snap.generation).toMatch(/^\d{8}T\d{6}Z$/);
+    expect([...blobs.blobs.keys()].filter((k) => k.includes("/gen/null/"))).toEqual([]);
+    expect([...blobs.blobs.keys()]).toEqual([`replica/gen/${snap.generation}/snapshot.db`]);
+    clock.advance(30_000);
+    insert(2);
+    expectOk(await repl.sync());
+    expect([...blobs.blobs.keys()].filter((k) => k.includes("/wal/")).every((k) => k.startsWith(`replica/gen/${snap.generation}/wal/`))).toBe(true);
+    expect((await restoreResult({})).ok).toBe(true);
+
+    blobs.blobs.set("replica/gen/null/wal/000001-000000-20260101T000000Z.wal", { data: new Uint8Array([1]), contentType: "application/octet-stream" });
+    expect(expectOk(await repl.points()).some((p) => p.generation === "null")).toBe(false);
+  });
+
   it("restores to a point in time between segments", async () => {
     const { repl, insert, restoredCount, restoreResult, clock } = setup();
     insert(1);
