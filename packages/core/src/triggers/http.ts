@@ -238,21 +238,36 @@ export interface HttpTimeouts {
   keepAliveMs?: number;
 }
 
-export interface HttpOptions {
+export interface ClientIpOptions {
+  trustProxy?: boolean;
+  proxyHops?: number;
+  trustedHeader?: string;
+}
+
+export interface HttpOptions extends ClientIpOptions {
   allow?: readonly string[];
   corsOrigin?: string;
   maxBodyBytes?: number;
-  trustProxy?: boolean;
   healthPath?: string | null;
   inlineTypes?: readonly string[];
   timeouts?: HttpTimeouts;
 }
 
-export function clientIp(req: IncomingMessage, trustProxy: boolean): string | undefined {
+function headerValues(value: string | string[] | undefined): string[] {
+  return (Array.isArray(value) ? value : value === undefined ? [] : [value])
+    .flatMap((v) => v.split(","))
+    .map((v) => v.trim())
+    .filter((v) => v !== "");
+}
+
+// A proxy appends the peer it saw to X-Forwarded-For, so only the entries counted from the right are
+// trustworthy; the left end is whatever the client sent. A trusted header names the client outright.
+export function clientIp(req: IncomingMessage, options: boolean | ClientIpOptions = {}): string | undefined {
+  const { trustProxy = false, proxyHops = 1, trustedHeader } = typeof options === "boolean" ? { trustProxy: options } : options;
+  if (trustedHeader !== undefined) return headerValues(req.headers[trustedHeader.toLowerCase()])[0];
   if (trustProxy) {
-    const forwarded = req.headers["x-forwarded-for"];
-    const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim();
-    if (first) return first;
+    const chain = headerValues(req.headers["x-forwarded-for"]);
+    return chain.length >= proxyHops ? chain[chain.length - proxyHops] : undefined;
   }
   return req.socket.remoteAddress ?? undefined;
 }
@@ -261,9 +276,9 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
   const started = Date.now();
   const healthPath = options.healthPath === undefined ? "/health" : options.healthPath;
   const allowlist = createAllowlist(options.allow ?? []);
-  const trustProxy = options.trustProxy ?? false;
+  const peer: ClientIpOptions = { trustProxy: options.trustProxy ?? false, proxyHops: options.proxyHops ?? 1, ...(options.trustedHeader === undefined ? {} : { trustedHeader: options.trustedHeader }) };
   const server = createServer((req, res) => {
-    if (allowlist !== null && !allowlist.check(clientIp(req, trustProxy))) {
+    if (allowlist !== null && !allowlist.check(clientIp(req, peer))) {
       sendError(res, 403, "forbidden", requestIdOf(req.headers["x-request-id"]));
       return;
     }
@@ -310,7 +325,7 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers[k] = v;
     const input: ContextInput = { trigger: { kind: "http", name: `${req.method} ${url.pathname}` }, payload, params: match.params, headers, files: body.files };
-    const ip = clientIp(req, trustProxy);
+    const ip = clientIp(req, peer);
     if (ip !== undefined) input.ip = ip;
 
     const result = await run(match.route.pipeline, input);

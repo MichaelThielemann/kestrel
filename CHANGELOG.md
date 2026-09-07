@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `core`: `http.proxyHops` (default 1) and `http.trustedHeader`. With `trustProxy` the client address
+  is now the `X-Forwarded-For` entry counted `proxyHops` from the right (the end proxies append to)
+  instead of the spoofable left end, and a chain shorter than `proxyHops` yields no address; a
+  `trustedHeader` names the client outright and a missing header yields no address. Without an
+  address `http.allow` refuses the request and `ctx.ip` is absent. `clientIp(req, options)` takes an
+  options object (the boolean form still works).
 ## 5.0.2 – 2026-09-07
 
 5.0.1 was tagged but never published to npm; this release carries both changes.

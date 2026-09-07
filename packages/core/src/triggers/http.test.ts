@@ -177,9 +177,20 @@ describe("http server", () => {
     await close?.();
 
     base = await serve(ok, { allow: ["203.0.113.0/24"], trustProxy: true });
-    expect((await fetch(`${base}/echo`, { headers: { "x-forwarded-for": "203.0.113.9, 10.0.0.1" } })).status).toBe(200);
-    expect((await fetch(`${base}/echo`, { headers: { "x-forwarded-for": "198.51.100.1" } })).status).toBe(403);
+    expect((await fetch(`${base}/echo`, { headers: { "x-forwarded-for": "198.51.100.1, 203.0.113.9" } })).status).toBe(200);
+    expect((await fetch(`${base}/echo`, { headers: { "x-forwarded-for": "203.0.113.9, 198.51.100.1" } })).status).toBe(403);
     expect((await fetch(`${base}/echo`)).status).toBe(403);
+    await close?.();
+
+    base = await serve(ok, { allow: ["203.0.113.0/24"], trustProxy: true, proxyHops: 2 });
+    expect((await fetch(`${base}/echo`, { headers: { "x-forwarded-for": "203.0.113.9, 10.0.0.1" } })).status).toBe(200);
+    expect((await fetch(`${base}/echo`, { headers: { "x-forwarded-for": "203.0.113.9" } })).status).toBe(403);
+    await close?.();
+
+    base = await serve(ok, { allow: ["203.0.113.0/24"], trustedHeader: "Trusted-Client-IP", trustProxy: true });
+    expect((await fetch(`${base}/echo`, { headers: { "trusted-client-ip": "203.0.113.9" } })).status).toBe(200);
+    expect((await fetch(`${base}/echo`, { headers: { "trusted-client-ip": "198.51.100.1", "x-forwarded-for": "203.0.113.9" } })).status).toBe(403);
+    expect((await fetch(`${base}/echo`, { headers: { "x-forwarded-for": "203.0.113.9" } })).status).toBe(403);
     await close?.();
 
     base = await serve(ok, { allow: ["::ffff:127.0.0.1"], corsOrigin: "https://example.org" });
