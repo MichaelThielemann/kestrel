@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-references-default",
-  "version": "5.0.2",
+  "version": "5.0.3",
   "description": "Referential integrity for content ref fields: existence on write, delete protection.",
   "type": "module",
   "license": "Apache-2.0",
