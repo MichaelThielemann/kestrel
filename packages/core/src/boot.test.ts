@@ -380,14 +380,21 @@ describe("boot", () => {
       describe: () => ({ record: { summary: "record the client ip", reads: ["ip"], writes: ["result"] } }),
     });
     const ipPipeline = definePipeline({ name: "ip", steps: ["spy.record"] });
-    const config = (trustProxy: boolean) => ({ modules: [{ use: "./spy", config: {} }], triggers: [{ http: "GET /ip", pipeline: "ip" }], http: { port: 0, trustProxy } });
-    kestrel = await boot({ config: config(false), modules: [spy], pipelines: [ipPipeline], logger: silentLogger });
-    let base = `http://127.0.0.1:${(await kestrel.start()).http?.port ?? 0}`;
-    expect(await (await fetch(`${base}/ip`, { headers: { "x-forwarded-for": "203.0.113.9" } })).json()).toBe("127.0.0.1");
-    await kestrel.stop();
-    kestrel = await boot({ config: config(true), modules: [spy], pipelines: [ipPipeline], logger: silentLogger });
-    base = `http://127.0.0.1:${(await kestrel.start()).http?.port ?? 0}`;
-    expect(await (await fetch(`${base}/ip`, { headers: { "x-forwarded-for": "203.0.113.9, 10.0.0.1" } })).json()).toBe("203.0.113.9");
+    const config = (http: Record<string, unknown>) => ({ modules: [{ use: "./spy", config: {} }], triggers: [{ http: "GET /ip", pipeline: "ip" }], http: { port: 0, ...http } });
+    const ipVia = async (http: Record<string, unknown>, headers: Record<string, string>) => {
+      await kestrel?.stop();
+      kestrel = await boot({ config: config(http), modules: [spy], pipelines: [ipPipeline], logger: silentLogger });
+      const base = `http://127.0.0.1:${(await kestrel.start()).http?.port ?? 0}`;
+      return (await fetch(`${base}/ip`, { headers })).json();
+    };
+    expect(await ipVia({ trustProxy: false }, { "x-forwarded-for": "203.0.113.9" })).toBe("127.0.0.1");
+    expect(await ipVia({ trustProxy: true }, { "x-forwarded-for": "203.0.113.9, 10.0.0.1" })).toBe("10.0.0.1");
+    expect(await ipVia({ trustProxy: true, proxyHops: 2 }, { "x-forwarded-for": "203.0.113.9, 10.0.0.1" })).toBe("203.0.113.9");
+    expect(await ipVia({ trustProxy: true, proxyHops: 3 }, { "x-forwarded-for": "203.0.113.9, 10.0.0.1" })).toBeNull();
+    expect(await ipVia({ trustProxy: true }, {})).toBeNull();
+    expect(await ipVia({ trustedHeader: "Trusted-Client-IP" }, { "trusted-client-ip": "198.51.100.7", "x-forwarded-for": "203.0.113.9" })).toBe("198.51.100.7");
+    expect(await ipVia({ trustedHeader: "Trusted-Client-IP", trustProxy: true }, { "x-forwarded-for": "203.0.113.9" })).toBeNull();
+    await expect(boot({ config: config({ proxyHops: 0 }), modules: [spy], pipelines: [ipPipeline], logger: silentLogger })).rejects.toThrow(/proxyHops/);
   });
 
   it("rejects an http.allow entry that is neither an address nor a CIDR range at boot", async () => {

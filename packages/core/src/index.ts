@@ -1,5 +1,5 @@
 export { boot, type Kestrel, type BootInput, type Triggers } from "./boot.ts";
-export { matchRoute, routePattern, parseRequestBody, parseQuery, buildResponse, responseForRun, errorResponse, clientIp, BodyTooLarge, type Route, type ParsedBody, type HttpResponse, type HttpTimeouts, type ResponseMeta } from "./triggers/http.ts";
+export { matchRoute, routePattern, parseRequestBody, parseQuery, buildResponse, responseForRun, errorResponse, clientIp, BodyTooLarge, type Route, type ParsedBody, type HttpResponse, type HttpTimeouts, type ClientIpOptions, type ResponseMeta } from "./triggers/http.ts";
 export { defineConfig, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
 export { defineContract, type Contract } from "./defineContract.ts";
 export { defineModule, type ModuleDefinition, type ModuleInput, type ModuleTriggers, type Deps, type EventEntry, type ContextPath, type JsonSchema, type StepDescription, type StepDescriptions } from "./defineModule.ts";

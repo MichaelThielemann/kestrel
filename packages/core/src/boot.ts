@@ -266,6 +266,8 @@ export async function boot(input: BootInput): Promise<Kestrel> {
           server = createHttpServer(routes, run, logger, {
             maxBodyBytes: http.maxBodyBytes,
             trustProxy: http.trustProxy,
+            proxyHops: http.proxyHops,
+            ...(http.trustedHeader === undefined ? {} : { trustedHeader: http.trustedHeader }),
             allow: http.allow,
             healthPath: http.healthPath,
             inlineTypes: http.inlineTypes,
