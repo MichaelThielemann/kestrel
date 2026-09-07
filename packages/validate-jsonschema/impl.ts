@@ -10,7 +10,7 @@ import { sanitize, sanitizeBySchema } from "./sanitize.ts";
 export type { Problem, Validation };
 
 export interface Config {
-  schemas: Record<string, string>;
+  schemas: Record<string, string | Record<string, unknown>>;
   maxDepth: number;
   maxNodes: number;
   watch?: boolean;
@@ -100,10 +100,12 @@ function newAjv(): Ajv2020 {
   return ajv;
 }
 
+function compileSchema(schema: Record<string, unknown>): { schema: Record<string, unknown>; fn: ValidateFunction } {
+  return { schema, fn: newAjv().compile(withDiscriminators(schema) as object) };
+}
+
 async function loadSchema(path: string): Promise<{ schema: Record<string, unknown>; fn: ValidateFunction }> {
-  const schema = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
-  const fn = newAjv().compile(withDiscriminators(schema) as object);
-  return { schema, fn };
+  return compileSchema(JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>);
 }
 
 const WATCH_DEBOUNCE_MS = 100;
@@ -114,9 +116,19 @@ export async function createValidator(config: Config, root: string, logger: Logg
   const raw = new Map<string, Record<string, unknown>>();
   const paths = new Map<string, string>();
 
-  for (const [target, file] of Object.entries(config.schemas)) {
+  for (const [target, source] of Object.entries(config.schemas)) {
     if (!/^[a-z][a-z0-9_]*\.[a-z][A-Za-z0-9_]*$/.test(target)) throw new SchemaLoadError(`validate/jsonschema: target "${target}" must look like "<type>.<field>"`);
-    const path = resolve(root, file);
+    if (typeof source !== "string") {
+      try {
+        const inline = compileSchema(structuredClone(source));
+        raw.set(target, inline.schema);
+        compiled.set(target, inline.fn);
+      } catch (err) {
+        throw new SchemaLoadError(`validate/jsonschema: invalid inline schema for ${target}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      continue;
+    }
+    const path = resolve(root, source);
     paths.set(target, path);
     let loaded: { schema: Record<string, unknown>; fn: ValidateFunction };
     try {

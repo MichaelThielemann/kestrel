@@ -297,3 +297,38 @@ describe("validate/jsonschema", () => {
     }
   });
 });
+
+describe("inline schemas", () => {
+  it("validates and sanitizes an inline schema exactly like a file schema", async () => {
+    const file = join(dir, "inline-twin.json");
+    writeFileSync(file, JSON.stringify(blocks));
+    const v = await createValidator({ schemas: { "pages.body": blocks, "posts.body": file }, maxDepth: 32, maxNodes: 20_000 }, dir, stubLogger());
+    expect(v.targets()).toEqual(["pages.body", "posts.body"]);
+    const bad = { blocks: [{ type: "hero", title: "" }, { type: "nope" }] };
+    expect(v.check("pages.body", bad)).toEqual(v.check("posts.body", bad));
+    expect(v.check("pages.body", bad).ok).toBe(false);
+    expect(v.check("pages.body", { blocks: [{ type: "hero", title: "Hi" }] }).ok).toBe(true);
+    expect(v.check("pages.body", { blocks: [null] }).problems).toEqual(v.check("posts.body", { blocks: [null] }).problems);
+    const dirty = { blocks: [{ type: "text", html: '<p onclick="x()">Hi <script>1</script></p>' }] };
+    expect(v.sanitize("pages.body", dirty)).toEqual(v.sanitize("posts.body", dirty));
+    expect(v.sanitize("pages.body", dirty)).toEqual({ blocks: [{ type: "text", html: "<p>Hi </p>" }] });
+    v.close();
+  });
+
+  it("does not let the caller's later edits leak into the compiled schema", async () => {
+    const schema: Record<string, unknown> = { type: "object", properties: { n: { type: "number" } }, additionalProperties: false };
+    const v = await createValidator({ schemas: { "pages.meta": schema }, maxDepth: 32, maxNodes: 20_000 }, dir, stubLogger());
+    (schema.properties as Record<string, unknown>).n = { type: "string" };
+    expect(v.check("pages.meta", { n: 1 }).ok).toBe(true);
+    v.close();
+  });
+
+  it("rejects an invalid inline schema at boot and ignores inline entries when watching", async () => {
+    await expect(createValidator({ schemas: { "pages.body": { type: "nonsense" } }, maxDepth: 32, maxNodes: 20_000 }, dir, stubLogger())).rejects.toThrow(/invalid inline schema for pages.body/);
+    const logger = stubLogger();
+    const v = await createValidator({ schemas: { "pages.body": blocks }, maxDepth: 32, maxNodes: 20_000, watch: true }, dir, logger);
+    expect(v.targets()).toEqual(["pages.body"]);
+    expect(logger.errors).toEqual([]);
+    v.close();
+  });
+});
