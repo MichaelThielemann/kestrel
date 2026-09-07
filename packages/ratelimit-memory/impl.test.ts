@@ -52,4 +52,15 @@ describe("ratelimit/memory", () => {
     expect(second.error.retryable).toBe(true);
     expect(second.error.details).toMatchObject({ retryAfterSeconds: 60 });
   });
+
+  it("counts requests without a client ip in one shared bucket key instead of skipping them", async () => {
+    const deps: Deps = { get: () => { throw new Error("not needed"); }, find: () => undefined, logger: { step() {}, info() {}, error() {} }, root: process.cwd() };
+    const instance = await module.setup(module.configSchema.parse({ buckets: { login: { limit: 1, windowSeconds: 60 } } }), deps);
+    const check = module.steps!(instance).check("login");
+    expect(isErr(await check(createContext({ trigger: { kind: "http", name: "t" } })))).toBe(false);
+    const second = await check(createContext({ trigger: { kind: "cron", name: "t" } }));
+    if (!isErr(second)) throw new Error("expected an Err");
+    expect(second.error.code).toBe("RATE_LIMITED");
+    expect(isErr(await check(createContext({ trigger: { kind: "http", name: "t" }, ip: "1.2.3.4" })))).toBe(false);
+  });
 });
