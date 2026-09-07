@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-images-default",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "Image variants: size registry, generation on upload, resumable sync.",
   "type": "module",
   "license": "Apache-2.0",

@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-media-default",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "Media uploads: files in blobstore@1, metadata in persistence@1.",
   "type": "module",
   "license": "Apache-2.0",

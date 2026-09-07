@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-renderer-plain",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "renderer@1 reference: a plain HTML page from a document (title, fields, JSON). For examples and tests.",
   "type": "module",
   "license": "Apache-2.0",

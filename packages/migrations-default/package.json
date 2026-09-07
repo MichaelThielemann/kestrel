@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-migrations-default",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "migrations@1: applies content migrations once, per document and stored locale, with a ledger.",
   "type": "module",
   "license": "Apache-2.0",

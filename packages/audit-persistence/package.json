@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-audit-persistence",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "Step audit.record: writes audit_entries via persistence@1.",
   "type": "module",
   "license": "Apache-2.0",
