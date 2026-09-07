@@ -26,4 +26,11 @@ describe("validate/jsonschema module", () => {
     expect(dir).not.toBe(process.cwd());
     instance.close();
   });
+
+  it("accepts an inline schema object next to a path", () => {
+    const config = configSchema.parse({ schemas: { "pages.title": "blocks.json", "settings.navigation": { type: "array" } } });
+    expect(config.schemas).toEqual({ "pages.title": "blocks.json", "settings.navigation": { type: "array" } });
+    expect(() => configSchema.parse({ schemas: { "pages.title": "" } })).toThrow();
+    expect(() => configSchema.parse({ schemas: { "pages.title": 3 } })).toThrow();
+  });
 });

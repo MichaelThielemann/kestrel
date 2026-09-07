@@ -1,10 +1,12 @@
 # validate/jsonschema
 Provides `validate@1`. Validates one payload field against a JSON Schema (draft 2020-12, `ajv` + `ajv-formats`).
-Config: `schemas: { "pages.body": "./schemas/blocks.json" }` (paths resolve against `deps.root`,
-the directory of the loaded `kestrel.config` — an absolute path also works),
-`maxDepth` (32), `maxNodes` (20000), `watch` (boolean, default `false`). Schemas are read and
-compiled at boot – unreadable or invalid files stop the boot. With `watch: true`, each schema file
-is watched (`fs.watch`, debounced ~100ms) and reloaded on change: a broken update (unreadable,
+Config: `schemas: { "pages.body": "./schemas/blocks.json", "settings.navigation": { type: "array", … } }` —
+a string is a path resolved against `deps.root` (the directory of the loaded `kestrel.config`; an
+absolute path also works), an object is the JSON Schema itself (for bundled builds that carry no
+schema files). Both forms compile, sanitize and report identically. Schemas are read and
+compiled at boot – unreadable or invalid files and invalid inline schemas stop the boot. With
+`watch: true`, each schema *file* is watched (`fs.watch`, debounced ~100ms; inline schemas have nothing to
+watch) and reloaded on change: a broken update (unreadable,
 invalid JSON, or a schema ajv rejects) is reported through the Kestrel logger at level `error`
 and the previous, still-working schema stays in effect – a broken schema file never stops the process.
 Recommended on for standalone dev (`pnpm start`), off in production. Step `validate.check:<type>.<field>` before `content.create/update`: `VALIDATION` (400) with
