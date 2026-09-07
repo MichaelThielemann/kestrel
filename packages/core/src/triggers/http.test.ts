@@ -162,6 +162,31 @@ describe("http server", () => {
 
   const ok: Runner = async () => ({ runId: "run-1", status: 200, result: { ok: true } });
 
+  it("closes the server to addresses outside http.allow, trusting X-Forwarded-For only with trustProxy", async () => {
+    let base = await serve(ok, { allow: ["127.0.0.1"] });
+    expect((await fetch(`${base}/echo`)).status).toBe(200);
+    expect((await fetch(`${base}/health`)).status).toBe(200);
+    await close?.();
+
+    base = await serve(ok, { allow: ["203.0.113.0/24"] });
+    const denied = await fetch(`${base}/echo`, { headers: { "x-forwarded-for": "203.0.113.9", "x-request-id": "req-7" } });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: "forbidden", code: "FORBIDDEN", retryable: false, runId: expect.any(String) as string });
+    expect(denied.headers.get("x-request-id")).toBe("req-7");
+    expect((await fetch(`${base}/health`)).status).toBe(403);
+    await close?.();
+
+    base = await serve(ok, { allow: ["203.0.113.0/24"], trustProxy: true });
+    expect((await fetch(`${base}/echo`, { headers: { "x-forwarded-for": "203.0.113.9, 10.0.0.1" } })).status).toBe(200);
+    expect((await fetch(`${base}/echo`, { headers: { "x-forwarded-for": "198.51.100.1" } })).status).toBe(403);
+    expect((await fetch(`${base}/echo`)).status).toBe(403);
+    await close?.();
+
+    base = await serve(ok, { allow: ["::ffff:127.0.0.1"], corsOrigin: "https://example.org" });
+    expect((await fetch(`${base}/echo`, { method: "OPTIONS" })).status).toBe(204);
+    expect(() => createHttpServer([], ok, silentLogger, { allow: ["example.org"] })).toThrow(/invalid entry "example.org"/);
+  });
+
   it("applies the configured server timeouts", async () => {
     const server = createHttpServer([], ok, silentLogger, { timeouts: { requestMs: 1234, headersMs: 567, keepAliveMs: 89 } });
     expect([server.requestTimeout, server.headersTimeout, server.keepAliveTimeout]).toEqual([1234, 567, 89]);

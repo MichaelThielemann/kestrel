@@ -5,6 +5,7 @@ import { isBinaryResult, requestIdOf, type ContextInput, type UploadedFile } fro
 import type { CoreCode } from "../errors.ts";
 import type { Logger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
+import { createAllowlist } from "./allowlist.ts";
 
 export interface Route {
   method: string;
@@ -195,6 +196,7 @@ export function responseForRun(result: RunResult, extraInline: readonly string[]
 /** Fixed code for errors raised before a pipeline runs, where there is no KestrelError to read one from. */
 const EDGE_CODE_BY_STATUS: Readonly<Record<number, CoreCode>> = {
   400: "VALIDATION",
+  403: "FORBIDDEN",
   404: "NOT_FOUND",
   413: "PAYLOAD_TOO_LARGE",
   500: "INTERNAL",
@@ -237,6 +239,7 @@ export interface HttpTimeouts {
 }
 
 export interface HttpOptions {
+  allow?: readonly string[];
   corsOrigin?: string;
   maxBodyBytes?: number;
   trustProxy?: boolean;
@@ -257,7 +260,13 @@ export function clientIp(req: IncomingMessage, trustProxy: boolean): string | un
 export function createHttpServer(routes: readonly Route[], run: Runner, logger: Logger, options: HttpOptions = {}): Server {
   const started = Date.now();
   const healthPath = options.healthPath === undefined ? "/health" : options.healthPath;
+  const allowlist = createAllowlist(options.allow ?? []);
+  const trustProxy = options.trustProxy ?? false;
   const server = createServer((req, res) => {
+    if (allowlist !== null && !allowlist.check(clientIp(req, trustProxy))) {
+      sendError(res, 403, "forbidden", requestIdOf(req.headers["x-request-id"]));
+      return;
+    }
     if (options.corsOrigin !== undefined) {
       res.setHeader("access-control-allow-origin", options.corsOrigin);
       res.setHeader("access-control-allow-headers", "content-type, authorization");
@@ -301,7 +310,7 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers[k] = v;
     const input: ContextInput = { trigger: { kind: "http", name: `${req.method} ${url.pathname}` }, payload, params: match.params, headers, files: body.files };
-    const ip = clientIp(req, options.trustProxy ?? false);
+    const ip = clientIp(req, trustProxy);
     if (ip !== undefined) input.ip = ip;
 
     const result = await run(match.route.pipeline, input);

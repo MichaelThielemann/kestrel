@@ -20,6 +20,7 @@ export const configSchema = z
         corsOrigin: z.string().min(1).optional(),
         maxBodyBytes: z.number().int().positive().default(10 * 1024 * 1024),
         trustProxy: z.boolean().default(false),
+            allow: z.array(z.string().min(1)).default([]),
             healthPath: z.string().regex(/^\/\S*$/).nullable().default("/health"),
             inlineTypes: z.array(z.string().min(1)).default([]),
             timeouts: z

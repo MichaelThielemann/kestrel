@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `core`: `http.allow` — a list of IPv4/IPv6 addresses or CIDR ranges the standalone HTTP server
+  answers at all; every other client gets `403 forbidden` before routing (health and CORS preflight
+  included). Empty or absent keeps the server open; the peer address is the socket's, or the first
+  `X-Forwarded-For` entry with `http.trustProxy`; IPv4-mapped IPv6 peers are checked as IPv4. An
+  entry that is neither an address nor a CIDR range is a boot error naming the entry.
 ## 5.0.1 – 2026-09-07
 
 - `validate-jsonschema`: a `schemas` entry may be the JSON Schema object itself instead of a file

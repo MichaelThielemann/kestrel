@@ -12,6 +12,7 @@ import { StepRegistry } from "./registry.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
 import { sortModules } from "./sort.ts";
 import { createCronEntry, startCron, type CronEntry } from "./triggers/cron.ts";
+import { createAllowlist } from "./triggers/allowlist.ts";
 import { createHttpServer, listen, parseRoute, routePattern, type Route } from "./triggers/http.ts";
 
 export interface BootInput {
@@ -183,6 +184,13 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     if (config.http?.inlineTypes.includes(SVG) && !steps.has(SANITIZE_SVG)) {
       throw new KestrelBootError(CORE, `http.inlineTypes contains "${SVG}" but no module registers the step "${SANITIZE_SVG}"`);
     }
+    if (config.http !== null) {
+      try {
+        createAllowlist(config.http.allow);
+      } catch (err) {
+        throw new KestrelBootError(CORE, `http.allow: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
 
     const definitions = new Map<string, PipelineDefinition>();
     for (const p of input.pipelines) {
@@ -258,6 +266,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
           server = createHttpServer(routes, run, logger, {
             maxBodyBytes: http.maxBodyBytes,
             trustProxy: http.trustProxy,
+            allow: http.allow,
             healthPath: http.healthPath,
             inlineTypes: http.inlineTypes,
             timeouts: http.timeouts,

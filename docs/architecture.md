@@ -61,7 +61,8 @@ my-site/
 The HTTP server in the core is just *one* trigger. An instance can be used in two ways:
 
 1. **Standalone**: `kestrel` (CLI) boots from `kestrel.config.ts`, starts the HTTP, event and
-   cron triggers. Clients speak HTTP (see `api.md`).
+   cron triggers. Clients speak HTTP (see `api.md`); `http.allow` closes the server to a list of
+   addresses or CIDR ranges (see `pipelines.md` § HTTP Operation).
 2. **Embedded**: A host (Nuxt/Nitro, Express, a script) imports the core, modules and pipelines
    statically, calls `boot()` and then `kestrel.run(pipeline, input)` directly — without an
    HTTP round trip. `http: null` in the config turns off the built-in server; event and cron
