@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-events-inmemory",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "description": "events@1 in process; enables event triggers.",
   "type": "module",
   "license": "Apache-2.0",

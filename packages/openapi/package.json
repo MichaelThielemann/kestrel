@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-openapi",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "description": "Generates an OpenAPI 3.1 description from a booted Kestrel instance (triggers, pipelines, step descriptions).",
   "type": "module",
   "license": "Apache-2.0",
