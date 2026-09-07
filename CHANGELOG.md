@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-The next release is 5.0.0: a rewrite that replaces the 4.x line of `@michaelthielemann/kestrel` with
+## 5.0.0 – 2026-09-07
+
+5.0.0 is a rewrite that replaces the 4.x line of `@michaelthielemann/kestrel` with
 a new package set (`@michaelthielemann/kestrel*`, one version for all). There is no upgrade path
 from 4.x; the model, config and API are new.
 
