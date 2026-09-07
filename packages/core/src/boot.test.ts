@@ -390,6 +390,13 @@ describe("boot", () => {
     expect(await (await fetch(`${base}/ip`, { headers: { "x-forwarded-for": "203.0.113.9, 10.0.0.1" } })).json()).toBe("203.0.113.9");
   });
 
+  it("rejects an http.allow entry that is neither an address nor a CIDR range at boot", async () => {
+    await expect(boot({ config: { ...baseConfig, http: { port: 0, allow: ["10.0.0.0/8", "example.org"] } }, modules, pipelines, logger: silentLogger })).rejects.toThrow(/http\.allow: ip allowlist: invalid entry "example.org"/);
+    kestrel = await boot({ config: { ...baseConfig, http: { port: 0, allow: ["10.0.0.0/8"] } }, modules, pipelines, logger: silentLogger });
+    const { http } = await kestrel.start();
+    expect((await fetch(`http://127.0.0.1:${http?.port ?? 0}/health`)).status).toBe(403);
+  });
+
   it("accepts multipart uploads and serves binary results", async () => {
     kestrel = await boot({ config: baseConfig, modules, pipelines, logger: silentLogger });
     const { http } = await kestrel.start();

@@ -177,7 +177,13 @@ the response header. Each request produces one `http` log line with method, path
 status, duration, IP and — if present — `requestId`. `http.timeouts` sets `requestMs`
 (30 s), `headersMs` (10 s) and `keepAliveMs` (5 s) on the server. `http.healthPath` (default
 `/health`, `null` disables it) answers without running a pipeline, with
-`{ ok, uptimeSeconds }`. `http.trustProxy` reads `X-Forwarded-For`. Rate limits are a step:
+`{ ok, uptimeSeconds }`. `http.trustProxy` reads `X-Forwarded-For`. `http.allow` (default `[]` =
+open) restricts the whole server to a list of IPv4/IPv6 addresses or CIDR ranges
+(`["203.0.113.0/24", "2001:db8::/32", "10.0.0.5"]`): every request — health, CORS preflight and
+routes alike — is checked before routing against the socket peer address (or the first
+`X-Forwarded-For` entry with `trustProxy`), an IPv4-mapped IPv6 peer (`::ffff:10.0.0.5`) counts as
+IPv4, anything else answers `403 forbidden` without details; an entry that is neither an address nor
+a CIDR range stops the boot naming the entry. Rate limits are a step:
 `ratelimit.check:login` before `authn.login` (module `ratelimit-memory`).
 
 ## Runner Behavior (in the core, `runner.ts`)
