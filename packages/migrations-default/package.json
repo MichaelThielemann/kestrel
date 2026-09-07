@@ -1,0 +1,58 @@
+{
+  "name": "@michaelthielemann/kestrel-migrations-default",
+  "version": "5.0.0",
+  "description": "migrations@1: applies content migrations once, per document and stored locale, with a ledger.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "exports": {
+    ".": "./module.ts",
+    "./impl": "./impl.ts",
+    "./helpers": "./helpers.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/module.d.ts",
+        "default": "./dist/module.js"
+      },
+      "./impl": {
+        "types": "./dist/impl.d.ts",
+        "default": "./dist/impl.js"
+      },
+      "./helpers": {
+        "types": "./dist/helpers.d.ts",
+        "default": "./dist/helpers.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json"
+  },
+  "peerDependencies": {
+    "@michaelthielemann/kestrel": "workspace:^",
+    "@michaelthielemann/kestrel-contracts": "workspace:^"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@michaelthielemann/kestrel": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-content-default": "workspace:*",
+    "vitest": "^3.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
+    "directory": "packages/migrations-default"
+  },
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues"
+}

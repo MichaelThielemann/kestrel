@@ -1,0 +1,57 @@
+{
+  "name": "@michaelthielemann/kestrel-replication-sqlite",
+  "version": "5.0.0",
+  "description": "Continuous SQLite replication to blobstore@1 (snapshots + WAL segments), point-in-time restore, retention.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "exports": {
+    ".": "./module.ts",
+    "./impl": "./impl.ts",
+    "./wal": "./wal.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/module.d.ts",
+        "default": "./dist/module.js"
+      },
+      "./impl": {
+        "types": "./dist/impl.d.ts",
+        "default": "./dist/impl.js"
+      },
+      "./wal": {
+        "types": "./dist/wal.d.ts",
+        "default": "./dist/wal.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json"
+  },
+  "peerDependencies": {
+    "@michaelthielemann/kestrel": "workspace:^",
+    "@michaelthielemann/kestrel-contracts": "workspace:^"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@michaelthielemann/kestrel": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "vitest": "^3.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
+    "directory": "packages/replication-sqlite"
+  },
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues"
+}

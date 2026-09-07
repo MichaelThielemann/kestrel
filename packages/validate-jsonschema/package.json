@@ -1,0 +1,56 @@
+{
+  "name": "@michaelthielemann/kestrel-validate-jsonschema",
+  "version": "5.0.0",
+  "description": "Step validate.check:<type>.<field>: validates a payload field against a JSON Schema file (ajv).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "exports": {
+    ".": "./module.ts",
+    "./impl": "./impl.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/module.d.ts",
+        "default": "./dist/module.js"
+      },
+      "./impl": {
+        "types": "./dist/impl.d.ts",
+        "default": "./dist/impl.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json"
+  },
+  "peerDependencies": {
+    "@michaelthielemann/kestrel": "workspace:^",
+    "@michaelthielemann/kestrel-contracts": "workspace:^"
+  },
+  "dependencies": {
+    "ajv": "^8.17.0",
+    "ajv-formats": "^3.0.1",
+    "zod": "^3.23.8",
+    "sanitize-html": "^2.17.0"
+  },
+  "devDependencies": {
+    "@michaelthielemann/kestrel": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "vitest": "^3.2.0",
+    "@types/sanitize-html": "^2.16.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
+    "directory": "packages/validate-jsonschema"
+  },
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues"
+}

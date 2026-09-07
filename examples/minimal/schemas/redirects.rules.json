@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "from": { "type": "string", "minLength": 1 },
+      "to": { "type": "string", "minLength": 1 },
+      "status": { "type": "string", "enum": ["301", "302", "307", "308"] }
+    },
+    "required": ["from", "to"],
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "kestrel-example-minimal",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "kestrel",
+    "openapi": "kestrel-openapi --out openapi.json --server http://127.0.0.1:4000"
+  },
+  "dependencies": {
+    "@michaelthielemann/kestrel": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-events-inmemory": "workspace:*",
+    "@michaelthielemann/kestrel-persistence-sqlite": "workspace:*",
+    "@michaelthielemann/kestrel-audit-persistence": "workspace:*",
+    "@michaelthielemann/kestrel-content-default": "workspace:*",
+    "@michaelthielemann/kestrel-site-default": "workspace:*",
+    "@michaelthielemann/kestrel-authz-roles": "workspace:*",
+    "@michaelthielemann/kestrel-blobstore-filesystem": "workspace:*",
+    "@michaelthielemann/kestrel-media-default": "workspace:*",
+    "@michaelthielemann/kestrel-images-default": "workspace:*",
+    "@michaelthielemann/kestrel-references-default": "workspace:*",
+    "@michaelthielemann/kestrel-authn-multi": "workspace:*",
+    "@michaelthielemann/kestrel-ratelimit-memory": "workspace:*",
+    "@michaelthielemann/kestrel-openapi": "workspace:*",
+    "@michaelthielemann/kestrel-links-default": "workspace:*",
+    "@michaelthielemann/kestrel-renderer-plain": "workspace:*",
+    "@michaelthielemann/kestrel-delivery-static": "workspace:*",
+    "@michaelthielemann/kestrel-replication-sqlite": "workspace:*",
+    "@michaelthielemann/kestrel-validate-jsonschema": "workspace:*",
+    "@michaelthielemann/kestrel-sanitize-svg": "workspace:*",
+    "@michaelthielemann/kestrel-redirects-default": "workspace:*",
+    "@michaelthielemann/kestrel-migrations-default": "workspace:*"
+  }
+}
