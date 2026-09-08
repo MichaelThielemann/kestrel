@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-redirects-default",
-  "version": "5.0.3",
+  "version": "5.1.0",
   "description": "Steps redirects.validate/lookup/export/render: admin-managed redirect rules, honoured in site resolution and exported as redirects.json for an edge proxy.",
   "type": "module",
   "license": "Apache-2.0",
