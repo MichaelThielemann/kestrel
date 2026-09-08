@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import type { Blob, Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import type { Blobstore, PutOptions } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { failure } from "@michaelthielemann/kestrel/errors";
@@ -12,16 +12,16 @@ import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { DEFAULT_MAX_ATTEMPTS, JOBS, SIZES, VARIANTS, createImages, whenIdle } from "./impl.ts";
 import type { Config, Job, Variant } from "./impl.ts";
 
-function fakeBlobstore(): Blobstore & { blobs: Map<string, Blob> } {
-  const blobs = new Map<string, Blob>();
+function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
+  const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
   return {
     blobs,
-    async put(key, blob) {
-      blobs.set(key, blob);
+    async put(key, data, options) {
+      blobs.set(key, { data, contentType: options?.contentType ?? "application/octet-stream" });
       return ok();
     },
     async get(key) {
-      return ok(blobs.get(key) ?? null);
+      return ok(blobs.get(key)?.data ?? null);
     },
     async remove(key) {
       blobs.delete(key);
@@ -35,7 +35,7 @@ function fakeBlobstore(): Blobstore & { blobs: Map<string, Blob> } {
       return ok();
     },
     async list(prefix) {
-      return ok([...blobs].filter(([k]) => k.startsWith(prefix)).map(([key, b]) => ({ key, size: b.data.byteLength, contentType: b.contentType })));
+      return ok([...blobs].filter(([k]) => k.startsWith(prefix)).map(([key, b]) => ({ key, size: b.data.byteLength })));
     },
   };
 }
@@ -61,7 +61,7 @@ async function make(config: Partial<Config> = {}, now: () => number = () => 1000
 async function addImage(db: ReturnType<typeof createFakePersistence>, blobs: ReturnType<typeof fakeBlobstore>, id: string, data: Uint8Array, contentType = "image/jpeg"): Promise<void> {
   const key = `orig/${id}.jpg`;
   await db.createOne(MEDIA, { id, key, contentType, folder: "", filename: `${id}.jpg` });
-  await blobs.put(key, { data, contentType });
+  await blobs.put(key, data, { contentType });
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -174,9 +174,9 @@ describe("generate", () => {
     expectOk(await images.generate("a"));
     let puts = 0;
     const originalPut = blobs.put.bind(blobs);
-    blobs.put = async (key: string, blob: Blob) => {
+    blobs.put = async (key: string, data: Uint8Array, options?: PutOptions) => {
       puts += 1;
-      return originalPut(key, blob);
+      return originalPut(key, data, options);
     };
     const second = expectOk(await images.generate("a"));
     expect(puts).toBe(0);
@@ -191,9 +191,9 @@ describe("generate", () => {
 
     const putKeys: string[] = [];
     const originalPut = blobs.put.bind(blobs);
-    blobs.put = async (key: string, blob: Blob) => {
+    blobs.put = async (key: string, data: Uint8Array, options?: PutOptions) => {
       putKeys.push(key);
-      return originalPut(key, blob);
+      return originalPut(key, data, options);
     };
     const variants = expectOk(await images.generate("a"));
     expect(putKeys).toEqual(["media-variants/a/thumb.webp"]);
@@ -245,12 +245,12 @@ describe("sync", () => {
     let firstVariantPutSeen = false;
     const gate = deferred();
     const originalPut = blobs.put.bind(blobs);
-    blobs.put = async (key: string, blob: Blob) => {
+    blobs.put = async (key: string, data: Uint8Array, options?: PutOptions) => {
       if (!gateOpen && key.startsWith("media-variants/")) {
         firstVariantPutSeen = true;
         await gate.promise;
       }
-      return originalPut(key, blob);
+      return originalPut(key, data, options);
     };
 
     expectOk(await images.sync());
@@ -267,9 +267,9 @@ describe("sync", () => {
     // close() is terminal for this instance (sync()/resume() answer CONFLICT) — a resume happens through
     // a fresh instance over the same persistence and blobstore, as on a process restart.
     let putsAfterResume = 0;
-    blobs.put = async (key: string, blob: Blob) => {
+    blobs.put = async (key: string, data: Uint8Array, options?: PutOptions) => {
       putsAfterResume += 1;
-      return originalPut(key, blob);
+      return originalPut(key, data, options);
     };
     const resumed = await createImages({ ...baseConfig, chunk: 1 }, { blobs, db, logger: noLogger });
     await resumed.sync();
@@ -287,9 +287,9 @@ describe("sync", () => {
 
     const gate = deferred();
     const originalPut = blobs.put.bind(blobs);
-    blobs.put = async (key: string, blob: Blob) => {
+    blobs.put = async (key: string, data: Uint8Array, options?: PutOptions) => {
       if (key.startsWith("media-variants/")) await gate.promise;
-      return originalPut(key, blob);
+      return originalPut(key, data, options);
     };
 
     const job = expectOk(await images.sync());
@@ -403,7 +403,7 @@ describe("exportTo", () => {
   it("writes <dir>/<folder>/<filename>.<size>.webp for every done variant", async () => {
     const { images, db, blobs } = await make();
     await db.createOne(MEDIA, { id: "a", key: "orig/a.jpg", contentType: "image/jpeg", folder: "press", filename: "hero.jpg" });
-    await blobs.put("orig/a.jpg", { data: await jpeg(600, 400), contentType: "image/jpeg" });
+    await blobs.put("orig/a.jpg", await jpeg(600, 400), { contentType: "image/jpeg" });
     expectOk(await images.generate("a"));
 
     const dir = await mkdtemp(join(tmpdir(), "images-export-"));
@@ -454,7 +454,7 @@ describe("exportTo escape guard", () => {
   it("refuses to write a variant outside the export directory", async () => {
     const { images, db, blobs } = await make();
     await db.createOne(MEDIA, { id: "a", key: "orig/a.jpg", contentType: "image/jpeg", folder: "../..", filename: "hero.jpg" });
-    await blobs.put("orig/a.jpg", { data: await jpeg(200, 200), contentType: "image/jpeg" });
+    await blobs.put("orig/a.jpg", await jpeg(200, 200), { contentType: "image/jpeg" });
     expectOk(await images.generate("a"));
 
     const dir = await mkdtemp(join(tmpdir(), "images-export-escape-"));
@@ -489,7 +489,7 @@ describe("remove pagination", () => {
     const { images, db, blobs } = await make();
     for (let i = 0; i < 620; i += 1) {
       const key = `media-variants/a/size${i}.webp`;
-      await blobs.put(key, { data: new Uint8Array([1]), contentType: "image/webp" });
+      await blobs.put(key, new Uint8Array([1]), { contentType: "image/webp" });
       await db.createOne(VARIANTS, { mediaId: "a", size: `size${i}`, spec: "s", width: 1, height: 1, format: "webp", key, bytes: 1, state: "done", error: null, attempts: 1, updatedAt: 1 });
     }
     const removed = expectOk(await images.remove("a"));
@@ -503,7 +503,7 @@ describe("prune dedupe and pagination", () => {
     const { images, db, blobs } = await make();
     for (let i = 0; i < 620; i += 1) {
       const key = `media-variants/m${i}/card.webp`;
-      await blobs.put(key, { data: new Uint8Array([1]), contentType: "image/webp" });
+      await blobs.put(key, new Uint8Array([1]), { contentType: "image/webp" });
       await db.createOne(VARIANTS, { mediaId: `m${i}`, size: "card", spec: "s", width: 1, height: 1, format: "webp", key, bytes: 1, state: "done", error: null, attempts: 1, updatedAt: 1 });
     }
     const result = expectOk(await images.prune(["card", "card"]));
@@ -539,7 +539,7 @@ describe("pending variant rows", () => {
   it("leaves an error row behind when the render fails", async () => {
     const { images, db, blobs } = await make();
     await db.createOne(MEDIA, { id: "a", key: "orig/a.jpg", contentType: "image/jpeg", folder: "", filename: "a.jpg" });
-    await blobs.put("orig/a.jpg", { data: new Uint8Array([1, 2, 3]), contentType: "image/jpeg" });
+    await blobs.put("orig/a.jpg", new Uint8Array([1, 2, 3]), { contentType: "image/jpeg" });
     expectOk(await images.generate("a"));
     const rows = expectOk(await db.findMany<Variant>(VARIANTS, { mediaId: "a" }, { limit: 50 })).items;
     expect(rows).toHaveLength(5);
@@ -569,7 +569,7 @@ describe("bounded attempts", () => {
   const corrupt = async (config: Partial<Config> = { maxAttempts: 2 }) => {
     const made = await make(config);
     await made.db.createOne(MEDIA, { id: "a", key: "orig/a.jpg", contentType: "image/jpeg", folder: "", filename: "a.jpg" });
-    await made.blobs.put("orig/a.jpg", { data: new Uint8Array([1, 2, 3]), contentType: "image/jpeg" });
+    await made.blobs.put("orig/a.jpg", new Uint8Array([1, 2, 3]), { contentType: "image/jpeg" });
     return made;
   };
 

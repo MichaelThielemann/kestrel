@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
-import type { Blob, Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createContext, type Context, type Step, type StepFactory } from "@michaelthielemann/kestrel/context";
@@ -14,15 +14,15 @@ import { err, ok } from "@michaelthielemann/kestrel/result";
 import module, { configSchema } from "./module.ts";
 import { DEFAULT_MAX_ATTEMPTS, JOBS, createImages, type Config, type Job } from "./impl.ts";
 
-function fakeBlobstore(): Blobstore & { blobs: Map<string, Blob> } {
-  const blobs = new Map<string, Blob>();
+function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
+  const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
   return {
     blobs,
-    async put(key, blob) { blobs.set(key, blob); return ok(); },
-    async get(key) { return ok(blobs.get(key) ?? null); },
+    async put(key, data, options) { blobs.set(key, { data, contentType: options?.contentType ?? "application/octet-stream" }); return ok(); },
+    async get(key) { return ok(blobs.get(key)?.data ?? null); },
     async remove(key) { blobs.delete(key); return ok(); },
     async move(from, to) { const b = blobs.get(from); if (!b) return err(failure("NOT_FOUND", `${from} not found`)); blobs.set(to, b); blobs.delete(from); return ok(); },
-    async list(prefix) { return ok([...blobs].filter(([k]) => k.startsWith(prefix)).map(([key, b]) => ({ key, size: b.data.byteLength, contentType: b.contentType }))); },
+    async list(prefix) { return ok([...blobs].filter(([k]) => k.startsWith(prefix)).map(([key, b]) => ({ key, size: b.data.byteLength }))); },
   };
 }
 
@@ -65,7 +65,7 @@ async function make(config: Partial<Config> = {}) {
 async function addImage(db: ReturnType<typeof createFakePersistence>, blobs: ReturnType<typeof fakeBlobstore>, id: string, data: Uint8Array): Promise<void> {
   const key = `orig/${id}.jpg`;
   await db.createOne(MEDIA, { id, key, contentType: "image/jpeg", folder: "", filename: `${id}.jpg` });
-  await blobs.put(key, { data, contentType: "image/jpeg" });
+  await blobs.put(key, data, { contentType: "image/jpeg" });
 }
 
 describe("images/default configSchema", () => {

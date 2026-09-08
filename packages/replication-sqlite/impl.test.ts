@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, it, expect } from "vitest";
-import { BLOBSTORE, type Blob, type Blobstore, type BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { BLOBSTORE, type Blobstore, type BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createContext } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
@@ -14,8 +14,8 @@ import { err, ok } from "@michaelthielemann/kestrel/result";
 import { applyPendingRestore, createReplicationSqlite, restoreFromBlobs, restoreMarker, type Replication } from "./impl.ts";
 import module from "./module.ts";
 
-function fakeBlobs(): Blobstore & { blobs: Map<string, Blob>; failNext(code: "TRANSIENT"): void } {
-  const blobs = new Map<string, Blob>();
+function fakeBlobs(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }>; failNext(code: "TRANSIENT"): void } {
+  const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
   let pending: "TRANSIENT" | null = null;
   const injected = (): BlobstoreError | null => {
     if (pending === null) return null;
@@ -27,16 +27,16 @@ function fakeBlobs(): Blobstore & { blobs: Map<string, Blob>; failNext(code: "TR
     failNext(code) {
       pending = code;
     },
-    async put(k, b) {
+    async put(k, data, options) {
       const e = injected();
       if (e) return err(e);
-      blobs.set(k, { data: new Uint8Array(b.data), contentType: b.contentType });
+      blobs.set(k, { data: new Uint8Array(data), contentType: options?.contentType ?? "application/octet-stream" });
       return ok();
     },
     async get(k) {
       const e = injected();
       if (e) return err(e);
-      return ok(blobs.get(k) ?? null);
+      return ok(blobs.get(k)?.data ?? null);
     },
     async remove(k) {
       const e = injected();
@@ -56,7 +56,7 @@ function fakeBlobs(): Blobstore & { blobs: Map<string, Blob>; failNext(code: "TR
     async list(p) {
       const e = injected();
       if (e) return err(e);
-      return ok([...blobs].filter(([k]) => k.startsWith(p)).map(([key, b]) => ({ key, size: b.data.byteLength, contentType: b.contentType })));
+      return ok([...blobs].filter(([k]) => k.startsWith(p)).map(([key, b]) => ({ key, size: b.data.byteLength })));
     },
   };
 }

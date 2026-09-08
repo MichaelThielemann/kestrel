@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { Blob, Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentDocument, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import { err, ok } from "@michaelthielemann/kestrel-contracts/errors";
 import { renderFailed, type Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
@@ -55,15 +55,15 @@ const site: Site = {
   resolveLinks: async (_t, doc) => ok({ ...doc, _links: { resolved: { path: "/x", locale: "de" } } }),
 };
 
-function fakeBlobs(): Blobstore & { blobs: Map<string, Blob> } {
-  const blobs = new Map<string, Blob>();
+function fakeBlobs(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
+  const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
   return {
     blobs,
-    async put(k, b) { blobs.set(k, b); return ok(); },
-    async get(k) { return ok(blobs.get(k) ?? null); },
+    async put(k, data, options) { blobs.set(k, { data, contentType: options?.contentType ?? "application/octet-stream" }); return ok(); },
+    async get(k) { return ok(blobs.get(k)?.data ?? null); },
     async remove(k) { blobs.delete(k); return ok(); },
     async move(from, to) { const b = blobs.get(from); if (!b) throw new Error(`${from} not found`); blobs.set(to, b); blobs.delete(from); return ok(); },
-    async list(p) { return ok([...blobs].filter(([k]) => k.startsWith(p)).map(([key, b]) => ({ key, size: b.data.byteLength, contentType: b.contentType }))); },
+    async list(p) { return ok([...blobs].filter(([k]) => k.startsWith(p)).map(([key, b]) => ({ key, size: b.data.byteLength }))); },
   };
 }
 
@@ -308,8 +308,8 @@ describe("delivery/static media rewrite", () => {
     expectOk(await db.createOne(mediaConfig.collection, { id: mediaId, filename: "cat.jpg", folder: "pics", contentType: "image/jpeg", key: "media/pics/cat.jpg", updatedAt: 1 }));
     expectOk(await db.createOne(mediaConfig.variants, { id: "v1", mediaId, size: "thumb", key: "media-variants/pics/thumb.webp", state: "done", format: "webp" }));
     expectOk(await db.createOne(mediaConfig.variants, { id: "v2", mediaId, size: "large", key: "media-variants/pics/large.webp", state: "pending", format: "webp" }));
-    expectOk(await blobs.put("media/pics/cat.jpg", { data: new TextEncoder().encode("cat-bytes"), contentType: "image/jpeg" }));
-    expectOk(await blobs.put("media-variants/pics/thumb.webp", { data: new TextEncoder().encode("thumb-bytes"), contentType: "image/webp" }));
+    expectOk(await blobs.put("media/pics/cat.jpg", new TextEncoder().encode("cat-bytes"), { contentType: "image/jpeg" }));
+    expectOk(await blobs.put("media-variants/pics/thumb.webp", new TextEncoder().encode("thumb-bytes"), { contentType: "image/webp" }));
   }
 
   it("copies the original and done variants, rewrites URLs, leaves pending ones and logs once", async () => {
@@ -372,7 +372,7 @@ describe("delivery/static media rewrite", () => {
     const db = createFakePersistence();
     await seedMedia(db);
     expectOk(await db.createOne(mediaConfig.collection, { id: mediaId, filename: "cat.jpg", folder: "pics", contentType: "image/jpeg", key: "media/pics/cat.jpg", updatedAt: 1 }));
-    expectOk(await blobs.put("media/pics/cat.jpg", { data: new TextEncoder().encode("cat-bytes"), contentType: "image/jpeg" }));
+    expectOk(await blobs.put("media/pics/cat.jpg", new TextEncoder().encode("cat-bytes"), { contentType: "image/jpeg" }));
     const html = `<img src="/api/media/${mediaId}/file">`;
     const delivery = await createDeliveryStatic({ ...config, media: { ...mediaConfig, publicPath: "/api/media" } }, { content, site, renderer: fakeHtmlRenderer(html), blobs, db, logger: fakeLogger() });
     put("p1", { slug__de: "team", title__de: "Team", status__de: "published" });
@@ -403,7 +403,7 @@ describe("delivery/static media rewrite", () => {
     const db = createFakePersistence();
     await seedMedia(db);
     expectOk(await db.createOne(mediaConfig.collection, { id: mediaId, filename: "cat.jpg", folder: "../..", contentType: "image/jpeg", key: "media/pics/cat.jpg", updatedAt: 1 }));
-    expectOk(await blobs.put("media/pics/cat.jpg", { data: new TextEncoder().encode("cat-bytes"), contentType: "image/jpeg" }));
+    expectOk(await blobs.put("media/pics/cat.jpg", new TextEncoder().encode("cat-bytes"), { contentType: "image/jpeg" }));
     const html = `<img src="/media/${mediaId}/file">`;
     const delivery = await createDeliveryStatic({ ...config, media: mediaConfig }, { content, site, renderer: fakeHtmlRenderer(html), blobs, db, logger: fakeLogger() });
     put("p1", { slug__de: "team", title__de: "Team", status__de: "published" });

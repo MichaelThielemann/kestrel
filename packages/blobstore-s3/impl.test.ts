@@ -1,6 +1,5 @@
 import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { describe, it, expect, vi } from "vitest";
-import { ok } from "@michaelthielemann/kestrel/result";
 import { blobstoreContractTests } from "@michaelthielemann/kestrel-contracts/blobstore.contract.test";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { clientOptions, createBlobstoreS3, DEFAULT_MAX_ATTEMPTS, DEFAULT_TIMEOUT_MS, type S3Like } from "./impl.ts";
@@ -46,29 +45,13 @@ function failingS3(error: unknown): S3Like {
 
 const withFake = async () => createBlobstoreS3({ bucket: "b", prefix: "site/" }, fakeS3());
 
-blobstoreContractTests(async () => {
-  const store = await withFake();
-  return {
-    ...store,
-    async list(prefix) {
-      const infos = await store.list(prefix);
-      if (!infos.ok) return infos;
-      const fake = await Promise.all(
-        infos.value.map(async (i) => {
-          const blob = await store.get(i.key);
-          return { ...i, contentType: blob.ok && blob.value ? blob.value.contentType : i.contentType };
-        }),
-      );
-      return ok(fake);
-    },
-  };
-});
+blobstoreContractTests(withFake);
 
 describe("blobstore/s3", () => {
   it("prefixes every key", async () => {
     const s3 = fakeS3();
     const store = createBlobstoreS3({ bucket: "b", prefix: "site/" }, s3);
-    expectOk(await store.put("img/a.png", { data: new Uint8Array([1]), contentType: "image/png" }));
+    expectOk(await store.put("img/a.png", new Uint8Array([1]), { contentType: "image/png" }));
     expect([...s3.objects.keys()]).toEqual(["site/img/a.png"]);
     expect(expectOk(await store.list("img/")).map((i) => i.key)).toEqual(["img/a.png"]);
   });
@@ -82,7 +65,7 @@ describe("blobstore/s3", () => {
       if (command instanceof CopyObjectCommand) copySource = command.input.CopySource ?? "";
       return original(command);
     };
-    expectOk(await store.put("media/2026/a b+c.png", { data: new Uint8Array([1]), contentType: "image/png" }));
+    expectOk(await store.put("media/2026/a b+c.png", new Uint8Array([1]), { contentType: "image/png" }));
     expectOk(await store.move("media/2026/a b+c.png", "media/2027/a b+c.png"));
     expect(copySource).toBe("b/site/media/2026/a%20b%2Bc.png");
     expect([...s3.objects.keys()]).toEqual(["site/media/2027/a b+c.png"]);
@@ -135,7 +118,7 @@ describe("blobstore/s3", () => {
     for (const [label, shape] of cases) {
       it(`put/get/remove/list answer TRANSIENT on ${label}`, async () => {
         const store = createBlobstoreS3({ bucket: "b", prefix: "" }, failingS3(Object.assign(new Error("boom"), shape)));
-        expectErr(await store.put("k", { data: new Uint8Array(), contentType: "text/plain" }), "TRANSIENT");
+        expectErr(await store.put("k", new Uint8Array(), { contentType: "text/plain" }), "TRANSIENT");
         expectErr(await store.get("k"), "TRANSIENT");
         expectErr(await store.remove("k"), "TRANSIENT");
         expectErr(await store.list(""), "TRANSIENT");
@@ -150,7 +133,7 @@ describe("blobstore/s3", () => {
     it("move answers TRANSIENT when the delete step (after a successful copy) fails transiently", async () => {
       const s3 = fakeS3();
       const store = createBlobstoreS3({ bucket: "b", prefix: "" }, s3);
-      expectOk(await store.put("a", { data: new Uint8Array([1]), contentType: "text/plain" }));
+      expectOk(await store.put("a", new Uint8Array([1]), { contentType: "text/plain" }));
       const original = s3.send.bind(s3);
       s3.send = async (command) => {
         if (command instanceof DeleteObjectCommand) throw Object.assign(new Error("boom"), { $metadata: { httpStatusCode: 500 } });

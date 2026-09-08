@@ -8,10 +8,10 @@ export interface Config {
   root: string;
 }
 
-const META = ".meta.json";
+const LEGACY_META = ".meta.json";
 
 export function assertKey(key: string): void {
-  if (key === "" || key.startsWith("/") || key.split("/").some((part) => part === "" || part === "." || part === "..") || key.endsWith(META)) {
+  if (key === "" || key.startsWith("/") || key.split("/").some((part) => part === "" || part === "." || part === "..") || key.endsWith(LEGACY_META)) {
     throw new Error(`blobstore/filesystem: invalid key ${JSON.stringify(key)}`);
   }
 }
@@ -29,6 +29,21 @@ function transientOrRethrow(cause: unknown): Err<BlobstoreError> {
     return err(failure("TRANSIENT", `blobstore/filesystem: ${code}`, { cause }));
   }
   throw cause;
+}
+
+async function walkFiles(dir: string, visit: (path: string, name: string) => Promise<void>): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (cause) {
+    if (errno(cause) === "ENOENT") return;
+    throw cause;
+  }
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) await walkFiles(path, visit);
+    else await visit(path, entry.name);
+  }
 }
 
 export function createBlobstoreFilesystem(config: Config): Blobstore {
@@ -54,32 +69,12 @@ export function createBlobstoreFilesystem(config: Config): Blobstore {
     }
   };
 
-  const walk = async (dir: string, out: BlobInfo[]): Promise<void> => {
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch (cause) {
-      if (errno(cause) === "ENOENT") return;
-      throw cause;
-    }
-    for (const entry of entries) {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) await walk(path, out);
-      else if (entry.name.endsWith(META)) {
-        const file = path.slice(0, -META.length);
-        const meta = JSON.parse(await readFile(path, "utf8")) as { contentType: string };
-        out.push({ key: relative(root, file).split(sep).join("/"), size: (await stat(file)).size, contentType: meta.contentType });
-      }
-    }
-  };
-
   return {
-    async put(key, blob) {
+    async put(key, data) {
       const path = pathOf(key);
       try {
         await mkdir(dirname(path), { recursive: true });
-        await writeFile(path, blob.data);
-        await writeFile(path + META, JSON.stringify({ contentType: blob.contentType }));
+        await writeFile(path, data);
         return ok();
       } catch (cause) {
         return transientOrRethrow(cause);
@@ -88,8 +83,7 @@ export function createBlobstoreFilesystem(config: Config): Blobstore {
     async get(key) {
       const path = pathOf(key);
       try {
-        const [data, meta] = await Promise.all([readFile(path), readFile(path + META, "utf8")]);
-        return ok({ data: new Uint8Array(data), contentType: (JSON.parse(meta) as { contentType: string }).contentType });
+        return ok(new Uint8Array(await readFile(path)));
       } catch (cause) {
         if (errno(cause) === "ENOENT") return ok(null);
         return transientOrRethrow(cause);
@@ -99,7 +93,6 @@ export function createBlobstoreFilesystem(config: Config): Blobstore {
       const path = pathOf(key);
       try {
         await rm(path, { force: true });
-        await rm(path + META, { force: true });
         await prune(dirname(path));
         return ok();
       } catch (cause) {
@@ -110,17 +103,13 @@ export function createBlobstoreFilesystem(config: Config): Blobstore {
       const source = pathOf(from);
       const target = pathOf(to);
       try {
-        await Promise.all([stat(source), stat(source + META)]);
+        await stat(source);
       } catch (cause) {
         if (errno(cause) === "ENOENT") return err(failure("NOT_FOUND", `blobstore/filesystem: ${JSON.stringify(from)} not found`, { cause }));
         return transientOrRethrow(cause);
       }
       try {
         await mkdir(dirname(target), { recursive: true });
-        // meta first: a crash between the two renames leaves the data file's meta
-        // already pointing at the target, so get(from) stays not-found and get(to)
-        // fails closed (missing data) until the data rename completes.
-        await rename(source + META, target + META);
         await rename(source, target);
         await prune(dirname(source));
         return ok();
@@ -131,7 +120,10 @@ export function createBlobstoreFilesystem(config: Config): Blobstore {
     async list(prefix) {
       try {
         const out: BlobInfo[] = [];
-        await walk(root, out);
+        await walkFiles(root, async (path, name) => {
+          if (name.endsWith(LEGACY_META)) return;
+          out.push({ key: relative(root, path).split(sep).join("/"), size: (await stat(path)).size });
+        });
         return ok(out.filter((info) => info.key.startsWith(prefix)).sort((a, b) => a.key.localeCompare(b.key)));
       } catch (cause) {
         return transientOrRethrow(cause);

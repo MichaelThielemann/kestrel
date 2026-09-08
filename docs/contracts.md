@@ -190,7 +190,7 @@ persistenceContractTests(async () => createPersistenceSqlite({ file: ":memory:" 
 | `persistence@1` | Store/find documents (raw storage for modules) | `KestrelError<"CONFLICT" \| "NOT_FOUND" \| "TRANSIENT">` | `sqlite`, `mariadb` |
 | `content@1` | Typed documents from a config-declared model: `single`/`multi`, field types, validation, timestamps. Generic document CRUD, no website vocabulary | `KestrelError<"VALIDATION" \| "NOT_FOUND" \| "CONFLICT" \| "TRANSIENT">` | `default` (on persistence), later `external` |
 | `site@1` | Website vocabulary over `content@1`: `resolve` (path → document per `SiteRules`), `pathOf` (document → path), `resolveLinks` (internal references → public paths) | `KestrelError<"TRANSIENT">` — an unresolvable path is `Ok(null)` | `default` (on content) |
-| `blobstore@1` | Binary files: `put`, `get`, `remove`, `move`, `list(prefix)` | `KestrelError<"NOT_FOUND" \| "TRANSIENT">` — `move` from a missing key is `NOT_FOUND`, `get`/`remove` of a missing key is `Ok` | `filesystem`, `s3` |
+| `blobstore@1` | Bytes by key: `put(key, bytes, { contentType? })` (the type is a write-time hint for stores that serve objects directly), `get` → bytes, `remove`, `move`, `list(prefix)` → `{ key, size }` | `KestrelError<"NOT_FOUND" \| "TRANSIENT">` — `move` from a missing key is `NOT_FOUND`, `get`/`remove` of a missing key is `Ok` | `filesystem`, `s3` |
 | – (steps only) | Media: upload into blobstore, metadata in persistence | – | `media-default` |
 | – (steps only) | Image variants: size registry, generation on upload, resumable sync, prune, delivery by path | – | `images-default` |
 | – (steps only) | Backup of a SQLite snapshot into blobstore, restore on start | – | `backup-blobstore` |

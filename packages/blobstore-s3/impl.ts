@@ -1,7 +1,7 @@
 import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, NoSuchKey, PutObjectCommand, S3Client, type S3ClientConfig } from "@aws-sdk/client-s3";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok, type Result } from "@michaelthielemann/kestrel/result";
-import type { Blob, BlobInfo, Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
+import type { BlobInfo, Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
 
 export const DEFAULT_TIMEOUT_MS = 10000;
 export const DEFAULT_MAX_ATTEMPTS = 3;
@@ -69,20 +69,20 @@ export function createBlobstoreS3(config: Config, client: S3Like = createClient(
     close() {
       if (client instanceof S3Client) client.destroy();
     },
-    async put(key, blob): Promise<Result<void, BlobstoreError>> {
+    async put(key, data, options = {}): Promise<Result<void, BlobstoreError>> {
       try {
-        await client.send(new PutObjectCommand({ Bucket: config.bucket, Key: fullKey(key), Body: blob.data, ContentType: blob.contentType }));
+        await client.send(new PutObjectCommand({ Bucket: config.bucket, Key: fullKey(key), Body: data, ...(options.contentType === undefined ? {} : { ContentType: options.contentType }) }));
         return ok();
       } catch (cause) {
         if (isTransient(cause)) return err(failure("TRANSIENT", `blobstore/s3: put ${JSON.stringify(key)} failed`, { cause }));
         throw cause;
       }
     },
-    async get(key): Promise<Result<Blob | null, BlobstoreError>> {
+    async get(key): Promise<Result<Uint8Array | null, BlobstoreError>> {
       try {
-        const out = (await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: fullKey(key) }))) as { Body?: { transformToByteArray(): Promise<Uint8Array> }; ContentType?: string };
+        const out = (await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: fullKey(key) }))) as { Body?: { transformToByteArray(): Promise<Uint8Array> } };
         if (!out.Body) return ok(null);
-        return ok({ data: await out.Body.transformToByteArray(), contentType: out.ContentType ?? "application/octet-stream" });
+        return ok(await out.Body.transformToByteArray());
       } catch (cause) {
         if (cause instanceof NoSuchKey || (cause as { name?: string }).name === "NoSuchKey") return ok(null);
         if (isTransient(cause)) return err(failure("TRANSIENT", `blobstore/s3: get ${JSON.stringify(key)} failed`, { cause }));
@@ -129,7 +129,7 @@ export function createBlobstoreS3(config: Config, client: S3Like = createClient(
           };
           for (const item of page.Contents ?? []) {
             if (item.Key === undefined) continue;
-            out.push({ key: item.Key.slice(config.prefix.length), size: item.Size ?? 0, contentType: "application/octet-stream" });
+            out.push({ key: item.Key.slice(config.prefix.length), size: item.Size ?? 0 });
           }
           token = page.NextContinuationToken;
         } while (token);

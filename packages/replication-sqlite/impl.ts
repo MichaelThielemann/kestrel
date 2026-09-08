@@ -70,13 +70,13 @@ export async function restoreFromBlobs(blobs: Blobstore, prefix: string, target:
   const blob = await blobs.get(snapshot.key);
   if (isErr(blob)) return blob;
   if (blob.value === null) return err(failure("NOT_FOUND", `replication/sqlite: snapshot ${snapshot.key} is missing`));
-  let image = blob.value.data;
+  let image = blob.value;
   let at = snapshot.at;
   for (const p of points.value.filter((x) => x.generation === generation && x.kind === "wal" && x.at <= until)) {
     const segment = await blobs.get(p.key);
     if (isErr(segment)) return segment;
     if (segment.value === null) return err(failure("NOT_FOUND", `replication/sqlite: segment ${p.key} is missing`));
-    image = applySegment(image, segment.value.data);
+    image = applySegment(image, segment.value);
     at = p.at;
   }
   mkdirSync(dirname(outFile), { recursive: true });
@@ -138,7 +138,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     const data = new Uint8Array(readFileSync(tmp));
     rmSync(tmp, { force: true });
     const gen = stamp(at);
-    const put = await blobs.put(`${config.prefix}gen/${gen}/snapshot.db`, { data, contentType: "application/vnd.sqlite3" });
+    const put = await blobs.put(`${config.prefix}gen/${gen}/snapshot.db`, data, { contentType: "application/vnd.sqlite3" });
     if (isErr(put)) return put;
     generation = gen;
     seq = 0;
@@ -174,7 +174,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     const segment = new Uint8Array(WAL_HEADER_SIZE + frames.byteLength);
     segment.set(wal.subarray(0, WAL_HEADER_SIZE));
     segment.set(frames, WAL_HEADER_SIZE);
-    const put = await blobs.put(segmentKey(now()), { data: segment, contentType: "application/octet-stream" });
+    const put = await blobs.put(segmentKey(now()), segment, { contentType: "application/octet-stream" });
     if (isErr(put)) return put;
     seq += 1;
     const count = lastCommit + 1 - shippedFrames;
