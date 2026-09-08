@@ -23,6 +23,10 @@ export interface Rendered {
 
 const CONTENT_TYPES: Record<string, string> = { webp: "image/webp", jpeg: "image/jpeg", png: "image/png" };
 
+export function contentTypeOf(format: string): string {
+  return CONTENT_TYPES[format] ?? `image/${format}`;
+}
+
 export async function render(data: Uint8Array, size: Size): Promise<Rendered> {
   const image = sharp(data, { failOn: "error" });
   const meta = await image.metadata();
@@ -37,6 +41,6 @@ export async function render(data: Uint8Array, size: Size): Promise<Rendered> {
     height: info.height,
     format,
     ext: extOf(size, format),
-    contentType: CONTENT_TYPES[format] ?? `image/${format}`,
+    contentType: contentTypeOf(format),
   };
 }

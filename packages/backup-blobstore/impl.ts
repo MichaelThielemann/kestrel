@@ -65,20 +65,19 @@ export function createBackupBlobstore(config: Config, blobs: Blobstore, now: () 
     if (blob.value === null) return ok(null);
     await mkdir(dirname(destination), { recursive: true });
     const part = `${destination}.part`;
-    await writeFile(part, blob.value.data);
+    await writeFile(part, blob.value);
     await rename(part, destination);
-    return ok(blob.value.data.byteLength);
+    return ok(blob.value.byteLength);
   };
 
   return {
     key: config.key,
     async backup() {
       const data = new Uint8Array(await readFile(config.source ?? config.file));
-      const blob = { data, contentType: "application/octet-stream" };
-      const put = await blobs.put(config.key, blob);
+      const put = await blobs.put(config.key, data, { contentType: "application/octet-stream" });
       if (isErr(put)) return put;
       if (config.versions > 0) {
-        const putVersion = await blobs.put(versionKey(config.key, now()), blob);
+        const putVersion = await blobs.put(versionKey(config.key, now()), data, { contentType: "application/octet-stream" });
         if (isErr(putVersion)) return putVersion;
         const before = await versions();
         if (isErr(before)) return before;

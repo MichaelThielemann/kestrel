@@ -52,6 +52,16 @@ function bytes(data: Uint8Array | string): Uint8Array {
   return typeof data === "string" ? new TextEncoder().encode(data) : data;
 }
 
+const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
+  webp: "image/webp", avif: "image/avif", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", svg: "image/svg+xml",
+  ico: "image/x-icon", pdf: "application/pdf", mp4: "video/mp4", webm: "video/webm", mp3: "audio/mpeg", json: "application/json", txt: "text/plain",
+};
+
+export function contentTypeByExtension(key: string): string {
+  const extension = extname(key).slice(1).toLowerCase();
+  return CONTENT_TYPE_BY_EXTENSION[extension] ?? "application/octet-stream";
+}
+
 export function keyFor(prefix: string, path: string, extension: string): string {
   const dir = path === "/" ? "" : `${path.slice(1)}/`;
   return `${prefix}${dir}index.${extension}`;
@@ -169,7 +179,7 @@ export async function createDeliveryStatic(config: Config, deps: { content: Cont
           html: async () => {
             const blob = await blobs.get(keyFor(config.prefix, path, "html"));
             if (isErr(blob)) return err(transientOnly(blob.error, "blobstore@1"));
-            return ok(blob.value ? new TextDecoder().decode(blob.value.data) : null);
+            return ok(blob.value ? new TextDecoder().decode(blob.value) : null);
           },
         });
       }
@@ -263,7 +273,7 @@ export async function createDeliveryStatic(config: Config, deps: { content: Cont
       // otherwise be rewritten to a path nothing ever writes, so this fails the publish like any other
       // copy failure instead.
       if (!blob.value) throw new Error(`delivery/static: media blob ${source} missing for ${id}`);
-      const stored = await blobs.put(destKey, { data: blob.value.data, contentType: blob.value.contentType });
+      const stored = await blobs.put(destKey, blob.value, { contentType: contentTypeByExtension(dest) });
       if (isErr(stored)) return err(transientOnly(stored.error, "blobstore@1"));
       uploadedAssets.add(destKey);
     }
@@ -315,14 +325,14 @@ export async function createDeliveryStatic(config: Config, deps: { content: Cont
           if (isErr(rewritten)) return failed(rewritten.error.message);
           data = rewritten.value;
         }
-        const stored = await blobs.put(keyFor(config.prefix, path, out.extension), { data: bytes(data), contentType: out.contentType });
+        const stored = await blobs.put(keyFor(config.prefix, path, out.extension), bytes(data), { contentType: out.contentType });
         if (isErr(stored)) return failed(stored.error.message);
         for (const asset of out.assets ?? []) {
           const assetPath = asset.path.replace(/^\/+/, "");
           if (assetPath === "" || assetPath.split("/").some((p) => p === "..")) throw new Error(`delivery/static: invalid asset path ${JSON.stringify(asset.path)}`);
           const key = `${config.prefix}${assetPath}`;
           if (!uploadedAssets.has(key)) {
-            const put = await blobs.put(key, { data: bytes(asset.data), contentType: asset.contentType });
+            const put = await blobs.put(key, bytes(asset.data), { contentType: asset.contentType });
             if (isErr(put)) return failed(put.error.message);
             uploadedAssets.add(key);
           }

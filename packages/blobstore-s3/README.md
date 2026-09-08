@@ -4,8 +4,9 @@ via `@aws-sdk/client-s3`. Config: `bucket`, optional `prefix` (`"site/"`), `regi
 `forcePathStyle`, `accessKeyId`/`secretAccessKey` (omit to use the SDK's default credential chain:
 environment, profile, instance role), `timeoutMs` (default 10000, used for both the connection and
 the request timeout, so a silent socket never hangs a pipeline step) and `maxAttempts` (default 3,
-the SDK's retry limit including the first try). `list()` reports `application/octet-stream` as
-content type because S3 listings carry no metadata; `get()` returns the stored type.
+the SDK's retry limit including the first try). `put` stores the `contentType` hint as the object's
+`Content-Type`, so a bucket served directly answers with the right type; `get` returns bytes only
+and `list` reports key and size. The store never wrote sidecar files.
 
 `pnpm test:s3` runs the `blobstore@1` contract test against a real MinIO instance in Podman
 (starts it, creates the bucket, runs `minio.test.ts`, always stops the container).

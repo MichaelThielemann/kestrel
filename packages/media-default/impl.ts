@@ -375,7 +375,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         provenance: parsedProvenance.value, width: size?.width ?? null, height: size?.height ?? null, alt: {}, title: {}, description: {},
       });
       if (isErr(created)) return created;
-      const stored = await blobs.put(key, { data: file.data, contentType: file.contentType });
+      const stored = await blobs.put(key, file.data, { contentType: file.contentType });
       if (isErr(stored)) {
         const marked = await db.updateOne(COLLECTION, id, { status: "failed", updatedAt: now() });
         if (isErr(marked)) logger.error(`media/default: could not mark ${id} as failed`, { id, key, error: marked.error.message });
@@ -531,7 +531,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const blob = await blobs.get(item.key);
       if (isErr(blob)) return blob;
       if (blob.value === null) throw new Error(`media/default: blob ${item.key} for ${id} is missing`);
-      return ok({ item, data: blob.value.data });
+      return ok({ item, data: blob.value });
     },
     async remove(id) {
       const found = await db.findOne<MediaItem>(COLLECTION, { id });
@@ -768,7 +768,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
             continue;
           }
           await mkdir(dirname(target), { recursive: true });
-          await writeFile(target, blob.value.data);
+          await writeFile(target, blob.value);
           const updated = new Date(item.updatedAt);
           await utimes(target, updated, updated);
           written += 1;

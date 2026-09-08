@@ -227,10 +227,10 @@ export async function exportLlms(config: LlmsConfig, deps: LlmsDeps): Promise<Re
   if (missingMain) deps.logger.info("delivery/static: rendered output without <main>, llms-full.txt uses the whole body");
 
   const header = { siteName, ...(siteDescription === undefined ? {} : { siteDescription }) };
-  const written = await deps.blobs.put(`${deps.prefix}${LLMS_KEY}`, { data: new TextEncoder().encode(buildLlmsTxt({ ...header, sections })), contentType: LLMS_CONTENT_TYPE });
+  const written = await deps.blobs.put(`${deps.prefix}${LLMS_KEY}`, new TextEncoder().encode(buildLlmsTxt({ ...header, sections })), { contentType: LLMS_CONTENT_TYPE });
   if (isErr(written)) return written;
   const fullFile = config.full
-    ? await deps.blobs.put(`${deps.prefix}${LLMS_FULL_KEY}`, { data: new TextEncoder().encode(buildLlmsFullTxt({ ...header, sections: fullSections })), contentType: LLMS_CONTENT_TYPE })
+    ? await deps.blobs.put(`${deps.prefix}${LLMS_FULL_KEY}`, new TextEncoder().encode(buildLlmsFullTxt({ ...header, sections: fullSections })), { contentType: LLMS_CONTENT_TYPE })
     : await deps.blobs.remove(`${deps.prefix}${LLMS_FULL_KEY}`);
   if (isErr(fullFile)) return fullFile;
   return ok({ entries, full: config.full });

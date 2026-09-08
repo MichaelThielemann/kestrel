@@ -84,7 +84,7 @@ export function createRedirects(config: Config, deps: { content: Content; blobs:
       if (isErr(pub)) return pub;
       const { rules, skipped } = pub.value;
       logSkipped(skipped);
-      const put = await deps.blobs.put(`${config.prefix}${config.key}`, { data: new TextEncoder().encode(serializeRedirects(rules)), contentType: "application/json" });
+      const put = await deps.blobs.put(`${config.prefix}${config.key}`, new TextEncoder().encode(serializeRedirects(rules)), { contentType: "application/json" });
       if (isErr(put)) return err(transientOnly(put.error, "blobstore@1"));
       return ok({ rules: rules.length, skipped });
     },

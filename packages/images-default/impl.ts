@@ -1,12 +1,12 @@
 import { mkdir, stat, utimes, writeFile } from "node:fs/promises";
 import { dirname, extname, relative, resolve as resolvePath, sep } from "node:path";
-import type { Blob, Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Document, Persistence, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import type { z } from "zod";
-import { eligible, render } from "./generate.ts";
+import { contentTypeOf, eligible, render } from "./generate.ts";
 import { DEFAULT_SIZES, mergeSizes, sizeSchema, spec } from "./sizes.ts";
 import type { Size, SizeRow } from "./sizes.ts";
 import type { configSchema } from "./module.ts";
@@ -182,10 +182,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return promise;
   }
 
-  async function renderVariant(mediaId: string, size: Size, original: Blob, previousKey: string): Promise<Result<RenderedVariant, KestrelError>> {
+  async function renderVariant(mediaId: string, size: Size, original: Uint8Array, previousKey: string): Promise<Result<RenderedVariant, KestrelError>> {
     let rendered;
     try {
-      rendered = await render(original.data, size);
+      rendered = await render(original, size);
     } catch (cause) {
       return err(failure("VALIDATION", errorMessage(cause), { cause }));
     }
@@ -196,7 +196,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const dropped = await blobs.remove(previousKey);
       if (isErr(dropped)) return dropped;
     }
-    const stored = await blobs.put(key, { data: rendered.data, contentType: rendered.contentType });
+    const stored = await blobs.put(key, rendered.data, { contentType: rendered.contentType });
     if (isErr(stored)) return stored;
     return ok({ spec: spec(size), width: rendered.width, height: rendered.height, format: rendered.format, key, bytes: rendered.data.byteLength, state: "done", error: null });
   }
@@ -220,7 +220,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       return row !== undefined && row.state === "failed" && row.spec === spec(size);
     };
 
-    let original: Blob | null = null;
+    let original: Uint8Array | null = null;
     if (effective.some((size) => !upToDate(size) && !exhausted(size))) {
       const found = await blobs.get(media.value.key);
       if (isErr(found)) return found;
@@ -519,7 +519,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (variant && variant.state === "done") {
         const blob = await blobs.get(variant.key);
         if (isErr(blob)) return blob;
-        if (blob.value) return ok({ data: blob.value.data, contentType: blob.value.contentType, fallback: false, variant: "done" });
+        if (blob.value) return ok({ data: blob.value, contentType: contentTypeOf(variant.format), fallback: false, variant: "done" });
       }
       // a variant that gave up will never become available; serving the full-size original in its
       // place would hide the defect behind a working-looking page forever.
@@ -527,7 +527,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const original = await blobs.get(media.value.key);
       if (isErr(original)) return original;
       if (original.value === null) return ok(null);
-      return ok({ data: original.value.data, contentType: media.value.contentType, fallback: true, variant: "pending" });
+      return ok({ data: original.value, contentType: media.value.contentType, fallback: true, variant: "pending" });
     },
 
     async failure(mediaId, file) {
@@ -571,7 +571,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
             continue;
           }
           await mkdir(dirname(target), { recursive: true });
-          await writeFile(target, blob.value.data);
+          await writeFile(target, blob.value);
           const updated = new Date(variant.updatedAt);
           await utimes(target, updated, updated);
           written += 1;

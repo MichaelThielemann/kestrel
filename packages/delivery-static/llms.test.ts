@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Blob, Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentDocument, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import type { Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
 import type { Site } from "@michaelthielemann/kestrel-contracts/site";
@@ -93,14 +93,14 @@ const site: Site = {
 };
 
 function fakeBlobs(): Blobstore & { text(key: string): string | undefined } {
-  const blobs = new Map<string, Blob>();
+  const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
   return {
     text: (key) => { const b = blobs.get(key); return b ? new TextDecoder().decode(b.data) : undefined; },
-    async put(k, b) { blobs.set(k, b); return ok(); },
-    async get(k) { return ok(blobs.get(k) ?? null); },
+    async put(k, data, options) { blobs.set(k, { data, contentType: options?.contentType ?? "application/octet-stream" }); return ok(); },
+    async get(k) { return ok(blobs.get(k)?.data ?? null); },
     async remove(k) { blobs.delete(k); return ok(); },
     async move() { throw new Error("n/a"); },
-    async list(p) { return ok([...blobs].filter(([k]) => k.startsWith(p)).map(([key, b]) => ({ key, size: b.data.byteLength, contentType: b.contentType }))); },
+    async list(p) { return ok([...blobs].filter(([k]) => k.startsWith(p)).map(([key, b]) => ({ key, size: b.data.byteLength }))); },
   };
 }
 

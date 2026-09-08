@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Blob, Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentDocument } from "@michaelthielemann/kestrel-contracts/content";
 import { err, failure, ok } from "@michaelthielemann/kestrel-contracts/errors";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
@@ -24,17 +24,17 @@ function fakeContent(initial?: unknown): { content: Content; reads: () => number
   return { content: content as Content, reads: () => reads, set: (rules, updatedAt) => (doc = { id: "redirects", createdAt: 1, updatedAt, rules } as const) };
 }
 
-function fakeBlobs(failPut = false): Blobstore & { blobs: Map<string, Blob> } {
-  const blobs = new Map<string, Blob>();
+function fakeBlobs(failPut = false): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
+  const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
   return {
     blobs,
-    async put(k, b) {
+    async put(k, data, options) {
       if (failPut) return err(failure("TRANSIENT", "s3 down"));
-      blobs.set(k, b);
+      blobs.set(k, { data, contentType: options?.contentType ?? "application/octet-stream" });
       return ok();
     },
     async get(k) {
-      return ok(blobs.get(k) ?? null);
+      return ok(blobs.get(k)?.data ?? null);
     },
     async remove(k) {
       blobs.delete(k);

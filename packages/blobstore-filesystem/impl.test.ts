@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import type * as FsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -28,7 +28,7 @@ afterEach(() => {
 blobstoreContractTests(async () => createBlobstoreFilesystem({ root: await fresh() }));
 
 describe("blobstore/filesystem", () => {
-  it("rejects keys that escape the root or collide with metadata", async () => {
+  it("rejects keys that escape the root or look like a legacy sidecar", async () => {
     expect(() => assertKey("../x")).toThrow(/invalid key/);
     expect(() => assertKey("/abs")).toThrow(/invalid key/);
     expect(() => assertKey("a//b")).toThrow(/invalid key/);
@@ -40,28 +40,28 @@ describe("blobstore/filesystem", () => {
   it("prunes directories emptied by move and remove, but never the root", async () => {
     const root = await fresh();
     const store = createBlobstoreFilesystem({ root });
-    const blob = { data: new Uint8Array([1]), contentType: "text/plain" };
-    expectOk(await store.put("a/b/x.txt", blob));
+    const bytes = new Uint8Array([1]);
+    expectOk(await store.put("a/b/x.txt", bytes, { contentType: "text/plain" }));
     expectOk(await store.move("a/b/x.txt", "c/x.txt"));
     await expect(readdir(root)).resolves.toEqual(["c"]);
 
-    expectOk(await store.put("c/d/y.txt", blob));
+    expectOk(await store.put("c/d/y.txt", bytes));
     expectOk(await store.remove("c/d/y.txt"));
-    await expect(readdir(join(root, "c"))).resolves.toEqual(["x.txt", "x.txt.meta.json"]);
+    await expect(readdir(join(root, "c"))).resolves.toEqual(["x.txt"]);
     expectOk(await store.remove("c/x.txt"));
     await expect(readdir(root)).resolves.toEqual([]);
   });
 
-  it("move reports a blob whose meta file is missing as NOT_FOUND, leaving the data file in place", async () => {
+  it("ignores legacy content-type sidecars in listings", async () => {
     const root = await fresh();
+    for (const [file, content] of [["a/x.txt", "x"], ["a/x.txt.meta.json", '{"contentType":"text/plain"}'], ["plain.meta.json", "{}"]] as const) {
+      await mkdir(dirname(join(root, file)), { recursive: true });
+      await writeFile(join(root, file), content);
+    }
     const store = createBlobstoreFilesystem({ root });
-    const path = join(root, "a/x.txt");
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, "orphan");
-    expect(expectErr(await store.move("a/x.txt", "b/y.txt"), "NOT_FOUND").message).toMatch(/not found/);
-    await expect(readFile(path, "utf8")).resolves.toBe("orphan");
-    expect(expectOk(await store.get("a/x.txt"))).toBeNull();
-    expect(expectOk(await store.get("b/y.txt"))).toBeNull();
+    expect(expectOk(await store.list(""))).toEqual([{ key: "a/x.txt", size: 1 }]);
+    expect(new TextDecoder().decode(expectOk(await store.get("a/x.txt")) ?? new Uint8Array())).toBe("x");
+    await expect(store.get("a/x.txt.meta.json")).rejects.toThrow(/invalid key/);
   });
 
   it("maps a transient IO error (EBUSY) to a retryable TRANSIENT Err instead of throwing", async () => {
@@ -69,7 +69,7 @@ describe("blobstore/filesystem", () => {
     const store = createBlobstoreFilesystem({ root });
     const busy = Object.assign(new Error("resource busy"), { code: "EBUSY" });
     vi.mocked(writeFile).mockRejectedValueOnce(busy);
-    const result = await store.put("a.txt", { data: new Uint8Array([1]), contentType: "text/plain" });
+    const result = await store.put("a.txt", new Uint8Array([1]));
     const error = expectErr(result, "TRANSIENT");
     expect(error.retryable).toBe(true);
     expect(error.cause).toBe(busy);
@@ -80,6 +80,6 @@ describe("blobstore/filesystem", () => {
     const store = createBlobstoreFilesystem({ root });
     const denied = Object.assign(new Error("permission denied"), { code: "EACCES" });
     vi.mocked(writeFile).mockRejectedValueOnce(denied);
-    await expect(store.put("a.txt", { data: new Uint8Array([1]), contentType: "text/plain" })).rejects.toBe(denied);
+    await expect(store.put("a.txt", new Uint8Array([1]))).rejects.toBe(denied);
   });
 });

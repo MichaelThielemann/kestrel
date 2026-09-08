@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Blob, Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createContext, type Context } from "@michaelthielemann/kestrel/context";
@@ -9,15 +9,15 @@ import type { Logger } from "@michaelthielemann/kestrel/logger";
 import module, { configSchema } from "./module.ts";
 import { createMediaDefault, type Config, type Media } from "./impl.ts";
 
-function fakeBlobstore(): Blobstore & { blobs: Map<string, Blob> } {
-  const blobs = new Map<string, Blob>();
+function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
+  const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
   return {
     blobs,
-    async put(key, blob) { blobs.set(key, blob); return ok(); },
-    async get(key) { return ok(blobs.get(key) ?? null); },
+    async put(key, data, options) { blobs.set(key, { data, contentType: options?.contentType ?? "application/octet-stream" }); return ok(); },
+    async get(key) { return ok(blobs.get(key)?.data ?? null); },
     async remove(key) { blobs.delete(key); return ok(); },
     async move(from, to) { const b = blobs.get(from); if (!b) return err(failure("NOT_FOUND", `${from} not found`)); blobs.set(to, b); blobs.delete(from); return ok(); },
-    async list(prefix) { return ok([...blobs].filter(([k]) => k.startsWith(prefix)).map(([key, b]) => ({ key, size: b.data.byteLength, contentType: b.contentType }))); },
+    async list(prefix) { return ok([...blobs].filter(([k]) => k.startsWith(prefix)).map(([key, b]) => ({ key, size: b.data.byteLength }))); },
   };
 }
 
@@ -28,7 +28,7 @@ function fakeCtx(files: Context["files"] = [], payload: Record<string, unknown> 
 const noLogger: Logger = { step() {}, info() {}, error() {} };
 const config = (overrides: Partial<Config> = {}): Config => ({ allowedTypes: ["image/*"], deniedTypes: [], maxBytes: 1024, locales: [], prefix: "media/", ...overrides });
 
-async function make(overrides: Partial<Config> = {}): Promise<{ media: Media; blobs: Blobstore & { blobs: Map<string, Blob> }; db: FakePersistence; steps: ReturnType<NonNullable<typeof module.steps>> }> {
+async function make(overrides: Partial<Config> = {}): Promise<{ media: Media; blobs: Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> }; db: FakePersistence; steps: ReturnType<NonNullable<typeof module.steps>> }> {
   const blobs = fakeBlobstore();
   const db = createFakePersistence();
   const media = await createMediaDefault(config(overrides), blobs, db, noLogger);
@@ -185,7 +185,7 @@ describe("media/default list step", () => {
 describe("media/default reconcile step", () => {
   it("reports orphans and deletes them only when payload.delete is set", async () => {
     const { blobs, steps } = await make();
-    expectOk(await blobs.put("media/stray.png", { data: new Uint8Array([1]), contentType: "image/png" }));
+    expectOk(await blobs.put("media/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
 
     const reported = expectOk(await steps.reconcile(fakeCtx()));
     expect(reported.result).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: [] });
@@ -197,7 +197,7 @@ describe("media/default reconcile step", () => {
 
   it("reconcileDelete deletes without a payload flag", async () => {
     const { blobs, steps } = await make();
-    expectOk(await blobs.put("media/stray.png", { data: new Uint8Array([1]), contentType: "image/png" }));
+    expectOk(await blobs.put("media/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
 
     const ctx = expectOk(await steps.reconcileDelete(fakeCtx()));
     expect(ctx.result).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: [] });

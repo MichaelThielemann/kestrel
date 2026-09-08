@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, afterAll } from "vitest";
 import { createBlobstoreFilesystem } from "@michaelthielemann/kestrel-blobstore-filesystem/impl";
-import type { Blob, Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Document, NewDocument, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
@@ -13,15 +13,15 @@ import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { COLLECTION, FOLDERS, createMediaDefault, parseProvenance, safeName, type Config } from "./impl.ts";
 
-function fakeBlobstore(): Blobstore & { blobs: Map<string, Blob> } {
-  const blobs = new Map<string, Blob>();
+function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
+  const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
   return {
     blobs,
-    async put(key, blob) { blobs.set(key, blob); return ok(); },
-    async get(key) { return ok(blobs.get(key) ?? null); },
+    async put(key, data, options) { blobs.set(key, { data, contentType: options?.contentType ?? "application/octet-stream" }); return ok(); },
+    async get(key) { return ok(blobs.get(key)?.data ?? null); },
     async remove(key) { blobs.delete(key); return ok(); },
     async move(from, to) { const b = blobs.get(from); if (!b) return err(failure("NOT_FOUND", `${from} not found`)); blobs.set(to, b); blobs.delete(from); return ok(); },
-    async list(prefix) { return ok([...blobs].filter(([k]) => k.startsWith(prefix)).map(([key, b]) => ({ key, size: b.data.byteLength, contentType: b.contentType }))); },
+    async list(prefix) { return ok([...blobs].filter(([k]) => k.startsWith(prefix)).map(([key, b]) => ({ key, size: b.data.byteLength }))); },
   };
 }
 const png = { filename: "../evil name.PNG", contentType: "image/png", data: new Uint8Array([1, 2, 3]) };
@@ -269,8 +269,8 @@ describe("media/default", () => {
 
   it("migrates legacy uuid keys to path keys, suffixing on collision and logging missing blobs", async () => {
     const { media, blobs, db, infos, errors } = await make();
-    expectOk(await blobs.put("legacy1.png", { data: new Uint8Array([1]), contentType: "image/png" }));
-    expectOk(await blobs.put("legacy2.png", { data: new Uint8Array([2]), contentType: "image/png" }));
+    expectOk(await blobs.put("legacy1.png", new Uint8Array([1]), { contentType: "image/png" }));
+    expectOk(await blobs.put("legacy2.png", new Uint8Array([2]), { contentType: "image/png" }));
     const base = { contentType: "image/png", size: 1, createdAt: 1, updatedAt: 1, provenance: { origin: "human" }, width: null, height: null, alt: {}, title: {}, description: {} };
     expectOk(await db.createOne(COLLECTION, { ...base, filename: "bild.png", folder: "f", key: "legacy1.png" }));
     expectOk(await db.createOne(COLLECTION, { ...base, filename: "bild.png", folder: "f", key: "legacy2.png" }));
@@ -287,7 +287,7 @@ describe("media/default", () => {
 
   it("migrateKeys never fails as a whole and skips names that would collide with a metadata sidecar", async () => {
     const { media, blobs, db, errors } = await make();
-    expectOk(await blobs.put("legacy3.png", { data: new Uint8Array([3]), contentType: "image/png" }));
+    expectOk(await blobs.put("legacy3.png", new Uint8Array([3]), { contentType: "image/png" }));
     const base = { contentType: "image/png", size: 1, createdAt: 1, updatedAt: 1, provenance: { origin: "human" }, width: null, height: null, alt: {}, title: {}, description: {} };
     expectOk(await db.createOne(COLLECTION, { ...base, filename: "x.meta.json", folder: "f", key: "legacy3.png" }));
     expect(expectOk(await media.migrateKeys())).toEqual({ moved: 0, renamed: 0, missing: 0, skipped: 1 });
@@ -309,7 +309,7 @@ describe("media/default", () => {
     const base = { contentType: "image/png", size: 1, provenance: { origin: "human" }, width: null, height: null, alt: {}, title: {}, description: {}, status: "ready", checksum: null };
     expectOk(await db.createOne(COLLECTION, { ...base, createdAt: 1, updatedAt: 1, filename: "a.png", folder: "f", key: "legacy-a.png" }));
     expectOk(await db.createOne(COLLECTION, { ...base, createdAt: 2, updatedAt: 2, filename: "b.png", folder: "f", key: "legacy-b.png" }));
-    expectOk(await blobs.put("legacy-b.png", { data: new Uint8Array([1]), contentType: "image/png" }));
+    expectOk(await blobs.put("legacy-b.png", new Uint8Array([1]), { contentType: "image/png" }));
     expect(expectOk(await media.migrateKeys())).toEqual({ moved: 1, renamed: 0, missing: 0, skipped: 1 });
     expect(errors.some((m) => /failed to migrate key/.test(m))).toBe(true);
   });
@@ -374,7 +374,7 @@ describe("media/default", () => {
 
   it("migrates keys that predate the prefix", async () => {
     const { media, blobs, db } = await make();
-    expectOk(await blobs.put("2026/presse/x.png", { data: new Uint8Array([1]), contentType: "image/png" }));
+    expectOk(await blobs.put("2026/presse/x.png", new Uint8Array([1]), { contentType: "image/png" }));
     const base = { contentType: "image/png", size: 1, createdAt: 1, updatedAt: 1, provenance: { origin: "human" }, width: null, height: null, alt: {}, title: {}, description: {} };
     expectOk(await db.createOne(COLLECTION, { ...base, filename: "x.png", folder: "2026/presse", key: "2026/presse/x.png" }));
     expect(expectOk(await media.migrateKeys())).toEqual({ moved: 1, renamed: 0, missing: 0, skipped: 0 });
@@ -383,7 +383,7 @@ describe("media/default", () => {
 
   it("finishes a migration whose blob was already moved before the row was updated", async () => {
     const { media, blobs, db } = await make();
-    expectOk(await blobs.put("media/f/bild.png", { data: new Uint8Array([1]), contentType: "image/png" }));
+    expectOk(await blobs.put("media/f/bild.png", new Uint8Array([1]), { contentType: "image/png" }));
     const base = { contentType: "image/png", size: 1, createdAt: 1, updatedAt: 1, provenance: { origin: "human" }, width: null, height: null, alt: {}, title: {}, description: {} };
     const row = expectOk(await db.createOne(COLLECTION, { ...base, filename: "bild.png", folder: "f", key: "legacy.png" }));
     expect(expectOk(await media.migrateKeys())).toEqual({ moved: 1, renamed: 0, missing: 0, skipped: 0 });
@@ -419,7 +419,7 @@ describe("media/default", () => {
       const order: string[] = [];
       const db = createFakePersistence();
       const observed: Persistence = { ...db, async createOne<T extends Document>(collection: string, data: NewDocument<T>) { if (collection === COLLECTION) order.push(`row:${String(data.status)}`); return db.createOne<T>(collection, data); } };
-      const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, { ...blobs, async put(key, blob) { order.push("blob"); return blobs.put(key, blob); } }, observed, noLogger, () => 7);
+      const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, { ...blobs, async put(key, data, options) { order.push("blob"); return blobs.put(key, data, options); } }, observed, noLogger, () => 7);
       const item = expectOk(await media.upload({ ...png, filename: "shot.png" }));
       expect(order).toEqual(["row:uploading", "blob"]);
       expect(item.status).toBe("ready");
@@ -430,7 +430,7 @@ describe("media/default", () => {
       const blobs = fakeBlobstore();
       const db = createFakePersistence();
       let broken = true;
-      const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, { ...blobs, async put(key, blob) { if (broken) return err(failure("TRANSIENT", "blobstore down")); return blobs.put(key, blob); } }, db, noLogger, () => 7);
+      const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, { ...blobs, async put(key, data, options) { if (broken) return err(failure("TRANSIENT", "blobstore down")); return blobs.put(key, data, options); } }, db, noLogger, () => 7);
       expect(expectErr(await media.upload({ ...png, filename: "shot.png" }), "TRANSIENT").message).toMatch(/blobstore down/);
       const stored = expectOk(await db.findOne<{ id: string; status: string }>(COLLECTION, {}));
       expect(stored?.status).toBe("failed");
@@ -450,7 +450,7 @@ describe("media/default", () => {
       const db = createFakePersistence();
       expectOk(await db.ensureCollection(COLLECTION, { filename: "string", folder: "string", contentType: "string", size: "number", key: "string", createdAt: "number", updatedAt: "number", provenance: "json", width: "number", height: "number", alt: "json", title: "json", description: "json" }));
       const legacy = expectOk(await db.createOne(COLLECTION, { filename: "old.png", folder: "", contentType: "image/png", size: 3, key: "media/old.png", createdAt: 1, updatedAt: 1, provenance: null, width: null, height: null, alt: {}, title: {}, description: {} }));
-      expectOk(await blobs.put("media/old.png", { data: png.data, contentType: "image/png" }));
+      expectOk(await blobs.put("media/old.png", png.data, { contentType: "image/png" }));
       const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, blobs, db, noLogger, () => 7);
       expect(expectOk(await media.get(legacy.id))?.status).toBe("ready");
       expect(expectOk(await media.get(legacy.id))?.provenance).toEqual({ origin: "unknown" });
@@ -488,9 +488,9 @@ describe("media/default", () => {
       const kept = expectOk(await media.upload({ ...png, filename: "kept.png" }));
       const lost = expectOk(await media.upload({ ...png, filename: "lost.png" }));
       blobs.blobs.delete(lost.key);
-      expectOk(await blobs.put("media/stray.png", { data: png.data, contentType: "image/png" }));
-      expectOk(await blobs.put("media-variants/x/thumb.webp", { data: png.data, contentType: "image/webp" }));
-      expectOk(await blobs.put("site/index.html", { data: png.data, contentType: "text/html" }));
+      expectOk(await blobs.put("media/stray.png", png.data, { contentType: "image/png" }));
+      expectOk(await blobs.put("media-variants/x/thumb.webp", png.data, { contentType: "image/webp" }));
+      expectOk(await blobs.put("site/index.html", png.data, { contentType: "text/html" }));
 
       expect(expectOk(await media.reconcile())).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: ["media/lost.png"] });
       expect(blobs.blobs.has("media/stray.png")).toBe(true);

@@ -1,6 +1,5 @@
-import { ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { describe, it, expect } from "vitest";
-import { ok } from "@michaelthielemann/kestrel/result";
 import { blobstoreContractTests } from "@michaelthielemann/kestrel-contracts/blobstore.contract.test";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createBlobstoreS3, createClient, type Config } from "./impl.ts";
@@ -41,35 +40,23 @@ describe.skipIf(!endpoint)("blobstore/s3 against MinIO", () => {
     };
   }
 
+  async function contentTypeOf(prefix: string, key: string): Promise<string | undefined> {
+    const out = (await client.send(new GetObjectCommand({ Bucket: bucket, Key: prefix + key }))) as { ContentType?: string };
+    return out.ContentType;
+  }
+
   const runPrefix = `minio-test/${Date.now()}-${Math.random().toString(36).slice(2)}/`;
 
-  // S3 listings carry no content-type metadata (README); the contract test expects list() to
-  // report it, so backfill it from get() the way the fake-backed impl.test.ts does.
-  blobstoreContractTests(async () => {
-    const store = await makeWith(runPrefix)();
-    return {
-      ...store,
-      async list(prefix) {
-        const infos = await store.list(prefix);
-        if (!infos.ok) return infos;
-        const fake = await Promise.all(
-          infos.value.map(async (i) => {
-            const blob = await store.get(i.key);
-            return { ...i, contentType: blob.ok && blob.value ? blob.value.contentType : i.contentType };
-          }),
-        );
-        return ok(fake);
-      },
-    };
-  });
+  blobstoreContractTests(makeWith(runPrefix));
 
   describe("extra cases", () => {
     const bytes = new TextEncoder().encode("hello minio");
 
     it("works under a nested prefix", async () => {
-      const store = await makeWith(`${runPrefix}a/b/`)();
-      expectOk(await store.put("x.txt", { data: bytes, contentType: "text/plain" }));
-      expect(expectOk(await store.get("x.txt"))?.contentType).toBe("text/plain");
+      const prefix = `${runPrefix}a/b/`;
+      const store = await makeWith(prefix)();
+      expectOk(await store.put("x.txt", bytes, { contentType: "text/plain" }));
+      expect(await contentTypeOf(prefix, "x.txt")).toBe("text/plain");
       expect(expectOk(await store.list("")).map((i) => i.key)).toEqual(["x.txt"]);
     });
 
@@ -77,24 +64,25 @@ describe.skipIf(!endpoint)("blobstore/s3 against MinIO", () => {
       const store = await makeWith(`${runPrefix}odd-keys/`)();
       const keys = ["a b.txt", "a+b.txt", "ä.txt", "100%.txt"];
       for (const key of keys) {
-        expectOk(await store.put(key, { data: bytes, contentType: "text/plain" }));
+        expectOk(await store.put(key, bytes, { contentType: "text/plain" }));
       }
       for (const key of keys) {
-        const blob = expectOk(await store.get(key));
-        expect(Array.from(blob?.data ?? [])).toEqual(Array.from(bytes));
+        const data = expectOk(await store.get(key));
+        expect(Array.from(data ?? [])).toEqual(Array.from(bytes));
       }
       expect(expectOk(await store.list("")).map((i) => i.key).sort()).toEqual([...keys].sort());
     });
 
     it("move onto an existing key overwrites it", async () => {
-      const store = await makeWith(`${runPrefix}move-overwrite/`)();
-      expectOk(await store.put("src.txt", { data: bytes, contentType: "text/plain" }));
-      expectOk(await store.put("dst.txt", { data: new Uint8Array([9]), contentType: "application/octet-stream" }));
+      const prefix = `${runPrefix}move-overwrite/`;
+      const store = await makeWith(prefix)();
+      expectOk(await store.put("src.txt", bytes, { contentType: "text/plain" }));
+      expectOk(await store.put("dst.txt", new Uint8Array([9]), { contentType: "application/octet-stream" }));
       expectOk(await store.move("src.txt", "dst.txt"));
       expect(expectOk(await store.get("src.txt"))).toBeNull();
       const dst = expectOk(await store.get("dst.txt"));
-      expect(dst?.contentType).toBe("text/plain");
-      expect(Array.from(dst?.data ?? [])).toEqual(Array.from(bytes));
+      expect(await contentTypeOf(prefix, "dst.txt")).toBe("text/plain");
+      expect(Array.from(dst ?? [])).toEqual(Array.from(bytes));
     });
 
     it("move of a missing key answers NOT_FOUND", async () => {
@@ -103,11 +91,13 @@ describe.skipIf(!endpoint)("blobstore/s3 against MinIO", () => {
     });
 
     it("move across directories", async () => {
-      const store = await makeWith(`${runPrefix}move-dirs/`)();
-      expectOk(await store.put("a/x.txt", { data: bytes, contentType: "text/plain" }));
+      const prefix = `${runPrefix}move-dirs/`;
+      const store = await makeWith(prefix)();
+      expectOk(await store.put("a/x.txt", bytes, { contentType: "text/plain" }));
       expectOk(await store.move("a/x.txt", "b/c/x.txt"));
       expect(expectOk(await store.get("a/x.txt"))).toBeNull();
-      expect(expectOk(await store.get("b/c/x.txt"))?.contentType).toBe("text/plain");
+      expect(expectOk(await store.get("b/c/x.txt"))).not.toBeNull();
+      expect(await contentTypeOf(prefix, "b/c/x.txt")).toBe("text/plain");
       expect(expectOk(await store.list("")).map((i) => i.key)).toEqual(["b/c/x.txt"]);
     });
   });
