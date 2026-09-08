@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-contracts",
-  "version": "5.0.3",
+  "version": "5.1.0",
   "description": "Kestrel standard contracts (persistence, authn, authz, blobstore, events) with contract test suites.",
   "type": "module",
   "license": "Apache-2.0",

@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-persistence-sqlite",
-  "version": "5.0.3",
+  "version": "5.1.0",
   "description": "persistence@1 on Node's built-in node:sqlite.",
   "type": "module",
   "license": "Apache-2.0",

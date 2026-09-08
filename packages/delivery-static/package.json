@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-delivery-static",
-  "version": "5.0.3",
+  "version": "5.1.0",
   "description": "Renders published documents per locale via renderer@1, stores them in blobstore@1 and tracks a publish status.",
   "type": "module",
   "license": "Apache-2.0",

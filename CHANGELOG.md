@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 5.1.0 – 2026-09-08
+
+- **breaking** `blobstore@1` is a byte store: `put(key, data, { contentType? })` takes the bytes and
+  an optional content-type hint (stored as object metadata by `blobstore-s3`, ignored by
+  `blobstore-filesystem`), `get` returns `Uint8Array | null`, `list` returns `{ key, size }`; the
+  `Blob` type is gone. The module owning an object knows its type: media from `media_items`,
+  images from the variant row's format, delivery from the file extension. `blobstore-filesystem`
+  writes no `.meta.json` sidecars any more; the ones earlier versions left under its root are
+  ignored by `list` and can be deleted once with `find <root> -name '*.meta.json' -delete`; keys
+  ending in `.meta.json` stay rejected.
 - `replication-sqlite`: `replication.snapshot` and `replication.prepareRestore` called before the
   first sync of a process no longer ship WAL segments into a `gen/null/` generation (the frames are
   covered by the snapshot the call takes); `replication.listPoints`, retention and restore ignore
