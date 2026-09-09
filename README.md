@@ -63,6 +63,9 @@ host such as Nuxt/Nitro, set `http: null`, import modules and pipelines statical
 2. Contracts are domain-neutral. Test question: would a shop or a forum need the same interface?
    If not, domain knowledge leaked into the wrong layer.
 3. Submodules provide steps, not triggers. No submodule owns a route or emits an event itself.
+   The one exception: a submodule emits from a contract method whose fact arises without a
+   pipeline or survives a partial failure of that method (today only `migrations.applied`); every
+   further exception needs a row with its reason in the event table of `docs/pipelines.md`.
 4. Business logic lives in pipelines; one pipeline file shows the complete flow.
 5. Errors fail loud at boot, not at runtime: a missing contract, a missing method, an unknown step
    or a cycle stops the boot and names the module and the reason.

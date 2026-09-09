@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `events@1`: a handler receives a shallowly frozen copy of the emitted data, so one handler can
+  no longer change what the next one sees; assigning to it throws inside the handler. Rule 3
+  (submodules emit no events) now names its one exception, `migrations.applied`, and the reason.
 ## 5.1.0 – 2026-09-08
 
 - **breaking** `blobstore@1` is a byte store: `put(key, data, { contentType? })` takes the bytes and

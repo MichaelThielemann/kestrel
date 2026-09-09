@@ -11,9 +11,10 @@ export function createEventsInmemory(): Events {
       const set = handlers.get(name);
       if (!set) return;
       const errors: unknown[] = [];
+      const frozen = Object.freeze({ ...data });
       for (const handler of [...set]) {
         try {
-          await handler(name, data);
+          await handler(name, frozen);
         } catch (error) {
           errors.push(error);
         }

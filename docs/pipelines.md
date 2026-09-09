@@ -447,7 +447,11 @@ an event receives this data as its `payload`.
 | `page.created` / `page.updated` / `page.deleted` | document id |
 | `media.uploaded` / `media.updated` / `media.deleted` | document id (for a bulk upload of several files: `null`, plus `ids: string[]`) |
 | `user.created` / `user.deactivated` | document id |
-| `migrations.applied` | – (no envelope: the `migrations/default` module sends its own `{ migrations: [id], documents }` after a run; deliberately no `page.updated` per document it migrated) |
+| `migrations.applied` | – (no envelope: the `migrations/default` module sends its own `{ migrations: [id], documents }` after a run; deliberately no `page.updated` per document it migrated). The named exception to rule 3: `apply()` is a contract method that also runs at boot, and after a partial failure the event still has to cover the migrations already applied — an `events.emit` step after a failing `migrations.apply` would never run |
+
+Whatever the bus delivers is a shallowly frozen copy of the emitted data, like the context between
+steps: a handler cannot change what the next handler sees, and assigning to the object throws in
+the handler (which `emit` reports in its `AggregateError`). Nested objects are shared, not frozen.
 
 `events.emit:<name>?with=result` additionally adds `result: ctx.result` unchanged (a
 deliberate opt-in, not the default). **Careful:** the shape of `result` then depends on the

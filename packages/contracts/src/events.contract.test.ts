@@ -75,6 +75,26 @@ export function eventsContractTests(make: () => Promise<Events>) {
       expect((agg.errors[1] as Error).message).toBe("second");
     });
 
+    it("hands every handler a frozen copy, so one handler cannot change what the next one sees", async () => {
+      const original: EventData = { id: "1" };
+      const seen: EventData[] = [];
+      bus.on("frozen", async (_name, data) => {
+        seen.push(data);
+        (data as { x?: number }).x = 1;
+      });
+      bus.on("frozen", async (_name, data) => {
+        seen.push(data);
+      });
+      const error = await bus.emit("frozen", original).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors[0]).toBeInstanceOf(TypeError);
+      expect(seen).toHaveLength(2);
+      expect(seen[1]).not.toHaveProperty("x");
+      expect(seen[0]).not.toBe(original);
+      expect(Object.isFrozen(seen[0])).toBe(true);
+      expect(original).toEqual({ id: "1" });
+    });
+
     it("handlers run in registration order, sequentially", async () => {
       const order: string[] = [];
       bus.on("seq", async () => {

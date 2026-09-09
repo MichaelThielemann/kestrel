@@ -11,7 +11,8 @@ export interface Events {
    * A throwing handler does not prevent the remaining handlers from running. If any handler
    * threw, `emit` rejects with an `AggregateError` (message `events: <n> handler(s) failed
    * for "<name>"`) whose `errors` holds the thrown values, in the order the handlers ran.
-   * Resolves when none threw.
+   * Resolves when none threw. Every handler receives the same shallowly frozen copy of `data`:
+   * a handler cannot change what the next one sees, and assigning to it throws inside the handler.
    */
   emit(name: string, data: EventData): Promise<void>;
   on(name: string, handler: EventHandler): Unsubscribe;

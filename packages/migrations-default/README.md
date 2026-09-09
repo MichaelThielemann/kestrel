@@ -39,9 +39,9 @@ defineMigration({
 });
 ```
 and a rename: `renameBlock(document, "serviced-apartments", "apartments")`.
-The boot-time `migrations.applied` (mode `"apply"`) has no subscribers yet — event triggers
-subscribe only after every module's `setup()` has run — while an admin-triggered `apply()` does
-reach them; after a partial failure the event still fires, covering only the migrations that were
+The boot-time `migrations.applied` (mode `"apply"`) reaches no listener by construction: it fires
+inside `setup()`, and event triggers subscribe in `start()`, after every module is set up. Only an
+`apply()` triggered through a pipeline reaches event triggers; after a partial failure the event still fires, covering only the migrations that were
 applied before the failing one.
 Not included: `down` migrations (point-in-time recovery is the way back), transactions, file
 discovery of migration modules, a CLI — all a consumer concern (see kestrel-web `#kestrel/migrations`).

@@ -22,7 +22,7 @@ function fakeEvents(): Events & { emitted: Array<{ name: string; data: Record<st
   return {
     emitted,
     emit: vi.fn(async (name: string, data: Record<string, unknown>) => {
-      emitted.push({ name, data });
+      emitted.push({ name, data: Object.freeze({ ...data }) });
     }),
     on: () => () => {},
   };
