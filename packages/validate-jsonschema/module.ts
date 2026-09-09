@@ -58,8 +58,8 @@ export default defineModule({
   }),
 
   describe: () => ({
-    sanitize: (target: string) => ({ summary: `Sanitize HTML at format:"html" positions of payload field ${target}`, reads: [], writes: [`payload.${target.slice(target.indexOf(".") + 1)}`] }),
-    sanitizeHtml: (field: string) => ({ summary: `Sanitize the HTML payload field ${field}`, reads: [], writes: [`payload.${field}`] }),
-    check: (target: string) => ({ summary: `Validate payload field ${target} against its JSON Schema`, reads: [], writes: [], errors: { 400: "schema violation (path and message per problem)" } }),
+    sanitize: (target: string) => ({ summary: `Sanitize HTML at format:"html" positions of payload field ${target}`, reads: [], writes: [`payload.${target.slice(target.indexOf(".") + 1)}`], input: { type: "object", additionalProperties: true } }),
+    sanitizeHtml: (field: string) => ({ summary: `Sanitize the HTML payload field ${field}`, reads: [], writes: [`payload.${field}`], input: { type: "object", additionalProperties: true } }),
+    check: (target: string) => ({ summary: `Validate payload field ${target} against its JSON Schema`, reads: [], writes: [], input: { type: "object", additionalProperties: true }, errors: { 400: "schema violation (path and message per problem)" } }),
   }),
 });

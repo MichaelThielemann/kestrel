@@ -267,38 +267,42 @@ describe("runPipeline", () => {
   });
 });
 
-describe("runPipeline dev validation", () => {
-  const typed = { summary: "typed", reads: [], writes: [], input: { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false }, query: { limit: { type: "integer" } } };
+describe("runPipeline payload validation", () => {
+  const typed = { summary: "typed", reads: [], writes: [], input: { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false }, query: { limit: { type: "integer", minimum: 1 }, ids: { type: "array", items: { type: "string" } } } };
   const step = (fn: Step) => ({ name: "content.create", description: typed, fn });
   const pass: Step = async (ctx: Context) => ok({ ...ctx, result: "ran" });
+  const http = { kind: "http" as const, name: "POST /pages" };
 
-  it("fails the run before the step when the payload does not match the input schema", async () => {
+  it("fails the run before the step with VALIDATION and details.problems when the body does not match input", async () => {
     const { logger, steps } = collectingLogger();
     let ran = false;
-    const res = await runPipeline(
-      { name: "createPage", steps: [step(async (ctx: Context) => { ran = true; return ok(ctx); })] },
-      { trigger: { kind: "http", name: "POST /pages" }, payload: { title: 1 } },
-      logger,
-      { validateInput: true },
-    );
-    expect(res).toMatchObject({ status: 500, code: "INTERNAL", retryable: false, step: "content.create" });
-    expect(res.error).toBe('dev: payload of step "content.create" in pipeline "createPage" does not match describe().input at $.title: expected string, got number');
+    const res = await runPipeline({ name: "createPage", steps: [step(async (ctx: Context) => { ran = true; return ok(ctx); })] }, { trigger: http, body: { title: 1, extra: true }, query: {} }, logger);
+    expect(res).toMatchObject({ status: 400, code: "VALIDATION", retryable: false, step: "content.create" });
+    expect(res.details).toEqual({ problems: [{ path: "$.title", message: "expected string, got number" }, { path: "$.extra", message: "is not allowed by additionalProperties: false" }] });
+    expect(res.error).toBe("content.create: payload does not match schema ($.title expected string, got number; $.extra is not allowed by additionalProperties: false)");
     expect(ran).toBe(false);
-    expect(steps[0]?.outcome).toBe("error");
+    expect(steps[0]?.outcome).toBe("fail(VALIDATION)");
   });
 
-  it("merges query parameters into the schema so they survive additionalProperties: false", async () => {
+  it("validates declared query keys on a coerced copy, ignores undeclared ones and leaves the context strings alone", async () => {
     const { logger } = collectingLogger();
-    const run = (payload: Record<string, unknown>) => runPipeline({ name: "p", steps: [step(pass)] }, { trigger: { kind: "http" as const, name: "GET /x" }, payload }, logger, { validateInput: true });
-    expect(await run({ title: "x", limit: 2 })).toMatchObject({ status: 200, result: "ran" });
-    expect((await run({ title: "x", extra: 2 })).error).toContain("at $.extra");
+    let seen: Record<string, unknown> = {};
+    const spy: Step = async (ctx: Context) => { seen = ctx.payload; return ok({ ...ctx, result: "ran" }); };
+    const run = (query: Record<string, unknown>) => runPipeline({ name: "p", steps: [step(spy)] }, { trigger: http, body: { title: "x" }, query, payload: { ...query, title: "x" } }, logger);
+    expect(await run({ limit: "2", ids: "a", cachebuster: "123" })).toMatchObject({ status: 200, result: "ran" });
+    expect(seen.limit).toBe("2");
+    expect(seen.ids).toBe("a");
+    const bad = await run({ limit: "0" });
+    expect(bad).toMatchObject({ status: 400, code: "VALIDATION", details: { problems: [{ path: "$.limit", message: "below minimum 1" }] } });
+    expect((await run({ limit: "abc" })).details).toEqual({ problems: [{ path: "$.limit", message: "expected integer, got string" }] });
   });
 
-  it("skips steps without an input schema and does not validate at all by default", async () => {
+  it("validates the payload as body for triggers without an HTTP split and skips steps without schemas", async () => {
     const { logger } = collectingLogger();
     const bare = { name: "content.create", description, fn: pass };
-    expect(await runPipeline({ name: "p", steps: [bare] }, input, logger, { validateInput: true })).toMatchObject({ status: 200 });
-    expect(await runPipeline({ name: "p", steps: [step(pass)] }, input, logger)).toMatchObject({ status: 200, result: "ran" });
+    expect(await runPipeline({ name: "p", steps: [bare] }, input, logger)).toMatchObject({ status: 200 });
+    expect(await runPipeline({ name: "p", steps: [step(pass)] }, { trigger: { kind: "event", name: "x" }, payload: { title: "x" } }, logger)).toMatchObject({ status: 200, result: "ran" });
+    expect(await runPipeline({ name: "p", steps: [step(pass)] }, { trigger: { kind: "event", name: "x" }, payload: { title: 3 } }, logger)).toMatchObject({ status: 400, code: "VALIDATION" });
   });
 });
 

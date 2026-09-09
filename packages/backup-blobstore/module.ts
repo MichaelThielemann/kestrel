@@ -59,7 +59,7 @@ export default defineModule({
       summary: "Stage the latest or a chosen version next to the file; applied on the next start",
       reads: [],
       writes: ["result"],
-      input: { type: "object", properties: { key: { type: "string" } } },
+      input: { type: "object", properties: { key: { type: "string" } }, additionalProperties: false },
       output: { type: "object", properties: { key: { type: "string" }, size: { type: "number" }, file: { type: "string" }, pending: { type: "boolean", enum: [true] }, appliedOnRestart: { type: "boolean", enum: [true] } }, required: ["key", "size", "file", "pending", "appliedOnRestart"] },
       errors: { 400: "unknown version", 404: "no backup" },
     },

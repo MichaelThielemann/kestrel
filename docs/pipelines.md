@@ -18,7 +18,9 @@ export interface Context {
   readonly runId: string;               // assigned by the runner, never derivable from payload or headers
   requestId?: string;                   // from the X-Request-Id header, if short printable ASCII
   trigger: { kind: "http" | "event" | "cron"; name: string };
-  payload: Record<string, unknown>;     // body, event data, ...
+  payload: Record<string, unknown>;     // { ...query, ...body } for HTTP, event data, ...
+  body: Record<string, unknown>;        // the HTTP body alone (the payload for other triggers)
+  query: Record<string, unknown>;       // the HTTP query parameters alone, as strings (empty for other triggers)
   params: Record<string, string>;       // route parameters
   headers: Record<string, string>;      // HTTP headers (lowercased), empty otherwise
   files: UploadedFile[];                // multipart uploads: { field, filename, contentType, data }
@@ -196,8 +198,10 @@ entry. Rate limits are a step:
 For every run:
 
 1. Build a new `Context`, assign a `runId` and put it on the context.
-2. Run the steps in order. In dev mode (see [Dev Validation](#dev-validation)),
-   `ctx.payload` is checked against that step's `describe().input` before every step.
+2. Run the steps in order. Before every step the body and the query are checked against
+   that step's `describe().input` and `describe().query`
+   (see [Payload Validation](#payload-validation)); a violation ends the run with
+   `VALIDATION` 400 before the step runs.
 3. Log per step: `runId`, pipeline, step name, duration in ms, `ok | fail(<code>) | error`;
    every JSON log line starts with `time` (local ISO-8601 time with milliseconds and UTC
    offset). If the run was triggered by another run (an event trigger), that run's id also
@@ -345,8 +349,8 @@ means "may write" (`authn.identifyUser` writes `identity?`) — an optional writ
 satisfies a read. A read on `a.b` is satisfied if an earlier step wrote `a.b` or `a`; a read
 on `a` is satisfied if an earlier step wrote `a` or any `a.x`. A `result` write with no
 sub-key replaces the whole object, and with it every previously written `result.<key>`.
-`payload.*` reads are never checked (the client owns the payload; [Dev
-Validation](#dev-validation) checks it against `describe().input` instead).
+`payload.*` reads are never checked (the client owns the payload; [Payload
+Validation](#payload-validation) checks it against `describe().input`/`query` instead).
 
 After resolving each pipeline, boot checks the dataflow (`checkDataflow`,
 `@michaelthielemann/kestrel/dataflow`): available from the start are `payload`, `headers`,
@@ -363,20 +367,44 @@ like `delivery.publish:<type>` declares `reads: ["result.id"]`, the boot check p
 pipeline supplies it, and the remaining `if (typeof id !== "string") throw …` is a pure bug
 path.
 
-## Dev Validation
+## Payload Validation
 
-`boot({ dev })` (default: `process.env.NODE_ENV !== "production"`) validates `ctx.payload`
-against `describe().input` in dev mode before every step that declares an input schema
-(query parameters from `describe().query` are merged into `input.properties` in the
-process, since the HTTP trigger merges them into the payload). A violation is a bug in the
-module's schema or in the caller's wiring, not a client error: it comes back as 500
-`INTERNAL` with `step` and is logged with outcome `error`. In production the check never
-runs. The validator (`@michaelthielemann/kestrel/schema`, `validateSchema(schema, value)`)
-is not ajv — no new dependency in `core` for a check that never runs in production — but
-covers exactly the JSON Schema keywords the shipped `describe()` blocks use (`type`
-including `"integer"` and the array form, `properties`, `required`, `additionalProperties`,
-`items`, `enum`, `const`, `oneOf`, `anyOf`, `pattern`, `minimum`, `maximum`, `minLength`,
-`maxLength`, `minItems`; `format` is ignored).
+Every step declares the input it reads in `describe()`: `input` is a JSON Schema for the
+request body (`ctx.body`), `query` a map of query-parameter name → JSON Schema (`ctx.query`).
+The runner checks both before the step runs, in every environment, so a request that does not
+match the step's own declaration never reaches the step:
+
+- The body is validated against `input` as it is. Body schemas state `additionalProperties`
+  explicitly; `false` is the rule, `true` only for steps that deliberately accept open objects
+  (a consumer document in `persistence.createOne`, the field a consumer JSON schema governs in
+  `validate.check`). Body values are never converted.
+- Query parameters arrive as strings (repeated keys as string arrays). For the check the runner
+  builds a coerced copy of the declared keys only: `"10"` → `10` for `integer`/`number`,
+  `"true"`/`"false"` → boolean, a single string → `[string]` for an `array`; text that does not
+  convert stays a string and fails the declared type. Undeclared query parameters are ignored
+  (cache busters, tooling). The context is not touched: steps keep reading strings through
+  `first()` and their own parsers.
+- A violation is a client error: `ctx.fail("VALIDATION", "<step>: payload does not match
+  schema (…)", { problems })` with `details.problems: [{ path: "$.field", message }]`, `step`
+  set, log outcome `fail(VALIDATION)`. Because the check runs per step, it happens after
+  `authn.requireUser` and `authz.require:*`: an anonymous client still gets 401, not 400.
+- Semantic validation stays with the modules (`content@1` `validate()`: unknown fields,
+  uniqueness, references; `authn` `credentials()`): the schema catches shape and type, the
+  module catches meaning.
+
+The validator is `@michaelthielemann/kestrel/schema` (`validateSchema(schema, value)`,
+`coerceQuery(query, values)`), not ajv: it covers the JSON Schema keywords the shipped
+`describe()` blocks use (`type` including `"integer"` and the array form, `properties`,
+`required`, `additionalProperties`, `items`, `enum`, `const`, `oneOf`, `anyOf`, `pattern`,
+`minimum`, `maximum`, `minLength`, `maxLength`, `minItems`; `format` is ignored) and every
+keyword has a positive and a negative test.
+
+Two checks keep the declarations honest: a static test in the core's suite parses every
+`packages/*/module.ts` and fails when a step whose handler (or a helper it calls) reads
+`ctx.payload` has neither `input` nor `query`, or when a literal object `input` leaves
+`additionalProperties` unstated; and every module with steps has a `module.test.ts` that runs
+each step once through `testing/runPipeline` with `modules: [{ module, instance }]`, so the
+real schemas apply to a representative payload.
 
 ## Pipeline Test
 
@@ -392,7 +420,9 @@ it("rejects without identity", async () => {
 });
 ```
 
-`fakeSteps` is a step registry of stand-ins, no database needed.
+`fakeSteps` is a step registry of stand-ins, no database needed. To run a module's real steps
+with their `describe()` schemas, pass `modules: [{ module, instance }]` (the instance from
+`module.setup(...)` against fakes) instead of or next to `steps`.
 
 ## Vocabulary
 

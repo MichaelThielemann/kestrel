@@ -21,8 +21,6 @@ export interface BootInput {
   pipelines: readonly PipelineDefinition[];
   logger?: Logger;
   root?: string;
-  /** Validates `ctx.payload` against `describe().input` before every step; defaults to `NODE_ENV !== "production"`. */
-  dev?: boolean;
 }
 
 export interface Triggers {
@@ -114,7 +112,6 @@ async function teardownAll(ordered: readonly ModuleDefinition[], instances: Read
 export async function boot(input: BootInput): Promise<Kestrel> {
   const logger = input.logger ?? consoleLogger;
   const root = input.root ?? process.cwd();
-  const dev = input.dev ?? process.env.NODE_ENV !== "production";
 
   const parsed = configSchema.safeParse(input.config);
   if (!parsed.success) throw new KestrelBootError(CORE, `invalid kestrel.config: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
@@ -243,7 +240,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     const run = (name: string, ctxInput: ContextInput): Promise<RunResult> => {
       const pipeline = pipelines.get(name);
       if (!pipeline) throw new Error(`unknown pipeline "${name}"`);
-      return runs.track(() => runPipeline(pipeline, ctxInput, logger, { validateInput: dev }));
+      return runs.track(() => runPipeline(pipeline, ctxInput, logger));
     };
 
     let server: Server | undefined;

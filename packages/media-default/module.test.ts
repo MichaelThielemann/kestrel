@@ -1,11 +1,17 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createContext, type Context } from "@michaelthielemann/kestrel/context";
+import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { failure } from "@michaelthielemann/kestrel/errors";
+import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
-import type { Logger } from "@michaelthielemann/kestrel/logger";
+import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import module, { configSchema } from "./module.ts";
 import { createMediaDefault, type Config, type Media } from "./impl.ts";
 
@@ -224,5 +230,149 @@ describe("media/default configSchema prefix validation", () => {
 
   it("accepts valid multi-segment prefix", () => {
     expect(configSchema.safeParse({ prefix: "assets/media/" }).success).toBe(true);
+  });
+});
+
+async function makeInstance(overrides: Partial<Config> = {}): Promise<{ media: Media; blobs: Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> }; db: FakePersistence }> {
+  const blobs = fakeBlobstore();
+  const db = createFakePersistence();
+  const parsed = configSchema.parse(config(overrides));
+  const media = (await module.setup(parsed, {
+    get<T>(contract: { name: string }): T {
+      if (contract === BLOBSTORE) return blobs as T;
+      if (contract === PERSISTENCE) return db as T;
+      throw new Error(`unexpected contract ${contract.name}`);
+    },
+    find: () => undefined,
+    logger: silentLogger,
+    root: process.cwd(),
+  })) as Media;
+  return { media, blobs, db };
+}
+
+function pipeline(...steps: string[]) {
+  return definePipeline({ name: "test", steps });
+}
+
+describe("media/default steps via runPipeline", () => {
+  it("upload: validates the body and stores the file", async () => {
+    const { media } = await makeInstance();
+    const invalid = await runPipeline(pipeline("media.upload"), { files: [file("a.png")], body: { nope: 1 } }, { modules: [{ module, instance: media }] });
+    expect(invalid.status).toBe(400);
+    expect(invalid.code).toBe("VALIDATION");
+    expect(invalid.details?.problems).toEqual([{ path: "$.nope", message: "is not allowed by additionalProperties: false" }]);
+
+    const ok1 = await runPipeline(pipeline("media.upload"), { files: [file("a.png")], body: { folder: "photos" } }, { modules: [{ module, instance: media }] });
+    expect(ok1.status).toBe(200);
+    expect((ok1.result as { folder: string }).folder).toBe("photos");
+  });
+
+  it("get: query.locale is validated and coerced", async () => {
+    const { media } = await makeInstance();
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }));
+    const res = await runPipeline(pipeline("media.get"), { params: { id: item.id }, query: { locale: "de" } }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect((res.result as { id: string }).id).toBe(item.id);
+  });
+
+  it("list: query.limit/offset are coerced from strings, folder/q/sort/ids/recursive/locale are declared", async () => {
+    const { media } = await makeInstance();
+    await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "photos");
+    const res = await runPipeline(pipeline("media.list"), { query: { folder: "photos", limit: "10", offset: "0" } }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect((res.result as { total: number }).total).toBe(1);
+  });
+
+  it("download: serves the binary result", async () => {
+    const { media } = await makeInstance();
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1, 2]) }));
+    const res = await runPipeline(pipeline("media.download"), { params: { id: item.id } }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect(res.result).toMatchObject({ binary: true });
+  });
+
+  it("listFolders: returns folders", async () => {
+    const { media } = await makeInstance();
+    const res = await runPipeline(pipeline("media.listFolders"), {}, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.result)).toBe(true);
+  });
+
+  it("update: replaces fields", async () => {
+    const { media } = await makeInstance();
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }));
+    const res = await runPipeline(pipeline("media.update"), { params: { id: item.id }, body: { filename: "b.png" } }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect((res.result as { filename: string }).filename).toBe("b.png");
+  });
+
+  it("remove: deletes the item", async () => {
+    const { media } = await makeInstance();
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }));
+    const res = await runPipeline(pipeline("media.remove"), { params: { id: item.id } }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect(res.result).toEqual({ ok: true });
+  });
+
+  it("reconcile: reports and, with body.delete, removes orphan blobs", async () => {
+    const { media, blobs } = await makeInstance();
+    expectOk(await blobs.put("media/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
+    const reported = await runPipeline(pipeline("media.reconcile"), {}, { modules: [{ module, instance: media }] });
+    expect(reported.result).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: [] });
+    const deleted = await runPipeline(pipeline("media.reconcile"), { body: { delete: true } }, { modules: [{ module, instance: media }] });
+    expect(deleted.status).toBe(200);
+    expect(expectOk(await blobs.get("media/stray.png"))).toBeNull();
+  });
+
+  it("reconcileDelete: always deletes orphan blobs", async () => {
+    const { media, blobs } = await makeInstance();
+    expectOk(await blobs.put("media/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
+    const res = await runPipeline(pipeline("media.reconcileDelete"), {}, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect(expectOk(await blobs.get("media/stray.png"))).toBeNull();
+  });
+
+  it("export: copies every media item to the target directory", async () => {
+    const { media } = await makeInstance();
+    await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) });
+    const dir = await mkdtemp(join(tmpdir(), "media-module-export-"));
+    try {
+      const res = await runPipeline(pipeline(`media.export:${dir}`), {}, { modules: [{ module, instance: media }] });
+      expect(res.status).toBe(200);
+      expect((res.result as { written: number }).written).toBe(1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("createFolder: creates a folder from body.path", async () => {
+    const { media } = await makeInstance();
+    const res = await runPipeline(pipeline("media.createFolder"), { body: { path: "x/y" } }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect((res.result as { folder: string }).folder).toBe("x/y");
+  });
+
+  it("renameFolder: moves a folder", async () => {
+    const { media } = await makeInstance();
+    expectOk(await media.createFolder("x"));
+    const res = await runPipeline(pipeline("media.renameFolder"), { params: { path: "x" }, body: { path: "y" } }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect((res.result as { folder: string }).folder).toBe("y");
+  });
+
+  it("folderItems: query.recursive is coerced from a string", async () => {
+    const { media } = await makeInstance();
+    await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "x/y");
+    const res = await runPipeline(pipeline("media.folderItems"), { params: { path: "x" }, query: { recursive: "true" } }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect((res.result as { ids: string[] }).ids).toHaveLength(1);
+  });
+
+  it("removeFolder: deletes a folder and its contents", async () => {
+    const { media } = await makeInstance();
+    expectOk(await media.createFolder("x"));
+    const res = await runPipeline(pipeline("media.removeFolder"), { params: { path: "x" } }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect(res.result).toMatchObject({ ok: true });
   });
 });

@@ -321,10 +321,10 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
       if (err instanceof BodyTooLarge) return sendError(res, 413, err.message, requestId);
       return sendError(res, 400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId);
     }
-    const payload: Record<string, unknown> = { ...parseQuery(url.searchParams), ...body.payload };
+    const query = parseQuery(url.searchParams);
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers[k] = v;
-    const input: ContextInput = { trigger: { kind: "http", name: `${req.method} ${url.pathname}` }, payload, params: match.params, headers, files: body.files };
+    const input: ContextInput = { trigger: { kind: "http", name: `${req.method} ${url.pathname}` }, payload: { ...query, ...body.payload }, body: body.payload, query, params: match.params, headers, files: body.files };
     const ip = clientIp(req, peer);
     if (ip !== undefined) input.ip = ip;
 

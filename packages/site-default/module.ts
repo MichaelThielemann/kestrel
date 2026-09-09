@@ -46,6 +46,7 @@ function describeSite(site: SiteDefault) {
       summary: `Replace internal kestrel:<type>:<id> references in the ${typeOf(arg)} document with public paths (_links map added)`,
       reads: ["result"],
       writes: ["result"],
+      query: { locale: { type: "string" } },
     }),
   };
 }

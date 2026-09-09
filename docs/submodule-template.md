@@ -147,8 +147,14 @@ async contract method returns `Result<T, E>` (`contracts.md`); an `Err` from `pe
 `describe()` is required as soon as a module provides `steps` (if missing, boot aborts with
 `step "<name>" has no describe() entry`), and provides a `StepDescription` per step with the
 required fields `summary`, `reads` and `writes` (path grammar and semantics: `pipelines.md`
-§ reads/writes) plus optional input/output schema, query, errors, security, etc. for
-`kestrel-openapi`; a step that extends `ctx.result` with fields instead of replacing it
+§ reads/writes). A step that reads `ctx.payload` (directly or through a helper) must declare
+what it reads: `input` (a JSON Schema for the body, with `additionalProperties` stated
+explicitly — `false` unless the step deliberately takes open objects) and/or `query` (a map of
+query-parameter name → schema; never closed, undeclared parameters are ignored). The runner
+enforces both before the step in every environment (`pipelines.md` § Payload Validation), a
+static test in the core's suite fails for undeclared reads, and the module's `module.test.ts`
+runs every step once through `testing/runPipeline` with `modules: [{ module, instance }]`.
+Further optional fields — output schema, errors, security, etc. — feed `kestrel-openapi`; a step that extends `ctx.result` with fields instead of replacing it
 (e.g. `redirects.export`) sets `extendsOutput` instead of `output` — the generator merges it
 into the predecessor's output schema. `extendsItems` behaves the same but merges the schema into
 `properties.items.items` of the predecessor when its output is a list (otherwise it merges at
@@ -196,6 +202,9 @@ Not included: self-service registration, password reset (own pipelines).
       success, `ctx.fail(code, message, details?)` or `ctx.fail(error)` on an expected
       failure); `throw` only for wiring errors
 - [ ] `describe()` is present and covers every step, including `reads`/`writes`
+- [ ] Every step that reads the payload declares `input` and/or `query`; body schemas state
+      `additionalProperties`; `module.test.ts` runs every step once through
+      `testing/runPipeline` with `modules: [{ module, instance }]`, including one schema violation
 - [ ] Contract test passes
 - [ ] Invalid config is caught by `configSchema` (Zod throws)
 - [ ] No route, no `emit`, no pipeline, no flow logic in the submodule

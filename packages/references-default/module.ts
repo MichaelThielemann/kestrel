@@ -106,7 +106,7 @@ export default defineModule({
   }),
 
   describe: () => ({
-    check: (type: string) => ({ summary: `Referenced ids of ${type} must exist`, reads: [], writes: [], errors: { 400: "a referenced document does not exist" } }),
+    check: (type: string) => ({ summary: `Referenced ids of ${type} must exist`, reads: [], writes: [], input: { type: "object", additionalProperties: true }, errors: { 400: "a referenced document does not exist" } }),
     index: (type: string) => ({ summary: `Index the references of a ${type} document`, reads: ["result.id"], writes: [] }),
     unindex: (type: string) => ({ summary: `Drop indexed references of a ${type} document`, reads: ["params.id"], writes: [], errors: { 400: "missing id" } }),
     guard: (target: string) => ({ summary: `Refuse deletion while ${target} is referenced`, reads: ["params.id"], writes: [], errors: { 400: "missing id", 409: "still referenced" } }),

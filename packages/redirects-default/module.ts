@@ -17,6 +17,7 @@ export const configSchema = z
   .strict();
 
 const RULE_SCHEMA = { type: "object", properties: { pattern: { type: "string" }, target: { type: "string" }, status: { type: "integer", enum: [301, 302, 307, 308] } }, required: ["pattern", "target", "status"] };
+const ROW_SCHEMA = { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, status: { type: ["string", "number"] } } };
 
 export default defineModule({
   name: "redirects/default",
@@ -59,8 +60,14 @@ export default defineModule({
     },
   }),
 
-  describe: () => ({
-    validate: { summary: "Compile the redirect rules of the payload; VALIDATION names the offending row", reads: [], writes: [], errors: { 400: "Row N: <reason>" } },
+  describe: (redirects) => ({
+    validate: {
+      summary: "Compile the redirect rules of the payload; VALIDATION names the offending row",
+      reads: [],
+      writes: [],
+      input: { type: "object", properties: { [redirects.field]: { type: "array", items: ROW_SCHEMA } }, additionalProperties: false },
+      errors: { 400: "Row N: <reason>" },
+    },
     lookup: { summary: "Answer { redirect: { to, status } } and end the pipeline when the request path matches a rule", reads: ["params.path"], writes: ["result"] },
     export: {
       summary: "Write redirects.json to the blobstore (adds `redirects: { rules, skipped }` to the result)",

@@ -11,7 +11,9 @@ import { VALIDATE, type Validate, type Validation } from "@michaelthielemann/kes
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import { createContext, type Context, type Step } from "@michaelthielemann/kestrel/context";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
+import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
+import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import type { MigrationsDefault } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
 
@@ -233,5 +235,39 @@ describe("migrations/default describe", () => {
     expect(Object.keys(apply.errors ?? {}).sort()).toEqual(["409", "500"]);
     expect(typeof apply.errors?.[409]).toBe("string");
     expect(typeof apply.errors?.[500]).toBe("string");
+  });
+});
+
+describe("migrations/default steps via runPipeline", () => {
+  it("list and apply run through the real runner with the module's own schema applied", async () => {
+    const migration: Migration = { id: "m1", collection: "pages", up: (c) => ({ ...c.document, title: "X" }) };
+    const { instance, content } = await boot([migration], { mode: "off" });
+    expectOk(await content.create("pages", { slug: "a", title: "A", status: "draft" }));
+
+    const list = definePipeline({ name: "list", steps: ["migrations.list"] });
+    const listed = await runPipeline(list, {}, { modules: [{ module, instance }] });
+    expect(listed.status).toBe(200);
+    expect((listed.result as { pending: unknown[] }).pending).toEqual([{ id: "m1", collection: "pages" }]);
+
+    const apply = definePipeline({ name: "apply", steps: ["migrations.apply"] });
+    const applied = await runPipeline(apply, { body: { dry: true } }, { modules: [{ module, instance }] });
+    expect(applied.status).toBe(200);
+    expect(applied.result).toEqual({ dry: true, changes: [{ id: "m1", documents: 1 }] });
+  });
+
+  it("apply rejects a non-boolean dry flag as VALIDATION before the step runs", async () => {
+    const { instance } = await boot([{ id: "m1", collection: "pages", up: () => null }], { mode: "off" });
+    const apply = definePipeline({ name: "apply-invalid", steps: ["migrations.apply"] });
+    const result = await runPipeline(apply, { body: { dry: "yes" } }, { modules: [{ module, instance }] });
+    expect(result.status).toBe(400);
+    expect(result.code).toBe("VALIDATION");
+  });
+
+  it("apply rejects an unknown body key as VALIDATION", async () => {
+    const { instance } = await boot([{ id: "m1", collection: "pages", up: () => null }], { mode: "off" });
+    const apply = definePipeline({ name: "apply-extra-key", steps: ["migrations.apply"] });
+    const result = await runPipeline(apply, { body: { nope: true } }, { modules: [{ module, instance }] });
+    expect(result.status).toBe(400);
+    expect(result.code).toBe("VALIDATION");
   });
 });

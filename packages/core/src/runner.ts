@@ -3,9 +3,8 @@ import { createContext, DONE, type Context, type ContextInput } from "./context.
 import type { Logger, StepLog } from "./logger.ts";
 import type { ResolvedStep } from "./registry.ts";
 import { failure, isKestrelError, type KestrelError } from "./errors.ts";
-import type { JsonSchema } from "./defineModule.ts";
 import { isErr, type Result } from "./result.ts";
-import { validateSchema } from "./schema.ts";
+import { coerceQuery, validateSchema, type SchemaProblem } from "./schema.ts";
 
 export interface ResolvedPipeline {
   name: string;
@@ -25,10 +24,6 @@ export interface RunResult {
 }
 
 export type Runner = (pipeline: string, input: ContextInput) => Promise<RunResult>;
-
-export interface RunOptions {
-  validateInput: boolean;
-}
 
 export interface RunTracker {
   track<T>(fn: () => Promise<T>): Promise<T>;
@@ -83,17 +78,20 @@ function isContext(value: unknown): value is Context {
   return record(ctx.trigger) && record(ctx.payload) && record(ctx.params) && record(ctx.headers) && Array.isArray(ctx.files) && typeof ctx.fail === "function" && typeof ctx.done === "function";
 }
 
-// Query parameters are merged into the payload by the HTTP trigger, so an `additionalProperties:
-// false` input schema has to accept them too.
-function payloadSchema(description: ResolvedStep["description"]): JsonSchema | undefined {
-  const input = description.input;
-  if (input === undefined) return undefined;
-  if (description.query === undefined) return input;
-  const properties = typeof input.properties === "object" && input.properties !== null ? (input.properties as Record<string, unknown>) : {};
-  return { ...input, properties: { ...properties, ...description.query } };
+function inputProblems(description: ResolvedStep["description"], ctx: Context): SchemaProblem[] {
+  const problems: SchemaProblem[] = description.input === undefined ? [] : validateSchema(description.input, ctx.body);
+  const query = description.query;
+  if (query !== undefined) {
+    const coerced = coerceQuery(query, ctx.query);
+    for (const [key, schema] of Object.entries(query)) {
+      if (!Object.hasOwn(coerced, key)) continue;
+      for (const problem of validateSchema(schema, coerced[key])) problems.push({ path: `$.${key}${problem.path.slice(1)}`, message: problem.message });
+    }
+  }
+  return problems;
 }
 
-export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInput, logger: Logger, options: RunOptions = { validateInput: false }): Promise<RunResult> {
+export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInput, logger: Logger): Promise<RunResult> {
   const runId = randomUUID();
   let ctx = createContext(input, runId);
   const requestId = ctx.requestId;
@@ -110,14 +108,11 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
         ms: Math.round((performance.now() - started) * 100) / 100,
         outcome,
       });
-    if (options.validateInput) {
-      const schema = payloadSchema(step.description);
-      const problem = schema === undefined ? undefined : validateSchema(schema, ctx.payload)[0];
-      if (problem !== undefined) {
-        log("error");
-        const error = failure("INTERNAL", `dev: payload of step "${step.name}" in pipeline "${pipeline.name}" does not match describe().input at ${problem.path}: ${problem.message}`);
-        return trace({ runId, status: error.status, error: error.message, code: error.code, retryable: error.retryable, step: step.name });
-      }
+    const problems = inputProblems(step.description, ctx);
+    if (problems.length > 0) {
+      const error = failure("VALIDATION", `${step.name}: payload does not match schema (${problems.map((p) => `${p.path} ${p.message}`).join("; ")})`, { details: { problems } });
+      log("fail(VALIDATION)");
+      return trace({ runId, status: error.status, error: error.message, code: error.code, retryable: error.retryable, step: step.name, details: { problems } });
     }
     try {
       const out: unknown = await step.fn(ctx);

@@ -5,7 +5,11 @@ a config without modules boots as an empty shell. `boot()` reads the config, sor
 `requires`, runs `setup()`, checks every provided contract's methods, registers steps, resolves
 pipelines and validates triggers; any problem throws `KestrelBootError { module, reason }`.
 The `kestrel` binary loads `kestrel.config.ts`, the modules named in `use` and `pipelines/*.ts`
-from the current directory. `testing/runPipeline` runs a pipeline against fake steps.
+from the current directory. `testing/runPipeline` runs a pipeline against fake steps or, with
+`modules: [{ module, instance }]`, against a module's real steps and schemas. Before every step
+the runner validates the body against the step's `describe().input` and the declared query
+parameters against `describe().query` (coerced from strings), answering `VALIDATION` 400 with
+`details.problems` on a mismatch — in every environment.
 
 ## Entry points
 The package exports a fixed list of subpaths; everything else (boot internals, registry, sorting,

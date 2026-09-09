@@ -45,6 +45,8 @@ export interface Context extends Kestrel.ContextExtensions {
   requestId?: string;
   trigger: Trigger;
   payload: Record<string, unknown>;
+  body: Record<string, unknown>;
+  query: Record<string, unknown>;
   params: Record<string, string>;
   headers: Record<string, string>;
   files: UploadedFile[];
@@ -78,6 +80,8 @@ export interface ContextInput {
   trigger: Trigger;
   parentRunId?: string;
   payload?: Record<string, unknown>;
+  body?: Record<string, unknown>;
+  query?: Record<string, unknown>;
   params?: Record<string, string>;
   headers?: Record<string, string>;
   files?: UploadedFile[];
@@ -99,10 +103,14 @@ export function requestIdOf(value: unknown): string | undefined {
 }
 
 export function createContext(input: ContextInput, runId: string = randomUUID()): Context {
+  const query = input.query ?? {};
+  const body = input.body ?? input.payload ?? {};
   const ctx: Context = {
     runId,
     trigger: input.trigger,
-    payload: input.payload ?? {},
+    payload: input.payload ?? { ...query, ...body },
+    body,
+    query,
     params: input.params ?? {},
     headers: input.headers ?? {},
     files: input.files ?? [],

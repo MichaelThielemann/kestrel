@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
+import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import type { Context, StepResult } from "@michaelthielemann/kestrel/context";
+import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import type { CoreCode, KestrelError } from "@michaelthielemann/kestrel/errors";
-import { isOk } from "@michaelthielemann/kestrel/result";
+import { isOk, ok } from "@michaelthielemann/kestrel/result";
 import type { RunResult, Runner } from "@michaelthielemann/kestrel/runner";
-import type { Logger } from "@michaelthielemann/kestrel/logger";
+import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
+import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import module from "./module.ts";
 import { createEventsInmemory } from "./impl.ts";
 
@@ -12,6 +15,8 @@ function fakeCtx(overrides: Partial<Context> = {}): Context {
     runId: "test",
     trigger: { kind: "http", name: "t" },
     payload: {},
+    body: {},
+    query: {},
     params: {},
     headers: {},
     files: [],
@@ -197,5 +202,36 @@ describe("events/inmemory event trigger hook", () => {
 
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatchObject({ message: 'event "page.created" pipeline "invalidateCache" ended with 503', meta: { runId: "r2", error: "boom", code: "TRANSIENT", retryable: true } });
+  });
+});
+
+async function makeInstance(): Promise<Events & { logger: Logger }> {
+  return (await module.setup(module.configSchema.parse({}), {
+    get: () => {
+      throw new Error("no contract expected");
+    },
+    find: () => undefined,
+    logger: silentLogger,
+    root: process.cwd(),
+  })) as Events & { logger: Logger };
+}
+
+function pipeline(...steps: string[]) {
+  return definePipeline({ name: "test", steps });
+}
+
+describe("events/inmemory emit step via runPipeline", () => {
+  it("registers the real step and describe(), and emits with id from a preceding step's result", async () => {
+    const events = await makeInstance();
+    let received: unknown;
+    events.on("page.created", async (_name, data) => {
+      received = data;
+    });
+    const seedResult = { "seed.result": async (ctx: Context) => ok({ ...ctx, result: { id: "p1", title: "t" } }) };
+
+    const res = await runPipeline(pipeline("seed.result", "events.emit:page.created"), { params: { slug: "x" } }, { modules: [{ module, instance: events }], steps: seedResult });
+
+    expect(res.status).toBe(200);
+    expect(received).toMatchObject({ event: "page.created", id: "p1", params: { slug: "x" } });
   });
 });
