@@ -117,7 +117,7 @@ If any step fails: abort with `KestrelBootError { module, reason }`.
 
 | Level | Mechanism | Cost |
 |---|---|---|
-| Compile | Contracts are TS interfaces, `setup()` returns the contract type. ESLint `no-restricted-imports` forbids submodule→submodule imports. Step names are a type: `StepCatalogue<Modules>` plus `pipelineDefiner<Known>()` turn an unknown or mistyped step in a pipeline file into a `tsc` error instead of a boot error (`pipelines.md` § Step catalogue). | immediate |
+| Compile | Contracts are TS interfaces, `setup()` returns the contract type. ESLint `no-restricted-imports` forbids submodule→submodule imports and, in adapted form, any contract or module import in `core`, anything but the core in `contracts`, and any contract or module in the `h3` adapter; the core package exports a fixed list of subpaths, so boot internals are not importable at all. Step names are a type: `StepCatalogue<Modules>` plus `pipelineDefiner<Known>()` turn an unknown or mistyped step in a pipeline file into a `tsc` error instead of a boot error (`pipelines.md` § Step catalogue). | immediate |
 | Test | One contract test per contract, every implementation must pass it. | seconds |
 | Boot | Registry check as above; `describe()` is required for every step, and `checkDataflow` proves that every `reads` path was written before it's used. | at startup |
 | Value (runtime) | Expected errors are `Result` values, not a `throw`: every async contract method and every step returns `Result<T, KestrelError>` (`{ code, status, message, retryable, details?, cause? }`, a code-→-status table `STATUS_OF`); `throw` is reserved for wiring errors and becomes a 500 `INTERNAL`. Details: `pipelines.md` § Errors as values, `contracts.md`. | per call |

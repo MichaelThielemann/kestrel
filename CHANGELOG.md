@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Breaking
+
+- `core`: the package exports a curated list of subpaths instead of `./*`: `.`, `./cast`,
+  `./catalogue`, `./context`, `./dataflow`, `./defineConfig`, `./defineContract`,
+  `./defineModule`, `./definePipeline`, `./errors`, `./load`, `./logger`, `./result`, `./runner`,
+  `./schema`, `./testing/runPipeline`. No longer importable: `./boot` (use `boot` from the root),
+  `./cli`, `./registry`, `./sort`, `./triggers/*` and every test file. ESLint now also guards
+  `core` (no contract, module or host framework), `contracts` (only the core) and `h3` (no contract
+  or module).
+
 - `events@1`: a handler receives a shallowly frozen copy of the emitted data, so one handler can
   no longer change what the next one sees; assigning to it throws inside the handler. Rule 3
   (submodules emit no events) now names its one exception, `migrations.applied`, and the reason.

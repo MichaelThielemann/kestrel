@@ -6,6 +6,16 @@ a config without modules boots as an empty shell. `boot()` reads the config, sor
 pipelines and validates triggers; any problem throws `KestrelBootError { module, reason }`.
 The `kestrel` binary loads `kestrel.config.ts`, the modules named in `use` and `pipelines/*.ts`
 from the current directory. `testing/runPipeline` runs a pipeline against fake steps.
+
+## Entry points
+The package exports a fixed list of subpaths; everything else (boot internals, registry, sorting,
+trigger implementations, tests) is private and not importable. `@michaelthielemann/kestrel` (the
+root: `boot`, `defineContract`, `defineModule`, `definePipeline`, `defineConfig`, the HTTP helpers
+an adapter needs, the error and result vocabulary) and `@michaelthielemann/kestrel/<name>` for
+`cast`, `catalogue`, `context`, `dataflow`, `defineConfig`, `defineContract`, `defineModule`,
+`definePipeline`, `errors`, `load`, `logger`, `result`, `runner`, `schema` and
+`testing/runPipeline`. The core imports no contract, no module and no host framework; ESLint
+enforces that for `core`, `contracts` (only the core) and the `h3` adapter (only `h3` and the core).
 Binary results are served `inline` for a built-in safe set of content types plus any listed in `http.inlineTypes`.
 `http.inlineTypes` with `image/svg+xml` needs a module registering the step `sanitize.svg`
 (`sanitize-svg`), otherwise boot fails.
