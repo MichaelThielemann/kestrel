@@ -112,6 +112,20 @@ describe("content/default module steps", () => {
     expect((res.result as ContentDocument).title).toBe("My Site");
   });
 
+  it("accepts null for optional fields on create and set, and for every field on update, but not for a required field on create", async () => {
+    const { instance } = await boot();
+    const settings = await run(["content.set:settings"], { body: { title: null } }, instance);
+    expect(settings.status).toBe(200);
+    expect((settings.result as ContentDocument).title).toBeNull();
+    const created = await run(["content.create:notes"], { body: { slug: "a", title: "A", status: "draft" } }, instance);
+    expect(created.status).toBe(200);
+    const cleared = await run(["content.update:notes"], { params: { id: (created.result as ContentDocument).id }, body: { title: null } }, instance);
+    expect(cleared.status).toBe(200);
+    const missing = await run(["content.create:notes"], { body: { slug: "b", title: null, status: "draft" } }, instance);
+    expect(missing).toMatchObject({ status: 400, code: "VALIDATION", step: "content.create:notes" });
+    expect(missing.details?.problems).toEqual([{ path: "$.title", message: "expected string, got null" }]);
+  });
+
   it("rejects a non-integer limit with 400 VALIDATION from the query schema", async () => {
     const { instance } = await boot();
     const res = await run(["content.list:notes"], { query: { limit: "abc" } }, instance);

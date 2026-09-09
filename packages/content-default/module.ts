@@ -102,7 +102,7 @@ function describeContent(content: ContentInstance) {
     const required: string[] = [];
     for (const [name, raw] of Object.entries(fields)) {
       const def = typeof raw === "string" ? { type: raw } : raw;
-      properties[name] = fieldSchema(raw, mode === "update");
+      properties[name] = fieldSchema(raw, mode === "update" || !def.required);
       if (mode === "create" && def.required) required.push(name);
     }
     if (model.locales) properties.locale = { type: "string", enum: model.locales };
