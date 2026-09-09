@@ -186,6 +186,8 @@ describe("validate/jsonschema", () => {
       runId: "test",
       trigger: { kind: "http", name: "t" },
       payload: { body: deep },
+      body: {},
+      query: {},
       params: {},
       headers: {},
       files: [],

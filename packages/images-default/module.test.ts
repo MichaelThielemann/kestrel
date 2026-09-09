@@ -3,16 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
-import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createContext, type Context, type Step, type StepFactory } from "@michaelthielemann/kestrel/context";
+import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { failure } from "@michaelthielemann/kestrel/errors";
+import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { validateSchema } from "@michaelthielemann/kestrel/schema";
-import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
+import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import module, { configSchema } from "./module.ts";
-import { DEFAULT_MAX_ATTEMPTS, JOBS, createImages, type Config, type Job } from "./impl.ts";
+import { DEFAULT_MAX_ATTEMPTS, JOBS, createImages, type Config, type Images, type Job } from "./impl.ts";
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
   const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
@@ -260,5 +263,143 @@ describe("images.register input schema", () => {
     const input = description.input ?? {};
     expect(validateSchema(input, { sizes: [{ name: "card", width: 640 }] })).toEqual([]);
     expect(validateSchema(input, { sizes: [{ name: "card" }] })).not.toEqual([]);
+  });
+});
+
+async function makeInstance(config: Partial<Config> = {}) {
+  const blobs = fakeBlobstore();
+  const db = createFakePersistence();
+  await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string" });
+  const parsed = configSchema.parse({ ...baseConfig, ...config });
+  const images = (await module.setup(parsed, {
+    get<T>(contract: { name: string }): T {
+      if (contract === BLOBSTORE) return blobs as T;
+      if (contract === PERSISTENCE) return db as T;
+      throw new Error(`unexpected contract ${contract.name}`);
+    },
+    find: () => undefined,
+    logger: silentLogger,
+    root: process.cwd(),
+  })) as Images;
+  return { images, blobs, db };
+}
+
+function pipeline(...steps: string[]) {
+  return definePipeline({ name: "test", steps });
+}
+
+const seedSteps = {
+  "seed.single": async (ctx: Context) => ok({ ...ctx, result: { id: "a", filename: "a.jpg" } }),
+  "seed.ids": async (ctx: Context) => ok({ ...ctx, result: { ids: ["a", "b"] } }),
+};
+
+describe("images/default steps via runPipeline", () => {
+  it("register: rejects an unknown size field, additionalProperties: false on nested items", async () => {
+    const { images } = await makeInstance();
+    const res = await runPipeline(pipeline("images.register"), { body: { sizes: [{ name: "card", width: 640, nope: true }] } }, { modules: [{ module, instance: images }] });
+    expect(res.status).toBe(400);
+    expect(res.code).toBe("VALIDATION");
+    expect(res.details?.problems).toEqual([{ path: "$.sizes[0].nope", message: "is not allowed by additionalProperties: false" }]);
+
+    const ok1 = await runPipeline(pipeline("images.register"), { body: { sizes: [{ name: "card", width: 640 }] } }, { modules: [{ module, instance: images }] });
+    expect(ok1.status).toBe(200);
+  });
+
+  it("listSizes: lists the effective sizes", async () => {
+    const { images } = await makeInstance();
+    const res = await runPipeline(pipeline("images.listSizes"), {}, { modules: [{ module, instance: images }] });
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.result)).toBe(true);
+  });
+
+  it("generate: accepts a plain body and the fuller media.uploaded event envelope (additionalProperties: true)", async () => {
+    const { images, db, blobs } = await makeInstance();
+    await addImage(db, blobs, "a", await jpeg(400, 300));
+    const plain = await runPipeline(pipeline("images.generate"), { body: { id: "a" } }, { modules: [{ module, instance: images }] });
+    expect(plain.status).toBe(200);
+    expect((plain.result as { id: string }).id).toBe("a");
+
+    const envelope = await runPipeline(pipeline("images.generate"), { body: { event: "media.uploaded", at: 1, identity: null, params: {}, id: "a" } }, { modules: [{ module, instance: images }] });
+    expect(envelope.status).toBe(200);
+  });
+
+  it("sync: starts a job", async () => {
+    const { images, db, blobs } = await makeInstance();
+    await addImage(db, blobs, "a", await jpeg(200, 200));
+    const res = await runPipeline(pipeline("images.sync"), {}, { modules: [{ module, instance: images }] });
+    expect(res.status).toBe(200);
+    expect((res.result as { state: string }).state).toMatch(/running|done/);
+    await module.teardown!(images);
+  });
+
+  it("resume: no-ops without a paused job", async () => {
+    const { images } = await makeInstance();
+    const res = await runPipeline(pipeline("images.resume"), {}, { modules: [{ module, instance: images }] });
+    expect(res.status).toBe(200);
+    expect(res.result).toBeNull();
+  });
+
+  it("prune: rejects a still-declared size", async () => {
+    const { images } = await makeInstance();
+    const res = await runPipeline(pipeline("images.prune"), { body: { sizes: ["thumb"] } }, { modules: [{ module, instance: images }] });
+    expect(res.status).toBe(400);
+    expect(res.code).toBe("VALIDATION");
+  });
+
+  it("readStatus: reports sizes, job and orphans", async () => {
+    const { images } = await makeInstance();
+    const res = await runPipeline(pipeline("images.readStatus"), {}, { modules: [{ module, instance: images }] });
+    expect(res.status).toBe(200);
+    expect(res.result).toMatchObject({ job: null });
+  });
+
+  it("remove: deletes a medium's variants", async () => {
+    const { images, db, blobs } = await makeInstance();
+    await addImage(db, blobs, "a", await jpeg(200, 200));
+    expectOk(await images.generate("a"));
+    const res = await runPipeline(pipeline("images.remove"), { params: { id: "a" } }, { modules: [{ module, instance: images }] });
+    expect(res.status).toBe(200);
+  });
+
+  it("removeMany: deletes variants for every id in result.ids", async () => {
+    const { images, db, blobs } = await makeInstance();
+    await addImage(db, blobs, "a", await jpeg(200, 200));
+    await addImage(db, blobs, "b", await jpeg(200, 200));
+    expectOk(await images.generate("a"));
+    expectOk(await images.generate("b"));
+    const res = await runPipeline(pipeline("seed.ids", "images.removeMany"), {}, { modules: [{ module, instance: images }], steps: seedSteps });
+    expect(res.status).toBe(200);
+  });
+
+  it("attach: adds variants[] to result", async () => {
+    const { images, db, blobs } = await makeInstance();
+    await addImage(db, blobs, "a", await jpeg(400, 300));
+    expectOk(await images.generate("a"));
+    const res = await runPipeline(pipeline("seed.single", "images.attach"), {}, { modules: [{ module, instance: images }], steps: seedSteps });
+    expect(res.status).toBe(200);
+    expect((res.result as { variants: unknown[] }).variants).toHaveLength(5);
+  });
+
+  it("serve: serves a done variant", async () => {
+    const { images, db, blobs } = await makeInstance();
+    await addImage(db, blobs, "a", await jpeg(400, 300));
+    expectOk(await images.generate("a"));
+    const res = await runPipeline(pipeline("images.serve"), { params: { id: "a", file: "thumb.webp" } }, { modules: [{ module, instance: images }] });
+    expect(res.status).toBe(200);
+    expect(res.result).toMatchObject({ binary: true });
+  });
+
+  it("export: copies every done variant to the target directory", async () => {
+    const { images, db, blobs } = await makeInstance();
+    await addImage(db, blobs, "a", await jpeg(400, 300));
+    expectOk(await images.generate("a"));
+    const dir = await mkdtemp(join(tmpdir(), "images-runpipeline-export-"));
+    try {
+      const res = await runPipeline(pipeline(`images.export:${dir}`), {}, { modules: [{ module, instance: images }] });
+      expect(res.status).toBe(200);
+      expect((res.result as { variants: { written: number } }).variants.written).toBeGreaterThan(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

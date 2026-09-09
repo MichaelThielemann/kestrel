@@ -78,6 +78,7 @@ export default defineModule({
       summary: `Create one ${collection} document from the payload`,
       reads: [],
       writes: ["result"],
+      input: { type: "object", additionalProperties: true },
       errors: { 409: "a document with that id or a unique value already exists" },
     }),
     findOne: (collection: string) => ({
@@ -96,6 +97,7 @@ export default defineModule({
       summary: `Patch the ${collection} document named by params.id from the payload`,
       reads: ["params.id"],
       writes: ["result"],
+      input: { type: "object", additionalProperties: true },
       errors: { 400: "missing id", 404: "no such document", 409: "a unique value already exists" },
     }),
     deleteOne: (collection: string) => ({

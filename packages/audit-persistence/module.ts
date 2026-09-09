@@ -24,6 +24,6 @@ export default defineModule({
   }),
 
   describe: () => ({
-    record: { summary: "Persist an audit log entry for an emitted event", reads: ["payload"], writes: [] },
+    record: { summary: "Persist an audit log entry for an emitted event", reads: ["payload"], writes: [], input: { type: "object", additionalProperties: true } },
   }),
 });

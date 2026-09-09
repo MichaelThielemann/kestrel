@@ -63,7 +63,7 @@ export default defineModule({
   }),
 
   describe: () => ({
-    login: { summary: "Log in with credentials", reads: [], writes: ["token", "identity", "result"], input: { type: "object", properties: { username: { type: "string" }, password: { type: "string" } }, required: ["username", "password"] }, output: { type: "object", properties: { token: { type: "string" }, identity: { type: "object", properties: { id: { type: "string" }, claims: { type: "object", additionalProperties: true } }, required: ["id", "claims"] } }, required: ["token", "identity"] }, errors: { 401: "invalid credentials" } },
+    login: { summary: "Log in with credentials", reads: [], writes: ["token", "identity", "result"], input: { type: "object", properties: { username: { type: "string" }, password: { type: "string" } }, required: ["username", "password"], additionalProperties: false }, output: { type: "object", properties: { token: { type: "string" }, identity: { type: "object", properties: { id: { type: "string" }, claims: { type: "object", additionalProperties: true } }, required: ["id", "claims"] } }, required: ["token", "identity"] }, errors: { 401: "invalid credentials" } },
     identifyUser: { summary: "Identify the caller if a valid token is present", reads: [], writes: ["token?", "identity?"], security: "optional" },
     requireUser: { summary: "Require a valid session", reads: [], writes: ["token", "identity"], security: "required", errors: { 401: "not authenticated" } },
     loadIdentity: { summary: "Current identity", reads: ["identity"], writes: ["result"], output: { type: "object", properties: { id: { type: "string" }, claims: { type: "object", additionalProperties: true } }, required: ["id", "claims"] }, errors: { 401: "not authenticated" } },

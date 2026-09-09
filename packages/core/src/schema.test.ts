@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateSchema } from "./schema.ts";
+import { coerceQuery, validateSchema } from "./schema.ts";
 
 const paths = (schema: Record<string, unknown>, value: unknown) => validateSchema(schema, value).map((p) => p.path);
 const ok = (schema: Record<string, unknown>, value: unknown) => validateSchema(schema, value);
@@ -129,3 +129,33 @@ describe("validateSchema", () => {
     expect(paths({ type: "object", properties: { "content-type": { type: "string" } } }, { "content-type": 1 })).toEqual(['$["content-type"]']);
   });
 });
+
+describe("coerceQuery", () => {
+  const query = { limit: { type: "integer" }, ratio: { type: "number" }, deep: { type: "boolean" }, ids: { type: "array", items: { type: "string" } }, sort: { type: "string" }, sizes: { type: "array", items: { type: "integer" } } };
+
+  it("converts strings to the declared integer, number and boolean types", () => {
+    expect(coerceQuery(query, { limit: "10", ratio: "1.5", deep: "true" })).toEqual({ limit: 10, ratio: 1.5, deep: true });
+    expect(coerceQuery(query, { deep: "false" })).toEqual({ deep: false });
+  });
+
+  it("leaves text that does not convert untouched so validation reports it", () => {
+    expect(coerceQuery(query, { limit: "abc", ratio: "", deep: "yes", limit2: "1" })).toEqual({ limit: "abc", ratio: "", deep: "yes" });
+    expect(coerceQuery(query, { limit: "1.5" })).toEqual({ limit: "1.5" });
+    expect(validateSchema(query.limit, coerceQuery(query, { limit: "abc" }).limit)).toEqual([{ path: "$", message: "expected integer, got string" }]);
+  });
+
+  it("wraps a single value for an array parameter and converts array items", () => {
+    expect(coerceQuery(query, { ids: "a" })).toEqual({ ids: ["a"] });
+    expect(coerceQuery(query, { ids: ["a", "b"] })).toEqual({ ids: ["a", "b"] });
+    expect(coerceQuery(query, { sizes: ["1", "2"] })).toEqual({ sizes: [1, 2] });
+    expect(coerceQuery(query, { sizes: "3" })).toEqual({ sizes: [3] });
+  });
+
+  it("copies only declared keys and never the strings themselves", () => {
+    const values = { limit: "10", other: "x" };
+    expect(coerceQuery(query, values)).toEqual({ limit: 10 });
+    expect(values.limit).toBe("10");
+    expect(coerceQuery(query, { sort: 5 })).toEqual({ sort: 5 });
+  });
+});
+

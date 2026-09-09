@@ -117,7 +117,8 @@
                 },
                 "required": [
                   "sizes"
-                ]
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -458,13 +459,15 @@
                       "required": [
                         "name",
                         "width"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   }
                 },
                 "required": [
                   "sizes"
-                ]
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -1551,7 +1554,8 @@
                   "dry": {
                     "type": "boolean"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -3293,7 +3297,8 @@
                     ],
                     "description": "milliseconds or ISO-8601; default latest"
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -3662,7 +3667,8 @@
                 },
                 "required": [
                   "password"
-                ]
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -3939,7 +3945,8 @@
                 "required": [
                   "currentPassword",
                   "newPassword"
-                ]
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -3975,6 +3982,30 @@
             }
           },
           {
+            "name": "recursive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -3988,6 +4019,22 @@
             "required": false,
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -4800,6 +4847,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5063,6 +5118,14 @@
             "name": "id",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -5331,7 +5394,8 @@
                       "null"
                     ]
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -5766,7 +5830,8 @@
                 },
                 "required": [
                   "path"
-                ]
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -6059,7 +6124,8 @@
                 },
                 "required": [
                   "path"
-                ]
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -6524,12 +6590,12 @@
                     ]
                   }
                 },
-                "additionalProperties": false,
                 "required": [
                   "slug",
-                  "title",
-                  "status"
-                ]
+                  "status",
+                  "title"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -8123,10 +8189,10 @@
                     ]
                   }
                 },
-                "additionalProperties": false,
                 "required": [
                   "title"
-                ]
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -8162,6 +8228,14 @@
               "type": "string"
             },
             "description": "rest of the path, may contain slashes"
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -8610,7 +8684,8 @@
                 "required": [
                   "username",
                   "password"
-                ]
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -9108,7 +9183,8 @@
                 },
                 "required": [
                   "password"
-                ]
+                ],
+                "additionalProperties": false
               }
             }
           }

@@ -13,7 +13,7 @@ export { ok, err, isOk, isErr, match, unwrapOr, type Ok, type Err, type Result }
 export { boundaryCast, type Boundary } from "./cast.ts";
 export { loadConfig, loadModules, loadPipelines } from "./load.ts";
 export { consoleLogger, silentLogger, logWarn, type Logger, type StepLog } from "./logger.ts";
-export type { RunResult, Runner, RunTracker, RunOptions } from "./runner.ts";
+export type { RunResult, Runner, RunTracker } from "./runner.ts";
 export { checkDataflow } from "./dataflow.ts";
-export { validateSchema, type SchemaProblem } from "./schema.ts";
+export { validateSchema, coerceQuery, type SchemaProblem } from "./schema.ts";
 export type { StopOptions, StopResult } from "./boot.ts";

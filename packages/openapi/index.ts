@@ -51,6 +51,7 @@ function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
   }
   const merged: JsonSchema = { type: "object", properties };
   if (required.size > 0) merged.required = [...required].sort();
+  if (schemas.some((s) => s.additionalProperties === false)) merged.additionalProperties = false;
   return merged;
 }
 

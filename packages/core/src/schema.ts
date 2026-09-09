@@ -136,6 +136,31 @@ function check(schema: JsonSchema, value: unknown, path: string, problems: Schem
   }
 }
 
+function coerceValue(schema: JsonSchema, value: unknown): unknown {
+  const types = typeNames(schema.type);
+  if (typeof value === "string") {
+    if (types.includes("integer") && /^-?\d+$/.test(value)) return Number(value);
+    if (types.includes("number") && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
+    if (types.includes("boolean") && (value === "true" || value === "false")) return value === "true";
+    if (types.includes("array") && !types.includes("string")) return [coerceValue(subSchema(schema.items) ?? {}, value)];
+  }
+  if (Array.isArray(value) && types.includes("array")) {
+    const items = subSchema(schema.items);
+    return items ? value.map((item) => coerceValue(items, item)) : value;
+  }
+  return value;
+}
+
+/** Query parameters arrive as strings (or string arrays); this returns a copy converted to the declared types where the text allows it, leaving everything else untouched. */
+export function coerceQuery(query: Record<string, JsonSchema>, values: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, schema] of Object.entries(query)) {
+    if (!present(values, key)) continue;
+    out[key] = coerceValue(schema, values[key]);
+  }
+  return out;
+}
+
 /** The subset of JSON Schema the shipped `describe().input` blocks use; unknown keywords are ignored. */
 export function validateSchema(schema: JsonSchema, value: unknown): SchemaProblem[] {
   const problems: SchemaProblem[] = [];

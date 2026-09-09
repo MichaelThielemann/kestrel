@@ -54,9 +54,12 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
       return respond(event, errorResponse(400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId));
     }
 
+    const query = parseQuery(url.searchParams);
     const input: ContextInput = {
       trigger: { kind: "http", name: `${event.method} ${pathname ?? url.pathname}` },
-      payload: { ...parseQuery(url.searchParams), ...parsed.payload },
+      payload: { ...query, ...parsed.payload },
+      body: parsed.payload,
+      query,
       params: match.params,
       headers,
       files: parsed.files,

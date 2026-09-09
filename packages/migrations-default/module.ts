@@ -75,7 +75,7 @@ export default defineModule({
       summary: "Apply every pending migration; payload.dry === true reports the changes without writing",
       reads: [],
       writes: ["result"],
-      input: { type: "object", properties: { dry: { type: "boolean" } } },
+      input: { type: "object", properties: { dry: { type: "boolean" } }, additionalProperties: false },
       output: { oneOf: [DRY_SCHEMA, APPLIED_SCHEMA] },
       errors: { 409: "another apply() is already running", 500: "a migration failed (message names the migration, document and locale)" },
     },

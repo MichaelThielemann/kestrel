@@ -4,6 +4,18 @@
 
 ### Breaking
 
+- `core`: `describe().input` and `describe().query` are enforced in production. Before every
+  step the runner validates `ctx.body` against `input` and the declared query parameters against
+  `query` (on a coerced copy: `"10"` → 10, `"true"` → true, one value → array where declared;
+  undeclared query parameters are ignored); a mismatch answers `VALIDATION` 400 with `step` and
+  `details.problems` instead of reaching the step (before: dev-only, 500 `INTERNAL`; never in
+  production). Body schemas of the shipped modules are closed (`additionalProperties: false`)
+  unless a step deliberately takes open objects, so unknown body fields are now rejected.
+  `boot({ dev })` and `RunOptions.validateInput` are gone. The `Context` gains `body` and `query`
+  (the HTTP body and query separately; `payload` stays their merge); `ContextInput` takes both.
+  Module authors: every step that reads `ctx.payload` must declare `input`/`query` — a static
+  test in the core's suite fails otherwise — and `testing/runPipeline` runs real steps with
+  `modules: [{ module, instance }]`.
 - `core`: the package exports a curated list of subpaths instead of `./*`: `.`, `./cast`,
   `./catalogue`, `./context`, `./dataflow`, `./defineConfig`, `./defineContract`,
   `./defineModule`, `./definePipeline`, `./errors`, `./load`, `./logger`, `./result`, `./runner`,

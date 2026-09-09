@@ -13,6 +13,8 @@ function context(): Context {
     runId: "test",
     trigger: { kind: "http", name: "t" },
     payload: {},
+    body: {},
+    query: {},
     params: {},
     headers: {},
     files: [],

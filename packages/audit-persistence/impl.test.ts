@@ -62,6 +62,8 @@ function fakeCtx(payload: Record<string, unknown>): Context {
     runId: "test",
     trigger: { kind: "http", name: "t" },
     payload,
+    body: {},
+    query: {},
     params: {},
     headers: {},
     files: [],

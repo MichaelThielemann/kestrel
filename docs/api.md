@@ -81,6 +81,14 @@ without Nuxt: [`../examples/h3`](../examples/h3).
 - **JSON in, JSON out.** Bodies are JSON objects (`content-type: application/json`), and so are
   responses; exceptions: file downloads (raw bytes) and multipart uploads.
 - **Query parameters** land in the payload just like body fields (`?locale=en&limit=10`).
+- **Every step validates its input.** Before a step runs, the body is checked against the
+  step's declared JSON Schema and the declared query parameters against their types (query
+  strings are read as `integer`/`number`/`boolean`/arrays where the declaration says so:
+  `?limit=10` passes, `?limit=abc` fails). Undeclared body fields are rejected by the steps that
+  declare a closed schema (most of them), undeclared query parameters are ignored. A violation
+  answers `400 VALIDATION` with `step` and `details.problems: [{ path: "$.field", message }]`
+  — the same shape `validate.check` uses — before anything is written. The check runs after
+  authentication and authorization, so a missing login still answers 401.
 - **Errors** always look like
   `{ "error": "<text>", "code": "<CODE>", "retryable": boolean, "runId": "<uuid>", "step"?: "<step>", "details"?: { … } }`.
   `code` is stable and machine-readable — the frontend should branch on it, not on `error` (the
@@ -88,7 +96,7 @@ without Nuxt: [`../examples/h3`](../examples/h3).
 
   | Code | Status | Meaning |
   |---|---|---|
-  | `VALIDATION` | 400 | invalid input (field name in the text or in `details.fields`) |
+  | `VALIDATION` | 400 | invalid input (field name in the text or in `details.fields`; schema violations in `details.problems`) |
   | `DANGLING_REF` | 400 | a `ref` field or an internal link points to a target that doesn't exist (`details.fields`, `details.refs`) |
   | `UNAUTHENTICATED` | 401 | not logged in or the token is invalid |
   | `FORBIDDEN` | 403 | missing permission |

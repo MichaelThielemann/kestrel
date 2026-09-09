@@ -260,9 +260,8 @@ const pipelines = [createPage, readPage, whoami, onCreated, upload, download];
 
 const typedPipeline = definePipeline({ name: "typed", steps: ["typed.create"] });
 const typedConfig = { modules: [{ use: "./typed", config: {} }], triggers: [], http: null };
-const bootTyped = (dev?: boolean) =>
-  boot({ config: typedConfig, modules: [typed], pipelines: [typedPipeline], logger: silentLogger, ...(dev === undefined ? {} : { dev }) });
-const runTyped = (instance: Kestrel, payload: Record<string, unknown>) => instance.run("typed", { trigger: { kind: "http", name: "POST /typed" }, payload });
+const bootTyped = () => boot({ config: typedConfig, modules: [typed], pipelines: [typedPipeline], logger: silentLogger });
+const runTyped = (instance: Kestrel, body: Record<string, unknown>, query: Record<string, unknown> = {}) => instance.run("typed", { trigger: { kind: "http", name: "POST /typed" }, payload: { ...query, ...body }, body, query });
 
 let kestrel: Kestrel | undefined;
 afterEach(async () => {
@@ -995,33 +994,19 @@ describe("boot", () => {
     expect(await stopping).toEqual({ drained: true });
   });
 
-  it("dev mode reports a payload that does not match describe().input as INTERNAL", async () => {
-    kestrel = await bootTyped(true);
-    const res = await runTyped(kestrel, { title: 42 });
-    expect(res).toMatchObject({ status: 500, code: "INTERNAL", retryable: false, step: "typed.create" });
-    expect(res.error).toBe('dev: payload of step "typed.create" in pipeline "typed" does not match describe().input at $.title: expected string, got number');
-  });
-
-  it("dev mode merges the query parameters into the validated payload", async () => {
-    kestrel = await bootTyped(true);
-    expect(await runTyped(kestrel, { title: "x", limit: 3 })).toMatchObject({ status: 200, result: "x" });
-    const res = await runTyped(kestrel, { title: "x", nope: 1 });
-    expect(res.error).toContain("at $.nope: is not allowed by additionalProperties: false");
-  });
-
-  it("boot({ dev: false }) skips the validation entirely", async () => {
-    kestrel = await bootTyped(false);
-    expect(await runTyped(kestrel, { title: 42 })).toMatchObject({ status: 200, result: 42 });
-  });
-
-  it("dev defaults to NODE_ENV !== production", async () => {
+  it("reports a body that does not match describe().input as VALIDATION in every environment", async () => {
     vi.stubEnv("NODE_ENV", "production");
     kestrel = await bootTyped();
-    expect(await runTyped(kestrel, { title: 42 })).toMatchObject({ status: 200, result: 42 });
-    await kestrel.stop();
+    const res = await runTyped(kestrel, { title: 42 });
+    expect(res).toMatchObject({ status: 400, code: "VALIDATION", retryable: false, step: "typed.create", details: { problems: [{ path: "$.title", message: "expected string, got number" }] } });
+    expect(res.error).toBe("typed.create: payload does not match schema ($.title expected string, got number)");
+  });
 
-    vi.stubEnv("NODE_ENV", "development");
+  it("checks declared query parameters on a coerced copy and rejects undeclared body keys", async () => {
     kestrel = await bootTyped();
-    expect(await runTyped(kestrel, { title: 42 })).toMatchObject({ status: 500, code: "INTERNAL" });
+    expect(await runTyped(kestrel, { title: "x" }, { limit: "3" })).toMatchObject({ status: 200, result: "x" });
+    expect(await runTyped(kestrel, { title: "x" }, { limit: "x" })).toMatchObject({ status: 400, code: "VALIDATION", details: { problems: [{ path: "$.limit", message: "expected integer, got string" }] } });
+    const res = await runTyped(kestrel, { title: "x", nope: 1 });
+    expect(res.details).toEqual({ problems: [{ path: "$.nope", message: "is not allowed by additionalProperties: false" }] });
   });
 });

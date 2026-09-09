@@ -1,9 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { createContentDefault } from "@michaelthielemann/kestrel-content-default/impl";
+import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
 import { SITE_TEST_MODEL } from "@michaelthielemann/kestrel-contracts/site.contract.test";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { createContext } from "@michaelthielemann/kestrel/context";
+import type { Contract } from "@michaelthielemann/kestrel/defineContract";
+import type { Deps } from "@michaelthielemann/kestrel/defineModule";
+import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
+import { silentLogger } from "@michaelthielemann/kestrel/logger";
+import type { RunResult } from "@michaelthielemann/kestrel/runner";
+import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { createSiteDefault } from "./impl.ts";
 import module from "./module.ts";
 
@@ -63,5 +70,52 @@ describe("site/default steps", () => {
     const error = expectErr(await map.resolve(arg)(ctx("")), "TRANSIENT");
     expect(error.status).toBe(503);
     expect(error.retryable).toBe(true);
+  });
+});
+
+describe("site/default module steps (schema-checked)", () => {
+  async function boot() {
+    const db = createFakePersistence();
+    const content = await createContentDefault(SITE_TEST_MODEL, db);
+    const providers = new Map<string, unknown>([[CONTENT.name, content]]);
+    const deps: Deps = {
+      get<T>(contract: Contract<T>): T {
+        if (!providers.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
+        return providers.get(contract.name) as T;
+      },
+      find: <T>(contract: Contract<T>): T | undefined => providers.get(contract.name) as T | undefined,
+      logger: silentLogger,
+      root: process.cwd(),
+    };
+    const instance = await module.setup(module.configSchema.parse({}), deps);
+    return { instance, content };
+  }
+
+  function run(steps: string[], input: Record<string, unknown>, instance: unknown): Promise<RunResult> {
+    return runPipeline(definePipeline({ name: "test", steps }), input, { modules: [{ module, instance }] });
+  }
+
+  const arg = "pages?home=home&status=published&fallback=true";
+
+  it("resolve then resolveLinks run through the real, schema-checked pipeline", async () => {
+    const { instance, content } = await boot();
+    const home = expectOk(await content.create("pages", { slug: "home", title: "Start", status: "published" }));
+    expectOk(await content.update("pages", home.id, { slug: "home", title: "Home", status: "published" }, { locale: "en" }));
+    expectOk(await content.create("pages", { slug: "links", title: "Links", status: "published", body: `<a href="kestrel:pages:${home.id}">Start</a>` }));
+
+    const res = await run([`site.resolve:${arg}`, `site.resolveLinks:${arg}`], { params: { path: "links" }, query: { locale: "de" } }, instance);
+    expect(res.status).toBe(200);
+    const doc = res.result as Record<string, unknown>;
+    expect(doc.body).toBe(`<a href="/">Start</a>`);
+  });
+
+  it("rejects a non-string locale query with 400 VALIDATION from the query schema", async () => {
+    const { instance, content } = await boot();
+    const home = expectOk(await content.create("pages", { slug: "home", title: "Start", status: "published" }));
+    expectOk(await content.create("pages", { slug: "links", title: "Links", status: "published", body: `<a href="kestrel:pages:${home.id}">Start</a>` }));
+
+    const res = await run([`site.resolve:${arg}`, `site.resolveLinks:${arg}`], { params: { path: "links" }, query: { locale: 5 } }, instance);
+    expect(res.status).toBe(400);
+    expect(res.code).toBe("VALIDATION");
   });
 });
