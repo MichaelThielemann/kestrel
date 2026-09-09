@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-h3",
-  "version": "5.1.0",
+  "version": "5.2.0",
   "description": "Adapter: serves a Kestrel instance's HTTP triggers as an h3 event handler (Nuxt/Nitro).",
   "type": "module",
   "license": "Apache-2.0",

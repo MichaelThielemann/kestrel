@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 5.2.0 – 2026-09-09
+
 ### Breaking
 
 - `core`: `describe().input` and `describe().query` are enforced in production. Before every

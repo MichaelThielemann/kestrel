@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-authn-single",
-  "version": "5.1.0",
+  "version": "5.2.0",
   "description": "authn@1 with one user from config (scrypt hash) and in-memory sessions.",
   "type": "module",
   "license": "Apache-2.0",

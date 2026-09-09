@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-authz-roles",
-  "version": "5.1.0",
+  "version": "5.2.0",
   "description": "authz@1 with roles and permissions from config.",
   "type": "module",
   "license": "Apache-2.0",
