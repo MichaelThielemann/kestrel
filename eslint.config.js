@@ -64,6 +64,47 @@ export default tseslint.config(
     },
   },
   {
+    files: ["packages/core/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            { group: ["@michaelthielemann/kestrel-*"], message: "The core knows no contract and no module." },
+            { group: ["h3", "nuxt", "nuxt/*", "#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "The core binds no host framework; adapters (e.g. kestrel-h3) do." },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/contracts/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            { group: ["@michaelthielemann/*", "!@michaelthielemann/kestrel", "!@michaelthielemann/kestrel/*", "!@michaelthielemann/kestrel-contracts", "!@michaelthielemann/kestrel-contracts/*"], message: "A contract imports only the core and its own files." },
+            { group: ["zod", "h3", "nuxt", "nuxt/*", "#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "A contract file is domain-neutral TypeScript: no validation library, no host framework." },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/h3/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            { group: ["@michaelthielemann/kestrel-*"], message: "The adapter knows neither contracts nor modules; it binds the core to h3." },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["examples/*/pipelines/**/*.ts"],
     rules: {
       "no-restricted-imports": [

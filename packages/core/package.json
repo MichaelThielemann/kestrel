@@ -12,7 +12,21 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./*": "./src/*.ts"
+    "./cast": "./src/cast.ts",
+    "./catalogue": "./src/catalogue.ts",
+    "./context": "./src/context.ts",
+    "./dataflow": "./src/dataflow.ts",
+    "./defineConfig": "./src/defineConfig.ts",
+    "./defineContract": "./src/defineContract.ts",
+    "./defineModule": "./src/defineModule.ts",
+    "./definePipeline": "./src/definePipeline.ts",
+    "./errors": "./src/errors.ts",
+    "./load": "./src/load.ts",
+    "./logger": "./src/logger.ts",
+    "./result": "./src/result.ts",
+    "./runner": "./src/runner.ts",
+    "./schema": "./src/schema.ts",
+    "./testing/runPipeline": "./src/testing/runPipeline.ts"
   },
   "publishConfig": {
     "exports": {
@@ -20,9 +34,65 @@
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
       },
-      "./*": {
-        "types": "./dist/*.d.ts",
-        "default": "./dist/*.js"
+      "./cast": {
+        "types": "./dist/cast.d.ts",
+        "default": "./dist/cast.js"
+      },
+      "./catalogue": {
+        "types": "./dist/catalogue.d.ts",
+        "default": "./dist/catalogue.js"
+      },
+      "./context": {
+        "types": "./dist/context.d.ts",
+        "default": "./dist/context.js"
+      },
+      "./dataflow": {
+        "types": "./dist/dataflow.d.ts",
+        "default": "./dist/dataflow.js"
+      },
+      "./defineConfig": {
+        "types": "./dist/defineConfig.d.ts",
+        "default": "./dist/defineConfig.js"
+      },
+      "./defineContract": {
+        "types": "./dist/defineContract.d.ts",
+        "default": "./dist/defineContract.js"
+      },
+      "./defineModule": {
+        "types": "./dist/defineModule.d.ts",
+        "default": "./dist/defineModule.js"
+      },
+      "./definePipeline": {
+        "types": "./dist/definePipeline.d.ts",
+        "default": "./dist/definePipeline.js"
+      },
+      "./errors": {
+        "types": "./dist/errors.d.ts",
+        "default": "./dist/errors.js"
+      },
+      "./load": {
+        "types": "./dist/load.d.ts",
+        "default": "./dist/load.js"
+      },
+      "./logger": {
+        "types": "./dist/logger.d.ts",
+        "default": "./dist/logger.js"
+      },
+      "./result": {
+        "types": "./dist/result.d.ts",
+        "default": "./dist/result.js"
+      },
+      "./runner": {
+        "types": "./dist/runner.d.ts",
+        "default": "./dist/runner.js"
+      },
+      "./schema": {
+        "types": "./dist/schema.d.ts",
+        "default": "./dist/schema.js"
+      },
+      "./testing/runPipeline": {
+        "types": "./dist/testing/runPipeline.d.ts",
+        "default": "./dist/testing/runPipeline.js"
       }
     },
     "bin": {

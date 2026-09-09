@@ -159,7 +159,7 @@ the root like `extendsOutput`) — for steps like `images.attach` that extend ea
 ```ts
 import { authnContractTests } from "@michaelthielemann/kestrel-contracts/authn.contract.test";
 import { createAuthnMulti } from "./impl";
-import { createFakePersistence } from "@michaelthielemann/kestrel/testing/fakePersistence";
+import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 
 authnContractTests(async () => {
   const db = createFakePersistence();
