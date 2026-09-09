@@ -6568,7 +6568,14 @@
                   "title": {
                     "type": "string"
                   },
-                  "body": {},
+                  "body": {
+                    "anyOf": [
+                      {},
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "status": {
                     "type": "string",
                     "enum": [
@@ -6578,10 +6585,24 @@
                     ]
                   },
                   "hero": {
-                    "type": "string",
-                    "description": "id of a media"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "description": "id of a media"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
-                  "seo": {},
+                  "seo": {
+                    "anyOf": [
+                      {},
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "locale": {
                     "type": "string",
                     "enum": [
@@ -7747,7 +7768,14 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "rules": {},
+                  "rules": {
+                    "anyOf": [
+                      {},
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "locale": {
                     "type": "string",
                     "enum": [
@@ -8178,9 +8206,23 @@
                     "type": "string"
                   },
                   "description": {
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
-                  "navigation": {},
+                  "navigation": {
+                    "anyOf": [
+                      {},
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "locale": {
                     "type": "string",
                     "enum": [
