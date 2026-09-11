@@ -6,7 +6,7 @@ point, plus `package.json`. It doesn't have to fulfill a contract (`provides: []
 may also provide only steps, e.g. `audit/persistence` with the step `audit.record`.
 
 ```
-module.ts        Shell: name, provides, requires, optional?, configSchema, setup, steps, optional teardown
+module.ts        Shell: name, provides, requires, optional?, configSchema, setup, steps, optional attach/teardown
 impl.ts          Entry point. Imports only kestrel-contracts, its own files, Node, package.json deps
 impl.test.ts     Calls the contract test, plus its own tests
 README.md        Required content: what, why, config, steps, what's not included
@@ -59,6 +59,11 @@ export default defineModule({
   // Optional: runs in reverse boot order on kestrel.stop(). Errors are logged but don't abort
   // stop(). For resources the submodule itself holds (connections, watchers).
   // teardown: (authn) => authn.close(),
+
+  // Optional: runs once at the end of boot with the read-only view of the booted instance —
+  // describe() is the manifest, observe(observer) sees every run and step start/end; the returned
+  // function runs on stop(). For modules that watch the instance (insights), never for wiring.
+  // attach: (instance, kestrel) => kestrel.observe(instance.observer),
 
   // Steps that pipelines may use. The name becomes "authn.<key>". Every step returns
   // Result<Context, KestrelError>: success is ok(ctx)/ok({ ...ctx, ... }), an expected failure
@@ -181,7 +186,9 @@ Required content, one paragraph each: **What** (the core function in one sentenc
 (context, distinction from alternatives) · **Config** (options, defaults) · **Steps** (what the
 submodule provides for pipelines) · **Not included** (deliberately left out, where that belongs
 instead). No examples or how-tos — those belong in `docs/`. Rule of thumb: fits on one screen
-(~30 lines).
+(~30 lines) — plus the generated section between `<!-- kestrel-docs:start -->` and
+`<!-- kestrel-docs:end -->` that `pnpm docs:generate` writes from the manifest (config variables,
+steps, the example's pipelines); never edit it by hand, CI compares it.
 
 ```
 # authn/multi
@@ -213,3 +220,8 @@ Not included: self-service registration, password reset (own pipelines).
 - [ ] If the submodule holds a connection, a watcher, etc.: `teardown` closes it
 - [ ] If the submodule contributes a trigger (`triggers.event`): the returned stop function
       unregisters all of it
+- [ ] Config fields that hold credentials carry `.describe("secret")`, so the manifest
+      (`kestrel.describe()`, `insights`) shows neither their default nor anything derived
+- [ ] `pnpm docs:generate` after changing `configSchema` or `describe()`: the generated section of
+      the README (between the `kestrel-docs` markers) and `examples/minimal/manifest.json` are
+      checked by CI

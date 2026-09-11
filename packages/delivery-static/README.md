@@ -37,3 +37,50 @@ row whose blob is gone).
 | `delivery.exportLlms` | – | `result.llms` | TRANSIENT |
 
 Not included: sitemap, CDN invalidation.
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-delivery-static` – module `delivery/static`: provides no contract; requires `content@1`, `renderer@1`, `blobstore@1`, `persistence@1`, `site@1`.
+
+| Config | Type | Required | Default |
+|---|---|---|---|
+| `types` | record | yes | – |
+| `formats` | array | no | `["html"]` |
+| `prefix` | string | no | `""` |
+| `prefixPrimary` | boolean | no | `false` |
+| `fallback` | boolean | no | `true` |
+| `media` | object | no | – |
+| `media.publicPath` | string | no | `"/media"` |
+| `media.collection` | string | no | `"media_items"` |
+| `media.variants` | string | no | `"images_variants"` |
+| `media.target` | string | no | `"media/"` |
+| `llms` | object | no | `{}` |
+| `llms.siteUrl` | string | no | – |
+| `llms.full` | boolean | no | `false` |
+| `llms.settings` | object | no | `{}` |
+| `llms.settings.type` | string | no | `"settings"` |
+| `llms.settings.titleField` | string | no | `"title"` |
+| `llms.settings.descriptionField` | string | no | `"description"` |
+| `llms.titleField` | string | no | `"title"` |
+| `llms.seoField` | string | no | `"seo"` |
+| `llms.headings` | record | no | `{}` |
+
+| Step | Summary | Reads | Writes | Input | Output | Errors |
+|---|---|---|---|---|---|---|
+| `delivery.publish:<arg>` | Render and store published locales of a <arg> | `result.id` | `result` | – | { document?: object, delivery?: object[], … } | – |
+| `delivery.unpublish:<arg>` | Remove rendered output of a <arg> | `params.id` | – | – | – | 400 missing id |
+| `delivery.readStatus:<arg>` | Publish status per locale of a <arg> | `params.id` | `result` | – | object[] | 400 missing id |
+| `delivery.publishAll:<arg>` | Re-render every <arg> | – | `result` | – | { documents?: number, live?: number, errors?: number, … } | – |
+| `delivery.exportLlms` | Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) | – | `result.llms` | – | { llms: object, … } | – |
+
+Pipelines in `examples/minimal` using these steps:
+
+- **createPage** (POST /pages): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.create:pages` → `references.index:pages` → `links.extract:pages` → **`delivery.publish:pages`** → **`delivery.exportLlms`** → `events.emit:page.created`
+- **deletePage** (DELETE /pages/:id): `authn.requireUser` → `authz.require:pages.delete` → `references.guard:pages` → `content.remove:pages` → `references.unindex:pages` → `links.unextract:pages` → **`delivery.unpublish:pages`** → **`delivery.exportLlms`** → `events.emit:page.deleted`
+- **deletePageTranslation** (DELETE /pages/:id/translations/:locale): `authn.requireUser` → `authz.require:pages.write` → `content.removeTranslation:pages` → `references.index:pages` → `links.extract:pages` → **`delivery.publish:pages`** → **`delivery.exportLlms`** → `events.emit:page.translationRemoved`
+- **pagePublishStatus** (GET /admin/publish-status/pages/:id): `authn.requireUser` → `authz.require:pages.manage` → **`delivery.readStatus:pages`**
+- **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.require:pages.manage` → **`delivery.publishAll:pages`** → `redirects.export` → **`delivery.exportLlms`**
+- **setSettings** (PUT /settings): `authn.requireUser` → `authz.require:settings.write` → `validate.check:settings.navigation` → `content.set:settings` → **`delivery.exportLlms`**
+- **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.update:pages` → `references.index:pages` → `links.extract:pages` → **`delivery.publish:pages`** → **`delivery.exportLlms`** → `events.emit:page.updated`
+
+<!-- kestrel-docs:end -->

@@ -7,3 +7,13 @@ Keys must be relative, without `.`/`..` segments, and must not end in `.meta.jso
 those files are ignored by `list` and can be deleted once with
 `find <root> -name '*.meta.json' -delete`. For local development and tests; on ephemeral disks
 use `blobstore-s3`.
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-blobstore-filesystem` – module `blobstore/filesystem`: provides `blobstore@1`.
+
+| Config | Type | Required | Default |
+|---|---|---|---|
+| `root` | string | yes | – |
+
+<!-- kestrel-docs:end -->

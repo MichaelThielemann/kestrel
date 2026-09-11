@@ -11,6 +11,16 @@ the runner validates the body against the step's `describe().input` and the decl
 parameters against `describe().query` (coerced from strings), answering `VALIDATION` 400 with
 `details.problems` on a mismatch — in every environment.
 
+## Introspection
+`kestrel.describe()` is the static manifest of the booted instance, computed once: every module
+with `use`, package version, contracts, config schema (JSON Schema from the Zod schema) and config
+variables (path, type, required, default, secret, set — never a value; fields marked
+`.describe("secret")` show no default), every step with owner and description, every pipeline with
+its resolved steps, every trigger. `kestrel.observe(observer)` registers a `RunObserver`
+(`runStart`, `runEnd`, `stepStart`, `stepEnd`) fed by the runner independently of the logger and
+returns the unsubscribe. A module reaches both through its `attach(instance, { describe, observe })`
+hook, called at the end of boot; a returned function runs on `stop()`.
+
 ## Entry points
 The package exports a fixed list of subpaths; everything else (boot internals, registry, sorting,
 trigger implementations, tests) is private and not importable. `@michaelthielemann/kestrel` (the

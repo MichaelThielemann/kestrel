@@ -8,6 +8,13 @@ export interface ResolvedStep {
   description: StepDescription;
 }
 
+export interface RegisteredStep {
+  name: string;
+  owner: string;
+  factory: boolean;
+  describe: StepDescriptions[string];
+}
+
 const CONTEXT_PATH = /^[a-zA-Z][A-Za-z0-9]*(\.[A-Za-z0-9_-]+)*\??$/;
 
 // Walks the prototype chain (like `missingMethods` in defineContract.ts, via
@@ -64,6 +71,14 @@ export class StepRegistry {
 
   names(): string[] {
     return [...this.entries.keys()];
+  }
+
+  owner(name: string): string | undefined {
+    return this.entries.get(name)?.owner;
+  }
+
+  list(): RegisteredStep[] {
+    return [...this.entries].map(([name, e]) => ({ name, owner: e.owner, factory: isStepFactory(e.fn), describe: e.describe }));
   }
 
   resolve(spec: string, owner = "pipeline"): ResolvedStep {

@@ -33,3 +33,37 @@ behind the full-size original: a `pending` variant still falls back to the origi
 `x-kestrel-variant: pending`), a `failed` one is `NOT_FOUND` naming the attempt count. Redefining
 the size lifts the quarantine and restores the full attempt budget.
 Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered HTML.
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-images-default` – module `images/default`: provides no contract; requires `blobstore@1`, `persistence@1`.
+
+| Config | Type | Required | Default |
+|---|---|---|---|
+| `sizes` | array | no | – |
+| `prefix` | string | no | `"media-variants/"` |
+| `publicPath` | string | no | `"/media"` |
+| `media` | object | no | `{"collection":"media_items"}` |
+| `media.collection` | string | yes | – |
+| `chunk` | integer | no | `20` |
+| `staleAfterMs` | integer | no | `60000` |
+| `maxAttempts` | integer | no | `5` |
+
+| Step | Summary | Reads | Writes | Input | Output | Errors |
+|---|---|---|---|---|---|---|
+| `images.register` | Replace the sizes registered by this instance – code-declared sizes are held in memory, never stored | – | `result` | { sizes: object[] } | object[] | 400 empty list or invalid size definition; 409 a size collides with a config size |
+| `images.listSizes` | Effective sizes (defaults/config merged with the sizes registered in this process) | – | `result` | – | object[] | – |
+| `images.generate` | Generate variants for one media item (id from params.id or payload.id), or for each id in payload.ids (unknown ids are skipped) | – | `result` | { id?: string, ids?: string[], … } | object \| object | 400 missing media id; 404 media item not found |
+| `images.sync` | Start a sync job, or resume a paused/error/stale one | – | `result` | – | { id: string, state: "running" \| "paused" \| "done" \| "error", total: number, done: number, failed: number, cursor: string, startedAt: number, updatedAt: number, finishedAt: number \| null, error: string \| null, … } | 409 a fresh job is already running |
+| `images.resume` | Resume a paused/error/stale job, or no-op (for cron) | – | `result` | – | object \| null | – |
+| `images.prune` | Delete the variants of sizes that are no longer declared | – | `result` | { sizes: string[] } | { sizes: number, variants: number, … } | 400 missing sizes, or a name is still declared or has no variants |
+| `images.readStatus` | Sizes with usage/variant counts, current job, and sizes whose variants are left over from a size the code no longer declares | – | `result` | – | { sizes: object[], job: object \| null, orphaned: object, registrySeen: boolean, … } | – |
+| `images.remove` | Delete one media item's variants (blob + rows) | `params.id` | – | – | – | 400 missing id |
+| `images.removeMany` | Delete variants for every id in result.ids (from media.folderItems) | `result.ids` | – | – | – | – |
+| `images.attach` | Add variants[] to a media item or list (result.id or result.items) | `result` | `result.variants` | – | { variants: object[], … } | – |
+| `images.serve` | Binary variant, or the original with x-kestrel-variant: pending while it isn't ready yet | `params.id`, `params.file` | `result` | – | – | 400 missing id or file; 404 media item or size not found, or the variant gave up after maxAttempts |
+| `images.export:<arg>` | Copy every done variant to <arg>/<folder>/<filename>.<size>.<ext> | – | `result.variants` | – | { variants: object, … } | – |
+
+Used by 14 of 68 pipelines in `examples/minimal`.
+
+<!-- kestrel-docs:end -->

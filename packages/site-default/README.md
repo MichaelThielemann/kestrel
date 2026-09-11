@@ -10,3 +10,20 @@ slug is found through the default locale, but localized filters are re-checked s
 Steps: `site.resolve:<t>?home=home&status=published&fallback=true` (`NOT_FOUND` otherwise) and
 `site.resolveLinks:<t>?…` with the same arguments. Config `{}`.
 Not included: rendering, storage, redirects (see delivery-static, redirects-default).
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-site-default` – module `site/default`: provides `site@1`; requires `content@1`.
+
+Config: `{}` – nothing to set.
+
+| Step | Summary | Reads | Writes | Input | Output | Errors |
+|---|---|---|---|---|---|---|
+| `site.resolve:<arg>` | Resolve a site path to a <arg> document (default locale unprefixed) | `params.path` | `result` | – | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, _locale?: string, _links?: object, … } | 404 no page at this path |
+| `site.resolveLinks:<arg>` | Replace internal kestrel:<type>:<id> references in the <arg> document with public paths (_links map added) | `result` | `result` | ?locale: string | – | – |
+
+Pipelines in `examples/minimal` using these steps:
+
+- **resolvePage** (GET /site/*path): `authn.identifyUser` → `authz.require:pages.read` → `redirects.lookup` → **`site.resolve:pages?home=home&status=published&fallback=true`** → **`site.resolveLinks:pages?home=home&status=published&fallback=true`**
+
+<!-- kestrel-docs:end -->

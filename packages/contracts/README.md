@@ -1,5 +1,5 @@
 # @michaelthielemann/kestrel-contracts
-The standard contracts: `persistence@1`, `authn@1`, `authz@1`, `blobstore@1`, `events@1`.
+The standard contracts: `persistence@1`, `authn@1`, `authz@1`, `blobstore@1`, `events@1`, `content@1`, `site@1`, `renderer@1`, `validate@1`, `migrations@1`, `insights@1`.
 Each contract is one file plus one `*.contract.test.ts` suite every implementation must pass.
 Every async method answers `Promise<Result<T, E>>` from `@michaelthielemann/kestrel/result`; the
 error union of each contract is declared next to it (`PersistenceError`, `ContentError`, …) and

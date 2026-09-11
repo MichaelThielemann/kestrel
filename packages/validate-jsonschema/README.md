@@ -22,3 +22,29 @@ else is dropped) – run it before `validate.check`. `validate.sanitizeHtml:<fie
 whole string field (richtext content fields). `oneOf` unions whose branches carry `properties.type.const` (block libraries) are turned into ajv
 discriminators at load time: only the matching branch is validated, an unknown `type` yields one
 problem. Not included: `$ref` to remote schemas, custom keywords.
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-validate-jsonschema` – module `validate/jsonschema`: provides `validate@1`.
+
+| Config | Type | Required | Default |
+|---|---|---|---|
+| `schemas` | record | yes | – |
+| `maxDepth` | integer | no | `32` |
+| `maxNodes` | integer | no | `20000` |
+| `watch` | boolean | no | `false` |
+
+| Step | Summary | Reads | Writes | Input | Output | Errors |
+|---|---|---|---|---|---|---|
+| `validate.sanitize:<arg>` | Sanitize HTML at format:"html" positions of payload field <arg> | – | `payload.<arg>` | object | – | – |
+| `validate.sanitizeHtml:<arg>` | Sanitize the HTML payload field <arg> | – | `payload.<arg>` | object | – | – |
+| `validate.check:<arg>` | Validate payload field <arg> against its JSON Schema | – | – | object | – | 400 schema violation (path and message per problem) |
+
+Pipelines in `examples/minimal` using these steps:
+
+- **createPage** (POST /pages): `authn.requireUser` → `authz.require:pages.write` → **`validate.check:pages.body`** → **`validate.sanitize:pages.body`** → **`validate.check:pages.body`** → `references.check:pages` → `content.create:pages` → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.created`
+- **setRedirects** (PUT /redirects): `authn.requireUser` → `authz.require:redirects.write` → **`validate.check:redirects.rules`** → `redirects.validate` → `content.set:redirects` → `redirects.export`
+- **setSettings** (PUT /settings): `authn.requireUser` → `authz.require:settings.write` → **`validate.check:settings.navigation`** → `content.set:settings` → `delivery.exportLlms`
+- **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → **`validate.check:pages.body`** → **`validate.sanitize:pages.body`** → **`validate.check:pages.body`** → `references.check:pages` → `content.update:pages` → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.updated`
+
+<!-- kestrel-docs:end -->

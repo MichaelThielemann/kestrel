@@ -11,7 +11,7 @@ export const configSchema = z
     identifier: z.enum(["username", "email"]).default("username"),
     minPasswordLength: z.number().int().min(8).default(12),
     sessionTtlSeconds: z.number().int().positive().default(86400),
-    bootstrap: z.object({ username: z.string().min(1), passwordHash: z.string().startsWith("scrypt$"), roles: z.array(z.string()).default([]) }).strict().optional(),
+    bootstrap: z.object({ username: z.string().min(1), passwordHash: z.string().startsWith("scrypt$").describe("secret"), roles: z.array(z.string()).default([]) }).strict().optional(),
   })
   .strict();
 

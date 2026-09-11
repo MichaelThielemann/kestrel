@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, it, expect } from "vitest";
@@ -210,5 +211,30 @@ describe("content migrations wiring", () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
     expect(pipelines.get("listMigrations")).toEqual(["authn.requireUser", "authz.require:migrations.manage", "migrations.list"]);
     expect(pipelines.get("applyMigrations")).toEqual(["authn.requireUser", "authz.require:migrations.manage", "migrations.apply"]);
+  });
+});
+
+describe("insights wiring", () => {
+  it("declares the module and the two admin routes", async () => {
+    const config = await loadConfig(join(root, "kestrel.config.ts"));
+    expect(config.modules.map((m) => m.use)).toContain("@michaelthielemann/kestrel-insights");
+    const routes = config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline]);
+    expect(routes).toEqual(expect.arrayContaining([["GET /admin/insights/manifest", "insightsManifest"], ["GET /admin/insights/stats", "insightsStats"]]));
+  });
+  it("guards both pipelines with a login and insights.read", async () => {
+    const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
+    expect(pipelines.get("insightsManifest")).toEqual(["authn.requireUser", "authz.require:insights.read", "insights.readManifest"]);
+    expect(pipelines.get("insightsStats")).toEqual(["authn.requireUser", "authz.require:insights.read", "insights.readStats"]);
+  });
+  it("keeps config values and secrets out of the committed manifest", () => {
+    const manifest = boundaryCast<{ modules: { name: string; version: string | null; config: { variables: { path: string; secret: boolean; default?: unknown }[] } }[] }>(JSON.parse(readFileSync(join(root, "manifest.json"), "utf8")), "json");
+    expect(manifest.modules.length).toBeGreaterThan(0);
+    for (const m of manifest.modules) expect(m.version, m.name).toMatch(/^\d+\.\d+\.\d+/);
+    const passwordHash = manifest.modules.find((m) => m.name === "authn/multi")!.config.variables.find((v) => v.path === "bootstrap.passwordHash");
+    expect(passwordHash).toMatchObject({ secret: true });
+    expect(passwordHash).not.toHaveProperty("default");
+    const text = readFileSync(join(root, "manifest.json"), "utf8");
+    expect(text).not.toContain("scrypt$522f4ac87bfe4bcd100ba47a7d2aaec2");
+    expect(text).not.toContain("./data/kestrel.db");
   });
 });

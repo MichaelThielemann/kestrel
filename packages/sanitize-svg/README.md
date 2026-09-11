@@ -8,3 +8,21 @@ files pass through untouched. Removed:
 `href`/`xlink:href` that is not an internal `#...` reference. Inline delivery of sanitized SVGs
 still needs `image/svg+xml` in core's `http.inlineTypes` – and the other way round: that entry
 without this module (or another one registering `sanitize.svg`) fails the boot.
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-sanitize-svg` – module `sanitize/svg`: provides no contract.
+
+| Config | Type | Required | Default |
+|---|---|---|---|
+| `maxBytes` | integer | no | `2097152` |
+
+| Step | Summary | Reads | Writes | Input | Output | Errors |
+|---|---|---|---|---|---|---|
+| `sanitize.svg` | Sanitize uploaded SVG files (scripts, handlers, external references removed) | `files` | `files` | – | – | 400 invalid svg; 413 svg too large |
+
+Pipelines in `examples/minimal` using these steps:
+
+- **uploadMedia** (POST /media): `authn.requireUser` → `authz.require:media.write` → **`sanitize.svg`** → `media.upload` → `events.emit:media.uploaded`
+
+<!-- kestrel-docs:end -->

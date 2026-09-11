@@ -53,6 +53,7 @@ export default defineConfig({
     { use: "@michaelthielemann/kestrel-audit-persistence", config: {} },
     { use: "@michaelthielemann/kestrel-events-inmemory", config: {} },
     { use: "@michaelthielemann/kestrel-ratelimit-memory", config: { buckets: { login: { limit: 5, windowSeconds: 60 } } } },
+    { use: "@michaelthielemann/kestrel-insights", config: {} },
   ],
   triggers: [
     { http: "POST /login", pipeline: "login" },
@@ -119,6 +120,8 @@ export default defineConfig({
     { http: "GET /admin/replication/points", pipeline: "replicationPoints" },
     { http: "POST /admin/replication/snapshot", pipeline: "replicationSnapshot" },
     { http: "POST /admin/replication/restore", pipeline: "replicationRestore" },
+    { http: "GET /admin/insights/manifest", pipeline: "insightsManifest" },
+    { http: "GET /admin/insights/stats", pipeline: "insightsStats" },
     { event: "auth.loggedIn", pipeline: "auditAuth" },
     { event: "auth.loggedOut", pipeline: "auditAuth" },
   ],
