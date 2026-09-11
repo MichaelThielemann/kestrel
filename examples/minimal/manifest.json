@@ -971,6 +971,7 @@
         "content.list",
         "content.update",
         "content.remove",
+        "content.describeModel",
         "content.removeTranslation"
       ],
       "eventHook": false
@@ -5289,6 +5290,109 @@
       }
     },
     {
+      "name": "content.describeModel",
+      "module": "content/default",
+      "factory": false,
+      "description": {
+        "summary": "The content model: locales, default locale and every type with its fields",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "locales": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "defaultLocale": {
+              "type": "string"
+            },
+            "types": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "single",
+                      "multi"
+                    ]
+                  },
+                  "fields": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string"
+                            },
+                            "required": {
+                              "type": "boolean"
+                            },
+                            "unique": {
+                              "type": "boolean"
+                            },
+                            "localized": {
+                              "type": "boolean"
+                            },
+                            "options": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "to": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "completeWhen": {
+                    "type": "object",
+                    "properties": {
+                      "field": {
+                        "type": "string"
+                      },
+                      "equals": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "field",
+                      "equals"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "fields"
+                ]
+              }
+            }
+          },
+          "required": [
+            "types"
+          ]
+        }
+      }
+    },
+    {
       "name": "content.removeTranslation",
       "module": "content/default",
       "factory": true,
@@ -7621,6 +7725,131 @@
                   "type": "number"
                 }
               }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "contentModel",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "content.describeModel",
+          "name": "content.describeModel",
+          "module": "content/default",
+          "description": {
+            "summary": "The content model: locales, default locale and every type with its fields",
+            "reads": [],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "object",
+              "properties": {
+                "locales": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "defaultLocale": {
+                  "type": "string"
+                },
+                "types": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "single",
+                          "multi"
+                        ]
+                      },
+                      "fields": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "oneOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string"
+                                },
+                                "required": {
+                                  "type": "boolean"
+                                },
+                                "unique": {
+                                  "type": "boolean"
+                                },
+                                "localized": {
+                                  "type": "boolean"
+                                },
+                                "options": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "to": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "completeWhen": {
+                        "type": "object",
+                        "properties": {
+                          "field": {
+                            "type": "string"
+                          },
+                          "equals": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "field",
+                          "equals"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "fields"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "types"
+              ]
             }
           }
         }
@@ -16288,6 +16517,11 @@
         "method": "POST",
         "path": "/admin/replication/restore",
         "pipeline": "replicationRestore"
+      },
+      {
+        "method": "GET",
+        "path": "/admin/content/model",
+        "pipeline": "contentModel"
       },
       {
         "method": "GET",

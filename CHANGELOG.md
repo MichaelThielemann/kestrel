@@ -19,6 +19,9 @@
   and per step spec, active runs, uptime, event-triggered runs per event name; `ratelimit`
   stays `[]`). `examples/minimal` wires `GET /admin/insights/manifest` and
   `GET /admin/insights/stats` behind `authz.require:insights.read`.
+- `content-default`: step `content.describeModel` answers the parsed model (`locales`,
+  `defaultLocale`, `types`); `examples/minimal` serves it as `GET /admin/content/model` to every
+  logged-in user.
 - `pnpm docs:generate` writes a generated section (config variables, steps, the example's
   pipelines) between `kestrel-docs` markers into every module README and
   `examples/minimal/manifest.json`; `pnpm docs:check` fails CI on drift.

@@ -58,6 +58,6 @@ Not included: self-service registration, password reset by mail, login rate limi
 | `authn.activateUser` | Activate a user | `params.id` | `result` | – | { ok: boolean, … } | 404 user not found |
 | `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed?: number, … } | – |
 
-Used by 59 of 68 pipelines in `examples/minimal`.
+Used by 60 of 69 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

@@ -238,3 +238,12 @@ describe("insights wiring", () => {
     expect(text).not.toContain("./data/kestrel.db");
   });
 });
+
+describe("content model wiring", () => {
+  it("serves the parsed model to every logged-in user", async () => {
+    const config = await loadConfig(join(root, "kestrel.config.ts"));
+    expect(config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline])).toContainEqual(["GET /admin/content/model", "contentModel"]);
+    const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
+    expect(pipelines.get("contentModel")).toEqual(["authn.requireUser", "content.describeModel"]);
+  });
+});

@@ -55,21 +55,9 @@ rewriting (see site-default), custom field types, versioning.
 | `content.list:<arg>` | List <arg> | – | `result` | ?locale: "de" \| "en", limit: integer, offset: integer, sort: string | { items: object[], total: number, … } | 400 invalid limit, offset, sort or locale |
 | `content.update:<arg>` | Update a <arg> | `params.id` | `result` | { locale?: "de" \| "en" } | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 validation failed; 404 not found |
 | `content.remove:<arg>` | Delete a <arg> | `params.id` | `result` | – | { ok?: boolean, … } | 400 missing id |
+| `content.describeModel` | The content model: locales, default locale and every type with its fields | – | `result` | – | { locales?: string[], defaultLocale?: string, types: object, … } | – |
 | `content.removeTranslation:<arg>` | Remove one translation of a <arg> (locale from the route or ?locale=); the document stays in its other locales | `params.id` | `result` | ?locale: "de" \| "en" | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 unknown or missing locale; 404 document or translation not found; 409 last translation – remove the document |
 
-Pipelines in `examples/minimal` using these steps:
-
-- **createPage** (POST /pages): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → **`content.create:pages`** → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.created`
-- **deletePage** (DELETE /pages/:id): `authn.requireUser` → `authz.require:pages.delete` → `references.guard:pages` → **`content.remove:pages`** → `references.unindex:pages` → `links.unextract:pages` → `delivery.unpublish:pages` → `delivery.exportLlms` → `events.emit:page.deleted`
-- **deletePageTranslation** (DELETE /pages/:id/translations/:locale): `authn.requireUser` → `authz.require:pages.write` → **`content.removeTranslation:pages`** → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.translationRemoved`
-- **getRedirects** (GET /redirects): `authn.identifyUser` → `authz.require:redirects.read` → **`content.get:redirects`**
-- **getSettings** (GET /settings): `authn.identifyUser` → `authz.require:settings.read` → **`content.get:settings`**
-- **listAllPages** (GET /admin/pages): `authn.requireUser` → `authz.require:pages.manage` → **`content.list:pages`**
-- **listPages** (GET /pages): `authn.identifyUser` → `authz.require:pages.read` → **`content.list:pages?status=published`**
-- **readAnyPage** (GET /admin/pages/:id): `authn.requireUser` → `authz.require:pages.manage` → **`content.get:pages`**
-- **readPage** (GET /pages/:id): `authn.identifyUser` → `authz.require:pages.read` → **`content.get:pages?status=published`**
-- **setRedirects** (PUT /redirects): `authn.requireUser` → `authz.require:redirects.write` → `validate.check:redirects.rules` → `redirects.validate` → **`content.set:redirects`** → `redirects.export`
-- **setSettings** (PUT /settings): `authn.requireUser` → `authz.require:settings.write` → `validate.check:settings.navigation` → **`content.set:settings`** → `delivery.exportLlms`
-- **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → **`content.update:pages`** → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.updated`
+Used by 13 of 69 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->
