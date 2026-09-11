@@ -6,6 +6,7 @@ import type { Triggers } from "./boot.ts";
 import type { JsonSchema, ModuleDefinition, StepDescription } from "./defineModule.ts";
 import type { StepRegistry } from "./registry.ts";
 import type { ResolvedPipeline } from "./runner.ts";
+import { VERSION } from "./version.ts";
 import { describeConfig, type ConfigVariable } from "./zodSchema.ts";
 
 export type { ConfigVariable } from "./zodSchema.ts";
@@ -70,17 +71,8 @@ export interface ManifestInput {
 /** The argument a factory step's describe() sees when no pipeline supplies one. */
 export const PLACEHOLDER_ARG = "<arg>";
 
-function readVersion(file: string): string | undefined {
-  try {
-    const pkg = JSON.parse(readFileSync(file, "utf8")) as { version?: unknown };
-    return typeof pkg.version === "string" ? pkg.version : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export function coreVersion(): string {
-  return readVersion(new URL("../package.json", import.meta.url).pathname) ?? "0.0.0";
+  return VERSION;
 }
 
 function packageNameOf(use: string): string {
