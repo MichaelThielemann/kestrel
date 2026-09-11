@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 5.3.0 – 2026-09-11
+
 - `core`: `kestrel.describe()` answers the static manifest of the booted instance — modules
   with `use`, package version, contracts, config schema (JSON Schema derived from the Zod
   schema) and config variables (path, type, required, default, secret, set; never a value),
@@ -11,7 +13,8 @@
   New module lifecycle hook `attach(instance, { describe, observe })`, called once at the end
   of boot; a returned function runs on `stop()`. Config fields holding credentials are marked
   `.describe("secret")` (`authn-multi`, `authn-single`, `blobstore-s3`) so the manifest shows no
-  default for them.
+  default for them. The core's version in the manifest comes from a `VERSION` constant, so an
+  embedded (bundled) instance reports the released number.
 - `contracts`: `insights@1` (`manifest()`, `stats()`).
 - `insights-default` (new package `@michaelthielemann/kestrel-insights`, config `{}`): provides
   `insights@1`; steps `insights.readManifest` and `insights.readStats` (count, failed = every

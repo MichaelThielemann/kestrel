@@ -6,8 +6,9 @@ All packages share one version and are published together from the workspace.
 2. `./scripts/smoke-consumer.sh "<scrypt hash for password smoke>"` – installs the packed
    tarballs into a throwaway project outside the workspace and boots it. This is the only check
    that sees the published shape (`publishConfig`, `files`, peer dependencies).
-3. Bump the version in every `packages/*/package.json` (same number everywhere) and add an entry
-   to `CHANGELOG.md`.
+3. Bump the version in every `packages/*/package.json` (same number everywhere) and
+   `packages/core/src/version.ts` (the workspace test fails when they differ), add an entry to
+   `CHANGELOG.md` and run `pnpm docs:generate` (the committed manifest carries the versions).
 4. Commit, tag `v<version>`.
 5. `pnpm -r --filter './packages/*' publish --access public` (dry run first: add `--dry-run`).
 

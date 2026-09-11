@@ -26,3 +26,11 @@ describe("tsconfig.build.json", () => {
     expect(referenced).toEqual(buildablePackages());
   });
 });
+
+describe("core VERSION", () => {
+  it("equals the core package.json version, so a bundled core reports the released number", async () => {
+    const { VERSION } = await import("../packages/core/src/version.ts");
+    const pkg = JSON.parse(readFileSync(join(root, "packages", "core", "package.json"), "utf-8")) as { version: string };
+    expect(VERSION).toBe(pkg.version);
+  });
+});
