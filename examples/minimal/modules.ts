@@ -19,6 +19,7 @@ import redirectsDefault from "@michaelthielemann/kestrel-redirects-default";
 import auditPersistence from "@michaelthielemann/kestrel-audit-persistence";
 import eventsInmemory from "@michaelthielemann/kestrel-events-inmemory";
 import ratelimitMemory from "@michaelthielemann/kestrel-ratelimit-memory";
+import insightsDefault from "@michaelthielemann/kestrel-insights";
 
 /** Same order as `kestrel.config.ts`'s `modules`; the CLI loads the real modules by `use` string, this list only carries the step catalogue's type. */
 const modules = [
@@ -42,6 +43,7 @@ const modules = [
   auditPersistence,
   eventsInmemory,
   ratelimitMemory,
+  insightsDefault,
 ] as const;
 
 export default modules;

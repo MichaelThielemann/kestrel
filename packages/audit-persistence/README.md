@@ -9,3 +9,19 @@ An event redelivered with the same `eventId` is skipped: `record` looks the id u
 concurrent deliveries of the same event can still both pass it. Events without an `eventId` are
 always inserted. `audit.record` fails `TRANSIENT` (503, retryable) when the persistence backend is
 unavailable; it never fails otherwise.
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-audit-persistence` – module `audit/persistence`: provides no contract; requires `persistence@1`.
+
+Config: `{}` – nothing to set.
+
+| Step | Summary | Reads | Writes | Input | Output | Errors |
+|---|---|---|---|---|---|---|
+| `audit.record` | Persist an audit log entry for an emitted event | `payload` | – | object | – | – |
+
+Pipelines in `examples/minimal` using these steps:
+
+- **auditAuth** (event auth.loggedIn, event auth.loggedOut): **`audit.record`**
+
+<!-- kestrel-docs:end -->

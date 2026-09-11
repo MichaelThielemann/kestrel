@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- `core`: `kestrel.describe()` answers the static manifest of the booted instance — modules
+  with `use`, package version, contracts, config schema (JSON Schema derived from the Zod
+  schema) and config variables (path, type, required, default, secret, set; never a value),
+  steps with owner, factory flag and description, pipelines with resolved steps, triggers.
+  `kestrel.observe(observer)` registers a `RunObserver` (`runStart`, `runEnd`, `stepStart`,
+  `stepEnd` with duration, status and outcome) the runner feeds independently of the logger.
+  New module lifecycle hook `attach(instance, { describe, observe })`, called once at the end
+  of boot; a returned function runs on `stop()`. Config fields holding credentials are marked
+  `.describe("secret")` (`authn-multi`, `authn-single`, `blobstore-s3`) so the manifest shows no
+  default for them.
+- `contracts`: `insights@1` (`manifest()`, `stats()`).
+- `insights-default` (new package `@michaelthielemann/kestrel-insights`, config `{}`): provides
+  `insights@1`; steps `insights.readManifest` and `insights.readStats` (count, failed = every
+  non-ok outcome, errors = 5xx, nearest-rank p50/p95 ms over the last 1000 samples per pipeline
+  and per step spec, active runs, uptime, event-triggered runs per event name; `ratelimit`
+  stays `[]`). `examples/minimal` wires `GET /admin/insights/manifest` and
+  `GET /admin/insights/stats` behind `authz.require:insights.read`.
+- `pnpm docs:generate` writes a generated section (config variables, steps, the example's
+  pipelines) between `kestrel-docs` markers into every module README and
+  `examples/minimal/manifest.json`; `pnpm docs:check` fails CI on drift.
+
 ## 5.2.0 – 2026-09-09
 
 ### Breaking

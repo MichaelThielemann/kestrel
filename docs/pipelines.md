@@ -219,6 +219,10 @@ For every run:
    (`api.md`).
 7. After the run ends: `ctx.result` is returned to the trigger (HTTP response, event
    result).
+8. Independently of the logger, every observer registered with `kestrel.observe()` (or through
+   a module's `attach` hook) sees `runStart`, `stepStart`, `stepEnd` (duration, status,
+   `ok | fail(<code>) | error`) and `runEnd` (duration, status, `ok | fail | error`, code, step)
+   — the source of `insights` stats. A throwing observer is logged and never touches the run.
 
 This makes pipelines **traceable** (a log line per step), **testable** (steps are pure
 functions, a pipeline can be tested with a fake context) and **measurable** (duration per

@@ -45,3 +45,25 @@ inside `setup()`, and event triggers subscribe in `start()`, after every module 
 applied before the failing one.
 Not included: `down` migrations (point-in-time recovery is the way back), transactions, file
 discovery of migration modules, a CLI — all a consumer concern (see kestrel-web `#kestrel/migrations`).
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-migrations-default` – module `migrations/default`: provides `migrations@1`; requires `content@1`, `persistence@1`, `events@1`; optional `validate@1`.
+
+| Config | Type | Required | Default |
+|---|---|---|---|
+| `migrations` | array | yes | – |
+| `mode` | enum | no | `"apply"` |
+| `chunk` | integer | no | `50` |
+
+| Step | Summary | Reads | Writes | Input | Output | Errors |
+|---|---|---|---|---|---|---|
+| `migrations.list` | Applied migrations (ledger, oldest first) and still-pending migrations (config order) | – | `result` | – | { applied: object[], pending: object[], … } | – |
+| `migrations.apply` | Apply every pending migration; payload.dry === true reports the changes without writing | – | `result` | { dry?: boolean } | object \| object | 409 another apply() is already running; 500 a migration failed (message names the migration, document and locale) |
+
+Pipelines in `examples/minimal` using these steps:
+
+- **applyMigrations** (POST /admin/migrations/apply): `authn.requireUser` → `authz.require:migrations.manage` → **`migrations.apply`**
+- **listMigrations** (GET /admin/migrations): `authn.requireUser` → `authz.require:migrations.manage` → **`migrations.list`**
+
+<!-- kestrel-docs:end -->

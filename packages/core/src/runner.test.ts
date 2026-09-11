@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { Context, Step } from "./context.ts";
 import { customFailure } from "./errors.ts";
-import type { Logger, StepLog } from "./logger.ts";
+import { silentLogger, type Logger, type StepLog } from "./logger.ts";
+import type { RunObserver } from "./observer.ts";
 import { ok } from "./result.ts";
 import type { ResolvedStep } from "./registry.ts";
 import { createRunTracker, runPipeline } from "./runner.ts";
@@ -303,6 +304,50 @@ describe("runPipeline payload validation", () => {
     expect(await runPipeline({ name: "p", steps: [bare] }, input, logger)).toMatchObject({ status: 200 });
     expect(await runPipeline({ name: "p", steps: [step(pass)] }, { trigger: { kind: "event", name: "x" }, payload: { title: "x" } }, logger)).toMatchObject({ status: 200, result: "ran" });
     expect(await runPipeline({ name: "p", steps: [step(pass)] }, { trigger: { kind: "event", name: "x" }, payload: { title: 3 } }, logger)).toMatchObject({ status: 400, code: "VALIDATION" });
+  });
+});
+
+describe("runPipeline observer", () => {
+  function recording() {
+    const events: string[] = [];
+    const observer: RunObserver = {
+      runStart: (e) => events.push(`runStart ${e.pipeline} ${e.trigger.kind}`),
+      runEnd: (e) => events.push(`runEnd ${e.pipeline} ${e.status} ${e.outcome} ${e.code ?? "-"} ${e.step ?? "-"} ${e.ms >= 0 ? "timed" : "untimed"}`),
+      stepStart: (e) => events.push(`stepStart ${e.step}`),
+      stepEnd: (e) => events.push(`stepEnd ${e.step} ${e.status} ${e.outcome}`),
+    };
+    return { events, observer };
+  }
+
+  it("reports ok runs with every step", async () => {
+    const { events, observer } = recording();
+    await runPipeline({ name: "p", steps: [{ name: "one", description, fn: async (ctx: Context) => ok(ctx) }, { name: "two", description, fn: async (ctx: Context) => ok(ctx) }] }, input, silentLogger, observer);
+    expect(events).toEqual(["runStart p http", "stepStart one", "stepEnd one 200 ok", "stepStart two", "stepEnd two 200 ok", "runEnd p 200 ok - - timed"]);
+  });
+
+  it("reports an Err as fail with the code and the step", async () => {
+    const { events, observer } = recording();
+    await runPipeline({ name: "p", steps: [{ name: "deny", description, fn: async (ctx: Context) => ctx.fail("FORBIDDEN", "no") }] }, input, silentLogger, observer);
+    expect(events).toEqual(["runStart p http", "stepStart deny", "stepEnd deny 403 fail(FORBIDDEN)", "runEnd p 403 fail FORBIDDEN deny timed"]);
+  });
+
+  it("reports a throw as error with status 500", async () => {
+    const { events, observer } = recording();
+    await runPipeline({ name: "p", steps: [{ name: "boom", description, fn: async () => { throw new Error("x"); } }] }, input, silentLogger, observer);
+    expect(events).toEqual(["runStart p http", "stepStart boom", "stepEnd boom 500 error", "runEnd p 500 error INTERNAL boom timed"]);
+  });
+
+  it("reports a schema violation as a failed step that never ran", async () => {
+    const { events, observer } = recording();
+    const guarded: ResolvedStep = { name: "guarded", description: { ...description, input: { type: "object", properties: { a: { type: "string" } } } }, fn: async (ctx: Context) => ok(ctx) };
+    await runPipeline({ name: "p", steps: [guarded] }, input, silentLogger, observer);
+    expect(events).toEqual(["runStart p http", "stepStart guarded", "stepEnd guarded 400 fail(VALIDATION)", "runEnd p 400 fail VALIDATION guarded timed"]);
+  });
+
+  it("carries parentRunId and requestId on the run events", async () => {
+    let start: { parentRunId?: string; requestId?: string } | undefined;
+    await runPipeline({ name: "p", steps: [{ name: "one", description, fn: async (ctx: Context) => ok(ctx) }] }, { ...input, parentRunId: "parent", headers: { "x-request-id": "req-1" } }, silentLogger, { runStart: (e) => { start = e; } });
+    expect(start).toMatchObject({ parentRunId: "parent", requestId: "req-1" });
   });
 });
 

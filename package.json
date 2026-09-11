@@ -13,7 +13,9 @@
     "test:s3": "node scripts/s3-minio.mjs",
     "test:contracts": "vitest run impl.test",
     "build": "tsc -b tsconfig.build.json",
-    "clean": "rm -rf packages/*/dist packages/*/tsconfig.tsbuildinfo"
+    "clean": "rm -rf packages/*/dist packages/*/tsconfig.tsbuildinfo",
+    "docs:generate": "node --disable-warning=ExperimentalWarning scripts/docs.ts",
+    "docs:check": "node --disable-warning=ExperimentalWarning scripts/docs.ts --check"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

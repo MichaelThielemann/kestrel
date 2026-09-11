@@ -46,3 +46,24 @@ stays a throw, because it is a wiring bug.
 | `persistence.deleteOne:<c>` | `params.id` | `result` | `VALIDATION`, `TRANSIENT` |
 
 Not included: migrations beyond adding columns, transactions across calls, full-text search.
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-persistence-sqlite` – module `persistence/sqlite`: provides `persistence@1`.
+
+| Config | Type | Required | Default |
+|---|---|---|---|
+| `file` | string | yes | – |
+| `busyTimeoutMs` | integer | no | – |
+
+| Step | Summary | Reads | Writes | Input | Output | Errors |
+|---|---|---|---|---|---|---|
+| `persistence.checkpoint` | Fold the write-ahead log into the main database file | – | – | – | – | – |
+| `persistence.snapshot:<arg>` | Write a transactionally consistent copy of the database to <arg> | – | `result` | – | { file: string, … } | – |
+| `persistence.createOne:<arg>` | Create one <arg> document from the payload | – | `result` | object | – | 409 a document with that id or a unique value already exists |
+| `persistence.findOne:<arg>` | Read the <arg> document named by params.id | `params.id` | `result` | – | – | 404 no such document |
+| `persistence.findMany:<arg>` | List every <arg> document | – | `result` | – | { items: object[], total: number, … } | – |
+| `persistence.updateOne:<arg>` | Patch the <arg> document named by params.id from the payload | `params.id` | `result` | object | – | 400 missing id; 404 no such document; 409 a unique value already exists |
+| `persistence.deleteOne:<arg>` | Delete the <arg> document named by params.id | `params.id` | `result` | – | { ok: true, … } | 400 missing id |
+
+<!-- kestrel-docs:end -->

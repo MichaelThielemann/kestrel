@@ -68,3 +68,49 @@ from a cron trigger rather than after every write; no trigger is wired here, tha
 consumer's job.
 
 Not included: image resizing, tags, linking media to content documents.
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-media-default` – module `media/default`: provides no contract; requires `blobstore@1`, `persistence@1`.
+
+| Config | Type | Required | Default |
+|---|---|---|---|
+| `allowedTypes` | array | no | `["image/*","application/pdf"]` |
+| `deniedTypes` | array | no | `["image/svg+xml","text/html","application/xhtml+xml"]` |
+| `maxBytes` | integer | no | `5242880` |
+| `locales` | array | no | `[]` |
+| `defaultLocale` | string | no | – |
+| `prefix` | string | no | `"media/"` |
+
+| Step | Summary | Reads | Writes | Input | Output | Errors |
+|---|---|---|---|---|---|---|
+| `media.upload` | Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results | `files` | `result` | { folder?: string, provenance?: string } | object \| object | 400 no file or invalid folder/provenance (per-file for a multi-file request); 409 filename already exists in that folder (per-file for a multi-file request); 413 file exceeds maxBytes (per-file for a multi-file request); 415 type not allowed (per-file for a multi-file request) |
+| `media.update` | Rename, move, set provenance or texts (alt/title/description per locale) | `params.id` | `result` | { filename?: string, folder?: string, provenance?: object, locale?: string, alt?: string \| null, title?: string \| null, description?: string \| null } ?locale: string | { id: string, filename: string, folder: string, contentType: string, size: number, key: string, checksum: string \| null, status: "uploading" \| "ready" \| "failed", createdAt: number, updatedAt: number, provenance: object, width?: number \| null, height?: number \| null, alt?: string \| null, title?: string \| null, description?: string \| null, … } | 400 invalid name, folder or text (texts are plain text, max 2000 chars); 404 not found; 409 filename already exists in that folder |
+| `media.get` | Media metadata | `params.id` | `result` | ?locale: string | { id: string, filename: string, folder: string, contentType: string, size: number, key: string, checksum: string \| null, status: "uploading" \| "ready" \| "failed", createdAt: number, updatedAt: number, provenance: object, width?: number \| null, height?: number \| null, alt?: string \| null, title?: string \| null, description?: string \| null, … } | 400 unknown locale; 404 not found |
+| `media.list` | List media, newest first | – | `result` | ?folder: string, recursive: boolean, q: string, sort: string, limit: integer, offset: integer, ids: string, locale: string | { items?: object[], total?: number, … } | 400 invalid folder or unknown locale |
+| `media.listFolders` | Folders (persistent and implied) with item counts | – | `result` | – | object[] | – |
+| `media.createFolder` | Create a folder (idempotent: an existing folder is returned unchanged) | – | `result` | { path: string } | { folder: string, count: number, … } | 400 missing or invalid path |
+| `media.renameFolder` | Rename or move a folder, moving its blobs | `params.path` | `result` | { path: string } | { folder: string, moved: number, … } | 400 missing or invalid path; 404 folder not found; 409 target folder already exists |
+| `media.folderItems` | Item ids in a folder, for use with references.guardAll:media before removeFolder | `params.path` | `result` | ?recursive: boolean | { path: string, ids: string[], … } | 400 missing or invalid path; 404 folder not found; 409 folder not empty (without `recursive`) |
+| `media.removeFolder` | Delete a folder and everything in it | `params.path` | `result` | – | { ok: boolean, removed: number, … } | 400 invalid path; 404 folder not found; 409 folder not empty or still referenced |
+| `media.download` | The file itself | `params.id` | `result` | – | – | 404 not found |
+| `media.remove` | Delete file and metadata | `params.id` | `result` | – | { ok: boolean, … } | 400 missing id |
+| `media.reconcile` | Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted) | – | `result` | { delete?: boolean } | { blobsWithoutRow: string[], rowsWithoutBlob: string[], … } | – |
+| `media.reconcileDelete` | Like media.reconcile, but always deletes the orphan blobs – the deletion is in the pipeline, not in the request | – | `result` | – | { blobsWithoutRow: string[], rowsWithoutBlob: string[], … } | – |
+| `media.export:<arg>` | Copy every media item to <arg>/<folder>/<filename> | – | `result` | – | { written?: number, skipped?: number, missing?: number, conflicts?: number, … } | – |
+
+Pipelines in `examples/minimal` using these steps:
+
+- **createMediaFolder** (POST /media/folders): `authn.requireUser` → `authz.require:media.write` → **`media.createFolder`**
+- **deleteMedia** (DELETE /media/:id): `authn.requireUser` → `authz.require:media.delete` → `references.guard:media` → `images.remove` → **`media.remove`** → `events.emit:media.deleted`
+- **deleteMediaFolder** (DELETE /media/folders/*path): `authn.requireUser` → `authz.require:media.delete` → **`media.folderItems`** → `references.guardAll:media` → `images.removeMany` → **`media.removeFolder`**
+- **downloadMedia** (GET /media/:id/file): `authn.identifyUser` → `authz.require:media.read` → **`media.download`**
+- **exportMedia** (POST /admin/media/export): `authn.requireUser` → `authz.require:media.manage` → **`media.export:./data/export`** → `images.export:./data/export`
+- **getMedia** (GET /media/:id): `authn.identifyUser` → `authz.require:media.read` → **`media.get`** → `images.attach`
+- **listMedia** (GET /media): `authn.identifyUser` → `authz.require:media.read` → **`media.list`** → `images.attach`
+- **listMediaFolders** (GET /media/folders): `authn.identifyUser` → `authz.require:media.read` → **`media.listFolders`**
+- **renameMediaFolder** (PATCH /media/folders/*path): `authn.requireUser` → `authz.require:media.write` → **`media.renameFolder`**
+- **updateMedia** (PATCH /media/:id): `authn.requireUser` → `authz.require:media.write` → **`media.update`** → `events.emit:media.updated`
+- **uploadMedia** (POST /media): `authn.requireUser` → `authz.require:media.write` → `sanitize.svg` → **`media.upload`** → `events.emit:media.uploaded`
+
+<!-- kestrel-docs:end -->

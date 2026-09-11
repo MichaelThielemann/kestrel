@@ -4,10 +4,12 @@ import type { ContextInput } from "./context.ts";
 import { missingMethods, type Contract } from "./defineContract.ts";
 import { checkDataflow } from "./dataflow.ts";
 import { configSchema, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
-import { stepPrefix, type Deps, type EventEntry, type ModuleDefinition } from "./defineModule.ts";
+import { stepPrefix, type Deps, type EventEntry, type Introspection, type ModuleDefinition } from "./defineModule.ts";
+import { buildManifest, type Manifest } from "./describe.ts";
 import type { PipelineDefinition } from "./definePipeline.ts";
 import { KestrelBootError } from "./errors.ts";
 import { consoleLogger, type Logger } from "./logger.ts";
+import { createObserverHub } from "./observer.ts";
 import { StepRegistry } from "./registry.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
 import { sortModules } from "./sort.ts";
@@ -37,7 +39,7 @@ export interface StopResult {
   drained: boolean;
 }
 
-export interface Kestrel {
+export interface Kestrel extends Introspection {
   config: KestrelConfig;
   contracts: Deps & { names(): string[] };
   steps: StepRegistry;
@@ -237,22 +239,31 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     const eventHook = eventHooks[0];
 
     const runs = createRunTracker();
+    const hub = createObserverHub(logger);
     const run = (name: string, ctxInput: ContextInput): Promise<RunResult> => {
       const pipeline = pipelines.get(name);
       if (!pipeline) throw new Error(`unknown pipeline "${name}"`);
-      return runs.track(() => runPipeline(pipeline, ctxInput, logger));
+      return runs.track(() => runPipeline(pipeline, ctxInput, logger, hub.observer));
+    };
+    const triggers: Triggers = { http: routes, events, crons };
+    let manifest: Manifest | undefined;
+    const describe = (): Manifest => {
+      manifest ??= buildManifest({ root, modules: input.modules, uses: config.modules.map((m) => m.use), rawConfigs: configByModule, contracts: contracts.names(), steps, pipelines, triggers });
+      return manifest;
     };
 
     let server: Server | undefined;
     const stoppers: Array<() => void> = [];
     let torndown = false;
 
-    return {
+    const kestrel: Kestrel = {
       config,
       contracts,
       steps,
       pipelines,
-      triggers: { http: routes, events, crons },
+      triggers,
+      describe,
+      observe: hub.observe,
       run,
       async start() {
         const started: { http?: AddressInfo } = {};
@@ -302,6 +313,18 @@ export async function boot(input: BootInput): Promise<Kestrel> {
         return { drained };
       },
     };
+
+    for (const mod of ordered) {
+      if (!mod.attach) continue;
+      let detach: ReturnType<NonNullable<ModuleDefinition["attach"]>>;
+      try {
+        detach = mod.attach(instances.get(mod), { describe, observe: hub.observe });
+      } catch (err) {
+        throw new KestrelBootError(mod.name, `attach() threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (typeof detach === "function") stoppers.push(detach);
+    }
+    return kestrel;
   } catch (err) {
     await teardownAll(ordered, instances, logger);
     throw err;

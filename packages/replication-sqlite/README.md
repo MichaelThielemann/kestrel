@@ -23,3 +23,35 @@ unknown `generation`, is `Err(NOT_FOUND)`; an unparsable `at` in the payload is 
 `backup/blobstore` follows the same pattern with its own file names (`<file>.restore-pending` plus
 `<file>.restore-marker`), so both modules can point at the same database without clashing.
 Not included: multi-process setups, encryption, restore without restart.
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-replication-sqlite` – module `replication/sqlite`: provides no contract; requires `blobstore@1`.
+
+| Config | Type | Required | Default |
+|---|---|---|---|
+| `file` | string | yes | – |
+| `prefix` | string | no | `"replica/"` |
+| `checkpointBytes` | integer | no | `4194304` |
+| `checkpointSeconds` | integer | no | `300` |
+| `snapshotSeconds` | integer | no | `86400` |
+| `retentionSeconds` | integer | no | `172800` |
+| `restoreOnStart` | boolean | no | `true` |
+
+| Step | Summary | Reads | Writes | Input | Output | Errors |
+|---|---|---|---|---|---|---|
+| `replication.sync` | Ship new WAL frames, checkpoint, snapshot and prune when due | – | `result` | – | { generation?: string, shippedBytes?: number, frames?: number, checkpointed?: boolean, pruned?: number, … } | – |
+| `replication.snapshot` | Start a new generation with a full snapshot | – | `result` | – | { generation?: string, bytes?: number, … } | – |
+| `replication.listPoints` | Restore points (snapshots and WAL segments) | – | `result` | – | object[] | – |
+| `replication.readStatus` | Replication status | – | `result` | – | { generation?: string \| null, lineage?: number, shippedFrames?: number, lastSyncAt?: number \| null, lastSnapshotAt?: number \| null, lastCheckpointAt?: number \| null, walBytes?: number, pendingRestore?: string \| null, … } | – |
+| `replication.prepareRestore` | Rebuild the database at a point in time next to the live file; applied on next start | – | `result` | { generation?: string, at?: number \| string } | { generation: string, at: number, file: string, restartRequired: true, … } | 400 invalid "at" value; 404 no snapshot before the requested point |
+
+Pipelines in `examples/minimal` using these steps:
+
+- **replicate** (cron * * * * *): **`replication.sync`**
+- **replicationPoints** (GET /admin/replication/points): `authn.requireUser` → `authz.require:system.manage` → **`replication.listPoints`**
+- **replicationRestore** (POST /admin/replication/restore): `authn.requireUser` → `authz.require:system.manage` → **`replication.prepareRestore`**
+- **replicationSnapshot** (POST /admin/replication/snapshot): `authn.requireUser` → `authz.require:system.manage` → **`replication.snapshot`**
+- **replicationStatus** (GET /admin/replication/status): `authn.requireUser` → `authz.require:system.manage` → **`replication.readStatus`**
+
+<!-- kestrel-docs:end -->

@@ -1,7 +1,9 @@
 import type { ZodTypeAny, output } from "zod";
 import type { StepFactory, StepMap } from "./context.ts";
 import type { Contract } from "./defineContract.ts";
+import type { Manifest } from "./describe.ts";
 import type { Logger } from "./logger.ts";
+import type { RunObserver, Unobserve } from "./observer.ts";
 import type { Runner } from "./runner.ts";
 
 export interface Deps {
@@ -51,6 +53,14 @@ export interface ModuleTriggers<P> {
   event?(instance: P, entries: readonly EventEntry[], run: Runner, logger: Logger): () => void;
 }
 
+/** The read-only view of the booted instance a module's `attach` hook receives: the static manifest and the run observer registration. */
+export interface Introspection {
+  describe: () => Manifest;
+  observe: (observer: RunObserver) => Unobserve;
+}
+
+export type Detach = () => void;
+
 export interface ModuleDefinition<N extends string = string, T extends StepMap = StepMap> {
   name: N;
   provides: readonly Contract<unknown>[];
@@ -61,6 +71,8 @@ export interface ModuleDefinition<N extends string = string, T extends StepMap =
   steps?(instance: unknown): T;
   describe?(instance: unknown): StepDescriptions<T>;
   triggers?: ModuleTriggers<unknown>;
+  /** Runs once at the end of boot, after every module is set up and every pipeline resolved; a returned function runs on `stop()`. */
+  attach?(instance: unknown, kestrel: Introspection): Detach | void;
   teardown?(instance: unknown): void | Promise<void>;
 }
 
@@ -75,6 +87,7 @@ export type ModuleInput<N extends string, S extends ZodTypeAny, P, T extends Ste
   configSchema: S;
   setup(config: output<S>, deps: Deps): Promise<P>;
   triggers?: ModuleTriggers<P>;
+  attach?(instance: P, kestrel: Introspection): Detach | void;
   teardown?(instance: P): void | Promise<void>;
 } & (WithSteps<P, T> | WithoutSteps);
 

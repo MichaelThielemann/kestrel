@@ -30,6 +30,7 @@ building block is its own package; a consumer installs exactly what it uses.
 | `@michaelthielemann/kestrel-renderer-plain` | `renderer@1` reference: plain HTML per document |
 | `@michaelthielemann/kestrel-delivery-static` | steps `delivery.publish/unpublish/status/publishAll`: static output per locale via renderer@1 into blobstore@1 |
 | `@michaelthielemann/kestrel-audit-persistence` | step `audit.record` |
+| `@michaelthielemann/kestrel-insights` | `insights@1`: steps `insights.readManifest/readStats` — the instance manifest and live per-process run statistics |
 
 ## Develop
 
@@ -40,6 +41,7 @@ pnpm install
 pnpm lint && pnpm typecheck && pnpm test
 pnpm start            # runs examples/minimal
 pnpm build            # emits dist/ (js + d.ts) for every package via tsc -b
+pnpm docs:generate    # rewrites the generated README sections and examples/minimal/manifest.json from the manifest; CI runs docs:check
 ```
 
 Inside the workspace, packages resolve to their TypeScript sources; `publishConfig` switches the

@@ -10,8 +10,8 @@ export const configSchema = z
     region: z.string().min(1).optional(),
     endpoint: z.string().url().optional(),
     forcePathStyle: z.boolean().optional(),
-    accessKeyId: z.string().min(1).optional(),
-    secretAccessKey: z.string().min(1).optional(),
+    accessKeyId: z.string().min(1).describe("secret").optional(),
+    secretAccessKey: z.string().min(1).describe("secret").optional(),
     timeoutMs: z.number().int().positive().default(DEFAULT_TIMEOUT_MS),
     maxAttempts: z.number().int().min(1).default(DEFAULT_MAX_ATTEMPTS),
   })

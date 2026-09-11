@@ -502,6 +502,27 @@ replication (point-in-time recovery).
 For the UI: show the 500's error message verbatim (it names the migration, document and language);
 offer "dry run" before "apply".
 
+## Insights (admin, permission `insights.read`)
+
+One view of the running instance for the admin's system page: what is wired (static) and how it
+runs (live). Both routes need a login and `insights.read` (401 anonymous, 403 without the
+permission; the example's `admin` role has `*`, `editor` does not). The manifest never carries a
+config *value*: per config variable only path, type, required, default and whether it is set;
+variables marked secret in the module's schema show neither default nor anything else. The live
+numbers are per process and start at zero on every boot — behind two instances each answers for
+itself.
+
+| Method | Path | Response |
+|---|---|---|
+| GET | `/admin/insights/manifest` | `{ generatedAt, core: { version }, contracts: ["persistence@1", …], modules: [Module], steps: [Step], pipelines: [Pipeline], triggers: { http: [{ method, path, pipeline }], events: [{ event, pipeline }], crons: [{ expression, pipeline }] } }` — computed once at boot, `generatedAt` is the response time |
+| GET | `/admin/insights/stats` | `{ generatedAt, process: { pid, startedAt, uptimeMs }, runs: { active, total, failed, errors }, pipelines: [{ name, count, failed, errors, p50Ms, p95Ms, lastAt }], steps: [{ pipeline, step, count, failed, errors, p50Ms, p95Ms }], events: [{ name, count, lastAt }], ratelimit: [] }` |
+
+`Module`: `{ name: "authn/multi", use: "@michaelthielemann/kestrel-authn-multi", version: string | null (null when the package cannot be resolved from the boot root, and for path entries), provides, requires, optional: ["<contract>@<major>"], config: { schema: JsonSchema, variables: [{ path: "bootstrap.passwordHash", type, required, default?, secret, set }] }, steps: ["authn.login", …], eventHook: boolean }`.
+`type` is one of `string number integer boolean array object record enum union literal function unknown`; `required` is relative to the parent object (`bootstrap.username` is required inside an optional `bootstrap`).
+`Step`: `{ name: "content.list", module: "content/default", factory: boolean, description: StepDescription | null }` — a factory step's description is evaluated with the placeholder argument `<arg>` and `null` when that throws.
+`Pipeline`: `{ name, steps: [{ spec: "content.list:pages", name: "content.list", module, description: StepDescription }] }` with the real arguments. `StepDescription` is the module's `describe()` entry: `summary`, `reads`, `writes`, `input`/`output`/`query` (JSON Schema), `errors`, `security`, `multipart`, `binary`.
+Stats: `failed` counts every run or step whose outcome is not ok — 4xx included, so a 401 on `/me` is a failed run; `errors` is the 5xx share of that (thrown steps, `INTERNAL`, `TRANSIENT`). `p50Ms`/`p95Ms` are nearest-rank percentiles over the last 1000 samples per key, `count`/`failed` are unbounded. `step` in `steps` is the spec as written in the pipeline (`authz.require:pages.read`). `events` counts event-triggered runs per event name — an event nobody listens to is invisible. `ratelimit` is always `[]` in this release (no ratelimit contract exists yet); the field stays so a client can render it later.
+
 ## Admin
 
 | Method | Path | Response |

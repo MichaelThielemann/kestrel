@@ -17,3 +17,24 @@ pipeline that runs `authn.requireUser` first (boot's dataflow check enforces it)
 
 Generate a hash: `node -e "import('./modules/authn/single/impl.ts').then(m => console.log(m.hashPassword(process.argv[1])))" -- <password>`
 Not included: multiple users, persistence of sessions across restarts, password change.
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-authn-single` – module `authn/single`: provides `authn@1`.
+
+| Config | Type | Required | Default |
+|---|---|---|---|
+| `username` | string | yes | – |
+| `passwordHash` | string | yes | *(secret)* |
+| `sessionTtlSeconds` | integer | no | `86400` |
+| `roles` | array | no | `[]` |
+
+| Step | Summary | Reads | Writes | Input | Output | Errors |
+|---|---|---|---|---|---|---|
+| `authn.login` | Log in with credentials | – | `token`, `identity`, `result` | { username: string, password: string } | { token: string, identity: object, … } | 401 invalid credentials |
+| `authn.identifyUser` | Identify the caller if a valid token is present | – | `token?`, `identity?` | – | – | – |
+| `authn.requireUser` | Require a valid session | – | `token`, `identity` | – | – | 401 not authenticated |
+| `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated |
+| `authn.logout` | End the current session | `token` | `result` | – | { ok: boolean, … } | 401 not authenticated |
+
+<!-- kestrel-docs:end -->

@@ -29,6 +29,7 @@
     "@michaelthielemann/kestrel-validate-jsonschema": "workspace:*",
     "@michaelthielemann/kestrel-sanitize-svg": "workspace:*",
     "@michaelthielemann/kestrel-redirects-default": "workspace:*",
-    "@michaelthielemann/kestrel-migrations-default": "workspace:*"
+    "@michaelthielemann/kestrel-migrations-default": "workspace:*",
+    "@michaelthielemann/kestrel-insights": "workspace:*"
   }
 }

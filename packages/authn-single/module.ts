@@ -8,7 +8,7 @@ import { createAuthnSingle, tokenFromHeaders } from "./impl.ts";
 export const configSchema = z
   .object({
     username: z.string().min(1),
-    passwordHash: z.string().startsWith("scrypt$"),
+    passwordHash: z.string().startsWith("scrypt$").describe("secret"),
     sessionTtlSeconds: z.number().int().positive().default(86400),
     roles: z.array(z.string()).default([]),
   })

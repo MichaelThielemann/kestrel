@@ -110,6 +110,10 @@ In both cases: only pipelines with a trigger are reachable from outside.
    `params.<p>` bound by any HTTP route of the pipeline), otherwise boot aborts.
 6. Check and register triggers (HTTP server, event bus, cron). Event triggers need a module with
    `triggers.event` — the core ships none and therefore knows no contract name for it.
+7. Call every module's `attach(instance, { describe, observe })` with the read-only view of the
+   booted instance: `describe()` is the static manifest (`kestrel.describe()`), `observe()`
+   registers a run observer that sees every run and step start and end (`kestrel.observe()`);
+   a returned function runs on `stop()`. `insights-default` is the module that uses it.
 
 If any step fails: abort with `KestrelBootError { module, reason }`.
 

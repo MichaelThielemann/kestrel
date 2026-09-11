@@ -19,3 +19,21 @@ is missing. Once the SDK's own `maxAttempts` are spent, `put`/`get`/`remove`/`mo
 `TimeoutError`/`NetworkingError`/`AbortError`, or a Node `code` of
 `ECONNRESET`/`ECONNREFUSED`/`ETIMEDOUT`/`EPIPE`/`EAI_AGAIN`. Everything else (an invalid key,
 `AccessDenied`, a misconfigured bucket) throws — it is a wiring bug, not an expected failure.
+
+<!-- kestrel-docs:start -->
+## Generated from the manifest
+`@michaelthielemann/kestrel-blobstore-s3` – module `blobstore/s3`: provides `blobstore@1`.
+
+| Config | Type | Required | Default |
+|---|---|---|---|
+| `bucket` | string | yes | – |
+| `prefix` | string | no | `""` |
+| `region` | string | no | – |
+| `endpoint` | string | no | – |
+| `forcePathStyle` | boolean | no | – |
+| `accessKeyId` | string | no | *(secret)* |
+| `secretAccessKey` | string | no | *(secret)* |
+| `timeoutMs` | integer | no | `10000` |
+| `maxAttempts` | integer | no | `3` |
+
+<!-- kestrel-docs:end -->
