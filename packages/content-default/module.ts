@@ -157,8 +157,32 @@ function describeContent(content: ContentInstance) {
       output: docSchema(typeOf(arg)),
       errors: { 400: "unknown or missing locale", 404: "document or translation not found", 409: "last translation – remove the document" },
     }),
+    describeModel: { summary: "The content model: locales, default locale and every type with its fields", reads: [], writes: ["result"], output: MODEL_SCHEMA },
   };
 }
+
+const FIELD_SCHEMA = {
+  oneOf: [
+    { type: "string" },
+    { type: "object", properties: { type: { type: "string" }, required: { type: "boolean" }, unique: { type: "boolean" }, localized: { type: "boolean" }, options: { type: "array", items: { type: "string" } }, to: { type: "string" } }, required: ["type"], additionalProperties: false },
+  ],
+};
+const MODEL_SCHEMA = {
+  type: "object",
+  properties: {
+    locales: { type: "array", items: { type: "string" } },
+    defaultLocale: { type: "string" },
+    types: {
+      type: "object",
+      additionalProperties: {
+        type: "object",
+        properties: { kind: { type: "string", enum: ["single", "multi"] }, fields: { type: "object", additionalProperties: FIELD_SCHEMA }, completeWhen: { type: "object", properties: { field: { type: "string" }, equals: { type: "string" } }, required: ["field", "equals"] } },
+        required: ["kind", "fields"],
+      },
+    },
+  },
+  required: ["types"],
+};
 
 export default defineModule({
   name: "content/default",
@@ -230,6 +254,7 @@ export default defineModule({
       if (isErr(removed)) return ctx.fail(removed.error);
       return ok({ ...ctx, result: { ok: true } });
     }),
+    describeModel: async (ctx: Context) => ok({ ...ctx, result: content.model() }),
     removeTranslation: stepFactory((type: string) => async (ctx: Context) => {
       if (!ctx.params.id) return ctx.fail("VALIDATION", "missing id");
       const locale = localeOf(ctx).locale;

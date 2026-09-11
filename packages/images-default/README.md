@@ -64,6 +64,6 @@ Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered
 | `images.serve` | Binary variant, or the original with x-kestrel-variant: pending while it isn't ready yet | `params.id`, `params.file` | `result` | – | – | 400 missing id or file; 404 media item or size not found, or the variant gave up after maxAttempts |
 | `images.export:<arg>` | Copy every done variant to <arg>/<folder>/<filename>.<size>.<ext> | – | `result.variants` | – | { variants: object, … } | – |
 
-Used by 14 of 68 pipelines in `examples/minimal`.
+Used by 14 of 69 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

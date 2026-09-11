@@ -96,6 +96,13 @@ describe("content/default module steps", () => {
     expect(res.status).toBe(200);
   });
 
+  it("describeModel answers the parsed model without maxLimit", async () => {
+    const { instance } = await boot();
+    const res = await run(["content.describeModel"], {}, instance);
+    expect(res.status).toBe(200);
+    expect(res.result).toEqual(MODEL);
+  });
+
   it("remove deletes a document", async () => {
     const { instance } = await boot();
     const created = await run(["content.create:notes"], { body: { slug: "a", title: "A", status: "draft" } }, instance);

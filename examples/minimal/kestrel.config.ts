@@ -120,6 +120,7 @@ export default defineConfig({
     { http: "GET /admin/replication/points", pipeline: "replicationPoints" },
     { http: "POST /admin/replication/snapshot", pipeline: "replicationSnapshot" },
     { http: "POST /admin/replication/restore", pipeline: "replicationRestore" },
+    { http: "GET /admin/content/model", pipeline: "contentModel" },
     { http: "GET /admin/insights/manifest", pipeline: "insightsManifest" },
     { http: "GET /admin/insights/stats", pipeline: "insightsStats" },
     { event: "auth.loggedIn", pipeline: "auditAuth" },
