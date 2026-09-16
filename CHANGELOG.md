@@ -28,6 +28,7 @@
 - `pnpm docs:generate` writes a generated section (config variables, steps, the example's
   pipelines) between `kestrel-docs` markers into every module README and
   `examples/minimal/manifest.json`; `pnpm docs:check` fails CI on drift.
+- `images-default`: sharp `^0.35.4` (libvips and libheif advisories).
 
 ## 5.2.0 – 2026-09-09
 

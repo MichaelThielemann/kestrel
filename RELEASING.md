@@ -9,8 +9,12 @@ All packages share one version and are published together from the workspace.
 3. Bump the version in every `packages/*/package.json` (same number everywhere) and
    `packages/core/src/version.ts` (the workspace test fails when they differ), add an entry to
    `CHANGELOG.md` and run `pnpm docs:generate` (the committed manifest carries the versions).
-4. Commit, tag `v<version>`.
-5. `pnpm -r --filter './packages/*' publish --access public` (dry run first: add `--dry-run`).
+4. Commit, tag `v<version>`, push the commit and the tag.
+5. The `release` workflow runs on the tag: it verifies the tag matches the workspace version,
+   repeats lint, typecheck, tests, docs check and build, then publishes every package with
+   `--provenance`. It authenticates with the repository secret `NPM_TOKEN` (granular npm token
+   with publish rights on `@michaelthielemann/*`). A local dry run is still possible with
+   `pnpm -r --filter './packages/*' publish --access public --dry-run`.
 
 `workspace:*` ranges are rewritten to the real version by pnpm on pack/publish; `publishConfig`
 switches `exports` and `bin` from the TypeScript sources to `dist/`.
