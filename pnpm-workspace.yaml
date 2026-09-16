@@ -4,3 +4,9 @@ packages:
 allowBuilds:
   esbuild: true
   sharp: true
+minimumReleaseAge: 4320
+minimumReleaseAgeExclude:
+  - '@michaelthielemann/*'
+trustPolicy: no-downgrade
+trustPolicyIgnoreAfter: 129600
+blockExoticSubdeps: true
