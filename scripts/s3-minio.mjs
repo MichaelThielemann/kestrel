@@ -49,7 +49,10 @@ async function ensureBucket() {
   });
   try {
     await client.send(new HeadBucketCommand({ Bucket: BUCKET }));
-  } catch {
+  } catch (error) {
+    if (error.name !== "NotFound" && error.$metadata?.httpStatusCode !== 404) {
+      throw new Error(`HeadBucket failed for endpoint ${ENDPOINT}, bucket "${BUCKET}": ${error.message ?? error}`, { cause: error });
+    }
     await client.send(new CreateBucketCommand({ Bucket: BUCKET }));
   }
 }

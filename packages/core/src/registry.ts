@@ -17,6 +17,9 @@ export interface RegisteredStep {
 
 const CONTEXT_PATH = /^[a-zA-Z][A-Za-z0-9]*(\.[A-Za-z0-9_-]+)*\??$/;
 
+/** The argument a factory step's describe() sees when no pipeline supplies one. */
+export const PLACEHOLDER_ARG = "<arg>";
+
 // Walks the prototype chain (like `missingMethods` in defineContract.ts, via
 // property access) so a class-instance step map registers its inherited methods too.
 function stepKeys(steps: StepMap): string[] {
@@ -29,13 +32,17 @@ function stepKeys(steps: StepMap): string[] {
   return [...keys];
 }
 
+function validPath(path: string): boolean {
+  return CONTEXT_PATH.test(path.split(PLACEHOLDER_ARG).join("arg"));
+}
+
 function checkPaths(owner: string, name: string, description: StepDescription): StepDescription {
   for (const path of description.reads) {
     if (path.endsWith("?")) throw new KestrelBootError(owner, `step "${name}" reads "${path}"; the trailing "?" is allowed in writes only`);
-    if (!CONTEXT_PATH.test(path)) throw new KestrelBootError(owner, `step "${name}" declares an invalid read path "${path}"`);
+    if (!validPath(path)) throw new KestrelBootError(owner, `step "${name}" declares an invalid read path "${path}"`);
   }
   for (const path of description.writes) {
-    if (!CONTEXT_PATH.test(path)) throw new KestrelBootError(owner, `step "${name}" declares an invalid write path "${path}"`);
+    if (!validPath(path)) throw new KestrelBootError(owner, `step "${name}" declares an invalid write path "${path}"`);
   }
   return description;
 }
@@ -55,6 +62,13 @@ export class StepRegistry {
       if (describe === undefined) throw new KestrelBootError(owner, `step "${name}" has no describe() entry`);
       if (typeof describe === "function") {
         if (!isStepFactory(fn)) throw new KestrelBootError(owner, `step "${name}" takes no argument but its describe() entry is a function`);
+        let placeholder: StepDescription;
+        try {
+          placeholder = describe(PLACEHOLDER_ARG);
+        } catch (err) {
+          throw new KestrelBootError(owner, `step "${name}" describe() threw for the placeholder argument "${PLACEHOLDER_ARG}": ${err instanceof Error ? err.message : String(err)}`);
+        }
+        checkPaths(owner, name, placeholder);
       } else {
         checkPaths(owner, name, describe);
       }

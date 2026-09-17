@@ -36,6 +36,7 @@ export default defineModule({
   requires: [CONTENT, PERSISTENCE, EVENTS],
   optional: [VALIDATE],
   configSchema,
+  emits: ["migrations.applied"],
 
   async setup(config, deps): Promise<MigrationsDefault> {
     const validate = deps.find(VALIDATE);

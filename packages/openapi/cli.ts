@@ -10,7 +10,12 @@ const option = (name: string): string | undefined => {
   return i === -1 ? undefined : args[i + 1];
 };
 const root = process.cwd();
-const pkg = JSON.parse(await readFile(resolve(root, "package.json"), "utf8").catch(() => "{}")) as { name?: string; version?: string };
+const pkg = JSON.parse(
+  await readFile(resolve(root, "package.json"), "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return "{}";
+    throw error;
+  }),
+) as { name?: string; version?: string };
 
 const config = await loadConfig(resolve(root, "kestrel.config.ts"));
 const modules = await loadModules(root, config);

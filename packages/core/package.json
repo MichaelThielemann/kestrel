@@ -1,7 +1,7 @@
 {
   "name": "@michaelthielemann/kestrel",
   "version": "5.3.0",
-  "description": "Kestrel core: contract registry, boot check and pipeline runner. Ships no contracts and no modules.",
+  "description": "Kestrel core: contract registry, boot check, pipeline runner and triggers. Ships no contracts and no modules.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {

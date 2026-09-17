@@ -6,7 +6,7 @@ point, plus `package.json`. It doesn't have to fulfill a contract (`provides: []
 may also provide only steps, e.g. `audit/persistence` with the step `audit.record`.
 
 ```
-module.ts        Shell: name, provides, requires, optional?, configSchema, setup, steps, optional attach/teardown
+module.ts        Shell: name, provides, requires, optional?, configSchema, setup, steps, optional emits/attach/teardown
 impl.ts          Entry point. Imports only kestrel-contracts, its own files, Node, package.json deps
 impl.test.ts     Calls the contract test, plus its own tests
 README.md        Required content: what, why, config, steps, what's not included
@@ -95,6 +95,13 @@ export default defineModule({
 });
 ```
 
+## Events from a contract method
+
+A module that emits an event from a contract method instead of an `events.emit` step declares it:
+`emits: ["migrations.applied"]` (`migrations/default`). Boot collects the events the pipelines emit
+plus every module's `emits`; an event trigger on a name in neither set is logged as a warning
+(`pipelines.md` § Triggers). The declaration shows up in the manifest as `ModuleManifest.emits`.
+
 ## Contributing triggers
 
 Modules can contribute triggers as well as steps: `triggers.event(instance, entries, run, logger)`
@@ -152,8 +159,14 @@ async contract method returns `Result<T, E>` (`contracts.md`); an `Err` from `pe
 `describe()` is required as soon as a module provides `steps` (if missing, boot aborts with
 `step "<name>" has no describe() entry`), and provides a `StepDescription` per step with the
 required fields `summary`, `reads` and `writes` (path grammar and semantics: `pipelines.md`
-§ reads/writes). A step that reads `ctx.payload` (directly or through a helper) must declare
-what it reads: `input` (a JSON Schema for the body, with `additionalProperties` stated
+§ reads/writes). A factory step's `describe(arg)` is called once at registration with the
+placeholder argument `"<arg>"`; if it throws, boot aborts naming the step and the cause, so it
+must work without a real argument. The runner compares what a step actually wrote against its
+`writes` after every successful step and ends the run with 500 `INTERNAL` on a mismatch, so a
+write that only happens on some paths is marked `"<path>?"`.
+
+A step that reads `ctx.payload` (directly or through a helper) must declare what it reads:
+`input` (a JSON Schema for the body, with `additionalProperties` stated
 explicitly — `false` unless the step deliberately takes open objects) and/or `query` (a map of
 query-parameter name → schema; never closed, undeclared parameters are ignored). The runner
 enforces both before the step in every environment (`pipelines.md` § Payload Validation), a
@@ -208,7 +221,12 @@ Not included: self-service registration, password reset (own pipelines).
 - [ ] Every step returns `Result<Context, KestrelError>` (`ok(ctx)`/`ok({ ...ctx, … })` on
       success, `ctx.fail(code, message, details?)` or `ctx.fail(error)` on an expected
       failure); `throw` only for wiring errors
-- [ ] `describe()` is present and covers every step, including `reads`/`writes`
+- [ ] `describe()` is present and covers every step, including `reads`/`writes`; a factory
+      `describe(arg)` also works for the placeholder argument `"<arg>"`
+- [ ] `writes` matches what every success path of the step really writes — conditional writes
+      carry `?`, otherwise the runner ends the run with 500 `INTERNAL`
+- [ ] Events the module emits from a contract method (not from a pipeline step) are listed in
+      `emits`
 - [ ] Every step that reads the payload declares `input` and/or `query`; body schemas state
       `additionalProperties`; `module.test.ts` runs every step once through
       `testing/runPipeline` with `modules: [{ module, instance }]`, including one schema violation

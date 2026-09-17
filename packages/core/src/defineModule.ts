@@ -70,6 +70,7 @@ export interface ModuleDefinition<N extends string = string, T extends StepMap =
   setup(config: unknown, deps: Deps): Promise<unknown>;
   steps?(instance: unknown): T;
   describe?(instance: unknown): StepDescriptions<T>;
+  emits?: readonly string[];
   triggers?: ModuleTriggers<unknown>;
   /** Runs once at the end of boot, after every module is set up and every pipeline resolved; a returned function runs on `stop()`. */
   attach?(instance: unknown, kestrel: Introspection): Detach | void;
@@ -86,6 +87,7 @@ export type ModuleInput<N extends string, S extends ZodTypeAny, P, T extends Ste
   optional?: readonly Contract<unknown>[];
   configSchema: S;
   setup(config: output<S>, deps: Deps): Promise<P>;
+  emits?: readonly string[];
   triggers?: ModuleTriggers<P>;
   attach?(instance: P, kestrel: Introspection): Detach | void;
   teardown?(instance: P): void | Promise<void>;

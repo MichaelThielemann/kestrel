@@ -12,6 +12,7 @@ export interface ModuleUnderTest {
 
 export interface RunPipelineOptions {
   steps?: Record<string, Step | StepFactory>;
+  writes?: Record<string, readonly string[]>;
   modules?: readonly ModuleUnderTest[];
   logger?: Logger;
 }
@@ -33,7 +34,7 @@ export function runPipeline(pipeline: PipelineDefinition, input: Partial<Context
     byPrefix.set(prefix, group);
   }
   for (const [prefix, group] of byPrefix) {
-    const descriptions = Object.fromEntries(Object.keys(group).map((key) => [key, { summary: `${prefix}.${key}`, reads: [], writes: ["result"] }]));
+    const descriptions = Object.fromEntries(Object.keys(group).map((key) => [key, { summary: `${prefix}.${key}`, reads: [], writes: options.writes?.[`${prefix}.${key}`] ?? ["result?"] }]));
     registry.register("test", prefix, group, descriptions);
   }
 

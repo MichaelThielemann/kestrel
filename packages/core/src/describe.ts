@@ -4,12 +4,13 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Triggers } from "./boot.ts";
 import type { JsonSchema, ModuleDefinition, StepDescription } from "./defineModule.ts";
-import type { StepRegistry } from "./registry.ts";
+import { PLACEHOLDER_ARG, type StepRegistry } from "./registry.ts";
 import type { ResolvedPipeline } from "./runner.ts";
 import { VERSION } from "./version.ts";
 import { describeConfig, type ConfigVariable } from "./zodSchema.ts";
 
 export type { ConfigVariable } from "./zodSchema.ts";
+export { PLACEHOLDER_ARG } from "./registry.ts";
 
 export interface ModuleManifest {
   name: string;
@@ -21,13 +22,14 @@ export interface ModuleManifest {
   config: { schema: JsonSchema; variables: ConfigVariable[] };
   steps: string[];
   eventHook: boolean;
+  emits: string[];
 }
 
 export interface StepManifest {
   name: string;
   module: string;
   factory: boolean;
-  description: StepDescription | null;
+  description: StepDescription;
 }
 
 export interface PipelineStepManifest {
@@ -67,9 +69,6 @@ export interface ManifestInput {
   pipelines: ReadonlyMap<string, ResolvedPipeline>;
   triggers: Triggers;
 }
-
-/** The argument a factory step's describe() sees when no pipeline supplies one. */
-export const PLACEHOLDER_ARG = "<arg>";
 
 export function coreVersion(): string {
   return VERSION;
@@ -123,21 +122,10 @@ export function buildManifest(input: ManifestInput): Manifest {
       config: describeConfig(mod.configSchema, input.rawConfigs.get(mod)),
       steps: registered.filter((s) => s.owner === mod.name).map((s) => s.name),
       eventHook: mod.triggers?.event !== undefined,
+      emits: [...(mod.emits ?? [])],
     };
   });
-  const steps = registered.map((s): StepManifest => {
-    let description: StepDescription | null;
-    if (typeof s.describe === "function") {
-      try {
-        description = s.describe(PLACEHOLDER_ARG);
-      } catch {
-        description = null;
-      }
-    } else {
-      description = s.describe;
-    }
-    return { name: s.name, module: s.owner, factory: s.factory, description };
-  });
+  const steps = registered.map((s): StepManifest => ({ name: s.name, module: s.owner, factory: s.factory, description: typeof s.describe === "function" ? s.describe(PLACEHOLDER_ARG) : s.describe }));
   const pipelines = [...input.pipelines.values()].map((p): PipelineManifest => ({
     name: p.name,
     steps: p.steps.map((s) => ({ spec: s.name, name: stepName(s.name), module: input.steps.owner(stepName(s.name)) ?? "", description: s.description })),

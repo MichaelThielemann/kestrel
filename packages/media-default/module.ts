@@ -55,6 +55,17 @@ function listOptions(payload: Record<string, unknown>): ListOptions & { locale?:
 const PROVENANCE = { type: "object", properties: { origin: { type: "string", enum: ["human", "ai", "mixed", "unknown"] }, tool: { type: "string" }, model: { type: "string" }, at: { type: "number" } }, required: ["origin"], description: "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown" };
 const MEDIA_ITEM_SCHEMA = { type: "object", properties: { id: { type: "string" }, filename: { type: "string" }, folder: { type: "string" }, contentType: { type: "string" }, size: { type: "number" }, key: { type: "string" }, checksum: { type: ["string", "null"], description: "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded" }, status: { type: "string", enum: ["uploading", "ready", "failed"], description: "only ready items are listed, readable and downloadable" }, createdAt: { type: "number" }, updatedAt: { type: "number" }, provenance: PROVENANCE, width: { type: ["number", "null"] }, height: { type: ["number", "null"] }, alt: { type: ["string", "null"] }, title: { type: ["string", "null"] }, description: { type: ["string", "null"] } }, required: ["id", "filename", "folder", "contentType", "size", "key", "checksum", "status", "createdAt", "updatedAt", "provenance"] };
 const RECONCILE_SCHEMA = { type: "object", properties: { blobsWithoutRow: { type: "array", items: { type: "string" } }, rowsWithoutBlob: { type: "array", items: { type: "string" } } }, required: ["blobsWithoutRow", "rowsWithoutBlob"] };
+const FOLDER_ITEMS_SUMMARY = "Item ids in a folder, for use with references.guardAll:media before removeFolder";
+
+function folderItemsStep(media: Media): (ctx: Context) => Promise<StepResult> {
+  return async (ctx) => {
+    if (!ctx.params.path) return ctx.fail("VALIDATION", "missing path");
+    const found = await media.folderItems(ctx.params.path, ctx.payload.recursive === true || first(ctx.payload.recursive) === "true");
+    if (isErr(found)) return ctx.fail(found.error);
+    if (found.value === null) return ctx.fail("NOT_FOUND", `media folder ${ctx.params.path} not found`);
+    return ok({ ...ctx, result: found.value });
+  };
+}
 
 export default defineModule({
   name: "media/default",
@@ -151,13 +162,8 @@ export default defineModule({
       if (renamed.value === null) return ctx.fail("NOT_FOUND", `media folder ${ctx.params.path} not found`);
       return ok({ ...ctx, result: renamed.value });
     },
-    folderItems: async (ctx: Context): Promise<StepResult> => {
-      if (!ctx.params.path) return ctx.fail("VALIDATION", "missing path");
-      const found = await media.folderItems(ctx.params.path, ctx.payload.recursive === true || first(ctx.payload.recursive) === "true");
-      if (isErr(found)) return ctx.fail(found.error);
-      if (found.value === null) return ctx.fail("NOT_FOUND", `media folder ${ctx.params.path} not found`);
-      return ok({ ...ctx, result: found.value });
-    },
+    listFolderItems: folderItemsStep(media),
+    folderItems: folderItemsStep(media),
     removeFolder: async (ctx: Context): Promise<StepResult> => {
       if (!ctx.params.path) return ctx.fail("VALIDATION", "missing path");
       const removed = await media.removeFolder(ctx.params.path);
@@ -225,7 +231,8 @@ export default defineModule({
     export: (dir: string) => ({ summary: `Copy every media item to ${dir}/<folder>/<filename>`, reads: [], writes: ["result"], output: { type: "object", properties: { written: { type: "number" }, skipped: { type: "number" }, missing: { type: "number" }, conflicts: { type: "number" } } } }),
     createFolder: { summary: "Create a folder (idempotent: an existing folder is returned unchanged)", reads: [], writes: ["result"], input: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, output: { type: "object", properties: { folder: { type: "string" }, count: { type: "number" } }, required: ["folder", "count"] }, errors: { 400: "missing or invalid path" } },
     renameFolder: { summary: "Rename or move a folder, moving its blobs", reads: ["params.path"], writes: ["result"], input: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, output: { type: "object", properties: { folder: { type: "string" }, moved: { type: "number" } }, required: ["folder", "moved"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "target folder already exists" } },
-    folderItems: { summary: "Item ids in a folder, for use with references.guardAll:media before removeFolder", reads: ["params.path"], writes: ["result"], query: { recursive: { type: "boolean" } }, output: { type: "object", properties: { path: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, required: ["path", "ids"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "folder not empty (without `recursive`)" } },
+    listFolderItems: { summary: FOLDER_ITEMS_SUMMARY, reads: ["params.path"], writes: ["result"], query: { recursive: { type: "boolean" } }, output: { type: "object", properties: { path: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, required: ["path", "ids"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "folder not empty (without `recursive`)" } },
+    folderItems: { summary: `Deprecated, use media.listFolderItems: ${FOLDER_ITEMS_SUMMARY}`, reads: ["params.path"], writes: ["result"], query: { recursive: { type: "boolean" } }, output: { type: "object", properties: { path: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, required: ["path", "ids"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "folder not empty (without `recursive`)" } },
     removeFolder: { summary: "Delete a folder and everything in it", reads: ["params.path"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" }, removed: { type: "number" } }, required: ["ok", "removed"] }, errors: { 400: "invalid path", 404: "folder not found", 409: "folder not empty or still referenced" } },
   }),
 });

@@ -494,6 +494,41 @@ describe("boot", () => {
     expect(await db.all("log")).toHaveLength(1);
   });
 
+  it("warns once for an event trigger no pipeline emits and no module declares", async () => {
+    const warnings: { message: string; data: Record<string, unknown> | undefined }[] = [];
+    const logger = { ...silentLogger, warn: (message: string, data?: Record<string, unknown>) => warnings.push({ message, data }) };
+    kestrel = await boot({ config: { ...baseConfig, triggers: [{ event: "page.creted", pipeline: "onCreated" }] }, modules, pipelines, logger });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toMatch(/no pipeline emits via events\.emit and no module declares in emits/);
+    expect(warnings[0]?.data).toEqual({ event: "page.creted", pipeline: "onCreated" });
+  });
+
+  it("stays quiet when a pipeline emits the event, whatever the emit step's query tail", async () => {
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warn: (message: string) => warnings.push(message) };
+    const archive = definePipeline({ name: "archivePage", steps: ["store.create:pages", "events.emit:page.archived?with=result"] });
+    kestrel = await boot({ config: { ...baseConfig, triggers: [{ event: "page.archived", pipeline: "onCreated" }] }, modules, pipelines: [...pipelines, archive], logger });
+    expect(warnings).toEqual([]);
+  });
+
+  it("stays quiet when a module declares the event in emits", async () => {
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warn: (message: string) => warnings.push(message) };
+    const migrations = defineModule({
+      name: "migrations/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      emits: ["migrations.applied"],
+      async setup(): Promise<null> {
+        return null;
+      },
+    });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./migrations", config: {} }], triggers: [{ event: "migrations.applied", pipeline: "onCreated" }] };
+    kestrel = await boot({ config, modules: [...modules, migrations], pipelines, logger });
+    expect(warnings).toEqual([]);
+  });
+
   it("http: null keeps the routes for adapters but serves nothing", async () => {
     kestrel = await boot({ config: { ...baseConfig, http: null }, modules, pipelines, logger: silentLogger });
     expect(kestrel.triggers.http.map((r) => r.pipeline)).toEqual(["createPage", "readPage", "whoami", "upload", "download"]);

@@ -142,7 +142,7 @@ describe("media folders wiring", () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
     expect(pipelines.get("createMediaFolder")).toEqual(["authn.requireUser", "authz.require:media.write", "media.createFolder"]);
     expect(pipelines.get("renameMediaFolder")).toEqual(["authn.requireUser", "authz.require:media.write", "media.renameFolder"]);
-    expect(pipelines.get("deleteMediaFolder")).toEqual(["authn.requireUser", "authz.require:media.delete", "media.folderItems", "references.guardAll:media", "images.removeMany", "media.removeFolder"]);
+    expect(pipelines.get("deleteMediaFolder")).toEqual(["authn.requireUser", "authz.require:media.delete", "media.listFolderItems", "references.guardAll:media", "images.removeMany", "media.removeFolder"]);
   });
 });
 

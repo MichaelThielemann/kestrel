@@ -27,6 +27,8 @@ function withIdentity(identity: Identity): Step {
   return async (ctx: Context) => ok({ ...ctx, identity });
 }
 
+const setsIdentity = { "identity.set": ["identity?"] };
+
 const requireReadPipeline = definePipeline({ name: "requireRead", steps: ["authz.require:pages.read"] });
 const requireWritePipeline = definePipeline({ name: "requireWrite", steps: ["identity.set", "authz.require:pages.write"] });
 
@@ -39,20 +41,20 @@ describe("authz/roles module steps via runPipeline", () => {
 
   it("answers 401 UNAUTHENTICATED without identity for a non-anonymous permission", async () => {
     const instance = await boot();
-    const res = await runPipeline(requireWritePipeline, {}, { modules: [{ module, instance }], steps: { "identity.set": async (ctx: Context) => ok(ctx) } });
+    const res = await runPipeline(requireWritePipeline, {}, { modules: [{ module, instance }], steps: { "identity.set": async (ctx: Context) => ok(ctx) }, writes: setsIdentity });
     expect(res.status).toBe(401);
   });
 
   it("answers 403 FORBIDDEN when the identity lacks the permission", async () => {
     const instance = await boot();
-    const res = await runPipeline(requireWritePipeline, {}, { modules: [{ module, instance }], steps: { "identity.set": withIdentity({ id: "v", claims: { roles: ["visitor"] } }) } });
+    const res = await runPipeline(requireWritePipeline, {}, { modules: [{ module, instance }], steps: { "identity.set": withIdentity({ id: "v", claims: { roles: ["visitor"] } }) }, writes: setsIdentity });
     expect(res.status).toBe(403);
     expect(res.code).toBe("FORBIDDEN");
   });
 
   it("passes when the identity has the permission", async () => {
     const instance = await boot();
-    const res = await runPipeline(requireWritePipeline, {}, { modules: [{ module, instance }], steps: { "identity.set": withIdentity({ id: "e", claims: { roles: ["editor"] } }) } });
+    const res = await runPipeline(requireWritePipeline, {}, { modules: [{ module, instance }], steps: { "identity.set": withIdentity({ id: "e", claims: { roles: ["editor"] } }) }, writes: setsIdentity });
     expect(res.status).toBe(200);
   });
 });

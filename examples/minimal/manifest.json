@@ -50,7 +50,8 @@
         ]
       },
       "steps": [],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "replication/sqlite",
@@ -168,7 +169,8 @@
         "replication.readStatus",
         "replication.prepareRestore"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "persistence/sqlite",
@@ -223,7 +225,8 @@
         "persistence.updateOne",
         "persistence.deleteOne"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "sanitize/svg",
@@ -258,7 +261,8 @@
       "steps": [
         "sanitize.svg"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "media/default",
@@ -387,6 +391,7 @@
         "media.listFolders",
         "media.createFolder",
         "media.renameFolder",
+        "media.listFolderItems",
         "media.folderItems",
         "media.removeFolder",
         "media.download",
@@ -395,7 +400,8 @@
         "media.reconcileDelete",
         "media.export"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "images/default",
@@ -584,7 +590,8 @@
         "images.serve",
         "images.export"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "authn/multi",
@@ -718,7 +725,8 @@
         "authn.activateUser",
         "authn.cleanupSessions"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "authz/roles",
@@ -790,7 +798,8 @@
       "steps": [
         "authz.require"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "content/default",
@@ -974,7 +983,8 @@
         "content.describeModel",
         "content.removeTranslation"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "site/default",
@@ -999,7 +1009,8 @@
         "site.resolve",
         "site.resolveLinks"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "references/default",
@@ -1076,7 +1087,8 @@
         "references.report",
         "references.rebuild"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "links/default",
@@ -1170,7 +1182,8 @@
         "links.report",
         "links.rebuild"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "validate/jsonschema",
@@ -1259,7 +1272,8 @@
         "validate.sanitizeHtml",
         "validate.check"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "migrations/default",
@@ -1354,7 +1368,10 @@
         "migrations.list",
         "migrations.apply"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": [
+        "migrations.applied"
+      ]
     },
     {
       "name": "renderer/plain",
@@ -1402,7 +1419,8 @@
         ]
       },
       "steps": [],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "delivery/static",
@@ -1717,7 +1735,8 @@
         "delivery.publishAll",
         "delivery.exportLlms"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "redirects/default",
@@ -1796,7 +1815,8 @@
         "redirects.export",
         "redirects.render"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "audit/persistence",
@@ -1818,7 +1838,8 @@
       "steps": [
         "audit.record"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "events/inmemory",
@@ -1840,7 +1861,8 @@
       "steps": [
         "events.emit"
       ],
-      "eventHook": true
+      "eventHook": true,
+      "emits": []
     },
     {
       "name": "ratelimit/memory",
@@ -1894,7 +1916,8 @@
         "ratelimit.check",
         "ratelimit.sweep"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     },
     {
       "name": "insights/default",
@@ -1917,7 +1940,8 @@
         "insights.readManifest",
         "insights.readStats"
       ],
-      "eventHook": false
+      "eventHook": false,
+      "emits": []
     }
   ],
   "steps": [
@@ -3239,11 +3263,53 @@
       }
     },
     {
-      "name": "media.folderItems",
+      "name": "media.listFolderItems",
       "module": "media/default",
       "factory": false,
       "description": {
         "summary": "Item ids in a folder, for use with references.guardAll:media before removeFolder",
+        "reads": [
+          "params.path"
+        ],
+        "writes": [
+          "result"
+        ],
+        "query": {
+          "recursive": {
+            "type": "boolean"
+          }
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "path",
+            "ids"
+          ]
+        },
+        "errors": {
+          "400": "missing or invalid path",
+          "404": "folder not found",
+          "409": "folder not empty (without `recursive`)"
+        }
+      }
+    },
+    {
+      "name": "media.folderItems",
+      "module": "media/default",
+      "factory": false,
+      "description": {
+        "summary": "Deprecated, use media.listFolderItems: Item ids in a folder, for use with references.guardAll:media before removeFolder",
         "reads": [
           "params.path"
         ],
@@ -4302,7 +4368,7 @@
           "result"
         ],
         "writes": [
-          "result.variants"
+          "result.variants?"
         ],
         "extendsItems": {
           "type": "object",
@@ -5975,7 +6041,7 @@
         "summary": "Sanitize HTML at format:\"html\" positions of payload field <arg>",
         "reads": [],
         "writes": [
-          "payload.<arg>"
+          "payload.<arg>?"
         ],
         "input": {
           "type": "object",
@@ -5991,7 +6057,7 @@
         "summary": "Sanitize the HTML payload field <arg>",
         "reads": [],
         "writes": [
-          "payload.<arg>"
+          "payload.<arg>?"
         ],
         "input": {
           "type": "object",
@@ -6454,7 +6520,7 @@
           "params.path"
         ],
         "writes": [
-          "result"
+          "result?"
         ]
       }
     },
@@ -6704,6 +6770,12 @@
                   },
                   "eventHook": {
                     "type": "boolean"
+                  },
+                  "emits": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
                 "required": [
@@ -6715,7 +6787,8 @@
                   "optional",
                   "config",
                   "steps",
-                  "eventHook"
+                  "eventHook",
+                  "emits"
                 ]
               }
             },
@@ -6734,72 +6807,65 @@
                     "type": "boolean"
                   },
                   "description": {
-                    "oneOf": [
-                      {
+                    "type": "object",
+                    "properties": {
+                      "summary": {
+                        "type": "string"
+                      },
+                      "reads": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "writes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "input": {
+                        "type": "object"
+                      },
+                      "output": {
+                        "type": "object"
+                      },
+                      "extendsOutput": {
+                        "type": "object"
+                      },
+                      "extendsItems": {
+                        "type": "object"
+                      },
+                      "query": {
                         "type": "object",
-                        "properties": {
-                          "summary": {
-                            "type": "string"
-                          },
-                          "reads": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "writes": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "input": {
-                            "type": "object"
-                          },
-                          "output": {
-                            "type": "object"
-                          },
-                          "extendsOutput": {
-                            "type": "object"
-                          },
-                          "extendsItems": {
-                            "type": "object"
-                          },
-                          "query": {
-                            "type": "object",
-                            "additionalProperties": {
-                              "type": "object"
-                            }
-                          },
-                          "errors": {
-                            "type": "object",
-                            "additionalProperties": {
-                              "type": "string"
-                            }
-                          },
-                          "security": {
-                            "type": "string",
-                            "enum": [
-                              "required",
-                              "optional"
-                            ]
-                          },
-                          "multipart": {
-                            "type": "boolean"
-                          },
-                          "binary": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "summary",
-                          "reads",
-                          "writes"
+                        "additionalProperties": {
+                          "type": "object"
+                        }
+                      },
+                      "errors": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "security": {
+                        "type": "string",
+                        "enum": [
+                          "required",
+                          "optional"
                         ]
                       },
-                      {
-                        "type": "null"
+                      "multipart": {
+                        "type": "boolean"
+                      },
+                      "binary": {
+                        "type": "boolean"
                       }
+                    },
+                    "required": [
+                      "summary",
+                      "reads",
+                      "writes"
                     ]
                   }
                 },
@@ -7994,7 +8060,7 @@
             "summary": "Sanitize HTML at format:\"html\" positions of payload field pages.body",
             "reads": [],
             "writes": [
-              "payload.body"
+              "payload.body?"
             ],
             "input": {
               "type": "object",
@@ -8687,8 +8753,8 @@
           }
         },
         {
-          "spec": "media.folderItems",
-          "name": "media.folderItems",
+          "spec": "media.listFolderItems",
+          "name": "media.listFolderItems",
           "module": "media/default",
           "description": {
             "summary": "Item ids in a folder, for use with references.guardAll:media before removeFolder",
@@ -9815,7 +9881,7 @@
               "result"
             ],
             "writes": [
-              "result.variants"
+              "result.variants?"
             ],
             "extendsItems": {
               "type": "object",
@@ -10561,6 +10627,12 @@
                       },
                       "eventHook": {
                         "type": "boolean"
+                      },
+                      "emits": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
                       }
                     },
                     "required": [
@@ -10572,7 +10644,8 @@
                       "optional",
                       "config",
                       "steps",
-                      "eventHook"
+                      "eventHook",
+                      "emits"
                     ]
                   }
                 },
@@ -10591,72 +10664,65 @@
                         "type": "boolean"
                       },
                       "description": {
-                        "oneOf": [
-                          {
+                        "type": "object",
+                        "properties": {
+                          "summary": {
+                            "type": "string"
+                          },
+                          "reads": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "writes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "input": {
+                            "type": "object"
+                          },
+                          "output": {
+                            "type": "object"
+                          },
+                          "extendsOutput": {
+                            "type": "object"
+                          },
+                          "extendsItems": {
+                            "type": "object"
+                          },
+                          "query": {
                             "type": "object",
-                            "properties": {
-                              "summary": {
-                                "type": "string"
-                              },
-                              "reads": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
-                              },
-                              "writes": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
-                              },
-                              "input": {
-                                "type": "object"
-                              },
-                              "output": {
-                                "type": "object"
-                              },
-                              "extendsOutput": {
-                                "type": "object"
-                              },
-                              "extendsItems": {
-                                "type": "object"
-                              },
-                              "query": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "object"
-                                }
-                              },
-                              "errors": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "string"
-                                }
-                              },
-                              "security": {
-                                "type": "string",
-                                "enum": [
-                                  "required",
-                                  "optional"
-                                ]
-                              },
-                              "multipart": {
-                                "type": "boolean"
-                              },
-                              "binary": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": [
-                              "summary",
-                              "reads",
-                              "writes"
+                            "additionalProperties": {
+                              "type": "object"
+                            }
+                          },
+                          "errors": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
+                          "security": {
+                            "type": "string",
+                            "enum": [
+                              "required",
+                              "optional"
                             ]
                           },
-                          {
-                            "type": "null"
+                          "multipart": {
+                            "type": "boolean"
+                          },
+                          "binary": {
+                            "type": "boolean"
                           }
+                        },
+                        "required": [
+                          "summary",
+                          "reads",
+                          "writes"
                         ]
                       }
                     },
@@ -11585,7 +11651,7 @@
               "result"
             ],
             "writes": [
-              "result.variants"
+              "result.variants?"
             ],
             "extendsItems": {
               "type": "object",
@@ -14219,7 +14285,7 @@
               "params.path"
             ],
             "writes": [
-              "result"
+              "result?"
             ]
           }
         },
@@ -15474,7 +15540,7 @@
             "summary": "Sanitize HTML at format:\"html\" positions of payload field pages.body",
             "reads": [],
             "writes": [
-              "payload.body"
+              "payload.body?"
             ],
             "input": {
               "type": "object",

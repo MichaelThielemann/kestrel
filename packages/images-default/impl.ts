@@ -603,13 +603,17 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     },
   };
 
-  idleHooks.set(api, idle);
+  Object.defineProperty(api, IDLE_HOOK, { value: idle, enumerable: false });
   return api;
 }
 
-// test-only hook to await the sync loop's in-process setImmediate chain; not part of the Images
-// interface since production callers never need to observe it.
-const idleHooks = new WeakMap<Images, () => Promise<void>>();
+const IDLE_HOOK: unique symbol = Symbol("images.idleHook");
+
+interface WithIdleHook {
+  [IDLE_HOOK]?: () => Promise<void>;
+}
+
 export function whenIdle(images: Images): Promise<void> {
-  return (idleHooks.get(images) ?? (() => Promise.resolve()))();
+  const hook = (images as Images & WithIdleHook)[IDLE_HOOK];
+  return hook ? hook() : Promise.resolve();
 }
