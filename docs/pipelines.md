@@ -520,9 +520,22 @@ replaces `ctx.result` with `{ document, delivery }`) — an event pipeline that 
 `with=result` is coupled to that pipeline's step order and can vary per consumer
 configuration.
 
-`emit` is synchronous: the triggering pipeline waits for every listener, and the HTTP
-response only goes out afterward. Listener errors are logged and don't fail the response;
-long-running work belongs in a job the listener starts (like `images.sync`).
+With `events-inmemory`, `emit` is synchronous: the triggering pipeline waits for every listener,
+and the HTTP response only goes out afterward. Listener errors are logged and don't fail the
+response; long-running work belongs in a job the listener starts (like `images.sync`).
+
+With `events-queue` instead (same steps, same envelope, one of the two — never both), `emit`
+writes the event to the `events_queue` collection of `persistence@1` and returns; the response
+goes out before any listener ran. A worker in the same process claims due rows every `pollMs`
+and runs the listener pipelines; a listener pipeline that ends with a failure status, or a
+handler that throws, counts as a failed attempt and the row is requeued after
+`backoffSeconds[attempt - 1]`, until `maxAttempts` moves it to the dead-letter state (admin
+steps `events.readQueueStatus`, `events.listDead`, `events.retryDead:all|one`,
+`events.purgeDone`). A row left `running` by a crashed process is picked up again after
+`lockTtlSeconds`. Guarantees: at least once, no ordering across events — a listener pipeline
+must be idempotent (the envelope's `eventId` is the dedup key). A persistence failure on write
+fails the `events.emit` step with 503 `TRANSIENT` rather than dropping the event. The payload
+rules stay the same: no tokens (`identity` only), a frozen shallow copy per handler.
 
 ## Rules
 

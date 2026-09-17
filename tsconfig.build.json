@@ -38,6 +38,9 @@
       "path": "./packages/events-inmemory"
     },
     {
+      "path": "./packages/events-queue"
+    },
+    {
       "path": "./packages/h3"
     },
     {
