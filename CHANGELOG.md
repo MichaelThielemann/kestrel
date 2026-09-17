@@ -26,6 +26,16 @@
   `migrations-default` declares `emits: ["migrations.applied"]`. Boot logs a warning (no abort)
   for an event trigger whose event no pipeline emits via `events.emit:<name>` and no module
   declares in `emits`.
+- `events-queue` (new package `@michaelthielemann/kestrel-events-queue`, module `events/queue`,
+  provides `events@1`, requires `persistence@1`, config all optional: `pollMs` 500, `batch` 20,
+  `maxAttempts` 5, `backoffSeconds` `[5, 30, 120, 600]`, `lockTtlSeconds` 300, `retentionDays`
+  7): `emit` persists the event in `events_queue` and returns, an in-process worker runs the
+  listener pipelines afterwards with retry, backoff and dead-letter; expired locks are reclaimed
+  after `lockTtlSeconds`. Steps `events.emit:<name>` (fails 503 `TRANSIENT` when the row cannot
+  be written), `events.readQueueStatus`, `events.listDead` (`?limit`), `events.retryDead:all`,
+  `events.retryDead:one` (`params.id`), `events.purgeDone`. Alternative to `events-inmemory`,
+  never both; delivery is at least once, listener pipelines must be idempotent. The `events@1`
+  contract test does not apply to it (it asserts synchronous delivery).
 - `media-default`: step `media.listFolderItems`. `media.folderItems` stays registered as a
   deprecated alias with the same behaviour and goes away in the next major version;
   `examples/minimal` uses the new name.

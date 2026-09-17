@@ -52,6 +52,8 @@ export default defineConfig({
     { use: "@michaelthielemann/kestrel-redirects-default", config: { prefix: "site/" } },
     { use: "@michaelthielemann/kestrel-audit-persistence", config: {} },
     { use: "@michaelthielemann/kestrel-events-inmemory", config: {} },
+    // Alternative: listeners run after the response, with retry and dead-letter (never both events modules):
+    // { use: "@michaelthielemann/kestrel-events-queue", config: {} },
     { use: "@michaelthielemann/kestrel-ratelimit-memory", config: { buckets: { login: { limit: 5, windowSeconds: 60 } } } },
     { use: "@michaelthielemann/kestrel-insights", config: {} },
   ],

@@ -352,6 +352,22 @@ importers:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@22.20.1)
 
+  packages/events-queue:
+    dependencies:
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@michaelthielemann/kestrel':
+        specifier: workspace:*
+        version: link:../core
+      '@michaelthielemann/kestrel-contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@22.20.1)
+
   packages/h3:
     devDependencies:
       '@michaelthielemann/kestrel':
