@@ -11,17 +11,24 @@ const fakeSteps = {
   "authz.require": stepFactory((perm: string) => async (ctx: Context) => (perm === "pages.write" ? ok(ctx) : ctx.fail("FORBIDDEN", perm))),
   "page.save": async (ctx: Context) => ok({ ...ctx, result: { id: "p1", ...ctx.payload } }),
 };
+const fakeWrites = { "authn.requireUser": ["params.user"] };
 
 describe("testing/runPipeline", () => {
   it("rejects without identity", async () => {
-    const res = await runPipeline(createPage, { payload: { title: "x" } }, { steps: fakeSteps });
+    const res = await runPipeline(createPage, { payload: { title: "x" } }, { steps: fakeSteps, writes: fakeWrites });
     expect(res.status).toBe(401);
   });
 
   it("runs through with a token", async () => {
-    const res = await runPipeline(createPage, { payload: { title: "x" }, headers: { authorization: "Bearer ok" } }, { steps: fakeSteps });
+    const res = await runPipeline(createPage, { payload: { title: "x" }, headers: { authorization: "Bearer ok" } }, { steps: fakeSteps, writes: fakeWrites });
     expect(res.status).toBe(200);
     expect(res.result).toEqual({ id: "p1", title: "x" });
+  });
+
+  it("a stand-in that writes an undeclared key fails the run", async () => {
+    const res = await runPipeline(createPage, { payload: { title: "x" }, headers: { authorization: "Bearer ok" } }, { steps: fakeSteps });
+    expect(res.status).toBe(500);
+    expect(res.error).toContain('writes "params" without declaring it');
   });
 
   it("unknown step in the pipeline fails loudly", async () => {

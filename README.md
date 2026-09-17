@@ -4,33 +4,38 @@ A modular, config-driven CMS backend in TypeScript. Capabilities are described b
 implemented by interchangeable submodules, and wired into business flows by pipelines. Every
 building block is its own package; a consumer installs exactly what it uses.
 
+<!-- kestrel-docs:start -->
 | Package | Purpose |
 |---|---|
-| `@michaelthielemann/kestrel` | Core: contract registry, boot check, runner, triggers |
-| `@michaelthielemann/kestrel-contracts` | Standard contracts with contract test suites |
-| `@michaelthielemann/kestrel-h3` | Adapter: serve the HTTP triggers as an h3 handler (Nuxt/Nitro) |
-| `@michaelthielemann/kestrel-openapi` | Generate OpenAPI 3.1 from a booted instance (`kestrel-openapi --out openapi.json`) |
-| `@michaelthielemann/kestrel-events-inmemory` | `events@1`, needed for event triggers |
-| `@michaelthielemann/kestrel-authn-single` | `authn@1`: one user from config |
-| `@michaelthielemann/kestrel-authn-multi` | `authn@1`: users and sessions in persistence, user management steps |
-| `@michaelthielemann/kestrel-persistence-sqlite` | `persistence@1` on `node:sqlite` |
-| `@michaelthielemann/kestrel-authz-roles` | `authz@1`: roles and permissions from config |
-| `@michaelthielemann/kestrel-content-default` | `content@1`: typed documents from a config-declared model |
-| `@michaelthielemann/kestrel-site-default` | `site@1`: site paths ↔ documents, internal links to public paths |
-| `@michaelthielemann/kestrel-blobstore-filesystem` | `blobstore@1` on a local directory |
-| `@michaelthielemann/kestrel-blobstore-s3` | `blobstore@1` on S3 / S3-compatible stores |
-| `@michaelthielemann/kestrel-media-default` | steps `media.upload/get/list/download/remove` |
-| `@michaelthielemann/kestrel-replication-sqlite` | steps `replication.sync/snapshot/points/status/prepareRestore`: continuous replication with point-in-time restore |
-| `@michaelthielemann/kestrel-backup-blobstore` | steps `backup.run/restore`: SQLite file to blobstore, restore on start |
-| `@michaelthielemann/kestrel-references-default` | steps `references.check/guard`: integrity for `ref` fields |
-| `@michaelthielemann/kestrel-ratelimit-memory` | step `ratelimit.check:<bucket>`: per-ip fixed-window limits |
-| `@michaelthielemann/kestrel-sanitize-svg` | step `sanitize.svg`: allowlist-cleans uploaded SVGs before media.upload |
-| `@michaelthielemann/kestrel-validate-jsonschema` | step `validate.check:<type>.<field>`: JSON Schema (ajv) for e.g. page bodies |
-| `@michaelthielemann/kestrel-links-default` | steps `links.extract/check/report/rebuild`: external link checking |
-| `@michaelthielemann/kestrel-renderer-plain` | `renderer@1` reference: plain HTML per document |
-| `@michaelthielemann/kestrel-delivery-static` | steps `delivery.publish/unpublish/status/publishAll`: static output per locale via renderer@1 into blobstore@1 |
-| `@michaelthielemann/kestrel-audit-persistence` | step `audit.record` |
-| `@michaelthielemann/kestrel-insights` | `insights@1`: steps `insights.readManifest/readStats` — the instance manifest and live per-process run statistics |
+| `@michaelthielemann/kestrel` | Kestrel core: contract registry, boot check, pipeline runner and triggers. Ships no contracts and no modules. |
+| `@michaelthielemann/kestrel-contracts` | Kestrel standard contracts (persistence, authn, authz, blobstore, events) with contract test suites. |
+| `@michaelthielemann/kestrel-h3` | Adapter: serves a Kestrel instance's HTTP triggers as an h3 event handler (Nuxt/Nitro). |
+| `@michaelthielemann/kestrel-openapi` | Generates an OpenAPI 3.1 description from a booted Kestrel instance (triggers, pipelines, step descriptions). |
+| `@michaelthielemann/kestrel-audit-persistence` | Step audit.record: writes audit_entries via persistence@1. |
+| `@michaelthielemann/kestrel-authn-multi` | authn@1 with users and sessions stored via persistence@1; user management steps. |
+| `@michaelthielemann/kestrel-authn-single` | authn@1 with one user from config (scrypt hash) and in-memory sessions. |
+| `@michaelthielemann/kestrel-authz-roles` | authz@1 with roles and permissions from config. |
+| `@michaelthielemann/kestrel-backup-blobstore` | Steps backup.run/restore: backs up a local file (e.g. the SQLite database) to blobstore@1, restoring it on start when missing. |
+| `@michaelthielemann/kestrel-blobstore-filesystem` | blobstore@1 on the local filesystem. |
+| `@michaelthielemann/kestrel-blobstore-s3` | blobstore@1 on Amazon S3 or any S3-compatible store. |
+| `@michaelthielemann/kestrel-content-default` | content@1: typed documents from a config-declared model, on top of persistence@1. |
+| `@michaelthielemann/kestrel-delivery-static` | Steps delivery.publish/unpublish/readStatus/publishAll: renders published documents per locale via renderer@1, stores them in blobstore@1 and tracks a publish status. |
+| `@michaelthielemann/kestrel-events-inmemory` | events@1 in process; enables event triggers. |
+| `@michaelthielemann/kestrel-images-default` | Steps images.register/generate/sync/resume/prune: image variant size registry, generation on upload, resumable sync. |
+| `@michaelthielemann/kestrel-insights` | insights@1: the instance manifest (modules, config schemas, steps, pipelines, triggers) and live per-process run statistics from the core's observer hook. |
+| `@michaelthielemann/kestrel-links-default` | Steps links.extract/check/report/rebuild: finds external URLs in content, checks them periodically and reports broken links. |
+| `@michaelthielemann/kestrel-media-default` | Media uploads: files in blobstore@1, metadata in persistence@1. |
+| `@michaelthielemann/kestrel-migrations-default` | migrations@1: applies content migrations once, per document and stored locale, with a ledger. |
+| `@michaelthielemann/kestrel-persistence-sqlite` | persistence@1 on Node's built-in node:sqlite. |
+| `@michaelthielemann/kestrel-ratelimit-memory` | Step ratelimit.check:<bucket>: fixed-window rate limiting per client ip, in memory. |
+| `@michaelthielemann/kestrel-redirects-default` | Steps redirects.validate/lookup/export/render: admin-managed redirect rules, honoured in site resolution and exported as redirects.json for an edge proxy. |
+| `@michaelthielemann/kestrel-references-default` | Referential integrity for content ref fields: existence on write, delete protection. |
+| `@michaelthielemann/kestrel-renderer-plain` | renderer@1 reference: a plain HTML page from a document (title, fields, JSON). For examples and tests. |
+| `@michaelthielemann/kestrel-replication-sqlite` | Continuous SQLite replication to blobstore@1 (snapshots + WAL segments), point-in-time restore, retention. |
+| `@michaelthielemann/kestrel-sanitize-svg` | Step sanitize.svg: strips scripts, event handlers and external references from uploaded SVG files. |
+| `@michaelthielemann/kestrel-site-default` | site@1: path <-> document resolution and internal link rewriting on top of content@1. |
+| `@michaelthielemann/kestrel-validate-jsonschema` | Step validate.check:<type>.<field>: validates a payload field against a JSON Schema file (ajv). |
+<!-- kestrel-docs:end -->
 
 ## Develop
 

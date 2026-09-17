@@ -15,7 +15,7 @@ import { validateSchema } from "@michaelthielemann/kestrel/schema";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import module, { configSchema } from "./module.ts";
-import { DEFAULT_MAX_ATTEMPTS, JOBS, createImages, type Config, type Images, type Job } from "./impl.ts";
+import { DEFAULT_MAX_ATTEMPTS, JOBS, VARIANTS, createImages, type Config, type Images, type Job, type Variant } from "./impl.ts";
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
   const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
@@ -357,8 +357,14 @@ describe("images/default steps via runPipeline", () => {
     const { images, db, blobs } = await makeInstance();
     await addImage(db, blobs, "a", await jpeg(200, 200));
     expectOk(await images.generate("a"));
+    const before = expectOk(await db.findMany<Variant>(VARIANTS, { mediaId: "a" }));
+    expect(before.items.length).toBeGreaterThan(0);
+    const keys = before.items.map((v) => v.key);
     const res = await runPipeline(pipeline("images.remove"), { params: { id: "a" } }, { modules: [{ module, instance: images }] });
     expect(res.status).toBe(200);
+    const after = expectOk(await db.findMany<Variant>(VARIANTS, { mediaId: "a" }));
+    expect(after.items).toHaveLength(0);
+    for (const key of keys) expect(blobs.blobs.has(key)).toBe(false);
   });
 
   it("removeMany: deletes variants for every id in result.ids", async () => {
@@ -367,8 +373,14 @@ describe("images/default steps via runPipeline", () => {
     await addImage(db, blobs, "b", await jpeg(200, 200));
     expectOk(await images.generate("a"));
     expectOk(await images.generate("b"));
+    const before = expectOk(await db.findMany<Variant>(VARIANTS, { mediaId: { in: ["a", "b"] } }));
+    expect(before.items.length).toBeGreaterThan(0);
+    const keys = before.items.map((v) => v.key);
     const res = await runPipeline(pipeline("seed.ids", "images.removeMany"), {}, { modules: [{ module, instance: images }], steps: seedSteps });
     expect(res.status).toBe(200);
+    const after = expectOk(await db.findMany<Variant>(VARIANTS, { mediaId: { in: ["a", "b"] } }));
+    expect(after.items).toHaveLength(0);
+    for (const key of keys) expect(blobs.blobs.has(key)).toBe(false);
   });
 
   it("attach: adds variants[] to result", async () => {

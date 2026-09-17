@@ -103,13 +103,16 @@ In both cases: only pipelines with a trigger are reachable from outside.
    under `provides`.
 4. Add every submodule's steps to the step registry (`authn.requireUser` etc.); every step needs
    a `describe()` entry with `summary`, `reads`, `writes` (required, otherwise
-   `KestrelBootError`).
+   `KestrelBootError`); a factory's `describe(arg)` is called once with the placeholder argument
+   and a throw is a `KestrelBootError` too.
 5. Load pipelines, resolve every step string against the step registry, then check each
    pipeline's data flow (`checkDataflow`): every `reads` path of a step must be covered by the
    `writes` of an earlier step or by the context's baseline (`payload`, `headers`, `files`, `ip`,
    `params.<p>` bound by any HTTP route of the pipeline), otherwise boot aborts.
 6. Check and register triggers (HTTP server, event bus, cron). Event triggers need a module with
-   `triggers.event` — the core ships none and therefore knows no contract name for it.
+   `triggers.event` — the core ships none and therefore knows no contract name for it. An event
+   trigger whose event no pipeline emits (`events.emit:<name>`) and no module declares in
+   `emits` is logged as a warning, not a boot error.
 7. Call every module's `attach(instance, { describe, observe })` with the read-only view of the
    booted instance: `describe()` is the static manifest (`kestrel.describe()`), `observe()`
    registers a run observer that sees every run and step start and end (`kestrel.observe()`);

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { stepFactory, type Context, type StepMap } from "./context.ts";
 import type { StepDescription } from "./defineModule.ts";
 import { KestrelBootError } from "./errors.ts";
-import { StepRegistry } from "./registry.ts";
+import { PLACEHOLDER_ARG, StepRegistry } from "./registry.ts";
 import { ok } from "./result.ts";
 
 const pass = async (ctx: Context) => ok(ctx);
@@ -135,7 +135,24 @@ describe("StepRegistry", () => {
 
   it("checks the path grammar of a factory description when it is built", () => {
     const r = new StepRegistry();
-    r.register("a/x", "a", { withArg: stepFactory((arg: string) => async (ctx: Context) => ok({ ...ctx, result: arg })) }, { withArg: (arg) => ({ summary: arg, reads: [`payload.${arg}!`], writes: [] }) });
+    r.register("a/x", "a", { withArg: stepFactory((arg: string) => async (ctx: Context) => ok({ ...ctx, result: arg })) }, { withArg: (arg) => ({ summary: arg, reads: arg === PLACEHOLDER_ARG ? [] : [`payload.${arg}!`], writes: [] }) });
     expect(() => r.resolve("a.withArg:pages", "pipelines/p")).toThrow(/\[a\/x\] step "a\.withArg:pages" declares an invalid read path "payload\.pages!"/);
+  });
+
+  it("checks the path grammar of a factory description for the placeholder argument at registration", () => {
+    const r = new StepRegistry();
+    const steps = { withArg: stepFactory((arg: string) => async (ctx: Context) => ok({ ...ctx, result: arg })) };
+    expect(() => r.register("a/x", "a", steps, { withArg: () => ({ summary: "s", reads: ["payload.id!"], writes: [] }) })).toThrow(/\[a\/x\] step "a\.withArg" declares an invalid read path "payload\.id!"/);
+  });
+
+  it("a factory describe() that throws for the placeholder argument is a boot error naming step and cause", () => {
+    const r = new StepRegistry();
+    const steps = { withArg: stepFactory((arg: string) => async (ctx: Context) => ok({ ...ctx, result: arg })) };
+    const describe = (arg: string): StepDescription => {
+      if (arg === PLACEHOLDER_ARG) throw new Error("needs a real argument");
+      return flat(arg);
+    };
+    expect(() => r.register("a/x", "a", steps, { withArg: describe })).toThrow(/\[a\/x\] step "a\.withArg" describe\(\) threw for the placeholder argument "<arg>": needs a real argument/);
+    expect(r.has("a.withArg")).toBe(false);
   });
 });

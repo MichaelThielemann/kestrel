@@ -79,6 +79,34 @@ function isContext(value: unknown): value is Context {
   return record(ctx.trigger) && record(ctx.payload) && record(ctx.params) && record(ctx.headers) && Array.isArray(ctx.files) && typeof ctx.fail === "function" && typeof ctx.done === "function";
 }
 
+function writeRoot(path: string): string {
+  const dot = path.indexOf(".");
+  const root = dot === -1 ? path : path.slice(0, dot);
+  return root.endsWith("?") ? root.slice(0, -1) : root;
+}
+
+function wrote(after: Context, path: string): boolean {
+  let value: unknown = after;
+  for (const segment of path.split(".")) {
+    if (typeof value !== "object" || value === null || !Object.hasOwn(value, segment)) return false;
+    value = Reflect.get(value, segment);
+  }
+  return true;
+}
+
+function checkWrites(step: ResolvedStep, before: Context, after: Context): void {
+  const declared = step.description.writes;
+  const roots = new Set(declared.map(writeRoot));
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (Object.is(Reflect.get(before, key), Reflect.get(after, key))) continue;
+    if (!roots.has(key)) throw new Error(`step "${step.name}" writes "${key}" without declaring it`);
+  }
+  for (const path of declared) {
+    if (path.endsWith("?") || wrote(after, path)) continue;
+    throw new Error(`step "${step.name}" declares writes "${path}" but did not write it (declare "${path}?" for a conditional write)`);
+  }
+}
+
 function inputProblems(description: ResolvedStep["description"], ctx: Context): SchemaProblem[] {
   const problems: SchemaProblem[] = description.input === undefined ? [] : validateSchema(description.input, ctx.body);
   const query = description.query;
@@ -165,6 +193,7 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
       if (!isContext(out.value)) {
         throw new Error(`step "${step.name}" returned ${typeof out.value} instead of a Result<Context>`);
       }
+      checkWrites(step, ctx, out.value);
       ctx = Object.freeze(out.value);
       log("ok", 200);
       if (Reflect.get(ctx, DONE) === true) return finish(trace({ runId, status: 200, result: ctx.result }));

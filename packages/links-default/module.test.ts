@@ -13,6 +13,7 @@ import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { ok } from "@michaelthielemann/kestrel/result";
 import type { RunResult } from "@michaelthielemann/kestrel/runner";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
+import { INDEX, type LinkEntry } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
 
 const model: ContentModel = { types: { pages: { kind: "multi", fields: { title: "text", body: "json" } } } };
@@ -59,7 +60,7 @@ async function boot() {
   };
   const config = configSchema.parse({});
   const instance = await module.setup(config, deps);
-  return { instance, content };
+  return { instance, content, db };
 }
 
 const seed = (result: unknown): Record<string, Step | StepFactory> => ({ "test.seed": async (ctx: Context) => ok({ ...ctx, result }) });
@@ -70,18 +71,22 @@ function run(steps: string[], input: Record<string, unknown>, instance: unknown,
 
 describe("links/default module steps", () => {
   it("extract indexes the links of a created document", async () => {
-    const { instance, content } = await boot();
+    const { instance, content, db } = await boot();
     const page = expectOk(await content.create("pages", { title: "A", body: { text: "see https://example.com/x" } }));
     const res = await run(["test.seed", "links.extract:pages"], {}, instance, seed({ id: page.id }));
     expect(res.status).toBe(200);
+    const indexed = expectOk(await db.findMany<LinkEntry>(INDEX, { fromType: "pages", fromId: page.id }));
+    expect(indexed.items).toEqual([expect.objectContaining({ url: "https://example.com/x", fromType: "pages", fromId: page.id, field: "body" })]);
   });
 
   it("unextract drops the indexed links of a document", async () => {
-    const { instance, content } = await boot();
+    const { instance, content, db } = await boot();
     const page = expectOk(await content.create("pages", { title: "A", body: { text: "see https://example.com/x" } }));
     await run(["test.seed", "links.extract:pages"], {}, instance, seed({ id: page.id }));
+    expect(expectOk(await db.findMany<LinkEntry>(INDEX, { fromType: "pages", fromId: page.id })).items.length).toBeGreaterThan(0);
     const res = await run(["links.unextract:pages"], { params: { id: page.id } }, instance);
     expect(res.status).toBe(200);
+    expect(expectOk(await db.findMany<LinkEntry>(INDEX, { fromType: "pages", fromId: page.id })).items).toEqual([]);
   });
 
   it("check answers a summary when nothing is due", async () => {

@@ -147,8 +147,13 @@ modules are active — Kestrel brings nothing along implicitly.
 
 HTTP, event and cron are equal-standing inputs. An event trigger is served by the module
 that supplies the `triggers.event` hook (here `events-inmemory`); if none is present, boot
-aborts. An endpoint has no logic of its own, it only starts a pipeline with the body as
-`payload` and the route parameters as `params`. JSON bodies land in `payload`,
+aborts. Boot also warns (once per trigger, never aborting) when an event trigger names an
+event that no pipeline emits through an `events.emit:<name>` step and no module declares in
+its `emits` — the symptom of a typo like `auth.logedIn`, whose listener pipeline would
+otherwise never run; an event emitted from a contract method instead of a pipeline
+(`migrations.applied`) is covered by the module's `emits`. An endpoint has no logic of its
+own, it only starts a pipeline with the body as `payload` and the route parameters as
+`params`. JSON bodies land in `payload`,
 `multipart/form-data` puts text fields in `payload` and files in `files`
 (`http.maxBodyBytes`, default 10 MB, otherwise 413). If `ctx.result` is a
 `binaryResult(data, contentType, filename?)`, the HTTP trigger responds with the raw bytes
@@ -211,8 +216,9 @@ For every run:
    status from `STATUS_OF[code]`. `ctx.done(result)` returns an `Ok<Context>`, which ends
    the run immediately with status 200 and `result`. No step after it runs. Details:
    [Errors as Values](#errors-as-values).
-5. An unexpected `throw` (a bug, not an expected error message) or a step that doesn't
-   return a `Result<Context>` → status 500, code `INTERNAL`, full stack in the log,
+5. An unexpected `throw` (a bug, not an expected error message), a step that doesn't
+   return a `Result<Context>`, or a step whose writes do not match its declaration
+   ([reads/writes](#readswrites)) → status 500, code `INTERNAL`, full stack in the log,
    pipeline and step name in the error text (unchanged: `"<pipeline>/<step>: <message>"`).
 6. Every error result carries `code`, `retryable`, `step` (the step it originated in) and —
    if the `KestrelError` has any — `details`; all four appear in the HTTP error body
@@ -371,6 +377,23 @@ like `delivery.publish:<type>` declares `reads: ["result.id"]`, the boot check p
 pipeline supplies it, and the remaining `if (typeof id !== "string") throw …` is a pure bug
 path.
 
+The runner holds a step to that declaration at run time, in every environment (like the
+payload validation). After a step returned `Ok<Context>` it compares the context it passed in
+with the one it got back, key by key (`Object.keys`, `!Object.is`, no deep comparison):
+
+- A top-level key whose value changed must be the root of a declared `writes` path (with or
+  without `?`), otherwise the run ends as `500 INTERNAL` with
+  `step "<name>" writes "<key>" without declaring it`.
+- Every declared path without `?` must exist afterwards, walked segment by segment
+  (`Object.hasOwn`; a `null` or `undefined` value counts as written as long as the property is
+  there), otherwise `step "<name>" declares writes "<path>" but did not write it (declare
+  "<path>?" for a conditional write)`.
+
+Both are wiring errors, not client errors: the stack is logged, the step name is in the error
+object, and observers see `stepEnd` with status 500, outcome `error`. A step that writes only
+on some paths (`validate.sanitize` when the field is absent, `redirects.lookup` when nothing
+matches) declares the `?` form; a step that replaces `ctx.result` wholesale declares `result`.
+
 ## Payload Validation
 
 Every step declares the input it reads in `describe()`: `input` is a JSON Schema for the
@@ -424,9 +447,12 @@ it("rejects without identity", async () => {
 });
 ```
 
-`fakeSteps` is a step registry of stand-ins, no database needed. To run a module's real steps
-with their `describe()` schemas, pass `modules: [{ module, instance }]` (the instance from
-`module.setup(...)` against fakes) instead of or next to `steps`.
+`fakeSteps` is a step registry of stand-ins, no database needed. A stand-in is registered with
+`writes: ["result?"]`, so it may set `ctx.result` or leave the context alone; one that seeds
+another key (an identity, a param) declares it through `writes: { "<module>.<step>": ["identity"] }`
+next to `steps`, since the runner checks every step against its declaration. To run a module's
+real steps with their `describe()` schemas, pass `modules: [{ module, instance }]` (the instance
+from `module.setup(...)` against fakes) instead of or next to `steps`.
 
 ## Vocabulary
 
@@ -481,7 +507,7 @@ an event receives this data as its `payload`.
 | `page.created` / `page.updated` / `page.deleted` | document id |
 | `media.uploaded` / `media.updated` / `media.deleted` | document id (for a bulk upload of several files: `null`, plus `ids: string[]`) |
 | `user.created` / `user.deactivated` | document id |
-| `migrations.applied` | – (no envelope: the `migrations/default` module sends its own `{ migrations: [id], documents }` after a run; deliberately no `page.updated` per document it migrated). The named exception to rule 3: `apply()` is a contract method that also runs at boot, and after a partial failure the event still has to cover the migrations already applied — an `events.emit` step after a failing `migrations.apply` would never run |
+| `migrations.applied` | – (no envelope: the `migrations/default` module sends its own `{ migrations: [id], documents }` after a run; deliberately no `page.updated` per document it migrated). The named exception to rule 3: `apply()` is a contract method that also runs at boot, and after a partial failure the event still has to cover the migrations already applied — an `events.emit` step after a failing `migrations.apply` would never run. The module declares it as `emits: ["migrations.applied"]`, so a trigger on it boots without the warning above |
 
 Whatever the bus delivers is a shallowly frozen copy of the emitted data, like the context between
 steps: a handler cannot change what the next handler sees, and assigning to the object throws in

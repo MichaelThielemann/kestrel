@@ -2,8 +2,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, it, expect } from "vitest";
+import type { Context, Step } from "@michaelthielemann/kestrel/context";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
+import { ok } from "@michaelthielemann/kestrel/result";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import module, { configSchema } from "./module.ts";
 import type { Validator } from "./impl.ts";
@@ -53,6 +55,8 @@ function pipeline(...steps: string[]) {
   return definePipeline({ name: "test", steps });
 }
 
+const capture: Step = async (ctx: Context) => ok({ ...ctx, result: ctx.payload });
+
 describe("validate/jsonschema steps via runPipeline", () => {
   const bodySchema = { type: "object", additionalProperties: false, properties: { html: { type: "string", format: "html" }, text: { type: "string" } }, required: ["text"] };
 
@@ -68,13 +72,33 @@ describe("validate/jsonschema steps via runPipeline", () => {
 
   it("sanitize: cleans format:\"html\" positions of the payload field", async () => {
     const validator = await makeInstance({ "pages.body": bodySchema });
-    const res = await runPipeline(pipeline("validate.sanitize:pages.body"), { body: { body: { text: "hi", html: "<script>alert(1)</script><p>ok</p>" } } }, { modules: [{ module, instance: validator }] });
+    const res = await runPipeline(pipeline("validate.sanitize:pages.body", "capture.payload"), { body: { body: { text: "hi", html: "<script>alert(1)</script><p>ok</p>" } } }, { modules: [{ module, instance: validator }], steps: { "capture.payload": capture } });
     expect(res.status).toBe(200);
+    const body = (res.result as { body: { html: string } }).body;
+    expect(body.html).not.toContain("<script>");
+    expect(body.html).toContain("<p>ok</p>");
+  });
+
+  it("sanitize: leaves a payload without the field alone", async () => {
+    const validator = await makeInstance({ "pages.body": bodySchema });
+    const res = await runPipeline(pipeline("validate.sanitize:pages.body", "capture.payload"), { body: { unrelated: "kept" } }, { modules: [{ module, instance: validator }], steps: { "capture.payload": capture } });
+    expect(res.status).toBe(200);
+    expect(res.result).toEqual({ unrelated: "kept" });
   });
 
   it("sanitizeHtml: cleans an arbitrary payload field", async () => {
     const validator = await makeInstance({ "pages.body": bodySchema });
-    const res = await runPipeline(pipeline("validate.sanitizeHtml:comment"), { body: { comment: "<script>alert(1)</script><p>hi</p>" } }, { modules: [{ module, instance: validator }] });
+    const res = await runPipeline(pipeline("validate.sanitizeHtml:comment", "capture.payload"), { body: { comment: "<script>alert(1)</script><p>hi</p>" } }, { modules: [{ module, instance: validator }], steps: { "capture.payload": capture } });
     expect(res.status).toBe(200);
+    const comment = (res.result as { comment: string }).comment;
+    expect(comment).not.toContain("<script>");
+    expect(comment).toContain("<p>hi</p>");
+  });
+
+  it("sanitizeHtml: leaves a field that is not a string alone", async () => {
+    const validator = await makeInstance({ "pages.body": bodySchema });
+    const res = await runPipeline(pipeline("validate.sanitizeHtml:comment", "capture.payload"), { body: { comment: 5 } }, { modules: [{ module, instance: validator }], steps: { "capture.payload": capture } });
+    expect(res.status).toBe(200);
+    expect(res.result).toEqual({ comment: 5 });
   });
 });

@@ -14,6 +14,7 @@ function collectingLogger() {
   return { logger, steps, errors };
 }
 const description = { summary: "test", reads: [], writes: [] };
+const writesResult = { summary: "test", reads: [], writes: ["result"] };
 const input = { trigger: { kind: "http" as const, name: "POST /x" }, payload: { a: 1 } };
 
 /** A step whose return value the runner has to reject; `Step` is the narrower of the two types. */
@@ -28,8 +29,8 @@ describe("runPipeline", () => {
       {
         name: "p",
         steps: [
-          { name: "one", description, fn: async (ctx: Context) => ok({ ...ctx, result: [1] }) },
-          { name: "two", description, fn: async (ctx: Context) => ok({ ...ctx, result: [...(ctx.result as number[]), 2] }) },
+          { name: "one", description: writesResult, fn: async (ctx: Context) => ok({ ...ctx, result: [1] }) },
+          { name: "two", description: writesResult, fn: async (ctx: Context) => ok({ ...ctx, result: [...(ctx.result as number[]), 2] }) },
         ],
       },
       input,
@@ -133,7 +134,7 @@ describe("runPipeline", () => {
       {
         name: "p",
         steps: [
-          { name: "one", description, fn: async (ctx: Context) => ctx.done({ redirect: { to: "/x", status: 301 } }) },
+          { name: "one", description: writesResult, fn: async (ctx: Context) => ctx.done({ redirect: { to: "/x", status: 301 } }) },
           { name: "two", description, fn: async (ctx: Context) => { ran = true; return ok(ctx); } },
         ],
       },
@@ -151,8 +152,8 @@ describe("runPipeline", () => {
       {
         name: "p",
         steps: [
-          { name: "one", description, fn: async (ctx: Context) => ok({ ...ctx, params: { ...ctx.params, id: "p1" } }) },
-          { name: "two", description, fn: async (ctx: Context) => ctx.done(ctx.params.id) },
+          { name: "one", description: { summary: "test", reads: [], writes: ["params.id"] }, fn: async (ctx: Context) => ok({ ...ctx, params: { ...ctx.params, id: "p1" } }) },
+          { name: "two", description: writesResult, fn: async (ctx: Context) => ctx.done(ctx.params.id) },
         ],
       },
       input,
@@ -258,7 +259,7 @@ describe("runPipeline", () => {
     const res = await runPipeline(
       {
         name: "p",
-        steps: [{ name: "one", description, fn: async (ctx: Context) => ok({ ...ctx, result: 1 }) }],
+        steps: [{ name: "one", description: writesResult, fn: async (ctx: Context) => ok({ ...ctx, result: 1 }) }],
       },
       input,
       logger,
@@ -269,7 +270,7 @@ describe("runPipeline", () => {
 });
 
 describe("runPipeline payload validation", () => {
-  const typed = { summary: "typed", reads: [], writes: [], input: { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false }, query: { limit: { type: "integer", minimum: 1 }, ids: { type: "array", items: { type: "string" } } } };
+  const typed = { summary: "typed", reads: [], writes: ["result"], input: { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false }, query: { limit: { type: "integer", minimum: 1 }, ids: { type: "array", items: { type: "string" } } } };
   const step = (fn: Step) => ({ name: "content.create", description: typed, fn });
   const pass: Step = async (ctx: Context) => ok({ ...ctx, result: "ran" });
   const http = { kind: "http" as const, name: "POST /pages" };
@@ -300,10 +301,52 @@ describe("runPipeline payload validation", () => {
 
   it("validates the payload as body for triggers without an HTTP split and skips steps without schemas", async () => {
     const { logger } = collectingLogger();
-    const bare = { name: "content.create", description, fn: pass };
+    const bare = { name: "content.create", description: writesResult, fn: pass };
     expect(await runPipeline({ name: "p", steps: [bare] }, input, logger)).toMatchObject({ status: 200 });
     expect(await runPipeline({ name: "p", steps: [step(pass)] }, { trigger: { kind: "event", name: "x" }, payload: { title: "x" } }, logger)).toMatchObject({ status: 200, result: "ran" });
     expect(await runPipeline({ name: "p", steps: [step(pass)] }, { trigger: { kind: "event", name: "x" }, payload: { title: 3 } }, logger)).toMatchObject({ status: 400, code: "VALIDATION" });
+  });
+});
+
+describe("runPipeline writes check", () => {
+  const run = (writes: string[], fn: Step) => runPipeline({ name: "p", steps: [{ name: "one", description: { summary: "test", reads: [], writes }, fn }] }, input, collectingLogger().logger);
+
+  it("a write of an undeclared key is an INTERNAL error naming step and key", async () => {
+    const res = await run([], async (ctx: Context) => ok({ ...ctx, result: 1 }));
+    expect(res).toMatchObject({ status: 500, code: "INTERNAL", retryable: false, step: "one" });
+    expect(res.error).toBe('p/one: step "one" writes "result" without declaring it');
+  });
+
+  it("a declared write that never happened is an INTERNAL error pointing at the conditional form", async () => {
+    const res = await run(["result"], async (ctx: Context) => ok(ctx));
+    expect(res).toMatchObject({ status: 500, code: "INTERNAL", step: "one" });
+    expect(res.error).toBe('p/one: step "one" declares writes "result" but did not write it (declare "result?" for a conditional write)');
+  });
+
+  it("a conditional write may stay unwritten", async () => {
+    expect(await run(["result?"], async (ctx: Context) => ok(ctx))).toMatchObject({ status: 200 });
+    expect(await run(["result?"], async (ctx: Context) => ok({ ...ctx, result: 1 }))).toMatchObject({ status: 200, result: 1 });
+  });
+
+  it("a nested path counts as written when the property exists, whatever its value", async () => {
+    expect(await run(["result.x"], async (ctx: Context) => ok({ ...ctx, result: { x: 1 } }))).toMatchObject({ status: 200 });
+    expect(await run(["result.x"], async (ctx: Context) => ok({ ...ctx, result: { x: null } }))).toMatchObject({ status: 200 });
+    const missing = await run(["result.x"], async (ctx: Context) => ok({ ...ctx, result: { y: 1 } }));
+    expect(missing.status).toBe(500);
+    expect(missing.error).toContain('declares writes "result.x" but did not write it');
+    const scalar = await run(["result.x"], async (ctx: Context) => ok({ ...ctx, result: "done" }));
+    expect(scalar.status).toBe(500);
+  });
+
+  it("checks the context ctx.done() hands back", async () => {
+    expect(await run(["result"], async (ctx: Context) => ctx.done({ id: "p1" }))).toMatchObject({ status: 200, result: { id: "p1" } });
+    const undeclared = await run([], async (ctx: Context) => ctx.done({ id: "p1" }));
+    expect(undeclared.status).toBe(500);
+    expect(undeclared.error).toContain('writes "result" without declaring it');
+  });
+
+  it("ignores a key a step rewrote with the same value", async () => {
+    expect(await run([], async (ctx: Context) => ok({ ...ctx, payload: ctx.payload }))).toMatchObject({ status: 200 });
   });
 });
 
@@ -335,6 +378,12 @@ describe("runPipeline observer", () => {
     const { events, observer } = recording();
     await runPipeline({ name: "p", steps: [{ name: "boom", description, fn: async () => { throw new Error("x"); } }] }, input, silentLogger, observer);
     expect(events).toEqual(["runStart p http", "stepStart boom", "stepEnd boom 500 error", "runEnd p 500 error INTERNAL boom timed"]);
+  });
+
+  it("reports an undeclared write as error with status 500", async () => {
+    const { events, observer } = recording();
+    await runPipeline({ name: "p", steps: [{ name: "one", description, fn: async (ctx: Context) => ok({ ...ctx, result: 1 }) }] }, input, silentLogger, observer);
+    expect(events).toEqual(["runStart p http", "stepStart one", "stepEnd one 500 error", "runEnd p 500 error INTERNAL one timed"]);
   });
 
   it("reports a schema violation as a failed step that never ran", async () => {

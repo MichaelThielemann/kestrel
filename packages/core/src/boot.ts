@@ -8,7 +8,7 @@ import { stepPrefix, type Deps, type EventEntry, type Introspection, type Module
 import { buildManifest, type Manifest } from "./describe.ts";
 import type { PipelineDefinition } from "./definePipeline.ts";
 import { KestrelBootError } from "./errors.ts";
-import { consoleLogger, type Logger } from "./logger.ts";
+import { consoleLogger, logWarn, type Logger } from "./logger.ts";
 import { createObserverHub } from "./observer.ts";
 import { StepRegistry } from "./registry.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
@@ -53,6 +53,7 @@ export interface Kestrel extends Introspection {
 const CORE = "kestrel";
 const SVG = "image/svg+xml";
 const SANITIZE_SVG = "sanitize.svg";
+const EVENTS_EMIT = "events.emit";
 const BARREL = new Set(["module", "index", "src", "dist"]);
 
 /** `use` is a package name or a path and never equals `mod.name`; both "@scope/kestrel-authn-multi" and "./modules/authn/multi/module.ts" reduce to ["authn", "multi"]. */
@@ -73,6 +74,28 @@ function entryNamesModule(use: string, moduleName: string): boolean {
   // separates any two modules whose names differ in that half.
   if (tokens.length < wanted.length) return wanted.includes(tokens[tokens.length - 1] as string);
   return wanted.every((w, i) => tokens[tokens.length - wanted.length + i] === w);
+}
+
+function emittedEvent(spec: string): string | undefined {
+  if (!spec.startsWith(`${EVENTS_EMIT}:`)) return undefined;
+  const arg = spec.slice(EVENTS_EMIT.length + 1);
+  const query = arg.indexOf("?");
+  return query === -1 ? arg : arg.slice(0, query);
+}
+
+function warnUnemittedEvents(modules: readonly ModuleDefinition[], pipelines: ReadonlyMap<string, ResolvedPipeline>, events: readonly EventEntry[], logger: Logger): void {
+  const emitted = new Set<string>();
+  for (const pipeline of pipelines.values()) {
+    for (const step of pipeline.steps) {
+      const event = emittedEvent(step.name);
+      if (event !== undefined) emitted.add(event);
+    }
+  }
+  for (const mod of modules) for (const event of mod.emits ?? []) emitted.add(event);
+  for (const entry of events) {
+    if (emitted.has(entry.event)) continue;
+    logWarn(logger, "event trigger listens to an event no pipeline emits via events.emit and no module declares in emits", { event: entry.event, pipeline: entry.pipeline });
+  }
 }
 
 function settledWithin(promise: Promise<void>, ms: number): Promise<boolean> {
@@ -237,6 +260,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     if (eventHooks.length > 1) throw new KestrelBootError(CORE, `modules "${eventHooks[0]?.name ?? ""}" and "${eventHooks[1]?.name ?? ""}" both provide an event trigger hook`);
     if (events.length > 0 && eventHooks.length === 0) throw new KestrelBootError(CORE, "event triggers need a module that provides an event trigger hook");
     const eventHook = eventHooks[0];
+    warnUnemittedEvents(ordered, pipelines, events, logger);
 
     const runs = createRunTracker();
     const hub = createObserverHub(logger);

@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { ContentDocument } from "@michaelthielemann/kestrel-contracts/content";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
+import type { Context, Step, StepFactory } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
+import { ok } from "@michaelthielemann/kestrel/result";
 import type { RunResult } from "@michaelthielemann/kestrel/runner";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import module, { configSchema } from "./module.ts";
@@ -43,15 +45,18 @@ async function boot() {
   return { instance, db };
 }
 
-function run(steps: string[], input: Record<string, unknown>, instance: unknown): Promise<RunResult> {
-  return runPipeline(definePipeline({ name: "test", steps }), input, { modules: [{ module, instance }] });
+function run(steps: string[], input: Record<string, unknown>, instance: unknown, extraSteps: Record<string, Step | StepFactory> = {}): Promise<RunResult> {
+  return runPipeline(definePipeline({ name: "test", steps }), input, { modules: [{ module, instance }], steps: extraSteps });
 }
 
 describe("content/default module steps", () => {
-  it("validate accepts a matching payload", async () => {
+  it("validate accepts a matching payload and leaves it unchanged for the next step", async () => {
     const { instance } = await boot();
-    const res = await run(["content.validate:notes"], { body: { slug: "a", title: "A", status: "draft" } }, instance);
+    const payload = { slug: "a", title: "A", status: "draft" };
+    const echo = { "test.echo": async (ctx: Context) => ok({ ...ctx, result: ctx.payload }) };
+    const res = await run(["content.validate:notes", "test.echo"], { body: payload }, instance, echo);
     expect(res.status).toBe(200);
+    expect(res.result).toEqual(payload);
   });
 
   it("create stores a document", async () => {

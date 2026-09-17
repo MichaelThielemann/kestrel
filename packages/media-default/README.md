@@ -91,7 +91,8 @@ Not included: image resizing, tags, linking media to content documents.
 | `media.listFolders` | Folders (persistent and implied) with item counts | – | `result` | – | object[] | – |
 | `media.createFolder` | Create a folder (idempotent: an existing folder is returned unchanged) | – | `result` | { path: string } | { folder: string, count: number, … } | 400 missing or invalid path |
 | `media.renameFolder` | Rename or move a folder, moving its blobs | `params.path` | `result` | { path: string } | { folder: string, moved: number, … } | 400 missing or invalid path; 404 folder not found; 409 target folder already exists |
-| `media.folderItems` | Item ids in a folder, for use with references.guardAll:media before removeFolder | `params.path` | `result` | ?recursive: boolean | { path: string, ids: string[], … } | 400 missing or invalid path; 404 folder not found; 409 folder not empty (without `recursive`) |
+| `media.listFolderItems` | Item ids in a folder, for use with references.guardAll:media before removeFolder | `params.path` | `result` | ?recursive: boolean | { path: string, ids: string[], … } | 400 missing or invalid path; 404 folder not found; 409 folder not empty (without `recursive`) |
+| `media.folderItems` | Deprecated, use media.listFolderItems: Item ids in a folder, for use with references.guardAll:media before removeFolder | `params.path` | `result` | ?recursive: boolean | { path: string, ids: string[], … } | 400 missing or invalid path; 404 folder not found; 409 folder not empty (without `recursive`) |
 | `media.removeFolder` | Delete a folder and everything in it | `params.path` | `result` | – | { ok: boolean, removed: number, … } | 400 invalid path; 404 folder not found; 409 folder not empty or still referenced |
 | `media.download` | The file itself | `params.id` | `result` | – | – | 404 not found |
 | `media.remove` | Delete file and metadata | `params.id` | `result` | – | { ok: boolean, … } | 400 missing id |
@@ -103,7 +104,7 @@ Pipelines in `examples/minimal` using these steps:
 
 - **createMediaFolder** (POST /media/folders): `authn.requireUser` → `authz.require:media.write` → **`media.createFolder`**
 - **deleteMedia** (DELETE /media/:id): `authn.requireUser` → `authz.require:media.delete` → `references.guard:media` → `images.remove` → **`media.remove`** → `events.emit:media.deleted`
-- **deleteMediaFolder** (DELETE /media/folders/*path): `authn.requireUser` → `authz.require:media.delete` → **`media.folderItems`** → `references.guardAll:media` → `images.removeMany` → **`media.removeFolder`**
+- **deleteMediaFolder** (DELETE /media/folders/*path): `authn.requireUser` → `authz.require:media.delete` → **`media.listFolderItems`** → `references.guardAll:media` → `images.removeMany` → **`media.removeFolder`**
 - **downloadMedia** (GET /media/:id/file): `authn.identifyUser` → `authz.require:media.read` → **`media.download`**
 - **exportMedia** (POST /admin/media/export): `authn.requireUser` → `authz.require:media.manage` → **`media.export:./data/export`** → `images.export:./data/export`
 - **getMedia** (GET /media/:id): `authn.identifyUser` → `authz.require:media.read` → **`media.get`** → `images.attach`

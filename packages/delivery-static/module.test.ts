@@ -62,9 +62,10 @@ const site: Site = {
   resolveLinks: async (_t, doc) => ok({ ...doc, _links: { resolved: { path: "/x", locale: "de" } } }),
 };
 
-function fakeBlobs(): Blobstore {
+function fakeBlobs(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
   const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
   return {
+    blobs,
     async put(k, data, options) {
       blobs.set(k, { data, contentType: options?.contentType ?? "application/octet-stream" });
       return ok();
@@ -119,11 +120,12 @@ function moduleDeps(providers: { content: Content; site: Site; renderer: Rendere
 
 const pagesType = { slugField: "slug", statusField: "status", publishedValue: "published", home: "home" };
 
-async function boot(renderer: Renderer = fakeRenderer()): Promise<{ instance: Delivery; put: ReturnType<typeof fakeContent>["put"] }> {
+async function boot(renderer: Renderer = fakeRenderer()): Promise<{ instance: Delivery; put: ReturnType<typeof fakeContent>["put"]; blobs: ReturnType<typeof fakeBlobs> }> {
   const { content, put } = fakeContent();
   const config = configSchema.parse({ types: { pages: pagesType }, prefix: "site/" });
-  const instance = (await module.setup(config, moduleDeps({ content, site, renderer, blobs: fakeBlobs(), db: createFakePersistence() }))) as Delivery;
-  return { instance, put };
+  const blobs = fakeBlobs();
+  const instance = (await module.setup(config, moduleDeps({ content, site, renderer, blobs, db: createFakePersistence() }))) as Delivery;
+  return { instance, put, blobs };
 }
 
 const seedId: Step = async (ctx) => okStep({ ...ctx, result: { id: ctx.params.id } });
@@ -150,13 +152,16 @@ describe("delivery/static module via runPipeline", () => {
   });
 
   it("unpublish removes the rendered output", async () => {
-    const { instance, put } = await boot();
+    const { instance, put, blobs } = await boot();
     put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published" });
     const publish = definePipeline({ name: "publish", steps: ["seed.id", "delivery.publish:pages"] });
     await runPipeline(publish, { params: { id: "p1" } }, { modules: [{ module, instance }], steps: { "seed.id": seedId } });
+    const publishedKeys = [...blobs.blobs.keys()];
+    expect(publishedKeys.length).toBeGreaterThan(0);
     const pipeline = definePipeline({ name: "unpublish", steps: ["delivery.unpublish:pages"] });
     const result = await runPipeline(pipeline, { params: { id: "p1" } }, { modules: [{ module, instance }] });
     expect(result.status).toBe(200);
+    for (const key of publishedKeys) expect(blobs.blobs.has(key)).toBe(false);
   });
 
   it("publishAll re-renders every document of the type", async () => {

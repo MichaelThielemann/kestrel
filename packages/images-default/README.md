@@ -60,7 +60,7 @@ Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered
 | `images.readStatus` | Sizes with usage/variant counts, current job, and sizes whose variants are left over from a size the code no longer declares | – | `result` | – | { sizes: object[], job: object \| null, orphaned: object, registrySeen: boolean, … } | – |
 | `images.remove` | Delete one media item's variants (blob + rows) | `params.id` | – | – | – | 400 missing id |
 | `images.removeMany` | Delete variants for every id in result.ids (from media.folderItems) | `result.ids` | – | – | – | – |
-| `images.attach` | Add variants[] to a media item or list (result.id or result.items) | `result` | `result.variants` | – | { variants: object[], … } | – |
+| `images.attach` | Add variants[] to a media item or list (result.id or result.items) | `result` | `result.variants?` | – | { variants: object[], … } | – |
 | `images.serve` | Binary variant, or the original with x-kestrel-variant: pending while it isn't ready yet | `params.id`, `params.file` | `result` | – | – | 400 missing id or file; 404 media item or size not found, or the variant gave up after maxAttempts |
 | `images.export:<arg>` | Copy every done variant to <arg>/<folder>/<filename>.<size>.<ext> | – | `result.variants` | – | { variants: object, … } | – |
 

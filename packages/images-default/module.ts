@@ -196,7 +196,7 @@ export default defineModule({
     },
     remove: { summary: "Delete one media item's variants (blob + rows)", reads: ["params.id"], writes: [], errors: { 400: "missing id" } },
     removeMany: { summary: "Delete variants for every id in result.ids (from media.folderItems)", reads: ["result.ids"], writes: [] },
-    attach: { summary: "Add variants[] to a media item or list (result.id or result.items)", reads: ["result"], writes: ["result.variants"], extendsItems: { type: "object", properties: { variants: { type: "array", items: ATTACHED_VARIANT_SCHEMA } }, required: ["variants"] } },
+    attach: { summary: "Add variants[] to a media item or list (result.id or result.items)", reads: ["result"], writes: ["result.variants?"], extendsItems: { type: "object", properties: { variants: { type: "array", items: ATTACHED_VARIANT_SCHEMA } }, required: ["variants"] } },
     serve: { summary: "Binary variant, or the original with x-kestrel-variant: pending while it isn't ready yet", reads: ["params.id", "params.file"], writes: ["result"], binary: true, errors: { 400: "missing id or file", 404: "media item or size not found, or the variant gave up after maxAttempts" } },
     export: (dir: string) => ({ summary: `Copy every done variant to ${dir}/<folder>/<filename>.<size>.<ext>`, reads: [], writes: ["result.variants"], extendsOutput: { type: "object", properties: { variants: { type: "object", properties: { written: { type: "number" }, skipped: { type: "number" } }, required: ["written", "skipped"] } }, required: ["variants"] } }),
   }),

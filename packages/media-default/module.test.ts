@@ -360,7 +360,15 @@ describe("media/default steps via runPipeline", () => {
     expect((res.result as { folder: string }).folder).toBe("y");
   });
 
-  it("folderItems: query.recursive is coerced from a string", async () => {
+  it("listFolderItems: query.recursive is coerced from a string", async () => {
+    const { media } = await makeInstance();
+    await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "x/y");
+    const res = await runPipeline(pipeline("media.listFolderItems"), { params: { path: "x" }, query: { recursive: "true" } }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect((res.result as { ids: string[] }).ids).toHaveLength(1);
+  });
+
+  it("folderItems: deprecated alias behaves exactly like listFolderItems", async () => {
     const { media } = await makeInstance();
     await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "x/y");
     const res = await runPipeline(pipeline("media.folderItems"), { params: { path: "x" }, query: { recursive: "true" } }, { modules: [{ module, instance: media }] });

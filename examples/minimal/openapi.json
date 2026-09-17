@@ -1183,6 +1183,12 @@
                           },
                           "eventHook": {
                             "type": "boolean"
+                          },
+                          "emits": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           }
                         },
                         "required": [
@@ -1194,7 +1200,8 @@
                           "optional",
                           "config",
                           "steps",
-                          "eventHook"
+                          "eventHook",
+                          "emits"
                         ]
                       }
                     },
@@ -1213,72 +1220,65 @@
                             "type": "boolean"
                           },
                           "description": {
-                            "oneOf": [
-                              {
+                            "type": "object",
+                            "properties": {
+                              "summary": {
+                                "type": "string"
+                              },
+                              "reads": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "writes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "input": {
+                                "type": "object"
+                              },
+                              "output": {
+                                "type": "object"
+                              },
+                              "extendsOutput": {
+                                "type": "object"
+                              },
+                              "extendsItems": {
+                                "type": "object"
+                              },
+                              "query": {
                                 "type": "object",
-                                "properties": {
-                                  "summary": {
-                                    "type": "string"
-                                  },
-                                  "reads": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "writes": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "input": {
-                                    "type": "object"
-                                  },
-                                  "output": {
-                                    "type": "object"
-                                  },
-                                  "extendsOutput": {
-                                    "type": "object"
-                                  },
-                                  "extendsItems": {
-                                    "type": "object"
-                                  },
-                                  "query": {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                      "type": "object"
-                                    }
-                                  },
-                                  "errors": {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "security": {
-                                    "type": "string",
-                                    "enum": [
-                                      "required",
-                                      "optional"
-                                    ]
-                                  },
-                                  "multipart": {
-                                    "type": "boolean"
-                                  },
-                                  "binary": {
-                                    "type": "boolean"
-                                  }
-                                },
-                                "required": [
-                                  "summary",
-                                  "reads",
-                                  "writes"
+                                "additionalProperties": {
+                                  "type": "object"
+                                }
+                              },
+                              "errors": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
+                              "security": {
+                                "type": "string",
+                                "enum": [
+                                  "required",
+                                  "optional"
                                 ]
                               },
-                              {
-                                "type": "null"
+                              "multipart": {
+                                "type": "boolean"
+                              },
+                              "binary": {
+                                "type": "boolean"
                               }
+                            },
+                            "required": [
+                              "summary",
+                              "reads",
+                              "writes"
                             ]
                           }
                         },
@@ -6748,7 +6748,7 @@
         "x-kestrel-steps": [
           "authn.requireUser",
           "authz.require:media.delete",
-          "media.folderItems",
+          "media.listFolderItems",
           "references.guardAll:media",
           "images.removeMany",
           "media.removeFolder"

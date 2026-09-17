@@ -44,8 +44,9 @@ const MODULE: JsonSchema = {
     config: { type: "object", properties: { schema: { type: "object" }, variables: { type: "array", items: VARIABLE } }, required: ["schema", "variables"] },
     steps: STRINGS,
     eventHook: { type: "boolean" },
+    emits: STRINGS,
   },
-  required: ["name", "use", "version", "provides", "requires", "optional", "config", "steps", "eventHook"],
+  required: ["name", "use", "version", "provides", "requires", "optional", "config", "steps", "eventHook", "emits"],
 };
 const PIPELINE_STEP: JsonSchema = { type: "object", properties: { spec: { type: "string" }, name: { type: "string" }, module: { type: "string" }, description: STEP_DESCRIPTION }, required: ["spec", "name", "module", "description"] };
 const TRIGGER = (key: string): JsonSchema => ({ type: "object", properties: { [key]: { type: "string" }, pipeline: { type: "string" } }, required: [key, "pipeline"] });
@@ -57,7 +58,7 @@ export const MANIFEST_SCHEMA: JsonSchema = {
     core: { type: "object", properties: { version: { type: "string" } }, required: ["version"] },
     contracts: STRINGS,
     modules: { type: "array", items: MODULE },
-    steps: { type: "array", items: { type: "object", properties: { name: { type: "string" }, module: { type: "string" }, factory: { type: "boolean" }, description: { oneOf: [STEP_DESCRIPTION, { type: "null" }] } }, required: ["name", "module", "factory", "description"] } },
+    steps: { type: "array", items: { type: "object", properties: { name: { type: "string" }, module: { type: "string" }, factory: { type: "boolean" }, description: STEP_DESCRIPTION }, required: ["name", "module", "factory", "description"] } },
     pipelines: { type: "array", items: { type: "object", properties: { name: { type: "string" }, steps: { type: "array", items: PIPELINE_STEP } }, required: ["name", "steps"] } },
     triggers: {
       type: "object",

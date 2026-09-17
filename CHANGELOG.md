@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+### Breaking
+
+- `core`: the runner checks every successful step against its `describe().writes`, in every
+  environment. A changed top-level context key that is not the root of a declared path, or a
+  declared path without `?` that is missing afterwards, ends the run as 500 `INTERNAL`
+  (`step "<name>" writes "<key>" without declaring it` / `step "<name>" declares writes "<path>"
+  but did not write it (declare "<path>?" for a conditional write)`) with the stack in the log and
+  `step` in the error body. Module authors mark conditional writes with `?`. Shipped fixes:
+  `validate.sanitize` and `validate.sanitizeHtml` (`payload.<field>?`), `redirects.lookup`
+  (`result?`), `images.attach` (`result.variants?`).
+- `core`: a factory step's `describe(arg)` is called once at registration with the placeholder
+  argument `<arg>`; a throw is a `KestrelBootError` naming step and cause instead of a manifest
+  entry with `description: null`. `StepManifest.description` is never `null` any more
+  (`kestrel.describe()`, `insights.readManifest`).
+- `core` (testing): stand-in steps in `testing/runPipeline` register with `writes: ["result?"]`;
+  a stand-in that seeds another context key declares it through the new `writes` option.
+
+### Added
+
+- `core`: modules may declare `emits: readonly string[]` for events they emit from a contract
+  method instead of an `events.emit` step; the manifest lists it as `ModuleManifest.emits`.
+  `migrations-default` declares `emits: ["migrations.applied"]`. Boot logs a warning (no abort)
+  for an event trigger whose event no pipeline emits via `events.emit:<name>` and no module
+  declares in `emits`.
+- `media-default`: step `media.listFolderItems`. `media.folderItems` stays registered as a
+  deprecated alias with the same behaviour and goes away in the next major version;
+  `examples/minimal` uses the new name.
+- docs: `pnpm docs:generate` and `docs:check` also write and verify the package table in the
+  root `README.md` from every `packages/*/package.json`.
+
+### Fixed
+
+- `openapi`: the CLI only tolerates a missing `package.json` (`ENOENT`); any other read error
+  throws.
+- `images-default`: the `whenIdle()` test hook keeps no module-level state.
+- `replication-sqlite`: the teardown log says that pending WAL frames stay in the local WAL and
+  ship on the next sync.
+- core test suite: `describe.scan` fails a `module.ts` it cannot parse instead of skipping it,
+  lists the three step-less modules explicitly, and follows helper chains of any depth to
+  `ctx.payload`.
+
 ## 5.3.0 – 2026-09-11
 
 - `core`: `kestrel.describe()` answers the static manifest of the booted instance — modules

@@ -36,8 +36,8 @@ problem. Not included: `$ref` to remote schemas, custom keywords.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors |
 |---|---|---|---|---|---|---|
-| `validate.sanitize:<arg>` | Sanitize HTML at format:"html" positions of payload field <arg> | – | `payload.<arg>` | object | – | – |
-| `validate.sanitizeHtml:<arg>` | Sanitize the HTML payload field <arg> | – | `payload.<arg>` | object | – | – |
+| `validate.sanitize:<arg>` | Sanitize HTML at format:"html" positions of payload field <arg> | – | `payload.<arg>?` | object | – | – |
+| `validate.sanitizeHtml:<arg>` | Sanitize the HTML payload field <arg> | – | `payload.<arg>?` | object | – | – |
 | `validate.check:<arg>` | Validate payload field <arg> against its JSON Schema | – | – | object | – | 400 schema violation (path and message per problem) |
 
 Pipelines in `examples/minimal` using these steps:

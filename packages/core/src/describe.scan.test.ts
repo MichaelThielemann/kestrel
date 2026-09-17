@@ -11,6 +11,12 @@ interface StepFacts {
   literalInputWithoutAdditionalProperties: boolean;
 }
 
+interface Scan {
+  scanned: boolean;
+  hasSteps: boolean;
+  facts: Map<string, StepFacts>;
+}
+
 let current: ts.SourceFile | undefined;
 
 function topLevel(name: string): ts.Node | undefined {
@@ -69,14 +75,33 @@ function literalInputLacksAdditionalProperties(entry: ts.Node | undefined): bool
   return isObject && !props.has("additionalProperties");
 }
 
-function payloadHelpers(source: ts.SourceFile): Set<string> {
-  const names = new Set<string>();
+function topLevelBodies(source: ts.SourceFile): Map<string, string> {
+  const bodies = new Map<string, string>();
   for (const statement of source.statements) {
-    if (ts.isFunctionDeclaration(statement) && statement.name && statement.getText(source).includes("ctx.payload")) names.add(statement.name.text);
+    if (ts.isFunctionDeclaration(statement) && statement.name) bodies.set(statement.name.text, statement.getText(source));
     if (ts.isVariableStatement(statement)) {
       for (const declaration of statement.declarationList.declarations) {
-        if (ts.isIdentifier(declaration.name) && declaration.initializer && declaration.getText(source).includes("ctx.payload")) names.add(declaration.name.text);
+        if (ts.isIdentifier(declaration.name) && declaration.initializer) bodies.set(declaration.name.text, declaration.getText(source));
       }
+    }
+  }
+  return bodies;
+}
+
+function calls(text: string, names: Iterable<string>): boolean {
+  return [...names].some((name) => new RegExp(`\\b${name}\\(`).test(text));
+}
+
+function payloadHelpers(source: ts.SourceFile): Set<string> {
+  const bodies = topLevelBodies(source);
+  const names = new Set<string>();
+  for (let added = true; added; ) {
+    added = false;
+    for (const [name, text] of bodies) {
+      if (names.has(name)) continue;
+      if (!text.includes("ctx.payload") && !calls(text, names)) continue;
+      names.add(name);
+      added = true;
     }
   }
   return names;
@@ -84,12 +109,11 @@ function payloadHelpers(source: ts.SourceFile): Set<string> {
 
 function readsPayload(handler: ts.Node, source: ts.SourceFile, helpers: Set<string>): boolean {
   const text = handler.getText(source);
-  if (text.includes("ctx.payload")) return true;
-  return [...helpers].some((name) => new RegExp(`\\b${name}\\(`).test(text));
+  return text.includes("ctx.payload") || calls(text, helpers);
 }
 
-function scan(file: string): Map<string, StepFacts> {
-  const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+function scanSource(file: string, text: string): Scan {
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   current = source;
   let definition: ts.ObjectLiteralExpression | undefined;
   const visit = (node: ts.Node): void => {
@@ -98,7 +122,7 @@ function scan(file: string): Map<string, StepFacts> {
   };
   visit(source);
   const facts = new Map<string, StepFacts>();
-  if (!definition) return facts;
+  if (!definition) return { scanned: false, hasSteps: false, facts };
   const props = objectProperties(definition);
   const steps = objectProperties(props.get("steps"));
   const descriptions = objectProperties(props.get("describe"));
@@ -111,20 +135,52 @@ function scan(file: string): Map<string, StepFacts> {
       literalInputWithoutAdditionalProperties: literalInputLacksAdditionalProperties(entry),
     });
   }
-  return facts;
+  return { scanned: true, hasSteps: props.has("steps"), facts };
+}
+
+function scan(file: string): Scan {
+  return scanSource(file, readFileSync(file, "utf8"));
 }
 
 const modules = readdirSync(PACKAGES).filter((dir) => existsSync(join(PACKAGES, dir, "module.ts")));
+const scans = modules.map((dir) => ({ dir, scan: scan(join(PACKAGES, dir, "module.ts")) }));
 
 describe("every step that reads the payload declares its schema", () => {
-  for (const dir of modules) {
-    const facts = scan(join(PACKAGES, dir, "module.ts"));
-    if (facts.size === 0) continue;
+  for (const { dir, scan: result } of scans) {
+    if (result.scanned && !result.hasSteps) continue;
     it(`${dir}`, () => {
-      const undeclared = [...facts].filter(([, f]) => f.readsPayload && !f.declared).map(([name]) => name);
-      const open = [...facts].filter(([, f]) => f.literalInputWithoutAdditionalProperties).map(([name]) => name);
+      if (!result.scanned || result.facts.size === 0) expect.fail(`${dir}/module.ts could not be scanned`);
+      const undeclared = [...result.facts].filter(([, f]) => f.readsPayload && !f.declared).map(([name]) => name);
+      const open = [...result.facts].filter(([, f]) => f.literalInputWithoutAdditionalProperties).map(([name]) => name);
       expect(undeclared, `${dir}/module.ts: steps reading ctx.payload without describe().input or .query`).toEqual([]);
       expect(open, `${dir}/module.ts: literal input schemas must state additionalProperties explicitly`).toEqual([]);
     });
   }
+
+  it("skips exactly the modules whose definition declares no steps", () => {
+    expect(scans.filter(({ scan: result }) => result.scanned && !result.hasSteps).map(({ dir }) => dir)).toEqual(["blobstore-filesystem", "blobstore-s3", "renderer-plain"]);
+  });
+});
+
+describe("scan", () => {
+  const module = (body: string) => `${body}
+export default defineModule({
+  name: "a/b",
+  steps: () => ({ create: async (ctx: Context) => ok({ ...ctx, result: title(ctx) }) }),
+  describe: () => ({ create: { summary: "create", reads: [], writes: ["result"] } }),
+});
+`;
+
+  it("follows a helper chain to ctx.payload", () => {
+    const direct = scanSource("direct.ts", module('function title(ctx: Context) {\n  return ctx.payload.title;\n}'));
+    expect(direct.facts.get("create")?.readsPayload).toBe(true);
+    const twoHops = scanSource("two-hops.ts", module('function field(ctx: Context) {\n  return ctx.payload.title;\n}\nfunction title(ctx: Context) {\n  return field(ctx);\n}'));
+    expect(twoHops.facts.get("create")?.readsPayload).toBe(true);
+    const none = scanSource("none.ts", module('function title(ctx: Context) {\n  return ctx.params.title;\n}'));
+    expect(none.facts.get("create")?.readsPayload).toBe(false);
+  });
+
+  it("reports a module.ts it cannot resolve as unscanned", () => {
+    expect(scanSource("empty.ts", "export const nothing = 1;\n")).toMatchObject({ scanned: false, hasSteps: false });
+  });
 });

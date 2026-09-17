@@ -29,15 +29,10 @@ const store = defineModule({
   steps: () => ({
     find: stepFactory((collection: string) => async (ctx: Context) => ok({ ...ctx, result: { collection } })),
     ping: async (ctx: Context) => ok({ ...ctx, result: "pong" }),
-    boom: stepFactory(() => async (ctx: Context) => ok(ctx)),
   }),
   describe: () => ({
     find: (collection: string) => ({ summary: `Find in ${collection}`, reads: [], writes: ["result"], output: { type: "object" } }),
     ping: { summary: "Ping", reads: [], writes: ["result"] },
-    boom: (arg: string) => {
-      if (arg === PLACEHOLDER_ARG) throw new Error("needs a real argument");
-      return { summary: arg, reads: [], writes: [] };
-    },
   }),
 });
 
@@ -77,7 +72,7 @@ describe("kestrel.describe()", () => {
     expect(manifest.core.version).toBe(coreVersion());
     expect(manifest.contracts).toEqual(["store@1"]);
     const [storeManifest, busManifest] = manifest.modules;
-    expect(storeManifest).toMatchObject({ name: "store/memory", use: "./modules/store.ts", version: null, provides: ["store@1"], requires: [], optional: [], steps: ["store.find", "store.ping", "store.boom"], eventHook: false });
+    expect(storeManifest).toMatchObject({ name: "store/memory", use: "./modules/store.ts", version: null, provides: ["store@1"], requires: [], optional: [], steps: ["store.find", "store.ping"], eventHook: false, emits: [] });
     expect(storeManifest!.config.schema).toMatchObject({ type: "object", additionalProperties: false });
     expect(storeManifest!.config.variables).toEqual([
       { path: "file", type: "string", required: true, secret: false, set: true },
@@ -102,9 +97,28 @@ describe("kestrel.describe()", () => {
     expect(steps).toEqual([
       { name: "store.find", module: "store/memory", factory: true, description: { summary: `Find in ${PLACEHOLDER_ARG}`, reads: [], writes: ["result"], output: { type: "object" } } },
       { name: "store.ping", module: "store/memory", factory: false, description: { summary: "Ping", reads: [], writes: ["result"] } },
-      { name: "store.boom", module: "store/memory", factory: true, description: null },
     ]);
     await kestrel.stop();
+  });
+
+  it("stops the boot when a factory describe() throws for the placeholder argument", async () => {
+    const broken = defineModule({
+      name: "broken/describe",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ boom: stepFactory(() => async (ctx: Context) => ok(ctx)) }),
+      describe: () => ({
+        boom: (arg: string) => {
+          if (arg === PLACEHOLDER_ARG) throw new Error("needs a real argument");
+          return { summary: arg, reads: [], writes: [] };
+        },
+      }),
+    });
+    await expect(booted([broken])).rejects.toThrow(/\[broken\/describe\] step "broken\.boom" describe\(\) threw for the placeholder argument "<arg>": needs a real argument/);
   });
 
   it("lists pipelines with their resolved steps and every trigger", async () => {
