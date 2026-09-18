@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 5.4.0 – 2026-09-18
+
 ### Breaking
 
 - `core`: the runner checks every successful step against its `describe().writes`, in every

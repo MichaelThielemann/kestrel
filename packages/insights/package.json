@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-insights",
-  "version": "5.3.0",
+  "version": "5.4.0",
   "description": "insights@1: the instance manifest (modules, config schemas, steps, pipelines, triggers) and live per-process run statistics from the core's observer hook.",
   "type": "module",
   "license": "Apache-2.0",
