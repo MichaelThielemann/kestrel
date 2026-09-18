@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
@@ -22,7 +23,7 @@ async function boot() {
 }
 
 function problems(details: Record<string, unknown> | undefined): Array<{ path: string; message: string }> {
-  return (details as { problems: Array<{ path: string; message: string }> }).problems;
+  return boundaryCast<{ problems: Array<{ path: string; message: string }> }>(details, "json").problems;
 }
 
 const loginPipeline = definePipeline({ name: "login", steps: ["authn.login"] });
@@ -37,7 +38,7 @@ describe("authn/single module steps via runPipeline", () => {
 
     const loggedIn = await runPipeline(loginPipeline, { body: { username: "admin", password: "secret" } }, { modules: [{ module, instance }] });
     expect(loggedIn.status).toBe(200);
-    const token = (loggedIn.result as { token: string }).token;
+    const token = boundaryCast<{ token: string }>(loggedIn.result, "json").token;
     const headers = { authorization: `Bearer ${token}` };
 
     const identified = await runPipeline(identifyPipeline, { headers }, { modules: [{ module, instance }] });
@@ -48,7 +49,7 @@ describe("authn/single module steps via runPipeline", () => {
 
     const loaded = await runPipeline(loadIdentityPipeline, { headers }, { modules: [{ module, instance }] });
     expect(loaded.status).toBe(200);
-    expect((loaded.result as { id: string }).id).toBe("admin");
+    expect(boundaryCast<{ id: string }>(loaded.result, "json").id).toBe("admin");
 
     const loggedOut = await runPipeline(logoutPipeline, { headers }, { modules: [{ module, instance }] });
     expect(loggedOut.status).toBe(200);

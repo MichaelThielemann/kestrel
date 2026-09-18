@@ -1,4 +1,5 @@
 import type { Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 
 export const COLLECTION = "audit_entries";
@@ -35,6 +36,6 @@ export async function createAuditPersistence(db: Persistence): Promise<Audit> {
 export function entryFromEventData(data: Record<string, unknown>): AuditEntry {
   const { eventId, event, at, identity, params } = data;
   if (typeof event !== "string" || typeof at !== "number") throw new Error("audit/persistence: payload is not event data (expected event and at)");
-  const identityId = typeof identity === "object" && identity !== null && typeof (identity as { id?: unknown }).id === "string" ? (identity as { id: string }).id : null;
-  return { eventId: typeof eventId === "string" ? eventId : null, event, at, identityId, params: typeof params === "object" && params !== null ? (params as Record<string, string>) : {} };
+  const identityId = typeof identity === "object" && identity !== null && "id" in identity && typeof identity.id === "string" ? identity.id : null;
+  return { eventId: typeof eventId === "string" ? eventId : null, event, at, identityId, params: typeof params === "object" && params !== null ? boundaryCast<Record<string, string>>(params, "json") : {} };
 }

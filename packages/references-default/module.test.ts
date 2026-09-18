@@ -5,6 +5,7 @@ import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context, Step, StepFactory } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
@@ -25,10 +26,10 @@ function fakeContent(): Content {
     validate: () => ({ ok: true, data: {} }),
     async get(type, id) {
       const row = id === undefined ? undefined : docs.get(id);
-      return ok(row && row.type === type ? (row as ContentDocument) : null);
+      return ok(row && row.type === type ? boundaryCast<ContentDocument>(row, "host") : null);
     },
     async list(type) {
-      const all = [...docs.values()].filter((r) => r.type === type) as ContentDocument[];
+      const all = boundaryCast<ContentDocument[]>([...docs.values()].filter((r) => r.type === type), "host");
       return ok({ items: all, total: all.length });
     },
     async create(type, data) {
@@ -53,9 +54,9 @@ async function boot() {
   const deps: Deps = {
     get<T>(contract: Contract<T>): T {
       if (!providers.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
-      return providers.get(contract.name) as T;
+      return boundaryCast<T>(providers.get(contract.name), "host");
     },
-    find: <T>(contract: Contract<T>): T | undefined => providers.get(contract.name) as T | undefined,
+    find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
     logger: silentLogger,
     root: process.cwd(),
   };
@@ -133,7 +134,7 @@ describe("references/default module steps", () => {
 
     const reported = await run(["references.report"], { query: { target: "media" } }, instance);
     expect(reported.status).toBe(200);
-    expect((reported.result as unknown[]).length).toBe(1);
+    expect(boundaryCast<unknown[]>(reported.result, "json").length).toBe(1);
 
     const rebuilt = await run(["references.rebuild"], {}, instance);
     expect(rebuilt.status).toBe(200);

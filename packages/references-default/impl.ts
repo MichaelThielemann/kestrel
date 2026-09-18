@@ -159,7 +159,7 @@ export function createReferencesDefault(config: Config, content: Content, db: Pe
       for (const [field, def] of refFields(type)) {
         const id = data[field];
         if (typeof id !== "string" || id === "") continue;
-        const to = def.to as string;
+        const to = def.to ?? "";
         const found = await exists(knownTarget(to), id);
         if (isErr(found)) return found;
         if (!found.value) out.push({ field, to, id });
