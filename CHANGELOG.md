@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Breaking
+
+- `media-default`: `media_items.key` is declared `unique`. Two concurrent uploads of the same
+  filename into the same folder end as one item and one `CONFLICT` (409, `details: { collection:
+  "media_items", field: "key" }`) instead of two rows over one blob. Migration: existing rows with
+  duplicate keys make `ensureCollection` throw at boot naming the key; find them beforehand with
+  `SELECT "key", COUNT(*) AS n FROM "media_items" WHERE "key" IS NOT NULL GROUP BY "key" HAVING n > 1;`
+  and delete or re-key the surplus rows.
+- `media-default`: uploading the same folder, filename and bytes again answers 200 with the item
+  that is already stored instead of 409; `media.upload` then ends the pipeline itself, so a
+  following `events.emit:media.uploaded` does not run, and for several files in one request `ids`
+  lists only the newly stored items. `Media.upload()` on `…/impl` returns `Result<{ item, created }>`.
+- `core`: `ConfigVariable.required` is true only when neither the variable nor any ancestor is
+  optional or defaulted; the generated config tables and `examples/minimal/manifest.json` change
+  accordingly.
+
+### Added
+
+- `core`: `ConfigVariable.status: "set" | "default" | "missing"` (type `ConfigStatus`) next to the
+  unchanged boolean `set`; `default` reports the effective default, including one a defaulted
+  ancestor supplies. `insights.readManifest`'s schema requires `status`.
+- `media-default`: the README documents the three key families (`media/<folder>/<file>` originals,
+  `media-variants/<id>/<size>.webp` variants from `images/default`, `site/media/<folder>/<file>.<size>.webp`
+  copies published by `delivery-static`) and the idempotent upload.
+
+### Fixed
+
+- `media-default`: `media.remove` deletes the blob only when no other row points at that key.
+- `insights`/`core`: the manifest no longer shows the child of an optional or defaulted config
+  object as required and not set.
+
 ### Changed
 
 - Lint: `@typescript-eslint/no-unsafe-type-assertion` is an error in every package (tests

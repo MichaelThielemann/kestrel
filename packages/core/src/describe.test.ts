@@ -75,9 +75,9 @@ describe("kestrel.describe()", () => {
     expect(storeManifest).toMatchObject({ name: "store/memory", use: "./modules/store.ts", version: null, provides: ["store@1"], requires: [], optional: [], steps: ["store.find", "store.ping"], eventHook: false, emits: [] });
     expect(storeManifest!.config.schema).toMatchObject({ type: "object", additionalProperties: false });
     expect(storeManifest!.config.variables).toEqual([
-      { path: "file", type: "string", required: true, secret: false, set: true },
-      { path: "token", type: "string", required: false, secret: true, set: true },
-      { path: "retries", type: "integer", required: false, default: 3, secret: false, set: false },
+      { path: "file", type: "string", required: true, secret: false, set: true, status: "set" },
+      { path: "token", type: "string", required: false, secret: true, set: true, status: "set" },
+      { path: "retries", type: "integer", required: false, default: 3, secret: false, set: false, status: "default" },
     ]);
     expect(busManifest).toMatchObject({ name: "bus/memory", requires: ["store@1"], eventHook: true, version: null, steps: [] });
     await kestrel.stop();

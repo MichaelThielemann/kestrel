@@ -10,7 +10,7 @@ import type { ResolvedPipeline } from "./runner.ts";
 import { VERSION } from "./version.ts";
 import { describeConfig, type ConfigVariable } from "./zodSchema.ts";
 
-export type { ConfigVariable } from "./zodSchema.ts";
+export type { ConfigStatus, ConfigVariable } from "./zodSchema.ts";
 export { PLACEHOLDER_ARG } from "./registry.ts";
 
 export interface ModuleManifest {

@@ -13,15 +13,33 @@ labelling itself is the frontend's job). An upload without `provenance` is recor
 `{ origin: "unknown" }`: a missing declaration is not evidence that a human made the file, and the
 caller (the admin UI, an import script) is the one that knows.
 
-The row is the truth, the blobstore only the storage. An upload writes the row first
+Three key families share the blobstore, with three owners:
+
+| Key | Owner | What it is |
+|---|---|---|
+| `media/<folder>/<file>` | this module (`prefix` configurable) | the original bytes, one blob per `media_items` row |
+| `media-variants/<id>/<size>.webp` | `images/default` | the generated variants of a medium; this module ignores them in `media.reconcile` |
+| `site/media/<folder>/<file>.<size>.webp` | `delivery-static` | the copies made at publish time (`prefix` + `media.target` there), referenced by the rendered HTML for static delivery |
+
+The row is the truth, the blobstore only the storage. `media_items.key` is `unique`: a blob key
+belongs to exactly one row, so two concurrent uploads of the same name in the same folder end as one
+item and one `CONFLICT`, never as two rows over one blob. An upload writes the row first
 (`status: "uploading"`, `checksum` = sha256 of the bytes as hex), then the blob, then
 `status: "ready"`; a failing blob write leaves `status: "failed"` and returns the blobstore's
 failure, so the pipeline still fails. Only `ready` items are returned by `media.get`, `media.list`
 and `media.download` (`NOT_FOUND` / filtered out otherwise), and a `failed` row is replaced when the same name is uploaded
 again, so a broken attempt never blocks a filename. `checksum` and `status` are additive: rows
 written before them read as `checksum: null` / `status: "ready"`. Deleting removes the row first
-and the blob after — a failing blob delete is logged, not fatal, and `media.reconcile` finds what
-is left over. A rename moves the blob first and moves it back if the row update fails.
+and the blob after — but only once no other row points at that key — a failing blob delete is
+logged, not fatal, and `media.reconcile` finds what is left over. A rename moves the blob first and
+moves it back if the row update fails.
+
+Uploading is idempotent: same folder, same filename and the same bytes return the item that is
+already there — no second row, no second blob write, no second variant folder — and `media.upload`
+then ends the pipeline itself (`ctx.done`, 200), so a following `events.emit:media.uploaded` does not
+announce an upload that stored nothing. The same name with *different* bytes stays a `CONFLICT`
+(409). For several files in one request, `ids` lists only what was newly stored; when nothing was,
+the step ends the pipeline the same way.
 
 Why: a plain blobstore has no metadata, folders, locale texts or provenance tracking; this module
 adds the bookkeeping other modules (`delivery-static`, `references-default`) rely on, without
@@ -33,9 +51,9 @@ Config: `allowedTypes` (`image/*`, `application/pdf`, `*`), `deniedTypes` (defau
 
 Steps: `media.upload` (processes every file in `ctx.files`, in order, with the same checks; exactly
 one file returns the item unchanged, two or more return `{ items, errors, ids }` with a per-file
-`{ filename, status, code, message }` entry in `errors` — a rejected or conflicting file doesn't stop
-the others, partial success is a 200; a `TRANSIENT` blobstore or database failure is not per-file and
-fails the whole request), `media.get`, `media.list` (folder, recursive, search, sort, ids, paging),
+`{ filename, status, code, message }` entry in `errors` and only the newly stored items in `ids` — a
+rejected or conflicting file doesn't stop the others, partial success is a 200; a `TRANSIENT`
+blobstore or database failure is not per-file and fails the whole request), `media.get`, `media.list` (folder, recursive, search, sort, ids, paging),
 `media.listFolders`, `media.createFolder`, `media.renameFolder`, `media.folderItems` (for
 `references.guardAll:media`), `media.removeFolder`, `media.update`, `media.download`,
 `media.remove`, `media.reconcile`, `media.reconcileDelete`, `media.export:<dir>`.
@@ -45,7 +63,7 @@ unavailable):
 
 | Step | codes |
 |---|---|
-| `media.upload` | `VALIDATION` (no file, invalid folder or provenance), `UNSUPPORTED` (type not allowed), `PAYLOAD_TOO_LARGE` (over `maxBytes`), `CONFLICT` (filename taken) |
+| `media.upload` | `VALIDATION` (no file, invalid folder or provenance), `UNSUPPORTED` (type not allowed), `PAYLOAD_TOO_LARGE` (over `maxBytes`), `CONFLICT` (filename taken by other bytes; `details.field: "key"`) |
 | `media.get` | `VALIDATION` (unknown locale), `NOT_FOUND` |
 | `media.list` | `VALIDATION` (invalid folder, unknown locale) |
 | `media.update` | `VALIDATION` (name, folder, provenance or text), `NOT_FOUND`, `CONFLICT` (filename taken) |
@@ -84,7 +102,7 @@ Not included: image resizing, tags, linking media to content documents.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors |
 |---|---|---|---|---|---|---|
-| `media.upload` | Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results | `files` | `result` | { folder?: string, provenance?: string } | object \| object | 400 no file or invalid folder/provenance (per-file for a multi-file request); 409 filename already exists in that folder (per-file for a multi-file request); 413 file exceeds maxBytes (per-file for a multi-file request); 415 type not allowed (per-file for a multi-file request) |
+| `media.upload` | Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing | `files` | `result` | { folder?: string, provenance?: string } | object \| object | 400 no file or invalid folder/provenance (per-file for a multi-file request); 409 filename already exists in that folder with different bytes, `details.field: "key"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict; 413 file exceeds maxBytes (per-file for a multi-file request); 415 type not allowed (per-file for a multi-file request) |
 | `media.update` | Rename, move, set provenance or texts (alt/title/description per locale) | `params.id` | `result` | { filename?: string, folder?: string, provenance?: object, locale?: string, alt?: string \| null, title?: string \| null, description?: string \| null } ?locale: string | { id: string, filename: string, folder: string, contentType: string, size: number, key: string, checksum: string \| null, status: "uploading" \| "ready" \| "failed", createdAt: number, updatedAt: number, provenance: object, width?: number \| null, height?: number \| null, alt?: string \| null, title?: string \| null, description?: string \| null, … } | 400 invalid name, folder or text (texts are plain text, max 2000 chars); 404 not found; 409 filename already exists in that folder |
 | `media.get` | Media metadata | `params.id` | `result` | ?locale: string | { id: string, filename: string, folder: string, contentType: string, size: number, key: string, checksum: string \| null, status: "uploading" \| "ready" \| "failed", createdAt: number, updatedAt: number, provenance: object, width?: number \| null, height?: number \| null, alt?: string \| null, title?: string \| null, description?: string \| null, … } | 400 unknown locale; 404 not found |
 | `media.list` | List media, newest first | – | `result` | ?folder: string, recursive: boolean, q: string, sort: string, limit: integer, offset: integer, ids: string, locale: string | { items?: object[], total?: number, … } | 400 invalid folder or unknown locale |

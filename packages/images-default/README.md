@@ -44,7 +44,7 @@ Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered
 | `prefix` | string | no | `"media-variants/"` |
 | `publicPath` | string | no | `"/media"` |
 | `media` | object | no | `{"collection":"media_items"}` |
-| `media.collection` | string | yes | – |
+| `media.collection` | string | no | `"media_items"` |
 | `chunk` | integer | no | `20` |
 | `staleAfterMs` | integer | no | `60000` |
 | `maxAttempts` | integer | no | `5` |

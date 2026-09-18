@@ -1158,6 +1158,15 @@
                                     },
                                     "set": {
                                       "type": "boolean"
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "enum": [
+                                        "set",
+                                        "default",
+                                        "missing"
+                                      ],
+                                      "description": "set: the raw config carries the path; default: it does not and the value comes from this node's or an ancestor's default; missing: no value at all"
                                     }
                                   },
                                   "required": [
@@ -1165,7 +1174,8 @@
                                     "type",
                                     "required",
                                     "secret",
-                                    "set"
+                                    "set",
+                                    "status"
                                   ]
                                 }
                               }
@@ -5178,7 +5188,7 @@
       },
       "post": {
         "operationId": "uploadMedia",
-        "summary": "Require a valid session → Requires permission media.write → Sanitize uploaded SVG files (scripts, handlers, external references removed) → Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results → Emit event \"media.uploaded\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission media.write → Sanitize uploaded SVG files (scripts, handlers, external references removed) → Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing → Emit event \"media.uploaded\" to every subscribed handler pipeline",
         "tags": [
           "media"
         ],
@@ -5464,7 +5474,8 @@
                           "type": "array",
                           "items": {
                             "type": "string"
-                          }
+                          },
+                          "description": "the newly stored items only; an unchanged re-upload is in `items` but not here, and is not announced as an event"
                         }
                       },
                       "required": [
@@ -5509,7 +5520,7 @@
             }
           },
           "409": {
-            "description": "filename already exists in that folder (per-file for a multi-file request)",
+            "description": "filename already exists in that folder with different bytes, `details.field: \"key\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict",
             "content": {
               "application/json": {
                 "schema": {

@@ -300,7 +300,7 @@ anyway, `redirects.read` only protects the editor view.
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| POST | `/media` | `multipart/form-data`: field `file`, repeatable for multiple files in one request, optional `folder`, optional `provenance` (`human`/`ai`/`mixed`/`unknown` or JSON `{ origin, tool?, model?, at? }`, applies to every file in the request; `unknown` if omitted) | exactly one file: `{ id, filename, folder, contentType, size, key, checksum, status, createdAt, provenance }` (`media.write`); multiple files: `{ items: [...same shape...], errors: [{ filename, status, message }], ids }` – each file is checked independently (type, size, 409 on a name conflict), a failed file doesn't stop the rest (partial success, 200); the blob key is `media/<folder>/<filename>` (no folder → `media/<filename>`; the `media/` prefix is configurable and separates media from replication snapshots, the site export and `redirects.json`), so on disk `data/blobs/media/2026/press/photo.jpg`; 409 for the same filename in the same folder (for multiple files, as an entry in `errors`, not as an HTTP status); no `file` field → 400 |
+| POST | `/media` | `multipart/form-data`: field `file`, repeatable for multiple files in one request, optional `folder`, optional `provenance` (`human`/`ai`/`mixed`/`unknown` or JSON `{ origin, tool?, model?, at? }`, applies to every file in the request; `unknown` if omitted) | exactly one file: `{ id, filename, folder, contentType, size, key, checksum, status, createdAt, provenance }` (`media.write`); multiple files: `{ items: [...same shape...], errors: [{ filename, status, message }], ids }` – each file is checked independently (type, size, 409 on a name conflict), a failed file doesn't stop the rest (partial success, 200); `ids` are the *newly stored* items only; the blob key is `media/<folder>/<filename>` (no folder → `media/<filename>`; the `media/` prefix is configurable and separates media from replication snapshots, the site export and `redirects.json`), so on disk `data/blobs/media/2026/press/photo.jpg`; 409 (`details: { collection: "media_items", field: "key" }`) for the same filename in the same folder with *different* bytes (for multiple files, as an entry in `errors`, not as an HTTP status); the same bytes again are idempotent, see below; no `file` field → 400 |
 | GET | `/media/folders` | – | `[{ folder, count }]` – every folder, including empty ones (persisted in `media_folders`) and implicit parent folders (the client builds the prefix tree; `folder` is a label). The root is not a folder: files without a folder don't create a `""` entry |
 | POST | `/media/folders` | `{ path }` | `{ folder, count }` – creates the folder (idempotent), including implicit parent folders (`media.write`); `count` is the number of files already there (0 for a new folder, otherwise the existing count) |
 | PATCH | `/media/folders/*path` | `{ path }` | `{ folder, moved }` – renames or moves the folder; subfolders and files move with it, blobs are renamed accordingly (`media.write`); 404 if the folder doesn't exist, 409 on a target conflict. If a rename aborts partway (the process dies between the blob move and the row update), the target folder stays occupied and a repeated PATCH answers 409: move the remaining files individually via `PATCH /media/:id`, then delete the source folder |
@@ -336,6 +336,23 @@ sanitizer would corrupt legitimate text such as `5 < 6`; the frontend escapes on
 visibly flag `ai`/`mixed` (EU AI Act Art. 50) and send the origin with every upload. Without one,
 `{ origin: "unknown" }` is stored: a missing value is not proof that a human created the file. Rows
 predating the field also read as `unknown`.
+Three key families live in the blob store, with three owners: `media/<folder>/<filename>` are the
+originals this module writes (the `media/` prefix is configurable), `media-variants/<id>/<size>.webp`
+are the variants `images-default` generates ([Image variants](#image-variants)), and
+`site/media/<folder>/<filename>.<size>.webp` are the copies `delivery-static` publishes for static
+delivery, which is what the rendered HTML references
+([Static delivery](#static-delivery-the-second-traffic-light)).
+`media.reconcile` only ever looks at the first family.
+
+`media_items.key` is unique in the database, so a blob key belongs to exactly one item: two uploads
+of the same name into the same folder at the same time end as one item and one 409, never as two
+items sharing one blob. Uploading is idempotent: same folder, same filename and the same bytes
+(`checksum`) return the item that is already there, with 200 and its original `id` and `createdAt` —
+no second item, no second blob, no second set of variants, and no `media.uploaded` event
+(`media.upload` ends the pipeline itself, so the `events.emit:media.uploaded` step after it does not
+run, see [pipelines.md](pipelines.md#event-data)). The same name with *different* bytes stays a 409.
+Deleting an item deletes its blob only when no other row points at that key.
+
 Upload happens in two phases: first the row with `status: "uploading"` and the `checksum` of the
 bytes, then the blob, then `status: "ready"`. If writing the blob fails, the row stays at
 `status: "failed"` and the request answers with an error; a repeated upload of the same name
@@ -507,8 +524,9 @@ offer "dry run" before "apply".
 One view of the running instance for the admin's system page: what is wired (static) and how it
 runs (live). Both routes need a login and `insights.read` (401 anonymous, 403 without the
 permission; the example's `admin` role has `*`, `editor` does not). The manifest never carries a
-config *value*: per config variable only path, type, required, default and whether it is set;
-variables marked secret in the module's schema show neither default nor anything else. The live
+config *value*: per config variable only path, type, required, default and whether it is set
+(`set`, plus the three-state `status`); variables marked secret in the module's schema show neither
+default nor anything else. The live
 numbers are per process and start at zero on every boot — behind two instances each answers for
 itself.
 
@@ -517,8 +535,15 @@ itself.
 | GET | `/admin/insights/manifest` | `{ generatedAt, core: { version }, contracts: ["persistence@1", …], modules: [Module], steps: [Step], pipelines: [Pipeline], triggers: { http: [{ method, path, pipeline }], events: [{ event, pipeline }], crons: [{ expression, pipeline }] } }` — computed once at boot, `generatedAt` is the response time |
 | GET | `/admin/insights/stats` | `{ generatedAt, process: { pid, startedAt, uptimeMs }, runs: { active, total, failed, errors }, pipelines: [{ name, count, failed, errors, p50Ms, p95Ms, lastAt }], steps: [{ pipeline, step, count, failed, errors, p50Ms, p95Ms }], events: [{ name, count, lastAt }], ratelimit: [] }` |
 
-`Module`: `{ name: "authn/multi", use: "@michaelthielemann/kestrel-authn-multi", version: string | null (null when the package cannot be resolved from the boot root, and for path entries), provides, requires, optional: ["<contract>@<major>"], config: { schema: JsonSchema, variables: [{ path: "bootstrap.passwordHash", type, required, default?, secret, set }] }, steps: ["authn.login", …], eventHook: boolean, emits: ["migrations.applied"] (events the module emits from a contract method, `[]` for most modules) }`.
-`type` is one of `string number integer boolean array object record enum union literal function unknown`; `required` is relative to the parent object (`bootstrap.username` is required inside an optional `bootstrap`).
+`Module`: `{ name: "authn/multi", use: "@michaelthielemann/kestrel-authn-multi", version: string | null (null when the package cannot be resolved from the boot root, and for path entries), provides, requires, optional: ["<contract>@<major>"], config: { schema: JsonSchema, variables: [{ path: "bootstrap.passwordHash", type, required, default?, secret, set, status }] }, steps: ["authn.login", …], eventHook: boolean, emits: ["migrations.applied"] (events the module emits from a contract method, `[]` for most modules) }`.
+`type` is one of `string number integer boolean array object record enum union literal function unknown`. `required` is true only when neither the variable nor any of its ancestors is optional or
+defaulted — `bootstrap.username` inside an optional `bootstrap` is *not* required, because leaving
+`bootstrap` out is legal. `set` says whether the raw config carries the path itself; `status` is the
+three-state version of it: `set` (same as `set: true`), `default` (the path is absent and the value
+comes from the variable's own `.default()` or from an ancestor's — `default` then holds the effective
+value, e.g. `media.collection` → `"media_items"` when `media` is left out entirely) or `missing` (no
+value at all). A parent that *is* spelled out in the config hands its children no default: only their
+own `.default()` still applies. Secret variables report `status` but never a `default`.
 `Step`: `{ name: "content.list", module: "content/default", factory: boolean, description: StepDescription }` — a factory step's description is evaluated with the placeholder argument `<arg>`; a `describe()` that throws for it stops the boot, so the field is never `null`.
 `Pipeline`: `{ name, steps: [{ spec: "content.list:pages", name: "content.list", module, description: StepDescription }] }` with the real arguments. `StepDescription` is the module's `describe()` entry: `summary`, `reads`, `writes`, `input`/`output`/`query` (JSON Schema), `errors`, `security`, `multipart`, `binary`.
 Stats: `failed` counts every run or step whose outcome is not ok — 4xx included, so a 401 on `/me` is a failed run; `errors` is the 5xx share of that (thrown steps, `INTERNAL`, `TRANSIENT`). `p50Ms`/`p95Ms` are nearest-rank percentiles over the last 1000 samples per key, `count`/`failed` are unbounded. `step` in `steps` is the spec as written in the pipeline (`authz.require:pages.read`). `events` counts event-triggered runs per event name — an event nobody listens to is invisible. `ratelimit` is always `[]` in this release (no ratelimit contract exists yet); the field stays so a client can render it later.
