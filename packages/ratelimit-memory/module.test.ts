@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
@@ -39,6 +40,6 @@ describe("ratelimit/memory module steps via runPipeline", () => {
     await runPipeline(checkPipeline, { ip: "1.2.3.4" }, { modules: [{ module, instance }] });
     const res = await runPipeline(sweepPipeline, {}, { modules: [{ module, instance }] });
     expect(res.status).toBe(200);
-    expect((res.result as { removed: number }).removed).toBe(0);
+    expect(boundaryCast<{ removed: number }>(res.result, "json").removed).toBe(0);
   });
 });

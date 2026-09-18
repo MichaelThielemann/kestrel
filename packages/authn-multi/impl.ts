@@ -76,10 +76,14 @@ function publicUser(user: User): PublicUser {
   return { id: user.id, username: user.username, roles: user.roles, active: user.active, createdAt: user.createdAt };
 }
 
+function isTransient(error: KestrelError<"CONFLICT" | "NOT_FOUND" | "TRANSIENT">): error is AuthnError {
+  return error.code === "TRANSIENT";
+}
+
 /** findOne/deleteOne calls in login/resolve/logout can only ever answer TRANSIENT; a CONFLICT or NOT_FOUND there is a persistence bug, not an authn@1 failure. */
 function transientOnly(error: KestrelError<"CONFLICT" | "NOT_FOUND" | "TRANSIENT">): AuthnError {
-  if (error.code !== "TRANSIENT") throw new Error(`authn/multi: unexpected persistence error ${error.code}: ${error.message}`);
-  return error as AuthnError;
+  if (!isTransient(error)) throw new Error(`authn/multi: unexpected persistence error ${error.code}: ${error.message}`);
+  return error;
 }
 
 function checkPassword(config: Config, password: string): Result<void, KestrelError<"VALIDATION">> {

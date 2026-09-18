@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, definePipeline, silentLogger } from "@michaelthielemann/kestrel";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
@@ -62,7 +63,7 @@ describe("insights/default module steps via runPipeline", () => {
     await kestrel.run("pass", { trigger });
     const manifest = await kestrel.run("insightsManifest", { trigger });
     expect(manifest.status).toBe(200);
-    expect(typeof (manifest.result as { generatedAt: unknown }).generatedAt).toBe("number");
+    expect(typeof boundaryCast<{ generatedAt: unknown }>(manifest.result, "json").generatedAt).toBe("number");
     expect(manifest.result).toMatchObject({ modules: [{ name: "probe/test" }, { name: "insights/default", provides: ["insights@1"], config: { variables: [] } }], triggers: { http: [{ method: "GET", path: "/pass", pipeline: "pass" }] } });
     const stats = await kestrel.run("insightsStats", { trigger });
     expect(stats.result).toMatchObject({ runs: { total: 2 }, pipelines: [{ name: "insightsManifest", count: 1 }, { name: "pass", count: 1 }] });

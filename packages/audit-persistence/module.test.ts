@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
@@ -15,9 +16,9 @@ function makeDeps(db: ReturnType<typeof createFakePersistence>): Deps {
   return {
     get<T>(contract: Contract<T>): T {
       if (!providers.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
-      return providers.get(contract.name) as T;
+      return boundaryCast<T>(providers.get(contract.name), "host");
     },
-    find: <T>(contract: Contract<T>): T | undefined => providers.get(contract.name) as T | undefined,
+    find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
     logger: silentLogger,
     root: process.cwd(),
   };
@@ -25,7 +26,7 @@ function makeDeps(db: ReturnType<typeof createFakePersistence>): Deps {
 
 async function boot(): Promise<{ instance: Audit; db: ReturnType<typeof createFakePersistence> }> {
   const db = createFakePersistence();
-  const instance = (await module.setup(module.configSchema.parse({}), makeDeps(db))) as Audit;
+  const instance = boundaryCast<Audit>(await module.setup(module.configSchema.parse({}), makeDeps(db)), "host");
   return { instance, db };
 }
 

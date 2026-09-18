@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import type { Content, ContentDocument, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import { createFakePersistence, matchesFilter } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createContext, type Context } from "@michaelthielemann/kestrel/context";
 import type { KestrelError } from "@michaelthielemann/kestrel/errors";
 import { ok, type Result } from "@michaelthielemann/kestrel/result";
@@ -21,7 +22,7 @@ function fakeContent(): Content {
   const docs = new Map<string, Record<string, unknown>>();
   const resolve = (row: Record<string, unknown>, locale: string): ContentDocument => {
     const doc: Record<string, unknown> = { id: row.id, createdAt: 1, updatedAt: 1, title: row[`title__${locale}`] ?? null, body: row[`body__${locale}`] ?? null, order: row.order ?? null };
-    return doc as ContentDocument;
+    return boundaryCast<ContentDocument>(doc, "host");
   };
   const notImplemented = () => Promise.reject(new Error("not needed"));
   return {

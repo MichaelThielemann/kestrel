@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
@@ -36,7 +37,7 @@ export default defineModule({
 
   steps: (links) => ({
     extract: stepFactory((type: string) => async (ctx: Context) => {
-      const result = ctx.result as { id?: unknown } | undefined;
+      const result = boundaryCast<{ id?: unknown } | undefined>(ctx.result, "json");
       const id = result?.id;
       if (typeof id !== "string") throw new Error(`links.extract:${type}: no document id in result`);
       const extracted = await links.extract(type, id);

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context, StepResult } from "@michaelthielemann/kestrel/context";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import type { CoreCode, KestrelError } from "@michaelthielemann/kestrel/errors";
@@ -61,7 +62,7 @@ describe("events/inmemory emit step", () => {
     const emit = (steps.emit as (spec: string) => (ctx: Context) => Promise<StepResult>)("page.created");
     await emit(fakeCtx({ params: { slug: "x" }, result: { id: "p1", title: "t" } }));
 
-    expect(received).toEqual({ eventId: expect.any(String) as string, event: "page.created", at: expect.any(Number) as number, runId: "test", identity: null, params: { slug: "x" }, id: "p1" });
+    expect(received).toEqual({ eventId: expect.any(String) as unknown, event: "page.created", at: expect.any(Number) as unknown, runId: "test", identity: null, params: { slug: "x" }, id: "p1" });
   });
 
   it("adds ids from a bulk result (result.ids), id stays null", async () => {
@@ -74,7 +75,7 @@ describe("events/inmemory emit step", () => {
     const emit = (steps.emit as (spec: string) => (ctx: Context) => Promise<StepResult>)("media.uploaded");
     await emit(fakeCtx({ result: { items: [], errors: [], ids: ["a", "b"] } }));
 
-    expect(received).toEqual({ eventId: expect.any(String) as string, event: "media.uploaded", at: expect.any(Number) as number, runId: "test", identity: null, params: {}, id: null, ids: ["a", "b"] });
+    expect(received).toEqual({ eventId: expect.any(String) as unknown, event: "media.uploaded", at: expect.any(Number) as unknown, runId: "test", identity: null, params: {}, id: null, ids: ["a", "b"] });
   });
 
   it("takes the id from ctx.result.document.id when result is a { document } envelope", async () => {
@@ -87,8 +88,8 @@ describe("events/inmemory emit step", () => {
     const emit = (steps.emit as (spec: string) => (ctx: Context) => Promise<StepResult>)("page.updated");
     await emit(fakeCtx({ result: { document: { id: "p2" }, delivery: { ok: true } } }));
 
-    expect((received as { id: unknown }).id).toBe("p2");
-    expect((received as Record<string, unknown>).result).toBeUndefined();
+    expect(boundaryCast<{ id: unknown }>(received, "json").id).toBe("p2");
+    expect(boundaryCast<Record<string, unknown>>(received, "json").result).toBeUndefined();
   });
 
   it("falls back to ctx.params.id when there is no result", async () => {
@@ -101,7 +102,7 @@ describe("events/inmemory emit step", () => {
     const emit = (steps.emit as (spec: string) => (ctx: Context) => Promise<StepResult>)("media.deleted");
     await emit(fakeCtx({ params: { id: "m1" } }));
 
-    expect((received as { id: unknown }).id).toBe("m1");
+    expect(boundaryCast<{ id: unknown }>(received, "json").id).toBe("m1");
   });
 
   it("falls back to null id when neither result nor params carry an id", async () => {
@@ -114,7 +115,7 @@ describe("events/inmemory emit step", () => {
     const emit = (steps.emit as (spec: string) => (ctx: Context) => Promise<StepResult>)("boot");
     await emit(fakeCtx());
 
-    expect((received as { id: unknown }).id).toBeNull();
+    expect(boundaryCast<{ id: unknown }>(received, "json").id).toBeNull();
   });
 
   it("stamps a fresh eventId and the emitting runId on every envelope", async () => {
@@ -143,8 +144,8 @@ describe("events/inmemory emit step", () => {
     const emit = (steps.emit as (spec: string) => (ctx: Context) => Promise<StepResult>)("auth.loggedIn?with=result");
     await emit(fakeCtx({ result: { token: "secret", identity: { id: "u1", claims: {} } } }));
 
-    expect((received as Record<string, unknown>).event).toBe("auth.loggedIn");
-    expect((received as Record<string, unknown>).result).toEqual({ token: "secret", identity: { id: "u1", claims: {} } });
+    expect(boundaryCast<Record<string, unknown>>(received, "json").event).toBe("auth.loggedIn");
+    expect(boundaryCast<Record<string, unknown>>(received, "json").result).toEqual({ token: "secret", identity: { id: "u1", claims: {} } });
   });
 });
 
@@ -206,14 +207,15 @@ describe("events/inmemory event trigger hook", () => {
 });
 
 async function makeInstance(): Promise<Events & { logger: Logger }> {
-  return (await module.setup(module.configSchema.parse({}), {
+  const instance = await module.setup(module.configSchema.parse({}), {
     get: () => {
       throw new Error("no contract expected");
     },
     find: () => undefined,
     logger: silentLogger,
     root: process.cwd(),
-  })) as Events & { logger: Logger };
+  });
+  return boundaryCast<Events & { logger: Logger }>(instance, "host");
 }
 
 function pipeline(...steps: string[]) {

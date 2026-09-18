@@ -4,6 +4,7 @@ import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
 import { SITE_TEST_MODEL } from "@michaelthielemann/kestrel-contracts/site.contract.test";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createContext } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
@@ -81,9 +82,9 @@ describe("site/default module steps (schema-checked)", () => {
     const deps: Deps = {
       get<T>(contract: Contract<T>): T {
         if (!providers.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
-        return providers.get(contract.name) as T;
+        return boundaryCast<T>(providers.get(contract.name), "host");
       },
-      find: <T>(contract: Contract<T>): T | undefined => providers.get(contract.name) as T | undefined,
+      find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
       logger: silentLogger,
       root: process.cwd(),
     };
@@ -105,7 +106,7 @@ describe("site/default module steps (schema-checked)", () => {
 
     const res = await run([`site.resolve:${arg}`, `site.resolveLinks:${arg}`], { params: { path: "links" }, query: { locale: "de" } }, instance);
     expect(res.status).toBe(200);
-    const doc = res.result as Record<string, unknown>;
+    const doc = boundaryCast<Record<string, unknown>>(res.result, "json");
     expect(doc.body).toBe(`<a href="/">Start</a>`);
   });
 

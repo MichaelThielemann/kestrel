@@ -6,6 +6,8 @@
  * here so the edge script only has to match and substitute.
  */
 
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+
 /** One entry of the published artifact. `pattern` is a regex SOURCE string, anchored, path-only. */
 export interface RedirectRule {
   pattern: string;
@@ -144,7 +146,7 @@ export function compileRedirects(rows: unknown): RedirectRule[] {
 
   return rows.map((raw, i) => {
     try {
-      const entry = (raw ?? {}) as Record<string, unknown>;
+      const entry = boundaryCast<Record<string, unknown>>(raw ?? {}, "json");
       const from = readText(entry.from, '"From"');
       const target = normalizeTarget(readText(entry.to, '"To"'));
       const groups = wildcardCount(from);
@@ -185,7 +187,7 @@ export function compilePublishableRedirects(rows: unknown): { rules: RedirectRul
     try {
       rules.push(...compileRedirects([row]));
     } catch (error) {
-      skipped.push(`Row ${i + 1}: ${(error as Error).message.replace(/^Row 1: /, "")}`);
+      skipped.push(`Row ${i + 1}: ${(error instanceof Error ? error.message : String(error)).replace(/^Row 1: /, "")}`);
     }
   });
   return { rules, skipped };
