@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { err, failure, ok, type Result } from "../errors.ts";
 import { fieldDefinition, type Document, type FieldDefinition, type FieldType, type Filter, type FindOptions, type NewDocument, type Page, type Persistence, type PersistenceError, type Schema } from "../persistence.ts";
 
@@ -12,7 +13,7 @@ const OPERATORS = new Set(["eq", "ne", "gt", "gte", "lt", "lte", "in", "like"]);
 function isCondition(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  return keys.length === 1 && OPERATORS.has(keys[0] as string);
+  return keys.length === 1 && keys.every((key) => OPERATORS.has(key));
 }
 
 // Without a schema (standalone matchesFilter) the column type is inferred from the stored value.
@@ -113,8 +114,8 @@ export function matchesFilter(doc: Row, filter: Filter, schema?: Schema): boolea
   return Object.entries(filter).every(([field, expected]) => {
     if (schema && field !== "id" && !(field in schema)) throw new Error(`fakePersistence: unknown field "${field}"`);
     const column = columnOf(schema, field, doc[field]);
-    const [op, value] = Object.entries(isCondition(expected) ? expected : { eq: expected })[0] as [string, unknown];
-    return matchesCondition(column, encode(column, doc[field]), op, value);
+    const encoded = encode(column, doc[field]);
+    return Object.entries(isCondition(expected) ? expected : { eq: expected }).every(([op, value]) => matchesCondition(column, encoded, op, value));
   });
 }
 
@@ -127,6 +128,7 @@ export function createFakePersistence(): FakePersistence {
   const collections = new Map<string, { schema: Record<string, FieldDefinition>; rows: Map<string, Row> }>();
   let pending: "TRANSIENT" | "CONFLICT" | null = null;
   const clone = <T>(v: T): T => structuredClone(v);
+  const cloneAs = <T>(row: Row): T => boundaryCast<T>(clone(row), "host");
   const injected = (): PersistenceError | null => {
     if (pending === null) return null;
     const code = pending;
@@ -138,10 +140,11 @@ export function createFakePersistence(): FakePersistence {
     if (!c) throw new Error(`fakePersistence: unknown collection "${name}"`);
     return c;
   };
-  const select = (collection: string, filter: Filter): Row[] => {
+  const selectEntries = (collection: string, filter: Filter): Array<[string, Row]> => {
     const { schema, rows } = table(collection);
-    return [...rows.values()].filter((row) => matchesFilter(row, filter, schema));
+    return [...rows.entries()].filter(([, row]) => matchesFilter(row, filter, schema));
   };
+  const select = (collection: string, filter: Filter): Row[] => selectEntries(collection, filter).map(([, row]) => row);
   const sortKey = (schema: Schema, field: string, row: Row): SqlValue => {
     if (field !== "id" && !(field in schema)) throw new Error(`fakePersistence: unknown field "${field}"`);
     return encode(columnOf(schema, field, row[field]), row[field]);
@@ -179,7 +182,7 @@ export function createFakePersistence(): FakePersistence {
     const violation = uniqueViolation(collection, row, undefined);
     if (violation) return err(violation);
     rows.set(id, row);
-    return ok(clone(row) as T);
+    return ok(cloneAs<T>(row));
   };
 
   return {
@@ -223,7 +226,7 @@ export function createFakePersistence(): FakePersistence {
       const injectedError = injected();
       if (injectedError) return err(injectedError);
       const [row] = select(collection, filter);
-      return ok(row ? (clone(row) as T) : null);
+      return ok(row ? cloneAs<T>(row) : null);
     },
     async findMany<T extends Document>(collection: string, filter: Filter, options: FindOptions = {}): Promise<Result<Page<T>, PersistenceError>> {
       const injectedError = injected();
@@ -236,7 +239,7 @@ export function createFakePersistence(): FakePersistence {
       }
       const offset = options.offset ?? 0;
       rows = rows.slice(offset, options.limit === undefined ? undefined : offset + options.limit);
-      return ok({ items: rows.map((r) => clone(r) as T), total });
+      return ok({ items: rows.map((r) => cloneAs<T>(r)), total });
     },
     async count(collection, filter) {
       const injectedError = injected();
@@ -253,19 +256,19 @@ export function createFakePersistence(): FakePersistence {
       const violation = uniqueViolation(collection, next, id);
       if (violation) return err(violation);
       rows.set(id, next);
-      return ok(clone(next) as T);
+      return ok(cloneAs<T>(next));
     },
     async updateMany(collection, filter, patch) {
       const injectedError = injected();
       if (injectedError) return err(injectedError);
       const { rows } = table(collection);
-      const hits = select(collection, filter);
+      const hits = selectEntries(collection, filter);
       const normalized = normalize(table(collection).schema, patch);
-      for (const row of hits) {
-        const violation = uniqueViolation(collection, { ...row, ...normalized }, row.id as string);
+      for (const [id, row] of hits) {
+        const violation = uniqueViolation(collection, { ...row, ...normalized }, id);
         if (violation) return err(violation);
       }
-      for (const row of hits) rows.set(row.id as string, { ...row, ...normalized, id: row.id });
+      for (const [id, row] of hits) rows.set(id, { ...row, ...normalized, id: row.id });
       return ok(hits.length);
     },
     async deleteOne(collection, id) {
@@ -278,8 +281,8 @@ export function createFakePersistence(): FakePersistence {
       const injectedError = injected();
       if (injectedError) return err(injectedError);
       const { rows } = table(collection);
-      const hits = select(collection, filter);
-      for (const row of hits) rows.delete(row.id as string);
+      const hits = selectEntries(collection, filter);
+      for (const [id] of hits) rows.delete(id);
       return ok(hits.length);
     },
   };

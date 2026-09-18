@@ -48,10 +48,10 @@ export interface ObserverHub {
 
 export function createObserverHub(logger: Logger): ObserverHub {
   const observers = new Set<RunObserver>();
-  const fanout = <K extends keyof RunObserver>(method: K, event: Parameters<NonNullable<RunObserver[K]>>[0]): void => {
+  const fanout = (method: keyof RunObserver, call: (observer: RunObserver) => void): void => {
     for (const observer of observers) {
       try {
-        (observer[method] as ((e: typeof event) => void) | undefined)?.call(observer, event);
+        call(observer);
       } catch (err) {
         logger.error(`run observer ${method} threw`, { error: err instanceof Error ? err.message : String(err) });
       }
@@ -59,10 +59,10 @@ export function createObserverHub(logger: Logger): ObserverHub {
   };
   return {
     observer: {
-      runStart: (e) => fanout("runStart", e),
-      runEnd: (e) => fanout("runEnd", e),
-      stepStart: (e) => fanout("stepStart", e),
-      stepEnd: (e) => fanout("stepEnd", e),
+      runStart: (e) => fanout("runStart", (o) => o.runStart?.(e)),
+      runEnd: (e) => fanout("runEnd", (o) => o.runEnd?.(e)),
+      stepStart: (e) => fanout("stepStart", (o) => o.stepStart?.(e)),
+      stepEnd: (e) => fanout("stepEnd", (o) => o.stepEnd?.(e)),
     },
     observe: (observer) => {
       observers.add(observer);

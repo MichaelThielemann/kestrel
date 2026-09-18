@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stepFactory, type Context, type StepMap } from "./context.ts";
+import { stepFactory, type Context, type Step, type StepMap } from "./context.ts";
 import type { StepDescription } from "./defineModule.ts";
 import { KestrelBootError } from "./errors.ts";
 import { PLACEHOLDER_ARG, StepRegistry } from "./registry.ts";
@@ -51,7 +51,7 @@ describe("StepRegistry", () => {
     r.register("authz/roles", "authz", { require: stepFactory((perm: string) => async (ctx: Context) => ok({ ...ctx, result: perm })) }, { require: (perm) => flat(`require ${perm}`) });
     const step = r.resolve("authz.require:pages.write");
     const out = await step.fn(context());
-    expect(out.ok && (out.value.result as string)).toBe("pages.write");
+    expect(out.ok && out.value.result).toBe("pages.write");
   });
 
   it("argument on a plain step is a boot error and never calls the step", () => {
@@ -92,13 +92,14 @@ describe("StepRegistry", () => {
 
   it("registers steps provided via the prototype chain (class-instance step maps)", async () => {
     class Steps {
+      [key: string]: Step;
       async requireUser(ctx: Context) {
         return ok(ctx);
       }
     }
     const r = new StepRegistry();
-    const instance: object = new Steps();
-    r.register("authn/single", "authn", instance as StepMap, { requireUser: flat("requireUser") });
+    const instance: StepMap = new Steps();
+    r.register("authn/single", "authn", instance, { requireUser: flat("requireUser") });
     expect(r.has("authn.requireUser")).toBe(true);
     const step = r.resolve("authn.requireUser");
     const ctx = context();

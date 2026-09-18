@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { Content, ContentError, ContentModel, FieldError } from "./content.ts";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { expectErr, expectOk } from "./testing/result.ts";
 
-const fieldsOf = (error: ContentError): string[] => ((error.details?.fields ?? []) as FieldError[]).map((f) => f.field).sort();
+const fieldsOf = (error: ContentError): string[] => boundaryCast<FieldError[]>(error.details?.fields ?? [], "host").map((f) => f.field).sort();
 
 export const CONTENT_TEST_MODEL: ContentModel = {
   types: {

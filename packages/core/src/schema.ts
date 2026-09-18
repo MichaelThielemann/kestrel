@@ -1,4 +1,5 @@
 import type { JsonSchema } from "./defineModule.ts";
+import { isRecord } from "./guards.ts";
 
 export interface SchemaProblem {
   path: string;
@@ -9,10 +10,6 @@ const ROOT = "$";
 
 function child(path: string, key: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function subSchema(value: unknown): JsonSchema | undefined {

@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { boundaryCast } from "../cast.ts";
 import { isBinaryResult, requestIdOf, type ContextInput, type UploadedFile } from "../context.ts";
 import type { CoreCode } from "../errors.ts";
 import type { Logger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
 import { createAllowlist } from "./allowlist.ts";
+import { isRecord } from "../guards.ts";
 
 export interface Route {
   method: string;
@@ -62,8 +64,7 @@ export function matchRoute(routes: readonly Route[], method: string, pathname: s
     if (wildcard === -1 ? route.segments.length !== parts.length : parts.length < wildcard) continue;
     const params: Record<string, string> = {};
     let ok = true;
-    for (let i = 0; i < route.segments.length; i++) {
-      const seg = route.segments[i] as string;
+    for (const [i, seg] of route.segments.entries()) {
       if (i === wildcard) {
         const rest = parts.slice(i).map(decodeSegment);
         // An encoded "/" would make the rest indistinguishable from a deeper path, so it never matches.
@@ -71,7 +72,8 @@ export function matchRoute(routes: readonly Route[], method: string, pathname: s
         else params[seg.slice(1)] = rest.join("/");
         break;
       }
-      const part = decodeSegment(parts[i] as string);
+      const raw = parts[i];
+      const part = raw === undefined ? undefined : decodeSegment(raw);
       if (part === undefined) ok = false;
       else if (seg.startsWith(":")) params[seg.slice(1)] = part;
       else if (seg !== part) ok = false;
@@ -86,11 +88,12 @@ export class BodyTooLarge extends Error {}
 
 async function readBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
+  const stream: AsyncIterable<Buffer> = req;
   let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
+  for await (const chunk of stream) {
+    size += chunk.length;
     if (size > maxBytes) throw new BodyTooLarge(`body exceeds ${maxBytes} bytes`);
-    chunks.push(chunk as Buffer);
+    chunks.push(chunk);
   }
   return Buffer.concat(chunks);
 }
@@ -125,8 +128,8 @@ export async function parseRequestBody(contentType: string, body: Uint8Array): P
   const text = Buffer.from(body).toString("utf8");
   if (text.trim() === "") return { payload: {}, files: [] };
   const parsed: unknown = JSON.parse(text);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("body must be a JSON object");
-  return { payload: parsed as Record<string, unknown>, files: [] };
+  if (!isRecord(parsed)) throw new Error("body must be a JSON object");
+  return { payload: parsed, files: [] };
 }
 
 export interface HttpResponse {
@@ -339,7 +342,7 @@ export function listen(server: Server, port: number, host: string): Promise<Addr
     server.once("error", reject);
     server.listen(port, host, () => {
       server.off("error", reject);
-      resolve(server.address() as AddressInfo);
+      resolve(boundaryCast<AddressInfo>(server.address(), "host"));
     });
   });
 }

@@ -40,6 +40,12 @@ export default tseslint.config(
     },
   },
   {
+    files: ["packages/core/**/*.ts", "packages/contracts/**/*.ts", "packages/h3/**/*.ts", "packages/openapi/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-unsafe-type-assertion": "error",
+    },
+  },
+  {
     files: ["packages/*/**/*.ts"],
     ignores: ["packages/core/**", "packages/contracts/**", "packages/h3/**"],
     rules: {

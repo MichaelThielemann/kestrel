@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { boundaryCast } from "./cast.ts";
 import { describeConfig, toJsonSchema } from "./zodSchema.ts";
 
 const schema = z
@@ -23,7 +24,7 @@ describe("toJsonSchema", () => {
     expect(out.type).toBe("object");
     expect(out.additionalProperties).toBe(false);
     expect(out.required).toEqual(["file", "buckets", "passwordHash", "kind", "up", "ttl"]);
-    const props = out.properties as Record<string, Record<string, unknown>>;
+    const props = boundaryCast<Record<string, Record<string, unknown>>>(out.properties, "json");
     expect(props.file).toEqual({ type: "string", minLength: 1 });
     expect(props.port).toEqual({ type: "integer", minimum: 1, maximum: 65535, default: 3000 });
     expect(props.mode).toEqual({ type: "string", enum: ["apply", "check", "off"], default: "apply" });
@@ -35,9 +36,9 @@ describe("toJsonSchema", () => {
   });
 
   it("keeps the secret marker and secret defaults out of the schema", () => {
-    const props = toJsonSchema(schema).properties as Record<string, Record<string, unknown>>;
+    const props = boundaryCast<Record<string, Record<string, unknown>>>(toJsonSchema(schema).properties, "json");
     expect(props.passwordHash).toEqual({ type: "string", pattern: "^scrypt\\$" });
-    const bootstrap = props.bootstrap!.properties as Record<string, unknown>;
+    const bootstrap = boundaryCast<Record<string, unknown>>(props.bootstrap?.properties, "json");
     expect(bootstrap.token).toEqual({ type: "string" });
     expect(JSON.stringify(toJsonSchema(schema))).not.toContain("secret");
   });

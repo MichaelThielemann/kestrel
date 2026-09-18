@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { boundaryCast } from "./cast.ts";
 import { consoleLogger, localIso } from "./logger.ts";
+
+function logLine(calls: unknown[][], index: number): Record<string, unknown> {
+  return boundaryCast<Record<string, unknown>>(JSON.parse(String(calls[index]?.[0])), "json");
+}
 
 describe("localIso", () => {
   it("formats with milliseconds and the local UTC offset", () => {
@@ -31,9 +36,9 @@ describe("consoleLogger", () => {
     consoleLogger.info("hello", { a: 1 });
     consoleLogger.error("oops", { b: 2 });
 
-    const stepLine = JSON.parse(logSpy.mock.calls[0]![0] as string) as Record<string, unknown>;
-    const infoLine = JSON.parse(logSpy.mock.calls[1]![0] as string) as Record<string, unknown>;
-    const errorLine = JSON.parse(errorSpy.mock.calls[0]![0] as string) as Record<string, unknown>;
+    const stepLine = logLine(logSpy.mock.calls, 0);
+    const infoLine = logLine(logSpy.mock.calls, 1);
+    const errorLine = logLine(errorSpy.mock.calls, 0);
 
     expect(Object.keys(stepLine)[0]).toBe("time");
     expect(Object.keys(infoLine)[0]).toBe("time");
@@ -46,6 +51,6 @@ describe("consoleLogger", () => {
   it("logs a failure outcome as fail(<code>)", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     consoleLogger.step({ runId: "r1", pipeline: "p", step: "s", ms: 1, outcome: "fail(NOT_FOUND)" });
-    expect(JSON.parse(logSpy.mock.calls[0]![0] as string)).toMatchObject({ level: "step", outcome: "fail(NOT_FOUND)" });
+    expect(logLine(logSpy.mock.calls, 0)).toMatchObject({ level: "step", outcome: "fail(NOT_FOUND)" });
   });
 });
