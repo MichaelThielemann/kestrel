@@ -47,7 +47,7 @@ export function migrationsContractTests(make: (input: { migrations: Migration[];
     });
 
     it("applies a migration once, records it in the ledger, and is a no-op on a second apply", async () => {
-      const up = vi.fn((ctx: MigrationContext) => ({ ...ctx.document, title: `${ctx.document.title as string} v2` }));
+      const up = vi.fn((ctx: MigrationContext) => ({ ...ctx.document, title: `${String(ctx.document.title)} v2` }));
       const migration: Migration = { id: "rewrite-title", collection: "pages", up };
       const { migrations, content } = await make({ migrations: [migration] });
       expectOk(await content.create("pages", { slug: "a", title: "A", status: "draft" }));
@@ -95,7 +95,7 @@ export function migrationsContractTests(make: (input: { migrations: Migration[];
       const calls: Array<{ id: string; locale: string | undefined }> = [];
       const up = (ctx: MigrationContext) => {
         calls.push({ id: ctx.document.id, locale: ctx.locale });
-        return { ...ctx.document, title: `${ctx.document.title as string}-${ctx.locale}` };
+        return { ...ctx.document, title: `${String(ctx.document.title)}-${ctx.locale}` };
       };
       const migration: Migration = { id: "per-locale", collection: "pages", up };
       const { migrations, content } = await make({ migrations: [migration] });
@@ -138,7 +138,7 @@ export function migrationsContractTests(make: (input: { migrations: Migration[];
     });
 
     it("also migrates a single-kind type", async () => {
-      const migration: Migration = { id: "settings-upper", collection: "settings", up: (ctx) => ({ ...ctx.document, title: (ctx.document.title as string).toUpperCase() }) };
+      const migration: Migration = { id: "settings-upper", collection: "settings", up: (ctx) => ({ ...ctx.document, title: String(ctx.document.title).toUpperCase() }) };
       const { migrations, content } = await make({ migrations: [migration] });
       expectOk(await content.set("settings", { title: "hello" }));
 

@@ -7,13 +7,13 @@ export interface CronSpec {
   anyDay: boolean;
 }
 
-const RANGES: ReadonlyArray<[string, number, number]> = [
+const RANGES = [
   ["minute", 0, 59],
   ["hour", 0, 23],
   ["day of month", 1, 31],
   ["month", 1, 12],
   ["day of week", 0, 7],
-];
+] as const;
 
 function parseField(field: string, label: string, min: number, max: number): { values: Set<number>; restricted: boolean } {
   const values = new Set<number>();
@@ -44,24 +44,30 @@ function parseField(field: string, label: string, min: number, max: number): { v
 }
 
 export function parseCron(expression: string): CronSpec {
-  const fields = expression.trim().split(/\s+/);
-  if (fields.length !== 5) throw new Error(`cron expression "${expression}" must have 5 fields`);
-  const parsed = fields.map((f, i) => {
-    const [label, min, max] = RANGES[i] as [string, number, number];
-    return parseField(f, label, min, max);
-  }) as [ReturnType<typeof parseField>, ReturnType<typeof parseField>, ReturnType<typeof parseField>, ReturnType<typeof parseField>, ReturnType<typeof parseField>];
-  const dow = parsed[4].values;
+  const [minute, hour, dayOfMonth, month, dayOfWeek, ...rest] = expression.trim().split(/\s+/);
+  if (minute === undefined || hour === undefined || dayOfMonth === undefined || month === undefined || dayOfWeek === undefined || rest.length > 0) {
+    throw new Error(`cron expression "${expression}" must have 5 fields`);
+  }
+  const [minuteRange, hourRange, dayOfMonthRange, monthRange, dayOfWeekRange] = RANGES;
+  const parsed = {
+    minute: parseField(minute, ...minuteRange),
+    hour: parseField(hour, ...hourRange),
+    dayOfMonth: parseField(dayOfMonth, ...dayOfMonthRange),
+    month: parseField(month, ...monthRange),
+    dayOfWeek: parseField(dayOfWeek, ...dayOfWeekRange),
+  };
+  const dow = parsed.dayOfWeek.values;
   if (dow.has(7)) {
     dow.delete(7);
     dow.add(0);
   }
   return {
-    minute: parsed[0].values,
-    hour: parsed[1].values,
-    dayOfMonth: parsed[2].values,
-    month: parsed[3].values,
+    minute: parsed.minute.values,
+    hour: parsed.hour.values,
+    dayOfMonth: parsed.dayOfMonth.values,
+    month: parsed.month.values,
     dayOfWeek: dow,
-    anyDay: parsed[2].restricted && parsed[4].restricted,
+    anyDay: parsed.dayOfMonth.restricted && parsed.dayOfWeek.restricted,
   };
 }
 

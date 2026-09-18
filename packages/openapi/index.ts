@@ -1,4 +1,5 @@
 import type { JsonSchema, Kestrel, ResolvedPipeline, Route, StepDescription } from "@michaelthielemann/kestrel";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 
 export interface OpenApiInfo {
   title: string;
@@ -46,8 +47,8 @@ function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
   const properties: Record<string, unknown> = {};
   const required = new Set<string>();
   for (const s of schemas) {
-    Object.assign(properties, (s.properties as Record<string, unknown> | undefined) ?? {});
-    for (const r of (s.required as string[] | undefined) ?? []) required.add(r);
+    Object.assign(properties, boundaryCast<Record<string, unknown>>(s.properties ?? {}, "json"));
+    for (const r of boundaryCast<string[]>(s.required ?? [], "json")) required.add(r);
   }
   const merged: JsonSchema = { type: "object", properties };
   if (required.size > 0) merged.required = [...required].sort();
@@ -56,9 +57,9 @@ function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
 }
 
 function mergeIntoItems(current: JsonSchema | undefined, extension: JsonSchema): JsonSchema {
-  const properties = current?.properties as Record<string, JsonSchema> | undefined;
+  const properties = boundaryCast<Record<string, JsonSchema> | undefined>(current?.properties, "json");
   const list = properties?.items;
-  const item = list?.items as JsonSchema | undefined;
+  const item = boundaryCast<JsonSchema | undefined>(list?.items, "json");
   if (current === undefined || item === undefined || typeof item !== "object" || Array.isArray(item)) {
     return current === undefined ? extension : mergeObjects([current, extension])!;
   }
@@ -120,7 +121,7 @@ function operation(route: Route, pipeline: ResolvedPipeline, params: string[]): 
   };
   const body = mergeObjects(inputs);
   if (multipart) {
-    const properties = { ...((body?.properties as Record<string, unknown> | undefined) ?? {}), file: { type: "string", format: "binary" } };
+    const properties = { ...boundaryCast<Record<string, unknown>>(body?.properties ?? {}, "json"), file: { type: "string", format: "binary" } };
     op.requestBody = { required: true, content: { "multipart/form-data": { schema: { type: "object", properties, required: ["file"] } } } };
   } else if (body && ["POST", "PUT", "PATCH", "DELETE"].includes(route.method)) {
     op.requestBody = { required: true, content: { "application/json": { schema: body } } };

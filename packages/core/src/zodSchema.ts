@@ -1,4 +1,5 @@
 import type { ZodTypeAny } from "zod";
+import { boundaryCast } from "./cast.ts";
 import type { JsonSchema } from "./defineModule.ts";
 
 export interface ConfigVariable {
@@ -20,24 +21,24 @@ export const SECRET = "secret";
 interface Def {
   typeName?: string;
   description?: string;
-  innerType?: ZodTypeAny;
-  schema?: ZodTypeAny;
-  type?: ZodTypeAny;
-  in?: ZodTypeAny;
+  innerType: ZodTypeAny;
+  schema: ZodTypeAny;
+  type: ZodTypeAny;
+  in: ZodTypeAny;
   out?: ZodTypeAny;
-  getter?: () => ZodTypeAny;
+  getter: () => ZodTypeAny;
   shape?: () => Record<string, ZodTypeAny>;
   unknownKeys?: string;
   catchall?: ZodTypeAny;
   keyType?: ZodTypeAny;
-  valueType?: ZodTypeAny;
-  values?: unknown;
+  valueType: ZodTypeAny;
+  values: Record<string, unknown>;
   value?: unknown;
   options?: ZodTypeAny[] | Map<unknown, ZodTypeAny>;
   items?: ZodTypeAny[];
   rest?: ZodTypeAny | null;
-  left?: ZodTypeAny;
-  right?: ZodTypeAny;
+  left: ZodTypeAny;
+  right: ZodTypeAny;
   checks?: Array<{ kind: string; value?: unknown; regex?: RegExp; inclusive?: boolean }>;
   minLength?: { value: number } | null;
   maxLength?: { value: number } | null;
@@ -53,7 +54,7 @@ interface Unwrapped {
   description?: string;
 }
 
-const def = (schema: ZodTypeAny): Def => schema._def as Def;
+const def = (schema: ZodTypeAny): Def => boundaryCast<Def>(schema._def, "host");
 const kind = (schema: ZodTypeAny): string => def(schema).typeName ?? "";
 
 /** Peels optional/default/nullable/effects/branded/pipeline/catch/lazy wrappers off, remembering what they said. */
@@ -66,24 +67,24 @@ function unwrap(schema: ZodTypeAny): Unwrapped {
     const name = d.typeName;
     if (name === "ZodOptional") {
       out.optional = true;
-      current = d.innerType as ZodTypeAny;
+      current = d.innerType;
     } else if (name === "ZodDefault") {
       out.optional = true;
       if (out.defaultValue === undefined && d.defaultValue !== undefined) out.defaultValue = d.defaultValue;
-      current = d.innerType as ZodTypeAny;
+      current = d.innerType;
     } else if (name === "ZodNullable") {
       out.nullable = true;
-      current = d.innerType as ZodTypeAny;
+      current = d.innerType;
     } else if (name === "ZodCatch") {
-      current = d.innerType as ZodTypeAny;
+      current = d.innerType;
     } else if (name === "ZodEffects") {
-      current = d.schema as ZodTypeAny;
+      current = d.schema;
     } else if (name === "ZodBranded") {
-      current = d.type as ZodTypeAny;
+      current = d.type;
     } else if (name === "ZodPipeline") {
-      current = d.in as ZodTypeAny;
+      current = d.in;
     } else if (name === "ZodLazy") {
-      current = (d.getter as () => ZodTypeAny)();
+      current = d.getter();
     } else {
       break;
     }
@@ -162,12 +163,12 @@ function bareSchema(schema: ZodTypeAny): JsonSchema {
     case "ZodEnum":
       return { type: "string", enum: d.values };
     case "ZodNativeEnum": {
-      const values = Object.values(d.values as Record<string, unknown>);
+      const values = Object.values(d.values);
       const numeric = values.filter((v) => typeof v === "number");
       return { enum: numeric.length > 0 ? numeric : values };
     }
     case "ZodArray": {
-      const out: JsonSchema = { type: "array", items: toJsonSchema(d.type as ZodTypeAny) };
+      const out: JsonSchema = { type: "array", items: toJsonSchema(d.type) };
       if (d.minLength) out.minItems = d.minLength.value;
       if (d.maxLength) out.maxItems = d.maxLength.value;
       if (d.exactLength) out.minItems = out.maxItems = d.exactLength.value;
@@ -181,12 +182,12 @@ function bareSchema(schema: ZodTypeAny): JsonSchema {
     case "ZodObject":
       return objectSchema(d);
     case "ZodRecord":
-      return { type: "object", additionalProperties: toJsonSchema(d.valueType as ZodTypeAny) };
+      return { type: "object", additionalProperties: toJsonSchema(d.valueType) };
     case "ZodUnion":
     case "ZodDiscriminatedUnion":
       return { anyOf: optionsOf(d).map(toJsonSchema) };
     case "ZodIntersection":
-      return { allOf: [toJsonSchema(d.left as ZodTypeAny), toJsonSchema(d.right as ZodTypeAny)] };
+      return { allOf: [toJsonSchema(d.left), toJsonSchema(d.right)] };
     default:
       return {};
   }
@@ -238,7 +239,7 @@ function valueAt(raw: unknown, path: string[]): unknown {
   let current = raw;
   for (const key of path) {
     if (typeof current !== "object" || current === null) return undefined;
-    current = (current as Record<string, unknown>)[key];
+    current = Reflect.get(current, key);
   }
   return current;
 }

@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Triggers } from "./boot.ts";
+import { boundaryCast } from "./cast.ts";
 import type { JsonSchema, ModuleDefinition, StepDescription } from "./defineModule.ts";
 import { PLACEHOLDER_ARG, type StepRegistry } from "./registry.ts";
 import type { ResolvedPipeline } from "./runner.ts";
@@ -93,7 +94,7 @@ export function packageVersion(root: string, use: string): string | null {
     const candidate = join(dir, "package.json");
     if (existsSync(candidate)) {
       try {
-        const pkg = JSON.parse(readFileSync(candidate, "utf8")) as { name?: unknown; version?: unknown };
+        const pkg = boundaryCast<{ name?: unknown; version?: unknown }>(JSON.parse(readFileSync(candidate, "utf8")), "json");
         if (pkg.name === name) return typeof pkg.version === "string" ? pkg.version : null;
       } catch {
         return null;

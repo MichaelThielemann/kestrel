@@ -13,7 +13,7 @@ describe("defineContract", () => {
   it("validates the name format", () => {
     expect(() => defineContract<{ a(): void }>()("thing", ["a"])).toThrow(/must look like/);
     expect(() => defineContract<{ a(): void }>()("thing@0", ["a"])).toThrow(/must look like/);
-    expect(() => (defineContract<{ a(): void }>() as (name: string, methods: readonly string[]) => unknown)("thing@1", [])).toThrow(/no methods/);
+    expect(() => defineContract<object>()("thing@1", [])).toThrow(/no methods/);
   });
 
   it("reports missing methods", () => {

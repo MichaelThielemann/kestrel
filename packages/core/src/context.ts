@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { failure, type CoreCode, type KestrelError } from "./errors.ts";
 import { err, ok, type Err, type Ok, type Result } from "./result.ts";
+import { isRecord } from "./guards.ts";
 
 export type TriggerKind = "http" | "event" | "cron";
 
@@ -37,7 +38,7 @@ export function binaryResult(data: Uint8Array, contentType: string, filename?: s
 }
 
 export function isBinaryResult(value: unknown): value is BinaryResult {
-  return typeof value === "object" && value !== null && (value as BinaryResult).binary === true && (value as BinaryResult).data instanceof Uint8Array;
+  return isRecord(value) && value.binary === true && value.data instanceof Uint8Array;
 }
 
 export interface Context extends Kestrel.ContextExtensions {

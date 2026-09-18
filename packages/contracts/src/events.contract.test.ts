@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { Events, EventData } from "./events.ts";
 
+function aggregateErrors(value: unknown): unknown[] {
+  return value instanceof AggregateError ? value.errors : [];
+}
+
+function messageOf(value: unknown): string {
+  return value instanceof Error ? value.message : String(value);
+}
+
 export function eventsContractTests(make: () => Promise<Events>) {
   describe("events@1", () => {
     let bus: Events;
@@ -69,10 +77,10 @@ export function eventsContractTests(make: () => Promise<Events>) {
       const error = await bus.emit("boom", {}).catch((e: unknown) => e);
       expect(ranSecond).toBe(true);
       expect(error).toBeInstanceOf(AggregateError);
-      const agg = error as AggregateError;
-      expect(agg.errors).toHaveLength(2);
-      expect((agg.errors[0] as Error).message).toBe("first");
-      expect((agg.errors[1] as Error).message).toBe("second");
+      const errors = aggregateErrors(error);
+      expect(errors).toHaveLength(2);
+      expect(messageOf(errors[0])).toBe("first");
+      expect(messageOf(errors[1])).toBe("second");
     });
 
     it("hands every handler a frozen copy, so one handler cannot change what the next one sees", async () => {
@@ -87,7 +95,7 @@ export function eventsContractTests(make: () => Promise<Events>) {
       });
       const error = await bus.emit("frozen", original).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(AggregateError);
-      expect((error as AggregateError).errors[0]).toBeInstanceOf(TypeError);
+      expect(aggregateErrors(error)[0]).toBeInstanceOf(TypeError);
       expect(seen).toHaveLength(2);
       expect(seen[1]).not.toHaveProperty("x");
       expect(seen[0]).not.toBe(original);

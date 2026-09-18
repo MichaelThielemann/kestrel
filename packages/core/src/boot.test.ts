@@ -2,6 +2,7 @@ import { Server } from "node:http";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { z } from "zod";
 import { boot, type Kestrel } from "./boot.ts";
+import { boundaryCast } from "./cast.ts";
 import { binaryResult, stepFactory, type Context } from "./context.ts";
 import { defineContract } from "./defineContract.ts";
 import { defineModule } from "./defineModule.ts";
@@ -78,7 +79,7 @@ const store = defineModule({
     download: async (ctx: Context) => {
       const doc = await db.get("files", ctx.params.name ?? "");
       if (!doc) return ctx.fail("NOT_FOUND", "no such file");
-      return ok({ ...ctx, result: binaryResult(new Uint8Array(doc.data as number[]), doc.contentType as string, ctx.params.name) });
+      return ok({ ...ctx, result: binaryResult(new Uint8Array(boundaryCast<number[]>(doc.data, "host")), boundaryCast<string>(doc.contentType, "host"), ctx.params.name) });
     },
     log: stepFactory((collection: string) => async (ctx: Context) => {
       await db.put(collection, String(ctx.payload.at), ctx.payload);
@@ -351,7 +352,7 @@ describe("boot", () => {
     expect(viaCookie.headers.get("x-kestrel-run-id")).toMatch(/^[0-9a-f-]{36}$/);
     expect(viaCookie.headers.get("x-content-type-options")).toBe("nosniff");
     expect(viaCookie.headers.get("cache-control")).toBe("no-store");
-    expect(await (await fetch(`${base}/pages/nope`)).json()).toMatchObject({ error: expect.stringContaining("not found") as string, runId: expect.any(String) as string });
+    expect(await (await fetch(`${base}/pages/nope`)).json()).toMatchObject({ error: expect.stringContaining("not found") as unknown, runId: expect.any(String) as unknown });
 
     const health = await fetch(`${base}/health`);
     expect(health.status).toBe(200);
@@ -576,9 +577,10 @@ describe("boot", () => {
     });
     const config = { modules: [{ use: "./events", config: {} }, { use: "./second", config: {} }], triggers: [] };
     const error = await boot({ config, modules: [events, second], pipelines: [], logger: silentLogger }).catch((err: unknown) => err);
-    expect((error as Error).message).toMatch(/both provide an event trigger hook/);
-    expect((error as Error).message).toContain("events/fake");
-    expect((error as Error).message).toContain("events/second");
+    const message = error instanceof Error ? error.message : String(error);
+    expect(message).toMatch(/both provide an event trigger hook/);
+    expect(message).toContain("events/fake");
+    expect(message).toContain("events/second");
   });
 
   it("validates cron expressions at boot", async () => {

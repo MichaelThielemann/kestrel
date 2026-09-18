@@ -1,5 +1,6 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { boundaryCast } from "./cast.ts";
 import type { ContextInput } from "./context.ts";
 import { missingMethods, type Contract } from "./defineContract.ts";
 import { checkDataflow } from "./dataflow.ts";
@@ -68,11 +69,12 @@ function useTokens(use: string): string[] {
 
 function entryNamesModule(use: string, moduleName: string): boolean {
   const tokens = useTokens(use);
-  if (tokens.length === 0) return false;
+  const last = tokens.at(-1);
+  if (last === undefined) return false;
   const wanted = moduleName.split("/");
   // Too few tokens to spell out "<module>/<submodule>": accept a hit on either half, which still
   // separates any two modules whose names differ in that half.
-  if (tokens.length < wanted.length) return wanted.includes(tokens[tokens.length - 1] as string);
+  if (tokens.length < wanted.length) return wanted.includes(last);
   return wanted.every((w, i) => tokens[tokens.length - wanted.length + i] === w);
 }
 
@@ -145,8 +147,9 @@ export async function boot(input: BootInput): Promise<Kestrel> {
 
   const configByModule = new Map<ModuleDefinition, unknown>();
   const seen = new Set<string>();
-  input.modules.forEach((mod, i) => {
-    const entry = config.modules[i] as KestrelConfig["modules"][number];
+  for (const [i, mod] of input.modules.entries()) {
+    const entry = config.modules[i];
+    if (entry === undefined) throw new KestrelBootError(CORE, `config.modules[${i}] is missing for module "${mod.name}"`);
     if (seen.has(mod.name)) throw new KestrelBootError(mod.name, `listed twice in kestrel.config (${entry.use})`);
     seen.add(mod.name);
     if (!entryNamesModule(entry.use, mod.name)) {
@@ -156,7 +159,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
       if (other) throw new KestrelBootError(CORE, `config.modules[${i}] "${entry.use}" names module "${other.name}", not "${mod.name}"; config entries and loaded modules must be in the same order`);
     }
     configByModule.set(mod, entry.config ?? {});
-  });
+  }
   const ordered = sortModules(input.modules);
   for (const mod of ordered) {
     if (mod.provides.length === 0) continue;
@@ -169,10 +172,10 @@ export async function boot(input: BootInput): Promise<Kestrel> {
   const contracts: Kestrel["contracts"] = {
     get<T>(contract: Contract<T>): T {
       if (!registered.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
-      return registered.get(contract.name) as T;
+      return boundaryCast<T>(registered.get(contract.name), "host");
     },
     find<T>(contract: Contract<T>): T | undefined {
-      return registered.get(contract.name) as T | undefined;
+      return boundaryCast<T | undefined>(registered.get(contract.name), "host");
     },
     names: () => [...registered.keys()],
     logger,

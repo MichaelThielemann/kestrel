@@ -5,15 +5,18 @@ export interface InternalRef {
   id: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function collect(value: unknown, out: Set<string>): void {
   if (typeof value === "string") {
     for (const m of value.matchAll(INTERNAL_REF)) out.add(`${m[1]}:${m[2]}`);
   } else if (Array.isArray(value)) {
     for (const v of value) collect(v, out);
-  } else if (typeof value === "object" && value !== null) {
-    const o = value as Record<string, unknown>;
-    if (o.type === "internal" && typeof o.collection === "string" && typeof o.id === "string") out.add(`${o.collection}:${o.id}`);
-    for (const v of Object.values(o)) collect(v, out);
+  } else if (isRecord(value)) {
+    if (value.type === "internal" && typeof value.collection === "string" && typeof value.id === "string") out.add(`${value.collection}:${value.id}`);
+    for (const v of Object.values(value)) collect(v, out);
   }
 }
 

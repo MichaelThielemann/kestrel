@@ -1,7 +1,27 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, definePipeline, ok, silentLogger, stepFactory, type Context } from "@michaelthielemann/kestrel";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { generateOpenApi } from "./index.ts";
+
+interface OpenApiResponse {
+  headers?: unknown;
+  content: { "application/json": { schema: Record<string, unknown> } };
+}
+
+interface OpenApiOperation {
+  operationId?: unknown;
+  security?: unknown;
+  requestBody?: unknown;
+  parameters?: Array<{ name: string }>;
+  responses: Record<string, OpenApiResponse>;
+}
+
+interface OpenApiDocument {
+  openapi: string;
+  paths: Record<string, Record<string, OpenApiOperation>>;
+  components: { schemas: { Error: unknown } };
+}
 
 const pass = async (ctx: Context) => ok(ctx);
 const demo = defineModule({
@@ -73,11 +93,7 @@ const pipelines = [
 
 async function generate(mountPath?: string) {
   const kestrel = await boot({ config, modules: [demo], pipelines, logger: silentLogger });
-  return generateOpenApi(kestrel, { title: "t", version: "1.0.0", servers: ["http://localhost:3000"], ...(mountPath === undefined ? {} : { mountPath }) }) as {
-    openapi: string;
-    paths: Record<string, Record<string, Record<string, unknown>>>;
-    components: Record<string, unknown>;
-  };
+  return boundaryCast<OpenApiDocument>(generateOpenApi(kestrel, { title: "t", version: "1.0.0", servers: ["http://localhost:3000"], ...(mountPath === undefined ? {} : { mountPath }) }), "json");
 }
 
 describe("kestrel-openapi", () => {
@@ -85,20 +101,20 @@ describe("kestrel-openapi", () => {
     const doc = await generate();
     expect(doc.openapi).toBe("3.1.0");
     expect(Object.keys(doc.paths).sort()).toEqual(["/listed", "/lonely-extend", "/media", "/media/{id}/file", "/pages", "/pages/{id}", "/plain", "/publish-all", "/replace-after-extend", "/single", "/site/{path}"]);
-    const create = doc.paths["/pages"]?.post as Record<string, unknown>;
-    expect(create.operationId).toBe("createPage");
-    expect(create.security).toEqual([{ bearerAuth: [] }]);
-    expect(create.requestBody).toMatchObject({ content: { "application/json": { schema: { required: ["title"] } } } });
-    expect(Object.keys(create.responses as object).sort()).toEqual(["200", "400", "401", "500", "503"]);
-    const read = doc.paths["/pages/{id}"]?.get as Record<string, unknown>;
-    expect(read.security).toEqual([{ bearerAuth: [] }, {}]);
-    expect(read.parameters).toEqual([{ name: "id", in: "path", required: true, schema: { type: "string" } }, { name: "locale", in: "query", required: false, schema: { type: "string" } }]);
-    expect((doc.paths["/site/{path}"]?.get?.parameters as Array<{ name: string }>)[0]?.name).toBe("path");
+    const create = doc.paths["/pages"]?.post;
+    expect(create?.operationId).toBe("createPage");
+    expect(create?.security).toEqual([{ bearerAuth: [] }]);
+    expect(create?.requestBody).toMatchObject({ content: { "application/json": { schema: { required: ["title"] } } } });
+    expect(Object.keys(create?.responses ?? {}).sort()).toEqual(["200", "400", "401", "500", "503"]);
+    const read = doc.paths["/pages/{id}"]?.get;
+    expect(read?.security).toEqual([{ bearerAuth: [] }, {}]);
+    expect(read?.parameters).toEqual([{ name: "id", in: "path", required: true, schema: { type: "string" } }, { name: "locale", in: "query", required: false, schema: { type: "string" } }]);
+    expect(doc.paths["/site/{path}"]?.get?.parameters?.[0]?.name).toBe("path");
   });
 
   it("describes the error body with code, retryable and the optional step and details fields", async () => {
     const doc = await generate();
-    expect((doc.components as { schemas: { Error: unknown } }).schemas.Error).toEqual({
+    expect(doc.components.schemas.Error).toEqual({
       type: "object",
       properties: {
         error: { type: "string" },
@@ -114,33 +130,33 @@ describe("kestrel-openapi", () => {
 
   it("documents Retry-After on 429 and 503 but not on other error responses", async () => {
     const doc = await generate();
-    const create = doc.paths["/pages"]?.post as { responses: Record<string, { headers?: unknown }> };
-    expect(create.responses["500"]?.headers).toBeUndefined();
-    expect(create.responses["503"]?.headers).toEqual({ "Retry-After": { description: "seconds until the client may retry", schema: { type: "integer" } } });
-    const upload = doc.paths["/media"]?.post as { responses: Record<string, { headers?: unknown }> };
-    expect(upload.responses["401"]?.headers).toBeUndefined();
+    const create = doc.paths["/pages"]?.post;
+    expect(create?.responses["500"]?.headers).toBeUndefined();
+    expect(create?.responses["503"]?.headers).toEqual({ "Retry-After": { description: "seconds until the client may retry", schema: { type: "integer" } } });
+    const upload = doc.paths["/media"]?.post;
+    expect(upload?.responses["401"]?.headers).toBeUndefined();
   });
 
   it("describes multipart uploads and binary downloads", async () => {
     const doc = await generate();
-    const upload = doc.paths["/media"]?.post as Record<string, unknown>;
-    expect(upload.requestBody).toMatchObject({ content: { "multipart/form-data": { schema: { properties: { file: { format: "binary" }, folder: { type: "string" } }, required: ["file"] } } } });
-    const download = doc.paths["/media/{id}/file"]?.get as { responses: Record<string, unknown> };
-    expect(download.responses["200"]).toMatchObject({ content: { "*/*": { schema: { format: "binary" } } } });
+    const upload = doc.paths["/media"]?.post;
+    expect(upload?.requestBody).toMatchObject({ content: { "multipart/form-data": { schema: { properties: { file: { format: "binary" }, folder: { type: "string" } }, required: ["file"] } } } });
+    const download = doc.paths["/media/{id}/file"]?.get;
+    expect(download?.responses["200"]).toMatchObject({ content: { "*/*": { schema: { format: "binary" } } } });
   });
 
   it("steps without an output schema still produce an operation, and output is deterministic", async () => {
     const a = await generate("/api");
     const b = await generate("/api");
     expect(Object.keys(a.paths)[0]).toBe("/api/listed");
-    expect((a.paths["/api/plain"]?.get as { responses: Record<string, unknown> }).responses["200"]).toMatchObject({ content: { "application/json": { schema: {} } } });
+    expect(a.paths["/api/plain"]?.get?.responses["200"]).toMatchObject({ content: { "application/json": { schema: {} } } });
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 
   it("merges extendsOutput into the preceding output's properties and required", async () => {
     const doc = await generate();
-    const publishAll = doc.paths["/publish-all"]?.post as { responses: Record<string, { content: { "application/json": { schema: Record<string, unknown> } } }> };
-    const schema = publishAll.responses["200"]!.content["application/json"].schema;
+    const publishAll = doc.paths["/publish-all"]?.post;
+    const schema = publishAll?.responses["200"]?.content["application/json"].schema;
     expect(schema).toEqual({
       type: "object",
       properties: {
@@ -155,8 +171,8 @@ describe("kestrel-openapi", () => {
 
   it("uses extendsOutput as the output when there was no prior output", async () => {
     const doc = await generate();
-    const lonely = doc.paths["/lonely-extend"]?.post as { responses: Record<string, { content: { "application/json": { schema: Record<string, unknown> } } }> };
-    expect(lonely.responses["200"]!.content["application/json"].schema).toEqual({
+    const lonely = doc.paths["/lonely-extend"]?.post;
+    expect(lonely?.responses["200"]?.content["application/json"].schema).toEqual({
       type: "object",
       properties: { extra: { type: "string" } },
       required: ["extra"],
@@ -165,8 +181,8 @@ describe("kestrel-openapi", () => {
 
   it("lets a later output replace a preceding extendsOutput merge", async () => {
     const doc = await generate();
-    const replaced = doc.paths["/replace-after-extend"]?.post as { responses: Record<string, { content: { "application/json": { schema: Record<string, unknown> } } }> };
-    expect(replaced.responses["200"]!.content["application/json"].schema).toEqual({
+    const replaced = doc.paths["/replace-after-extend"]?.post;
+    expect(replaced?.responses["200"]?.content["application/json"].schema).toEqual({
       type: "object",
       properties: { onlyThis: { type: "string" } },
       required: ["onlyThis"],
@@ -175,8 +191,8 @@ describe("kestrel-openapi", () => {
 
   it("merges extendsItems into items[] of a list output", async () => {
     const doc = await generate();
-    const listed = doc.paths["/listed"]?.get as { responses: Record<string, { content: { "application/json": { schema: Record<string, unknown> } } }> };
-    expect(listed.responses["200"]!.content["application/json"].schema).toEqual({
+    const listed = doc.paths["/listed"]?.get;
+    expect(listed?.responses["200"]?.content["application/json"].schema).toEqual({
       type: "object",
       properties: {
         items: { type: "array", items: { type: "object", properties: { id: { type: "string" }, variants: { type: "array", items: { type: "string" } } }, required: ["id", "variants"] } },
@@ -188,8 +204,8 @@ describe("kestrel-openapi", () => {
 
   it("merges extendsItems at the root when the output has no items[]", async () => {
     const doc = await generate();
-    const single = doc.paths["/single"]?.get as { responses: Record<string, { content: { "application/json": { schema: Record<string, unknown> } } }> };
-    expect(single.responses["200"]!.content["application/json"].schema).toEqual({
+    const single = doc.paths["/single"]?.get;
+    expect(single?.responses["200"]?.content["application/json"].schema).toEqual({
       type: "object",
       properties: { onlyThis: { type: "string" }, variants: { type: "array", items: { type: "string" } } },
       required: ["onlyThis", "variants"],

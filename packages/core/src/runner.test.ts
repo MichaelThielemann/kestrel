@@ -3,6 +3,7 @@ import type { Context, Step } from "./context.ts";
 import { customFailure } from "./errors.ts";
 import { silentLogger, type Logger, type StepLog } from "./logger.ts";
 import type { RunObserver } from "./observer.ts";
+import { boundaryCast } from "./cast.ts";
 import { ok } from "./result.ts";
 import type { ResolvedStep } from "./registry.ts";
 import { createRunTracker, runPipeline } from "./runner.ts";
@@ -19,7 +20,7 @@ const input = { trigger: { kind: "http" as const, name: "POST /x" }, payload: { 
 
 /** A step whose return value the runner has to reject; `Step` is the narrower of the two types. */
 function looseStep(name: string, fn: (ctx: Context) => Promise<unknown>): ResolvedStep {
-  return { name, description, fn: fn as Step };
+  return { name, description, fn: boundaryCast<Step>(fn, "host") };
 }
 
 describe("runPipeline", () => {
@@ -30,7 +31,7 @@ describe("runPipeline", () => {
         name: "p",
         steps: [
           { name: "one", description: writesResult, fn: async (ctx: Context) => ok({ ...ctx, result: [1] }) },
-          { name: "two", description: writesResult, fn: async (ctx: Context) => ok({ ...ctx, result: [...(ctx.result as number[]), 2] }) },
+          { name: "two", description: writesResult, fn: async (ctx: Context) => ok({ ...ctx, result: [...boundaryCast<number[]>(ctx.result, "host"), 2] }) },
         ],
       },
       input,

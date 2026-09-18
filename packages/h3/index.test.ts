@@ -4,7 +4,12 @@ import { createApp, toNodeListener } from "h3";
 import { afterEach, describe, it, expect } from "vitest";
 import { z } from "zod";
 import { binaryResult, boot, customFailure, defineContract, defineModule, definePipeline, ok, silentLogger, type Context, type Kestrel } from "@michaelthielemann/kestrel";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createKestrelHandler } from "./index.ts";
+
+async function jsonBody<T>(res: Response): Promise<T> {
+  return boundaryCast<T>(await res.json(), "json");
+}
 
 interface Store {
   put(key: string, value: unknown): Promise<void>;
@@ -30,7 +35,7 @@ const store = defineModule({
       return ok({ ...ctx, result: { filename: file.filename, size: file.data.byteLength } });
     },
     download: async (ctx: Context) => {
-      const doc = (await db.get(ctx.params.name ?? "")) as { contentType: string; data: number[] } | null;
+      const doc = boundaryCast<{ contentType: string; data: number[] } | null>(await db.get(ctx.params.name ?? ""), "host");
       if (!doc) return ctx.fail("NOT_FOUND", "no such file");
       return ok({ ...ctx, result: binaryResult(new Uint8Array(doc.data), doc.contentType, ctx.params.name) });
     },
@@ -77,7 +82,7 @@ async function serve(options: Parameters<typeof createKestrelHandler>[1] = {}) {
   const server = createServer(toNodeListener(app));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   close = () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
-  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  return `http://127.0.0.1:${boundaryCast<AddressInfo>(server.address(), "host").port}`;
 }
 
 describe("kestrel-h3", () => {
@@ -89,8 +94,8 @@ describe("kestrel-h3", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(await res.json()).toEqual({ payload: { x: "1" }, params: { id: "42" }, ip: "127.0.0.1", auth: "Bearer t" });
     const post = await fetch(`${base}/echo`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ a: 1 }) });
-    expect(((await post.json()) as { payload: unknown }).payload).toEqual({ a: 1 });
-    expect(((await (await fetch(`${base}/site/en/about`)).json()) as { params: unknown }).params).toEqual({ path: "en/about" });
+    expect((await jsonBody<{ payload: unknown }>(post)).payload).toEqual({ a: 1 });
+    expect((await jsonBody<{ params: unknown }>(await fetch(`${base}/site/en/about`))).params).toEqual({ path: "en/about" });
   });
 
   it("derives the client ip with the core policy: trusted header, then X-Forwarded-For from the right, then the peer", async () => {
@@ -98,7 +103,7 @@ describe("kestrel-h3", () => {
       await close?.();
       await kestrel?.stop();
       const base = await serve(options);
-      return ((await (await fetch(`${base}/echo/1`, { headers })).json()) as { ip: string | null }).ip;
+      return (await jsonBody<{ ip: string | null }>(await fetch(`${base}/echo/1`, { headers }))).ip;
     };
     expect(await ipVia({}, { "x-forwarded-for": "203.0.113.9" })).toBe("127.0.0.1");
     expect(await ipVia({ trustProxy: true }, { "x-forwarded-for": "203.0.113.9, 10.0.0.1" })).toBe("10.0.0.1");
@@ -112,16 +117,16 @@ describe("kestrel-h3", () => {
   it("groups repeated query keys into arrays, keeps single values as strings", async () => {
     const base = await serve();
     const res = await fetch(`${base}/echo/1?tag=a&tag=b`);
-    expect(((await res.json()) as { payload: unknown }).payload).toEqual({ tag: ["a", "b"] });
+    expect((await jsonBody<{ payload: unknown }>(res)).payload).toEqual({ tag: ["a", "b"] });
     const single = await fetch(`${base}/echo/1?tag=a`);
-    expect(((await single.json()) as { payload: unknown }).payload).toEqual({ tag: "a" });
+    expect((await jsonBody<{ payload: unknown }>(single)).payload).toEqual({ tag: "a" });
   });
 
   it("maps failures, unknown routes and bad bodies to the same error format", async () => {
     const base = await serve();
     const fail = await fetch(`${base}/fail`);
     expect(fail.status).toBe(418);
-    expect(await fail.json()).toMatchObject({ error: "teapot", code: "TEAPOT", retryable: false, runId: expect.any(String) as string });
+    expect(await fail.json()).toMatchObject({ error: "teapot", code: "TEAPOT", retryable: false, runId: expect.any(String) as unknown });
     const notFound = await fetch(`${base}/nope`);
     expect(notFound.status).toBe(404);
     expect(await notFound.json()).toMatchObject({ code: "NOT_FOUND", retryable: false });
@@ -167,7 +172,7 @@ describe("kestrel-h3", () => {
 
   it("reports the failing step and the details a step attached", async () => {
     const base = await serve();
-    const body = (await (await fetch(`${base}/fail`)).json()) as { error: string; code?: string; retryable?: boolean; step?: string; details?: unknown };
+    const body = await jsonBody<{ error: string; code?: string; retryable?: boolean; step?: string; details?: unknown }>(await fetch(`${base}/fail`));
     expect(body.error).toBe("teapot");
     expect(body.code).toBe("TEAPOT");
     expect(body.retryable).toBe(false);
@@ -191,7 +196,7 @@ describe("kestrel-h3", () => {
     for (const res of cases) {
       const runId = res.headers.get("x-kestrel-run-id");
       expect(runId).toMatch(/^[0-9a-f-]{36}$/);
-      expect((await res.json() as { runId?: string }).runId).toBe(runId);
+      expect((await jsonBody<{ runId?: string }>(res)).runId).toBe(runId);
     }
   });
 });

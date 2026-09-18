@@ -2,7 +2,7 @@ import { afterEach, describe, it, expect } from "vitest";
 import { binaryResult } from "../context.ts";
 import { silentLogger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
-import { buildResponse, createHttpServer, disposition, errorResponse, listen, matchRoute, parseQuery, parseRoute, responseForRun, routePattern, type Route } from "./http.ts";
+import { buildResponse, createHttpServer, disposition, errorResponse, listen, matchRoute, parseQuery, parseRoute, responseForRun, routePattern } from "./http.ts";
 
 describe("http routes", () => {
   const routes = [parseRoute("GET /pages/:id", "readPage"), parseRoute("POST /pages", "createPage"), parseRoute("GET /", "home")];
@@ -24,7 +24,7 @@ describe("http routes", () => {
     const wild = [parseRoute("GET /site/*path", "resolve"), parseRoute("GET /site", "home")];
     expect(matchRoute(wild, "GET", "/site/en/about%20us")?.params).toEqual({ path: "en/about us" });
     expect(matchRoute(wild, "GET", "/site/")?.route.pipeline).toBe("home");
-    expect(matchRoute([wild[0] as Route], "GET", "/site/")?.params).toEqual({ path: "" });
+    expect(matchRoute(wild.slice(0, 1), "GET", "/site/")?.params).toEqual({ path: "" });
     expect(matchRoute(wild, "GET", "/other/x")).toBeUndefined();
     expect(() => parseRoute("GET /*path/more", "x")).toThrow(/wildcard must be the last segment/);
   });
@@ -102,11 +102,11 @@ describe("http error format", () => {
 
   it("puts code, retryable, step and details next to error and runId", () => {
     const res = responseForRun(failed);
-    expect(JSON.parse(res.body as string)).toEqual({ error: "pages: slug must be unique", code: "VALIDATION", retryable: false, runId: "run-1", step: "content.create", details: { fields: [{ field: "slug", message: "must be unique" }] } });
+    expect(JSON.parse(String(res.body))).toEqual({ error: "pages: slug must be unique", code: "VALIDATION", retryable: false, runId: "run-1", step: "content.create", details: { fields: [{ field: "slug", message: "must be unique" }] } });
   });
 
   it("omits step and details when the run carries none", () => {
-    expect(JSON.parse(responseForRun({ runId: "run-2", status: 404, error: "not found", code: "NOT_FOUND", retryable: false }).body as string)).toEqual({ error: "not found", code: "NOT_FOUND", retryable: false, runId: "run-2" });
+    expect(JSON.parse(String(responseForRun({ runId: "run-2", status: 404, error: "not found", code: "NOT_FOUND", retryable: false }).body))).toEqual({ error: "not found", code: "NOT_FOUND", retryable: false, runId: "run-2" });
   });
 
   it("echoes the request id on both a run response and an edge error", () => {
@@ -118,10 +118,10 @@ describe("http error format", () => {
   });
 
   it("assigns errorResponse a fixed code by status and retryable: false", () => {
-    expect(JSON.parse(errorResponse(400, "bad body").body as string)).toMatchObject({ code: "VALIDATION", retryable: false });
-    expect(JSON.parse(errorResponse(404, "no route").body as string)).toMatchObject({ code: "NOT_FOUND", retryable: false });
-    expect(JSON.parse(errorResponse(413, "too big").body as string)).toMatchObject({ code: "PAYLOAD_TOO_LARGE", retryable: false });
-    expect(JSON.parse(errorResponse(500, "internal error").body as string)).toMatchObject({ code: "INTERNAL", retryable: false });
+    expect(JSON.parse(String(errorResponse(400, "bad body").body))).toMatchObject({ code: "VALIDATION", retryable: false });
+    expect(JSON.parse(String(errorResponse(404, "no route").body))).toMatchObject({ code: "NOT_FOUND", retryable: false });
+    expect(JSON.parse(String(errorResponse(413, "too big").body))).toMatchObject({ code: "PAYLOAD_TOO_LARGE", retryable: false });
+    expect(JSON.parse(String(errorResponse(500, "internal error").body))).toMatchObject({ code: "INTERNAL", retryable: false });
   });
 
   it("sets Retry-After on a retryable 429 or 503, using details.retryAfterSeconds", () => {
@@ -171,7 +171,7 @@ describe("http server", () => {
     base = await serve(ok, { allow: ["203.0.113.0/24"] });
     const denied = await fetch(`${base}/echo`, { headers: { "x-forwarded-for": "203.0.113.9", "x-request-id": "req-7" } });
     expect(denied.status).toBe(403);
-    expect(await denied.json()).toEqual({ error: "forbidden", code: "FORBIDDEN", retryable: false, runId: expect.any(String) as string });
+    expect(await denied.json()).toEqual({ error: "forbidden", code: "FORBIDDEN", retryable: false, runId: expect.any(String) as unknown });
     expect(denied.headers.get("x-request-id")).toBe("req-7");
     expect((await fetch(`${base}/health`)).status).toBe(403);
     await close?.();

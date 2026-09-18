@@ -21,6 +21,5 @@ export function defineContract<T>(): <const M extends readonly MethodKeys<T>[]>(
 
 export function missingMethods<T>(contract: Contract<T>, instance: unknown): string[] {
   if (instance === null || (typeof instance !== "object" && typeof instance !== "function")) return [...contract.methods];
-  const obj = instance as Record<string, unknown>;
-  return contract.methods.filter((m) => typeof obj[m] !== "function");
+  return contract.methods.filter((m) => typeof Reflect.get(instance, m) !== "function");
 }

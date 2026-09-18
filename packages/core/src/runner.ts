@@ -6,6 +6,7 @@ import type { ResolvedStep } from "./registry.ts";
 import { failure, isKestrelError, type KestrelError } from "./errors.ts";
 import { isErr, type Result } from "./result.ts";
 import { coerceQuery, validateSchema, type SchemaProblem } from "./schema.ts";
+import { isRecord } from "./guards.ts";
 
 export interface ResolvedPipeline {
   name: string;
@@ -66,17 +67,15 @@ export function createRunTracker(): RunTracker {
 }
 
 function isResult(value: unknown): value is Result<unknown, KestrelError> {
-  if (typeof value !== "object" || value === null) return false;
-  const result = value as Result<unknown, KestrelError>;
-  if (result.ok === true) return "value" in result;
-  return result.ok === false && isKestrelError(result.error);
+  if (!isRecord(value)) return false;
+  if (value.ok === true) return "value" in value;
+  return value.ok === false && isKestrelError(value.error);
 }
 
 function isContext(value: unknown): value is Context {
-  if (typeof value !== "object" || value === null) return false;
-  const ctx = value as Context;
+  if (!isRecord(value)) return false;
   const record = (v: unknown): boolean => typeof v === "object" && v !== null;
-  return record(ctx.trigger) && record(ctx.payload) && record(ctx.params) && record(ctx.headers) && Array.isArray(ctx.files) && typeof ctx.fail === "function" && typeof ctx.done === "function";
+  return record(value.trigger) && record(value.payload) && record(value.params) && record(value.headers) && Array.isArray(value.files) && typeof value.fail === "function" && typeof value.done === "function";
 }
 
 function writeRoot(path: string): string {
