@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import type { Authn, AuthnError, Identity } from "@michaelthielemann/kestrel-contracts/authn";
-import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
+import type { Authz } from "@michaelthielemann/kestrel-contracts/authz";
+import { customFailure, err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 
 export const USERS = "authn_users";
@@ -10,6 +11,7 @@ export interface Config {
   identifier: "username" | "email";
   minPasswordLength: number;
   sessionTtlSeconds: number;
+  adminPermission: string;
   bootstrap?: { username: string; passwordHash: string; roles: string[] } | undefined;
 }
 
@@ -34,7 +36,9 @@ interface SessionRow extends Document {
   expiresAt: number;
 }
 
-export type AuthnMultiError = KestrelError<"VALIDATION" | "CONFLICT" | "NOT_FOUND" | "TRANSIENT">;
+export type AuthnMultiError = KestrelError<"VALIDATION" | "CONFLICT" | "NOT_FOUND" | "TRANSIENT" | "LAST_ADMIN">;
+
+export const LAST_ADMIN_STATUS = 409;
 
 const KEY_LENGTH = 64;
 
@@ -62,10 +66,17 @@ export function tokenFromHeaders(headers: Record<string, string>): string | unde
   return undefined;
 }
 
+export interface UserPatch {
+  username?: string;
+  roles?: string[];
+}
+
 export interface AuthnMulti extends Authn {
   createUser(input: { username: string; password: string; roles?: string[] }): Promise<Result<PublicUser, AuthnMultiError>>;
   listUsers(): Promise<Result<PublicUser[], AuthnMultiError>>;
   getUser(id: string): Promise<Result<PublicUser | null, AuthnMultiError>>;
+  updateUser(id: string, patch: UserPatch): Promise<Result<PublicUser, AuthnMultiError>>;
+  deleteUser(id: string): Promise<Result<void, AuthnMultiError>>;
   setPassword(id: string, password: string): Promise<Result<void, AuthnMultiError>>;
   changePassword(id: string, current: string, next: string, keepToken?: string): Promise<Result<void, AuthnMultiError>>;
   setActive(id: string, active: boolean): Promise<Result<void, AuthnMultiError>>;
@@ -90,7 +101,15 @@ function checkPassword(config: Config, password: string): Result<void, KestrelEr
   return password.length < config.minPasswordLength ? err(failure("VALIDATION", `authn/multi: password must have at least ${config.minPasswordLength} characters`)) : ok();
 }
 
-export async function createAuthnMulti(config: Config, db: Persistence, now: () => number = Date.now): Promise<AuthnMulti> {
+function checkRoles(roles: readonly string[]): Result<void, KestrelError<"VALIDATION">> {
+  return roles.every((role) => role.trim() !== "") ? ok() : err(failure("VALIDATION", "authn/multi: a role must not be empty"));
+}
+
+function sameRoles(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((role, i) => role === b[i]);
+}
+
+export async function createAuthnMulti(config: Config, db: Persistence, now: () => number = Date.now, authz?: Authz): Promise<AuthnMulti> {
   const usersReady = await db.ensureCollection(USERS, { username: { type: "string", unique: true }, passwordHash: "string", roles: "json", active: "boolean", createdAt: "number" });
   if (isErr(usersReady)) throw new Error(`authn/multi: setup failed: ${usersReady.error.message}`);
   const sessionsReady = await db.ensureCollection(SESSIONS, { userId: "string", expiresAt: "number" });
@@ -104,8 +123,36 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
     return ok(found.value);
   };
 
+  /** Who counts as an admin is the authz module's answer, never a role name spelled out here; without one, nobody does and the last-admin guard cannot bite. */
+  const isAdmin = async (user: User): Promise<Result<boolean, AuthnMultiError>> => {
+    if (!authz || !user.active) return ok(false);
+    const allowed = await authz.can(identity(user), config.adminPermission);
+    if (isErr(allowed)) return allowed;
+    return ok(allowed.value);
+  };
+
+  const guardLastAdmin = async (user: User, next: { roles: string[]; active: boolean }): Promise<Result<void, AuthnMultiError>> => {
+    const was = await isAdmin(user);
+    if (isErr(was)) return was;
+    if (!was.value) return ok();
+    const stays = await isAdmin({ ...user, ...next });
+    if (isErr(stays)) return stays;
+    if (stays.value) return ok();
+    const active = await db.findMany<User>(USERS, { active: true });
+    if (isErr(active)) return active;
+    for (const other of active.value.items) {
+      if (other.id === user.id) continue;
+      const admin = await isAdmin(other);
+      if (isErr(admin)) return admin;
+      if (admin.value) return ok();
+    }
+    return err(customFailure("LAST_ADMIN", LAST_ADMIN_STATUS, `authn/multi: "${user.username}" is the last active user with "${config.adminPermission}"`));
+  };
+
   const createUser: AuthnMulti["createUser"] = async ({ username, password, roles = [] }) => {
     if (username.trim() === "") return err(failure("VALIDATION", "authn/multi: username must not be empty"));
+    const rolesCheck = checkRoles(roles);
+    if (isErr(rolesCheck)) return rolesCheck;
     const passwordCheck = checkPassword(config, password);
     if (isErr(passwordCheck)) return passwordCheck;
     const existing = await db.findOne<User>(USERS, { username });
@@ -172,6 +219,44 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
       if (isErr(found)) return found;
       return ok(found.value ? publicUser(found.value) : null);
     },
+    async updateUser(id, patch) {
+      const found = await userById(id);
+      if (isErr(found)) return found;
+      const user = found.value;
+      const username = patch.username !== undefined && patch.username !== user.username ? patch.username : undefined;
+      const roles = patch.roles !== undefined && !sameRoles(patch.roles, user.roles) ? patch.roles : undefined;
+      if (username !== undefined) {
+        if (username.trim() === "") return err(failure("VALIDATION", "authn/multi: username must not be empty"));
+        const taken = await db.findOne<User>(USERS, { username });
+        if (isErr(taken)) return taken;
+        if (taken.value) return err(failure("CONFLICT", `authn/multi: user "${username}" already exists`));
+      }
+      if (roles !== undefined) {
+        const rolesCheck = checkRoles(roles);
+        if (isErr(rolesCheck)) return rolesCheck;
+        const guarded = await guardLastAdmin(user, { roles, active: user.active });
+        if (isErr(guarded)) return guarded;
+      }
+      if (username === undefined && roles === undefined) return ok(publicUser(user));
+      const updated = await db.updateOne<User>(USERS, id, { ...(username === undefined ? {} : { username }), ...(roles === undefined ? {} : { roles }) });
+      if (isErr(updated)) return updated.error.code === "CONFLICT" && updated.error.details?.field === "username" ? err(failure("CONFLICT", `authn/multi: user "${username ?? user.username}" already exists`)) : updated;
+      if (roles !== undefined) {
+        const cleared = await db.deleteMany(SESSIONS, { userId: id });
+        if (isErr(cleared)) return cleared;
+      }
+      return ok(publicUser(updated.value));
+    },
+    async deleteUser(id) {
+      const found = await userById(id);
+      if (isErr(found)) return found;
+      const guarded = await guardLastAdmin(found.value, { roles: [], active: false });
+      if (isErr(guarded)) return guarded;
+      const cleared = await db.deleteMany(SESSIONS, { userId: id });
+      if (isErr(cleared)) return cleared;
+      const deleted = await db.deleteOne(USERS, id);
+      if (isErr(deleted)) return deleted;
+      return ok();
+    },
     async setPassword(id, password) {
       const user = await userById(id);
       if (isErr(user)) return user;
@@ -198,6 +283,10 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
     async setActive(id, active) {
       const user = await userById(id);
       if (isErr(user)) return user;
+      if (!active) {
+        const guarded = await guardLastAdmin(user.value, { roles: user.value.roles, active });
+        if (isErr(guarded)) return guarded;
+      }
       const updated = await db.updateOne<User>(USERS, id, { active });
       if (isErr(updated)) return updated;
       if (!active) {

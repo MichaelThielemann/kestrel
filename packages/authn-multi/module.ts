@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AUTHN } from "@michaelthielemann/kestrel-contracts/authn";
+import { AUTHZ } from "@michaelthielemann/kestrel-contracts/authz";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
@@ -11,6 +12,7 @@ export const configSchema = z
     identifier: z.enum(["username", "email"]).default("username"),
     minPasswordLength: z.number().int().min(8).default(12),
     sessionTtlSeconds: z.number().int().positive().default(86400),
+    adminPermission: z.string().min(1).default("users.manage").describe("The permission that makes a user an admin; the last active holder of it cannot be deactivated, deleted or stripped of it"),
     bootstrap: z.object({ username: z.string().min(1), passwordHash: z.string().startsWith("scrypt$").describe("secret"), roles: z.array(z.string()).default([]) }).strict().optional(),
   })
   .strict();
@@ -27,10 +29,11 @@ export default defineModule({
   name: "authn/multi",
   provides: [AUTHN],
   requires: [PERSISTENCE],
+  optional: [AUTHZ],
   configSchema,
 
   async setup(config, deps): Promise<AuthnMulti> {
-    return createAuthnMulti(config, deps.get(PERSISTENCE));
+    return createAuthnMulti(config, deps.get(PERSISTENCE), Date.now, deps.find(AUTHZ));
   },
 
   steps: (authn) => ({
@@ -87,6 +90,24 @@ export default defineModule({
       if (isErr(user)) return ctx.fail(user.error);
       if (!user.value) return ctx.fail("NOT_FOUND", `user ${id} not found`);
       return ok({ ...ctx, result: user.value });
+    },
+    updateUser: async (ctx: Context) => {
+      const id = ctx.params.id;
+      if (id === undefined) throw new Error("authn.updateUser: no params.id (boot's dataflow check already proved this route always provides it)");
+      const username = str(ctx.payload.username);
+      const roles = Array.isArray(ctx.payload.roles) ? ctx.payload.roles.filter((r): r is string => typeof r === "string") : undefined;
+      if (username === undefined && roles === undefined) return ctx.fail("VALIDATION", "username or roles is required");
+      const updated = await authn.updateUser(id, { ...(username === undefined ? {} : { username }), ...(roles === undefined ? {} : { roles }) });
+      if (isErr(updated)) return ctx.fail(updated.error);
+      return ok({ ...ctx, result: updated.value });
+    },
+    deleteUser: async (ctx: Context) => {
+      const id = ctx.params.id;
+      if (id === undefined) throw new Error("authn.deleteUser: no params.id (boot's dataflow check already proved this route always provides it)");
+      if (ctx.identity?.id === id) return ctx.fail("VALIDATION", "you cannot delete yourself");
+      const result = await authn.deleteUser(id);
+      if (isErr(result)) return ctx.fail(result.error);
+      return ok({ ...ctx, result: { ok: true } });
     },
     setPassword: async (ctx: Context) => {
       const id = ctx.params.id;
@@ -168,6 +189,21 @@ export default defineModule({
       output: { type: "object", properties: { id: { type: "string" }, username: { type: "string" }, roles: { type: "array", items: { type: "string" } }, active: { type: "boolean" }, createdAt: { type: "number" } }, required: ["id", "username", "roles", "active", "createdAt"] },
       errors: { 404: "user not found" },
     },
+    updateUser: {
+      summary: "Rename a user or set their roles (a role change ends their sessions)",
+      reads: ["params.id"],
+      writes: ["result"],
+      input: { type: "object", properties: { username: { type: "string" }, roles: { type: "array", items: { type: "string" } } }, additionalProperties: false },
+      output: { type: "object", properties: { id: { type: "string" }, username: { type: "string" }, roles: { type: "array", items: { type: "string" } }, active: { type: "boolean" }, createdAt: { type: "number" } }, required: ["id", "username", "roles", "active", "createdAt"] },
+      errors: { 400: "neither username nor roles given, or an empty one", 404: "user not found", 409: "username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`)" },
+    },
+    deleteUser: {
+      summary: "Delete a user and their sessions for good",
+      reads: ["identity", "params.id"],
+      writes: ["result"],
+      output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+      errors: { 400: "cannot delete yourself", 404: "user not found", 409: "the last active admin cannot be deleted (`LAST_ADMIN`)" },
+    },
     setPassword: {
       summary: "Set a user's password (ends their sessions)",
       reads: ["params.id"],
@@ -185,11 +221,11 @@ export default defineModule({
       errors: { 400: "wrong current password, missing fields, or new one too short", 401: "not authenticated" },
     },
     deactivateUser: {
-      summary: "Deactivate a user",
+      summary: "Deactivate a user (ends their sessions)",
       reads: ["params.id"],
       writes: ["result"],
       output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
-      errors: { 400: "cannot deactivate yourself", 404: "user not found" },
+      errors: { 400: "cannot deactivate yourself", 404: "user not found", 409: "the last active admin cannot be deactivated (`LAST_ADMIN`)" },
     },
     activateUser: {
       summary: "Activate a user",

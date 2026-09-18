@@ -9703,17 +9703,17 @@
     },
     "/users/{id}": {
       "delete": {
-        "operationId": "deactivateUser",
-        "summary": "Require a valid session → Requires permission users.manage → Deactivate a user → Emit event \"user.deactivated\" to every subscribed handler pipeline",
+        "operationId": "deleteUser",
+        "summary": "Require a valid session → Requires permission users.manage → Delete a user and their sessions for good → Emit event \"user.deleted\" to every subscribed handler pipeline",
         "tags": [
           "users"
         ],
-        "x-kestrel-pipeline": "deactivateUser",
+        "x-kestrel-pipeline": "deleteUser",
         "x-kestrel-steps": [
           "authn.requireUser",
           "authz.require:users.manage",
-          "authn.deactivateUser",
-          "events.emit:user.deactivated"
+          "authn.deleteUser",
+          "events.emit:user.deleted"
         ],
         "parameters": [
           {
@@ -9745,7 +9745,7 @@
             }
           },
           "400": {
-            "description": "cannot deactivate yourself",
+            "description": "cannot delete yourself",
             "content": {
               "application/json": {
                 "schema": {
@@ -9776,6 +9776,16 @@
           },
           "404": {
             "description": "user not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the last active admin cannot be deleted (`LAST_ADMIN`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9943,6 +9953,174 @@
             "bearerAuth": []
           }
         ]
+      },
+      "patch": {
+        "operationId": "updateUser",
+        "summary": "Require a valid session → Requires permission users.manage → Rename a user or set their roles (a role change ends their sessions) → Emit event \"user.updated\" to every subscribed handler pipeline",
+        "tags": [
+          "users"
+        ],
+        "x-kestrel-pipeline": "updateUser",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:users.manage",
+          "authn.updateUser",
+          "events.emit:user.updated"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "username": {
+                      "type": "string"
+                    },
+                    "roles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "username",
+                    "roles",
+                    "active",
+                    "createdAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "neither username nor roles given, or an empty one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission users.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "user not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "temporarily unavailable; retry after the Retry-After header",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "roles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/users/{id}/activate": {
@@ -10019,6 +10197,135 @@
           },
           "404": {
             "description": "user not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "temporarily unavailable; retry after the Retry-After header",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/users/{id}/deactivate": {
+      "post": {
+        "operationId": "deactivateUser",
+        "summary": "Require a valid session → Requires permission users.manage → Deactivate a user (ends their sessions) → Emit event \"user.deactivated\" to every subscribed handler pipeline",
+        "tags": [
+          "users"
+        ],
+        "x-kestrel-pipeline": "deactivateUser",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:users.manage",
+          "authn.deactivateUser",
+          "events.emit:user.deactivated"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "cannot deactivate yourself",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission users.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "user not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the last active admin cannot be deactivated (`LAST_ADMIN`)",
             "content": {
               "application/json": {
                 "schema": {

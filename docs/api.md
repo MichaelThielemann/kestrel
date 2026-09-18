@@ -168,11 +168,18 @@ never relies on that.
 | GET | `/users` | – | `[{ id, username, roles, active, createdAt }]` |
 | POST | `/users` | `{ username, password, roles? }` | user; 409 (`CONFLICT`) on a duplicate, 400 (`VALIDATION`) on a password that's too short |
 | GET | `/users/:id` | – | user |
+| PATCH | `/users/:id` | `{ username?, roles? }` | user; 400 (`VALIDATION`) without either field, 409 (`CONFLICT`) on a duplicate name, 409 (`LAST_ADMIN`) when the last admin would lose the permission; a role change ends that user's sessions |
 | PUT | `/users/:id/password` | `{ password }` | `{ ok: true }`; ends that user's sessions |
-| DELETE | `/users/:id` | – | deactivates (`{ ok: true }`); 400 for self |
+| POST | `/users/:id/deactivate` | – | `{ ok: true }`; ends that user's sessions; 400 for self, 409 (`LAST_ADMIN`) for the last admin |
 | POST | `/users/:id/activate` | – | `{ ok: true }` |
+| DELETE | `/users/:id` | – | deletes the user and their sessions (`{ ok: true }`); 400 for self, 409 (`LAST_ADMIN`) for the last admin |
 
-Password hashes never appear in responses.
+The username is the identity — a user has no e-mail field. Roles are free strings; which ones
+exist is the authz configuration's business (`authz.roles` in `kestrel.config.ts`). `LAST_ADMIN`
+(409) protects the last active user who still holds `users.manage` (`authn.adminPermission`):
+they can neither be deactivated, nor deleted, nor stripped of the role that grants it. Deleting
+removes the row; events already recorded by `audit-persistence` keep the identity id they were
+written with. Password hashes never appear in responses.
 
 ## Content
 
