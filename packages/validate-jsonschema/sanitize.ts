@@ -1,3 +1,4 @@
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import sanitizeHtml from "sanitize-html";
 
 export const HTML_ALLOWLIST = {
@@ -28,12 +29,15 @@ export function sanitize(html: string): string {
 
 type Node = Record<string, unknown>;
 
+function isNode(value: unknown): value is Node {
+  return typeof value === "object" && value !== null;
+}
+
 function resolveRef(root: Node, node: unknown): Node | undefined {
-  if (typeof node !== "object" || node === null) return undefined;
-  const n = node as Node;
-  if (typeof n.$ref !== "string") return n;
-  if (!n.$ref.startsWith("#/")) return undefined;
-  return n.$ref.slice(2).split("/").reduce<unknown>((o, k) => (typeof o === "object" && o !== null ? (o as Node)[k] : undefined), root) as Node | undefined;
+  if (!isNode(node)) return undefined;
+  if (typeof node.$ref !== "string") return node;
+  if (!node.$ref.startsWith("#/")) return undefined;
+  return boundaryCast<Node | undefined>(node.$ref.slice(2).split("/").reduce<unknown>((o, k) => (isNode(o) ? o[k] : undefined), root), "json");
 }
 
 function jsonType(value: unknown): string {
@@ -46,10 +50,12 @@ function jsonType(value: unknown): string {
 // `anyOf: [schema, {type:"null"}]` wrapper has no discriminator and is selected by type.
 function pickBranch(root: Node, branches: unknown[], value: unknown): Node | undefined {
   const schemas = branches.map((b) => resolveRef(root, b));
-  const tag = typeof value === "object" && value !== null ? (value as Node).type : undefined;
+  const tag = isNode(value) ? value.type : undefined;
   let tagged = false;
   for (const schema of schemas) {
-    const constant = ((schema?.properties as Node | undefined)?.type as Node | undefined)?.const;
+    const properties = schema && isNode(schema.properties) ? schema.properties : undefined;
+    const typeNode = properties && isNode(properties.type) ? properties.type : undefined;
+    const constant = typeNode?.const;
     if (constant === undefined) continue;
     tagged = true;
     if (constant === tag) return schema;
@@ -63,7 +69,7 @@ export function sanitizeBySchema(root: Node, schema: unknown, value: unknown): u
   const s = resolveRef(root, schema);
   if (!s) return value;
   if (Array.isArray(s.oneOf) || Array.isArray(s.anyOf)) {
-    const branch = pickBranch(root, (s.oneOf ?? s.anyOf) as unknown[], value);
+    const branch = pickBranch(root, boundaryCast<unknown[]>(s.oneOf ?? s.anyOf, "json"), value);
     return branch ? sanitizeBySchema(root, branch, value) : value;
   }
   if (typeof value === "string") return s.format === "html" ? sanitize(value) : value;
@@ -71,10 +77,10 @@ export function sanitizeBySchema(root: Node, schema: unknown, value: unknown): u
     if (s.items === undefined) return value;
     return value.map((v) => sanitizeBySchema(root, s.items, v));
   }
-  if (typeof value === "object" && value !== null) {
-    const properties = (s.properties as Record<string, unknown> | undefined) ?? {};
+  if (isNode(value)) {
+    const properties = boundaryCast<Record<string, unknown> | undefined>(s.properties, "json") ?? {};
     const out: Node = {};
-    for (const [k, v] of Object.entries(value as Node)) {
+    for (const [k, v] of Object.entries(value)) {
       const child = properties[k] ?? (typeof s.additionalProperties === "object" ? s.additionalProperties : undefined);
       out[k] = child === undefined ? v : sanitizeBySchema(root, child, v);
     }

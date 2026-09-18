@@ -4,6 +4,7 @@ import { basename, dirname, resolve } from "node:path";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import type { Problem, Validate, Validation } from "@michaelthielemann/kestrel-contracts/validate";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { sanitize, sanitizeBySchema } from "./sanitize.ts";
 
@@ -61,29 +62,42 @@ function format(errors: ErrorObject[] | null | undefined): Problem[] {
 
 type Node = Record<string, unknown>;
 
+function isNode(value: unknown): value is Node {
+  return typeof value === "object" && value !== null;
+}
+
 function resolveLocal(root: Node, node: unknown): Node | undefined {
-  if (typeof node !== "object" || node === null) return undefined;
-  const ref = (node as Node).$ref;
-  if (typeof ref !== "string") return node as Node;
+  if (!isNode(node)) return undefined;
+  const ref = node.$ref;
+  if (typeof ref !== "string") return node;
   if (!ref.startsWith("#/")) return undefined;
-  return ref.slice(2).split("/").reduce<unknown>((o, k) => (typeof o === "object" && o !== null ? (o as Node)[k] : undefined), root) as Node | undefined;
+  return boundaryCast<Node | undefined>(ref.slice(2).split("/").reduce<unknown>((o, k) => (isNode(o) ? o[k] : undefined), root), "json");
 }
 
 export function withDiscriminators(schema: unknown): unknown {
-  const root = structuredClone(schema) as Node;
+  const root = boundaryCast<Node>(structuredClone(schema), "json");
   const visit = (node: unknown): void => {
     if (Array.isArray(node)) {
       node.forEach(visit);
       return;
     }
-    if (typeof node !== "object" || node === null) return;
-    const n = node as Node;
+    if (!isNode(node)) return;
+    const n = node;
     const branches = Array.isArray(n.oneOf) ? n.oneOf.map((b) => resolveLocal(root, b)) : [];
-    if (branches.length > 0 && (n.type === undefined || n.type === "object") && branches.every((b) => b !== undefined && typeof (b.properties as Node | undefined)?.type === "object" && ((b.properties as Node).type as Node).const !== undefined)) {
+    if (
+      branches.length > 0 &&
+      (n.type === undefined || n.type === "object") &&
+      branches.every((b) => {
+        if (b === undefined) return false;
+        const type = boundaryCast<Node | undefined>(b.properties, "json")?.type;
+        if (typeof type !== "object") return false;
+        return boundaryCast<Node>(type, "json").const !== undefined;
+      })
+    ) {
       n.discriminator = { propertyName: "type" };
       n.type = "object";
-      for (const b of branches as Node[]) {
-        const required = Array.isArray(b.required) ? (b.required as string[]) : [];
+      for (const b of boundaryCast<Node[]>(branches, "json")) {
+        const required = Array.isArray(b.required) ? boundaryCast<string[]>(b.required, "json") : [];
         if (!required.includes("type")) b.required = [...required, "type"];
       }
     }
@@ -101,11 +115,11 @@ function newAjv(): Ajv2020 {
 }
 
 function compileSchema(schema: Record<string, unknown>): { schema: Record<string, unknown>; fn: ValidateFunction } {
-  return { schema, fn: newAjv().compile(withDiscriminators(schema) as object) };
+  return { schema, fn: newAjv().compile(boundaryCast<object>(withDiscriminators(schema), "json")) };
 }
 
 async function loadSchema(path: string): Promise<{ schema: Record<string, unknown>; fn: ValidateFunction }> {
-  return compileSchema(JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>);
+  return compileSchema(boundaryCast<Record<string, unknown>>(JSON.parse(await readFile(path, "utf8")), "json"));
 }
 
 const WATCH_DEBOUNCE_MS = 100;
@@ -135,7 +149,7 @@ export async function createValidator(config: Config, root: string, logger: Logg
       loaded = await loadSchema(path);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const isReadOrParseError = err instanceof SyntaxError || (err as NodeJS.ErrnoException).code !== undefined;
+      const isReadOrParseError = err instanceof SyntaxError || boundaryCast<NodeJS.ErrnoException>(err, "host").code !== undefined;
       if (isReadOrParseError) throw new SchemaLoadError(`validate/jsonschema: cannot read schema for ${target} at ${path}: ${message}`);
       throw new SchemaLoadError(`validate/jsonschema: invalid schema for ${target} at ${path}: ${message}`);
     }

@@ -4,6 +4,7 @@ import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import { migrationFailed, type ApplyResult, type LedgerEntry, type Migration, type MigrationContext, type Migrations, type MigrationsError, type PendingMigration } from "@michaelthielemann/kestrel-contracts/migrations";
 import type { Document, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Validate } from "@michaelthielemann/kestrel-contracts/validate";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import type { Err } from "@michaelthielemann/kestrel/result";
 
@@ -39,13 +40,13 @@ function causeOf(value: unknown): string {
 /** Every collection and locale reaching content@1 comes from the model itself, so anything but a transient failure there is a wiring bug. */
 function fromContent(error: ContentError): MigrationsError {
   if (error.code !== "TRANSIENT") throw new Error(`migrations: unexpected content@1 error ${error.code}: ${error.message}`);
-  return error as MigrationsError;
+  return boundaryCast<MigrationsError>(error, "host");
 }
 
 /** The ledger is read by filter and written with a fresh id, so persistence@1 never answers NOT_FOUND here. */
 function fromPersistence(error: PersistenceError): MigrationsError {
   if (error.code === "NOT_FOUND") throw new Error(`migrations: unexpected persistence@1 error ${error.code}: ${error.message}`);
-  return error as MigrationsError;
+  return boundaryCast<MigrationsError>(error, "host");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

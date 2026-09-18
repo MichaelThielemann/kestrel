@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, it, expect } from "vitest";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context, Step } from "@michaelthielemann/kestrel/context";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
@@ -18,14 +19,14 @@ writeFileSync(join(dir, "blocks.json"), JSON.stringify({ type: "object", additio
 describe("validate/jsonschema module", () => {
   it("resolves relative schema paths against deps.root, not process.cwd()", async () => {
     const config = configSchema.parse({ schemas: { "pages.title": "blocks.json" } });
-    const instance = (await module.setup(config, {
+    const instance = boundaryCast<Validator>(await module.setup(config, {
       get: () => {
         throw new Error("no contract expected");
       },
       find: () => undefined,
       logger: silentLogger,
       root: dir,
-    })) as Validator;
+    }), "host");
     expect(instance.targets()).toEqual(["pages.title"]);
     expect(dir).not.toBe(process.cwd());
     instance.close();
@@ -41,14 +42,14 @@ describe("validate/jsonschema module", () => {
 
 async function makeInstance(schemas: Record<string, unknown>): Promise<Validator> {
   const config = configSchema.parse({ schemas });
-  return (await module.setup(config, {
+  return boundaryCast<Validator>(await module.setup(config, {
     get: () => {
       throw new Error("no contract expected");
     },
     find: () => undefined,
     logger: silentLogger,
     root: process.cwd(),
-  })) as Validator;
+  }), "host");
 }
 
 function pipeline(...steps: string[]) {
@@ -74,7 +75,7 @@ describe("validate/jsonschema steps via runPipeline", () => {
     const validator = await makeInstance({ "pages.body": bodySchema });
     const res = await runPipeline(pipeline("validate.sanitize:pages.body", "capture.payload"), { body: { body: { text: "hi", html: "<script>alert(1)</script><p>ok</p>" } } }, { modules: [{ module, instance: validator }], steps: { "capture.payload": capture } });
     expect(res.status).toBe(200);
-    const body = (res.result as { body: { html: string } }).body;
+    const body = boundaryCast<{ body: { html: string } }>(res.result, "host").body;
     expect(body.html).not.toContain("<script>");
     expect(body.html).toContain("<p>ok</p>");
   });
@@ -90,7 +91,7 @@ describe("validate/jsonschema steps via runPipeline", () => {
     const validator = await makeInstance({ "pages.body": bodySchema });
     const res = await runPipeline(pipeline("validate.sanitizeHtml:comment", "capture.payload"), { body: { comment: "<script>alert(1)</script><p>hi</p>" } }, { modules: [{ module, instance: validator }], steps: { "capture.payload": capture } });
     expect(res.status).toBe(200);
-    const comment = (res.result as { comment: string }).comment;
+    const comment = boundaryCast<{ comment: string }>(res.result, "host").comment;
     expect(comment).not.toContain("<script>");
     expect(comment).toContain("<p>hi</p>");
   });

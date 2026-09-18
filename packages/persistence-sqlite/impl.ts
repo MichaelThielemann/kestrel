@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { err, failure, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { fieldDefinition, type Document, type FieldDefinition, type FieldType, type Filter, type FindOptions, type NewDocument, type Page, type Persistence, type PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 
@@ -12,9 +13,10 @@ export interface Config {
 
 type Row = Record<string, unknown>;
 type SqlValue = string | number | null;
+type Op = "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "in" | "like";
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const OPERATORS: Record<string, string> = { eq: "=", ne: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=", in: "IN", like: "LIKE" };
+const OPERATORS: Record<Op, string> = { eq: "=", ne: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=", in: "IN", like: "LIKE" };
 const COLUMN_TYPE: Record<FieldType, string> = { string: "TEXT", number: "REAL", boolean: "INTEGER", json: "TEXT" };
 
 function quote(identifier: string, what: string): string {
@@ -22,10 +24,14 @@ function quote(identifier: string, what: string): string {
   return `"${identifier}"`;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // node:sqlite reports the *extended* result code in `errcode` (a primary-key collision is 1555);
 // masking with 0xff yields the primary code: 5 SQLITE_BUSY, 6 SQLITE_LOCKED, 19 SQLITE_CONSTRAINT.
 export function persistenceFailure(cause: unknown): PersistenceError | null {
-  const errcode = typeof cause === "object" && cause !== null && typeof (cause as { errcode?: unknown }).errcode === "number" ? (cause as { errcode: number }).errcode : 0;
+  const errcode = isRecord(cause) && typeof cause.errcode === "number" ? cause.errcode : 0;
   const primary = errcode & 0xff;
   if (primary === 5 || primary === 6) return failure("TRANSIENT", "persistence/sqlite: database is busy", { cause, details: { retryAfterSeconds: 1 } });
   if (primary === 19 && cause instanceof Error && cause.message.includes("UNIQUE constraint failed")) {
@@ -93,16 +99,16 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
         return JSON.stringify(value);
     }
   };
-  const decode = (collection: string, row: Row): Row => {
+  const decode = <T extends Document>(collection: string, row: Row): T => {
     const out: Row = { id: row.id };
     for (const [field, { type }] of Object.entries(schemaOf(collection))) {
       const v = row[field];
       if (v === null || v === undefined) out[field] = null;
       else if (type === "boolean") out[field] = v === 1;
-      else if (type === "json") out[field] = JSON.parse(v as string) as unknown;
+      else if (type === "json") out[field] = JSON.parse(boundaryCast<string>(v, "host")) as unknown;
       else out[field] = v;
     }
-    return out;
+    return boundaryCast<T>(out, "host");
   };
 
   const where = (collection: string, filter: Filter): { sql: string; params: SqlValue[] } => {
@@ -112,20 +118,21 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
       const type = fieldType(collection, field);
       const column = quote(field, "field");
       const condition = isCondition(expected) ? expected : { eq: expected };
-      const [op, value] = Object.entries(condition)[0] as [string, unknown];
-      if (op === "in") {
-        const list = Array.isArray(value) ? value : [];
-        if (list.length === 0) {
-          clauses.push("0");
-          continue;
+      for (const [op, value] of Object.entries(condition)) {
+        if (op === "in") {
+          const list = Array.isArray(value) ? value : [];
+          if (list.length === 0) {
+            clauses.push("0");
+            continue;
+          }
+          clauses.push(`${column} IN (${list.map(() => "?").join(", ")})`);
+          params.push(...list.map((v) => encode(type, v)));
+        } else if ((op === "eq" || op === "ne") && (value === null || value === undefined)) {
+          clauses.push(`${column} IS ${op === "eq" ? "" : "NOT "}NULL`);
+        } else {
+          clauses.push(`${column} ${isOperator(op) ? OPERATORS[op] : op} ?`);
+          params.push(encode(op === "like" ? "string" : type, value));
         }
-        clauses.push(`${column} IN (${list.map(() => "?").join(", ")})`);
-        params.push(...list.map((v) => encode(type, v)));
-      } else if ((op === "eq" || op === "ne") && (value === null || value === undefined)) {
-        clauses.push(`${column} IS ${op === "eq" ? "" : "NOT "}NULL`);
-      } else {
-        clauses.push(`${column} ${OPERATORS[op] as string} ?`);
-        params.push(encode(op === "like" ? "string" : type, value));
       }
     }
     return { sql: clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`, params };
@@ -134,7 +141,7 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
   const selectById = (collection: string, id: string): Result<Document | null, PersistenceError> => {
     const row = run(() => db.prepare(`SELECT * FROM ${quote(collection, "collection")} WHERE "id" = ?`).get(id) as Row | undefined);
     if (isErr(row)) return row;
-    return ok(row.value ? (decode(collection, row.value) as Document) : null);
+    return ok(row.value ? decode<Document>(collection, row.value) : null);
   };
 
   const insert = (collection: string, data: NewDocument<Document>): Result<Document, PersistenceError> => {
@@ -143,7 +150,7 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
     for (const field of Object.keys(fields)) fieldType(collection, field);
     const id = givenId ?? randomUUID();
     const columns = ["id", ...Object.keys(schema)];
-    const values: SqlValue[] = [id, ...Object.keys(schema).map((f) => encode((schema[f] as FieldDefinition).type, fields[f]))];
+    const values: SqlValue[] = [id, ...Object.entries(schema).map(([f, def]) => encode(def.type, fields[f]))];
     const inserted = run(() => db.prepare(`INSERT INTO ${quote(collection, "collection")} (${columns.map((c) => quote(c, "field")).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`).run(...values));
     if (isErr(inserted)) {
       if (inserted.error.code !== "CONFLICT" || inserted.error.details?.field !== "id") return inserted;
@@ -151,7 +158,7 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
     }
     const row = selectById(collection, id);
     if (isErr(row)) return row;
-    return ok(row.value as Document);
+    return ok(boundaryCast<Document>(row.value, "host"));
   };
 
   const setClause = (collection: string, patch: Row): { sql: string; params: SqlValue[] } => {
@@ -187,15 +194,15 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
       const columns = Object.entries(definitions).map(([f, { type }]) => `${quote(f, "field")} ${COLUMN_TYPE[type]}`);
       const created = run(() => {
         db.exec(`CREATE TABLE IF NOT EXISTS ${table} ("id" TEXT PRIMARY KEY${columns.map((c) => `, ${c}`).join("")})`);
-        const existing = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name));
+        const existing = new Set(boundaryCast<Array<{ name: string }>>(db.prepare(`PRAGMA table_info(${table})`).all(), "host").map((c) => c.name));
         for (const [field, { type }] of Object.entries(definitions)) {
           if (!existing.has(field)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${quote(field, "field")} ${COLUMN_TYPE[type]}`);
         }
-        const indexes = new Set((db.prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string }>).map((i) => i.name));
+        const indexes = new Set(boundaryCast<Array<{ name: string }>>(db.prepare(`PRAGMA index_list(${table})`).all(), "host").map((i) => i.name));
         for (const [field, { unique }] of Object.entries(definitions)) {
           const index = uniqueIndexName(name, field);
           if (unique) {
-            const duplicate = db.prepare(`SELECT ${quote(field, "field")} AS value, COUNT(*) AS n FROM ${table} WHERE ${quote(field, "field")} IS NOT NULL GROUP BY ${quote(field, "field")} HAVING n > 1 LIMIT 1`).get() as { value: SqlValue; n: number } | undefined;
+            const duplicate = boundaryCast<{ value: SqlValue; n: number } | undefined>(db.prepare(`SELECT ${quote(field, "field")} AS value, COUNT(*) AS n FROM ${table} WHERE ${quote(field, "field")} IS NOT NULL GROUP BY ${quote(field, "field")} HAVING n > 1 LIMIT 1`).get(), "host");
             if (duplicate) throw new Error(`persistence/sqlite: cannot make "${name}.${field}" unique: value ${JSON.stringify(duplicate.value)} is stored ${duplicate.n} times`);
             db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${quote(index, "index")} ON ${table} (${quote(field, "field")})`);
           } else if (indexes.has(index)) {
@@ -211,7 +218,7 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
     async createOne<T extends Document>(collection: string, data: NewDocument<T>): Promise<Result<T, PersistenceError>> {
       const created = insert(collection, data);
       if (isErr(created)) return created;
-      return ok(created.value as T);
+      return ok(boundaryCast<T>(created.value, "host"));
     },
 
     async createMany<T extends Document>(collection: string, data: NewDocument<T>[]): Promise<Result<T[], PersistenceError>> {
@@ -225,7 +232,7 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
             db.exec("ROLLBACK");
             return created;
           }
-          out.push(created.value as T);
+          out.push(boundaryCast<T>(created.value, "host"));
         }
         const committed = run(() => db.exec("COMMIT"));
         if (isErr(committed)) {
@@ -243,7 +250,7 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
       const w = where(collection, filter);
       const row = run(() => db.prepare(`SELECT * FROM ${quote(collection, "collection")}${w.sql} LIMIT 1`).get(...w.params) as Row | undefined);
       if (isErr(row)) return row;
-      return ok(row.value ? (decode(collection, row.value) as T) : null);
+      return ok(row.value ? decode<T>(collection, row.value) : null);
     },
 
     async findMany<T extends Document>(collection: string, filter: Filter, options: FindOptions = {}): Promise<Result<Page<T>, PersistenceError>> {
@@ -258,14 +265,14 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
       if (options.limit !== undefined || options.offset !== undefined) sql += ` LIMIT ${options.limit ?? -1} OFFSET ${options.offset ?? 0}`;
       return run(() => {
         const rows = db.prepare(sql).all(...w.params) as Row[];
-        const total = (db.prepare(`SELECT COUNT(*) AS n FROM ${table}${w.sql}`).get(...w.params) as { n: number }).n;
-        return { items: rows.map((r) => decode(collection, r) as T), total };
+        const total = boundaryCast<{ n: number }>(db.prepare(`SELECT COUNT(*) AS n FROM ${table}${w.sql}`).get(...w.params), "host").n;
+        return { items: rows.map((r) => decode<T>(collection, r)), total };
       });
     },
 
     async count(collection, filter) {
       const w = where(collection, filter);
-      return run(() => (db.prepare(`SELECT COUNT(*) AS n FROM ${quote(collection, "collection")}${w.sql}`).get(...w.params) as { n: number }).n);
+      return run(() => boundaryCast<{ n: number }>(db.prepare(`SELECT COUNT(*) AS n FROM ${quote(collection, "collection")}${w.sql}`).get(...w.params), "host").n);
     },
 
     async updateOne<T extends Document>(collection: string, id: string, patch: Partial<Omit<T, "id">>): Promise<Result<T, PersistenceError>> {
@@ -277,7 +284,7 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
       const doc = selectById(collection, id);
       if (isErr(doc)) return doc;
       if (doc.value === null) return err(failure("NOT_FOUND", `persistence/sqlite: "${collection}/${id}" does not exist`));
-      return ok(doc.value as T);
+      return ok(boundaryCast<T>(doc.value, "host"));
     },
 
     async updateMany(collection, filter, patch) {
@@ -298,6 +305,10 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
       return run(() => Number(db.prepare(`DELETE FROM ${quote(collection, "collection")}${w.sql}`).run(...w.params).changes));
     },
   };
+}
+
+function isOperator(key: string): key is Op {
+  return key in OPERATORS;
 }
 
 function isCondition(value: unknown): value is Record<string, unknown> {

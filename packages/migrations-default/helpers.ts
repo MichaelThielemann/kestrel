@@ -1,4 +1,5 @@
 import type { Migration } from "@michaelthielemann/kestrel-contracts/migrations";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 
 export interface Block {
   id?: string;
@@ -31,7 +32,7 @@ function walkNode(node: Block, type: string, fn: (block: Block) => Block | null)
 export function mapBlocks(document: Record<string, unknown>, type: string, fn: (block: Block) => Block | null, blocksField = "body"): Record<string, unknown> {
   const blocks = document[blocksField];
   if (!Array.isArray(blocks)) return document;
-  const mapped = (blocks as Block[]).flatMap((node) => {
+  const mapped = boundaryCast<Block[]>(blocks, "host").flatMap((node) => {
     const result = walkNode(node, type, fn);
     return result === null ? [] : [result];
   });
@@ -52,5 +53,5 @@ export function omit<T extends Record<string, unknown>>(obj: T, keys: string | s
   const drop = new Set(Array.isArray(keys) ? keys : [keys]);
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) if (!drop.has(key)) out[key] = value;
-  return out as Partial<T>;
+  return boundaryCast<Partial<T>>(out, "host");
 }

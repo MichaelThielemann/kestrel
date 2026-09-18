@@ -1,5 +1,6 @@
 import type { Content, ContentDocument, ContentError, ContentModel, FieldDefinition, FieldError, FieldType, LocaleOptions, TypeDefinition, Validation } from "@michaelthielemann/kestrel-contracts/content";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Err } from "@michaelthielemann/kestrel/result";
 import type { Document, FieldType as StorageType, Filter, FindOptions, Persistence, PersistenceError, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
 
@@ -121,7 +122,7 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
   const toRow = (typeName: string, fields: Record<string, unknown>, locale: string | undefined): Record<string, unknown> => {
     const type = typeOf(typeName);
     const row: Record<string, unknown> = {};
-    for (const [field, value] of Object.entries(fields)) row[column(field, definition(type.fields[field] as FieldType | FieldDefinition), locale)] = value;
+    for (const [field, value] of Object.entries(fields)) row[column(field, definition(boundaryCast<FieldType | FieldDefinition>(type.fields[field], "host")), locale)] = value;
     return row;
   };
 
@@ -153,7 +154,7 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
       for (const l of locales) translations[l] = decisive.length > 0 && decisive.every(([f, def]) => row[column(f, def, l)] !== null && row[column(f, def, l)] !== undefined);
       doc._translations = translations;
     }
-    return doc as ContentDocument;
+    return boundaryCast<ContentDocument>(doc, "host");
   };
 
   const toFilter = (typeName: string, filter: Filter, locale: string | undefined): Filter => {
@@ -175,7 +176,7 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
     const type = typeOf(typeName);
     const rule = type.completeWhen;
     if (!rule || locale === undefined) return ok();
-    const stateField = definition(type.fields[rule.field] as FieldType | FieldDefinition);
+    const stateField = definition(boundaryCast<FieldType | FieldDefinition>(type.fields[rule.field], "host"));
     if (merged[column(rule.field, stateField, locale)] !== rule.equals) return ok();
     const missing = Object.entries(type.fields)
       .map(([f, raw]) => [f, definition(raw)] as [string, FieldDefinition])
@@ -238,7 +239,7 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
         for (const field of Object.keys(find.sort)) {
           if (!RESERVED.has(field) && !fields[field]) return err(failure("VALIDATION", `content/default: unknown sort field "${field}" for "${typeName}"`));
         }
-        query.sort = Object.fromEntries(Object.entries(toFilter(typeName, find.sort, locale.value)) as Array<[string, "asc" | "desc"]>);
+        query.sort = Object.fromEntries(boundaryCast<Array<[string, "asc" | "desc"]>>(Object.entries(toFilter(typeName, find.sort, locale.value)), "host"));
       }
       const page = await db.findMany<Document>(typeName, toFilter(typeName, filter, locale.value), query);
       if (isErr(page)) return page;

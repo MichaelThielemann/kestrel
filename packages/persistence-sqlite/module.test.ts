@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
@@ -21,7 +22,7 @@ const deps: Deps = {
 };
 
 async function boot(): Promise<PersistenceSqlite> {
-  const instance = (await module.setup(configSchema.parse({ file: ":memory:" }), deps)) as PersistenceSqlite;
+  const instance = boundaryCast<PersistenceSqlite>(await module.setup(configSchema.parse({ file: ":memory:" }), deps), "host");
   await instance.ensureCollection("t", { a: "string" });
   return instance;
 }
@@ -37,7 +38,7 @@ describe("persistence/sqlite module via runPipeline", () => {
     const create = definePipeline({ name: "create", steps: ["persistence.createOne:t"] });
     const created = await runPipeline(create, { body: { a: "x" } }, { modules: [{ module, instance }] });
     expect(created.status).toBe(200);
-    const id = (created.result as { id: string }).id;
+    const id = boundaryCast<{ id: string }>(created.result, "host").id;
 
     const find = definePipeline({ name: "find", steps: ["persistence.findOne:t"] });
     const found = await runPipeline(find, { params: { id } }, { modules: [{ module, instance }] });
@@ -49,7 +50,7 @@ describe("persistence/sqlite module via runPipeline", () => {
   it("createOne rejects a non-object body as VALIDATION before the step runs", async () => {
     const instance = await boot();
     const pipeline = definePipeline({ name: "create-invalid", steps: ["persistence.createOne:t"] });
-    const result = await runPipeline(pipeline, { body: JSON.parse("[]") as Record<string, unknown> }, { modules: [{ module, instance }] });
+    const result = await runPipeline(pipeline, { body: boundaryCast<Record<string, unknown>>(JSON.parse("[]"), "json") }, { modules: [{ module, instance }] });
     expect(result.status).toBe(400);
     expect(result.code).toBe("VALIDATION");
     instance.close();
@@ -61,7 +62,7 @@ describe("persistence/sqlite module via runPipeline", () => {
     const pipeline = definePipeline({ name: "findMany", steps: ["persistence.findMany:t"] });
     const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }] });
     expect(result.status).toBe(200);
-    expect((result.result as { total: number }).total).toBe(1);
+    expect(boundaryCast<{ total: number }>(result.result, "host").total).toBe(1);
     instance.close();
   });
 
