@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
@@ -46,7 +47,7 @@ function moduleDeps(blobs: Blobstore, root: string): Deps {
   return {
     get<T>(contract: Contract<T>): T {
       if (contract.name !== BLOBSTORE.name) throw new Error(`no provider for "${contract.name}"`);
-      return blobs as T;
+      return boundaryCast<T>(blobs, "host");
     },
     find: <T>(): T | undefined => undefined,
     logger: silentLogger,
@@ -71,7 +72,7 @@ async function boot(): Promise<{ instance: Replication; blobs: ReturnType<typeof
   app.close();
   const blobs = fakeBlobs();
   const config = configSchema.parse({ file, restoreOnStart: false });
-  const instance = (await module.setup(config, moduleDeps(blobs, dir))) as Replication;
+  const instance = boundaryCast<Replication>(await module.setup(config, moduleDeps(blobs, dir)), "host");
   open.push(instance);
   return { instance, blobs };
 }
@@ -82,7 +83,7 @@ describe("replication/sqlite module via runPipeline", () => {
     const pipeline = definePipeline({ name: "sync", steps: ["replication.sync"] });
     const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }] });
     expect(result.status).toBe(200);
-    expect(result.result).toMatchObject({ generation: expect.any(String) as string });
+    expect(result.result).toMatchObject({ generation: expect.any(String) as unknown });
   });
 
   it("snapshot starts a new generation", async () => {
@@ -90,7 +91,7 @@ describe("replication/sqlite module via runPipeline", () => {
     const pipeline = definePipeline({ name: "snapshot", steps: ["replication.snapshot"] });
     const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }] });
     expect(result.status).toBe(200);
-    expect(result.result).toMatchObject({ generation: expect.any(String) as string });
+    expect(result.result).toMatchObject({ generation: expect.any(String) as unknown });
   });
 
   it("listPoints reports the restore points written by snapshot", async () => {
@@ -100,7 +101,7 @@ describe("replication/sqlite module via runPipeline", () => {
     const pipeline = definePipeline({ name: "listPoints", steps: ["replication.listPoints"] });
     const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }] });
     expect(result.status).toBe(200);
-    expect((result.result as unknown[]).length).toBeGreaterThan(0);
+    expect(boundaryCast<unknown[]>(result.result, "host").length).toBeGreaterThan(0);
   });
 
   it("readStatus reports replication status", async () => {
@@ -108,7 +109,7 @@ describe("replication/sqlite module via runPipeline", () => {
     const pipeline = definePipeline({ name: "readStatus", steps: ["replication.readStatus"] });
     const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }] });
     expect(result.status).toBe(200);
-    expect(result.result).toMatchObject({ walBytes: expect.any(Number) as number });
+    expect(result.result).toMatchObject({ walBytes: expect.any(Number) as unknown });
   });
 
   it("prepareRestore rebuilds the database at the latest point after a snapshot", async () => {

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context } from "@michaelthielemann/kestrel/context";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
@@ -42,7 +43,7 @@ describe("sanitize/svg step via runPipeline", () => {
     );
 
     expect(res.status).toBe(200);
-    const files = res.result as Array<{ filename: string; contentType: string; text: string }>;
+    const files = boundaryCast<Array<{ filename: string; contentType: string; text: string }>>(res.result, "host");
     expect(files[0]?.contentType).toBe("image/svg+xml");
     expect(files[0]?.text).not.toContain("<script");
     expect(files[1]?.text).toBe("not an svg");

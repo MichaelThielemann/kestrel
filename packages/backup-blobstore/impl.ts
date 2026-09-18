@@ -110,12 +110,16 @@ export function createBackupBlobstore(config: Config, blobs: Blobstore, now: () 
   };
 }
 
+function isErrno(cause: unknown): cause is NodeJS.ErrnoException {
+  return cause instanceof Error;
+}
+
 export async function exists(file: string): Promise<boolean> {
   try {
     await stat(file);
     return true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if (isErrno(err) && err.code === "ENOENT") return false;
     throw err;
   }
 }

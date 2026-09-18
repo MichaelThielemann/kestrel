@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, it, expect } from "vitest";
 import { BLOBSTORE, type Blobstore, type BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createContext } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
@@ -64,7 +65,7 @@ function deps(blobs: Blobstore, root: string): Deps {
   return {
     get<T>(contract: Contract<T>): T {
       if (contract.name !== BLOBSTORE.name) throw new Error(`no provider for "${contract.name}"`);
-      return blobs as T;
+      return boundaryCast<T>(blobs, "host");
     },
     find: <T>(): T | undefined => undefined,
     logger: silentLogger,

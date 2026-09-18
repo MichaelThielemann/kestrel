@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
@@ -44,7 +45,7 @@ function moduleDeps(blobs: Blobstore, root: string): Deps {
   return {
     get<T>(contract: Contract<T>): T {
       if (contract.name !== BLOBSTORE.name) throw new Error(`no provider for "${contract.name}"`);
-      return blobs as T;
+      return boundaryCast<T>(blobs, "host");
     },
     find: <T>(): T | undefined => undefined,
     logger: silentLogger,
@@ -64,7 +65,7 @@ async function boot(): Promise<Backup> {
   await writeFile(file, "hello");
   const blobs = fakeBlobstore();
   const config = configSchema.parse({ file, key: "backups/db", restoreOnStart: false, versions: 2 });
-  return (await module.setup(config, moduleDeps(blobs, dir))) as Backup;
+  return boundaryCast<Backup>(await module.setup(config, moduleDeps(blobs, dir)), "host");
 }
 
 describe("backup/blobstore module via runPipeline", () => {
@@ -83,7 +84,7 @@ describe("backup/blobstore module via runPipeline", () => {
     const pipeline = definePipeline({ name: "listVersions", steps: ["backup.listVersions"] });
     const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }] });
     expect(result.status).toBe(200);
-    expect((result.result as { versions: string[] }).versions.length).toBe(1);
+    expect(boundaryCast<{ versions: string[] }>(result.result, "host").versions.length).toBe(1);
   });
 
   it("restore stages the latest version to be applied on the next start", async () => {
