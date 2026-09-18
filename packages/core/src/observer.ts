@@ -16,6 +16,8 @@ export interface RunEndEvent extends RunStartEvent {
   outcome: "ok" | "fail" | "error";
   code?: string;
   step?: string;
+  /** Only for a status of 400 and above: the failure message a client would see, truncated and without a stack. A thrown error contributes its name only. */
+  message?: string;
 }
 
 export interface StepStartEvent {

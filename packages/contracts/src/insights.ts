@@ -30,6 +30,19 @@ export interface EventStats {
   lastAt: number | null;
 }
 
+/** One failed run, as the runner reported it: the message a client would see, never a stack. */
+export interface RecentFailure {
+  at: number;
+  runId: string;
+  pipeline: string;
+  trigger: { kind: string; name: string };
+  status: number;
+  ms: number;
+  code?: string;
+  step?: string;
+  message?: string;
+}
+
 export interface RateLimitStats {
   key: string;
   remaining: number;
@@ -45,6 +58,8 @@ export interface Stats {
   steps: StepStats[];
   events: EventStats[];
   ratelimit: RateLimitStats[];
+  /** The newest failed runs first, capped by the module's ring buffer. */
+  recentFailures: RecentFailure[];
 }
 
 /** Both methods read process memory only and never fail; `manifest()` is the core's static view, `stats()` the live counters. */

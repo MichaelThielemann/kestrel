@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { Context, Step } from "./context.ts";
 import { customFailure } from "./errors.ts";
 import { silentLogger, type Logger, type StepLog } from "./logger.ts";
-import type { RunObserver } from "./observer.ts";
+import type { RunEndEvent, RunObserver } from "./observer.ts";
 import { boundaryCast } from "./cast.ts";
 import { ok } from "./result.ts";
 import type { ResolvedStep } from "./registry.ts";
@@ -392,6 +392,21 @@ describe("runPipeline observer", () => {
     const guarded: ResolvedStep = { name: "guarded", description: { ...description, input: { type: "object", properties: { a: { type: "string" } } } }, fn: async (ctx: Context) => ok(ctx) };
     await runPipeline({ name: "p", steps: [guarded] }, input, silentLogger, observer);
     expect(events).toEqual(["runStart p http", "stepStart guarded", "stepEnd guarded 400 fail(VALIDATION)", "runEnd p 400 fail VALIDATION guarded timed"]);
+  });
+
+  it("carries the failure message, but only the error name of a throw", async () => {
+    const ends: Array<RunEndEvent> = [];
+    const collect: RunObserver = { runEnd: (e) => ends.push(e) };
+    await runPipeline({ name: "p", steps: [{ name: "one", description, fn: async (ctx: Context) => ok(ctx) }] }, input, silentLogger, collect);
+    await runPipeline({ name: "p", steps: [{ name: "deny", description, fn: async (ctx: Context) => ctx.fail("FORBIDDEN", "no") }] }, input, silentLogger, collect);
+    await runPipeline({ name: "p", steps: [{ name: "boom", description, fn: async () => { throw new TypeError("secret=hunter2"); } }] }, input, silentLogger, collect);
+    expect(ends.map((e) => e.message)).toEqual([undefined, "no", "p/boom: unexpected TypeError"]);
+  });
+
+  it("truncates a long failure message", async () => {
+    let end: RunEndEvent | undefined;
+    await runPipeline({ name: "p", steps: [{ name: "deny", description, fn: async (ctx: Context) => ctx.fail("VALIDATION", "x".repeat(600)) }] }, input, silentLogger, { runEnd: (e) => { end = e; } });
+    expect(end?.message).toBe(`${"x".repeat(500)}…`);
   });
 
   it("carries parentRunId and requestId on the run events", async () => {

@@ -528,12 +528,16 @@ config *value*: per config variable only path, type, required, default and wheth
 (`set`, plus the three-state `status`); variables marked secret in the module's schema show neither
 default nor anything else. The live
 numbers are per process and start at zero on every boot — behind two instances each answers for
-itself.
+itself. `recentFailures` is a ring buffer of the last runs that ended with a status of 400 or
+above (newest first, 50 by default, `recentFailures` in the module's config, `0` turns it off).
+`message` is the same text the failing run returned to its caller, truncated at 500 characters;
+an unexpected throw shows only `"<pipeline>/<step>: unexpected <ErrorName>"`, and a stack never
+leaves the log.
 
 | Method | Path | Response |
 |---|---|---|
 | GET | `/admin/insights/manifest` | `{ generatedAt, core: { version }, contracts: ["persistence@1", …], modules: [Module], steps: [Step], pipelines: [Pipeline], triggers: { http: [{ method, path, pipeline }], events: [{ event, pipeline }], crons: [{ expression, pipeline }] } }` — computed once at boot, `generatedAt` is the response time |
-| GET | `/admin/insights/stats` | `{ generatedAt, process: { pid, startedAt, uptimeMs }, runs: { active, total, failed, errors }, pipelines: [{ name, count, failed, errors, p50Ms, p95Ms, lastAt }], steps: [{ pipeline, step, count, failed, errors, p50Ms, p95Ms }], events: [{ name, count, lastAt }], ratelimit: [] }` |
+| GET | `/admin/insights/stats` | `{ generatedAt, process: { pid, startedAt, uptimeMs }, runs: { active, total, failed, errors }, pipelines: [{ name, count, failed, errors, p50Ms, p95Ms, lastAt }], steps: [{ pipeline, step, count, failed, errors, p50Ms, p95Ms }], events: [{ name, count, lastAt }], ratelimit: [], recentFailures: [{ at, runId, pipeline, trigger: { kind, name }, status, ms, code?, step?, message? }] }` |
 
 `Module`: `{ name: "authn/multi", use: "@michaelthielemann/kestrel-authn-multi", version: string | null (null when the package cannot be resolved from the boot root, and for path entries), provides, requires, optional: ["<contract>@<major>"], config: { schema: JsonSchema, variables: [{ path: "bootstrap.passwordHash", type, required, default?, secret, set, status }] }, steps: ["authn.login", …], eventHook: boolean, emits: ["migrations.applied"] (events the module emits from a contract method, `[]` for most modules) }`.
 `type` is one of `string number integer boolean array object record enum union literal function unknown`. `required` is true only when neither the variable nor any of its ancestors is optional or

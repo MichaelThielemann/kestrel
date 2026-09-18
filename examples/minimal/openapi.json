@@ -1541,7 +1541,7 @@
     "/admin/insights/stats": {
       "get": {
         "operationId": "insightsStats",
-        "summary": "Require a valid session → Requires permission insights.read → Live counters of this process: runs, pipelines, steps, events",
+        "summary": "Require a valid session → Requires permission insights.read → Live counters of this process: runs, pipelines, steps, events, and the most recent failed runs",
         "tags": [
           "admin"
         ],
@@ -1730,6 +1730,62 @@
                           "resetAt"
                         ]
                       }
+                    },
+                    "recentFailures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "at": {
+                            "type": "number"
+                          },
+                          "runId": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "trigger": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "name"
+                            ]
+                          },
+                          "status": {
+                            "type": "number"
+                          },
+                          "ms": {
+                            "type": "number"
+                          },
+                          "code": {
+                            "type": "string"
+                          },
+                          "step": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "description": "The failure text a client would see, truncated; never a stack"
+                          }
+                        },
+                        "required": [
+                          "at",
+                          "runId",
+                          "pipeline",
+                          "trigger",
+                          "status",
+                          "ms"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -1739,7 +1795,8 @@
                     "pipelines",
                     "steps",
                     "events",
-                    "ratelimit"
+                    "ratelimit",
+                    "recentFailures"
                   ]
                 }
               }

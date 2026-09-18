@@ -2011,10 +2011,27 @@
       "config": {
         "schema": {
           "type": "object",
-          "properties": {},
+          "properties": {
+            "recentFailures": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 500,
+              "default": 50
+            }
+          },
           "additionalProperties": false
         },
-        "variables": []
+        "variables": [
+          {
+            "path": "recentFailures",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "default": 50
+          }
+        ]
       },
       "steps": [
         "insights.readManifest",
@@ -7154,7 +7171,7 @@
       "module": "insights/default",
       "factory": false,
       "description": {
-        "summary": "Live counters of this process: runs, pipelines, steps, events",
+        "summary": "Live counters of this process: runs, pipelines, steps, events, and the most recent failed runs",
         "reads": [],
         "writes": [
           "result"
@@ -7332,6 +7349,62 @@
                   "resetAt"
                 ]
               }
+            },
+            "recentFailures": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "at": {
+                    "type": "number"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "pipeline": {
+                    "type": "string"
+                  },
+                  "trigger": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "name"
+                    ]
+                  },
+                  "status": {
+                    "type": "number"
+                  },
+                  "ms": {
+                    "type": "number"
+                  },
+                  "code": {
+                    "type": "string"
+                  },
+                  "step": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "The failure text a client would see, truncated; never a stack"
+                  }
+                },
+                "required": [
+                  "at",
+                  "runId",
+                  "pipeline",
+                  "trigger",
+                  "status",
+                  "ms"
+                ]
+              }
             }
           },
           "required": [
@@ -7341,7 +7414,8 @@
             "pipelines",
             "steps",
             "events",
-            "ratelimit"
+            "ratelimit",
+            "recentFailures"
           ]
         }
       }
@@ -11058,7 +11132,7 @@
           "name": "insights.readStats",
           "module": "insights/default",
           "description": {
-            "summary": "Live counters of this process: runs, pipelines, steps, events",
+            "summary": "Live counters of this process: runs, pipelines, steps, events, and the most recent failed runs",
             "reads": [],
             "writes": [
               "result"
@@ -11236,6 +11310,62 @@
                       "resetAt"
                     ]
                   }
+                },
+                "recentFailures": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "at": {
+                        "type": "number"
+                      },
+                      "runId": {
+                        "type": "string"
+                      },
+                      "pipeline": {
+                        "type": "string"
+                      },
+                      "trigger": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "name"
+                        ]
+                      },
+                      "status": {
+                        "type": "number"
+                      },
+                      "ms": {
+                        "type": "number"
+                      },
+                      "code": {
+                        "type": "string"
+                      },
+                      "step": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string",
+                        "description": "The failure text a client would see, truncated; never a stack"
+                      }
+                    },
+                    "required": [
+                      "at",
+                      "runId",
+                      "pipeline",
+                      "trigger",
+                      "status",
+                      "ms"
+                    ]
+                  }
                 }
               },
               "required": [
@@ -11245,7 +11375,8 @@
                 "pipelines",
                 "steps",
                 "events",
-                "ratelimit"
+                "ratelimit",
+                "recentFailures"
               ]
             }
           }

@@ -227,8 +227,9 @@ For every run:
    result).
 8. Independently of the logger, every observer registered with `kestrel.observe()` (or through
    a module's `attach` hook) sees `runStart`, `stepStart`, `stepEnd` (duration, status,
-   `ok | fail(<code>) | error`) and `runEnd` (duration, status, `ok | fail | error`, code, step)
-   — the source of `insights` stats. A throwing observer is logged and never touches the run.
+   `ok | fail(<code>) | error`) and `runEnd` (duration, status, `ok | fail | error`, code, step,
+   message) — the source of `insights` stats. A throwing observer is logged and never touches
+   the run.
 
 This makes pipelines **traceable** (a log line per step), **testable** (steps are pure
 functions, a pipeline can be tested with a fake context) and **measurable** (duration per
@@ -293,6 +294,16 @@ needs a different status (e.g. `MIGRATION_FAILED` with 500) passes a ready-made
 `KestrelError` from its contract file: `ctx.fail(migrationFailed(message, details))`.
 Success is `ok(ctx)` or `ok({ ...ctx, result })`; `ctx.done(result)` remains the only way to
 end a pipeline *successfully* ahead of time.
+
+### What may stand in `message`
+
+`message` leaves the process three ways: in the HTTP error body, in the log, and — for a
+failed run — in `runEnd.message`, from where `insights` keeps it in its ring buffer of recent
+failures and the admin UI shows it. A module author therefore writes only text a logged-in
+admin may read: no passwords, tokens, connection strings, API keys or raw rows. Secrets belong
+in `logger.error`, never in the error. The runner truncates the message at 500 characters, and
+an unexpected `throw` contributes only `"<pipeline>/<step>: unexpected <ErrorName>"` to the
+event — the thrown text and the stack stay in the log.
 
 `throw` stays reserved for wiring bugs (a bug, not an expected runtime error message): an
 unknown contract type, a step running without a precondition the boot dataflow check was

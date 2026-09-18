@@ -114,6 +114,37 @@ describe("insights aggregation", () => {
     expect(insights.stats().pipelines[0]).toMatchObject({ count: 7, p50Ms: 2, p95Ms: 4 });
   });
 
+  it("keeps the newest failed runs with code, step and message and no stack", async () => {
+    const kestrel = await booted();
+    const insights = boundaryCast<ReturnType<typeof createInsights>>(kestrel.contracts.get(module.provides[0]!), "host");
+    await kestrel.run("pass", { trigger: http });
+    await kestrel.run("deny", { trigger: http });
+    await kestrel.run("boom", { trigger: http });
+    const failures = insights.stats().recentFailures;
+    expect(failures.map((f) => [f.pipeline, f.status, f.code, f.step, f.message])).toEqual([
+      ["boom", 500, "INTERNAL", "probe.boom", "boom/probe.boom: unexpected Error"],
+      ["deny", 403, "FORBIDDEN", "probe.deny", "no"],
+    ]);
+    expect(failures[0]?.trigger).toEqual(http);
+    expect(typeof failures[0]?.runId).toBe("string");
+    expect(failures[0]?.at).toBeLessThanOrEqual(Date.now());
+    expect(failures[0]?.ms).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(failures)).not.toContain("impl.test.ts");
+    await kestrel.stop();
+  });
+
+  it("drops the oldest failures once the ring buffer is full", () => {
+    const insights = createInsights({ now: () => 0, processStartedAt: 0, recentFailureSize: 2 });
+    for (const code of ["A", "B", "C"]) insights.observer.runEnd!({ runId: code, pipeline: "p", trigger: http, at: 0, ms: 1, status: 500, outcome: "error", code });
+    expect(insights.stats().recentFailures.map((f) => f.code)).toEqual(["C", "B"]);
+  });
+
+  it("keeps no failures at all when the buffer is turned off", () => {
+    const insights = createInsights({ now: () => 0, processStartedAt: 0, recentFailureSize: 0 });
+    insights.observer.runEnd!({ runId: "r", pipeline: "p", trigger: http, at: 0, ms: 1, status: 500, outcome: "error" });
+    expect(insights.stats().recentFailures).toEqual([]);
+  });
+
   it("reports process facts and uptime", () => {
     const insights = createInsights({ now: () => 5000, processStartedAt: 2000 });
     const stats = insights.stats();
