@@ -2,47 +2,6 @@
 
 ## Unreleased
 
-### Breaking
-
-- `media-default`: `media_items.key` is declared `unique`. Two concurrent uploads of the same
-  filename into the same folder end as one item and one `CONFLICT` (409, `details: { collection:
-  "media_items", field: "key" }`) instead of two rows over one blob. Migration: existing rows with
-  duplicate keys make `ensureCollection` throw at boot naming the key; find them beforehand with
-  `SELECT "key", COUNT(*) AS n FROM "media_items" WHERE "key" IS NOT NULL GROUP BY "key" HAVING n > 1;`
-  and delete or re-key the surplus rows.
-- `media-default`: uploading the same folder, filename and bytes again answers 200 with the item
-  that is already stored instead of 409; `media.upload` then ends the pipeline itself, so a
-  following `events.emit:media.uploaded` does not run, and for several files in one request `ids`
-  lists only the newly stored items. `Media.upload()` on `…/impl` returns `Result<{ item, created }>`.
-- `core`: `ConfigVariable.required` is true only when neither the variable nor any ancestor is
-  optional or defaulted; the generated config tables and `examples/minimal/manifest.json` change
-  accordingly.
-
-### Added
-
-- `core`: `ConfigVariable.status: "set" | "default" | "missing"` (type `ConfigStatus`) next to the
-  unchanged boolean `set`; `default` reports the effective default, including one a defaulted
-  ancestor supplies. `insights.readManifest`'s schema requires `status`.
-- `media-default`: the README documents the three key families (`media/<folder>/<file>` originals,
-  `media-variants/<id>/<size>.webp` variants from `images/default`, `site/media/<folder>/<file>.<size>.webp`
-  copies published by `delivery-static`) and the idempotent upload.
-
-### Fixed
-
-- `media-default`: `media.remove` deletes the blob only when no other row points at that key.
-- `insights`/`core`: the manifest no longer shows the child of an optional or defaulted config
-  object as required and not set.
-
-### Changed
-
-- Lint: `@typescript-eslint/no-unsafe-type-assertion` is an error in every package (tests
-  included), so a narrowing `as T` on an `unknown` value can no longer bypass `boundaryCast`. The
-  405 assertions across the workspace became typed generics, type guards, narrowing through
-  existing checks or `boundaryCast<T>(value, boundary)` at a genuine untyped source (sqlite rows,
-  S3 responses, JSON, ajv output, host objects); `core` shares one `isRecord` guard. No
-  consumer-visible behaviour change: no new throws on reachable paths, no changed messages or
-  return values.
-
 ## 5.4.0 – 2026-09-18
 
 ### Breaking
@@ -61,6 +20,19 @@
   (`kestrel.describe()`, `insights.readManifest`).
 - `core` (testing): stand-in steps in `testing/runPipeline` register with `writes: ["result?"]`;
   a stand-in that seeds another context key declares it through the new `writes` option.
+- `media-default`: `media_items.key` is declared `unique`. Two concurrent uploads of the same
+  filename into the same folder end as one item and one `CONFLICT` (409, `details: { collection:
+  "media_items", field: "key" }`) instead of two rows over one blob. Migration: existing rows with
+  duplicate keys make `ensureCollection` throw at boot naming the key; find them beforehand with
+  `SELECT "key", COUNT(*) AS n FROM "media_items" WHERE "key" IS NOT NULL GROUP BY "key" HAVING n > 1;`
+  and delete or re-key the surplus rows.
+- `media-default`: uploading the same folder, filename and bytes again answers 200 with the item
+  that is already stored instead of 409; `media.upload` then ends the pipeline itself, so a
+  following `events.emit:media.uploaded` does not run, and for several files in one request `ids`
+  lists only the newly stored items. `Media.upload()` on `…/impl` returns `Result<{ item, created }>`.
+- `core`: `ConfigVariable.required` is true only when neither the variable nor any ancestor is
+  optional or defaulted; the generated config tables and `examples/minimal/manifest.json` change
+  accordingly.
 
 ### Added
 
@@ -84,6 +56,12 @@
   `examples/minimal` uses the new name.
 - docs: `pnpm docs:generate` and `docs:check` also write and verify the package table in the
   root `README.md` from every `packages/*/package.json`.
+- `core`: `ConfigVariable.status: "set" | "default" | "missing"` (type `ConfigStatus`) next to the
+  unchanged boolean `set`; `default` reports the effective default, including one a defaulted
+  ancestor supplies. `insights.readManifest`'s schema requires `status`.
+- `media-default`: the README documents the three key families (`media/<folder>/<file>` originals,
+  `media-variants/<id>/<size>.webp` variants from `images/default`, `site/media/<folder>/<file>.<size>.webp`
+  copies published by `delivery-static`) and the idempotent upload.
 
 ### Fixed
 
@@ -95,6 +73,19 @@
 - core test suite: `describe.scan` fails a `module.ts` it cannot parse instead of skipping it,
   lists the three step-less modules explicitly, and follows helper chains of any depth to
   `ctx.payload`.
+- `media-default`: `media.remove` deletes the blob only when no other row points at that key.
+- `insights`/`core`: the manifest no longer shows the child of an optional or defaulted config
+  object as required and not set.
+
+### Changed
+
+- Lint: `@typescript-eslint/no-unsafe-type-assertion` is an error in every package (tests
+  included), so a narrowing `as T` on an `unknown` value can no longer bypass `boundaryCast`. The
+  405 assertions across the workspace became typed generics, type guards, narrowing through
+  existing checks or `boundaryCast<T>(value, boundary)` at a genuine untyped source (sqlite rows,
+  S3 responses, JSON, ajv output, host objects); `core` shares one `isRecord` guard. No
+  consumer-visible behaviour change: no new throws on reachable paths, no changed messages or
+  return values.
 
 ## 5.3.0 – 2026-09-11
 
