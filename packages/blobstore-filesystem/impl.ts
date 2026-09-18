@@ -16,8 +16,12 @@ export function assertKey(key: string): void {
   }
 }
 
+function isErrno(cause: unknown): cause is NodeJS.ErrnoException {
+  return cause instanceof Error;
+}
+
 function errno(cause: unknown): string | undefined {
-  return typeof cause === "object" && cause !== null ? (cause as NodeJS.ErrnoException).code : undefined;
+  return isErrno(cause) ? cause.code : undefined;
 }
 
 const TRANSIENT_CODES = new Set(["EBUSY", "EAGAIN", "EMFILE", "ENFILE"]);

@@ -7,6 +7,7 @@ import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createContext, type Context, type Step, type StepFactory } from "@michaelthielemann/kestrel/context";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { failure } from "@michaelthielemann/kestrel/errors";
@@ -124,15 +125,16 @@ describe("generate step", () => {
     const { db, blobs, steps } = await make();
     await addImage(db, blobs, "a", await jpeg(400, 300));
     const ctx = expectOk(await steps.generate(fakeCtx({ payload: { event: "media.uploaded", at: 1, identity: null, params: {}, id: "a" } })));
-    expect((ctx.result as { id: string; variants: unknown[] }).id).toBe("a");
-    expect((ctx.result as { id: string; variants: unknown[] }).variants).toHaveLength(5);
+    const result = boundaryCast<{ id: string; variants: unknown[] }>(ctx.result, "host");
+    expect(result.id).toBe("a");
+    expect(result.variants).toHaveLength(5);
   });
 
   it("reads the media id from payload.id", async () => {
     const { db, blobs, steps } = await make();
     await addImage(db, blobs, "a", await jpeg(400, 300));
     const ctx = expectOk(await steps.generate(fakeCtx({ payload: { id: "a" } })));
-    expect((ctx.result as { id: string }).id).toBe("a");
+    expect(boundaryCast<{ id: string }>(ctx.result, "host").id).toBe("a");
   });
 
   it("answers VALIDATION without a media id", async () => {
@@ -152,7 +154,7 @@ describe("generate step", () => {
     await addImage(db, blobs, "a", await jpeg(400, 300));
     await addImage(db, blobs, "b", await jpeg(200, 200));
     const ctx = expectOk(await steps.generate(fakeCtx({ payload: { event: "media.uploaded", at: 1, identity: null, params: {}, id: null, ids: ["a", "b", "nope"] } })));
-    const result = ctx.result as { items: Array<{ id: string; variants: unknown[] }> };
+    const result = boundaryCast<{ items: Array<{ id: string; variants: unknown[] }> }>(ctx.result, "host");
     expect(result.items.map((i) => i.id)).toEqual(["a", "b"]);
     expect(result.items[0]?.variants).toHaveLength(5);
   });
@@ -179,7 +181,7 @@ describe("serve step", () => {
     await addImage(db, blobs, "a", await jpeg(400, 300));
     // no images.generate() call: the "thumb" variant row does not exist yet, so read() falls back
     const ctx = expectOk(await steps.serve(fakeCtx({ params: { id: "a", file: "thumb.webp" } })));
-    const result = ctx.result as { binary: true; headers?: Record<string, string> };
+    const result = boundaryCast<{ binary: true; headers?: Record<string, string> }>(ctx.result, "host");
     expect(result.binary).toBe(true);
     expect(result.headers).toEqual({ "x-kestrel-variant": "pending" });
   });
@@ -211,7 +213,7 @@ describe("attach step", () => {
     await addImage(db, blobs, "a", await jpeg(400, 300));
     expectOk(await images.generate("a"));
     const ctx = expectOk(await steps.attach(fakeCtx({ result: { id: "a", filename: "a.jpg" } })));
-    const result = ctx.result as { variants: Array<{ size: string; path: string }> };
+    const result = boundaryCast<{ variants: Array<{ size: string; path: string }> }>(ctx.result, "host");
     expect(result.variants).toHaveLength(5);
     expect(result.variants.find((v) => v.size === "thumb")).toMatchObject({ path: "/media/a/variants/thumb.webp" });
   });
@@ -223,7 +225,7 @@ describe("attach step", () => {
     expectOk(await images.generate("a"));
     expectOk(await images.generate("b"));
     const ctx = expectOk(await steps.attach(fakeCtx({ result: { items: [{ id: "a" }, { id: "b" }], total: 2 } })));
-    const result = ctx.result as { items: Array<{ id: string; variants: unknown[] }>; total: number };
+    const result = boundaryCast<{ items: Array<{ id: string; variants: unknown[] }>; total: number }>(ctx.result, "host");
     expect(result.total).toBe(2);
     expect(result.items[0]?.variants).toHaveLength(5);
     expect(result.items[1]?.variants).toHaveLength(5);
@@ -271,16 +273,19 @@ async function makeInstance(config: Partial<Config> = {}) {
   const db = createFakePersistence();
   await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string" });
   const parsed = configSchema.parse({ ...baseConfig, ...config });
-  const images = (await module.setup(parsed, {
-    get<T>(contract: { name: string }): T {
-      if (contract === BLOBSTORE) return blobs as T;
-      if (contract === PERSISTENCE) return db as T;
-      throw new Error(`unexpected contract ${contract.name}`);
-    },
-    find: () => undefined,
-    logger: silentLogger,
-    root: process.cwd(),
-  })) as Images;
+  const images = boundaryCast<Images>(
+    await module.setup(parsed, {
+      get<T>(contract: { name: string }): T {
+        if (contract === BLOBSTORE) return boundaryCast<T>(blobs, "host");
+        if (contract === PERSISTENCE) return boundaryCast<T>(db, "host");
+        throw new Error(`unexpected contract ${contract.name}`);
+      },
+      find: () => undefined,
+      logger: silentLogger,
+      root: process.cwd(),
+    }),
+    "host",
+  );
   return { images, blobs, db };
 }
 
@@ -317,7 +322,7 @@ describe("images/default steps via runPipeline", () => {
     await addImage(db, blobs, "a", await jpeg(400, 300));
     const plain = await runPipeline(pipeline("images.generate"), { body: { id: "a" } }, { modules: [{ module, instance: images }] });
     expect(plain.status).toBe(200);
-    expect((plain.result as { id: string }).id).toBe("a");
+    expect(boundaryCast<{ id: string }>(plain.result, "host").id).toBe("a");
 
     const envelope = await runPipeline(pipeline("images.generate"), { body: { event: "media.uploaded", at: 1, identity: null, params: {}, id: "a" } }, { modules: [{ module, instance: images }] });
     expect(envelope.status).toBe(200);
@@ -328,7 +333,7 @@ describe("images/default steps via runPipeline", () => {
     await addImage(db, blobs, "a", await jpeg(200, 200));
     const res = await runPipeline(pipeline("images.sync"), {}, { modules: [{ module, instance: images }] });
     expect(res.status).toBe(200);
-    expect((res.result as { state: string }).state).toMatch(/running|done/);
+    expect(boundaryCast<{ state: string }>(res.result, "host").state).toMatch(/running|done/);
     await module.teardown!(images);
   });
 
@@ -389,7 +394,7 @@ describe("images/default steps via runPipeline", () => {
     expectOk(await images.generate("a"));
     const res = await runPipeline(pipeline("seed.single", "images.attach"), {}, { modules: [{ module, instance: images }], steps: seedSteps });
     expect(res.status).toBe(200);
-    expect((res.result as { variants: unknown[] }).variants).toHaveLength(5);
+    expect(boundaryCast<{ variants: unknown[] }>(res.result, "host").variants).toHaveLength(5);
   });
 
   it("serve: serves a done variant", async () => {
@@ -409,7 +414,7 @@ describe("images/default steps via runPipeline", () => {
     try {
       const res = await runPipeline(pipeline(`images.export:${dir}`), {}, { modules: [{ module, instance: images }] });
       expect(res.status).toBe(200);
-      expect((res.result as { variants: { written: number } }).variants.written).toBeGreaterThan(0);
+      expect(boundaryCast<{ variants: { written: number } }>(res.result, "host").variants.written).toBeGreaterThan(0);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

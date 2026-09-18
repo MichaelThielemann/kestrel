@@ -1,4 +1,5 @@
 import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, NoSuchKey, PutObjectCommand, S3Client, type S3ClientConfig } from "@aws-sdk/client-s3";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok, type Result } from "@michaelthielemann/kestrel/result";
 import type { BlobInfo, Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
@@ -50,7 +51,7 @@ const TRANSIENT_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPI
 
 /** After the SDK's own `maxAttempts` are spent, this is the only line separating "retry the caller" from "the operation is broken". */
 function isTransient(cause: unknown): boolean {
-  const e = cause as { name?: string; code?: string; $retryable?: unknown; $metadata?: { httpStatusCode?: number } };
+  const e = boundaryCast<{ name?: string; code?: string; $retryable?: unknown; $metadata?: { httpStatusCode?: number } }>(cause, "host");
   const status = e.$metadata?.httpStatusCode;
   if (status !== undefined && (status >= 500 || status === 429)) return true;
   if (e.$retryable) return true;
@@ -80,11 +81,11 @@ export function createBlobstoreS3(config: Config, client: S3Like = createClient(
     },
     async get(key): Promise<Result<Uint8Array | null, BlobstoreError>> {
       try {
-        const out = (await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: fullKey(key) }))) as { Body?: { transformToByteArray(): Promise<Uint8Array> } };
+        const out = boundaryCast<{ Body?: { transformToByteArray(): Promise<Uint8Array> } }>(await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: fullKey(key) })), "host");
         if (!out.Body) return ok(null);
         return ok(await out.Body.transformToByteArray());
       } catch (cause) {
-        if (cause instanceof NoSuchKey || (cause as { name?: string }).name === "NoSuchKey") return ok(null);
+        if (cause instanceof NoSuchKey || boundaryCast<{ name?: string }>(cause, "host").name === "NoSuchKey") return ok(null);
         if (isTransient(cause)) return err(failure("TRANSIENT", `blobstore/s3: get ${JSON.stringify(key)} failed`, { cause }));
         throw cause;
       }
@@ -105,7 +106,7 @@ export function createBlobstoreS3(config: Config, client: S3Like = createClient(
       try {
         await client.send(new CopyObjectCommand({ Bucket: config.bucket, Key: fullKey(to), CopySource: copySource, MetadataDirective: "COPY" }));
       } catch (cause) {
-        const info = cause as { name?: string; $metadata?: { httpStatusCode?: number } };
+        const info = boundaryCast<{ name?: string; $metadata?: { httpStatusCode?: number } }>(cause, "host");
         if (info.name === "NoSuchKey" || info.$metadata?.httpStatusCode === 404) return err(failure("NOT_FOUND", `blobstore/s3: ${JSON.stringify(from)} not found`, { cause }));
         if (isTransient(cause)) return err(failure("TRANSIENT", `blobstore/s3: move ${JSON.stringify(from)} to ${JSON.stringify(to)} failed`, { cause }));
         throw cause;
@@ -123,10 +124,10 @@ export function createBlobstoreS3(config: Config, client: S3Like = createClient(
       let token: string | undefined;
       try {
         do {
-          const page = (await client.send(new ListObjectsV2Command({ Bucket: config.bucket, Prefix: config.prefix + prefix, ContinuationToken: token }))) as {
+          const page = boundaryCast<{
             Contents?: Array<{ Key?: string; Size?: number }>;
             NextContinuationToken?: string;
-          };
+          }>(await client.send(new ListObjectsV2Command({ Bucket: config.bucket, Prefix: config.prefix + prefix, ContinuationToken: token })), "host");
           for (const item of page.Contents ?? []) {
             if (item.Key === undefined) continue;
             out.push({ key: item.Key.slice(config.prefix.length), size: item.Size ?? 0 });

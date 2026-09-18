@@ -43,9 +43,13 @@ const PAGE = 100;
 
 // Collections are addressed by generated id or by delivery's own filters and every locale comes from
 // the content model, so only a transient failure of a dependency is expected here.
+function isTransientError(error: KestrelError): error is DeliveryError {
+  return error.code === "TRANSIENT";
+}
+
 function transientOnly(error: KestrelError, source: string): DeliveryError {
-  if (error.code !== "TRANSIENT") throw new Error(`delivery/static: unexpected ${source} failure ${error.code}: ${error.message}`);
-  return error as DeliveryError;
+  if (!isTransientError(error)) throw new Error(`delivery/static: unexpected ${source} failure ${error.code}: ${error.message}`);
+  return error;
 }
 
 function bytes(data: Uint8Array | string): Uint8Array {

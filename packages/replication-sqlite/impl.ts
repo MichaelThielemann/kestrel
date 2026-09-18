@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writ
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import { applySegment, FRAME_HEADER_SIZE, frameSize, parseFrameHeader, parseWalHeader, WAL_HEADER_SIZE, type WalHeader } from "./wal.ts";
@@ -91,9 +92,9 @@ async function listPoints(blobs: Blobstore, prefix: string): Promise<Result<Poin
   for (const info of list.value) {
     const m = /gen\/(\d{8}T\d{6}Z)\/(snapshot\.db|wal\/(\d+)-(\d+)-([0-9TZ]+)\.wal)$/.exec(info.key);
     if (!m) continue;
-    const generation = m[1] as string;
+    const generation = m[1] ?? "";
     if (m[2] === "snapshot.db") out.push({ generation, at: unstamp(generation), kind: "snapshot", key: info.key });
-    else out.push({ generation, at: unstamp(m[5] as string), kind: "wal", key: info.key });
+    else out.push({ generation, at: unstamp(m[5] ?? ""), kind: "wal", key: info.key });
   }
   return ok(out.sort((a, b) => a.generation.localeCompare(b.generation) || (a.kind === "snapshot" ? -1 : b.kind === "snapshot" ? 1 : a.key.localeCompare(b.key))));
 }
@@ -123,7 +124,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let lastCheckpointAt: number | null = null;
 
   const walBytes = (): number => (existsSync(walFile) ? statSync(walFile).size : 0);
-  const segmentKey = (at: number): string => `${config.prefix}gen/${generation as string}/wal/${pad(lineage, 6)}-${pad(seq, 6)}-${stamp(at)}.wal`;
+  const segmentKey = (currentGeneration: string, at: number): string => `${config.prefix}gen/${currentGeneration}/wal/${pad(lineage, 6)}-${pad(seq, 6)}-${stamp(at)}.wal`;
 
   const takeSnapshot = async (): Promise<Result<{ generation: string; bytes: number }, BlobstoreError>> => {
     const at = now();
@@ -152,7 +153,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   // Frames written before this process took its first snapshot are covered by that snapshot; without a
   // generation there is nowhere to ship them to.
   const shipNewFrames = async (): Promise<Result<{ bytes: number; frames: number }, BlobstoreError>> => {
-    if (generation === null || !existsSync(walFile)) return ok({ bytes: 0, frames: 0 });
+    const currentGeneration = generation;
+    if (currentGeneration === null || !existsSync(walFile)) return ok({ bytes: 0, frames: 0 });
     const wal = new Uint8Array(readFileSync(walFile));
     const current = parseWalHeader(wal);
     if (!current) return ok({ bytes: 0, frames: 0 });
@@ -174,7 +176,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     const segment = new Uint8Array(WAL_HEADER_SIZE + frames.byteLength);
     segment.set(wal.subarray(0, WAL_HEADER_SIZE));
     segment.set(frames, WAL_HEADER_SIZE);
-    const put = await blobs.put(segmentKey(now()), segment, { contentType: "application/octet-stream" });
+    const put = await blobs.put(segmentKey(currentGeneration, now()), segment, { contentType: "application/octet-stream" });
     if (isErr(put)) return put;
     seq += 1;
     const count = lastCommit + 1 - shippedFrames;
@@ -185,7 +187,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   const checkpoint = (): boolean => {
     release();
     try {
-      const row = conn.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get() as { busy: number } | undefined;
+      const row = boundaryCast<{ busy: number } | undefined>(conn.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get(), "host");
       const done = row !== undefined && row.busy === 0;
       if (done) {
         lastCheckpointAt = now();
@@ -242,7 +244,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       const pruned = await prune();
       if (isErr(pruned)) return pruned;
       lastSyncAt = t;
-      return ok({ generation: generation as string, shippedBytes: shipped.value.bytes, frames: shipped.value.frames, checkpointed, pruned: pruned.value });
+      if (generation === null) throw new Error("replication/sqlite: sync ended without a generation");
+      return ok({ generation, shippedBytes: shipped.value.bytes, frames: shipped.value.frames, checkpointed, pruned: pruned.value });
     },
     async snapshot() {
       const shipped = await shipNewFrames();
