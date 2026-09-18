@@ -45,7 +45,8 @@
             "type": "string",
             "required": true,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           }
         ]
       },
@@ -110,7 +111,8 @@
             "type": "string",
             "required": true,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "prefix",
@@ -118,6 +120,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "replica/"
           },
           {
@@ -126,6 +129,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": 4194304
           },
           {
@@ -134,6 +138,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": 300
           },
           {
@@ -142,6 +147,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": 86400
           },
           {
@@ -150,6 +156,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": 172800
           },
           {
@@ -158,6 +165,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": true
           }
         ]
@@ -205,14 +213,16 @@
             "type": "string",
             "required": true,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "busyTimeoutMs",
             "type": "integer",
             "required": false,
             "secret": false,
-            "set": false
+            "set": false,
+            "status": "missing"
           }
         ]
       },
@@ -254,6 +264,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": 2097152
           }
         ]
@@ -333,6 +344,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": [
               "image/*",
               "application/pdf"
@@ -344,6 +356,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": [
               "image/svg+xml",
               "text/html",
@@ -356,6 +369,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": 5242880
           },
           {
@@ -364,6 +378,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": []
           },
           {
@@ -371,7 +386,8 @@
             "type": "string",
             "required": false,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "prefix",
@@ -379,6 +395,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": "media/"
           }
         ]
@@ -515,7 +532,8 @@
             "type": "array",
             "required": false,
             "secret": false,
-            "set": false
+            "set": false,
+            "status": "missing"
           },
           {
             "path": "prefix",
@@ -523,6 +541,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "media-variants/"
           },
           {
@@ -531,6 +550,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "/media"
           },
           {
@@ -539,6 +559,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": {
               "collection": "media_items"
             }
@@ -546,9 +567,11 @@
           {
             "path": "media.collection",
             "type": "string",
-            "required": true,
+            "required": false,
             "secret": false,
-            "set": false
+            "set": false,
+            "status": "default",
+            "default": "media_items"
           },
           {
             "path": "chunk",
@@ -556,6 +579,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": 20
           },
           {
@@ -564,6 +588,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": 60000
           },
           {
@@ -572,6 +597,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": 5
           }
         ]
@@ -661,6 +687,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": "username"
           },
           {
@@ -669,6 +696,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": 12
           },
           {
@@ -677,6 +705,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": 86400
           },
           {
@@ -684,21 +713,24 @@
             "type": "object",
             "required": false,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "bootstrap.username",
             "type": "string",
-            "required": true,
+            "required": false,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "bootstrap.passwordHash",
             "type": "string",
-            "required": true,
+            "required": false,
             "secret": true,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "bootstrap.roles",
@@ -706,6 +738,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": []
           }
         ]
@@ -775,7 +808,8 @@
             "type": "record",
             "required": true,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "roleClaim",
@@ -783,6 +817,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "roles"
           },
           {
@@ -791,6 +826,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": []
           }
         ]
@@ -946,21 +982,24 @@
             "type": "record",
             "required": true,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "locales",
             "type": "array",
             "required": false,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "defaultLocale",
             "type": "string",
             "required": false,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "maxLimit",
@@ -968,6 +1007,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": 200
           }
         ]
@@ -1071,7 +1111,8 @@
             "type": "record",
             "required": true,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           }
         ]
       },
@@ -1139,6 +1180,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": 10000
           },
           {
@@ -1147,6 +1189,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": 4
           },
           {
@@ -1155,6 +1198,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": 21600
           },
           {
@@ -1163,6 +1207,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "kestrel-links/0.1 (+link check)"
           },
           {
@@ -1171,6 +1216,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": false
           }
         ]
@@ -1239,7 +1285,8 @@
             "type": "record",
             "required": true,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "maxDepth",
@@ -1247,6 +1294,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": 32
           },
           {
@@ -1255,6 +1303,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": 20000
           },
           {
@@ -1263,6 +1312,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": false
           }
         ]
@@ -1344,7 +1394,8 @@
             "type": "array",
             "required": true,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "mode",
@@ -1352,6 +1403,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": "apply"
           },
           {
@@ -1360,6 +1412,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": 50
           }
         ]
@@ -1406,6 +1459,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "title"
           },
           {
@@ -1414,6 +1468,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": "Kestrel"
           }
         ]
@@ -1572,7 +1627,8 @@
             "type": "record",
             "required": true,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "formats",
@@ -1580,6 +1636,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": [
               "html"
             ]
@@ -1590,6 +1647,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": ""
           },
           {
@@ -1598,6 +1656,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": false
           },
           {
@@ -1606,6 +1665,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": true
           },
           {
@@ -1613,7 +1673,8 @@
             "type": "object",
             "required": false,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           },
           {
             "path": "media.publicPath",
@@ -1621,6 +1682,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": "/media"
           },
           {
@@ -1629,6 +1691,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "media_items"
           },
           {
@@ -1637,6 +1700,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "images_variants"
           },
           {
@@ -1645,6 +1709,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "media/"
           },
           {
@@ -1653,6 +1718,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": {}
           },
           {
@@ -1660,7 +1726,8 @@
             "type": "string",
             "required": false,
             "secret": false,
-            "set": false
+            "set": false,
+            "status": "missing"
           },
           {
             "path": "llms.full",
@@ -1668,6 +1735,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": false
           },
           {
@@ -1676,6 +1744,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": {}
           },
           {
@@ -1684,6 +1753,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "settings"
           },
           {
@@ -1692,6 +1762,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "title"
           },
           {
@@ -1700,6 +1771,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "description"
           },
           {
@@ -1708,6 +1780,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "title"
           },
           {
@@ -1716,6 +1789,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "seo"
           },
           {
@@ -1724,6 +1798,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": {}
           }
         ]
@@ -1781,6 +1856,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "redirects"
           },
           {
@@ -1789,6 +1865,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "rules"
           },
           {
@@ -1797,6 +1874,7 @@
             "required": false,
             "secret": false,
             "set": true,
+            "status": "set",
             "default": ""
           },
           {
@@ -1805,6 +1883,7 @@
             "required": false,
             "secret": false,
             "set": false,
+            "status": "default",
             "default": "redirects.json"
           }
         ]
@@ -1908,7 +1987,8 @@
             "type": "record",
             "required": true,
             "secret": false,
-            "set": true
+            "set": true,
+            "status": "set"
           }
         ]
       },
@@ -2332,7 +2412,7 @@
       "module": "media/default",
       "factory": false,
       "description": {
-        "summary": "Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results",
+        "summary": "Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing",
         "reads": [
           "files"
         ],
@@ -2621,7 +2701,8 @@
                   "type": "array",
                   "items": {
                     "type": "string"
-                  }
+                  },
+                  "description": "the newly stored items only; an unchanged re-upload is in `items` but not here, and is not announced as an event"
                 }
               },
               "required": [
@@ -2634,7 +2715,7 @@
         },
         "errors": {
           "400": "no file or invalid folder/provenance (per-file for a multi-file request)",
-          "409": "filename already exists in that folder (per-file for a multi-file request)",
+          "409": "filename already exists in that folder with different bytes, `details.field: \"key\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict",
           "413": "file exceeds maxBytes (per-file for a multi-file request)",
           "415": "type not allowed (per-file for a multi-file request)"
         }
@@ -6745,6 +6826,15 @@
                             },
                             "set": {
                               "type": "boolean"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "set",
+                                "default",
+                                "missing"
+                              ],
+                              "description": "set: the raw config carries the path; default: it does not and the value comes from this node's or an ancestor's default; missing: no value at all"
                             }
                           },
                           "required": [
@@ -6752,7 +6842,8 @@
                             "type",
                             "required",
                             "secret",
-                            "set"
+                            "set",
+                            "status"
                           ]
                         }
                       }
@@ -10602,6 +10693,15 @@
                                 },
                                 "set": {
                                   "type": "boolean"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "set",
+                                    "default",
+                                    "missing"
+                                  ],
+                                  "description": "set: the raw config carries the path; default: it does not and the value comes from this node's or an ancestor's default; missing: no value at all"
                                 }
                               },
                               "required": [
@@ -10609,7 +10709,8 @@
                                 "type",
                                 "required",
                                 "secret",
-                                "set"
+                                "set",
+                                "status"
                               ]
                             }
                           }
@@ -15976,7 +16077,7 @@
           "name": "media.upload",
           "module": "media/default",
           "description": {
-            "summary": "Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results",
+            "summary": "Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing",
             "reads": [
               "files"
             ],
@@ -16265,7 +16366,8 @@
                       "type": "array",
                       "items": {
                         "type": "string"
-                      }
+                      },
+                      "description": "the newly stored items only; an unchanged re-upload is in `items` but not here, and is not announced as an event"
                     }
                   },
                   "required": [
@@ -16278,7 +16380,7 @@
             },
             "errors": {
               "400": "no file or invalid folder/provenance (per-file for a multi-file request)",
-              "409": "filename already exists in that folder (per-file for a multi-file request)",
+              "409": "filename already exists in that folder with different bytes, `details.field: \"key\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict",
               "413": "file exceeds maxBytes (per-file for a multi-file request)",
               "415": "type not allowed (per-file for a multi-file request)"
             }

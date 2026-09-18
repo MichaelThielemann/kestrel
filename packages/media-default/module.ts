@@ -92,24 +92,28 @@ export default defineModule({
       if (ctx.files.length === 1) {
         const [file] = ctx.files;
         if (!file) throw new Error("media/default: upload: expected exactly one file");
-        const item = await media.upload(file, folder, ctx.payload.provenance);
-        if (isErr(item)) return ctx.fail(item.error);
-        return ok({ ...ctx, result: item.value });
+        const uploaded = await media.upload(file, folder, ctx.payload.provenance);
+        if (isErr(uploaded)) return ctx.fail(uploaded.error);
+        // nothing was stored, so a following events.emit:media.uploaded would announce an upload that did not happen
+        return uploaded.value.created ? ok({ ...ctx, result: uploaded.value.item }) : ctx.done(uploaded.value.item);
       }
       const items: MediaItem[] = [];
+      const ids: string[] = [];
       const errors: Array<{ filename: string; status: number; code: string; message: string }> = [];
       for (const file of ctx.files) {
-        const item = await media.upload(file, folder, ctx.payload.provenance);
-        if (!isErr(item)) {
-          items.push(item.value);
+        const uploaded = await media.upload(file, folder, ctx.payload.provenance);
+        if (!isErr(uploaded)) {
+          items.push(uploaded.value.item);
+          if (uploaded.value.created) ids.push(uploaded.value.item.id);
           continue;
         }
         // a per-file rejection is reported next to the files that made it through; a failing
         // blobstore or database is not per-file and fails the whole request
-        if (item.error.code === "TRANSIENT") return ctx.fail(item.error);
-        errors.push({ filename: file.filename, status: item.error.status, code: item.error.code, message: item.error.message });
+        if (uploaded.error.code === "TRANSIENT") return ctx.fail(uploaded.error);
+        errors.push({ filename: file.filename, status: uploaded.error.status, code: uploaded.error.code, message: uploaded.error.message });
       }
-      return ok({ ...ctx, result: { items, errors, ids: items.map((item) => item.id) } });
+      const result = { items, errors, ids };
+      return ids.length === 0 ? ctx.done(result) : ok({ ...ctx, result });
     },
     update: async (ctx: Context): Promise<StepResult> => {
       if (!ctx.params.id) return ctx.fail("VALIDATION", "missing id");
@@ -213,7 +217,7 @@ export default defineModule({
 
   describe: () => ({
     upload: {
-      summary: "Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results",
+      summary: "Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing",
       reads: ["files"],
       writes: ["result"],
       multipart: true,
@@ -221,10 +225,10 @@ export default defineModule({
       output: {
         oneOf: [
           MEDIA_ITEM_SCHEMA,
-          { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, errors: { type: "array", items: { type: "object", properties: { filename: { type: "string" }, status: { type: "number" }, code: { type: "string" }, message: { type: "string" } }, required: ["filename", "status", "code", "message"] } }, ids: { type: "array", items: { type: "string" } } }, required: ["items", "errors", "ids"] },
+          { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, errors: { type: "array", items: { type: "object", properties: { filename: { type: "string" }, status: { type: "number" }, code: { type: "string" }, message: { type: "string" } }, required: ["filename", "status", "code", "message"] } }, ids: { type: "array", items: { type: "string" }, description: "the newly stored items only; an unchanged re-upload is in `items` but not here, and is not announced as an event" } }, required: ["items", "errors", "ids"] },
         ],
       },
-      errors: { 400: "no file or invalid folder/provenance (per-file for a multi-file request)", 409: "filename already exists in that folder (per-file for a multi-file request)", 413: "file exceeds maxBytes (per-file for a multi-file request)", 415: "type not allowed (per-file for a multi-file request)" },
+      errors: { 400: "no file or invalid folder/provenance (per-file for a multi-file request)", 409: "filename already exists in that folder with different bytes, `details.field: \"key\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict", 413: "file exceeds maxBytes (per-file for a multi-file request)", 415: "type not allowed (per-file for a multi-file request)" },
     },
     get: { summary: "Media metadata", reads: ["params.id"], writes: ["result"], query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "unknown locale", 404: "not found" } },
     list: { summary: "List media, newest first", reads: [], writes: ["result"], query: { folder: { type: "string" }, recursive: { type: "boolean" }, q: { type: "string" }, sort: { type: "string" }, limit: { type: "integer" }, offset: { type: "integer" }, ids: { type: "string" }, locale: { type: "string" } }, output: { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, total: { type: "number" } } }, errors: { 400: "invalid folder or unknown locale" } },

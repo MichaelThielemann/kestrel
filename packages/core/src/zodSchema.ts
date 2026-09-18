@@ -2,6 +2,8 @@ import type { ZodTypeAny } from "zod";
 import { boundaryCast } from "./cast.ts";
 import type { JsonSchema } from "./defineModule.ts";
 
+export type ConfigStatus = "set" | "default" | "missing";
+
 export interface ConfigVariable {
   path: string;
   type: string;
@@ -9,6 +11,7 @@ export interface ConfigVariable {
   default?: unknown;
   secret: boolean;
   set: boolean;
+  status: ConfigStatus;
 }
 
 export interface ConfigDescription {
@@ -244,23 +247,36 @@ function valueAt(raw: unknown, path: string[]): unknown {
   return current;
 }
 
-function collectVariables(schema: ZodTypeAny, raw: unknown, path: string[], out: ConfigVariable[]): void {
+interface Ancestors {
+  optional: boolean;
+  default: unknown;
+}
+
+function collectVariables(schema: ZodTypeAny, raw: unknown, path: string[], out: ConfigVariable[], ancestors: Ancestors): void {
   const { inner } = unwrap(schema);
   if (kind(inner) !== "ZodObject") return;
+  // zod substitutes an ancestor's `.default()` only while that ancestor is absent from the raw config;
+  // a parent spelled out there hands its children nothing and leaves them to their own defaults.
+  const inherited = valueAt(raw, path) === undefined ? ancestors.default : undefined;
   for (const [key, child] of Object.entries(def(inner).shape?.() ?? {})) {
     const childPath = [...path, key];
     const unwrapped = unwrap(child);
     const secret = unwrapped.description === SECRET;
-    const variable: ConfigVariable = { path: childPath.join("."), type: typeOf(unwrapped.inner), required: !unwrapped.optional, secret, set: valueAt(raw, childPath) !== undefined };
-    if (unwrapped.defaultValue && !secret) variable.default = unwrapped.defaultValue();
+    const set = valueAt(raw, childPath) !== undefined;
+    const fromAncestor = valueAt(inherited, [key]);
+    const effective = fromAncestor === undefined ? unwrapped.defaultValue?.() : fromAncestor;
+    const optional = ancestors.optional || unwrapped.optional;
+    const status: ConfigStatus = set ? "set" : effective === undefined ? "missing" : "default";
+    const variable: ConfigVariable = { path: childPath.join("."), type: typeOf(unwrapped.inner), required: !optional, secret, set, status };
+    if (effective !== undefined && !secret) variable.default = effective;
     out.push(variable);
-    if (kind(unwrapped.inner) === "ZodObject") collectVariables(unwrapped.inner, raw, childPath, out);
+    if (kind(unwrapped.inner) === "ZodObject") collectVariables(unwrapped.inner, raw, childPath, out, { optional, default: effective });
   }
 }
 
-/** JSON Schema plus one row per config path; `raw` is the consumer's entry before parsing and only decides `set`, never lands in the output. */
+/** JSON Schema plus one row per config path; `raw` is the consumer's entry before parsing and only decides `set`/`status`, never lands in the output. */
 export function describeConfig(schema: ZodTypeAny, raw: unknown): ConfigDescription {
   const variables: ConfigVariable[] = [];
-  collectVariables(schema, raw, [], variables);
+  collectVariables(schema, raw, [], variables, { optional: false, default: undefined });
   return { schema: toJsonSchema(schema), variables };
 }

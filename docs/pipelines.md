@@ -505,13 +505,21 @@ an event receives this data as its `payload`.
 |---|---|
 | `auth.loggedIn` / `auth.loggedOut` | user id |
 | `page.created` / `page.updated` / `page.deleted` | document id |
-| `media.uploaded` / `media.updated` / `media.deleted` | document id (for a bulk upload of several files: `null`, plus `ids: string[]`) |
+| `media.uploaded` / `media.updated` / `media.deleted` | document id (for a bulk upload of several files: `null`, plus `ids: string[]` — the newly stored items only) |
 | `user.created` / `user.deactivated` | document id |
 | `migrations.applied` | – (no envelope: the `migrations/default` module sends its own `{ migrations: [id], documents }` after a run; deliberately no `page.updated` per document it migrated). The named exception to rule 3: `apply()` is a contract method that also runs at boot, and after a partial failure the event still has to cover the migrations already applied — an `events.emit` step after a failing `migrations.apply` would never run. The module declares it as `emits: ["migrations.applied"]`, so a trigger on it boots without the warning above |
 
 Whatever the bus delivers is a shallowly frozen copy of the emitted data, like the context between
 steps: a handler cannot change what the next handler sees, and assigning to the object throws in
 the handler (which `emit` reports in its `AggregateError`). Nested objects are shared, not frozen.
+
+A step that changed nothing can keep the emit from happening at all: `ctx.done(result)` ends the
+pipeline successfully right there, so no later step runs — including `events.emit`. `media.upload`
+uses this for an idempotent re-upload (same folder, same filename, same bytes): it answers 200 with
+the item that was already stored and no `media.uploaded` goes out, so nothing regenerates variants
+for a file that did not change. The alternative — emitting anyway and asking every listener to
+recognise the repeat — would spread one module's knowledge across all of them. A step that suppresses
+an event this way says so in its `describe().summary`, because the pipeline file does not show it.
 
 `events.emit:<name>?with=result` additionally adds `result: ctx.result` unchanged (a
 deliberate opt-in, not the default). **Careful:** the shape of `result` then depends on the

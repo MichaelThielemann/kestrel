@@ -38,8 +38,8 @@ Not included: self-service registration, password reset by mail, login rate limi
 | `minPasswordLength` | integer | no | `12` |
 | `sessionTtlSeconds` | integer | no | `86400` |
 | `bootstrap` | object | no | – |
-| `bootstrap.username` | string | yes | – |
-| `bootstrap.passwordHash` | string | yes | *(secret)* |
+| `bootstrap.username` | string | no | – |
+| `bootstrap.passwordHash` | string | no | *(secret)* |
 | `bootstrap.roles` | array | no | `[]` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors |

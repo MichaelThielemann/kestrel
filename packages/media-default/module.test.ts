@@ -7,7 +7,7 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { createContext, type Context } from "@michaelthielemann/kestrel/context";
+import { createContext, DONE, type Context } from "@michaelthielemann/kestrel/context";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
@@ -45,12 +45,38 @@ async function make(overrides: Partial<Config> = {}): Promise<{ media: Media; bl
 const file = (filename: string, data: Uint8Array = new Uint8Array([1])): Context["files"][number] => ({ field: "file", filename, contentType: "image/png", data });
 
 describe("media/default upload step", () => {
-  it("maps a duplicate filename to CONFLICT", async () => {
+  it("maps a duplicate filename with other bytes to CONFLICT", async () => {
     const { steps } = await make();
     expectOk(await steps.upload(fakeCtx([file("a.png")])));
-    const error = expectErr(await steps.upload(fakeCtx([file("a.png")])), "CONFLICT");
+    const error = expectErr(await steps.upload(fakeCtx([file("a.png", new Uint8Array([2]))])), "CONFLICT");
     expect(error.status).toBe(409);
     expect(error.message).toMatch(/already exists/);
+    expect(error.details).toMatchObject({ field: "key" });
+  });
+
+  it("an identical re-upload answers 200 with the stored item and ends the pipeline before events.emit", async () => {
+    const { media, steps, db } = await make();
+    const first = expectOk(await steps.upload(fakeCtx([file("a.png")])));
+    const again = expectOk(await steps.upload(fakeCtx([file("a.png")])));
+    expect(boundaryCast<{ id: string }>(again.result, "host").id).toBe(boundaryCast<{ id: string }>(first.result, "host").id);
+    expect(Reflect.get(again, DONE)).toBe(true);
+    expect(Reflect.get(first, DONE)).toBeUndefined();
+    expect(expectOk(await db.count("media_items", {}))).toBe(1);
+    expect(expectOk(await media.list()).total).toBe(1);
+  });
+
+  it("multiple files: ids carries only what was stored, and an all-idempotent batch ends the pipeline", async () => {
+    const { steps } = await make();
+    expectOk(await steps.upload(fakeCtx([file("a.png")])));
+    const mixed = expectOk(await steps.upload(fakeCtx([file("a.png"), file("b.png")])));
+    const result = boundaryCast<{ items: Array<{ id: string; filename: string }>; ids: string[] }>(mixed.result, "host");
+    expect(result.items.map((i) => i.filename)).toEqual(["a.png", "b.png"]);
+    expect(result.ids).toEqual([result.items[1]?.id]);
+    expect(Reflect.get(mixed, DONE)).toBeUndefined();
+
+    const repeat = expectOk(await steps.upload(fakeCtx([file("a.png"), file("b.png")])));
+    expect(boundaryCast<{ ids: string[] }>(repeat.result, "host").ids).toEqual([]);
+    expect(Reflect.get(repeat, DONE)).toBe(true);
   });
 
   it("no file uploaded is a VALIDATION failure", async () => {
@@ -83,7 +109,7 @@ describe("media/default upload step", () => {
   it("multiple files: a conflict is a CONFLICT error entry, not a failed step", async () => {
     const { steps } = await make();
     expectOk(await steps.upload(fakeCtx([file("a.png")])));
-    const ctx = expectOk(await steps.upload(fakeCtx([file("a.png"), file("d.png")])));
+    const ctx = expectOk(await steps.upload(fakeCtx([file("a.png", new Uint8Array([2])), file("d.png")])));
     const result = boundaryCast<{ items: Array<{ filename: string }>; errors: Array<{ filename: string; status: number; code: string }> }>(ctx.result, "host");
     expect(result.items.map((i) => i.filename)).toEqual(["d.png"]);
     expect(result.errors).toEqual([{ filename: "a.png", status: 409, code: "CONFLICT", message: expect.stringContaining("already exists") as unknown }]);
@@ -101,7 +127,7 @@ describe("media/default upload step", () => {
 describe("media/default download step", () => {
   it("flags an upload without provenance as unknown", async () => {
     const { media, steps } = await make();
-    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }));
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) })).item;
     expect(item.provenance).toEqual({ origin: "unknown" });
     const ctx = expectOk(await steps.download(fakeCtx([], {}, { id: item.id })));
     expect(boundaryCast<{ headers?: Record<string, string> }>(ctx.result, "host").headers).toEqual({ "x-content-provenance": "unknown" });
@@ -109,14 +135,14 @@ describe("media/default download step", () => {
 
   it("sets no provenance header for a human upload", async () => {
     const { media, steps } = await make();
-    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "", "human"));
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "", "human")).item;
     const ctx = expectOk(await steps.download(fakeCtx([], {}, { id: item.id })));
     expect(boundaryCast<{ headers?: Record<string, string> }>(ctx.result, "host").headers).toBeUndefined();
   });
 
   it("keeps the binary result shape", async () => {
     const { media, steps } = await make();
-    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1, 2]) }));
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1, 2]) })).item;
     const ctx = expectOk(await steps.download(fakeCtx([], {}, { id: item.id })));
     expect(ctx.result).toMatchObject({ binary: true, contentType: "image/png", filename: "a.png" });
     expect(Array.from(boundaryCast<{ data: Uint8Array }>(ctx.result, "host").data)).toEqual([1, 2]);
@@ -137,14 +163,14 @@ describe("media/default get and update steps", () => {
 
   it("an unknown locale is VALIDATION", async () => {
     const { media, steps } = await make({ locales: ["de"], defaultLocale: "de" });
-    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }));
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) })).item;
     expect(expectErr(await steps.get(fakeCtx([], { locale: "fr" }, { id: item.id })), "VALIDATION").status).toBe(400);
   });
 
   it("a taken filename is CONFLICT", async () => {
     const { media, steps } = await make();
     expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }));
-    const b = expectOk(await media.upload({ filename: "b.png", contentType: "image/png", data: new Uint8Array([1]) }));
+    const b = expectOk(await media.upload({ filename: "b.png", contentType: "image/png", data: new Uint8Array([1]) })).item;
     expect(expectErr(await steps.update(fakeCtx([], { filename: "a.png" }, { id: b.id })), "CONFLICT").status).toBe(409);
   });
 
@@ -271,9 +297,31 @@ describe("media/default steps via runPipeline", () => {
     expect(boundaryCast<{ folder: string }>(ok1.result, "host").folder).toBe("photos");
   });
 
+  it("upload: the same name with other bytes is a 409 naming the key and the field", async () => {
+    const { media } = await makeInstance();
+    expect((await runPipeline(pipeline("media.upload"), { files: [file("a.png")] }, { modules: [{ module, instance: media }] })).status).toBe(200);
+    const res = await runPipeline(pipeline("media.upload"), { files: [file("a.png", new Uint8Array([2]))] }, { modules: [{ module, instance: media }] });
+    expect(res).toMatchObject({ status: 409, code: "CONFLICT", step: "media.upload", details: { collection: "media_items", field: "key" } });
+    expect(res.error).toMatch(/media\/a\.png already exists/);
+  });
+
+  it("upload: an identical re-upload is a 200 with the stored item, and the step after media.upload does not run", async () => {
+    const { media } = await makeInstance();
+    let emitted = 0;
+    const emit = { "events.emit": async (ctx: Context) => { emitted += 1; return ok(ctx); } };
+    const run = () => runPipeline(pipeline("media.upload", "events.emit"), { files: [file("a.png")] }, { modules: [{ module, instance: media }], steps: emit });
+    const first = await run();
+    expect(first.status).toBe(200);
+    expect(emitted).toBe(1);
+    const again = await run();
+    expect(again.status).toBe(200);
+    expect(boundaryCast<{ id: string }>(again.result, "host").id).toBe(boundaryCast<{ id: string }>(first.result, "host").id);
+    expect(emitted).toBe(1);
+  });
+
   it("get: query.locale is validated and coerced", async () => {
     const { media } = await makeInstance();
-    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }));
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) })).item;
     const res = await runPipeline(pipeline("media.get"), { params: { id: item.id }, query: { locale: "de" } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
     expect(boundaryCast<{ id: string }>(res.result, "host").id).toBe(item.id);
@@ -289,7 +337,7 @@ describe("media/default steps via runPipeline", () => {
 
   it("download: serves the binary result", async () => {
     const { media } = await makeInstance();
-    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1, 2]) }));
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1, 2]) })).item;
     const res = await runPipeline(pipeline("media.download"), { params: { id: item.id } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
     expect(res.result).toMatchObject({ binary: true });
@@ -304,7 +352,7 @@ describe("media/default steps via runPipeline", () => {
 
   it("update: replaces fields", async () => {
     const { media } = await makeInstance();
-    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }));
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) })).item;
     const res = await runPipeline(pipeline("media.update"), { params: { id: item.id }, body: { filename: "b.png" } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
     expect(boundaryCast<{ filename: string }>(res.result, "host").filename).toBe("b.png");
@@ -312,7 +360,7 @@ describe("media/default steps via runPipeline", () => {
 
   it("remove: deletes the item", async () => {
     const { media } = await makeInstance();
-    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }));
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) })).item;
     const res = await runPipeline(pipeline("media.remove"), { params: { id: item.id } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
     expect(res.result).toEqual({ ok: true });

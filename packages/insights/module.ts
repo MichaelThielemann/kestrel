@@ -29,8 +29,8 @@ const STEP_DESCRIPTION: JsonSchema = {
 };
 const VARIABLE: JsonSchema = {
   type: "object",
-  properties: { path: { type: "string" }, type: { type: "string" }, required: { type: "boolean" }, default: {}, secret: { type: "boolean" }, set: { type: "boolean" } },
-  required: ["path", "type", "required", "secret", "set"],
+  properties: { path: { type: "string" }, type: { type: "string" }, required: { type: "boolean" }, default: {}, secret: { type: "boolean" }, set: { type: "boolean" }, status: { type: "string", enum: ["set", "default", "missing"], description: "set: the raw config carries the path; default: it does not and the value comes from this node's or an ancestor's default; missing: no value at all" } },
+  required: ["path", "type", "required", "secret", "set", "status"],
 };
 const MODULE: JsonSchema = {
   type: "object",

@@ -79,8 +79,14 @@ export interface Reconciliation {
   rowsWithoutBlob: string[];
 }
 
+/** `created` is false when the upload was idempotent: same folder, same filename, same checksum, so `item` is the row that was already there. */
+export interface Upload {
+  item: MediaItem;
+  created: boolean;
+}
+
 export interface Media {
-  upload(file: { filename: string; contentType: string; data: Uint8Array }, folder?: string, provenance?: unknown): Promise<Result<MediaItem, MediaError>>;
+  upload(file: { filename: string; contentType: string; data: Uint8Array }, folder?: string, provenance?: unknown): Promise<Result<Upload, MediaError>>;
   get(id: string, locale?: string): Promise<Result<MediaItem | null, MediaError>>;
   list(options?: ListOptions & { locale?: string }): Promise<Result<{ items: MediaItem[]; total: number }, MediaError>>;
   byIds(ids: string[], locale?: string): Promise<Result<MediaItem[], MediaError>>;
@@ -207,7 +213,7 @@ export function safeName(filename: string): string {
 
 export async function createMediaDefault(config: Config, blobs: Blobstore, db: Persistence, logger: Logger, now: () => number = Date.now): Promise<Media> {
   const items = await db.ensureCollection(COLLECTION, {
-    filename: "string", folder: "string", contentType: "string", size: "number", key: "string", checksum: "string", status: "string", createdAt: "number", updatedAt: "number",
+    filename: "string", folder: "string", contentType: "string", size: "number", key: { type: "string", unique: true }, checksum: "string", status: "string", createdAt: "number", updatedAt: "number",
     provenance: "json", width: "number", height: "number", alt: "json", title: "json", description: "json",
   });
   if (isErr(items)) throw new Error(`media/default: cannot prepare collection "${COLLECTION}": ${items.error.message}`);
@@ -234,10 +240,20 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     if (isErr(row)) return row;
     return ok(row.value !== null && row.value.id !== exceptId);
   };
+  const keyConflict = (key: string): MediaError => failure("CONFLICT", `media/default: ${key} already exists`, { details: { collection: COLLECTION, field: "key" } });
   const assertFree = async (key: string, exceptId?: string): Promise<Result<void, MediaError>> => {
     const taken = await keyTaken(key, exceptId);
     if (isErr(taken)) return taken;
-    return taken.value ? err(failure("CONFLICT", `media/default: ${key} already exists`)) : ok();
+    return taken.value ? err(keyConflict(key)) : ok();
+  };
+  // an upload of bytes that are already stored under this key is a repeat, not a collision: the caller gets
+  // the row that is there. Anything else under the key — other bytes, or an upload still in flight — conflicts.
+  const existingFor = async (key: string, checksum: string): Promise<Result<MediaItem | null, MediaError>> => {
+    const row = await db.findOne<Document>(COLLECTION, { key });
+    if (isErr(row)) return row;
+    if (row.value === null) return ok(null);
+    const item = resolveWith(row.value, fallbackLocale);
+    return item.status === "ready" && item.checksum === checksum ? ok(item) : err(keyConflict(key));
   };
   // a row from an upload whose blob write failed owns nothing; it must not block its filename forever
   const releaseFailed = async (key: string): Promise<Result<void, MediaError>> => {
@@ -370,8 +386,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const key = blobKey(folderPath.value, filename);
       const released = await releaseFailed(key);
       if (isErr(released)) return released;
-      const free = await assertFree(key);
-      if (isErr(free)) return free;
+      const checksum = createHash("sha256").update(file.data).digest("hex");
+      const taken = await existingFor(key, checksum);
+      if (isErr(taken)) return taken;
+      if (taken.value !== null) return ok({ item: taken.value, created: false });
       const parsedProvenance = parseProvenance(provenance);
       if (isErr(parsedProvenance)) return parsedProvenance;
       const size = file.contentType.startsWith("image/") ? imageSize(file.data) : null;
@@ -380,10 +398,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (isErr(folderReady)) return folderReady;
       const created = await db.createOne<Document>(COLLECTION, {
         id, filename, folder: folderPath.value, contentType: file.contentType, size: file.data.byteLength, key,
-        checksum: createHash("sha256").update(file.data).digest("hex"), status: "uploading", createdAt: at, updatedAt: at,
+        checksum, status: "uploading", createdAt: at, updatedAt: at,
         provenance: parsedProvenance.value, width: size?.width ?? null, height: size?.height ?? null, alt: {}, title: {}, description: {},
       });
-      if (isErr(created)) return created;
+      if (isErr(created)) return created.error.code === "CONFLICT" ? err(keyConflict(key)) : created;
       const stored = await blobs.put(key, file.data, { contentType: file.contentType });
       if (isErr(stored)) {
         const marked = await db.updateOne(COLLECTION, id, { status: "failed", updatedAt: now() });
@@ -392,7 +410,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       }
       const ready = await db.updateOne<Document>(COLLECTION, id, { status: "ready", updatedAt: now() });
       if (isErr(ready)) return ready;
-      return ok(resolveWith(ready.value, fallbackLocale));
+      return ok({ item: resolveWith(ready.value, fallbackLocale), created: true });
     },
     async get(id, locale) {
       const row = await db.findOne<Document>(COLLECTION, { id });
@@ -549,6 +567,13 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const item = found.value;
       const deleted = await db.deleteOne(COLLECTION, id);
       if (isErr(deleted)) return deleted;
+      // rows written before `key` was unique may still share this blob; deleting it would take their bytes too
+      const shared = await db.count(COLLECTION, { key: item.key });
+      if (isErr(shared)) {
+        logger.error(`media/default: could not check whether blob ${item.key} of removed item ${id} is still referenced, keeping it`, { id, key: item.key, error: shared.error.message });
+        return ok();
+      }
+      if (shared.value > 0) return ok();
       // the row is gone, so the blob is already unreachable; media.reconcile sweeps it up later
       const dropped = await blobs.remove(item.key);
       if (isErr(dropped)) logger.error(`media/default: could not delete blob ${item.key} of removed item ${id}`, { id, key: item.key, error: dropped.error.message });
