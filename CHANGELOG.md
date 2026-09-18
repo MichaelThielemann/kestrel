@@ -4,13 +4,13 @@
 
 ### Changed
 
-- Lint: `@typescript-eslint/no-unsafe-type-assertion` is an error in `core`, `contracts`, `h3` and
-  `openapi` (tests included), so a narrowing `as T` on an `unknown` value can no longer bypass
-  `boundaryCast`. The 132 assertions in those packages became typed generics, type guards,
-  narrowing through existing checks or `boundaryCast<T>(value, boundary)` at a genuine untyped
-  source; `core` shares one `isRecord` guard. No consumer-visible behaviour change: no new throws
-  on reachable paths, no changed messages or return values. The module packages still carry 273
-  such assertions and follow in a later pass.
+- Lint: `@typescript-eslint/no-unsafe-type-assertion` is an error in every package (tests
+  included), so a narrowing `as T` on an `unknown` value can no longer bypass `boundaryCast`. The
+  405 assertions across the workspace became typed generics, type guards, narrowing through
+  existing checks or `boundaryCast<T>(value, boundary)` at a genuine untyped source (sqlite rows,
+  S3 responses, JSON, ajv output, host objects); `core` shares one `isRecord` guard. No
+  consumer-visible behaviour change: no new throws on reachable paths, no changed messages or
+  return values.
 
 ## 5.4.0 – 2026-09-18
 
