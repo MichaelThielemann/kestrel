@@ -1,6 +1,6 @@
 {
   "core": {
-    "version": "5.4.0"
+    "version": "5.5.0"
   },
   "contracts": [
     "blobstore@1",
@@ -19,7 +19,7 @@
     {
       "name": "blobstore/filesystem",
       "use": "@michaelthielemann/kestrel-blobstore-filesystem",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [
         "blobstore@1"
       ],
@@ -57,7 +57,7 @@
     {
       "name": "replication/sqlite",
       "use": "@michaelthielemann/kestrel-replication-sqlite",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [],
       "requires": [
         "blobstore@1"
@@ -183,7 +183,7 @@
     {
       "name": "persistence/sqlite",
       "use": "@michaelthielemann/kestrel-persistence-sqlite",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [
         "persistence@1"
       ],
@@ -241,7 +241,7 @@
     {
       "name": "sanitize/svg",
       "use": "@michaelthielemann/kestrel-sanitize-svg",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [],
       "requires": [],
       "optional": [],
@@ -278,7 +278,7 @@
     {
       "name": "media/default",
       "use": "@michaelthielemann/kestrel-media-default",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [],
       "requires": [
         "blobstore@1",
@@ -423,7 +423,7 @@
     {
       "name": "images/default",
       "use": "@michaelthielemann/kestrel-images-default",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [],
       "requires": [
         "blobstore@1",
@@ -622,7 +622,7 @@
     {
       "name": "authn/multi",
       "use": "@michaelthielemann/kestrel-authn-multi",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [
         "authn@1"
       ],
@@ -783,7 +783,7 @@
     {
       "name": "authz/roles",
       "use": "@michaelthielemann/kestrel-authz-roles",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [
         "authz@1"
       ],
@@ -859,7 +859,7 @@
     {
       "name": "content/default",
       "use": "@michaelthielemann/kestrel-content-default",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [
         "content@1"
       ],
@@ -1048,7 +1048,7 @@
     {
       "name": "site/default",
       "use": "@michaelthielemann/kestrel-site-default",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [
         "site@1"
       ],
@@ -1074,7 +1074,7 @@
     {
       "name": "references/default",
       "use": "@michaelthielemann/kestrel-references-default",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [],
       "requires": [
         "content@1",
@@ -1153,7 +1153,7 @@
     {
       "name": "links/default",
       "use": "@michaelthielemann/kestrel-links-default",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [],
       "requires": [
         "content@1",
@@ -1253,7 +1253,7 @@
     {
       "name": "validate/jsonschema",
       "use": "@michaelthielemann/kestrel-validate-jsonschema",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [
         "validate@1"
       ],
@@ -1347,7 +1347,7 @@
     {
       "name": "migrations/default",
       "use": "@michaelthielemann/kestrel-migrations-default",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [
         "migrations@1"
       ],
@@ -1448,7 +1448,7 @@
     {
       "name": "renderer/plain",
       "use": "@michaelthielemann/kestrel-renderer-plain",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [
         "renderer@1"
       ],
@@ -1499,7 +1499,7 @@
     {
       "name": "delivery/static",
       "use": "@michaelthielemann/kestrel-delivery-static",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [],
       "requires": [
         "content@1",
@@ -1835,7 +1835,7 @@
     {
       "name": "redirects/default",
       "use": "@michaelthielemann/kestrel-redirects-default",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [],
       "requires": [
         "content@1",
@@ -1919,7 +1919,7 @@
     {
       "name": "audit/persistence",
       "use": "@michaelthielemann/kestrel-audit-persistence",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [],
       "requires": [
         "persistence@1"
@@ -1942,7 +1942,7 @@
     {
       "name": "events/inmemory",
       "use": "@michaelthielemann/kestrel-events-inmemory",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [
         "events@1"
       ],
@@ -1965,7 +1965,7 @@
     {
       "name": "ratelimit/memory",
       "use": "@michaelthielemann/kestrel-ratelimit-memory",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [],
       "requires": [],
       "optional": [],
@@ -2021,7 +2021,7 @@
     {
       "name": "insights/default",
       "use": "@michaelthielemann/kestrel-insights",
-      "version": "5.4.0",
+      "version": "5.5.0",
       "provides": [
         "insights@1"
       ],
