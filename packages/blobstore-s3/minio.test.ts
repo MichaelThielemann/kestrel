@@ -2,6 +2,7 @@ import { ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand } from "@aw
 import { describe, it, expect } from "vitest";
 import { blobstoreContractTests } from "@michaelthielemann/kestrel-contracts/blobstore.contract.test";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createBlobstoreS3, createClient, type Config } from "./impl.ts";
 
 const endpoint = process.env.KESTREL_S3_ENDPOINT;
@@ -41,7 +42,7 @@ describe.skipIf(!endpoint)("blobstore/s3 against MinIO", () => {
   }
 
   async function contentTypeOf(prefix: string, key: string): Promise<string | undefined> {
-    const out = (await client.send(new GetObjectCommand({ Bucket: bucket, Key: prefix + key }))) as { ContentType?: string };
+    const out = boundaryCast<{ ContentType?: string }>(await client.send(new GetObjectCommand({ Bucket: bucket, Key: prefix + key })), "host");
     return out.ContentType;
   }
 

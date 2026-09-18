@@ -173,6 +173,10 @@ function text(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
+function isNonNullObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 export async function exportLlms(config: LlmsConfig, deps: LlmsDeps): Promise<Result<{ entries: number; full: boolean }, KestrelError>> {
   const siteUrl = config.siteUrl?.replace(/\/+$/, "");
   const localeOptions = (locale: string) => (locale === "" ? {} : { locale, fallback: deps.fallback });
@@ -200,7 +204,7 @@ export async function exportLlms(config: LlmsConfig, deps: LlmsDeps): Promise<Re
       const doc = read.value;
       if (!doc) continue;
       const seo = doc[config.seoField];
-      const meta = seo && typeof seo === "object" ? (seo as Record<string, unknown>) : {};
+      const meta = isNonNullObject(seo) ? seo : {};
       if (meta.noindex === true) continue;
       const description = text(meta.description);
       const entry: LlmsEntry = { title: text(meta.title) ?? text(doc[config.titleField]) ?? source.path, url: `${siteUrl ?? ""}${source.path}`, ...(description === undefined ? {} : { description }) };

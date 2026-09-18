@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { binaryResult, first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
@@ -22,6 +23,10 @@ export const configSchema = z
 function mediaId(ctx: Context): string | undefined {
   if (ctx.params.id) return ctx.params.id;
   return first(ctx.payload.id);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function attachedVariant(images: Images, variant: Variant): { size: string; width: number; height: number; format: string; bytes: number; state: Variant["state"]; path: string } {
@@ -92,8 +97,8 @@ export default defineModule({
 
     prune: async (ctx: Context) => {
       const names = ctx.payload.sizes;
-      if (!Array.isArray(names) || names.some((name) => typeof name !== "string")) return ctx.fail("VALIDATION", "images: missing sizes");
-      const pruned = await images.prune(names as string[]);
+      if (!Array.isArray(names) || !names.every((name): name is string => typeof name === "string")) return ctx.fail("VALIDATION", "images: missing sizes");
+      const pruned = await images.prune(names);
       if (isErr(pruned)) return ctx.fail(pruned.error);
       return ok({ ...ctx, result: pruned.value });
     },
@@ -112,9 +117,9 @@ export default defineModule({
     },
 
     removeMany: async (ctx: Context) => {
-      const ids = (ctx.result as { ids?: unknown } | undefined)?.ids;
+      const ids = boundaryCast<{ ids?: unknown } | undefined>(ctx.result, "host")?.ids;
       if (!Array.isArray(ids)) throw new Error("images: removeMany: no ids in result");
-      for (const id of ids as string[]) {
+      for (const id of boundaryCast<string[]>(ids, "host")) {
         const removed = await images.remove(id);
         if (isErr(removed)) return ctx.fail(removed.error);
       }
@@ -122,7 +127,7 @@ export default defineModule({
     },
 
     attach: async (ctx: Context) => {
-      const result = ctx.result as { id?: unknown; items?: unknown } | undefined;
+      const result = boundaryCast<{ id?: unknown; items?: unknown } | undefined>(ctx.result, "host");
       if (typeof result?.id === "string") {
         const byMedia = await images.variantsOf([result.id]);
         if (isErr(byMedia)) return ctx.fail(byMedia.error);
@@ -130,7 +135,7 @@ export default defineModule({
         return ok({ ...ctx, result: { ...result, variants: variants.map((v) => attachedVariant(images, v)) } });
       }
       if (Array.isArray(result?.items)) {
-        const items = result.items as Array<Record<string, unknown>>;
+        const items = boundaryCast<Array<Record<string, unknown>>>(result.items, "host");
         const ids = items.map((item) => item.id).filter((id): id is string => typeof id === "string");
         const byMedia = await images.variantsOf(ids);
         if (isErr(byMedia)) return ctx.fail(byMedia.error);
@@ -165,7 +170,7 @@ export default defineModule({
       if (isErr(variants)) return ctx.fail(variants.error);
       // the step runs after media.export in the same pipeline; replacing ctx.result would drop that
       // step's counts, so the variant counts are nested under their own key instead.
-      const previous = typeof ctx.result === "object" && ctx.result !== null && !Array.isArray(ctx.result) ? (ctx.result as Record<string, unknown>) : {};
+      const previous = isRecord(ctx.result) ? ctx.result : {};
       return ok({ ...ctx, result: { ...previous, variants: variants.value } });
     }),
   }),

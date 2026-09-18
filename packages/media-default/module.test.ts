@@ -6,6 +6,7 @@ import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createContext, type Context } from "@michaelthielemann/kestrel/context";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { failure } from "@michaelthielemann/kestrel/errors";
@@ -60,7 +61,7 @@ describe("media/default upload step", () => {
   it("a single file keeps the item-only response", async () => {
     const { steps } = await make();
     const ctx = expectOk(await steps.upload(fakeCtx([file("a.png")])));
-    expect((ctx.result as { filename: string }).filename).toBe("a.png");
+    expect(boundaryCast<{ filename: string }>(ctx.result, "host").filename).toBe("a.png");
   });
 
   it("a disallowed type is UNSUPPORTED (415), an oversized file PAYLOAD_TOO_LARGE (413)", async () => {
@@ -73,9 +74,9 @@ describe("media/default upload step", () => {
   it("multiple files: partial success returns items and errors with a code, 200", async () => {
     const { steps } = await make({ maxBytes: 2 });
     const ctx = expectOk(await steps.upload(fakeCtx([file("a.png"), file("b.png"), file("c.png", new Uint8Array([1, 2, 3]))])));
-    const result = ctx.result as { items: Array<{ filename: string; id: string }>; errors: Array<{ filename: string; status: number; code: string; message: string }>; ids: string[] };
+    const result = boundaryCast<{ items: Array<{ filename: string; id: string }>; errors: Array<{ filename: string; status: number; code: string; message: string }>; ids: string[] }>(ctx.result, "host");
     expect(result.items.map((i) => i.filename)).toEqual(["a.png", "b.png"]);
-    expect(result.errors).toEqual([{ filename: "c.png", status: 413, code: "PAYLOAD_TOO_LARGE", message: expect.stringContaining("exceeds") as string }]);
+    expect(result.errors).toEqual([{ filename: "c.png", status: 413, code: "PAYLOAD_TOO_LARGE", message: expect.stringContaining("exceeds") as unknown }]);
     expect(result.ids).toEqual(result.items.map((i) => i.id));
   });
 
@@ -83,9 +84,9 @@ describe("media/default upload step", () => {
     const { steps } = await make();
     expectOk(await steps.upload(fakeCtx([file("a.png")])));
     const ctx = expectOk(await steps.upload(fakeCtx([file("a.png"), file("d.png")])));
-    const result = ctx.result as { items: Array<{ filename: string }>; errors: Array<{ filename: string; status: number; code: string }> };
+    const result = boundaryCast<{ items: Array<{ filename: string }>; errors: Array<{ filename: string; status: number; code: string }> }>(ctx.result, "host");
     expect(result.items.map((i) => i.filename)).toEqual(["d.png"]);
-    expect(result.errors).toEqual([{ filename: "a.png", status: 409, code: "CONFLICT", message: expect.stringContaining("already exists") as string }]);
+    expect(result.errors).toEqual([{ filename: "a.png", status: 409, code: "CONFLICT", message: expect.stringContaining("already exists") as unknown }]);
   });
 
   it("multiple files: a transient failure fails the whole request instead of becoming an entry", async () => {
@@ -103,14 +104,14 @@ describe("media/default download step", () => {
     const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }));
     expect(item.provenance).toEqual({ origin: "unknown" });
     const ctx = expectOk(await steps.download(fakeCtx([], {}, { id: item.id })));
-    expect((ctx.result as { headers?: Record<string, string> }).headers).toEqual({ "x-content-provenance": "unknown" });
+    expect(boundaryCast<{ headers?: Record<string, string> }>(ctx.result, "host").headers).toEqual({ "x-content-provenance": "unknown" });
   });
 
   it("sets no provenance header for a human upload", async () => {
     const { media, steps } = await make();
     const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "", "human"));
     const ctx = expectOk(await steps.download(fakeCtx([], {}, { id: item.id })));
-    expect((ctx.result as { headers?: Record<string, string> }).headers).toBeUndefined();
+    expect(boundaryCast<{ headers?: Record<string, string> }>(ctx.result, "host").headers).toBeUndefined();
   });
 
   it("keeps the binary result shape", async () => {
@@ -118,7 +119,7 @@ describe("media/default download step", () => {
     const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1, 2]) }));
     const ctx = expectOk(await steps.download(fakeCtx([], {}, { id: item.id })));
     expect(ctx.result).toMatchObject({ binary: true, contentType: "image/png", filename: "a.png" });
-    expect(Array.from((ctx.result as { data: Uint8Array }).data)).toEqual([1, 2]);
+    expect(Array.from(boundaryCast<{ data: Uint8Array }>(ctx.result, "host").data)).toEqual([1, 2]);
   });
 
   it("an unknown id is NOT_FOUND", async () => {
@@ -176,7 +177,7 @@ describe("media/default list step", () => {
     const { media, steps } = await make();
     expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "a"));
     const ctx = expectOk(await steps.list(fakeCtx([], { folder: ["a", "b"] })));
-    expect((ctx.result as { total: number }).total).toBe(1);
+    expect(boundaryCast<{ total: number }>(ctx.result, "host").total).toBe(1);
   });
 
   it("answers TRANSIENT (503, retryable) when persistence is down", async () => {
@@ -237,16 +238,19 @@ async function makeInstance(overrides: Partial<Config> = {}): Promise<{ media: M
   const blobs = fakeBlobstore();
   const db = createFakePersistence();
   const parsed = configSchema.parse(config(overrides));
-  const media = (await module.setup(parsed, {
-    get<T>(contract: { name: string }): T {
-      if (contract === BLOBSTORE) return blobs as T;
-      if (contract === PERSISTENCE) return db as T;
-      throw new Error(`unexpected contract ${contract.name}`);
-    },
-    find: () => undefined,
-    logger: silentLogger,
-    root: process.cwd(),
-  })) as Media;
+  const media = boundaryCast<Media>(
+    await module.setup(parsed, {
+      get<T>(contract: { name: string }): T {
+        if (contract === BLOBSTORE) return boundaryCast<T>(blobs, "host");
+        if (contract === PERSISTENCE) return boundaryCast<T>(db, "host");
+        throw new Error(`unexpected contract ${contract.name}`);
+      },
+      find: () => undefined,
+      logger: silentLogger,
+      root: process.cwd(),
+    }),
+    "host",
+  );
   return { media, blobs, db };
 }
 
@@ -264,7 +268,7 @@ describe("media/default steps via runPipeline", () => {
 
     const ok1 = await runPipeline(pipeline("media.upload"), { files: [file("a.png")], body: { folder: "photos" } }, { modules: [{ module, instance: media }] });
     expect(ok1.status).toBe(200);
-    expect((ok1.result as { folder: string }).folder).toBe("photos");
+    expect(boundaryCast<{ folder: string }>(ok1.result, "host").folder).toBe("photos");
   });
 
   it("get: query.locale is validated and coerced", async () => {
@@ -272,7 +276,7 @@ describe("media/default steps via runPipeline", () => {
     const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }));
     const res = await runPipeline(pipeline("media.get"), { params: { id: item.id }, query: { locale: "de" } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
-    expect((res.result as { id: string }).id).toBe(item.id);
+    expect(boundaryCast<{ id: string }>(res.result, "host").id).toBe(item.id);
   });
 
   it("list: query.limit/offset are coerced from strings, folder/q/sort/ids/recursive/locale are declared", async () => {
@@ -280,7 +284,7 @@ describe("media/default steps via runPipeline", () => {
     await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "photos");
     const res = await runPipeline(pipeline("media.list"), { query: { folder: "photos", limit: "10", offset: "0" } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
-    expect((res.result as { total: number }).total).toBe(1);
+    expect(boundaryCast<{ total: number }>(res.result, "host").total).toBe(1);
   });
 
   it("download: serves the binary result", async () => {
@@ -303,7 +307,7 @@ describe("media/default steps via runPipeline", () => {
     const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }));
     const res = await runPipeline(pipeline("media.update"), { params: { id: item.id }, body: { filename: "b.png" } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
-    expect((res.result as { filename: string }).filename).toBe("b.png");
+    expect(boundaryCast<{ filename: string }>(res.result, "host").filename).toBe("b.png");
   });
 
   it("remove: deletes the item", async () => {
@@ -339,7 +343,7 @@ describe("media/default steps via runPipeline", () => {
     try {
       const res = await runPipeline(pipeline(`media.export:${dir}`), {}, { modules: [{ module, instance: media }] });
       expect(res.status).toBe(200);
-      expect((res.result as { written: number }).written).toBe(1);
+      expect(boundaryCast<{ written: number }>(res.result, "host").written).toBe(1);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -349,7 +353,7 @@ describe("media/default steps via runPipeline", () => {
     const { media } = await makeInstance();
     const res = await runPipeline(pipeline("media.createFolder"), { body: { path: "x/y" } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
-    expect((res.result as { folder: string }).folder).toBe("x/y");
+    expect(boundaryCast<{ folder: string }>(res.result, "host").folder).toBe("x/y");
   });
 
   it("renameFolder: moves a folder", async () => {
@@ -357,7 +361,7 @@ describe("media/default steps via runPipeline", () => {
     expectOk(await media.createFolder("x"));
     const res = await runPipeline(pipeline("media.renameFolder"), { params: { path: "x" }, body: { path: "y" } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
-    expect((res.result as { folder: string }).folder).toBe("y");
+    expect(boundaryCast<{ folder: string }>(res.result, "host").folder).toBe("y");
   });
 
   it("listFolderItems: query.recursive is coerced from a string", async () => {
@@ -365,7 +369,7 @@ describe("media/default steps via runPipeline", () => {
     await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "x/y");
     const res = await runPipeline(pipeline("media.listFolderItems"), { params: { path: "x" }, query: { recursive: "true" } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
-    expect((res.result as { ids: string[] }).ids).toHaveLength(1);
+    expect(boundaryCast<{ ids: string[] }>(res.result, "host").ids).toHaveLength(1);
   });
 
   it("folderItems: deprecated alias behaves exactly like listFolderItems", async () => {
@@ -373,7 +377,7 @@ describe("media/default steps via runPipeline", () => {
     await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "x/y");
     const res = await runPipeline(pipeline("media.folderItems"), { params: { path: "x" }, query: { recursive: "true" } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
-    expect((res.result as { ids: string[] }).ids).toHaveLength(1);
+    expect(boundaryCast<{ ids: string[] }>(res.result, "host").ids).toHaveLength(1);
   });
 
   it("removeFolder: deletes a folder and its contents", async () => {
