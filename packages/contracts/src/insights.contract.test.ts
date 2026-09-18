@@ -36,6 +36,7 @@ export function insightsContractTests(make: () => Promise<InsightsFixture>) {
       expect(stats.steps).toEqual([]);
       expect(stats.events).toEqual([]);
       expect(stats.ratelimit).toEqual([]);
+      expect(stats.recentFailures).toEqual([]);
       expect(stats.process.pid).toBe(process.pid);
       expect(stats.process.uptimeMs).toBeGreaterThanOrEqual(0);
       expect(stats.generatedAt).toBeLessThanOrEqual(Date.now());

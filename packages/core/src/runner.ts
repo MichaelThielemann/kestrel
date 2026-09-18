@@ -124,6 +124,12 @@ function runOutcome(result: RunResult, thrown: boolean): RunEndEvent["outcome"] 
   return result.status < 400 ? "ok" : "fail";
 }
 
+const MESSAGE_LIMIT = 500;
+
+function truncate(message: string): string {
+  return message.length > MESSAGE_LIMIT ? `${message.slice(0, MESSAGE_LIMIT)}…` : message;
+}
+
 export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInput, logger: Logger, observer: RunObserver = {}): Promise<RunResult> {
   const runId = randomUUID();
   let ctx = createContext(input, runId);
@@ -135,10 +141,13 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
   if (requestId !== undefined) runEvent.requestId = requestId;
   observer.runStart?.(runEvent);
   let thrown = false;
+  let thrownMessage: string | undefined;
   const finish = (result: RunResult): RunResult => {
     const end: RunEndEvent = { ...runEvent, ms: elapsed(runStarted), status: result.status, outcome: runOutcome(result, thrown) };
     if (result.code !== undefined) end.code = result.code;
     if (result.step !== undefined) end.step = result.step;
+    const message = thrownMessage ?? (result.status < 400 ? undefined : result.error);
+    if (message !== undefined) end.message = truncate(message);
     observer.runEnd?.(end);
     return result;
   };
@@ -201,6 +210,7 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
       log("error", 500);
       const error = caught instanceof Error ? caught : new Error(String(caught));
       logger.error(`pipeline "${pipeline.name}" step "${step.name}" threw`, { runId, stack: error.stack ?? error.message });
+      thrownMessage = `${pipeline.name}/${step.name}: unexpected ${error.name}`;
       return finish(trace({ runId, status: 500, error: `${pipeline.name}/${step.name}: ${error.message}`, code: "INTERNAL", retryable: false, step: step.name }));
     }
   }

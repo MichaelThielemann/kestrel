@@ -5,7 +5,7 @@ import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/define
 import { ok } from "@michaelthielemann/kestrel/result";
 import { createInsights, type InsightsDefault } from "./impl.ts";
 
-export const configSchema = z.object({}).strict();
+export const configSchema = z.object({ recentFailures: z.number().int().min(0).max(500).default(50) }).strict();
 
 const STRINGS: JsonSchema = { type: "array", items: { type: "string" } };
 const NULLABLE_NUMBER: JsonSchema = { type: ["number", "null"] };
@@ -74,6 +74,21 @@ export const MANIFEST_SCHEMA: JsonSchema = {
 };
 
 const TIMING = { count: { type: "number" }, failed: { type: "number" }, errors: { type: "number" }, p50Ms: { type: "number" }, p95Ms: { type: "number" } };
+const RECENT_FAILURE: JsonSchema = {
+  type: "object",
+  properties: {
+    at: { type: "number" },
+    runId: { type: "string" },
+    pipeline: { type: "string" },
+    trigger: { type: "object", properties: { kind: { type: "string" }, name: { type: "string" } }, required: ["kind", "name"] },
+    status: { type: "number" },
+    ms: { type: "number" },
+    code: { type: "string" },
+    step: { type: "string" },
+    message: { type: "string", description: "The failure text a client would see, truncated; never a stack" },
+  },
+  required: ["at", "runId", "pipeline", "trigger", "status", "ms"],
+};
 export const STATS_SCHEMA: JsonSchema = {
   type: "object",
   properties: {
@@ -84,8 +99,9 @@ export const STATS_SCHEMA: JsonSchema = {
     steps: { type: "array", items: { type: "object", properties: { pipeline: { type: "string" }, step: { type: "string" }, ...TIMING }, required: ["pipeline", "step", "count", "failed", "errors", "p50Ms", "p95Ms"] } },
     events: { type: "array", items: { type: "object", properties: { name: { type: "string" }, count: { type: "number" }, lastAt: NULLABLE_NUMBER }, required: ["name", "count", "lastAt"] } },
     ratelimit: { type: "array", items: { type: "object", properties: { key: { type: "string" }, remaining: { type: "number" }, resetAt: { type: "number" } }, required: ["key", "remaining", "resetAt"] } },
+    recentFailures: { type: "array", items: RECENT_FAILURE },
   },
-  required: ["generatedAt", "process", "runs", "pipelines", "steps", "events", "ratelimit"],
+  required: ["generatedAt", "process", "runs", "pipelines", "steps", "events", "ratelimit", "recentFailures"],
 };
 
 export default defineModule({
@@ -94,8 +110,8 @@ export default defineModule({
   requires: [],
   configSchema,
 
-  async setup(): Promise<InsightsDefault> {
-    return createInsights();
+  async setup(config): Promise<InsightsDefault> {
+    return createInsights({ recentFailureSize: config.recentFailures });
   },
 
   attach: (insights, kestrel) => insights.attach(kestrel),
@@ -107,6 +123,6 @@ export default defineModule({
 
   describe: () => ({
     readManifest: { summary: "The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers", reads: [], writes: ["result"], output: MANIFEST_SCHEMA },
-    readStats: { summary: "Live counters of this process: runs, pipelines, steps, events", reads: [], writes: ["result"], output: STATS_SCHEMA },
+    readStats: { summary: "Live counters of this process: runs, pipelines, steps, events, and the most recent failed runs", reads: [], writes: ["result"], output: STATS_SCHEMA },
   }),
 });

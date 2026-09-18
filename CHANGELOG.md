@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- `core`: `RunEndEvent` carries `message` for a run that ended with a status of 400 or above —
+  the text the caller received, truncated at 500 characters and never a stack. An unexpected
+  `throw` contributes `"<pipeline>/<step>: unexpected <ErrorName>"` only; its own text and stack
+  stay in the log.
+- `insights`: `stats().recentFailures` is a ring buffer of the last failed runs, newest first,
+  with `{ at, runId, pipeline, trigger: { kind, name }, status, ms, code?, step?, message? }`. Its
+  size is the new module config `recentFailures` (default 50, `0` turns it off). `insights@1`
+  gains the field on `Stats` and the step `insights.readStats` declares it in its output schema.
+
 ## 5.4.0 – 2026-09-18
 
 ### Breaking

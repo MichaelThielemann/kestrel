@@ -34,20 +34,22 @@ const probe = defineModule({
 });
 
 describe("insights/default module steps via runPipeline", () => {
-  it("accepts the empty config only", () => {
-    expect(configSchema.safeParse({}).success).toBe(true);
+  it("accepts the empty config and a ring buffer size", () => {
+    expect(configSchema.parse({})).toEqual({ recentFailures: 50 });
+    expect(configSchema.safeParse({ recentFailures: 10 }).success).toBe(true);
+    expect(configSchema.safeParse({ recentFailures: -1 }).success).toBe(false);
     expect(configSchema.safeParse({ extra: 1 }).success).toBe(false);
   });
 
   it("readStats answers the live counters", async () => {
-    const instance = await module.setup({}, deps);
+    const instance = await module.setup(configSchema.parse({}), deps);
     const res = await runPipeline(statsPipeline, {}, { modules: [{ module, instance }] });
     expect(res.status).toBe(200);
-    expect(res.result).toMatchObject({ runs: { active: 0, total: 0, failed: 0, errors: 0 }, pipelines: [], steps: [], events: [], ratelimit: [] });
+    expect(res.result).toMatchObject({ runs: { active: 0, total: 0, failed: 0, errors: 0 }, pipelines: [], steps: [], events: [], ratelimit: [], recentFailures: [] });
   });
 
   it("readManifest outside a booted instance is a wiring error", async () => {
-    const instance = await module.setup({}, deps);
+    const instance = await module.setup(configSchema.parse({}), deps);
     const res = await runPipeline(manifestPipeline, {}, { modules: [{ module, instance }] });
     expect(res).toMatchObject({ status: 500, code: "INTERNAL" });
   });
@@ -64,7 +66,7 @@ describe("insights/default module steps via runPipeline", () => {
     const manifest = await kestrel.run("insightsManifest", { trigger });
     expect(manifest.status).toBe(200);
     expect(typeof boundaryCast<{ generatedAt: unknown }>(manifest.result, "json").generatedAt).toBe("number");
-    expect(manifest.result).toMatchObject({ modules: [{ name: "probe/test" }, { name: "insights/default", provides: ["insights@1"], config: { variables: [] } }], triggers: { http: [{ method: "GET", path: "/pass", pipeline: "pass" }] } });
+    expect(manifest.result).toMatchObject({ modules: [{ name: "probe/test" }, { name: "insights/default", provides: ["insights@1"], config: { variables: [{ path: "recentFailures", type: "integer", required: false, default: 50 }] } }], triggers: { http: [{ method: "GET", path: "/pass", pipeline: "pass" }] } });
     const stats = await kestrel.run("insightsStats", { trigger });
     expect(stats.result).toMatchObject({ runs: { total: 2 }, pipelines: [{ name: "insightsManifest", count: 1 }, { name: "pass", count: 1 }] });
     await kestrel.stop();
