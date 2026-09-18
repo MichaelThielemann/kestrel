@@ -3,7 +3,9 @@ import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentDocument } from "@michaelthielemann/kestrel-contracts/content";
 import { err, failure, ok } from "@michaelthielemann/kestrel-contracts/errors";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createContext, DONE } from "@michaelthielemann/kestrel/context";
+import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { createRedirects, requestPath } from "./impl.ts";
@@ -21,7 +23,7 @@ function fakeContent(initial?: unknown): { content: Content; reads: () => number
       return ok(type === "redirects" ? doc : null);
     },
   };
-  return { content: content as Content, reads: () => reads, set: (rules, updatedAt) => (doc = { id: "redirects", createdAt: 1, updatedAt, rules } as const) };
+  return { content: boundaryCast<Content>(content, "host"), reads: () => reads, set: (rules, updatedAt) => (doc = { id: "redirects", createdAt: 1, updatedAt, rules } as const) };
 }
 
 function fakeBlobs(failPut = false): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
@@ -104,7 +106,7 @@ describe("lookup", () => {
   });
   it("passes a persistence failure through as TRANSIENT", async () => {
     const content: Pick<Content, "get"> = { async get() { return err(failure("TRANSIENT", "db busy")); } };
-    const r = createRedirects(config, { content: content as Content, blobs: fakeBlobs(), logger: stubLogger().logger });
+    const r = createRedirects(config, { content: boundaryCast<Content>(content, "host"), blobs: fakeBlobs(), logger: stubLogger().logger });
     const error = expectErr(await r.lookup("/x"), "TRANSIENT");
     expect(error.status).toBe(503);
     expect(error.retryable).toBe(true);
@@ -138,7 +140,7 @@ describe("export", () => {
     expect(errors).toHaveLength(1);
     const blob = blobs.blobs.get("site/redirects.json");
     expect(blob?.contentType).toBe("application/json");
-    const parsed = JSON.parse(new TextDecoder().decode(blob?.data)) as Array<{ target: string; status: number }>;
+    const parsed = boundaryCast<Array<{ target: string; status: number }>>(JSON.parse(new TextDecoder().decode(blob?.data)), "json");
     expect(parsed.map((x) => [x.target, x.status])).toEqual([["/artikel/$1", 301], ["/aktion", 302]]);
   });
   it("writes [] when the singleton is absent and passes a blobstore failure through as TRANSIENT", async () => {
@@ -166,7 +168,14 @@ describe("module steps", () => {
   async function steps(initial?: unknown, blobs = fakeBlobs()) {
     const c = fakeContent(initial);
     const { logger } = stubLogger();
-    const deps: Deps = { get: (contract) => (contract.name === "content@1" ? c.content : blobs) as never, find: () => undefined, logger, root: process.cwd() };
+    const deps: Deps = {
+      get<T>(contract: Contract<T>): T {
+        return boundaryCast<T>(contract.name === "content@1" ? c.content : blobs, "host");
+      },
+      find: () => undefined,
+      logger,
+      root: process.cwd(),
+    };
     const instance = await module.setup(module.configSchema.parse({ prefix: "site/" }), deps);
     return module.steps!(instance);
   }

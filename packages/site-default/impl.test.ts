@@ -4,6 +4,7 @@ import type { ContentModel } from "@michaelthielemann/kestrel-contracts/content"
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { SITE_TEST_MODEL, siteContractTests } from "@michaelthielemann/kestrel-contracts/site.contract.test";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createSiteDefault, publicPath, splitPath } from "./impl.ts";
 
 async function make(model: ContentModel = SITE_TEST_MODEL) {
@@ -84,7 +85,7 @@ describe("site/default", () => {
     expectOk(await content.update("pages", home.id, { slug: "home", title: "Home", status: "published" }, { locale: "en" }));
     const en = expectOk(await site.resolveLinks("pages", page, { locale: "en", rules }));
     expect(en._links).toEqual({ [home.id]: { path: "/en", locale: "en" }, [impressum.id]: { broken: true } });
-    expect((en.body as Array<{ target: { broken?: boolean } }>)[0]?.target.broken).toBe(true);
+    expect(boundaryCast<Array<{ target: { broken?: boolean } }>>(en.body, "json")[0]?.target.broken).toBe(true);
   });
 
   it("surfaces a persistence failure as TRANSIENT", async () => {

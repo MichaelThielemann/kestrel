@@ -19,6 +19,10 @@ export const configSchema = z
 const RULE_SCHEMA = { type: "object", properties: { pattern: { type: "string" }, target: { type: "string" }, status: { type: "integer", enum: [301, 302, 307, 308] } }, required: ["pattern", "target", "status"] };
 const ROW_SCHEMA = { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, status: { type: ["string", "number"] } } };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export default defineModule({
   name: "redirects/default",
   provides: [],
@@ -48,7 +52,7 @@ export default defineModule({
       return hit.value ? ctx.done({ redirect: hit.value }) : ok(ctx);
     },
     export: async (ctx: Context) => {
-      const previous = typeof ctx.result === "object" && ctx.result !== null && !Array.isArray(ctx.result) ? (ctx.result as Record<string, unknown>) : {};
+      const previous = isRecord(ctx.result) ? ctx.result : {};
       const exported = await redirects.export();
       if (isErr(exported)) return ctx.fail(exported.error);
       return ok({ ...ctx, result: { ...previous, redirects: exported.value } });

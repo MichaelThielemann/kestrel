@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
@@ -14,9 +15,9 @@ function makeDeps(db: ReturnType<typeof createFakePersistence>): Deps {
   return {
     get<T>(contract: Contract<T>): T {
       if (!providers.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
-      return providers.get(contract.name) as T;
+      return boundaryCast<T>(providers.get(contract.name), "host");
     },
-    find: <T>(contract: Contract<T>): T | undefined => providers.get(contract.name) as T | undefined,
+    find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
     logger: silentLogger,
     root: process.cwd(),
   };
@@ -24,12 +25,12 @@ function makeDeps(db: ReturnType<typeof createFakePersistence>): Deps {
 
 async function boot(): Promise<{ instance: AuthnMulti }> {
   const db = createFakePersistence();
-  const instance = (await module.setup(configSchema.parse({ minPasswordLength: 8 }), makeDeps(db))) as AuthnMulti;
+  const instance = boundaryCast<AuthnMulti>(await module.setup(configSchema.parse({ minPasswordLength: 8 }), makeDeps(db)), "host");
   return { instance };
 }
 
 function problems(details: Record<string, unknown> | undefined): Array<{ path: string; message: string }> {
-  return (details as { problems: Array<{ path: string; message: string }> }).problems;
+  return boundaryCast<{ problems: Array<{ path: string; message: string }> }>(details, "json").problems;
 }
 
 const loginPipeline = definePipeline({ name: "login", steps: ["authn.login"] });
@@ -51,7 +52,7 @@ describe("authn/multi module steps via runPipeline", () => {
     const { instance } = await boot();
     const res = await runPipeline(createUserPipeline, { body: { username: "alice", password: "long-enough", roles: ["editor"] } }, { modules: [{ module, instance }] });
     expect(res.status).toBe(200);
-    expect((res.result as { username: string }).username).toBe("alice");
+    expect(boundaryCast<{ username: string }>(res.result, "json").username).toBe("alice");
   });
 
   it("login, identifyUser, requireUser, loadIdentity, changePassword and logout round-trip", async () => {
@@ -61,7 +62,7 @@ describe("authn/multi module steps via runPipeline", () => {
 
     const loggedIn = await runPipeline(loginPipeline, { body: { username: "bob", password: "long-enough" } }, { modules: [{ module, instance }] });
     expect(loggedIn.status).toBe(200);
-    const token = (loggedIn.result as { token: string }).token;
+    const token = boundaryCast<{ token: string }>(loggedIn.result, "json").token;
     const headers = { authorization: `Bearer ${token}` };
 
     const identified = await runPipeline(identifyPipeline, { headers }, { modules: [{ module, instance }] });
@@ -72,7 +73,7 @@ describe("authn/multi module steps via runPipeline", () => {
 
     const loaded = await runPipeline(loadIdentityPipeline, { headers }, { modules: [{ module, instance }] });
     expect(loaded.status).toBe(200);
-    expect((loaded.result as { id: string }).id).toBeTypeOf("string");
+    expect(boundaryCast<{ id: string }>(loaded.result, "json").id).toBeTypeOf("string");
 
     const changed = await runPipeline(changePasswordPipeline, { headers, body: { currentPassword: "long-enough", newPassword: "even-longer" } }, { modules: [{ module, instance }] });
     expect(changed.status).toBe(200);
@@ -84,15 +85,15 @@ describe("authn/multi module steps via runPipeline", () => {
   it("listUsers, getUser, setPassword, deactivateUser, activateUser and cleanupSessions", async () => {
     const { instance } = await boot();
     const created = await runPipeline(createUserPipeline, { body: { username: "carol", password: "long-enough" } }, { modules: [{ module, instance }] });
-    const id = (created.result as { id: string }).id;
+    const id = boundaryCast<{ id: string }>(created.result, "json").id;
 
     const listed = await runPipeline(listUsersPipeline, {}, { modules: [{ module, instance }] });
     expect(listed.status).toBe(200);
-    expect((listed.result as unknown[]).length).toBe(1);
+    expect(boundaryCast<unknown[]>(listed.result, "json").length).toBe(1);
 
     const got = await runPipeline(getUserPipeline, { params: { id } }, { modules: [{ module, instance }] });
     expect(got.status).toBe(200);
-    expect((got.result as { id: string }).id).toBe(id);
+    expect(boundaryCast<{ id: string }>(got.result, "json").id).toBe(id);
 
     const passwordSet = await runPipeline(setPasswordPipeline, { params: { id }, body: { password: "brand-new-pass" } }, { modules: [{ module, instance }] });
     expect(passwordSet.status).toBe(200);
@@ -105,7 +106,7 @@ describe("authn/multi module steps via runPipeline", () => {
 
     const cleaned = await runPipeline(cleanupSessionsPipeline, {}, { modules: [{ module, instance }] });
     expect(cleaned.status).toBe(200);
-    expect((cleaned.result as { removed: number }).removed).toBe(0);
+    expect(boundaryCast<{ removed: number }>(cleaned.result, "json").removed).toBe(0);
   });
 
   it("login answers 400 VALIDATION when a field has the wrong type", async () => {

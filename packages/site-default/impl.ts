@@ -40,6 +40,10 @@ export function splitPath(path: string, locales: string[], prefixPrimary: boolea
   return { slug: first ?? "" };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function rewrite(value: unknown, paths: Map<string, string | null>): unknown {
   if (typeof value === "string") {
     const exact = /^kestrel:([a-z][a-z0-9_]*):([A-Za-z0-9-]+)$/.exec(value);
@@ -52,12 +56,11 @@ function rewrite(value: unknown, paths: Map<string, string | null>): unknown {
       .replace(INTERNAL_REF, (_m, t: string, id: string) => paths.get(`${t}:${id}`) ?? "#");
   }
   if (Array.isArray(value)) return value.map((v) => rewrite(v, paths));
-  if (typeof value === "object" && value !== null) {
-    const o = value as Record<string, unknown>;
+  if (isRecord(value)) {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(o)) out[k] = rewrite(v, paths);
-    if (o.type === "internal" && typeof o.collection === "string" && typeof o.id === "string") {
-      const path = paths.get(`${o.collection}:${o.id}`);
+    for (const [k, v] of Object.entries(value)) out[k] = rewrite(v, paths);
+    if (value.type === "internal" && typeof value.collection === "string" && typeof value.id === "string") {
+      const path = paths.get(`${value.collection}:${value.id}`);
       if (path) out.path = path;
       else out.broken = true;
     }
@@ -71,10 +74,14 @@ export interface SiteDefault extends Site {
   model(): ContentModel;
 }
 
+function isTransient(error: ContentError): error is SiteError {
+  return error.code === "TRANSIENT";
+}
+
 /** Every locale site/default passes to content@1 comes from the model's own locale list, so a VALIDATION or NOT_FOUND there is a bug, not a site@1 failure. */
 function transientOnly(error: ContentError): SiteError {
-  if (error.code !== "TRANSIENT") throw new Error(`site/default: unexpected content@1 error ${error.code}: ${error.message}`);
-  return error as SiteError;
+  if (!isTransient(error)) throw new Error(`site/default: unexpected content@1 error ${error.code}: ${error.message}`);
+  return error;
 }
 
 export function createSiteDefault(content: Content): SiteDefault {
@@ -150,7 +157,9 @@ export function createSiteDefault(content: Content): SiteDefault {
       const paths = new Map<string, string | null>();
       const links: Record<string, LinkTarget> = {};
       for (const ref of refs) {
-        const [t, id] = ref.split(":") as [string, string];
+        const at = ref.indexOf(":");
+        const t = ref.slice(0, at);
+        const id = ref.slice(at + 1);
         let path: string | null = null;
         if (model.types[t]) {
           const strictResult = await content.get(t, id, locale === undefined ? {} : { locale });
@@ -169,10 +178,10 @@ export function createSiteDefault(content: Content): SiteDefault {
         paths.set(ref, path);
         links[id] = path ? { path, locale: locale ?? "" } : { broken: true };
       }
-      const out: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(document)) out[k] = k.startsWith("_") || k === "id" ? v : rewrite(v, paths);
+      const out: ContentDocument = { ...document };
+      for (const [k, v] of Object.entries(document)) if (!k.startsWith("_") && k !== "id") out[k] = rewrite(v, paths);
       out._links = links;
-      return ok(out as ContentDocument);
+      return ok(out);
     },
   };
 }
