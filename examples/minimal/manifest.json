@@ -5,8 +5,8 @@
   "contracts": [
     "blobstore@1",
     "persistence@1",
-    "authn@1",
     "authz@1",
+    "authn@1",
     "content@1",
     "site@1",
     "validate@1",
@@ -629,7 +629,9 @@
       "requires": [
         "persistence@1"
       ],
-      "optional": [],
+      "optional": [
+        "authz@1"
+      ],
       "config": {
         "schema": {
           "type": "object",
@@ -651,6 +653,12 @@
               "type": "integer",
               "exclusiveMinimum": 0,
               "default": 86400
+            },
+            "adminPermission": {
+              "type": "string",
+              "minLength": 1,
+              "default": "users.manage",
+              "description": "The permission that makes a user an admin; the last active holder of it cannot be deactivated, deleted or stripped of it"
             },
             "bootstrap": {
               "type": "object",
@@ -709,6 +717,15 @@
             "default": 86400
           },
           {
+            "path": "adminPermission",
+            "type": "string",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "default": "users.manage"
+          },
+          {
             "path": "bootstrap",
             "type": "object",
             "required": false,
@@ -752,6 +769,8 @@
         "authn.createUser",
         "authn.listUsers",
         "authn.getUser",
+        "authn.updateUser",
+        "authn.deleteUser",
         "authn.setPassword",
         "authn.changePassword",
         "authn.deactivateUser",
@@ -4578,6 +4597,21 @@
       }
     },
     {
+      "name": "authz.require",
+      "module": "authz/roles",
+      "factory": true,
+      "description": {
+        "summary": "Requires permission <arg>",
+        "reads": [],
+        "writes": [],
+        "security": "required",
+        "errors": {
+          "401": "not authenticated",
+          "403": "missing permission <arg>"
+        }
+      }
+    },
+    {
       "name": "authn.login",
       "module": "authn/multi",
       "factory": false,
@@ -4893,6 +4927,101 @@
       }
     },
     {
+      "name": "authn.updateUser",
+      "module": "authn/multi",
+      "factory": false,
+      "description": {
+        "summary": "Rename a user or set their roles (a role change ends their sessions)",
+        "reads": [
+          "params.id"
+        ],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "username": {
+              "type": "string"
+            },
+            "roles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "username": {
+              "type": "string"
+            },
+            "roles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "createdAt": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "id",
+            "username",
+            "roles",
+            "active",
+            "createdAt"
+          ]
+        },
+        "errors": {
+          "400": "neither username nor roles given, or an empty one",
+          "404": "user not found",
+          "409": "username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`)"
+        }
+      }
+    },
+    {
+      "name": "authn.deleteUser",
+      "module": "authn/multi",
+      "factory": false,
+      "description": {
+        "summary": "Delete a user and their sessions for good",
+        "reads": [
+          "identity",
+          "params.id"
+        ],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ok"
+          ]
+        },
+        "errors": {
+          "400": "cannot delete yourself",
+          "404": "user not found",
+          "409": "the last active admin cannot be deleted (`LAST_ADMIN`)"
+        }
+      }
+    },
+    {
       "name": "authn.setPassword",
       "module": "authn/multi",
       "factory": false,
@@ -4983,7 +5112,7 @@
       "module": "authn/multi",
       "factory": false,
       "description": {
-        "summary": "Deactivate a user",
+        "summary": "Deactivate a user (ends their sessions)",
         "reads": [
           "params.id"
         ],
@@ -5003,7 +5132,8 @@
         },
         "errors": {
           "400": "cannot deactivate yourself",
-          "404": "user not found"
+          "404": "user not found",
+          "409": "the last active admin cannot be deactivated (`LAST_ADMIN`)"
         }
       }
     },
@@ -5052,21 +5182,6 @@
               "type": "number"
             }
           }
-        }
-      }
-    },
-    {
-      "name": "authz.require",
-      "module": "authz/roles",
-      "factory": true,
-      "description": {
-        "summary": "Requires permission <arg>",
-        "reads": [],
-        "writes": [],
-        "security": "required",
-        "errors": {
-          "401": "not authenticated",
-          "403": "missing permission <arg>"
         }
       }
     },
@@ -8740,7 +8855,7 @@
           "name": "authn.deactivateUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Deactivate a user",
+            "summary": "Deactivate a user (ends their sessions)",
             "reads": [
               "params.id"
             ],
@@ -8760,7 +8875,8 @@
             },
             "errors": {
               "400": "cannot deactivate yourself",
-              "404": "user not found"
+              "404": "user not found",
+              "409": "the last active admin cannot be deactivated (`LAST_ADMIN`)"
             }
           }
         },
@@ -9489,6 +9605,84 @@
           "module": "events/inmemory",
           "description": {
             "summary": "Emit event \"page.translationRemoved\" to every subscribed handler pipeline",
+            "reads": [],
+            "writes": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "deleteUser",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:users.manage",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission users.manage",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission users.manage"
+            }
+          }
+        },
+        {
+          "spec": "authn.deleteUser",
+          "name": "authn.deleteUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Delete a user and their sessions for good",
+            "reads": [
+              "identity",
+              "params.id"
+            ],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "ok"
+              ]
+            },
+            "errors": {
+              "400": "cannot delete yourself",
+              "404": "user not found",
+              "409": "the last active admin cannot be deleted (`LAST_ADMIN`)"
+            }
+          }
+        },
+        {
+          "spec": "events.emit:user.deleted",
+          "name": "events.emit",
+          "module": "events/inmemory",
+          "description": {
+            "summary": "Emit event \"user.deleted\" to every subscribed handler pipeline",
             "reads": [],
             "writes": []
           }
@@ -16151,6 +16345,117 @@
       ]
     },
     {
+      "name": "updateUser",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:users.manage",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission users.manage",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission users.manage"
+            }
+          }
+        },
+        {
+          "spec": "authn.updateUser",
+          "name": "authn.updateUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Rename a user or set their roles (a role change ends their sessions)",
+            "reads": [
+              "params.id"
+            ],
+            "writes": [
+              "result"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "username": {
+                  "type": "string"
+                },
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "username": {
+                  "type": "string"
+                },
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "active": {
+                  "type": "boolean"
+                },
+                "createdAt": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "username",
+                "roles",
+                "active",
+                "createdAt"
+              ]
+            },
+            "errors": {
+              "400": "neither username nor roles given, or an empty one",
+              "404": "user not found",
+              "409": "username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`)"
+            }
+          }
+        },
+        {
+          "spec": "events.emit:user.updated",
+          "name": "events.emit",
+          "module": "events/inmemory",
+          "description": {
+            "summary": "Emit event \"user.updated\" to every subscribed handler pipeline",
+            "reads": [],
+            "writes": []
+          }
+        }
+      ]
+    },
+    {
       "name": "uploadMedia",
       "steps": [
         {
@@ -16568,6 +16873,11 @@
         "pipeline": "getUser"
       },
       {
+        "method": "PATCH",
+        "path": "/users/:id",
+        "pipeline": "updateUser"
+      },
+      {
         "method": "PUT",
         "path": "/users/:id/password",
         "pipeline": "setPassword"
@@ -16575,6 +16885,11 @@
       {
         "method": "DELETE",
         "path": "/users/:id",
+        "pipeline": "deleteUser"
+      },
+      {
+        "method": "POST",
+        "path": "/users/:id/deactivate",
         "pipeline": "deactivateUser"
       },
       {

@@ -43,6 +43,8 @@ const listUsersPipeline = definePipeline({ name: "listUsers", steps: ["authn.lis
 const getUserPipeline = definePipeline({ name: "getUser", steps: ["authn.getUser"] });
 const setPasswordPipeline = definePipeline({ name: "setPassword", steps: ["authn.setPassword"] });
 const changePasswordPipeline = definePipeline({ name: "changePassword", steps: ["authn.requireUser", "authn.changePassword"] });
+const updateUserPipeline = definePipeline({ name: "updateUser", steps: ["authn.updateUser"] });
+const deleteUserPipeline = definePipeline({ name: "deleteUser", steps: ["authn.requireUser", "authn.deleteUser"] });
 const deactivateUserPipeline = definePipeline({ name: "deactivateUser", steps: ["authn.deactivateUser"] });
 const activateUserPipeline = definePipeline({ name: "activateUser", steps: ["authn.activateUser"] });
 const cleanupSessionsPipeline = definePipeline({ name: "cleanupSessions", steps: ["authn.cleanupSessions"] });
@@ -107,6 +109,42 @@ describe("authn/multi module steps via runPipeline", () => {
     const cleaned = await runPipeline(cleanupSessionsPipeline, {}, { modules: [{ module, instance }] });
     expect(cleaned.status).toBe(200);
     expect(boundaryCast<{ removed: number }>(cleaned.result, "json").removed).toBe(0);
+  });
+
+  it("updateUser renames a user and answers 409 for a name that is taken", async () => {
+    const { instance } = await boot();
+    const created = await runPipeline(createUserPipeline, { body: { username: "carol", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const id = boundaryCast<{ id: string }>(created.result, "json").id;
+    await runPipeline(createUserPipeline, { body: { username: "dora", password: "long-enough" } }, { modules: [{ module, instance }] });
+
+    const renamed = await runPipeline(updateUserPipeline, { params: { id }, body: { username: "caro", roles: ["editor"] } }, { modules: [{ module, instance }] });
+    expect(renamed.status).toBe(200);
+    expect(renamed.result).toMatchObject({ id, username: "caro", roles: ["editor"] });
+
+    const taken = await runPipeline(updateUserPipeline, { params: { id }, body: { username: "dora" } }, { modules: [{ module, instance }] });
+    expect(taken).toMatchObject({ status: 409, code: "CONFLICT" });
+
+    const unknownField = await runPipeline(updateUserPipeline, { params: { id }, body: { email: "x@example.org" } }, { modules: [{ module, instance }] });
+    expect(unknownField.status).toBe(400);
+    expect(problems(unknownField.details)[0]?.path).toBe("$.email");
+  });
+
+  it("deleteUser removes a user but never the caller themselves", async () => {
+    const { instance } = await boot();
+    const created = await runPipeline(createUserPipeline, { body: { username: "carol", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const id = boundaryCast<{ id: string }>(created.result, "json").id;
+    const loggedIn = await runPipeline(loginPipeline, { body: { username: "carol", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const headers = { authorization: `Bearer ${boundaryCast<{ token: string }>(loggedIn.result, "json").token}` };
+
+    const self = await runPipeline(deleteUserPipeline, { params: { id }, headers }, { modules: [{ module, instance }] });
+    expect(self).toMatchObject({ status: 400, code: "VALIDATION" });
+
+    const other = await runPipeline(createUserPipeline, { body: { username: "dora", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const otherId = boundaryCast<{ id: string }>(other.result, "json").id;
+    const deleted = await runPipeline(deleteUserPipeline, { params: { id: otherId }, headers }, { modules: [{ module, instance }] });
+    expect(deleted.status).toBe(200);
+    const gone = await runPipeline(getUserPipeline, { params: { id: otherId } }, { modules: [{ module, instance }] });
+    expect(gone).toMatchObject({ status: 404, code: "NOT_FOUND" });
   });
 
   it("login answers 400 VALIDATION when a field has the wrong type", async () => {

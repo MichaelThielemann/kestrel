@@ -3,12 +3,20 @@ import { authnContractTests } from "@michaelthielemann/kestrel-contracts/authn.c
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createContext, type Context } from "@michaelthielemann/kestrel/context";
+import type { Authz } from "@michaelthielemann/kestrel-contracts/authz";
 import type { KestrelError } from "@michaelthielemann/kestrel/errors";
-import type { Result } from "@michaelthielemann/kestrel/result";
+import { ok, type Result } from "@michaelthielemann/kestrel/result";
 import { createAuthnMulti, hashPassword, tokenFromHeaders, SESSIONS, USERS } from "./impl.ts";
 import module from "./module.ts";
 
-const config = { identifier: "username" as const, minPasswordLength: 8, sessionTtlSeconds: 60 };
+const config = { identifier: "username" as const, minPasswordLength: 8, sessionTtlSeconds: 60, adminPermission: "users.manage" };
+
+const adminAuthz: Authz = {
+  async can(identity, permission) {
+    const roles = identity.claims.roles;
+    return ok(permission === "users.manage" && Array.isArray(roles) && roles.includes("admin"));
+  },
+};
 
 authnContractTests(async () => {
   const authn = await createAuthnMulti(config, createFakePersistence());
@@ -108,6 +116,72 @@ describe("authn/multi", () => {
   });
 });
 
+describe("authn/multi user administration", () => {
+  it("renames a user and keeps their sessions, but refuses a name another user holds", async () => {
+    const a = await createAuthnMulti(config, createFakePersistence());
+    const bob = expectOk(await a.createUser({ username: "bob", password: "long-enough" }));
+    expectOk(await a.createUser({ username: "eve", password: "long-enough" }));
+    const session = expectOk(await a.login({ username: "bob", password: "long-enough" }));
+    expect(expectOk(await a.updateUser(bob.id, { username: "bobby" }))).toMatchObject({ id: bob.id, username: "bobby", roles: [] });
+    expect(expectOk(await a.resolve(session?.token ?? ""))?.claims).toEqual({ username: "bobby", roles: [] });
+    expectErr(await a.updateUser(bob.id, { username: "eve" }), "CONFLICT");
+    expectErr(await a.updateUser(bob.id, { username: " " }), "VALIDATION");
+    expectErr(await a.updateUser("nope", { username: "x" }), "NOT_FOUND");
+  });
+
+  it("sets roles, rejects an empty one and ends the sessions of that user only", async () => {
+    const a = await createAuthnMulti(config, createFakePersistence());
+    const bob = expectOk(await a.createUser({ username: "bob", password: "long-enough", roles: ["editor"] }));
+    expectOk(await a.createUser({ username: "eve", password: "long-enough" }));
+    const bobs = expectOk(await a.login({ username: "bob", password: "long-enough" }));
+    const eves = expectOk(await a.login({ username: "eve", password: "long-enough" }));
+    expectErr(await a.updateUser(bob.id, { roles: ["editor", " "] }), "VALIDATION");
+    expect(expectOk(await a.updateUser(bob.id, { roles: [] })).roles).toEqual([]);
+    expect(expectOk(await a.resolve(bobs?.token ?? ""))).toBeNull();
+    expect(expectOk(await a.resolve(eves?.token ?? ""))).not.toBeNull();
+  });
+
+  it("deletes a user with their sessions", async () => {
+    const a = await createAuthnMulti(config, createFakePersistence());
+    const bob = expectOk(await a.createUser({ username: "bob", password: "long-enough" }));
+    const session = expectOk(await a.login({ username: "bob", password: "long-enough" }));
+    expectOk(await a.deleteUser(bob.id));
+    expect(expectOk(await a.getUser(bob.id))).toBeNull();
+    expect(expectOk(await a.resolve(session?.token ?? ""))).toBeNull();
+    expectErr(await a.deleteUser(bob.id), "NOT_FOUND");
+  });
+
+  it("never lets the last active admin lose the permission, be deactivated or be deleted", async () => {
+    const a = await createAuthnMulti(config, createFakePersistence(), Date.now, adminAuthz);
+    const admin = expectOk(await a.createUser({ username: "admin", password: "long-enough", roles: ["admin"] }));
+    expectOk(await a.createUser({ username: "bob", password: "long-enough", roles: ["editor"] }));
+    expectErr(await a.updateUser(admin.id, { roles: ["editor"] }), "LAST_ADMIN");
+    expectErr(await a.setActive(admin.id, false), "LAST_ADMIN");
+    expectErr(await a.deleteUser(admin.id), "LAST_ADMIN");
+    expectOk(await a.updateUser(admin.id, { username: "boss" }));
+
+    const second = expectOk(await a.createUser({ username: "second", password: "long-enough", roles: ["admin"] }));
+    expectOk(await a.updateUser(admin.id, { roles: ["editor"] }));
+    expectErr(await a.deleteUser(second.id), "LAST_ADMIN");
+    expectOk(await a.updateUser(admin.id, { roles: ["admin"] }));
+    expectOk(await a.setActive(second.id, false));
+  });
+
+  it("counts only active users as admins", async () => {
+    const a = await createAuthnMulti(config, createFakePersistence(), Date.now, adminAuthz);
+    const admin = expectOk(await a.createUser({ username: "admin", password: "long-enough", roles: ["admin"] }));
+    const spare = expectOk(await a.createUser({ username: "spare", password: "long-enough", roles: ["admin"] }));
+    expectOk(await a.setActive(spare.id, false));
+    expectErr(await a.deleteUser(admin.id), "LAST_ADMIN");
+  });
+
+  it("guards nothing without an authz module, because nobody can be known to be an admin", async () => {
+    const a = await createAuthnMulti(config, createFakePersistence());
+    const admin = expectOk(await a.createUser({ username: "admin", password: "long-enough", roles: ["admin"] }));
+    expectOk(await a.deleteUser(admin.id));
+  });
+});
+
 const ctx = (overrides: { payload?: Record<string, unknown>; params?: Record<string, string>; headers?: Record<string, string> } = {}) =>
   createContext({ trigger: { kind: "http", name: "t" }, payload: overrides.payload ?? {}, params: overrides.params ?? {}, headers: overrides.headers ?? {} });
 
@@ -157,6 +231,28 @@ describe("authn/multi module steps", () => {
     expectErr(await deactivateUser(asSelf), "VALIDATION");
     expectErr(await deactivateUser(ctx({ params: { id: "nope" } })), "NOT_FOUND");
     expectOk(await deactivateUser(ctx({ params: { id: user.id } })));
+  });
+
+  it("updateUser: VALIDATION without a field, CONFLICT on a taken name, ok otherwise", async () => {
+    const authn = await createAuthnMulti(config, createFakePersistence());
+    const user = expectOk(await authn.createUser({ username: "bob", password: "long-enough" }));
+    expectOk(await authn.createUser({ username: "eve", password: "long-enough" }));
+    const updateUser = module.steps!(authn).updateUser;
+    expectErr(await updateUser(ctx({ params: { id: user.id } })), "VALIDATION");
+    expectErr(await updateUser(ctx({ params: { id: user.id }, payload: { username: "eve" } })), "CONFLICT");
+    const step = expectOk(await updateUser(ctx({ params: { id: user.id }, payload: { username: "bobby", roles: ["editor"] } })));
+    expect(step.result).toMatchObject({ username: "bobby", roles: ["editor"] });
+  });
+
+  it("deleteUser: VALIDATION for self, NOT_FOUND for an unknown id, ok otherwise", async () => {
+    const authn = await createAuthnMulti(config, createFakePersistence());
+    const user = expectOk(await authn.createUser({ username: "bob", password: "long-enough" }));
+    const deleteUser = module.steps!(authn).deleteUser;
+    const asSelf = { ...ctx({ params: { id: user.id } }), identity: { id: user.id, claims: {} } };
+    expectErr(await deleteUser(asSelf), "VALIDATION");
+    expectErr(await deleteUser(ctx({ params: { id: "nope" } })), "NOT_FOUND");
+    const step = expectOk(await deleteUser(ctx({ params: { id: user.id } })));
+    expect(step.result).toMatchObject({ ok: true });
   });
 
   it("activateUser: NOT_FOUND for an unknown id, ok for a known one", async () => {

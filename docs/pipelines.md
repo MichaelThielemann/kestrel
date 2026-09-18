@@ -517,7 +517,7 @@ an event receives this data as its `payload`.
 | `auth.loggedIn` / `auth.loggedOut` | user id |
 | `page.created` / `page.updated` / `page.deleted` | document id |
 | `media.uploaded` / `media.updated` / `media.deleted` | document id (for a bulk upload of several files: `null`, plus `ids: string[]` — the newly stored items only) |
-| `user.created` / `user.deactivated` | document id |
+| `user.created` / `user.updated` / `user.deactivated` / `user.deleted` | document id |
 | `migrations.applied` | – (no envelope: the `migrations/default` module sends its own `{ migrations: [id], documents }` after a run; deliberately no `page.updated` per document it migrated). The named exception to rule 3: `apply()` is a contract method that also runs at boot, and after a partial failure the event still has to cover the migrations already applied — an `events.emit` step after a failing `migrations.apply` would never run. The module declares it as `emits: ["migrations.applied"]`, so a trigger on it boots without the warning above |
 
 Whatever the bus delivers is a shallowly frozen copy of the emitted data, like the context between

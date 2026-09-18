@@ -2,7 +2,26 @@
 
 ## Unreleased
 
+### Breaking
+
+- `examples/minimal`: `DELETE /users/:id` deletes the user for good instead of deactivating them;
+  deactivating moved to `POST /users/:id/deactivate`, the counterpart of `POST /users/:id/activate`.
+  A consumer that wired `DELETE` to `deactivateUser` keeps its own mapping — the routes live in
+  `kestrel.config.ts`, not in the module.
+
 ### Added
+
+- `authn-multi`: the steps `authn.updateUser` (`params.id`, body `{ username?, roles? }`, answers the
+  user) and `authn.deleteUser` (`params.id`, answers `{ ok: true }`), plus the methods `updateUser`
+  and `deleteUser` on the module's `AuthnMulti` interface. A username stays unique (409 `CONFLICT`),
+  roles are free non-empty strings, a role change and a deactivation end that user's sessions, a
+  delete removes their sessions with them, and nobody can delete themselves (400).
+- `authn-multi`: the config `adminPermission` (default `users.manage`) and an optional `authz@1`
+  dependency guard the last admin: deactivating, deleting or taking the permission away from the
+  last active user who holds it answers 409 `LAST_ADMIN`. Without an authz module nobody is known
+  to be an admin and the guard stays silent.
+- `examples/minimal`: the pipelines `updateUser` (`PATCH /users/:id`, emits `user.updated`) and
+  `deleteUser` (`DELETE /users/:id`, emits `user.deleted`).
 
 - `core`: `RunEndEvent` carries `message` for a run that ended with a status of 400 or above —
   the text the caller received, truncated at 500 characters and never a stack. An unexpected
