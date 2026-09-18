@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 5.5.0 – 2026-09-19
+
 ### Breaking
 
 - `examples/minimal`: `DELETE /users/:id` deletes the user for good instead of deactivating them;
@@ -22,7 +24,6 @@
   to be an admin and the guard stays silent.
 - `examples/minimal`: the pipelines `updateUser` (`PATCH /users/:id`, emits `user.updated`) and
   `deleteUser` (`DELETE /users/:id`, emits `user.deleted`).
-
 - `core`: `RunEndEvent` carries `message` for a run that ended with a status of 400 or above —
   the text the caller received, truncated at 500 characters and never a stack. An unexpected
   `throw` contributes `"<pipeline>/<step>: unexpected <ErrorName>"` only; its own text and stack
