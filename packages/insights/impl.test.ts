@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, definePipeline, silentLogger, type Kestrel } from "@michaelthielemann/kestrel";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context } from "@michaelthielemann/kestrel/context";
 import { ok } from "@michaelthielemann/kestrel/result";
 import { insightsContractTests } from "@michaelthielemann/kestrel-contracts/insights.contract.test";
@@ -49,7 +50,7 @@ const http = { kind: "http" as const, name: "GET /pass" };
 
 insightsContractTests(async () => {
   const kestrel = await booted();
-  return { insights: kestrel.contracts.get(module.provides[0]!) as ReturnType<typeof createInsights>, run: async () => void (await kestrel.run("pass", { trigger: http })), pipeline: "pass" };
+  return { insights: boundaryCast<ReturnType<typeof createInsights>>(kestrel.contracts.get(module.provides[0]!), "host"), run: async () => void (await kestrel.run("pass", { trigger: http })), pipeline: "pass" };
 });
 
 describe("percentile", () => {
@@ -67,7 +68,7 @@ describe("percentile", () => {
 describe("insights aggregation", () => {
   it("counts ok, failed and errored runs per pipeline and per step", async () => {
     const kestrel = await booted();
-    const insights = kestrel.contracts.get(module.provides[0]!) as ReturnType<typeof createInsights>;
+    const insights = boundaryCast<ReturnType<typeof createInsights>>(kestrel.contracts.get(module.provides[0]!), "host");
     for (let i = 0; i < 3; i++) await kestrel.run("pass", { trigger: http });
     await kestrel.run("deny", { trigger: http });
     await kestrel.run("boom", { trigger: http });
@@ -97,7 +98,7 @@ describe("insights aggregation", () => {
 
   it("counts event-triggered runs per event name", async () => {
     const kestrel = await booted();
-    const insights = kestrel.contracts.get(module.provides[0]!) as ReturnType<typeof createInsights>;
+    const insights = boundaryCast<ReturnType<typeof createInsights>>(kestrel.contracts.get(module.provides[0]!), "host");
     await kestrel.run("pass", { trigger: { kind: "event", name: "thing.done" } });
     await kestrel.run("pass", { trigger: { kind: "event", name: "thing.done" } });
     await kestrel.run("pass", { trigger: http });
@@ -125,7 +126,7 @@ describe("insights aggregation", () => {
     const insights = createInsights();
     expect(() => insights.manifest()).toThrow("not attached");
     const kestrel = await booted();
-    const attached = kestrel.contracts.get(module.provides[0]!) as ReturnType<typeof createInsights>;
+    const attached = boundaryCast<ReturnType<typeof createInsights>>(kestrel.contracts.get(module.provides[0]!), "host");
     expect(attached.manifest().modules.map((m) => m.name)).toEqual(["probe/test", "insights/default"]);
     await kestrel.stop();
     await kestrel.run("pass", { trigger: http });

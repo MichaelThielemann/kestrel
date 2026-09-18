@@ -2,6 +2,7 @@ import { z } from "zod";
 import { CONTENT, type ContentDocument } from "@michaelthielemann/kestrel-contracts/content";
 import { documentSchema } from "@michaelthielemann/kestrel-contracts/content-schema";
 import { SITE, type SiteRules } from "@michaelthielemann/kestrel-contracts/site";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
@@ -77,8 +78,8 @@ export default defineModule({
       const { type, fixed } = parseTarget(arg);
       const rules = siteRules(fixed);
       return async (ctx: Context) => {
-        const doc = ctx.result as ContentDocument | undefined;
-        if (!doc || typeof doc !== "object") throw new Error(`site/default: resolveLinks step ran without a document in result`);
+        if (!ctx.result || typeof ctx.result !== "object") throw new Error(`site/default: resolveLinks step ran without a document in result`);
+        const doc = boundaryCast<ContentDocument>(ctx.result, "json");
         const locale = doc._locale ?? ctx.params.locale ?? first(ctx.payload.locale);
         const resolved = await site.resolveLinks(type, doc, { ...(locale === undefined ? {} : { locale }), rules });
         if (isErr(resolved)) return ctx.fail(resolved.error);

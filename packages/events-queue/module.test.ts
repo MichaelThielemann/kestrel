@@ -24,7 +24,7 @@ async function setup(overrides: Record<string, unknown> = {}) {
     logger: silentLogger,
     root: process.cwd(),
   };
-  const instance = (await module.setup(configSchema.parse({ maxAttempts: 1, ...overrides }), deps)) as EventsQueue;
+  const instance = boundaryCast<EventsQueue>(await module.setup(configSchema.parse({ maxAttempts: 1, ...overrides }), deps), "host");
   return { db, instance };
 }
 
@@ -74,9 +74,9 @@ describe("events/queue module steps via runPipeline", () => {
     await instance.tick();
     const res = await run(["events.listDead"], { query: { limit: "2" } }, instance);
     expect(res.status).toBe(200);
-    expect((res.result as { items: unknown[] }).items).toHaveLength(2);
+    expect(boundaryCast<{ items: unknown[] }>(res.result, "json").items).toHaveLength(2);
     expect((await run(["events.listDead"], { query: { limit: "0" } }, instance)).status).toBe(400);
-    expect(((await run(["events.listDead"], {}, instance)).result as { items: unknown[] }).items).toHaveLength(3);
+    expect(boundaryCast<{ items: unknown[] }>((await run(["events.listDead"], {}, instance)).result, "json").items).toHaveLength(3);
   });
 
   it("retryDead:one needs params.id, 404s an unknown id and requeues a dead event; retryDead:all requeues every one", async () => {
@@ -87,7 +87,7 @@ describe("events/queue module steps via runPipeline", () => {
     await run(["events.emit:x"], {}, instance);
     await run(["events.emit:x"], {}, instance);
     await instance.tick();
-    const dead = ((await run(["events.listDead"], {}, instance)).result as { items: { id: string }[] }).items;
+    const dead = boundaryCast<{ items: { id: string }[] }>((await run(["events.listDead"], {}, instance)).result, "json").items;
     expect(await run(["events.retryDead:one"], {}, instance)).toMatchObject({ status: 400 });
     expect(await run(["events.retryDead:one"], { params: { id: "nope" } }, instance)).toMatchObject({ status: 404, code: "NOT_FOUND" });
     expect((await run(["events.retryDead:one"], { params: { id: dead[0]!.id } }, instance)).result).toEqual({ retried: 1 });

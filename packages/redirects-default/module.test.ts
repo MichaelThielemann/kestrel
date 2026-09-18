@@ -4,6 +4,7 @@ import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentDocument } from "@michaelthielemann/kestrel-contracts/content";
 import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
 import { err, failure, ok } from "@michaelthielemann/kestrel-contracts/errors";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
@@ -53,9 +54,9 @@ async function boot(initial?: unknown) {
   const deps: Deps = {
     get<T>(contract: Contract<T>): T {
       if (!providers.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
-      return providers.get(contract.name) as T;
+      return boundaryCast<T>(providers.get(contract.name), "host");
     },
-    find: <T>(contract: Contract<T>): T | undefined => providers.get(contract.name) as T | undefined,
+    find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
     logger: silentLogger,
     root: process.cwd(),
   };
@@ -100,7 +101,7 @@ describe("redirects/default module steps", () => {
     const { instance } = await boot(rules);
     const res = await run(["redirects.render"], {}, instance);
     expect(res.status).toBe(200);
-    expect((res.result as Array<{ status: number }>).map((r) => r.status)).toEqual([301, 302]);
+    expect(boundaryCast<Array<{ status: number }>>(res.result, "json").map((r) => r.status)).toEqual([301, 302]);
   });
 
   it("rejects a rules field of the wrong type with 400 VALIDATION from the body schema", async () => {

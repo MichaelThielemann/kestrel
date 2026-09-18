@@ -25,10 +25,14 @@ export function requestPath(raw: string): string {
   return `/${withoutQuery.replace(/^\/+/, "")}`;
 }
 
+function isTransient(error: ContentError | BlobstoreError): error is RedirectsError {
+  return error.code === "TRANSIENT";
+}
+
 /** content@1 and blobstore@1 only ever answer TRANSIENT here (no locale option, no move); anything else is a bug. */
 function transientOnly(error: ContentError | BlobstoreError, from: string): RedirectsError {
-  if (error.code !== "TRANSIENT") throw new Error(`redirects/default: unexpected ${from} error ${error.code}: ${error.message}`);
-  return error as RedirectsError;
+  if (!isTransient(error)) throw new Error(`redirects/default: unexpected ${from} error ${error.code}: ${error.message}`);
+  return error;
 }
 
 export function createRedirects(config: Config, deps: { content: Content; blobs: Blobstore; logger: Logger }): Redirects {

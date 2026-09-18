@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
@@ -35,7 +36,7 @@ export default defineModule({
       return ok(ctx);
     }),
     index: stepFactory((type: string) => async (ctx: Context) => {
-      const result = ctx.result as { id?: unknown } | undefined;
+      const result = boundaryCast<{ id?: unknown } | undefined>(ctx.result, "json");
       const id = result?.id;
       if (typeof id !== "string") throw new Error(`references.index:${type}: no document id in result`);
       const indexed = await refs.index(type, id);
@@ -76,11 +77,11 @@ export default defineModule({
       return ok({ ...ctx, result });
     }),
     guardAll: stepFactory((target: string) => async (ctx: Context) => {
-      const result = ctx.result as { ids?: unknown } | undefined;
+      const result = boundaryCast<{ ids?: unknown } | undefined>(ctx.result, "json");
       const ids = result?.ids;
       if (!Array.isArray(ids)) throw new Error(`references.guardAll:${target}: no ids in result`);
       const referenced: string[] = [];
-      for (const id of ids as string[]) {
+      for (const id of boundaryCast<string[]>(ids, "json")) {
         const referrers = await refs.referrers(target, id);
         if (isErr(referrers)) return ctx.fail(referrers.error);
         if (referrers.value.length > 0) referenced.push(id);

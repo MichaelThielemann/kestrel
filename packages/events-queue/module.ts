@@ -3,6 +3,7 @@ import { z } from "zod";
 import "@michaelthielemann/kestrel-contracts/authn";
 import { EVENTS } from "@michaelthielemann/kestrel-contracts/events";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
@@ -78,7 +79,7 @@ export default defineModule({
       const questionMark = spec.indexOf("?");
       const name = questionMark === -1 ? spec : spec.slice(0, questionMark);
       const withResult = questionMark !== -1 && new URLSearchParams(spec.slice(questionMark + 1)).get("with") === "result";
-      const result = ctx.result as { id?: unknown; document?: { id?: unknown }; ids?: unknown } | undefined;
+      const result = boundaryCast<{ id?: unknown; document?: { id?: unknown }; ids?: unknown } | undefined>(ctx.result, "json");
       const id = typeof result?.id === "string" ? result.id : typeof result?.document?.id === "string" ? result.document.id : typeof ctx.params.id === "string" ? ctx.params.id : null;
       const envelope: Record<string, unknown> = { eventId: randomUUID(), event: name, at: Date.now(), runId: ctx.runId, identity: ctx.identity ?? null, params: ctx.params, id };
       if (Array.isArray(result?.ids) && result.ids.every((v): v is string => typeof v === "string")) envelope.ids = result.ids;
@@ -107,10 +108,15 @@ export default defineModule({
     retryDead: stepFactory((arg: string) => {
       const target = retryTarget(arg);
       return async (ctx: Context) => {
-        if (target === "one" && !ctx.params.id) return ctx.fail("VALIDATION", "missing id");
-        const retried = await events.retryDead(target === "all" ? "all" : (ctx.params.id as string));
+        if (target === "all") {
+          const retried = await events.retryDead("all");
+          if (isErr(retried)) return ctx.fail(retried.error);
+          return ok({ ...ctx, result: retried.value });
+        }
+        if (!ctx.params.id) return ctx.fail("VALIDATION", "missing id");
+        const retried = await events.retryDead(ctx.params.id);
         if (isErr(retried)) return ctx.fail(retried.error);
-        if (target === "one" && retried.value.retried === 0) return ctx.fail("NOT_FOUND", `no dead event "${ctx.params.id ?? ""}"`);
+        if (retried.value.retried === 0) return ctx.fail("NOT_FOUND", `no dead event "${ctx.params.id}"`);
         return ok({ ...ctx, result: retried.value });
       };
     }),

@@ -208,7 +208,11 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       for (const c of counts) if (isErr(c)) return c;
       const oldest = await db.findMany<QueueRow>(QUEUE, { state: "pending" }, { sort: { availableAt: "asc" }, limit: 1 });
       if (isErr(oldest)) return oldest;
-      const [pending, running_, dead, done24h] = counts.map((c) => (c.ok ? c.value : 0)) as [number, number, number, number];
+      const [pendingCount, runningCount, deadCount, done24hCount] = counts;
+      const pending = pendingCount.ok ? pendingCount.value : 0;
+      const running_ = runningCount.ok ? runningCount.value : 0;
+      const dead = deadCount.ok ? deadCount.value : 0;
+      const done24h = done24hCount.ok ? done24hCount.value : 0;
       return ok({ pending, running: running_, dead, done24h, oldestPendingAt: oldest.value.items[0]?.availableAt ?? null, worker: { running, lastTickAt } });
     },
     async listDead(limit) {
