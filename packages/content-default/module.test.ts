@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ContentDocument } from "@michaelthielemann/kestrel-contracts/content";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context, Step, StepFactory } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
@@ -34,9 +35,9 @@ async function boot() {
   const deps: Deps = {
     get<T>(contract: Contract<T>): T {
       if (!providers.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
-      return providers.get(contract.name) as T;
+      return boundaryCast<T>(providers.get(contract.name), "host");
     },
-    find: <T>(contract: Contract<T>): T | undefined => providers.get(contract.name) as T | undefined,
+    find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
     logger: silentLogger,
     root: process.cwd(),
   };
@@ -63,16 +64,16 @@ describe("content/default module steps", () => {
     const { instance } = await boot();
     const res = await run(["content.create:notes"], { body: { slug: "a", title: "A", status: "draft" } }, instance);
     expect(res.status).toBe(200);
-    expect((res.result as ContentDocument).slug).toBe("a");
+    expect(boundaryCast<ContentDocument>(res.result, "host").slug).toBe("a");
   });
 
   it("get reads a document by id", async () => {
     const { instance } = await boot();
     const created = await run(["content.create:notes"], { body: { slug: "a", title: "A", status: "draft" } }, instance);
-    const id = (created.result as ContentDocument).id;
+    const id = boundaryCast<ContentDocument>(created.result, "host").id;
     const res = await run(["content.get:notes"], { params: { id }, query: { locale: "de" } }, instance);
     expect(res.status).toBe(200);
-    expect((res.result as ContentDocument).slug).toBe("a");
+    expect(boundaryCast<ContentDocument>(res.result, "host").slug).toBe("a");
   });
 
   it("list pages through the documents of a type", async () => {
@@ -80,22 +81,22 @@ describe("content/default module steps", () => {
     await run(["content.create:notes"], { body: { slug: "a", title: "A", status: "draft" } }, instance);
     const res = await run(["content.list:notes"], { query: { limit: "10", offset: "0", sort: "slug" } }, instance);
     expect(res.status).toBe(200);
-    expect((res.result as { total: number }).total).toBe(1);
+    expect(boundaryCast<{ total: number }>(res.result, "host").total).toBe(1);
   });
 
   it("update changes a document", async () => {
     const { instance } = await boot();
     const created = await run(["content.create:notes"], { body: { slug: "a", title: "A", status: "draft" } }, instance);
-    const id = (created.result as ContentDocument).id;
+    const id = boundaryCast<ContentDocument>(created.result, "host").id;
     const res = await run(["content.update:notes"], { params: { id }, body: { status: "published" } }, instance);
     expect(res.status).toBe(200);
-    expect((res.result as ContentDocument).status).toBe("published");
+    expect(boundaryCast<ContentDocument>(res.result, "host").status).toBe("published");
   });
 
   it("removeTranslation drops one locale of a document", async () => {
     const { instance } = await boot();
     const created = await run(["content.create:notes"], { body: { slug: "a", title: "A", status: "draft" } }, instance);
-    const id = (created.result as ContentDocument).id;
+    const id = boundaryCast<ContentDocument>(created.result, "host").id;
     await run(["content.update:notes"], { params: { id }, body: { title: "A-en" }, query: { locale: "en" } }, instance);
     const res = await run(["content.removeTranslation:notes"], { params: { id }, query: { locale: "en" } }, instance);
     expect(res.status).toBe(200);
@@ -111,7 +112,7 @@ describe("content/default module steps", () => {
   it("remove deletes a document", async () => {
     const { instance } = await boot();
     const created = await run(["content.create:notes"], { body: { slug: "a", title: "A", status: "draft" } }, instance);
-    const id = (created.result as ContentDocument).id;
+    const id = boundaryCast<ContentDocument>(created.result, "host").id;
     const res = await run(["content.remove:notes"], { params: { id } }, instance);
     expect(res.status).toBe(200);
     expect(res.result).toEqual({ ok: true });
@@ -121,17 +122,17 @@ describe("content/default module steps", () => {
     const { instance } = await boot();
     const res = await run(["content.set:settings"], { body: { title: "My Site" } }, instance);
     expect(res.status).toBe(200);
-    expect((res.result as ContentDocument).title).toBe("My Site");
+    expect(boundaryCast<ContentDocument>(res.result, "host").title).toBe("My Site");
   });
 
   it("accepts null for optional fields on create and set, and for every field on update, but not for a required field on create", async () => {
     const { instance } = await boot();
     const settings = await run(["content.set:settings"], { body: { title: null } }, instance);
     expect(settings.status).toBe(200);
-    expect((settings.result as ContentDocument).title).toBeNull();
+    expect(boundaryCast<ContentDocument>(settings.result, "host").title).toBeNull();
     const created = await run(["content.create:notes"], { body: { slug: "a", title: "A", status: "draft" } }, instance);
     expect(created.status).toBe(200);
-    const cleared = await run(["content.update:notes"], { params: { id: (created.result as ContentDocument).id }, body: { title: null } }, instance);
+    const cleared = await run(["content.update:notes"], { params: { id: boundaryCast<ContentDocument>(created.result, "host").id }, body: { title: null } }, instance);
     expect(cleared.status).toBe(200);
     const missing = await run(["content.create:notes"], { body: { slug: "b", title: null, status: "draft" } }, instance);
     expect(missing).toMatchObject({ status: 400, code: "VALIDATION", step: "content.create:notes" });

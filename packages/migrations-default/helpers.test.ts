@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { defineMigration, mapBlocks, omit, renameBlock, renameProp, type Block } from "./helpers.ts";
 
 describe("mapBlocks", () => {
@@ -17,13 +18,13 @@ describe("mapBlocks", () => {
     const migrated = mapBlocks(document, "serviced-apartments", (block) => {
       const props = block.props ?? {};
       const images = props.images;
-      const categories = (props.categories as Array<Record<string, unknown>> | undefined) ?? [];
+      const categories = boundaryCast<Array<Record<string, unknown>> | undefined>(props.categories, "host") ?? [];
       if (!Array.isArray(images) || categories.length === 0) return block;
       const [first, ...rest] = categories;
       return { ...block, props: omit({ ...props, categories: [{ ...first, images }, ...rest] }, "images") };
     });
 
-    const block = (migrated.body as Block[])[0]!;
+    const block = boundaryCast<Block[]>(migrated.body, "host")[0]!;
     expect(block.props?.images).toBeUndefined();
     expect(block.props?.categories).toEqual([{ name: "Studio", images: ["a.jpg", "b.jpg"] }, { name: "Suite" }]);
   });
@@ -41,7 +42,7 @@ describe("mapBlocks", () => {
       ],
     };
     const migrated = mapBlocks(document, "hero", (block) => ({ ...block, props: { ...block.props, title: "new" } }));
-    const columns = (migrated.body as Block[])[0]!;
+    const columns = boundaryCast<Block[]>(migrated.body, "host")[0]!;
     expect(columns.slots?.left?.[0]?.props?.title).toBe("new");
     expect(columns.slots?.right?.[0]?.props?.html).toBe("keep");
   });
@@ -60,7 +61,7 @@ describe("mapBlocks", () => {
   it("uses a custom blocksField", () => {
     const document = { content: [{ type: "hero", props: {} }] };
     const migrated = mapBlocks(document, "hero", (b) => ({ ...b, type: "hero2" }), "content");
-    expect((migrated.content as Block[])[0]?.type).toBe("hero2");
+    expect(boundaryCast<Block[]>(migrated.content, "host")[0]?.type).toBe("hero2");
   });
 
   it("removes a node nested inside slots when fn returns null", () => {
@@ -68,7 +69,7 @@ describe("mapBlocks", () => {
       body: [{ type: "columns", slots: { left: [{ type: "ad" }, { type: "text", props: { html: "keep" } }] } }],
     };
     const migrated = mapBlocks(document, "ad", () => null);
-    const columns = (migrated.body as Block[])[0]!;
+    const columns = boundaryCast<Block[]>(migrated.body, "host")[0]!;
     expect(columns.slots?.left).toEqual([{ type: "text", props: { html: "keep" } }]);
   });
 
@@ -78,7 +79,7 @@ describe("mapBlocks", () => {
       body: [{ type: "columns", slots: { left: [{ type: "columns", props: { id: "child" } }] }, props: { id: "parent" } }],
     };
     mapBlocks(document, "columns", (block) => {
-      visited.push(block.props?.id as string);
+      visited.push(boundaryCast<string>(block.props?.id, "host"));
       return block;
     });
     expect(visited).toEqual(["child", "parent"]);
@@ -87,7 +88,7 @@ describe("mapBlocks", () => {
   it("keeps a non-array slot value as it is", () => {
     const document: Record<string, unknown> = { body: [{ type: "hero", slots: { left: "not-an-array" } }] };
     const migrated = mapBlocks(document, "hero", (b) => ({ ...b, props: { ...b.props, title: "new" } }));
-    expect((migrated.body as Block[])[0]?.slots?.left).toBe("not-an-array");
+    expect(boundaryCast<Block[]>(migrated.body, "host")[0]?.slots?.left).toBe("not-an-array");
   });
 
   it("does not mutate the input document, its blocks, or nested slot arrays", () => {
@@ -109,7 +110,7 @@ describe("renameBlock", () => {
       ],
     };
     const migrated = renameBlock(document, "serviced-apartments", "apartments");
-    const blocks = migrated.body as Block[];
+    const blocks = boundaryCast<Block[]>(migrated.body, "host");
     expect(blocks[0]?.type).toBe("apartments");
     expect(blocks[1]?.slots?.left?.[0]?.type).toBe("apartments");
   });

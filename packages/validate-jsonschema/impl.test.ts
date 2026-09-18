@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, it, expect } from "vitest";
 import { validateContractTests } from "@michaelthielemann/kestrel-contracts/validate.contract.test";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context } from "@michaelthielemann/kestrel/context";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { failure, type CoreCode, type KestrelError } from "@michaelthielemann/kestrel/errors";
@@ -219,7 +220,7 @@ describe("validate/jsonschema", () => {
   it("sanitizes html only at format:html positions, keeping kestrel: links", async () => {
     const v = await createValidator(config, dir, stubLogger());
     const dirty = '<p onclick="x()">Hi <a href="kestrel:pages:abc" target="_blank">link</a><script>alert(1)</script><img src="javascript:evil()"><a href="https://ok.example">ok</a></p>';
-    const out = v.sanitize("pages.body", { blocks: [{ type: "hero", title: dirty }, { type: "text", html: dirty }, { type: "video", html: dirty }] }) as { blocks: Array<Record<string, string>> };
+    const out = boundaryCast<{ blocks: Array<Record<string, string>> }>(v.sanitize("pages.body", { blocks: [{ type: "hero", title: dirty }, { type: "text", html: dirty }, { type: "video", html: dirty }] }), "json");
     expect(out.blocks[0]?.title).toBe(dirty);
     expect(out.blocks[1]?.html).toBe('<p>Hi <a href="kestrel:pages:abc" target="_blank" rel="noopener noreferrer">link</a><img /><a href="https://ok.example">ok</a></p>');
     expect(out.blocks[2]?.html).toBe(dirty);
@@ -287,8 +288,8 @@ describe("validate/jsonschema", () => {
   it("two boots keep their own schemas; the first instance's step factories still resolve against it", async () => {
     const deps: Deps = { get: () => { throw new Error("not needed"); }, find: () => undefined, logger: stubLogger(), root: dir };
     const schemaPath = "blocks.json";
-    const first = (await module.setup(module.configSchema.parse({ schemas: { "pages.a": schemaPath } }), deps)) as Validator;
-    const second = (await module.setup(module.configSchema.parse({ schemas: { "pages.b": schemaPath } }), deps)) as Validator;
+    const first = boundaryCast<Validator>(await module.setup(module.configSchema.parse({ schemas: { "pages.a": schemaPath } }), deps), "host");
+    const second = boundaryCast<Validator>(await module.setup(module.configSchema.parse({ schemas: { "pages.b": schemaPath } }), deps), "host");
     try {
       const check = module.steps!(first).check as (arg: string) => unknown;
       expect(() => check("pages.a")).not.toThrow();
@@ -320,7 +321,7 @@ describe("inline schemas", () => {
   it("does not let the caller's later edits leak into the compiled schema", async () => {
     const schema: Record<string, unknown> = { type: "object", properties: { n: { type: "number" } }, additionalProperties: false };
     const v = await createValidator({ schemas: { "pages.meta": schema }, maxDepth: 32, maxNodes: 20_000 }, dir, stubLogger());
-    (schema.properties as Record<string, unknown>).n = { type: "string" };
+    boundaryCast<Record<string, unknown>>(schema.properties, "json").n = { type: "string" };
     expect(v.check("pages.meta", { n: 1 }).ok).toBe(true);
     v.close();
   });

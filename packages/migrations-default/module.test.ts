@@ -9,6 +9,7 @@ import { createFakePersistence, type FakePersistence } from "@michaelthielemann/
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { VALIDATE, type Validate, type Validation } from "@michaelthielemann/kestrel-contracts/validate";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createContext, type Context, type Step } from "@michaelthielemann/kestrel/context";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
@@ -61,14 +62,14 @@ async function boot(migrations: Migration[], options: BootOptions = {}) {
   const deps: Deps = {
     get<T>(contract: Contract<T>): T {
       if (!providers.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
-      return providers.get(contract.name) as T;
+      return boundaryCast<T>(providers.get(contract.name), "host");
     },
-    find: <T>(contract: Contract<T>): T | undefined => providers.get(contract.name) as T | undefined,
+    find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
     logger: noLogger,
     root: ".",
   };
   const config = configSchema.parse({ migrations, mode: options.mode ?? "off" });
-  const instance = (await module.setup(config, deps)) as MigrationsDefault;
+  const instance = boundaryCast<MigrationsDefault>(await module.setup(config, deps), "host");
   return { instance, content, db, events };
 }
 
@@ -125,7 +126,7 @@ describe("migrations/default steps", () => {
     const { instance, content } = await boot([migration]);
     expectOk(await content.create("pages", { slug: "a", title: "A", status: "draft" }));
 
-    const before = expectOk(await stepOf(instance, "list")(ctx())).result as { applied: unknown[]; pending: unknown[] };
+    const before = boundaryCast<{ applied: unknown[]; pending: unknown[] }>(expectOk(await stepOf(instance, "list")(ctx())).result, "host");
     expect(before.pending).toEqual([{ id: "m1", collection: "pages" }]);
     expect(before.applied).toEqual([]);
   });
@@ -145,7 +146,7 @@ describe("migrations/default steps", () => {
     const { instance, content } = await boot([migration]);
     expectOk(await content.create("pages", { slug: "a", title: "A", status: "draft" }));
 
-    const result = expectOk(await stepOf(instance, "apply")(ctx())).result as { applied: Array<{ id: string; documents: number }> };
+    const result = boundaryCast<{ applied: Array<{ id: string; documents: number }> }>(expectOk(await stepOf(instance, "apply")(ctx())).result, "host");
     expect(result.applied).toEqual([expect.objectContaining({ id: "m1", documents: 1 })]);
   });
 
@@ -215,7 +216,7 @@ describe("migrations/default validate@1 wiring", () => {
     const { instance, content } = await boot([migration]);
     expectOk(await content.create("pages", { slug: "a", title: "A", status: "draft", body: "ok" }));
 
-    const result = expectOk(await stepOf(instance, "apply")(ctx())).result as { applied: Array<{ id: string; documents: number }> };
+    const result = boundaryCast<{ applied: Array<{ id: string; documents: number }> }>(expectOk(await stepOf(instance, "apply")(ctx())).result, "host");
     expect(result.applied).toEqual([expect.objectContaining({ id: "m1", documents: 1 })]);
   });
 });
@@ -223,12 +224,12 @@ describe("migrations/default validate@1 wiring", () => {
 describe("migrations/default describe", () => {
   it("describes both steps with their dataflow", () => {
     const descriptions = module.describe!(undefined);
-    const list = descriptions.list as { summary?: string; reads?: string[]; writes?: string[] };
+    const list = boundaryCast<{ summary?: string; reads?: string[]; writes?: string[] }>(descriptions.list, "host");
     expect(typeof list.summary).toBe("string");
     expect(list.reads).toEqual([]);
     expect(list.writes).toEqual(["result"]);
 
-    const apply = descriptions.apply as { summary?: string; reads?: string[]; writes?: string[]; errors?: Record<number, string> };
+    const apply = boundaryCast<{ summary?: string; reads?: string[]; writes?: string[]; errors?: Record<number, string> }>(descriptions.apply, "host");
     expect(typeof apply.summary).toBe("string");
     expect(apply.reads).toEqual([]);
     expect(apply.writes).toEqual(["result"]);
@@ -247,7 +248,7 @@ describe("migrations/default steps via runPipeline", () => {
     const list = definePipeline({ name: "list", steps: ["migrations.list"] });
     const listed = await runPipeline(list, {}, { modules: [{ module, instance }] });
     expect(listed.status).toBe(200);
-    expect((listed.result as { pending: unknown[] }).pending).toEqual([{ id: "m1", collection: "pages" }]);
+    expect(boundaryCast<{ pending: unknown[] }>(listed.result, "host").pending).toEqual([{ id: "m1", collection: "pages" }]);
 
     const apply = definePipeline({ name: "apply", steps: ["migrations.apply"] });
     const applied = await runPipeline(apply, { body: { dry: true } }, { modules: [{ module, instance }] });

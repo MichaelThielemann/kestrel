@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { contentContractTests } from "@michaelthielemann/kestrel-contracts/content.contract.test";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createContext, type Context } from "@michaelthielemann/kestrel/context";
 import type { KestrelError } from "@michaelthielemann/kestrel/errors";
 import type { Result } from "@michaelthielemann/kestrel/result";
@@ -12,7 +13,7 @@ contentContractTests((model) => createContentDefault(model, createFakePersistenc
 
 const ctx = (params: Record<string, string> = {}, payload: Record<string, unknown> = {}): Context => createContext({ trigger: { kind: "http", name: "t" }, params, payload });
 
-const resultOf = (step: Result<Context, KestrelError>): Record<string, unknown> => expectOk(step).result as Record<string, unknown>;
+const resultOf = (step: Result<Context, KestrelError>): Record<string, unknown> => boundaryCast<Record<string, unknown>>(expectOk(step).result, "host");
 
 describe("content/default", () => {
   it("rejects reserved field names and bad type names in the model", () => {

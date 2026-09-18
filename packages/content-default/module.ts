@@ -3,6 +3,7 @@ import { CONTENT, type Content, type ContentModel } from "@michaelthielemann/kes
 import { documentSchema, fieldSchema } from "@michaelthielemann/kestrel-contracts/content-schema";
 import type { JsonSchema } from "@michaelthielemann/kestrel/defineModule";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import type { KestrelError } from "@michaelthielemann/kestrel/errors";
@@ -191,7 +192,7 @@ export default defineModule({
   configSchema,
 
   async setup(config, deps): Promise<ContentInstance> {
-    const model: ContentModel = { types: config.types as ContentModel["types"] };
+    const model: ContentModel = { types: boundaryCast<ContentModel["types"]>(config.types, "host") };
     if (config.locales !== undefined) model.locales = config.locales;
     if (config.defaultLocale !== undefined) model.defaultLocale = config.defaultLocale;
     return { ...(await createContentDefault(model, deps.get(PERSISTENCE))), maxLimit: config.maxLimit };

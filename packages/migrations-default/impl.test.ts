@@ -5,6 +5,7 @@ import { migrationsContractTests, MIGRATIONS_TEST_MODEL } from "@michaelthielema
 import type { ApplyResult, LedgerEntry, Migration, MigrationContext, MigrationsError } from "@michaelthielemann/kestrel-contracts/migrations";
 import type { Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import type { Validate, Validation } from "@michaelthielemann/kestrel-contracts/validate";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
@@ -138,7 +139,7 @@ describe("migrations/default transient persistence", () => {
 describe("migrations/default events", () => {
   it("emits exactly one migrations.applied event with the applied ids and total changed documents", async () => {
     const m1: Migration = { id: "m1", collection: "pages", up: (ctx) => ({ ...ctx.document, title: "X" }) };
-    const m2: Migration = { id: "m2", collection: "pages", up: (ctx) => ({ ...ctx.document, title: `${ctx.document.title as string}!` }) };
+    const m2: Migration = { id: "m2", collection: "pages", up: (ctx) => ({ ...ctx.document, title: `${boundaryCast<string>(ctx.document.title, "host")}!` }) };
     const { migrations, content, events } = await createTestMigrations({ migrations: [m1, m2] });
     expectOk(await content.create("pages", { slug: "a", title: "A", status: "draft" }));
     expectOk(await content.create("pages", { slug: "b", title: "B", status: "draft" }));
@@ -149,7 +150,7 @@ describe("migrations/default events", () => {
   });
 
   it("logs a failing migrations.applied listener instead of failing the run", async () => {
-    const migration: Migration = { id: "m1", collection: "pages", up: ({ document }) => ({ ...document, title: `${document.title as string}!` }) };
+    const migration: Migration = { id: "m1", collection: "pages", up: ({ document }) => ({ ...document, title: `${boundaryCast<string>(document.title, "host")}!` }) };
     const db = createFakePersistence();
     const content = await createContentDefault(MIGRATIONS_TEST_MODEL, db);
     expectOk(await content.create("pages", { slug: "a", title: "A", status: "draft" }));
@@ -303,7 +304,7 @@ describe("migrations/default patch diffing", () => {
   });
 
   it("does not write a locale's null localized field left untouched by up (no translation invented)", async () => {
-    const up = (ctx: MigrationContext) => ({ ...ctx.document, title: `${ctx.document.title as string}!` });
+    const up = (ctx: MigrationContext) => ({ ...ctx.document, title: `${boundaryCast<string>(ctx.document.title, "host")}!` });
     const migration: Migration = { id: "m1", collection: "pages", up };
     const { migrations, content } = await createTestMigrations({ migrations: [migration] });
     const created = expectOk(await content.create("pages", { slug: "a", title: "A", status: "draft", body: "de-body" }));
@@ -420,7 +421,7 @@ describe("migrations/default worked example (helpers)", () => {
         mapBlocks(document, "serviced-apartments", (block) => {
           const props = block.props ?? {};
           const images = props.images;
-          const categories = (props.categories as Array<Record<string, unknown>> | undefined) ?? [];
+          const categories = boundaryCast<Array<Record<string, unknown>> | undefined>(props.categories, "host") ?? [];
           if (!Array.isArray(images) || categories.length === 0) return block;
           const [first, ...rest] = categories;
           return { ...block, props: omit({ ...props, categories: [{ ...first, images }, ...rest] }, "images") };
@@ -439,7 +440,7 @@ describe("migrations/default worked example (helpers)", () => {
     expectOk(await migrations.apply());
 
     const after = expectOk(await content.get("pages", created.id));
-    const blocks = after?.body as Block[];
+    const blocks = boundaryCast<Block[]>(after?.body, "host");
     expect(blocks[0]?.props?.images).toBeUndefined();
     expect(blocks[0]?.props?.categories).toEqual([{ name: "Studio", images: ["a.jpg", "b.jpg"] }, { name: "Suite" }]);
   });
@@ -452,6 +453,6 @@ describe("migrations/default worked example (helpers)", () => {
     expectOk(await migrations.apply());
 
     const after = expectOk(await content.get("pages", created.id));
-    expect((after?.body as Block[])[0]?.type).toBe("apartments");
+    expect(boundaryCast<Block[]>(after?.body, "host")[0]?.type).toBe("apartments");
   });
 });
