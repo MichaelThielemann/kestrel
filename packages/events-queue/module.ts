@@ -125,7 +125,7 @@ export default defineModule({
     emit: (spec: string) => ({ summary: `Queue event "${spec}" for the subscribed handler pipelines; the worker delivers it after this run`, reads: [], writes: [], errors: { 503: "the event could not be persisted" } }),
     readQueueStatus: { summary: "Queue counters per state, the oldest pending event and the worker state of this process", reads: [], writes: ["result"], output: STATUS_SCHEMA },
     listDead: { summary: "Dead-letter events, most recently failed first", reads: [], writes: ["result"], query: { limit: { type: "integer", minimum: 1, maximum: MAX_DEAD_LIMIT } }, output: DEAD_SCHEMA },
-    retryDead: (arg: string) => ({ summary: arg === "one" ? "Requeue the dead-letter event named by params.id" : "Requeue every dead-letter event", reads: arg === "one" ? ["params.id"] : [], writes: ["result"], output: COUNT("retried"), errors: arg === "one" ? { 400: "missing id", 404: "no dead event with that id" } : {} }),
+    retryDead: (arg: string) => ({ summary: arg === "one" ? "Requeue the dead-letter event named by params.id" : "Requeue every dead-letter event", reads: arg === "one" ? ["params.id"] : [], writes: ["result"], output: COUNT("retried"), ...(arg === "one" ? { errors: { 400: "missing id", 404: "no dead event with that id" } } : {}) }),
     purgeDone: { summary: "Delete delivered events older than retentionDays", reads: [], writes: ["result"], output: COUNT("removed") },
   }),
 });
