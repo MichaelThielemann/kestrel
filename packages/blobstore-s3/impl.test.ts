@@ -2,6 +2,7 @@ import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2
 import { describe, it, expect, vi } from "vitest";
 import { blobstoreContractTests } from "@michaelthielemann/kestrel-contracts/blobstore.contract.test";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { clientOptions, createBlobstoreS3, DEFAULT_MAX_ATTEMPTS, DEFAULT_TIMEOUT_MS, type S3Like } from "./impl.ts";
 
 function fakeS3(): S3Like & { objects: Map<string, { data: Uint8Array; contentType: string }> } {
@@ -10,7 +11,7 @@ function fakeS3(): S3Like & { objects: Map<string, { data: Uint8Array; contentTy
     objects,
     async send(command) {
       if (command instanceof PutObjectCommand) {
-        objects.set(command.input.Key ?? "", { data: new Uint8Array(command.input.Body as Uint8Array), contentType: command.input.ContentType ?? "" });
+        objects.set(command.input.Key ?? "", { data: new Uint8Array(boundaryCast<Uint8Array>(command.input.Body, "host")), contentType: command.input.ContentType ?? "" });
         return {};
       }
       if (command instanceof GetObjectCommand) {

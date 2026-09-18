@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, it, expect } from "vitest";
 import { BLOBSTORE, type Blobstore, type BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createContext } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
@@ -65,7 +66,7 @@ function moduleDeps(blobs: Blobstore, root: string): Deps {
   return {
     get<T>(contract: Contract<T>): T {
       if (contract.name !== BLOBSTORE.name) throw new Error(`no provider for "${contract.name}"`);
-      return blobs as T;
+      return boundaryCast<T>(blobs, "host");
     },
     find: <T>(): T | undefined => undefined,
     logger: silentLogger,
@@ -93,14 +94,14 @@ function setup(overrides: Partial<Parameters<typeof createReplicationSqlite>[0]>
   const repl = createReplicationSqlite(config, blobs, clock.now);
   open.push(repl);
   const insert = (n: number) => { for (let i = 0; i < n; i++) app.prepare("INSERT INTO t (v) VALUES (?)").run(`row-${i}`); };
-  const count = () => (app.prepare("SELECT count(*) AS n FROM t").get() as { n: number }).n;
+  const count = () => boundaryCast<{ n: number }>(app.prepare("SELECT count(*) AS n FROM t").get(), "host").n;
   const restoreResult = (target: { generation?: string; at?: number }) => restoreFromBlobs(blobs, "replica/", target, join(dir, `restore-${Math.random().toString(36).slice(2)}.db`));
   const restoredCount = async (target: { generation?: string; at?: number }) => {
     const out = join(dir, `restore-${Math.random().toString(36).slice(2)}.db`);
     const result = expectOk(await restoreFromBlobs(blobs, "replica/", target, out));
     const db = new DatabaseSync(out);
-    const n = (db.prepare("SELECT count(*) AS n FROM t").get() as { n: number }).n;
-    const ok = (db.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check;
+    const n = boundaryCast<{ n: number }>(db.prepare("SELECT count(*) AS n FROM t").get(), "host").n;
+    const ok = boundaryCast<{ integrity_check: string }>(db.prepare("PRAGMA integrity_check").get(), "host").integrity_check;
     db.close();
     return { n, ok, ...result };
   };
@@ -187,7 +188,8 @@ describe("replication/sqlite", () => {
     const { repl, insert, restoredCount, clock, blobs } = setup({ snapshotSeconds: 3600, retentionSeconds: 7200 });
     insert(1);
     expectOk(await repl.sync());
-    const snapshot1 = expectOk(await repl.points())[0] as { generation: string; at: number };
+    const snapshot1 = expectOk(await repl.points())[0];
+    if (!snapshot1) throw new Error("expected a point after the first sync");
     clock.advance(3600_000 + 1);
     insert(1);
     expectOk(await repl.sync());
@@ -230,7 +232,7 @@ describe("replication/sqlite", () => {
     app.close();
     expect(applyPendingRestore(file)).toBe(true);
     const db = new DatabaseSync(file);
-    expect((db.prepare("SELECT count(*) AS n FROM t").get() as { n: number }).n).toBe(104);
+    expect(boundaryCast<{ n: number }>(db.prepare("SELECT count(*) AS n FROM t").get(), "host").n).toBe(104);
     db.close();
     expect(applyPendingRestore(file)).toBe(false);
   });

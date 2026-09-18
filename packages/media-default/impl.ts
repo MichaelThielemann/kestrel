@@ -4,6 +4,7 @@ import { dirname, extname, relative, resolve as resolvePath, sep } from "node:pa
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Document, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { imageSize } from "./imageSize.ts";
 
@@ -129,13 +130,21 @@ function typeAllowed(allowed: string[], contentType: string): boolean {
 
 const ORIGINS = new Set<string>(["human", "ai", "mixed", "unknown"]);
 
+function isOrigin(value: string): value is Origin {
+  return ORIGINS.has(value);
+}
+
+function isNonNullObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 export function parseProvenance(value: unknown): Result<Provenance, MediaError> {
   if (value === undefined || value === null || value === "") return ok({ origin: "unknown" });
   const raw: unknown = typeof value === "string" ? (value.startsWith("{") ? JSON.parse(value) : { origin: value }) : value;
-  if (typeof raw !== "object" || raw === null) return err(failure("VALIDATION", "media/default: provenance must be an object or origin string"));
-  const p = raw as Record<string, unknown>;
-  if (typeof p.origin !== "string" || !ORIGINS.has(p.origin)) return err(failure("VALIDATION", "media/default: provenance.origin must be human, ai, mixed or unknown"));
-  const out: Provenance = { origin: p.origin as Origin };
+  if (!isNonNullObject(raw)) return err(failure("VALIDATION", "media/default: provenance must be an object or origin string"));
+  const p = raw;
+  if (typeof p.origin !== "string" || !isOrigin(p.origin)) return err(failure("VALIDATION", "media/default: provenance.origin must be human, ai, mixed or unknown"));
+  const out: Provenance = { origin: p.origin };
   if (typeof p.tool === "string" && p.tool !== "") out.tool = p.tool;
   if (typeof p.model === "string" && p.model !== "") out.model = p.model;
   if (typeof p.at === "number" && Number.isFinite(p.at)) out.at = p.at;
@@ -342,10 +351,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
   const resolveWith = (row: Record<string, unknown>, key: string): MediaItem => {
     const item: Record<string, unknown> = { ...row, provenance: row.provenance ?? { origin: "unknown" }, updatedAt: row.updatedAt ?? row.createdAt, width: row.width ?? null, height: row.height ?? null, checksum: row.checksum ?? null, status: row.status ?? "ready" };
     for (const field of TEXT_FIELDS) {
-      const texts = row[field] as Texts | null | undefined;
+      const texts = boundaryCast<Texts | null | undefined>(row[field], "host");
       item[field] = texts?.[key] ?? null;
     }
-    return item as MediaItem;
+    return boundaryCast<MediaItem>(item, "host");
   };
 
   return {
@@ -489,7 +498,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
           const plain = checkPlainText(field, value);
           if (isErr(plain)) return plain;
         }
-        const texts: Texts = { ...((existing[field] as Texts | null | undefined) ?? {}) };
+        const texts: Texts = { ...(boundaryCast<Texts | null | undefined>(existing[field], "host") ?? {}) };
         if (value === null || value === "") delete texts[key.value];
         else texts[key.value] = value;
         fields[field] = texts;
@@ -498,18 +507,18 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       // patch never leaves the blob moved with no matching row.
       let moved: { from: string; to: string } | null = null;
       if (patch.filename !== undefined || patch.folder !== undefined) {
-        const nextFolder = (fields.folder as string | undefined) ?? (existing.folder as string);
-        const nextName = (fields.filename as string | undefined) ?? (existing.filename as string);
+        const nextFolder = boundaryCast<string | undefined>(fields.folder, "host") ?? boundaryCast<string>(existing.folder, "host");
+        const nextName = boundaryCast<string | undefined>(fields.filename, "host") ?? boundaryCast<string>(existing.filename, "host");
         const nextKey = blobKey(nextFolder, nextName);
         if (nextKey !== existing.key) {
           const free = await assertFree(nextKey, id);
           if (isErr(free)) return free;
-          const relocated = await moveBlob(existing.key as string, nextKey);
+          const relocated = await moveBlob(boundaryCast<string>(existing.key, "host"), nextKey);
           if (isErr(relocated)) return relocated;
           const folderReady = await ensureFolder(nextFolder);
           if (isErr(folderReady)) return folderReady;
           fields.key = nextKey;
-          moved = { from: existing.key as string, to: nextKey };
+          moved = { from: boundaryCast<string>(existing.key, "host"), to: nextKey };
         }
       }
       const row = await db.updateOne<Document>(COLLECTION, id, fields);

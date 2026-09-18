@@ -6,6 +6,7 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { RENDERER, type Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
 import { SITE, type Site } from "@michaelthielemann/kestrel-contracts/site";
 import { createFakePersistence, matchesFilter } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Step } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
@@ -110,7 +111,7 @@ function moduleDeps(providers: { content: Content; site: Site; renderer: Rendere
   return {
     get<T>(contract: Contract<T>): T {
       if (!map.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
-      return map.get(contract.name) as T;
+      return boundaryCast<T>(map.get(contract.name), "host");
     },
     find: <T>(): T | undefined => undefined,
     logger: silentLogger,
@@ -124,7 +125,7 @@ async function boot(renderer: Renderer = fakeRenderer()): Promise<{ instance: De
   const { content, put } = fakeContent();
   const config = configSchema.parse({ types: { pages: pagesType }, prefix: "site/" });
   const blobs = fakeBlobs();
-  const instance = (await module.setup(config, moduleDeps({ content, site, renderer, blobs, db: createFakePersistence() }))) as Delivery;
+  const instance = boundaryCast<Delivery>(await module.setup(config, moduleDeps({ content, site, renderer, blobs, db: createFakePersistence() })), "host");
   return { instance, put, blobs };
 }
 
@@ -137,7 +138,7 @@ describe("delivery/static module via runPipeline", () => {
     const pipeline = definePipeline({ name: "publish", steps: ["seed.id", "delivery.publish:pages"] });
     const result = await runPipeline(pipeline, { params: { id: "p1" } }, { modules: [{ module, instance }], steps: { "seed.id": seedId } });
     expect(result.status).toBe(200);
-    expect((result.result as { delivery: Array<{ locale: string; state: string }> }).delivery).toContainEqual(expect.objectContaining({ locale: "de", state: "live" }));
+    expect(boundaryCast<{ delivery: Array<{ locale: string; state: string }> }>(result.result, "host").delivery).toContainEqual(expect.objectContaining({ locale: "de", state: "live" }));
   });
 
   it("readStatus reports publish status per locale", async () => {

@@ -6,6 +6,7 @@ import type { Site } from "@michaelthielemann/kestrel-contracts/site";
 import { ok } from "@michaelthielemann/kestrel-contracts/errors";
 import { createFakePersistence, matchesFilter } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { createDeliveryStatic, type Config } from "./impl.ts";
 import { configSchema } from "./module.ts";
@@ -64,7 +65,7 @@ function fakeContent() {
   const fields: Record<string, string[]> = { pages: ["slug", "title", "status", "seo"], settings: ["title", "description"] };
   const resolve = (type: string, row: Record<string, unknown>, locale: string, fallback: boolean): ContentDocument => {
     const pick = (f: string) => row[`${f}__${locale}`] ?? (fallback ? row[`${f}__de`] : undefined) ?? null;
-    return { id: row.id as string, createdAt: 1, updatedAt: 1, ...Object.fromEntries((fields[type] ?? []).map((f) => [f, pick(f)])) };
+    return { id: boundaryCast<string>(row.id, "host"), createdAt: 1, updatedAt: 1, ...Object.fromEntries((fields[type] ?? []).map((f) => [f, pick(f)])) };
   };
   const content: Content = {
     model: () => model,

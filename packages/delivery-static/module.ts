@@ -4,6 +4,7 @@ import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { RENDERER } from "@michaelthielemann/kestrel-contracts/renderer";
 import { SITE } from "@michaelthielemann/kestrel-contracts/site";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
@@ -41,8 +42,12 @@ export const configSchema = z
   })
   .strict();
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function documentId(ctx: Context, step: string): string {
-  const result = ctx.result as { id?: unknown } | undefined;
+  const result = boundaryCast<{ id?: unknown } | undefined>(ctx.result, "host");
   if (typeof result?.id !== "string") throw new Error(`delivery/static: ${step} ran without a document id in result`);
   return result.id;
 }
@@ -87,7 +92,7 @@ export default defineModule({
       return ok({ ...ctx, result: summary.value });
     }),
     exportLlms: async (ctx: Context) => {
-      const previous = typeof ctx.result === "object" && ctx.result !== null && !Array.isArray(ctx.result) ? (ctx.result as Record<string, unknown>) : {};
+      const previous = isRecord(ctx.result) ? ctx.result : {};
       const exported = await delivery.exportLlms();
       if (isErr(exported)) return ctx.fail("TRANSIENT", `delivery.exportLlms: llms.txt was not written – try again (${exported.error.message})`);
       return ok({ ...ctx, result: { ...previous, llms: exported.value } });

@@ -21,6 +21,10 @@ function localeOf(ctx: Context): string | undefined {
   return ctx.params.locale ?? first(ctx.payload.locale);
 }
 
+function isSortField(value: string): value is SortField {
+  return (SORTABLE as readonly string[]).includes(value);
+}
+
 function idsFrom(value: unknown): string[] {
   const raw: string[] = Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : typeof value === "string" ? [value] : [];
   return [...new Set(raw.flatMap((v) => v.split(",")).map((s) => s.trim()).filter(Boolean))];
@@ -40,8 +44,8 @@ function listOptions(payload: Record<string, unknown>): ListOptions & { locale?:
   if (sort !== undefined && sort !== "") {
     const desc = sort.startsWith("-");
     const field = desc ? sort.slice(1) : sort;
-    if ((SORTABLE as readonly string[]).includes(field)) {
-      options.sortBy = field as SortField;
+    if (isSortField(field)) {
+      options.sortBy = field;
       options.direction = desc ? "desc" : "asc";
     }
   }
@@ -86,7 +90,9 @@ export default defineModule({
       if (ctx.files.length === 0) return ctx.fail("VALIDATION", "no file uploaded (multipart field expected)");
       const folder = first(ctx.payload.folder) ?? "";
       if (ctx.files.length === 1) {
-        const item = await media.upload(ctx.files[0] as Context["files"][number], folder, ctx.payload.provenance);
+        const [file] = ctx.files;
+        if (!file) throw new Error("media/default: upload: expected exactly one file");
+        const item = await media.upload(file, folder, ctx.payload.provenance);
         if (isErr(item)) return ctx.fail(item.error);
         return ok({ ...ctx, result: item.value });
       }
