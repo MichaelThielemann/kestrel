@@ -128,7 +128,7 @@ without Nuxt: [`../examples/h3`](../examples/h3).
   `kestrel_token` cookie, impractical for cross-origin use). Sessions expire after 24 h.
 - **Permissions**: anonymous callers may read (`pages.read`, `settings.read`, `media.read`);
   anything that writes needs a login and a role. Roles: `admin` (everything), `editor`
-  (`pages.*`, `media.*`, `settings.read`, `redirects.*`).
+  (`pages.*`, `media.*`, `images.read`, `settings.read`, `redirects.*`).
 - **Languages**: the model has `locales: ["de", "en"]`, `defaultLocale: "de"`. `?locale=en` on read
   returns **only** English values, a missing translation = `null`. On write, `locale` (query or
   body) sets only that language. Non-localized fields apply to every language. A `?locale=` outside
@@ -630,10 +630,6 @@ Stats: `failed` counts every run or step whose outcome is not ok — 4xx include
 | Method | Path | Response |
 |---|---|---|
 | GET | `/admin/content/model` | `{ locales, defaultLocale, types: { [name]: { kind, fields: { [field]: type \| { type, required?, unique?, localized?, options?, to? } }, completeWhen? } } }` – the parsed `content-default` config, every logged-in user (no permission beyond the session); the host builds its admin schema from it |
-| GET | `/admin/events/status` | `{ pending, running, dead, done24h, oldestPendingAt, worker: { running, lastTickAt } }` – queue counters of `events-queue` and the worker of this process (`system.manage`; only with the `events-queue` module) |
-| GET | `/admin/events/dead` | `{ items: [{ id, name, attempts, error, createdAt, availableAt }] }` – dead-letter events, most recently failed first (`?limit`, default 50, max 500) (`system.manage`) |
-| POST | `/admin/events/retry` | `{ retried }` – requeues every dead-letter event with `attempts` reset (`system.manage`) |
-| POST | `/admin/events/dead/:id/retry` | `{ retried: 1 }` – requeues one dead-letter event; 404 when there is no dead event with that id (`system.manage`) |
 | POST | `/admin/media/export` | `{ written, skipped, missing, conflicts }` – copies every medium to `data/export/<folder>/<filename>` (a readable layout for external tools; matches the blob keys without their `media/` prefix; name collisions → `-2`, `-3`; unchanged files are skipped) (`media.manage`); afterwards also exports every finished image variant to `data/export/<folder>/<filename>.<size>.<ext>` and adds `variants: { written, skipped }` to the response — the media counters are unaffected |
 | GET | `/admin/references/broken` | `[{ fromType, fromId, field, locale, toTarget, toId, via, broken, checkedAt }]` – `via` names the origin: `"field"` (a `ref` field) or `"body"` (an internal link in a `json` field) (`pages.manage`) |
 | POST | `/admin/references/rebuild` | `{ documents, entries }` (`pages.manage`) |
@@ -641,6 +637,19 @@ Stats: `failed` counts every run or step whose outcome is not ok — 4xx include
 | GET | `/admin/references/to/pages?ids=a,b,c`, `/admin/references/to/media?ids=a,b,c` | `{ [id]: [{ type, field, id, via }] }` – batch variant of the route above, max. 200 ids, comma-separated; missing or empty `ids`, or more than 200 → 400 (`pages.manage`) |
 | GET | `/admin/links/broken` | `[{ url, fromType, fromId, field, locale, ok, status, error, checkedAt }]` – external links that failed the nightly check (`?type=pages` filters) (`pages.manage`) |
 | POST | `/admin/links/rebuild` | `{ documents, entries }` (`pages.manage`) |
+
+### Event queue
+
+The example instance runs `events-inmemory`, so it wires no queue routes. A deployment that swaps
+in `events-queue` gets four admin steps to put behind triggers of its own; the paths below are a
+suggestion, the step names and response shapes are not.
+
+| Suggested route | Step | Response |
+|---|---|---|
+| GET `/admin/events/status` | `events.readQueueStatus` | `{ pending, running, dead, done24h, oldestPendingAt, worker: { running, lastTickAt } }` – queue counters and the worker of this process |
+| GET `/admin/events/dead` | `events.listDead` | `{ items: [{ id, name, attempts, error, createdAt, availableAt }] }` – most recently failed first (`?limit`, max 500) |
+| POST `/admin/events/retry` | `events.retryDead:all` | `{ retried }` – requeues every dead-letter event with `attempts` reset |
+| POST `/admin/events/dead/:id/retry` | `events.retryDead:one` | `{ retried: 1 }` – requeues one; 404 when there is no dead event with that id |
 
 ## What the frontend does not need to do
 

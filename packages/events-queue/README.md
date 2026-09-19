@@ -6,7 +6,7 @@ attempt and requeues the row after `backoffSeconds[attempt - 1]` (the last entry
 `maxAttempts` failures the row is `dead` with the last error. A row stuck in `running` longer than
 `lockTtlSeconds` (a crashed process) is picked up again. Delivery is therefore at least once, with
 no ordering guarantee across events — listener pipelines must be idempotent. The triggering
-pipeline no longer waits for listeners; a listener pipeline ending with a failure status counts as
+pipeline does not wait for listeners; a listener pipeline ending with a failure status counts as
 a failed attempt. `emit` rejects only when the row cannot be written, and the `events.emit` step
 then fails the run with the persistence error (503 `TRANSIENT`) instead of dropping the event.
 Alternative to `events-inmemory` (same steps, same envelope, same `triggers.event` hook); configure

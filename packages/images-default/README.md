@@ -2,8 +2,8 @@
 One variant per effective size for every raster image in `media-default`: generated on upload,
 completed/repaired by a resumable sync job, listed on media metadata, served by path, exportable,
 pruned only on explicit request. The original is never touched. Effective sizes = config/default
-sizes merged with `images.register`ed ones (a name colliding with a config size is `CONFLICT`);
-WebP only.
+sizes merged with `images.register`ed ones (a name colliding with a config size is `CONFLICT`).
+The default sizes render WebP; a size may set `format: "original"` to keep the source format.
 
 Sizes are declared in code, so none of them are stored: config sizes come from the config on every
 boot and registered sizes live in the process that took them, rebuilt by every `images.register`

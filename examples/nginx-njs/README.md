@@ -37,5 +37,3 @@ podman build -t kestrel-nginx-njs examples/nginx-njs
 podman run --rm -e REDIRECTS_URL=http://<origin>:4000/redirects.json -p 8080:8080 kestrel-nginx-njs
 curl -i localhost:8080/old/x   # expected: 30x + Location: /new/x
 ```
-
-An automated Podman integration test is a follow-up.

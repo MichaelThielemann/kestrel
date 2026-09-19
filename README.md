@@ -1,8 +1,19 @@
 # Kestrel
 
-A modular, config-driven CMS backend in TypeScript. Capabilities are described by contracts,
-implemented by interchangeable submodules, and wired into business flows by pipelines. Every
-building block is its own package; a consumer installs exactly what it uses.
+A CMS backend in TypeScript, assembled from interchangeable building blocks instead of shipped as
+one application. A **contract** describes a capability (`persistence@1`, `authn@1`, `content@1`); a
+**submodule** implements one and contributes **steps**; a **pipeline** is an ordered list of step
+names and holds the business logic; a **trigger** — an HTTP route, an event or a cron expression —
+starts a pipeline. Two files wire an instance: `kestrel.config.ts` says *which* blocks are active
+with what settings, `pipelines/` says *how* they work together.
+
+The core is a registry, a boot check and a runner. It ships no contracts and no modules, so a
+project installs exactly the packages it uses and swapping an implementation changes config, not
+pipelines. Wiring mistakes — an unknown step, a missing contract, a step reading context nothing
+wrote — stop the boot instead of failing on a request.
+
+New here? [`docs/getting-started.md`](docs/getting-started.md) goes from an empty folder to a
+running instance with a login, a content type and a step of your own.
 
 <!-- kestrel-docs:start -->
 | Package | Purpose |
@@ -39,74 +50,68 @@ building block is its own package; a consumer installs exactly what it uses.
 | `@michaelthielemann/kestrel-validate-jsonschema` | Step validate.check:<type>.<field>: validates a payload field against a JSON Schema file (ajv). |
 <!-- kestrel-docs:end -->
 
-## Develop
+## Use it
+
+```
+pnpm add @michaelthielemann/kestrel @michaelthielemann/kestrel-contracts @michaelthielemann/kestrel-persistence-sqlite
+```
+
+Write `kestrel.config.ts` and your pipelines under `pipelines/`, then run `kestrel` — the whole
+walkthrough, including a module of your own, is in
+[`docs/getting-started.md`](docs/getting-started.md). To embed Kestrel in a host such as
+Nuxt/Nitro instead, set `http: null`, import modules and pipelines statically and call
+`kestrel.run()`; see [`examples/embedded`](examples/embedded) and
+[`examples/h3`](examples/h3).
+
+## Develop this repository
 
 Requires Node 22.13 or newer (`node:sqlite`) and pnpm 11 (`corepack enable`).
 
 ```
 pnpm install
 pnpm lint && pnpm typecheck && pnpm test
-pnpm start            # runs examples/minimal
+pnpm start            # boots examples/minimal
 pnpm build            # emits dist/ (js + d.ts) for every package via tsc -b
-pnpm docs:generate    # rewrites the generated README sections and examples/minimal/manifest.json from the manifest; CI runs docs:check
+pnpm docs:generate    # rewrites the generated README sections and examples/minimal/manifest.json; CI runs docs:check
 ```
 
 Inside the workspace, packages resolve to their TypeScript sources; `publishConfig` switches the
 exports to `dist/` on publish. `./scripts/smoke-consumer.sh <hash>` packs everything and boots a
-consumer project outside the workspace from the tarballs – see `RELEASING.md`.
+consumer project outside the workspace from the tarballs — see [`RELEASING.md`](RELEASING.md).
 
-## Consumer
-
-```
-pnpm add @michaelthielemann/kestrel @michaelthielemann/kestrel-contracts @michaelthielemann/kestrel-persistence-sqlite
-```
-
-Write `kestrel.config.ts` (modules by package name, triggers by pipeline name) and your
-pipelines under `pipelines/`, then run `kestrel`. See `examples/minimal`. To embed Kestrel in a
-host such as Nuxt/Nitro, set `http: null`, import modules and pipelines statically and call
-`kestrel.run()` – see `examples/embedded`.
+Sections between `<!-- kestrel-docs:start -->` and `<!-- kestrel-docs:end -->` — the table above and
+one block per package README — are written from the instance manifest by `pnpm docs:generate`.
+Never edit them by hand; CI compares them.
 
 ## Conventions
 
 1. Submodules never know each other; contracts are the only shared vocabulary between them.
-2. Contracts are domain-neutral. Test question: would a shop or a forum need the same interface?
-   If not, domain knowledge leaked into the wrong layer.
-3. Submodules provide steps, not triggers. No submodule owns a route or emits an event itself.
-   The one exception: a submodule emits from a contract method whose fact arises without a
-   pipeline or survives a partial failure of that method (today only `migrations.applied`); every
-   further exception needs a row with its reason in the event table of `docs/pipelines.md`.
+2. Contracts are domain-neutral: would a shop or a forum need the same interface?
+3. Submodules provide steps, not triggers — no submodule owns a route or emits an event itself.
 4. Business logic lives in pipelines; one pipeline file shows the complete flow.
-5. Errors fail loud at boot, not at runtime: a missing contract, a missing method, an unknown step
-   or a cycle stops the boot and names the module and the reason.
+5. Errors fail loud at boot, not at runtime.
 
-Steps are strings (`"authz.require:pages.write"`) resolved against the step registry at boot; a step
-with an argument is a factory marked with `stepFactory()`. The `Context` a pipeline passes along is
-shallow-frozen: a step returns the input unchanged or a copy, never a mutation. A step returns
-`Promise<Result<Context, KestrelError>>` — expected failures are values built with `ctx.fail(...)`,
-`throw` is reserved for wiring bugs. Every module that registers steps describes them
-(`summary`, `reads`, `writes`) so boot can check the dataflow of every pipeline. Submodules keep no
-module-level state; everything lives in the `deps`/config closed over by `setup(config, deps)`.
-Contracts in `packages/contracts/src/*.ts` are frozen once published. English in code, docs and
-`CHANGELOG.md`; comments only where a hidden constraint is not obvious from the code.
+The reasoning behind each, and the one documented exception to rule 3, is in
+[`docs/architecture.md`](docs/architecture.md). Submodules keep no module-level state; everything
+lives in the `deps`/config closed over by `setup(config, deps)`. Contracts in
+`packages/contracts/src/*.ts` are frozen once published. English in code, docs and `CHANGELOG.md`;
+comments only where a hidden constraint is not obvious from the code.
 
 ## Documentation
 
 | doc | when to read |
 |---|---|
-| `docs/architecture.md` | Core concepts (contract, module, submodule, step, pipeline, trigger), package layout, boot sequence, the five rules, config vs. context. |
-| `docs/pipelines.md` | Pipeline file shape, the `Context` type, step arguments and `stepFactory()`, triggers in `kestrel.config.ts`, runner behaviour, naming vocabulary, event payloads. |
-| `docs/contracts.md` | What a contract is, the rules for defining one, a worked example (`persistence@1`). |
-| `docs/api.md` | The HTTP API of the example instance (`examples/minimal`) — read before touching a route or a response shape. |
-| `docs/submodule-template.md` | File layout and `module.ts`/`impl.ts` shape for a new submodule package. |
-| `RELEASING.md` | Version bump, smoke test and publish steps. |
-| `CHANGELOG.md` | Every behaviour change visible to a consumer, newest first under `## Unreleased`. |
+| [`docs/getting-started.md`](docs/getting-started.md) | First contact: install, configure, run, and write your own module. Start here. |
+| [`docs/architecture.md`](docs/architecture.md) | The model behind it: contract, module, submodule, step, pipeline, trigger; package layout, boot sequence, the five rules, config vs. context. |
+| [`docs/configuration.md`](docs/configuration.md) | Reference for `kestrel.config.ts`: every top-level and `http` key with its default, trigger forms, the `kestrel` and `kestrel-openapi` commands. |
+| [`docs/pipelines.md`](docs/pipelines.md) | Writing steps and pipelines: the `Context` type, step arguments and `stepFactory()`, errors as values, `reads`/`writes`, payload validation, runner behaviour, naming, event payloads. |
+| [`docs/contracts.md`](docs/contracts.md) | Defining a contract, the rules it must follow, worked examples, and the content model as configuration. |
+| [`docs/submodule-template.md`](docs/submodule-template.md) | Shipping a submodule as a package: file layout, `module.ts`/`impl.ts` shape, checklist before "done". |
+| [`docs/api.md`](docs/api.md) | The HTTP API of the example instance — read before touching a route or a response shape. |
+| [`examples/minimal`](examples/minimal) | Every shipped module wired up in one instance; the reference `docs/api.md` describes. |
+| [`RELEASING.md`](RELEASING.md) | Version bump, smoke test and publish steps. |
+| [`CHANGELOG.md`](CHANGELOG.md) | Every behaviour change visible to a consumer, newest first under `## Unreleased`. |
 
 ## License
 
-Apache-2.0 — see `LICENSE`.
-
-## Password for `authn-single`
-
-```
-node -e "import('@michaelthielemann/kestrel-authn-single/impl').then(m => console.log(m.hashPassword(process.argv[1])))" -- <password>
-```
+Apache-2.0 — see [`LICENSE`](LICENSE).
