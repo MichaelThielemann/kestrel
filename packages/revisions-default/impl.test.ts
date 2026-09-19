@@ -4,7 +4,7 @@ import { revisionsContractTests } from "@michaelthielemann/kestrel-contracts/rev
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
-import { createRevisionsDefault, documentOf, keptRevisions, snapshotFields, statusOf, survivingParent, type RevisionsConfig } from "./impl.ts";
+import { createRevisionsDefault, documentOf, keptRevisions, restoreReportOf, snapshotFields, statusOf, survivingParent, withoutDropped, type RevisionsConfig } from "./impl.ts";
 
 const AUTHOR = { id: "u1", name: "alice" };
 
@@ -121,5 +121,27 @@ describe("snapshot helpers", () => {
     expect(statusOf(config(), { status: "published" })).toEqual({ status: "published", live: true });
     expect(statusOf(config(), { status: "draft" })).toEqual({ status: "draft", live: false });
     expect(statusOf(config({ statusField: "state" }), { status: "published" })).toEqual({ status: null, live: false });
+  });
+});
+
+describe("restore analysis", () => {
+  const snapshot = { title: "A", teaser: "T", status: "draft" };
+
+  it("names the fields the model lost and the ones it gained, sorted", () => {
+    expect(restoreReportOf("r1", snapshot, ["title", "status", "author", "slug"])).toEqual({ revisionId: "r1", dropped: ["teaser"], missing: ["author", "slug"] });
+  });
+
+  it("reports nothing when the snapshot and the model agree", () => {
+    expect(restoreReportOf("r1", snapshot, ["title", "teaser", "status"])).toEqual({ revisionId: "r1", dropped: [], missing: [] });
+  });
+
+  it("counts a field the snapshot holds as null as present", () => {
+    expect(restoreReportOf("r1", { title: null }, ["title"]).missing).toEqual([]);
+  });
+
+  it("removes the dropped fields and keeps the rest, without touching the snapshot", () => {
+    expect(withoutDropped(snapshot, ["teaser"])).toEqual({ title: "A", status: "draft" });
+    expect(withoutDropped(snapshot, [])).toEqual(snapshot);
+    expect(snapshot.teaser).toBe("T");
   });
 });
