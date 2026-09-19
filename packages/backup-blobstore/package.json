@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-backup-blobstore",
-  "version": "5.7.0",
+  "version": "5.8.0",
   "description": "Steps backup.run/restore: backs up a local file (e.g. the SQLite database) to blobstore@1, restoring it on start when missing.",
   "type": "module",
   "license": "Apache-2.0",

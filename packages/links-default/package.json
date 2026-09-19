@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-links-default",
-  "version": "5.7.0",
+  "version": "5.8.0",
   "description": "Steps links.extract/check/report/rebuild: finds external URLs in content, checks them periodically and reports broken links.",
   "type": "module",
   "license": "Apache-2.0",

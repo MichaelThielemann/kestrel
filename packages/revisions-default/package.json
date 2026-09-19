@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-revisions-default",
-  "version": "5.7.0",
+  "version": "5.8.0",
   "description": "revisions@1: a full snapshot per save, branching through a parent pointer, restore as a new save, retention with a prune step.",
   "type": "module",
   "license": "Apache-2.0",
