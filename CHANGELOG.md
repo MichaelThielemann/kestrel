@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 5.6.0 – 2026-09-19
+
 ### Added
 
 - `images/default`: config `renderTimeoutMs` (default 30000). A render that does not return within
