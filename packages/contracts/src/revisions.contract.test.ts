@@ -39,6 +39,13 @@ export function revisionsContractTests(make: (options: { keep: number }) => Prom
       expect(expectOk(await revisions.head("pages", "p1", "de"))).toBe(first.id);
     });
 
+    it("keeps an anonymous author as { id: null, name: null }", async () => {
+      const anonymous = await record({ author: { id: null, name: null } });
+      expect(anonymous.author).toEqual({ id: null, name: null });
+      expect(expectOk(await revisions.read("pages", "p1", anonymous.id))?.author).toEqual({ id: null, name: null });
+      expect(expectOk(await revisions.list("pages", "p1", "de")).items[0]?.author).toEqual({ id: null, name: null });
+    });
+
     it("chains a linear history: every save's parent is the previous head", async () => {
       const first = await record();
       const second = await record();

@@ -105,9 +105,20 @@ export default defineModule({
       const id = ctx.params.id;
       if (id === undefined) throw new Error("authn.deleteUser: no params.id (boot's dataflow check already proved this route always provides it)");
       if (ctx.identity?.id === id) return ctx.fail("VALIDATION", "you cannot delete yourself");
+      const wanted = ctx.payload.reassignTo;
+      if (wanted !== undefined && wanted !== null && typeof wanted !== "string") return ctx.fail("VALIDATION", "reassignTo must be a user id or null");
+      let reassignTo: { id: string; name: string } | null = null;
+      if (typeof wanted === "string") {
+        if (wanted === id) return ctx.fail("VALIDATION", "reassignTo must not be the deleted user");
+        const target = await authn.getUser(wanted);
+        if (isErr(target)) return ctx.fail(target.error);
+        if (!target.value) return ctx.fail("NOT_FOUND", `user ${wanted} not found`);
+        if (!target.value.active) return ctx.fail("VALIDATION", "reassignTo must be an active user");
+        reassignTo = { id: target.value.id, name: target.value.username };
+      }
       const result = await authn.deleteUser(id);
       if (isErr(result)) return ctx.fail(result.error);
-      return ok({ ...ctx, result: { ok: true } });
+      return ok({ ...ctx, result: { ok: true, reassignTo } });
     },
     setPassword: async (ctx: Context) => {
       const id = ctx.params.id;
@@ -198,11 +209,20 @@ export default defineModule({
       errors: { 400: "neither username nor roles given, or an empty one", 404: "user not found", 409: "username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`)" },
     },
     deleteUser: {
-      summary: "Delete a user and their sessions for good",
-      reads: ["identity", "params.id"],
+      summary: "Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised",
+      reads: ["identity", "params.id", "payload.reassignTo"],
       writes: ["result"],
-      output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
-      errors: { 400: "cannot delete yourself", 404: "user not found", 409: "the last active admin cannot be deleted (`LAST_ADMIN`)" },
+      input: { type: "object", properties: { reassignTo: { type: ["string", "null"] } }, additionalProperties: false },
+      output: {
+        type: "object",
+        properties: { ok: { type: "boolean" }, reassignTo: { type: ["object", "null"], properties: { id: { type: "string" }, name: { type: "string" } }, required: ["id", "name"] } },
+        required: ["ok", "reassignTo"],
+      },
+      errors: {
+        400: "cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id",
+        404: "user not found, or `reassignTo` names no user",
+        409: "the last active admin cannot be deleted (`LAST_ADMIN`)",
+      },
     },
     setPassword: {
       summary: "Set a user's password (ends their sessions)",

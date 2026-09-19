@@ -24,13 +24,15 @@ function makeDeps(db: ReturnType<typeof createFakePersistence>): Deps {
   };
 }
 
-async function boot(): Promise<{ instance: Audit; db: ReturnType<typeof createFakePersistence> }> {
+async function boot(config: Record<string, unknown> = {}): Promise<{ instance: Audit; db: ReturnType<typeof createFakePersistence> }> {
   const db = createFakePersistence();
-  const instance = boundaryCast<Audit>(await module.setup(module.configSchema.parse({}), makeDeps(db)), "host");
+  const instance = boundaryCast<Audit>(await module.setup(module.configSchema.parse(config), makeDeps(db)), "host");
   return { instance, db };
 }
 
 const recordPipeline = definePipeline({ name: "record", steps: ["audit.record"] });
+const anonymizePipeline = definePipeline({ name: "anonymize", steps: ["audit.anonymize"] });
+const prunePipeline = definePipeline({ name: "prune", steps: ["audit.prune"] });
 
 describe("audit/persistence module steps via runPipeline", () => {
   it("record persists an entry built from the event envelope", async () => {
@@ -45,5 +47,38 @@ describe("audit/persistence module steps via runPipeline", () => {
     const res = await runPipeline(recordPipeline, { body: { eventId: null, event: "auth.loggedOut", at: 2, identity: null, params: {} } }, { modules: [{ module, instance }] });
     expect(res.status).toBe(200);
     expect(expectOk(await db.count(COLLECTION, { event: "auth.loggedOut", identityId: null }))).toBe(1);
+  });
+
+  it("anonymize strips the user the event payload names and is repeatable", async () => {
+    const { instance, db } = await boot();
+    await runPipeline(recordPipeline, { body: { eventId: "e1", event: "auth.loggedIn", at: 1, identity: { id: "u1", claims: {} }, params: {} } }, { modules: [{ module, instance }] });
+
+    const first = await runPipeline(anonymizePipeline, { payload: { id: "u1", event: "user.deleted", at: 2, identity: null, params: { id: "u1" } } }, { modules: [{ module, instance }] });
+    expect(first.status).toBe(200);
+    expect(first.result).toEqual({ entries: 1 });
+    expect(expectOk(await db.count(COLLECTION, { identityId: "u1" }))).toBe(0);
+
+    const again = await runPipeline(anonymizePipeline, { params: { id: "u1" } }, { modules: [{ module, instance }] });
+    expect(again.result).toEqual({ entries: 0 });
+  });
+
+  it("anonymize answers 400 without a user id", async () => {
+    const { instance } = await boot();
+    const res = await runPipeline(anonymizePipeline, {}, { modules: [{ module, instance }] });
+    expect(res).toMatchObject({ status: 400, code: "VALIDATION" });
+  });
+
+  it("prune removes what retentionDays no longer covers and answers 400 when it is unset", async () => {
+    const { instance, db } = await boot({ retentionDays: 30 });
+    await runPipeline(recordPipeline, { body: { eventId: "old", event: "auth.loggedIn", at: 1, identity: null, params: {} } }, { modules: [{ module, instance }] });
+    await runPipeline(recordPipeline, { body: { eventId: "new", event: "auth.loggedIn", at: Date.now(), identity: null, params: {} } }, { modules: [{ module, instance }] });
+
+    const pruned = await runPipeline(prunePipeline, {}, { modules: [{ module, instance }] });
+    expect(pruned.status).toBe(200);
+    expect(pruned.result).toEqual({ removed: 1 });
+    expect(expectOk(await db.count(COLLECTION, {}))).toBe(1);
+
+    const { instance: unset } = await boot();
+    expect(await runPipeline(prunePipeline, {}, { modules: [{ module, instance: unset }] })).toMatchObject({ status: 400, code: "VALIDATION" });
   });
 });

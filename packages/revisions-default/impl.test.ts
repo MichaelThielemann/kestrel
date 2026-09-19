@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import type { NewRevision, Revisions } from "@michaelthielemann/kestrel-contracts/revisions";
+import type { NewRevision } from "@michaelthielemann/kestrel-contracts/revisions";
 import { revisionsContractTests } from "@michaelthielemann/kestrel-contracts/revisions.contract.test";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
-import { createRevisionsDefault, documentOf, keptRevisions, restoreReportOf, snapshotFields, statusOf, survivingParent, withoutDropped, type RevisionsConfig } from "./impl.ts";
+import { createRevisionsDefault, documentOf, keptRevisions, restoreReportOf, snapshotFields, statusOf, survivingParent, withoutDropped, type RevisionsConfig, type RevisionsDefault } from "./impl.ts";
 
 const AUTHOR = { id: "u1", name: "alice" };
 
@@ -12,7 +12,7 @@ function config(patch: Partial<RevisionsConfig> = {}): RevisionsConfig {
   return { keep: 50, maxSnapshotBytes: 1048576, pruneOnWrite: false, statusField: "status", liveStatuses: ["published"], maxLimit: 100, ...patch };
 }
 
-async function make(patch: Partial<RevisionsConfig> = {}, logger = silentLogger): Promise<Revisions> {
+async function make(patch: Partial<RevisionsConfig> = {}, logger = silentLogger): Promise<RevisionsDefault> {
   return createRevisionsDefault(config(patch), { db: createFakePersistence(), logger });
 }
 
@@ -102,6 +102,35 @@ describe("revisions/default", () => {
     expect(expectOk(await revisions.read("pages", "p2", recorded.id))).toBeNull();
     expect(expectOk(await revisions.read("posts", "p1", recorded.id))).toBeNull();
     expectErr(await revisions.label("posts", "p1", recorded.id, "x"), "NOT_FOUND");
+  });
+
+  it("anonymises every revision of one author and leaves the others alone", async () => {
+    const revisions = await make();
+    expectOk(await revisions.record(entry()));
+    expectOk(await revisions.record(entry({ documentId: "p2", author: { id: "u2", name: "bob" } })));
+    expect(expectOk(await revisions.reassignAuthor("u1", null))).toBe(1);
+    expect(expectOk(await revisions.list("pages", "p1", "de")).items[0]?.author).toEqual({ id: null, name: null });
+    expect(expectOk(await revisions.list("pages", "p2", "de")).items[0]?.author).toEqual({ id: "u2", name: "bob" });
+  });
+
+  it("moves every revision of one author to another and keeps snapshots, count and order", async () => {
+    const revisions = await make();
+    const first = expectOk(await revisions.record(entry()));
+    const second = expectOk(await revisions.record(entry()));
+    expect(expectOk(await revisions.reassignAuthor("u1", { id: "u2", name: "bob" }))).toBe(2);
+    const page = expectOk(await revisions.list("pages", "p1", "de"));
+    expect(page.total).toBe(2);
+    expect(page.items.map((item) => item.id)).toEqual([second.id, first.id]);
+    expect(page.items.map((item) => item.author)).toEqual([{ id: "u2", name: "bob" }, { id: "u2", name: "bob" }]);
+    expect(expectOk(await revisions.read("pages", "p1", first.id))?.snapshot).not.toBeNull();
+  });
+
+  it("changes nothing on a second reassign of the same author", async () => {
+    const revisions = await make();
+    expectOk(await revisions.record(entry()));
+    expect(expectOk(await revisions.reassignAuthor("u1", null))).toBe(1);
+    expect(expectOk(await revisions.reassignAuthor("u1", null))).toBe(0);
+    expect(expectOk(await revisions.list("pages", "p1", "de")).items[0]?.author).toEqual({ id: null, name: null });
   });
 
   it("passes a storage failure through as TRANSIENT", async () => {
