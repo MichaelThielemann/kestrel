@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { err, failure, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Document, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
-import type { NewRevision, PruneReport, PruneScope, Revision, RevisionListOptions, RevisionPage, Revisions, RevisionsError, RevisionSummary } from "@michaelthielemann/kestrel-contracts/revisions";
+import type { NewRevision, PruneReport, PruneScope, RestoreReport, Revision, RevisionListOptions, RevisionPage, Revisions, RevisionsError, RevisionSummary } from "@michaelthielemann/kestrel-contracts/revisions";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 
@@ -305,6 +305,25 @@ export function snapshotFields(document: Record<string, unknown>): Record<string
     fields[key] = value;
   }
   return fields;
+}
+
+/** What a snapshot and the model's current fields disagree about, both lists sorted. */
+export function restoreReportOf(revisionId: string, snapshot: Record<string, unknown>, modelFields: readonly string[]): RestoreReport {
+  const known = new Set(modelFields);
+  return {
+    revisionId,
+    dropped: Object.keys(snapshot)
+      .filter((field) => !known.has(field))
+      .sort(),
+    missing: [...new Set(modelFields)].filter((field) => !Object.hasOwn(snapshot, field)).sort(),
+  };
+}
+
+/** The snapshot without the fields the model lost, so the update chain never sees an unknown field. */
+export function withoutDropped(snapshot: Record<string, unknown>, dropped: readonly string[]): Record<string, unknown> {
+  if (dropped.length === 0) return { ...snapshot };
+  const gone = new Set(dropped);
+  return Object.fromEntries(Object.entries(snapshot).filter(([field]) => !gone.has(field)));
 }
 
 /** The saved document from `ctx.result`, which the content steps leave either bare or under `document`. */

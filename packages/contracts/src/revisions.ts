@@ -4,12 +4,23 @@ import type { Page } from "./query.ts";
 
 export type { Page } from "./query.ts";
 
+/** How far a snapshot still fits the content model, so a restore can warn instead of failing. */
+export interface RestoreReport {
+  revisionId: string;
+  /** Fields of the snapshot the model no longer has; a restore leaves them out. */
+  dropped: string[];
+  /** Fields the model gained after the snapshot; a restore cannot revert them and leaves them as they are. */
+  missing: string[];
+}
+
 // Only importing this contract puts the branch point of the next recorded revision on the context.
 declare global {
   namespace Kestrel {
     interface ContextExtensions {
       /** The revision the next `record` of this run branches from; set by a restore, absent for a normal save. */
       revisionParent?: string;
+      /** What the restore of this run had to leave out; absent when nothing knows the current model. */
+      restoreReport?: RestoreReport;
     }
   }
 }
