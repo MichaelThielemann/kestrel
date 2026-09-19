@@ -114,6 +114,7 @@ export default defineConfig({
     { http: "GET /admin/images/sizes", pipeline: "listImageSizes" },
     { http: "POST /admin/images/sync", pipeline: "syncImages" },
     { http: "POST /admin/images/prune", pipeline: "pruneImages" },
+    { http: "POST /admin/images/retry-failed", pipeline: "retryFailedImages" },
     { http: "GET /admin/images/status", pipeline: "imagesStatus" },
     { http: "GET /admin/migrations", pipeline: "listMigrations" },
     { http: "POST /admin/migrations/apply", pipeline: "applyMigrations" },

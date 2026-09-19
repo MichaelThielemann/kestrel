@@ -9,8 +9,9 @@ import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testin
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
-import { DEFAULT_MAX_ATTEMPTS, JOBS, SIZES, VARIANTS, createImages, whenIdle } from "./impl.ts";
+import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, JOBS, SIZES, VARIANTS, createImages, whenIdle } from "./impl.ts";
 import type { Config, Job, Variant } from "./impl.ts";
+import type { Rendered, Renderer } from "./generate.ts";
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
   const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
@@ -48,13 +49,13 @@ async function jpeg(width: number, height: number): Promise<Uint8Array> {
   return sharp({ create: { width, height, channels: 3, background: "#336699" } }).jpeg().toBuffer();
 }
 
-const baseConfig: Config = { prefix: "media-variants/", publicPath: "/media", media: { collection: MEDIA }, chunk: 20, staleAfterMs: 60000, maxAttempts: DEFAULT_MAX_ATTEMPTS };
+const baseConfig: Config = { prefix: "media-variants/", publicPath: "/media", media: { collection: MEDIA }, chunk: 20, staleAfterMs: 60000, maxAttempts: DEFAULT_MAX_ATTEMPTS, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS };
 
-async function make(config: Partial<Config> = {}, now: () => number = () => 1000) {
+async function make(config: Partial<Config> = {}, now: () => number = () => 1000, render?: Renderer) {
   const blobs = fakeBlobstore();
   const db = createFakePersistence();
   await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string" });
-  const images = await createImages({ ...baseConfig, ...config }, { blobs, db, logger: noLogger }, now);
+  const images = await createImages({ ...baseConfig, ...config }, { blobs, db, logger: noLogger, ...(render ? { render } : {}) }, now);
   return { images, blobs, db };
 }
 
@@ -623,6 +624,101 @@ describe("bounded attempts", () => {
     expectOk(await images.register([{ name: "thumb", width: 111 }]));
     const retried = expectOk(await images.generate("a")).find((v) => v.size === "thumb");
     expect(retried).toMatchObject({ state: "error", attempts: 1 });
+  });
+});
+
+describe("render timeout", () => {
+  const ONE_SIZE = [{ name: "thumb", width: 100, fit: "inside", format: "webp", quality: 82 }] satisfies Config["sizes"];
+
+  const hanging = async (render: Renderer, config: Partial<Config> = {}) => {
+    const made = await make({ sizes: ONE_SIZE, renderTimeoutMs: 10, maxAttempts: 2, ...config }, () => 1000, render);
+    await addImage(made.db, made.blobs, "a", await jpeg(200, 200));
+    return made;
+  };
+
+  const never: Renderer = () => new Promise<Rendered>(() => {});
+
+  it("counts a render that never returns as a failed attempt and keeps generating", async () => {
+    const { images } = await hanging(never);
+    expect(expectOk(await images.generate("a"))[0]).toMatchObject({ state: "error", attempts: 1, error: "render timed out after 10ms" });
+    expect(expectOk(await images.generate("a"))[0]).toMatchObject({ state: "failed", attempts: 2 });
+  });
+
+  it("lets the sync job finish although every render hangs", async () => {
+    const { images } = await hanging(never);
+    expectOk(await images.sync());
+    await whenIdle(images);
+    expect(expectOk(await images.status()).job).toMatchObject({ state: "done", failed: 1 });
+  });
+
+  it("drops the result of a render that only returns after the timeout", async () => {
+    const late = deferred();
+    const { images, blobs } = await hanging(async () => {
+      await late.promise;
+      return { data: new Uint8Array([7]), width: 100, height: 100, format: "webp", ext: "webp", contentType: "image/webp" };
+    });
+    expect(expectOk(await images.generate("a"))[0]).toMatchObject({ state: "error", key: "" });
+    late.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(blobs.blobs.has("media-variants/a/thumb.webp")).toBe(false);
+    expect(expectOk(await images.read("a", "thumb.webp"))).toMatchObject({ fallback: true, variant: "pending" });
+  });
+});
+
+describe("retryFailed", () => {
+  const corrupt = async (config: Partial<Config> = {}) => {
+    const made = await make({ maxAttempts: 1, ...config });
+    await made.db.createOne(MEDIA, { id: "a", key: "orig/a.jpg", contentType: "image/jpeg", folder: "", filename: "a.jpg" });
+    await made.blobs.put("orig/a.jpg", new Uint8Array([1, 2, 3]), { contentType: "image/jpeg" });
+    return made;
+  };
+
+  it("reports nothing to do while no variant has given up", async () => {
+    const { images } = await corrupt();
+    expect(expectOk(await images.retryFailed())).toEqual({ variants: 0, media: 0, job: null });
+  });
+
+  it("puts every failed variant back to pending with a fresh budget and starts a full pass", async () => {
+    const { images, db } = await corrupt();
+    expectOk(await images.generate("a"));
+    expect(expectOk(await db.count(VARIANTS, { state: "failed" }))).toBe(5);
+
+    const retried = expectOk(await images.retryFailed());
+    expect(retried).toMatchObject({ variants: 5, media: 1 });
+    expect(retried.job).toMatchObject({ state: "running", cursor: "" });
+    await whenIdle(images);
+
+    const rows = expectOk(await db.findMany<Variant>(VARIANTS, {}, { limit: 50 })).items;
+    expect(rows.every((row) => row.attempts === 1)).toBe(true);
+  });
+
+  it("retries one media item at once and leaves the others quarantined", async () => {
+    const { images, db, blobs } = await corrupt();
+    await db.createOne(MEDIA, { id: "b", key: "orig/b.jpg", contentType: "image/jpeg", folder: "", filename: "b.jpg" });
+    await blobs.put("orig/b.jpg", new Uint8Array([1, 2, 3]), { contentType: "image/jpeg" });
+    expectOk(await images.generate("a"));
+    expectOk(await images.generate("b"));
+    await blobs.put("orig/a.jpg", await jpeg(400, 300), { contentType: "image/jpeg" });
+
+    expect(expectOk(await images.retryFailed("a"))).toEqual({ variants: 5, media: 1, job: null });
+    expect(expectOk(await db.count(VARIANTS, { mediaId: "a", state: "done" }))).toBe(5);
+    expect(expectOk(await db.count(VARIANTS, { mediaId: "b", state: "failed" }))).toBe(5);
+  });
+
+  it("refuses once images are shutting down", async () => {
+    const { images } = await corrupt();
+    await images.close();
+    expect(expectErr(await images.retryFailed(), "CONFLICT").status).toBe(409);
+  });
+
+  it("lists the variants that gave up with their last error in status()", async () => {
+    const { images } = await corrupt();
+    expectOk(await images.generate("a"));
+    const status = expectOk(await images.status());
+    expect(status.failed.variants).toBe(5);
+    expect(status.failed.recent).toHaveLength(5);
+    expect(status.failed.recent[0]).toMatchObject({ mediaId: "a", attempts: 1, updatedAt: 1000 });
+    expect(status.failed.recent[0]!.error).toEqual(expect.any(String));
   });
 });
 

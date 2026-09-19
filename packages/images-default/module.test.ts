@@ -16,7 +16,7 @@ import { validateSchema } from "@michaelthielemann/kestrel/schema";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import module, { configSchema } from "./module.ts";
-import { DEFAULT_MAX_ATTEMPTS, JOBS, VARIANTS, createImages, type Config, type Images, type Job, type Variant } from "./impl.ts";
+import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, JOBS, VARIANTS, createImages, type Config, type Images, type Job, type Variant } from "./impl.ts";
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
   const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
@@ -36,6 +36,7 @@ interface ImageSteps {
   generate: Step;
   sync: Step;
   resume: Step;
+  retryFailed: Step;
   prune: Step;
   readStatus: Step;
   remove: Step;
@@ -51,7 +52,7 @@ function fakeCtx(overrides: Partial<Context> = {}): Context {
 
 const noLogger: Logger = { step() {}, info() {}, error() {} };
 const MEDIA = "media_items";
-const baseConfig: Config = { prefix: "media-variants/", publicPath: "/media", media: { collection: MEDIA }, chunk: 20, staleAfterMs: 60000, maxAttempts: DEFAULT_MAX_ATTEMPTS };
+const baseConfig: Config = { prefix: "media-variants/", publicPath: "/media", media: { collection: MEDIA }, chunk: 20, staleAfterMs: 60000, maxAttempts: DEFAULT_MAX_ATTEMPTS, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS };
 
 async function jpeg(width: number, height: number): Promise<Uint8Array> {
   return sharp({ create: { width, height, channels: 3, background: "#336699" } }).jpeg().toBuffer();
@@ -75,7 +76,7 @@ async function addImage(db: ReturnType<typeof createFakePersistence>, blobs: Ret
 describe("images/default configSchema", () => {
   it("applies defaults", () => {
     const parsed = configSchema.parse({});
-    expect(parsed).toMatchObject({ prefix: "media-variants/", publicPath: "/media", media: { collection: "media_items" }, chunk: 20, staleAfterMs: 60000, maxAttempts: 5 });
+    expect(parsed).toMatchObject({ prefix: "media-variants/", publicPath: "/media", media: { collection: "media_items" }, chunk: 20, staleAfterMs: 60000, maxAttempts: 5, renderTimeoutMs: 30000 });
   });
 
   it("rejects unknown keys", () => {
@@ -107,6 +108,40 @@ describe("sync step", () => {
     const error = expectErr(await steps.sync(fakeCtx()), "CONFLICT");
     expect(error.status).toBe(409);
     expect(error.message).toMatch(/images: sync job .* is running/);
+  });
+});
+
+describe("retryFailed step", () => {
+  const corrupt = async () => {
+    const made = await make({ maxAttempts: 1 });
+    await made.db.createOne(MEDIA, { id: "a", key: "orig/a.jpg", contentType: "image/jpeg", folder: "", filename: "a.jpg" });
+    await made.blobs.put("orig/a.jpg", new Uint8Array([1, 2, 3]), { contentType: "image/jpeg" });
+    return made;
+  };
+
+  it("answers NOT_FOUND for an unknown media id", async () => {
+    const { steps } = await corrupt();
+    const error = expectErr(await steps.retryFailed(fakeCtx({ payload: { id: "nope" } })), "NOT_FOUND");
+    expect(error.status).toBe(404);
+  });
+
+  it("lifts the quarantine on one media item taken from the body", async () => {
+    const { images, steps, blobs } = await corrupt();
+    expectOk(await images.generate("a"));
+    await blobs.put("orig/a.jpg", await jpeg(400, 300), { contentType: "image/jpeg" });
+    const ctx = expectOk(await steps.retryFailed(fakeCtx({ payload: { id: "a" } })));
+    expect(boundaryCast<{ variants: number; media: number; job: Job | null }>(ctx.result, "host")).toEqual({ variants: 5, media: 1, job: null });
+    expect(expectOk(await images.status()).failed.variants).toBe(0);
+  });
+
+  it("lifts the quarantine on every failed variant without an id", async () => {
+    const { images, steps } = await corrupt();
+    expectOk(await images.generate("a"));
+    const ctx = expectOk(await steps.retryFailed(fakeCtx()));
+    const result = boundaryCast<{ variants: number; media: number; job: Job | null }>(ctx.result, "host");
+    expect(result).toMatchObject({ variants: 5, media: 1 });
+    expect(result.job).toMatchObject({ state: "running" });
+    await images.close();
   });
 });
 

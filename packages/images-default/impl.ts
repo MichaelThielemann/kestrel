@@ -1,12 +1,13 @@
 import { mkdir, stat, utimes, writeFile } from "node:fs/promises";
 import { dirname, extname, relative, resolve as resolvePath, sep } from "node:path";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
-import type { Document, Persistence, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Document, Filter, Persistence, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import type { z } from "zod";
 import { contentTypeOf, eligible, render } from "./generate.ts";
+import type { Rendered, Renderer } from "./generate.ts";
 import { DEFAULT_SIZES, mergeSizes, sizeSchema, spec } from "./sizes.ts";
 import type { Size, SizeRow } from "./sizes.ts";
 import type { configSchema } from "./module.ts";
@@ -16,6 +17,9 @@ export const VARIANTS = "images_variants";
 export const JOBS = "images_jobs";
 
 export const DEFAULT_MAX_ATTEMPTS = 5;
+export const DEFAULT_RENDER_TIMEOUT_MS = 30000;
+
+const FAILURE_SAMPLE = 20;
 
 export type Config = z.output<typeof configSchema>;
 
@@ -46,11 +50,20 @@ export interface Job extends Document {
   error: string | null;
 }
 
+export interface FailedVariant {
+  mediaId: string;
+  size: string;
+  attempts: number;
+  error: string | null;
+  updatedAt: number;
+}
+
 export interface ImagesStatus {
   sizes: Array<SizeRow & { used: boolean; variants: { done: number; pending: number; error: number; failed: number } }>;
   job: Job | null;
   orphaned: { sizes: string[]; variants: number };
   registrySeen: boolean;
+  failed: { variants: number; recent: FailedVariant[] };
 }
 
 export interface VariantBlob {
@@ -66,6 +79,12 @@ export interface VariantFailure {
   error: string | null;
 }
 
+export interface RetriedFailures {
+  variants: number;
+  media: number;
+  job: Job | null;
+}
+
 export interface Images {
   register(sizes: unknown): Promise<Result<SizeRow[], KestrelError>>;
   sizes(): Promise<SizeRow[]>;
@@ -73,6 +92,7 @@ export interface Images {
   generate(mediaId: string): Promise<Result<Variant[], KestrelError>>;
   sync(): Promise<Result<Job, KestrelError>>;
   resume(): Promise<Result<Job | null, KestrelError>>;
+  retryFailed(mediaId?: string): Promise<Result<RetriedFailures, KestrelError>>;
   prune(names: string[]): Promise<Result<{ sizes: number; variants: number }, KestrelError>>;
   status(): Promise<Result<ImagesStatus, KestrelError>>;
   remove(mediaId: string): Promise<Result<number, KestrelError>>;
@@ -104,8 +124,9 @@ function parseSize(raw: unknown): Result<Size, KestrelError> {
   return err(failure("VALIDATION", `images: ${issue?.path.join(".") ?? "size"}: ${issue?.message ?? "invalid size"}`));
 }
 
-export async function createImages(config: Config, deps: { blobs: Blobstore; db: Persistence; logger: Logger }, now: () => number = Date.now): Promise<Images> {
+export async function createImages(config: Config, deps: { blobs: Blobstore; db: Persistence; logger: Logger; render?: Renderer }, now: () => number = Date.now): Promise<Images> {
   const { blobs, db, logger } = deps;
+  const renderImage: Renderer = deps.render ?? render;
 
   const collections: Array<[string, Schema]> = [
     [SIZES, { name: "string", width: "number", height: "number", fit: "string", format: "string", quality: "number", source: "string", updatedAt: "number" }],
@@ -182,13 +203,32 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return promise;
   }
 
-  async function renderVariant(mediaId: string, size: Size, original: Uint8Array, previousKey: string): Promise<Result<RenderedVariant, KestrelError>> {
-    let rendered;
+  // sharp offers no way to abort a running render, so a render that outlives the timeout is left to
+  // settle on its own and whatever it produces is dropped: the caller has already recorded a failed
+  // attempt, and writing the late result would resurrect a variant the admin was told had failed.
+  async function renderWithin(original: Uint8Array, size: Size): Promise<Result<Rendered, KestrelError>> {
+    const settled = renderImage(original, size).then(
+      (rendered) => ({ rendered }),
+      (cause: unknown) => ({ cause }),
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expiry = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), config.renderTimeoutMs);
+    });
     try {
-      rendered = await render(original, size);
-    } catch (cause) {
-      return err(failure("VALIDATION", errorMessage(cause), { cause }));
+      const outcome = await Promise.race([settled, expiry]);
+      if (outcome === "timeout") return err(failure("TRANSIENT", `render timed out after ${config.renderTimeoutMs}ms`));
+      if ("cause" in outcome) return err(failure("VALIDATION", errorMessage(outcome.cause), { cause: outcome.cause }));
+      return ok(outcome.rendered);
+    } finally {
+      clearTimeout(timer);
     }
+  }
+
+  async function renderVariant(mediaId: string, size: Size, original: Uint8Array, previousKey: string): Promise<Result<RenderedVariant, KestrelError>> {
+    const attempt = await renderWithin(original, size);
+    if (isErr(attempt)) return attempt;
+    const rendered = attempt.value;
     const key = `${config.prefix}${mediaId}/${size.name}.${rendered.ext}`;
     // a format change moves the variant to a new key; the old blob would otherwise be orphaned
     // with nothing referencing it.
@@ -340,7 +380,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return db.findOne<Job>(JOBS, { id: currentJobId });
   }
 
-  async function startSync(): Promise<Result<Job, KestrelError>> {
+  async function startSync(fromStart: boolean): Promise<Result<Job, KestrelError>> {
     const found = await currentJob();
     if (isErr(found)) return found;
     const job = found.value;
@@ -348,7 +388,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       return err(failure("CONFLICT", `images: sync job ${job.id} is running`));
     }
     let target: Job;
-    if (job && job.state !== "done") {
+    // a retry has to reach media the paused job's cursor has already passed, so it opens a job of
+    // its own instead of continuing that one.
+    if (job && job.state !== "done" && !fromStart) {
       const resumed = await db.updateOne<Job>(JOBS, job.id, { state: "running", updatedAt: now() });
       if (isErr(resumed)) return resumed;
       target = resumed.value;
@@ -362,6 +404,18 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     }
     startLoop();
     return ok(target);
+  }
+
+  function beginSync(fromStart: boolean): Promise<Result<Job, KestrelError>> {
+    if (closed) return Promise.resolve(err(failure("CONFLICT", "images: images are shutting down")));
+    // two callers arriving in the same tick must not both create a job row; the second awaits the
+    // first caller's in-flight start instead.
+    if (starting) return starting;
+    const promise = startSync(fromStart).finally(() => {
+      starting = null;
+    });
+    starting = promise;
+    return promise;
   }
 
   const api: Images = {
@@ -393,15 +447,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     generate,
 
     sync() {
-      if (closed) return Promise.resolve(err(failure("CONFLICT", "images: images are shutting down")));
-      // two callers arriving in the same tick must not both create a job row; the second awaits the
-      // first caller's in-flight start instead.
-      if (starting) return starting;
-      const promise = startSync().finally(() => {
-        starting = null;
-      });
-      starting = promise;
-      return promise;
+      return beginSync(false);
     },
 
     async resume() {
@@ -415,6 +461,36 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (isErr(target)) return target;
       startLoop();
       return ok(target.value);
+    },
+
+    async retryFailed(mediaId) {
+      if (closed) return err(failure("CONFLICT", "images: images are shutting down"));
+      const filter: Filter = mediaId === undefined ? { state: "failed" } : { mediaId, state: "failed" };
+      const affected = new Set<string>();
+      for (let offset = 0; ; offset += 500) {
+        const page = await db.findMany<Variant>(VARIANTS, filter, { sort: { id: "asc" }, limit: 500, offset });
+        if (isErr(page)) return page;
+        for (const row of page.value.items) affected.add(row.mediaId);
+        if (page.value.items.length < 500) break;
+      }
+      if (affected.size === 0) return ok({ variants: 0, media: 0, job: null });
+      // attempts go back to zero, not to one below maxAttempts: a retry is an admin saying the
+      // cause is gone, so the variant gets the whole budget again.
+      const reset = await db.updateMany<Variant>(VARIANTS, filter, { state: "pending", error: null, attempts: 0, updatedAt: now() });
+      if (isErr(reset)) return reset;
+      if (mediaId !== undefined) {
+        const regenerated = await generate(mediaId);
+        if (isErr(regenerated)) return regenerated;
+        return ok({ variants: reset.value, media: affected.size, job: null });
+      }
+      const started = await beginSync(true);
+      if (!isErr(started)) return ok({ variants: reset.value, media: affected.size, job: started.value });
+      if (started.error.code !== "CONFLICT") return started;
+      // a fresh job is already walking the library; the reset rows are pending again, so that job
+      // picks up whatever it has not passed yet and the next run takes the rest.
+      const running = await currentJob();
+      if (isErr(running)) return running;
+      return ok({ variants: reset.value, media: affected.size, job: running.value });
     },
 
     async prune(names) {
@@ -466,10 +542,20 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       }
       const job = await currentJob();
       if (isErr(job)) return job;
-      if (!registrySeen) return ok({ sizes: sizesOut, job: job.value, orphaned: { sizes: [], variants: 0 }, registrySeen });
+      // the per-size counts only cover declared sizes, so the totals are read over the collection
+      // and carry the error texts an admin needs to decide whether a retry is worth it.
+      const failedTotal = await db.count(VARIANTS, { state: "failed" });
+      if (isErr(failedTotal)) return failedTotal;
+      const recent = await db.findMany<Variant>(VARIANTS, { state: "failed" }, { sort: { updatedAt: "desc" }, limit: FAILURE_SAMPLE });
+      if (isErr(recent)) return recent;
+      const failed = {
+        variants: failedTotal.value,
+        recent: recent.value.items.map((row) => ({ mediaId: row.mediaId, size: row.size, attempts: row.attempts, error: row.error, updatedAt: row.updatedAt })),
+      };
+      if (!registrySeen) return ok({ sizes: sizesOut, job: job.value, orphaned: { sizes: [], variants: 0 }, registrySeen, failed });
       const orphaned = await orphanedVariants(declaredVariants);
       if (isErr(orphaned)) return orphaned;
-      return ok({ sizes: sizesOut, job: job.value, orphaned: orphaned.value, registrySeen });
+      return ok({ sizes: sizesOut, job: job.value, orphaned: orphaned.value, registrySeen, failed });
     },
 
     async remove(mediaId) {

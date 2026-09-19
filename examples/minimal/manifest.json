@@ -565,6 +565,11 @@
               "type": "integer",
               "exclusiveMinimum": 0,
               "default": 5
+            },
+            "renderTimeoutMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 30000
             }
           },
           "additionalProperties": false
@@ -660,6 +665,17 @@
             "value": 5,
             "redacted": false,
             "default": 5
+          },
+          {
+            "path": "renderTimeoutMs",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 30000,
+            "redacted": false,
+            "default": 30000
           }
         ]
       },
@@ -669,6 +685,7 @@
         "images.generate",
         "images.sync",
         "images.resume",
+        "images.retryFailed",
         "images.prune",
         "images.readStatus",
         "images.remove",
@@ -4532,6 +4549,113 @@
       }
     },
     {
+      "name": "images.retryFailed",
+      "module": "images/default",
+      "factory": false,
+      "description": {
+        "summary": "Put every variant that gave up after maxAttempts back to pending with a fresh attempt budget – all of them, or one media item's (id from params.id or payload.id) – and start the work that regenerates them",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "variants": {
+              "type": "number"
+            },
+            "media": {
+              "type": "number"
+            },
+            "job": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "running",
+                        "paused",
+                        "done",
+                        "error"
+                      ]
+                    },
+                    "total": {
+                      "type": "number"
+                    },
+                    "done": {
+                      "type": "number"
+                    },
+                    "failed": {
+                      "type": "number"
+                    },
+                    "cursor": {
+                      "type": "string"
+                    },
+                    "startedAt": {
+                      "type": "number"
+                    },
+                    "updatedAt": {
+                      "type": "number"
+                    },
+                    "finishedAt": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "state",
+                    "total",
+                    "done",
+                    "failed",
+                    "cursor",
+                    "startedAt",
+                    "updatedAt",
+                    "finishedAt",
+                    "error"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "variants",
+            "media",
+            "job"
+          ]
+        },
+        "errors": {
+          "404": "media item not found",
+          "409": "images are shutting down"
+        }
+      }
+    },
+    {
       "name": "images.prune",
       "module": "images/default",
       "factory": false,
@@ -4581,7 +4705,7 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Sizes with usage/variant counts, current job, and sizes whose variants are left over from a size the code no longer declares",
+        "summary": "Sizes with usage/variant counts, current job, the variants that gave up with their last error, and sizes whose variants are left over from a size the code no longer declares",
         "reads": [],
         "writes": [
           "result"
@@ -4760,13 +4884,59 @@
             },
             "registrySeen": {
               "type": "boolean"
+            },
+            "failed": {
+              "type": "object",
+              "properties": {
+                "variants": {
+                  "type": "number"
+                },
+                "recent": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "mediaId": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "string"
+                      },
+                      "attempts": {
+                        "type": "number"
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "updatedAt": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "mediaId",
+                      "size",
+                      "attempts",
+                      "error",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "variants",
+                "recent"
+              ]
             }
           },
           "required": [
             "sizes",
             "job",
             "orphaned",
-            "registrySeen"
+            "registrySeen",
+            "failed"
           ]
         }
       }
@@ -10972,7 +11142,7 @@
           "name": "images.readStatus",
           "module": "images/default",
           "description": {
-            "summary": "Sizes with usage/variant counts, current job, and sizes whose variants are left over from a size the code no longer declares",
+            "summary": "Sizes with usage/variant counts, current job, the variants that gave up with their last error, and sizes whose variants are left over from a size the code no longer declares",
             "reads": [],
             "writes": [
               "result"
@@ -11151,13 +11321,59 @@
                 },
                 "registrySeen": {
                   "type": "boolean"
+                },
+                "failed": {
+                  "type": "object",
+                  "properties": {
+                    "variants": {
+                      "type": "number"
+                    },
+                    "recent": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "mediaId": {
+                            "type": "string"
+                          },
+                          "size": {
+                            "type": "string"
+                          },
+                          "attempts": {
+                            "type": "number"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "updatedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "mediaId",
+                          "size",
+                          "attempts",
+                          "error",
+                          "updatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "variants",
+                    "recent"
+                  ]
                 }
               },
               "required": [
                 "sizes",
                 "job",
                 "orphaned",
-                "registrySeen"
+                "registrySeen",
+                "failed"
               ]
             }
           }
@@ -15296,6 +15512,150 @@
       ]
     },
     {
+      "name": "retryFailedImages",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:images.manage",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission images.manage",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission images.manage"
+            }
+          }
+        },
+        {
+          "spec": "images.retryFailed",
+          "name": "images.retryFailed",
+          "module": "images/default",
+          "description": {
+            "summary": "Put every variant that gave up after maxAttempts back to pending with a fresh attempt budget – all of them, or one media item's (id from params.id or payload.id) – and start the work that regenerates them",
+            "reads": [],
+            "writes": [
+              "result"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "variants": {
+                  "type": "number"
+                },
+                "media": {
+                  "type": "number"
+                },
+                "job": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "running",
+                            "paused",
+                            "done",
+                            "error"
+                          ]
+                        },
+                        "total": {
+                          "type": "number"
+                        },
+                        "done": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        },
+                        "cursor": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "number"
+                        },
+                        "updatedAt": {
+                          "type": "number"
+                        },
+                        "finishedAt": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "error": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "state",
+                        "total",
+                        "done",
+                        "failed",
+                        "cursor",
+                        "startedAt",
+                        "updatedAt",
+                        "finishedAt",
+                        "error"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "variants",
+                "media",
+                "job"
+              ]
+            },
+            "errors": {
+              "404": "media item not found",
+              "409": "images are shutting down"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "scanReferences",
       "steps": [
         {
@@ -17437,6 +17797,11 @@
         "method": "POST",
         "path": "/admin/images/prune",
         "pipeline": "pruneImages"
+      },
+      {
+        "method": "POST",
+        "path": "/admin/images/retry-failed",
+        "pipeline": "retryFailedImages"
       },
       {
         "method": "GET",

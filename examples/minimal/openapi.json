@@ -288,6 +288,212 @@
         ]
       }
     },
+    "/admin/images/retry-failed": {
+      "post": {
+        "operationId": "retryFailedImages",
+        "summary": "Require a valid session → Requires permission images.manage → Put every variant that gave up after maxAttempts back to pending with a fresh attempt budget – all of them, or one media item's (id from params.id or payload.id) – and start the work that regenerates them",
+        "tags": [
+          "admin"
+        ],
+        "x-kestrel-pipeline": "retryFailedImages",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:images.manage",
+          "images.retryFailed"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "variants": {
+                      "type": "number"
+                    },
+                    "media": {
+                      "type": "number"
+                    },
+                    "job": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "running",
+                                "paused",
+                                "done",
+                                "error"
+                              ]
+                            },
+                            "total": {
+                              "type": "number"
+                            },
+                            "done": {
+                              "type": "number"
+                            },
+                            "failed": {
+                              "type": "number"
+                            },
+                            "cursor": {
+                              "type": "string"
+                            },
+                            "startedAt": {
+                              "type": "number"
+                            },
+                            "updatedAt": {
+                              "type": "number"
+                            },
+                            "finishedAt": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "error": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "state",
+                            "total",
+                            "done",
+                            "failed",
+                            "cursor",
+                            "startedAt",
+                            "updatedAt",
+                            "finishedAt",
+                            "error"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "variants",
+                    "media",
+                    "job"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission images.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "media item not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "images are shutting down",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "temporarily unavailable; retry after the Retry-After header",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/admin/images/sizes": {
       "get": {
         "operationId": "listImageSizes",
@@ -640,7 +846,7 @@
     "/admin/images/status": {
       "get": {
         "operationId": "imagesStatus",
-        "summary": "Require a valid session → Requires permission images.read → Sizes with usage/variant counts, current job, and sizes whose variants are left over from a size the code no longer declares",
+        "summary": "Require a valid session → Requires permission images.read → Sizes with usage/variant counts, current job, the variants that gave up with their last error, and sizes whose variants are left over from a size the code no longer declares",
         "tags": [
           "admin"
         ],
@@ -830,13 +1036,59 @@
                     },
                     "registrySeen": {
                       "type": "boolean"
+                    },
+                    "failed": {
+                      "type": "object",
+                      "properties": {
+                        "variants": {
+                          "type": "number"
+                        },
+                        "recent": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "mediaId": {
+                                "type": "string"
+                              },
+                              "size": {
+                                "type": "string"
+                              },
+                              "attempts": {
+                                "type": "number"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "updatedAt": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "mediaId",
+                              "size",
+                              "attempts",
+                              "error",
+                              "updatedAt"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "variants",
+                        "recent"
+                      ]
                     }
                   },
                   "required": [
                     "sizes",
                     "job",
                     "orphaned",
-                    "registrySeen"
+                    "registrySeen",
+                    "failed"
                   ]
                 }
               }
