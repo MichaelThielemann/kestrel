@@ -127,7 +127,7 @@ describe("insights aggregation", () => {
     ]);
     expect(failures[0]?.trigger).toEqual(http);
     expect(typeof failures[0]?.runId).toBe("string");
-    expect(failures[0]?.at).toBeLessThanOrEqual(Date.now());
+    expect(failures[0]?.at).toBeLessThan(Date.now() + 1);
     expect(failures[0]?.ms).toBeGreaterThanOrEqual(0);
     expect(JSON.stringify(failures)).not.toContain("impl.test.ts");
     await kestrel.stop();
