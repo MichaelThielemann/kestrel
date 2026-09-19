@@ -182,8 +182,6 @@ export default defineModule({
     export: stepFactory((dir: string) => async (ctx: Context) => {
       const variants = await images.exportTo(dir);
       if (isErr(variants)) return ctx.fail(variants.error);
-      // the step runs after media.export in the same pipeline; replacing ctx.result would drop that
-      // step's counts, so the variant counts are nested under their own key instead.
       const previous = isRecord(ctx.result) ? ctx.result : {};
       return ok({ ...ctx, result: { ...previous, variants: variants.value } });
     }),

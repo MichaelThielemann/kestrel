@@ -40,8 +40,6 @@ function fakeContent() {
   return { content, put, rows };
 }
 
-// Stands in for site-default: enough of site@1 for delivery to build paths and hand the renderer a
-// document whose internal references were rewritten.
 const site: Site = {
   resolve: () => Promise.reject(new Error("n/a")),
   pathOf(_t, doc, o = {}) {
@@ -388,7 +386,6 @@ describe("delivery/static media rewrite", () => {
     const db = createFakePersistence();
     await seedMedia(db);
     expectOk(await db.createOne(mediaConfig.collection, { id: mediaId, filename: "cat.jpg", folder: "pics", contentType: "image/jpeg", key: "media/pics/cat.jpg", updatedAt: 1 }));
-    // no blob put for "media/pics/cat.jpg" -> the row exists but its blob is missing
     const html = `<img src="/media/${mediaId}/file">`;
     const delivery = await createDeliveryStatic({ ...config, media: mediaConfig }, { content, site, renderer: fakeHtmlRenderer(html), blobs, db, logger: fakeLogger() });
     put("p1", { slug__de: "team", title__de: "Team", status__de: "published" });

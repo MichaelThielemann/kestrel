@@ -142,8 +142,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   const baseSource: "default" | "config" = config.sizes ? "config" : "default";
   const maxAttempts = config.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
 
-  // sizes are declared in code (config or images.register), so a stored copy would outlive the code
-  // that defined it; earlier versions persisted them, and those rows are dropped once here.
   const staleSizeRows = await db.deleteMany(SIZES, {});
   if (isErr(staleSizeRows)) throw new Error(`images/default: cannot drop persisted size rows: ${staleSizeRows.error.message}`);
   if (staleSizeRows.value > 0) logger.info(`images/default: dropped ${staleSizeRows.value} persisted size rows, sizes are rebuilt from config and images.register`);
@@ -151,8 +149,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   const initialSizes = mergeSizes(baseSizes, baseSource, []);
   if (isErr(initialSizes)) throw new Error(`images/default: ${initialSizes.error.message}`);
   let effective: SizeRow[] = initialSizes.value;
-  // until this process has seen a register() call it cannot tell a variant of a size the code no
-  // longer declares from a variant of a size that simply has not been registered yet.
   let registrySeen = false;
   let closed = false;
 
@@ -189,9 +185,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok({ sizes: [...counts.keys()].sort(), variants: [...counts.values()].reduce((sum, n) => sum + n, 0) });
   }
 
-  // concurrent callers for the same mediaId (an upload event and the sync loop both reaching it, say)
-  // must not read-then-write the variant rows independently, or they duplicate them; the second
-  // caller instead awaits the first caller's in-flight render.
   const inFlight = new Map<string, Promise<Result<Variant[], KestrelError>>>();
 
   function generate(mediaId: string): Promise<Result<Variant[], KestrelError>> {
@@ -203,9 +196,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return promise;
   }
 
-  // sharp offers no way to abort a running render, so a render that outlives the timeout is left to
-  // settle on its own and whatever it produces is dropped: the caller has already recorded a failed
-  // attempt, and writing the late result would resurrect a variant the admin was told had failed.
   async function renderWithin(original: Uint8Array, size: Size): Promise<Result<Rendered, KestrelError>> {
     const settled = renderImage(original, size).then(
       (rendered) => ({ rendered }),
@@ -230,8 +220,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(attempt)) return attempt;
     const rendered = attempt.value;
     const key = `${config.prefix}${mediaId}/${size.name}.${rendered.ext}`;
-    // a format change moves the variant to a new key; the old blob would otherwise be orphaned
-    // with nothing referencing it.
     if (previousKey !== "" && previousKey !== key) {
       const dropped = await blobs.remove(previousKey);
       if (isErr(dropped)) return dropped;
@@ -253,8 +241,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const row = byName.get(size.name);
       return row !== undefined && row.state === "done" && row.spec === spec(size);
     };
-    // a size whose definition changed is new work, so the exhausted attempt count of the old spec
-    // must not keep the variant quarantined.
     const exhausted = (size: Size): boolean => {
       const row = byName.get(size.name);
       return row !== undefined && row.state === "failed" && row.spec === spec(size);
@@ -274,11 +260,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         results.push(row!);
         continue;
       }
-      // a redefined size is new work, so lifting the quarantine also restores the full attempt budget
       const attempts = (row !== undefined && row.state === "failed" ? 0 : (row?.attempts ?? 0)) + 1;
       const previousKey = row?.key ?? "";
-      // the row is written as "pending" before the render so a crash mid-render leaves a retryable
-      // state rather than a stale "done", and read() falls back to the original meanwhile.
       const pending: Omit<Variant, "id" | "mediaId" | "size"> = { spec: spec(size), width: row?.width ?? 0, height: row?.height ?? 0, format: row?.format ?? "", key: previousKey, bytes: row?.bytes ?? 0, state: "pending", error: null, attempts, updatedAt: now() };
       const current = row ? await db.updateOne<Variant>(VARIANTS, row.id, pending) : await db.createOne<Variant>(VARIANTS, { mediaId, size: size.name, ...pending });
       if (isErr(current)) return current;
@@ -318,8 +301,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (isErr(variants)) return variants;
       if (variants.value.some((v) => v.state === "error" || v.state === "failed")) failed += 1;
       else done += 1;
-      // per image, not per chunk: a long chunk would otherwise look stalled to /admin/images/status
-      // and trip the staleAfterMs takeover.
       const progressed = await db.updateOne<Job>(JOBS, job.id, { done, failed, updatedAt: now() });
       if (isErr(progressed)) return progressed;
     }
@@ -388,8 +369,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       return err(failure("CONFLICT", `images: sync job ${job.id} is running`));
     }
     let target: Job;
-    // a retry has to reach media the paused job's cursor has already passed, so it opens a job of
-    // its own instead of continuing that one.
     if (job && job.state !== "done" && !fromStart) {
       const resumed = await db.updateOne<Job>(JOBS, job.id, { state: "running", updatedAt: now() });
       if (isErr(resumed)) return resumed;
@@ -408,8 +387,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
   function beginSync(fromStart: boolean): Promise<Result<Job, KestrelError>> {
     if (closed) return Promise.resolve(err(failure("CONFLICT", "images: images are shutting down")));
-    // two callers arriving in the same tick must not both create a job row; the second awaits the
-    // first caller's in-flight start instead.
     if (starting) return starting;
     const promise = startSync(fromStart).finally(() => {
       starting = null;
@@ -474,8 +451,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         if (page.value.items.length < 500) break;
       }
       if (affected.size === 0) return ok({ variants: 0, media: 0, job: null });
-      // attempts go back to zero, not to one below maxAttempts: a retry is an admin saying the
-      // cause is gone, so the variant gets the whole budget again.
       const reset = await db.updateMany<Variant>(VARIANTS, filter, { state: "pending", error: null, attempts: 0, updatedAt: now() });
       if (isErr(reset)) return reset;
       if (mediaId !== undefined) {
@@ -486,8 +461,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const started = await beginSync(true);
       if (!isErr(started)) return ok({ variants: reset.value, media: affected.size, job: started.value });
       if (started.error.code !== "CONFLICT") return started;
-      // a fresh job is already walking the library; the reset rows are pending again, so that job
-      // picks up whatever it has not passed yet and the next run takes the rest.
       const running = await currentJob();
       if (isErr(running)) return running;
       return ok({ variants: reset.value, media: affected.size, job: running.value });
@@ -542,8 +515,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       }
       const job = await currentJob();
       if (isErr(job)) return job;
-      // the per-size counts only cover declared sizes, so the totals are read over the collection
-      // and carry the error texts an admin needs to decide whether a retry is worth it.
       const failedTotal = await db.count(VARIANTS, { state: "failed" });
       if (isErr(failedTotal)) return failedTotal;
       const recent = await db.findMany<Variant>(VARIANTS, { state: "failed" }, { sort: { updatedAt: "desc" }, limit: FAILURE_SAMPLE });
@@ -579,7 +550,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     async variantsOf(mediaIds) {
       const map = new Map<string, Variant[]>();
       for (const id of mediaIds) map.set(id, []);
-      // SQLite caps bound parameters, so a large `in` filter is chunked rather than sent in one query.
       for (let i = 0; i < mediaIds.length; i += 200) {
         const chunk = mediaIds.slice(i, i + 200);
         for (let offset = 0; ; offset += 500) {
@@ -607,8 +577,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         if (isErr(blob)) return blob;
         if (blob.value) return ok({ data: blob.value, contentType: contentTypeOf(variant.format), fallback: false, variant: "done" });
       }
-      // a variant that gave up will never become available; serving the full-size original in its
-      // place would hide the defect behind a working-looking page forever.
       if (variant && variant.state === "failed") return ok(null);
       const original = await blobs.get(media.value.key);
       if (isErr(original)) return original;
@@ -672,8 +640,6 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     },
 
     async close() {
-      // set before the first await: sync()/resume() called anywhere in this same tick (or later)
-      // answer CONFLICT rather than racing a job into "running" that the stopped loop will never pick up.
       closed = true;
       stopRequested = true;
       await idle();

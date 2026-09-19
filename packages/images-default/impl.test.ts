@@ -265,8 +265,6 @@ describe("sync", () => {
     const paused = expectOk(await images.status());
     expect(paused.job).toMatchObject({ state: "paused", cursor: "a", done: 1 });
 
-    // close() is terminal for this instance (sync()/resume() answer CONFLICT) — a resume happens through
-    // a fresh instance over the same persistence and blobstore, as on a process restart.
     let putsAfterResume = 0;
     blobs.put = async (key: string, data: Uint8Array, options?: PutOptions) => {
       putsAfterResume += 1;
@@ -278,7 +276,7 @@ describe("sync", () => {
 
     const done = expectOk(await resumed.status());
     expect(done.job).toMatchObject({ state: "done", cursor: "c", done: 3 });
-    expect(putsAfterResume).toBe(10); // 5 sizes each for "b" and "c" only, "a" was already done
+    expect(putsAfterResume).toBe(10);
   });
 
   it("answers CONFLICT for a fresh running job and resumes a stale one", async () => {
@@ -315,7 +313,7 @@ describe("sync", () => {
     await addImage(db, blobs, "a", await jpeg(200, 200));
     expectOk(await images.sync());
     await whenIdle(images);
-    expect(expectOk(await images.resume())).toBeNull(); // job is "done"
+    expect(expectOk(await images.resume())).toBeNull();
   });
 });
 
@@ -330,7 +328,6 @@ describe("sync job failures", () => {
     await addImage(db, blobs, "a", await jpeg(200, 200));
 
     expectOk(await images.sync());
-    // the loop reads the job row first, so the injected failure lands inside loopOnce()
     db.failNext("TRANSIENT");
     await whenIdle(images);
 
@@ -347,7 +344,7 @@ describe("prune", () => {
     expectOk(await images.register([{ name: "card", width: 480 }]));
     await addImage(db, blobs, "a", await jpeg(600, 400));
     expectOk(await images.generate("a"));
-    expectOk(await images.register([{ name: "other", width: 100 }])); // "card" becomes orphaned
+    expectOk(await images.register([{ name: "other", width: 100 }]));
 
     expect(expectErr(await images.prune(["thumb"]), "VALIDATION").message).toContain("not an orphan");
     expect(expectErr(await images.prune(["gone"]), "VALIDATION").message).toContain("has no variants");
@@ -366,7 +363,7 @@ describe("status", () => {
     expectOk(await images.generate("a"));
     const status = expectOk(await images.status());
     const thumb = status.sizes.find((s) => s.name === "thumb")!;
-    expect(thumb.used).toBe(false); // defaults are never "registered"
+    expect(thumb.used).toBe(false);
     expect(thumb.variants).toEqual({ done: 1, pending: 0, error: 0, failed: 0 });
   });
 });
@@ -529,7 +526,7 @@ describe("status registrySeen", () => {
     expect(before.orphaned).toEqual({ sizes: [], variants: 0 });
     expect(before.sizes.find((s) => s.name === "card")).toBeUndefined();
 
-    expectOk(await images2.register([{ name: "other", width: 100 }])); // "card" is not declared any more
+    expectOk(await images2.register([{ name: "other", width: 100 }]));
     const after = expectOk(await images2.status());
     expect(after.registrySeen).toBe(true);
     expect(after.orphaned.sizes).toEqual(["card"]);
