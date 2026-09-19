@@ -24,6 +24,9 @@ last-write-wins. If conflicts ever matter, `expectedUpdatedAt` is the lever, not
 **Config.** `keep` (50) newest revisions per document and locale, `maxSnapshotBytes` (1 MiB),
 `pruneOnWrite` (true), `statusField` (`status`) and `liveStatuses` (`["published"]`) name the field
 that decides whether a recorded state was live, `maxLimit` (100) caps a list page.
+`statusField`/`liveStatuses` must match whatever actually publishes — `delivery-static` names the
+same thing `statusField`/`publishedValue`, a workflow in the consumer may add further live values.
+A value missing here is recorded as not live, and retention then drops a state that was online.
 
 **Retention.** `prune` keeps, per document and locale: the newest `keep`, every revision that was
 ever live, every labelled one, the head, every branch tip and every branch point. Everything else
@@ -31,9 +34,22 @@ goes, and the survivors are re-parented onto their nearest surviving ancestor, s
 never breaks and the shape of the tree is preserved. `revisions.prune` is the cron step for the
 whole store; with `pruneOnWrite` every save prunes its own group as well.
 
+`keep` is therefore not an upper bound: ever-live, labelled and branch revisions accumulate without
+one, and a page that is published on every save keeps a snapshot of every save. Pruning a group
+loads that group's rows including their snapshots, so a history that grows into the thousands makes
+every save of that document more expensive — cap it with a stricter `liveStatuses`, labels used
+sparingly, or `pruneOnWrite: false` plus the cron.
+
 **Size guard.** A snapshot beyond `maxSnapshotBytes` is recorded as `skipped: true` with no content
 and a `warn` log line. The save itself never fails for it; only restoring such a revision does, with
 409.
+
+**What a restore restores.** The snapshot goes through the ordinary update as a patch, so it moves
+exactly the fields the model had when it was recorded: a field added to the model since keeps its
+current value, and a field the model has dropped since fails the restore with 400 `unknown field`.
+A snapshot holds the document as one locale reads it, so the fields that are not localized are in
+every locale's snapshot — restoring one locale moves them for the others too, which record no
+revision of their own for it.
 
 **Steps.** `revisions.record:<collection>` after `content.create`/`content.update`,
 `revisions.restore:<collection>` before the ordinary update chain (it only fills the body, the
