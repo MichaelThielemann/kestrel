@@ -182,10 +182,12 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     root,
   };
   const instances = new Map<ModuleDefinition, unknown>();
+  const parsedByModule = new Map<ModuleDefinition, unknown>();
   try {
     for (const mod of ordered) {
       const cfg = mod.configSchema.safeParse(configByModule.get(mod));
       if (!cfg.success) throw new KestrelBootError(mod.name, `invalid config: ${cfg.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
+      parsedByModule.set(mod, cfg.data);
       let instance: unknown;
       try {
         instance = await mod.setup(cfg.data, contracts);
@@ -275,7 +277,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     const triggers: Triggers = { http: routes, events, crons };
     let manifest: Manifest | undefined;
     const describe = (): Manifest => {
-      manifest ??= buildManifest({ root, modules: input.modules, uses: config.modules.map((m) => m.use), rawConfigs: configByModule, contracts: contracts.names(), steps, pipelines, triggers });
+      manifest ??= buildManifest({ root, modules: input.modules, uses: config.modules.map((m) => m.use), rawConfigs: configByModule, parsedConfigs: parsedByModule, contracts: contracts.names(), steps, pipelines, triggers });
       return manifest;
     };
 

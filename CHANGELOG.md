@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Added
+
+- `core`: every `ConfigVariable` in the manifest (`kestrel.describe()`, `insights.readManifest`)
+  carries `value` — the effective value, i.e. what the config sets, otherwise the default, `null`
+  when `status` is `missing` — and `redacted`. The value is a JSON snapshot: functions, class
+  instances and Buffers become type labels, a `Date` its ISO string, strings beyond 200 characters,
+  arrays beyond 20 items and objects beyond 20 keys are truncated with a marker, and nesting deeper
+  than five levels or a cycle reads `"[object]"` / `"[circular]"`. Both fields are additive; the
+  contract stays `insights@1`.
+- `core`: a redacted variable reports `value: null`, `redacted: true` and no `default`. Redaction
+  follows the schema (`.describe("secret")`, which now also emits `writeOnly: true` into the
+  generated JSON Schema, plus `format: "password"` and `x-secret: true` for a hand-written one), the
+  key name (`password`, `secret`, `token`, `credential`, `authorization`, `passphrase`, `salt`,
+  `dsn`, connection strings, and `key`/`keys` qualified by `api`, `access`, `private`, `signing`, …;
+  a bare `key` stays visible, and numbers and booleans are never redacted by name), a value that is
+  a URL carrying `user:password@`, and any redacted ancestor. The same net runs inside a shown
+  value, where a nested credential key reads `"[redacted]"`.
+- `insights`: `insights.readManifest` declares `value` and `redacted` on a config variable in its
+  output schema. The route stays admin-only — the example pipelines guard it with
+  `authn.requireUser` and `authz.require:insights.read`.
+- `scripts/workspace.test.ts`: walks every package's config schema and fails when a key that reads
+  like a credential is not marked secret in the schema.
+
 ## 5.5.0 – 2026-09-19
 
 ### Breaking

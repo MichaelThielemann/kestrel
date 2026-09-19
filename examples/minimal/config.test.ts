@@ -226,16 +226,20 @@ describe("insights wiring", () => {
     expect(pipelines.get("insightsManifest")).toEqual(["authn.requireUser", "authz.require:insights.read", "insights.readManifest"]);
     expect(pipelines.get("insightsStats")).toEqual(["authn.requireUser", "authz.require:insights.read", "insights.readStats"]);
   });
-  it("keeps config values and secrets out of the committed manifest", () => {
-    const manifest = boundaryCast<{ modules: { name: string; version: string | null; config: { variables: { path: string; secret: boolean; default?: unknown }[] } }[] }>(JSON.parse(readFileSync(join(root, "manifest.json"), "utf8")), "json");
+  it("shows the effective config values in the committed manifest and keeps the secrets out", () => {
+    const manifest = boundaryCast<{ modules: { name: string; version: string | null; config: { variables: { path: string; secret: boolean; default?: unknown; value: unknown; redacted: boolean }[] } }[] }>(
+      JSON.parse(readFileSync(join(root, "manifest.json"), "utf8")),
+      "json",
+    );
     expect(manifest.modules.length).toBeGreaterThan(0);
     for (const m of manifest.modules) expect(m.version, m.name).toMatch(/^\d+\.\d+\.\d+/);
-    const passwordHash = manifest.modules.find((m) => m.name === "authn/multi")!.config.variables.find((v) => v.path === "bootstrap.passwordHash");
-    expect(passwordHash).toMatchObject({ secret: true });
-    expect(passwordHash).not.toHaveProperty("default");
-    const text = readFileSync(join(root, "manifest.json"), "utf8");
-    expect(text).not.toContain("scrypt$522f4ac87bfe4bcd100ba47a7d2aaec2");
-    expect(text).not.toContain("./data/kestrel.db");
+    const authn = manifest.modules.find((m) => m.name === "authn/multi")!.config.variables;
+    expect(authn.find((v) => v.path === "bootstrap.passwordHash")).toMatchObject({ secret: true, redacted: true, value: null });
+    expect(authn.find((v) => v.path === "bootstrap.passwordHash")).not.toHaveProperty("default");
+    expect(authn.find((v) => v.path === "bootstrap.username")).toMatchObject({ redacted: false, value: "admin" });
+    expect(authn.find((v) => v.path === "bootstrap")).toMatchObject({ value: { username: "admin", passwordHash: "[redacted]" } });
+    expect(manifest.modules.find((m) => m.name === "persistence/sqlite")!.config.variables.find((v) => v.path === "file")).toMatchObject({ value: "./data/kestrel.db" });
+    expect(readFileSync(join(root, "manifest.json"), "utf8")).not.toContain("scrypt$522f4ac87bfe4bcd100ba47a7d2aaec2");
   });
 });
 

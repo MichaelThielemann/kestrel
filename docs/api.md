@@ -530,10 +530,10 @@ offer "dry run" before "apply".
 
 One view of the running instance for the admin's system page: what is wired (static) and how it
 runs (live). Both routes need a login and `insights.read` (401 anonymous, 403 without the
-permission; the example's `admin` role has `*`, `editor` does not). The manifest never carries a
-config *value*: per config variable only path, type, required, default and whether it is set
-(`set`, plus the three-state `status`); variables marked secret in the module's schema show neither
-default nor anything else. The live
+permission; the example's `admin` role has `*`, `editor` does not). The manifest carries the
+*effective* value of every config variable (`value`), so an admin UI can list what every module is
+actually configured with — which is why both routes stay behind `insights.read` and why a secret
+never leaves the process: a redacted variable answers `value: null, redacted: true`. The live
 numbers are per process and start at zero on every boot — behind two instances each answers for
 itself. `recentFailures` is a ring buffer of the last runs that ended with a status of 400 or
 above (newest first, 50 by default, `recentFailures` in the module's config, `0` turns it off).
@@ -546,7 +546,7 @@ leaves the log.
 | GET | `/admin/insights/manifest` | `{ generatedAt, core: { version }, contracts: ["persistence@1", …], modules: [Module], steps: [Step], pipelines: [Pipeline], triggers: { http: [{ method, path, pipeline }], events: [{ event, pipeline }], crons: [{ expression, pipeline }] } }` — computed once at boot, `generatedAt` is the response time |
 | GET | `/admin/insights/stats` | `{ generatedAt, process: { pid, startedAt, uptimeMs }, runs: { active, total, failed, errors }, pipelines: [{ name, count, failed, errors, p50Ms, p95Ms, lastAt }], steps: [{ pipeline, step, count, failed, errors, p50Ms, p95Ms }], events: [{ name, count, lastAt }], ratelimit: [], recentFailures: [{ at, runId, pipeline, trigger: { kind, name }, status, ms, code?, step?, message? }] }` |
 
-`Module`: `{ name: "authn/multi", use: "@michaelthielemann/kestrel-authn-multi", version: string | null (null when the package cannot be resolved from the boot root, and for path entries), provides, requires, optional: ["<contract>@<major>"], config: { schema: JsonSchema, variables: [{ path: "bootstrap.passwordHash", type, required, default?, secret, set, status }] }, steps: ["authn.login", …], eventHook: boolean, emits: ["migrations.applied"] (events the module emits from a contract method, `[]` for most modules) }`.
+`Module`: `{ name: "authn/multi", use: "@michaelthielemann/kestrel-authn-multi", version: string | null (null when the package cannot be resolved from the boot root, and for path entries), provides, requires, optional: ["<contract>@<major>"], config: { schema: JsonSchema, variables: [{ path: "bootstrap.passwordHash", type, required, default?, secret, set, status, value, redacted }] }, steps: ["authn.login", …], eventHook: boolean, emits: ["migrations.applied"] (events the module emits from a contract method, `[]` for most modules) }`.
 `type` is one of `string number integer boolean array object record enum union literal function unknown`. `required` is true only when neither the variable nor any of its ancestors is optional or
 defaulted — `bootstrap.username` inside an optional `bootstrap` is *not* required, because leaving
 `bootstrap` out is legal. `set` says whether the raw config carries the path itself; `status` is the
@@ -554,7 +554,24 @@ three-state version of it: `set` (same as `set: true`), `default` (the path is a
 comes from the variable's own `.default()` or from an ancestor's — `default` then holds the effective
 value, e.g. `media.collection` → `"media_items"` when `media` is left out entirely) or `missing` (no
 value at all). A parent that *is* spelled out in the config hands its children no default: only their
-own `.default()` still applies. Secret variables report `status` but never a `default`.
+own `.default()` still applies.
+
+`value` is the effective value — what the config sets, otherwise the default, `null` when the status
+is `missing`. It is a JSON snapshot, not the live object: a function, a class instance or a Buffer
+becomes a type label (`"[function]"`, `"[URL]"`, `"[Buffer 4096 bytes]"`), a `Date` its ISO string, a
+string longer than 200 characters is cut with `…[+n chars]`, an array beyond 20 items and an object
+beyond 20 keys gain a `…[+n items]` / `"…": "[+n keys]"` marker, and nesting deeper than five levels
+or a cycle reads `"[object]"` / `"[circular]"`. Filesystem paths are shown as they are.
+
+`redacted: true` means the value is withheld and `value` is `null` (a `default` is left out too).
+A variable is redacted when its schema marks it secret — `writeOnly: true`, `format: "password"` or
+`x-secret: true` in the config JSON Schema, which `.describe("secret")` in a zod schema produces —
+or when its key name looks like a credential (`password`, `secret`, `token`, `credential(s)`,
+`authorization`, `passphrase`, `salt`, `dsn`, a connection string, and `key`/`keys` together with
+`api`, `access`, `private`, `signing`, … — a bare `key` is an object name and stays visible), or when
+its value is a URL carrying `user:password@`, or when an ancestor is redacted. The same net runs
+inside a shown value: a nested credential key reads `"[redacted]"`. Numbers and booleans are never
+redacted by name alone, so `minPasswordLength` keeps its value.
 `Step`: `{ name: "content.list", module: "content/default", factory: boolean, description: StepDescription }` — a factory step's description is evaluated with the placeholder argument `<arg>`; a `describe()` that throws for it stops the boot, so the field is never `null`.
 `Pipeline`: `{ name, steps: [{ spec: "content.list:pages", name: "content.list", module, description: StepDescription }] }` with the real arguments. `StepDescription` is the module's `describe()` entry: `summary`, `reads`, `writes`, `input`/`output`/`query` (JSON Schema), `errors`, `security`, `multipart`, `binary`.
 Stats: `failed` counts every run or step whose outcome is not ok — 4xx included, so a 401 on `/me` is a failed run; `errors` is the 5xx share of that (thrown steps, `INTERNAL`, `TRANSIENT`). `p50Ms`/`p95Ms` are nearest-rank percentiles over the last 1000 samples per key, `count`/`failed` are unbounded. `step` in `steps` is the spec as written in the pipeline (`authz.require:pages.read`). `events` counts event-triggered runs per event name — an event nobody listens to is invisible. `ratelimit` is always `[]` in this release (no ratelimit contract exists yet); the field stays so a client can render it later.

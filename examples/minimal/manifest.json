@@ -46,7 +46,9 @@
             "required": true,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": "./data/blobs",
+            "redacted": false
           }
         ]
       },
@@ -112,7 +114,9 @@
             "required": true,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": "./data/kestrel.db",
+            "redacted": false
           },
           {
             "path": "prefix",
@@ -121,6 +125,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "replica/",
+            "redacted": false,
             "default": "replica/"
           },
           {
@@ -130,6 +136,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 4194304,
+            "redacted": false,
             "default": 4194304
           },
           {
@@ -139,6 +147,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 300,
+            "redacted": false,
             "default": 300
           },
           {
@@ -148,6 +158,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 86400,
+            "redacted": false,
             "default": 86400
           },
           {
@@ -157,6 +169,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 172800,
+            "redacted": false,
             "default": 172800
           },
           {
@@ -166,6 +180,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": true,
+            "redacted": false,
             "default": true
           }
         ]
@@ -214,7 +230,9 @@
             "required": true,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": "./data/kestrel.db",
+            "redacted": false
           },
           {
             "path": "busyTimeoutMs",
@@ -222,7 +240,9 @@
             "required": false,
             "secret": false,
             "set": false,
-            "status": "missing"
+            "status": "missing",
+            "value": null,
+            "redacted": false
           }
         ]
       },
@@ -265,6 +285,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 2097152,
+            "redacted": false,
             "default": 2097152
           }
         ]
@@ -345,6 +367,11 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": [
+              "image/*",
+              "application/pdf"
+            ],
+            "redacted": false,
             "default": [
               "image/*",
               "application/pdf"
@@ -357,6 +384,11 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": [
+              "text/html",
+              "application/xhtml+xml"
+            ],
+            "redacted": false,
             "default": [
               "image/svg+xml",
               "text/html",
@@ -370,6 +402,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": 5242880,
+            "redacted": false,
             "default": 5242880
           },
           {
@@ -379,6 +413,11 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": [
+              "de",
+              "en"
+            ],
+            "redacted": false,
             "default": []
           },
           {
@@ -387,7 +426,9 @@
             "required": false,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": "de",
+            "redacted": false
           },
           {
             "path": "prefix",
@@ -396,6 +437,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": "media/",
+            "redacted": false,
             "default": "media/"
           }
         ]
@@ -533,7 +576,9 @@
             "required": false,
             "secret": false,
             "set": false,
-            "status": "missing"
+            "status": "missing",
+            "value": null,
+            "redacted": false
           },
           {
             "path": "prefix",
@@ -542,6 +587,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "media-variants/",
+            "redacted": false,
             "default": "media-variants/"
           },
           {
@@ -551,6 +598,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "/media",
+            "redacted": false,
             "default": "/media"
           },
           {
@@ -560,6 +609,10 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": {
+              "collection": "media_items"
+            },
+            "redacted": false,
             "default": {
               "collection": "media_items"
             }
@@ -571,6 +624,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "media_items",
+            "redacted": false,
             "default": "media_items"
           },
           {
@@ -580,6 +635,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 20,
+            "redacted": false,
             "default": 20
           },
           {
@@ -589,6 +646,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 60000,
+            "redacted": false,
             "default": 60000
           },
           {
@@ -598,6 +657,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 5,
+            "redacted": false,
             "default": 5
           }
         ]
@@ -669,7 +730,8 @@
                 },
                 "passwordHash": {
                   "type": "string",
-                  "pattern": "^scrypt\\$"
+                  "pattern": "^scrypt\\$",
+                  "writeOnly": true
                 },
                 "roles": {
                   "type": "array",
@@ -696,6 +758,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": "username",
+            "redacted": false,
             "default": "username"
           },
           {
@@ -705,6 +769,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": 8,
+            "redacted": false,
             "default": 12
           },
           {
@@ -714,6 +780,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": 86400,
+            "redacted": false,
             "default": 86400
           },
           {
@@ -723,6 +791,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "users.manage",
+            "redacted": false,
             "default": "users.manage"
           },
           {
@@ -731,7 +801,15 @@
             "required": false,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": {
+              "username": "admin",
+              "passwordHash": "[redacted]",
+              "roles": [
+                "admin"
+              ]
+            },
+            "redacted": false
           },
           {
             "path": "bootstrap.username",
@@ -739,7 +817,9 @@
             "required": false,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": "admin",
+            "redacted": false
           },
           {
             "path": "bootstrap.passwordHash",
@@ -747,7 +827,9 @@
             "required": false,
             "secret": true,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": null,
+            "redacted": true
           },
           {
             "path": "bootstrap.roles",
@@ -756,6 +838,10 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": [
+              "admin"
+            ],
+            "redacted": false,
             "default": []
           }
         ]
@@ -828,7 +914,20 @@
             "required": true,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": {
+              "admin": [
+                "*"
+              ],
+              "editor": [
+                "pages.*",
+                "media.*",
+                "images.read",
+                "settings.read",
+                "redirects.*"
+              ]
+            },
+            "redacted": false
           },
           {
             "path": "roleClaim",
@@ -837,6 +936,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "roles",
+            "redacted": false,
             "default": "roles"
           },
           {
@@ -846,6 +947,12 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": [
+              "pages.read",
+              "settings.read",
+              "media.read"
+            ],
+            "redacted": false,
             "default": []
           }
         ]
@@ -1002,7 +1109,78 @@
             "required": true,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": {
+              "pages": {
+                "kind": "multi",
+                "fields": {
+                  "slug": {
+                    "type": "slug",
+                    "required": true,
+                    "unique": true,
+                    "localized": true
+                  },
+                  "title": {
+                    "type": "text",
+                    "required": true,
+                    "localized": true
+                  },
+                  "body": {
+                    "type": "json",
+                    "localized": true
+                  },
+                  "status": {
+                    "type": "enum",
+                    "required": true,
+                    "localized": true,
+                    "options": [
+                      "draft",
+                      "finished",
+                      "published"
+                    ]
+                  },
+                  "hero": {
+                    "type": "ref",
+                    "to": "media"
+                  },
+                  "seo": {
+                    "type": "json",
+                    "localized": true
+                  }
+                },
+                "completeWhen": {
+                  "field": "status",
+                  "equals": "published"
+                }
+              },
+              "redirects": {
+                "kind": "single",
+                "fields": {
+                  "rules": {
+                    "type": "json"
+                  }
+                }
+              },
+              "settings": {
+                "kind": "single",
+                "fields": {
+                  "title": {
+                    "type": "text",
+                    "required": true,
+                    "localized": true
+                  },
+                  "description": {
+                    "type": "text",
+                    "localized": true
+                  },
+                  "navigation": {
+                    "type": "json",
+                    "localized": true
+                  }
+                }
+              }
+            },
+            "redacted": false
           },
           {
             "path": "locales",
@@ -1010,7 +1188,12 @@
             "required": false,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": [
+              "de",
+              "en"
+            ],
+            "redacted": false
           },
           {
             "path": "defaultLocale",
@@ -1018,7 +1201,9 @@
             "required": false,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": "de",
+            "redacted": false
           },
           {
             "path": "maxLimit",
@@ -1027,6 +1212,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 200,
+            "redacted": false,
             "default": 200
           }
         ]
@@ -1131,7 +1318,16 @@
             "required": true,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": {
+              "pages": {
+                "content": "pages"
+              },
+              "media": {
+                "collection": "media_items"
+              }
+            },
+            "redacted": false
           }
         ]
       },
@@ -1200,6 +1396,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": 10000,
+            "redacted": false,
             "default": 10000
           },
           {
@@ -1209,6 +1407,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": 4,
+            "redacted": false,
             "default": 4
           },
           {
@@ -1218,6 +1418,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": 21600,
+            "redacted": false,
             "default": 21600
           },
           {
@@ -1227,6 +1429,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "kestrel-links/0.1 (+link check)",
+            "redacted": false,
             "default": "kestrel-links/0.1 (+link check)"
           },
           {
@@ -1236,6 +1440,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": false,
+            "redacted": false,
             "default": false
           }
         ]
@@ -1305,7 +1511,13 @@
             "required": true,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": {
+              "pages.body": "./schemas/blocks.json",
+              "redirects.rules": "./schemas/redirects.rules.json",
+              "settings.navigation": "./schemas/settings.navigation.json"
+            },
+            "redacted": false
           },
           {
             "path": "maxDepth",
@@ -1314,6 +1526,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 32,
+            "redacted": false,
             "default": 32
           },
           {
@@ -1323,6 +1537,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 20000,
+            "redacted": false,
             "default": 20000
           },
           {
@@ -1332,6 +1548,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": false,
+            "redacted": false,
             "default": false
           }
         ]
@@ -1414,7 +1632,15 @@
             "required": true,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": [
+              {
+                "id": "2026-09-03-text-to-prose",
+                "collection": "pages",
+                "up": "[function]"
+              }
+            ],
+            "redacted": false
           },
           {
             "path": "mode",
@@ -1423,6 +1649,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": "apply",
+            "redacted": false,
             "default": "apply"
           },
           {
@@ -1432,6 +1660,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 50,
+            "redacted": false,
             "default": 50
           }
         ]
@@ -1479,6 +1709,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "title",
+            "redacted": false,
             "default": "title"
           },
           {
@@ -1488,6 +1720,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": "Kestrel example",
+            "redacted": false,
             "default": "Kestrel"
           }
         ]
@@ -1647,7 +1881,16 @@
             "required": true,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": {
+              "pages": {
+                "slugField": "slug",
+                "statusField": "status",
+                "publishedValue": "published",
+                "home": "home"
+              }
+            },
+            "redacted": false
           },
           {
             "path": "formats",
@@ -1656,6 +1899,10 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": [
+              "html"
+            ],
+            "redacted": false,
             "default": [
               "html"
             ]
@@ -1667,6 +1914,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": "site/",
+            "redacted": false,
             "default": ""
           },
           {
@@ -1676,6 +1925,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": false,
+            "redacted": false,
             "default": false
           },
           {
@@ -1685,6 +1936,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": true,
+            "redacted": false,
             "default": true
           },
           {
@@ -1693,7 +1946,14 @@
             "required": false,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": {
+              "publicPath": "/media",
+              "collection": "media_items",
+              "variants": "images_variants",
+              "target": "media/"
+            },
+            "redacted": false
           },
           {
             "path": "media.publicPath",
@@ -1702,6 +1962,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": "/media",
+            "redacted": false,
             "default": "/media"
           },
           {
@@ -1711,6 +1973,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "media_items",
+            "redacted": false,
             "default": "media_items"
           },
           {
@@ -1720,6 +1984,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "images_variants",
+            "redacted": false,
             "default": "images_variants"
           },
           {
@@ -1729,6 +1995,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "media/",
+            "redacted": false,
             "default": "media/"
           },
           {
@@ -1738,6 +2006,20 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": {
+              "full": true,
+              "settings": {
+                "type": "settings",
+                "titleField": "title",
+                "descriptionField": "description"
+              },
+              "titleField": "title",
+              "seoField": "seo",
+              "headings": {
+                "pages": "Pages"
+              }
+            },
+            "redacted": false,
             "default": {}
           },
           {
@@ -1746,7 +2028,9 @@
             "required": false,
             "secret": false,
             "set": false,
-            "status": "missing"
+            "status": "missing",
+            "value": null,
+            "redacted": false
           },
           {
             "path": "llms.full",
@@ -1755,6 +2039,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": true,
+            "redacted": false,
             "default": false
           },
           {
@@ -1764,6 +2050,12 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": {
+              "type": "settings",
+              "titleField": "title",
+              "descriptionField": "description"
+            },
+            "redacted": false,
             "default": {}
           },
           {
@@ -1773,6 +2065,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "settings",
+            "redacted": false,
             "default": "settings"
           },
           {
@@ -1782,6 +2076,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "title",
+            "redacted": false,
             "default": "title"
           },
           {
@@ -1791,6 +2087,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "description",
+            "redacted": false,
             "default": "description"
           },
           {
@@ -1800,6 +2098,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "title",
+            "redacted": false,
             "default": "title"
           },
           {
@@ -1809,6 +2109,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "seo",
+            "redacted": false,
             "default": "seo"
           },
           {
@@ -1818,6 +2120,10 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": {
+              "pages": "Pages"
+            },
+            "redacted": false,
             "default": {}
           }
         ]
@@ -1876,6 +2182,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "redirects",
+            "redacted": false,
             "default": "redirects"
           },
           {
@@ -1885,6 +2193,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "rules",
+            "redacted": false,
             "default": "rules"
           },
           {
@@ -1894,6 +2204,8 @@
             "secret": false,
             "set": true,
             "status": "set",
+            "value": "site/",
+            "redacted": false,
             "default": ""
           },
           {
@@ -1903,6 +2215,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": "redirects.json",
+            "redacted": false,
             "default": "redirects.json"
           }
         ]
@@ -2007,7 +2321,14 @@
             "required": true,
             "secret": false,
             "set": true,
-            "status": "set"
+            "status": "set",
+            "value": {
+              "login": {
+                "limit": 5,
+                "windowSeconds": 60
+              }
+            },
+            "redacted": false
           }
         ]
       },
@@ -2048,6 +2369,8 @@
             "secret": false,
             "set": false,
             "status": "default",
+            "value": 50,
+            "redacted": false,
             "default": 50
           }
         ]
@@ -6967,6 +7290,13 @@
                                 "missing"
                               ],
                               "description": "set: the raw config carries the path; default: it does not and the value comes from this node's or an ancestor's default; missing: no value at all"
+                            },
+                            "value": {
+                              "description": "The effective value as a JSON snapshot: what the config sets, else the default; null when the variable is missing or redacted"
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "description": "The value is withheld: the schema marks the variable secret, its key name looks like a credential, or an ancestor is redacted"
                             }
                           },
                           "required": [
@@ -6975,7 +7305,9 @@
                             "required",
                             "secret",
                             "set",
-                            "status"
+                            "status",
+                            "value",
+                            "redacted"
                           ]
                         }
                       }
@@ -10970,6 +11302,13 @@
                                     "missing"
                                   ],
                                   "description": "set: the raw config carries the path; default: it does not and the value comes from this node's or an ancestor's default; missing: no value at all"
+                                },
+                                "value": {
+                                  "description": "The effective value as a JSON snapshot: what the config sets, else the default; null when the variable is missing or redacted"
+                                },
+                                "redacted": {
+                                  "type": "boolean",
+                                  "description": "The value is withheld: the schema marks the variable secret, its key name looks like a credential, or an ancestor is redacted"
                                 }
                               },
                               "required": [
@@ -10978,7 +11317,9 @@
                                 "required",
                                 "secret",
                                 "set",
-                                "status"
+                                "status",
+                                "value",
+                                "redacted"
                               ]
                             }
                           }
