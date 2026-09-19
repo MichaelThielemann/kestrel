@@ -1,9 +1,12 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { loadConfig, loadPipelines } from "@michaelthielemann/kestrel/load";
+import { boot } from "@michaelthielemann/kestrel";
+import { loadConfig, loadModules, loadPipelines } from "@michaelthielemann/kestrel/load";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import type { KestrelConfigInput } from "@michaelthielemann/kestrel/defineConfig";
 
 const root = dirname(fileURLToPath(import.meta.url));
 
@@ -286,5 +289,43 @@ describe("content model wiring", () => {
     expect(config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline])).toContainEqual(["GET /admin/content/model", "contentModel"]);
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
     expect(pipelines.get("contentModel")).toEqual(["authn.requireUser", "content.describeModel"]);
+  });
+});
+
+describe("demo bootstrap credentials", () => {
+  it("logs the demo admin in with the documented password", async () => {
+    const configInput = await loadConfig(join(root, "kestrel.config.ts"));
+    const dataDir = mkdtempSync(join(tmpdir(), "kestrel-minimal-"));
+    const isolated: KestrelConfigInput = {
+      ...configInput,
+      http: null,
+      modules: configInput.modules.map((m) => {
+        if (m.use === "@michaelthielemann/kestrel-persistence-sqlite") {
+          return { ...m, config: { ...(m.config as object), file: ":memory:" } };
+        }
+        if (m.use === "@michaelthielemann/kestrel-replication-sqlite") {
+          return { ...m, config: { ...(m.config as object), file: join(dataDir, "replication.db") } };
+        }
+        if (m.use === "@michaelthielemann/kestrel-blobstore-filesystem") {
+          return { ...m, config: { ...(m.config as object), root: join(dataDir, "blobs") } };
+        }
+        return m;
+      }),
+    };
+    const modules = await loadModules(root, isolated);
+    const pipelines = await loadPipelines(root, "pipelines");
+    const kestrel = await boot({ config: isolated, modules, pipelines, root });
+    await kestrel.start();
+    try {
+      const session = await kestrel.run("login", {
+        trigger: { kind: "http", name: "test" },
+        payload: { username: "admin", password: "kestrel-demo" },
+      });
+      expect(session.status).toBe(200);
+      expect(session.result).toMatchObject({ identity: { claims: { username: "admin", roles: ["admin"] } } });
+    } finally {
+      await kestrel.stop();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });

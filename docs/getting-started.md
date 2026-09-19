@@ -3,8 +3,9 @@
 From an empty folder to a running instance with a login, a content type and one step you wrote
 yourself. Everything here is a consumer project: Kestrel is installed from npm, nothing is cloned.
 
-Requires Node 22.13 or newer (`node:sqlite`) and pnpm. Config, pipeline and module files are
-TypeScript and are loaded by Node's built-in type stripping — there is no build step.
+Requires Node 22.18 or newer (`node:sqlite`, and unflagged type stripping) and pnpm. Config,
+pipeline and module files are TypeScript and are loaded by Node's built-in type stripping —
+there is no build step.
 
 ## 1. Install
 
@@ -231,3 +232,8 @@ Add the module to `modules.ts` as well, and `greet.say` becomes part of the type
 | Define your own contract | [`contracts.md`](contracts.md) |
 | Ship a module as a package | [`submodule-template.md`](submodule-template.md) |
 | A full instance with every module wired up | [`../examples/minimal`](../examples/minimal) |
+
+`examples/minimal` ships a bootstrap `admin` user for `authn-multi` with the demo password
+`kestrel-demo` (same demo password `examples/embedded` documents for `authn-single`). Replace
+the `passwordHash` in `examples/minimal/kestrel.config.ts` with your own before using the
+instance for anything but trying it out.

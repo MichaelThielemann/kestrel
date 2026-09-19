@@ -65,7 +65,8 @@ Nuxt/Nitro instead, set `http: null`, import modules and pipelines statically an
 
 ## Develop this repository
 
-Requires Node 22.13 or newer (`node:sqlite`) and pnpm 11 (`corepack enable`).
+Requires Node 22.18 or newer (`node:sqlite`, and unflagged type stripping for loading `.ts`
+config/pipeline files) and pnpm 11 (`corepack enable`).
 
 ```
 pnpm install
