@@ -11,7 +11,8 @@
   pages it newest first without snapshots and names the head, `read` adds the snapshot, `label`
   names a revision, `prune` applies retention and `remove` drops a document's or one locale's
   history. Importing the contract puts `revisionParent` on the context: the revision the next
-  `record` of that run branches from.
+  `record` of that run branches from, and `restoreReport` (`RestoreReport`): what a restore of that
+  run had to leave out.
 - New module `revisions/default` (`@michaelthielemann/kestrel-revisions-default`) providing
   `revisions@1` on `persistence@1`, with `content@1` optional for the default locale. Branching
   follows from `parentId` alone: a save's parent is the head, a save made by a restore is the
@@ -22,6 +23,17 @@
   update chain validates, sanitizes, saves, indexes and publishes it), `revisions.list`,
   `revisions.read`, `revisions.label`, `revisions.prune` (cron), `revisions.remove` and
   `revisions.removeTranslation`.
+- `revisions/default` survives a content model that moved on since a snapshot was taken.
+  `revisions.restore:<collection>` reads the current field set from the optional `content@1`
+  dependency's `model()` and leaves snapshot fields the model no longer has out of the body instead
+  of failing the write; fields the model gained after the snapshot stay at their current value. The
+  new step `revisions.reportRestore` adds the outcome to the finished result as
+  `restore: { revisionId, dropped, missing }`, and `revisions.read` returns the same analysis next to
+  the snapshot, so a UI can warn before a restore rather than after. Without `content@1`, or for a
+  collection the model does not describe, the snapshot goes over unchanged as before and no report is
+  written. Nested structures stay the validator's business: a restored body that fails
+  `validate.check:<c>.body` still answers 400 with the validator's own details, and a removed block
+  type is a case for a content migration, not for restore.
 - `revisions/default` retention: `keep` (50) newest per document and locale plus every revision that
   was ever live (`statusField`/`liveStatuses`), every labelled one, the head, every branch tip and
   every branch point; survivors are re-parented onto their nearest surviving ancestor, so a

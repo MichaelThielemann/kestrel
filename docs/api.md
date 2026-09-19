@@ -289,8 +289,8 @@ revision need `pages.manage`, restoring and labelling need `pages.write` (a rest
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
 | GET | `/admin/pages/:id/revisions` | `?locale=&limit=&offset=` | `{ items: [Revision], total, head }` – newest first, without `snapshot`; `head` is the revision the next save will hang off (`pages.manage`) |
-| GET | `/admin/pages/:id/revisions/:revisionId` | – | one `Revision` plus `snapshot` (the saved fields, `null` when the revision was skipped); 404 for an unknown revision (`pages.manage`) |
-| POST | `/admin/pages/:id/revisions/:revisionId/restore` | – | `{ document, delivery: [...], llms }` – the same shape `PATCH /pages/:id` returns; 404 for an unknown revision, 409 when the revision carries no snapshot, and every 400 a normal save can produce (`pages.write`); event `page.restored` |
+| GET | `/admin/pages/:id/revisions/:revisionId` | – | one `Revision` plus `snapshot` (the saved fields, `null` when the revision was skipped) and `restore` (see below); 404 for an unknown revision (`pages.manage`) |
+| POST | `/admin/pages/:id/revisions/:revisionId/restore` | – | `{ document, delivery: [...], llms, restore }` – the shape `PATCH /pages/:id` returns plus `restore`; 404 for an unknown revision, 409 when the revision carries no snapshot, and every 400 a normal save can produce (`pages.write`); event `page.restored` |
 | PATCH | `/admin/pages/:id/revisions/:revisionId` | `{ label: string \| null }` | the `Revision` – names a revision so retention keeps it forever; `null` or an empty string clears the name (`pages.write`) |
 
 `Revision`: `{ id, collection, documentId, locale, parentId, createdAt, author: { id, name },
@@ -302,6 +302,16 @@ save time, so a later rename does not rewrite history. `status` is the value of 
 restore points at the restored revision — that is where the history forks. Switching to another
 branch is the same gesture as going back: restore that branch's tip and save. There are no merges
 (see the module README for why), and no separate branch id is needed to draw the tree.
+
+**After a model change.** A restore does not fail because the content model moved on. `restore:
+{ revisionId, dropped: string[], missing: string[] }` says what it could not carry over: `dropped`
+are snapshot fields the model no longer has — the restore leaves them out of the write — and
+`missing` are fields the model gained after the snapshot, which the restore cannot revert and leaves
+at their current value. Both arrays are usually empty; the same object already comes with
+`GET …/revisions/:revisionId`, so a UI can warn before restoring instead of after. Whatever lives
+*inside* a field stays the validator's: a restored `body` whose blocks no longer match the schema
+answers 400 with the validator's own problem list, and a block type that was removed is fixed by a
+content migration, not by a restore.
 
 **Retention.** A nightly cron keeps, per page and language, the newest 50 plus every revision that
 was ever live, every labelled one, the head, every branch tip and every branch point; removed

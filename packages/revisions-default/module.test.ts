@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { CONTENT, type Content, type ContentModel } from "@michaelthielemann/kestrel-contracts/content";
-import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
+import contentModule from "@michaelthielemann/kestrel-content-default";
+import { createContentDefault } from "@michaelthielemann/kestrel-content-default/impl";
+import { CONTENT, type Content, type ContentModel, type TypeDefinition } from "@michaelthielemann/kestrel-contracts/content";
+import { PERSISTENCE, type Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { RevisionPage, RevisionSummary } from "@michaelthielemann/kestrel-contracts/revisions";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -18,10 +20,12 @@ const model: ContentModel = { locales: ["de", "en"], defaultLocale: "de", types:
 
 const IDENTITY = { id: "u1", claims: { username: "alice" } };
 
-function fakeContent(): Content {
+function fakeContent(types: ContentModel["types"] = model.types): Content {
   const notImplemented = () => Promise.reject(new Error("not needed"));
-  return { model: () => model, validate: () => ({ ok: true, data: {} }), get: notImplemented, list: notImplemented, create: notImplemented, set: notImplemented, update: notImplemented, remove: notImplemented, removeTranslation: notImplemented };
+  return { model: () => ({ ...model, types }), validate: () => ({ ok: true, data: {} }), get: notImplemented, list: notImplemented, create: notImplemented, set: notImplemented, update: notImplemented, remove: notImplemented, removeTranslation: notImplemented };
 }
+
+const pagesWith = (fields: TypeDefinition["fields"]): ContentModel["types"] => ({ pages: { kind: "multi", fields } });
 
 function depsWith(providers: Map<string, unknown>): Deps {
   return {
@@ -35,11 +39,14 @@ function depsWith(providers: Map<string, unknown>): Deps {
   };
 }
 
-async function boot(config: Record<string, unknown> = {}, withContent = true) {
-  const db = createFakePersistence();
+async function bootOn(db: Persistence, config: Record<string, unknown> = {}, content: Content | null = fakeContent()) {
   const providers = new Map<string, unknown>([[PERSISTENCE.name, db]]);
-  if (withContent) providers.set(CONTENT.name, fakeContent());
+  if (content !== null) providers.set(CONTENT.name, content);
   return module.setup(configSchema.parse(config), depsWith(providers));
+}
+
+async function boot(config: Record<string, unknown> = {}, content: Content | null = fakeContent()) {
+  return bootOn(createFakePersistence(), config, content);
 }
 
 const helpers: Record<string, Step | StepFactory> = {
@@ -76,7 +83,7 @@ describe("revisions/default module steps", () => {
   });
 
   it("records under * when no content model declares locales", async () => {
-    const instance = await boot({}, false);
+    const instance = await boot({}, null);
     await run(["test.seed", "revisions.record:pages"], {}, instance);
     const listed = await run(["revisions.list:pages"], { params: { id: "p1" } }, instance);
     expect(page(listed.result).items[0]?.locale).toBe("*");
@@ -109,6 +116,55 @@ describe("revisions/default module steps", () => {
     expect(listed.items[0]).toMatchObject({ parentId: older?.id, kind: "restore" });
     expect(listed.head).toBe(listed.items[0]?.id);
     expect(listed.items[1]?.kind).toBe("save");
+  });
+
+  it("drops the fields the model lost, names the ones it gained and reports both into the result", async () => {
+    const db = createFakePersistence();
+    const before = await bootOn(db, {}, fakeContent(pagesWith({ title: "text", teaser: "text", status: "enum" })));
+    const fields = { title: "A", teaser: "T", status: "draft" };
+    await run(["test.save", "revisions.record:pages"], { body: fields, payload: fields }, before);
+    const [only] = page((await run(["revisions.list:pages"], { params: { id: "p1" } }, before)).result).items;
+    const params = { id: "p1", revisionId: only?.id ?? "" };
+
+    const after = await bootOn(db, {}, fakeContent(pagesWith({ title: "text", status: "enum", author: "text" })));
+    const restored = await run(["revisions.restore:pages", "test.save", "revisions.reportRestore"], { params }, after);
+    expect(restored.status).toBe(200);
+    expect(restored.result).toMatchObject({ id: "p1", title: "A", status: "draft", restore: { revisionId: only?.id, dropped: ["teaser"], missing: ["author"] } });
+    expect(restored.result).not.toHaveProperty("teaser");
+  });
+
+  it("read reports the same analysis next to the snapshot, so a UI can warn before restoring", async () => {
+    const db = createFakePersistence();
+    const before = await bootOn(db, {}, fakeContent(pagesWith({ title: "text", teaser: "text", status: "enum" })));
+    const fields = { title: "A", teaser: "T", status: "draft" };
+    await run(["test.save", "revisions.record:pages"], { body: fields, payload: fields }, before);
+    const [only] = page((await run(["revisions.list:pages"], { params: { id: "p1" } }, before)).result).items;
+
+    const after = await bootOn(db, {}, fakeContent(pagesWith({ title: "text", status: "enum", author: "text" })));
+    const read = await run(["revisions.read:pages"], { params: { id: "p1", revisionId: only?.id ?? "" } }, after);
+    expect(read.result).toMatchObject({ snapshot: fields, restore: { revisionId: only?.id, dropped: ["teaser"], missing: ["author"] } });
+  });
+
+  it("hands the snapshot over untouched and reports nothing when no content model is known", async () => {
+    const instance = await boot({}, null);
+    const fields = { title: "A", teaser: "T", status: "draft" };
+    await run(["test.save", "revisions.record:pages"], { body: fields, payload: fields }, instance);
+    const [only] = page((await run(["revisions.list:pages"], { params: { id: "p1" } }, instance)).result).items;
+    const params = { id: "p1", revisionId: only?.id ?? "" };
+
+    const restored = await run(["revisions.restore:pages", "test.save", "revisions.reportRestore"], { params }, instance);
+    expect(restored.result).toMatchObject({ teaser: "T" });
+    expect(restored.result).not.toHaveProperty("restore");
+    expect((await run(["revisions.read:pages"], { params }, instance)).result).not.toHaveProperty("restore");
+  });
+
+  it("reports nothing for a collection the content model does not describe", async () => {
+    const instance = await boot({}, fakeContent(pagesWith({ title: "text" })));
+    await run(["test.seed", "revisions.record:posts"], {}, instance);
+    const [only] = page((await run(["revisions.list:posts"], { params: { id: "p1" } }, instance)).result).items;
+    const restored = await run(["revisions.restore:posts", "test.save", "revisions.reportRestore"], { params: { id: "p1", revisionId: only?.id ?? "" } }, instance);
+    expect(restored.result).toMatchObject({ status: "draft" });
+    expect(restored.result).not.toHaveProperty("restore");
   });
 
   it("refuses to restore a revision recorded without a snapshot", async () => {
@@ -157,5 +213,46 @@ describe("revisions/default module steps", () => {
     const listed = await run(["revisions.list:pages"], { params: { id: "p1" }, query: { limit: "50" } }, instance);
     expect(listed.status).toBe(400);
     expect(listed.code).toBe("VALIDATION");
+  });
+});
+
+describe("revisions/default restore against the real content/default", () => {
+  async function wire(db: Persistence, fields: TypeDefinition["fields"]) {
+    const content = await createContentDefault({ types: pagesWith(fields) }, db);
+    const revisions = await bootOn(db, {}, content);
+    return (steps: string[], input: Record<string, unknown>): Promise<RunResult> =>
+      runPipeline(definePipeline({ name: "test", steps }), input, {
+        modules: [
+          { module, instance: revisions },
+          { module: contentModule, instance: { ...content, maxLimit: 200 } },
+        ],
+      });
+  }
+
+  const document = (result: unknown): Record<string, unknown> => boundaryCast<Record<string, unknown>>(result, "json");
+
+  it("restores a snapshot the model has outgrown, and the content update takes the reduced body", async () => {
+    const db = createFakePersistence();
+    const before = await wire(db, { title: "text", teaser: "text", status: "text" });
+    const fields = { title: "A", teaser: "T", status: "draft" };
+    const created = await before(["content.create:pages", "revisions.record:pages"], { body: fields, payload: fields });
+    expect(created.status).toBe(200);
+    const id = String(document(created.result).id);
+    const revisionId = page((await before(["revisions.list:pages"], { params: { id } })).result).items[0]?.id ?? "";
+
+    const after = await wire(db, { title: "text", status: "text", author: "text" });
+    const edited = { title: "B", status: "published", author: "Bob" };
+    expect((await after(["content.update:pages"], { params: { id }, body: edited, payload: edited })).status).toBe(200);
+    const rejected = await after(["content.update:pages"], { params: { id }, body: { teaser: "T" }, payload: { teaser: "T" } });
+    expect(rejected.status).toBe(400);
+    expect(rejected.error).toContain("teaser");
+
+    const restored = await after(["revisions.restore:pages", "content.update:pages", "revisions.record:pages", "revisions.reportRestore"], { params: { id, revisionId } });
+    expect(restored.status).toBe(200);
+    expect(restored.result).toMatchObject({ id, title: "A", status: "draft", author: "Bob", restore: { revisionId, dropped: ["teaser"], missing: ["author"] } });
+    expect(document(restored.result)).not.toHaveProperty("teaser");
+
+    const listed = page((await after(["revisions.list:pages"], { params: { id } })).result);
+    expect(listed.items[0]).toMatchObject({ kind: "restore", parentId: revisionId });
   });
 });

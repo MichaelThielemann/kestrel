@@ -1,12 +1,12 @@
 import { z } from "zod";
 import "@michaelthielemann/kestrel-contracts/authn";
-import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
+import { CONTENT, type Content } from "@michaelthielemann/kestrel-contracts/content";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
-import { REVISIONS, type NewRevision, type RevisionAuthor, type Revisions } from "@michaelthielemann/kestrel-contracts/revisions";
+import { REVISIONS, type NewRevision, type RestoreReport, type RevisionAuthor, type Revisions } from "@michaelthielemann/kestrel-contracts/revisions";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { createRevisionsDefault, documentOf, snapshotFields, statusOf, type RevisionsConfig } from "./impl.ts";
+import { createRevisionsDefault, documentOf, restoreReportOf, snapshotFields, statusOf, withoutDropped, type RevisionsConfig } from "./impl.ts";
 
 /** The locale recorded when the consumer's content model declares no locales at all. */
 export const NO_LOCALE = "*";
@@ -22,7 +22,7 @@ export const configSchema = z
   })
   .strict();
 
-type Instance = Revisions & { config: RevisionsConfig; defaultLocale: string };
+type Instance = Revisions & { config: RevisionsConfig; defaultLocale: string; content?: Content };
 
 const AUTHOR_SCHEMA: JsonSchema = { type: "object", properties: { id: { type: ["string", "null"] }, name: { type: ["string", "null"] } }, required: ["id", "name"] };
 const SUMMARY_PROPERTIES: Record<string, JsonSchema> = {
@@ -41,7 +41,12 @@ const SUMMARY_PROPERTIES: Record<string, JsonSchema> = {
   skipped: { type: "boolean" },
 };
 const SUMMARY_SCHEMA: JsonSchema = { type: "object", properties: SUMMARY_PROPERTIES, required: Object.keys(SUMMARY_PROPERTIES) };
-const REVISION_SCHEMA: JsonSchema = { type: "object", properties: { ...SUMMARY_PROPERTIES, snapshot: { type: ["object", "null"] } }, required: [...Object.keys(SUMMARY_PROPERTIES), "snapshot"] };
+const RESTORE_SCHEMA: JsonSchema = {
+  type: "object",
+  properties: { revisionId: { type: "string" }, dropped: { type: "array", items: { type: "string" } }, missing: { type: "array", items: { type: "string" } } },
+  required: ["revisionId", "dropped", "missing"],
+};
+const REVISION_SCHEMA: JsonSchema = { type: "object", properties: { ...SUMMARY_PROPERTIES, snapshot: { type: ["object", "null"] }, restore: RESTORE_SCHEMA }, required: [...Object.keys(SUMMARY_PROPERTIES), "snapshot"] };
 const PAGE_SCHEMA: JsonSchema = { type: "object", properties: { items: { type: "array", items: SUMMARY_SCHEMA }, total: { type: "number" }, head: { type: ["string", "null"] } }, required: ["items", "total", "head"] };
 const REPORT_SCHEMA: JsonSchema = { type: "object", properties: { inspected: { type: "number" }, removed: { type: "number" } }, required: ["inspected", "removed"] };
 const LABEL_SCHEMA: JsonSchema = { type: "object", properties: { label: { type: ["string", "null"], maxLength: 200 } }, required: ["label"], additionalProperties: false };
@@ -69,17 +74,33 @@ function labelOf(ctx: Context): string | null {
   return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The fields the content model has for a collection right now, `null` when nothing describes it. */
+function modelFieldsOf(content: Content | undefined, collection: string): string[] | null {
+  const type = content?.model().types[collection];
+  return type === undefined ? null : Object.keys(type.fields);
+}
+
+function reportOf(content: Content | undefined, collection: string, revisionId: string, snapshot: Record<string, unknown>): RestoreReport | null {
+  const fields = modelFieldsOf(content, collection);
+  return fields === null ? null : restoreReportOf(revisionId, snapshot, fields);
+}
+
 export default defineModule({
   name: "revisions/default",
   provides: [REVISIONS],
   requires: [PERSISTENCE],
-  // Only to read the default locale of the content model; the history itself is content-agnostic.
+  // Only to read the model: its default locale, and which fields a restore can still write.
   optional: [CONTENT],
   configSchema,
 
   async setup(config, deps): Promise<Instance> {
     const revisions = await createRevisionsDefault(config, { db: deps.get(PERSISTENCE), logger: deps.logger });
-    return { ...revisions, config, defaultLocale: deps.find(CONTENT)?.model().defaultLocale ?? NO_LOCALE };
+    const content = deps.find(CONTENT);
+    return { ...revisions, config, defaultLocale: content?.model().defaultLocale ?? NO_LOCALE, ...(content === undefined ? {} : { content }) };
   },
 
   steps: (revisions) => ({
@@ -121,7 +142,9 @@ export default defineModule({
       const revision = await revisions.read(collection, ctx.params.id, ctx.params.revisionId);
       if (isErr(revision)) return ctx.fail(revision.error);
       if (!revision.value) return ctx.fail("NOT_FOUND", `revisions: no revision "${ctx.params.revisionId}" of ${collection}/${ctx.params.id}`);
-      return ok({ ...ctx, result: revision.value });
+      const snapshot = revision.value.snapshot;
+      const report = snapshot === null ? null : reportOf(revisions.content, collection, revision.value.id, snapshot);
+      return ok({ ...ctx, result: report === null ? revision.value : { ...revision.value, restore: report } });
     }),
 
     restore: stepFactory((collection: string) => async (ctx: Context) => {
@@ -131,9 +154,17 @@ export default defineModule({
       if (!revision.value) return ctx.fail("NOT_FOUND", `revisions: no revision "${ctx.params.revisionId}" of ${collection}/${ctx.params.id}`);
       const snapshot = revision.value.snapshot;
       if (!snapshot) return ctx.fail("CONFLICT", `revisions: revision "${revision.value.id}" was recorded without a snapshot and cannot be restored`, { bytes: revision.value.bytes });
-      const fields: Record<string, unknown> = { ...snapshot, ...(revision.value.locale === NO_LOCALE ? {} : { locale: revision.value.locale }) };
-      return ok({ ...ctx, body: fields, payload: fields, revisionParent: revision.value.id });
+      const report = reportOf(revisions.content, collection, revision.value.id, snapshot);
+      const kept = report === null ? snapshot : withoutDropped(snapshot, report.dropped);
+      const fields: Record<string, unknown> = { ...kept, ...(revision.value.locale === NO_LOCALE ? {} : { locale: revision.value.locale }) };
+      return ok({ ...ctx, body: fields, payload: fields, revisionParent: revision.value.id, ...(report === null ? {} : { restoreReport: report }) });
     }),
+
+    reportRestore: async (ctx: Context) => {
+      if (ctx.restoreReport === undefined) return ok(ctx);
+      const previous = isRecord(ctx.result) ? ctx.result : {};
+      return ok({ ...ctx, result: { ...previous, restore: ctx.restoreReport } });
+    },
 
     label: stepFactory((collection: string) => async (ctx: Context) => {
       if (!ctx.params.id || !ctx.params.revisionId) return ctx.fail("VALIDATION", "missing id or revisionId");
@@ -180,18 +211,24 @@ export default defineModule({
       errors: { 400: "missing id" },
     }),
     read: (collection: string) => ({
-      summary: `One revision of a ${collection} document including its snapshot`,
+      summary: `One revision of a ${collection} document including its snapshot and, where the content model is known, the dry run of its restore under \`restore\``,
       reads: ["params.id", "params.revisionId"],
       writes: ["result"],
       output: REVISION_SCHEMA,
       errors: { 400: "missing id or revisionId", 404: "no such revision" },
     }),
     restore: (collection: string) => ({
-      summary: `Put a ${collection} revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision`,
+      summary: `Put a ${collection} revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out`,
       reads: ["params.id", "params.revisionId"],
-      writes: ["body", "payload", "revisionParent"],
-      errors: { 400: "missing id or revisionId", 404: "no such revision", 409: "the revision carries no snapshot" },
+      writes: ["body", "payload", "revisionParent", "restoreReport?"],
+      errors: { 400: "missing id or revisionId; the restored fields fail validation", 404: "no such revision", 409: "the revision carries no snapshot" },
     }),
+    reportRestore: {
+      summary: "Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is",
+      reads: [],
+      writes: ["result.restore?"],
+      extendsOutput: { type: "object", properties: { restore: RESTORE_SCHEMA } },
+    },
     label: (collection: string) => ({
       summary: `Name a ${collection} revision, or clear its name with null; a labelled revision is never pruned`,
       reads: ["params.id", "params.revisionId"],

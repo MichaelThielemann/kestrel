@@ -1606,6 +1606,7 @@
         "revisions.list",
         "revisions.read",
         "revisions.restore",
+        "revisions.reportRestore",
         "revisions.label",
         "revisions.prune",
         "revisions.remove",
@@ -7048,7 +7049,7 @@
       "module": "revisions/default",
       "factory": true,
       "description": {
-        "summary": "One revision of a <arg> document including its snapshot",
+        "summary": "One revision of a <arg> document including its snapshot and, where the content model is known, the dry run of its restore under `restore`",
         "reads": [
           "params.id",
           "params.revisionId"
@@ -7134,6 +7135,31 @@
                 "object",
                 "null"
               ]
+            },
+            "restore": {
+              "type": "object",
+              "properties": {
+                "revisionId": {
+                  "type": "string"
+                },
+                "dropped": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "missing": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "revisionId",
+                "dropped",
+                "missing"
+              ]
             }
           },
           "required": [
@@ -7164,7 +7190,7 @@
       "module": "revisions/default",
       "factory": true,
       "description": {
-        "summary": "Put a <arg> revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision",
+        "summary": "Put a <arg> revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out",
         "reads": [
           "params.id",
           "params.revisionId"
@@ -7172,12 +7198,55 @@
         "writes": [
           "body",
           "payload",
-          "revisionParent"
+          "revisionParent",
+          "restoreReport?"
         ],
         "errors": {
-          "400": "missing id or revisionId",
+          "400": "missing id or revisionId; the restored fields fail validation",
           "404": "no such revision",
           "409": "the revision carries no snapshot"
+        }
+      }
+    },
+    {
+      "name": "revisions.reportRestore",
+      "module": "revisions/default",
+      "factory": false,
+      "description": {
+        "summary": "Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is",
+        "reads": [],
+        "writes": [
+          "result.restore?"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "restore": {
+              "type": "object",
+              "properties": {
+                "revisionId": {
+                  "type": "string"
+                },
+                "dropped": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "missing": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "revisionId",
+                "dropped",
+                "missing"
+              ]
+            }
+          }
         }
       }
     },
@@ -14669,7 +14738,7 @@
           "name": "revisions.read",
           "module": "revisions/default",
           "description": {
-            "summary": "One revision of a pages document including its snapshot",
+            "summary": "One revision of a pages document including its snapshot and, where the content model is known, the dry run of its restore under `restore`",
             "reads": [
               "params.id",
               "params.revisionId"
@@ -14754,6 +14823,31 @@
                   "type": [
                     "object",
                     "null"
+                  ]
+                },
+                "restore": {
+                  "type": "object",
+                  "properties": {
+                    "revisionId": {
+                      "type": "string"
+                    },
+                    "dropped": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "missing": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "revisionId",
+                    "dropped",
+                    "missing"
                   ]
                 }
               },
@@ -16679,7 +16773,7 @@
           "name": "revisions.restore",
           "module": "revisions/default",
           "description": {
-            "summary": "Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision",
+            "summary": "Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out",
             "reads": [
               "params.id",
               "params.revisionId"
@@ -16687,10 +16781,11 @@
             "writes": [
               "body",
               "payload",
-              "revisionParent"
+              "revisionParent",
+              "restoreReport?"
             ],
             "errors": {
-              "400": "missing id or revisionId",
+              "400": "missing id or revisionId; the restored fields fail validation",
               "404": "no such revision",
               "409": "the revision carries no snapshot"
             }
@@ -17104,6 +17199,48 @@
               "required": [
                 "llms"
               ]
+            }
+          }
+        },
+        {
+          "spec": "revisions.reportRestore",
+          "name": "revisions.reportRestore",
+          "module": "revisions/default",
+          "description": {
+            "summary": "Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is",
+            "reads": [],
+            "writes": [
+              "result.restore?"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "restore": {
+                  "type": "object",
+                  "properties": {
+                    "revisionId": {
+                      "type": "string"
+                    },
+                    "dropped": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "missing": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "revisionId",
+                    "dropped",
+                    "missing"
+                  ]
+                }
+              }
             }
           }
         },

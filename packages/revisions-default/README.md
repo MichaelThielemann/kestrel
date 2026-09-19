@@ -45,16 +45,33 @@ and a `warn` log line. The save itself never fails for it; only restoring such a
 409.
 
 **What a restore restores.** The snapshot goes through the ordinary update as a patch, so it moves
-exactly the fields the model had when it was recorded: a field added to the model since keeps its
-current value, and a field the model has dropped since fails the restore with 400 `unknown field`.
-A snapshot holds the document as one locale reads it, so the fields that are not localized are in
-every locale's snapshot — restoring one locale moves them for the others too, which record no
-revision of their own for it.
+exactly the fields the model had when it was recorded. A snapshot holds the document as one locale
+reads it, so the fields that are not localized are in every locale's snapshot — restoring one locale
+moves them for the others too, which record no revision of their own for it.
+
+**When the model changed since.** A history that becomes unusable the moment a field is renamed is
+worth nothing, so `revisions.restore` compares the snapshot with the model instead of failing on it:
+fields the model no longer has are left out of the body (`dropped`), fields the model gained after
+the snapshot are simply not in the patch and keep their current value (`missing`). Both lists go on
+the context as `restoreReport`, and `revisions.reportRestore` puts them into the result as
+`restore: { revisionId, dropped, missing }` — put that step at the end of the restore pipeline, after
+the step that shapes the response. `revisions.read` runs the same comparison and returns it next to
+the snapshot, so a UI can warn before anyone restores anything.
+
+The model comes from the optional `content@1` dependency's `model()`; without it, or for a
+collection the model does not describe, the snapshot goes over unchanged as before and no report is
+written — an unknown field then fails the update chain with the 400 it always did.
+
+**What restore does not decide.** Everything inside a field stays the validator's business:
+`validate.check:<c>.body` sees the restored body as it sees a hand-typed one, and its 400 carries
+its own problem list unchanged. A block type that no longer exists is therefore not something a
+restore repairs — that is a content migration, which rewrites the stored documents (and, if it
+matters, the snapshots) before anyone restores them.
 
 **Steps.** `revisions.record:<collection>` after `content.create`/`content.update`,
 `revisions.restore:<collection>` before the ordinary update chain (it only fills the body, the
-existing steps validate, sanitize, save, index and publish), plus `list`, `read`, `label`, `prune`,
-`remove` and `removeTranslation`.
+existing steps validate, sanitize, save, index and publish), `revisions.reportRestore` at its end,
+plus `list`, `read`, `label`, `prune`, `remove` and `removeTranslation`.
 
 **Not included.** No diff — a block-aware diff belongs in the admin UI. No merge, no conflict
 detection, no undo stack (that is the editor's, per session). No pipelines and no routes: the
@@ -77,8 +94,9 @@ consumer wires those, `docs/api.md` shows the example instance's.
 |---|---|---|---|---|---|---|
 | `revisions.record:<arg>` | Record the saved <arg> document from the result as a revision; its parent is the head, or the revision a restore put on the context | `result` | – | ?locale: string | – | 503 the revision could not be written |
 | `revisions.list:<arg>` | Revisions of one <arg> document and locale, newest first and without snapshots | `params.id` | `result` | ?locale: string, limit: integer, offset: integer | { items: object[], total: number, head: string \| null, … } | 400 missing id |
-| `revisions.read:<arg>` | One revision of a <arg> document including its snapshot | `params.id`, `params.revisionId` | `result` | – | { id: string, collection: string, documentId: string, locale: string, parentId: string \| null, createdAt: number, author: object, kind: "save" \| "restore", label: string \| null, status: string \| null, live: boolean, bytes: number, skipped: boolean, snapshot: object \| null, … } | 400 missing id or revisionId; 404 no such revision |
-| `revisions.restore:<arg>` | Put a <arg> revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision | `params.id`, `params.revisionId` | `body`, `payload`, `revisionParent` | – | – | 400 missing id or revisionId; 404 no such revision; 409 the revision carries no snapshot |
+| `revisions.read:<arg>` | One revision of a <arg> document including its snapshot and, where the content model is known, the dry run of its restore under `restore` | `params.id`, `params.revisionId` | `result` | – | { id: string, collection: string, documentId: string, locale: string, parentId: string \| null, createdAt: number, author: object, kind: "save" \| "restore", label: string \| null, status: string \| null, live: boolean, bytes: number, skipped: boolean, snapshot: object \| null, restore?: object, … } | 400 missing id or revisionId; 404 no such revision |
+| `revisions.restore:<arg>` | Put a <arg> revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out | `params.id`, `params.revisionId` | `body`, `payload`, `revisionParent`, `restoreReport?` | – | – | 400 missing id or revisionId; the restored fields fail validation; 404 no such revision; 409 the revision carries no snapshot |
+| `revisions.reportRestore` | Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is | – | `result.restore?` | – | { restore?: object, … } | – |
 | `revisions.label:<arg>` | Name a <arg> revision, or clear its name with null; a labelled revision is never pruned | `params.id`, `params.revisionId` | `result` | { label: string \| null } | { id: string, collection: string, documentId: string, locale: string, parentId: string \| null, createdAt: number, author: object, kind: "save" \| "restore", label: string \| null, status: string \| null, live: boolean, bytes: number, skipped: boolean, … } | 400 missing id or revisionId; 404 no such revision |
 | `revisions.prune` | Apply the retention rules to every recorded document and locale | – | `result` | – | { inspected: number, removed: number, … } | – |
 | `revisions.remove:<arg>` | Drop every revision of a <arg> document, in every locale | `params.id` | – | – | – | 400 missing id |
@@ -93,7 +111,7 @@ Pipelines in `examples/minimal` using these steps:
 - **pageRevision** (GET /admin/pages/:id/revisions/:revisionId): `authn.requireUser` → `authz.require:pages.manage` → **`revisions.read:pages`**
 - **pageRevisions** (GET /admin/pages/:id/revisions): `authn.requireUser` → `authz.require:pages.manage` → **`revisions.list:pages`**
 - **pruneRevisions** (cron 15 3 * * *): **`revisions.prune`**
-- **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.require:pages.write` → **`revisions.restore:pages`** → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.update:pages` → **`revisions.record:pages`** → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.restored`
+- **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.require:pages.write` → **`revisions.restore:pages`** → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.update:pages` → **`revisions.record:pages`** → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → **`revisions.reportRestore`** → `events.emit:page.restored`
 - **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.update:pages` → **`revisions.record:pages`** → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.updated`
 
 <!-- kestrel-docs:end -->
