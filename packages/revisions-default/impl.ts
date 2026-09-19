@@ -61,6 +61,26 @@ function headKey(collection: string, documentId: string, locale: string): string
   return `${collection}\u0000${documentId}\u0000${locale}`;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Structural equality of JSON values, independent of object key order. */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((v, i) => deepEqual(v, b[i]));
+  }
+  if (isRecord(a) && isRecord(b)) {
+    const ak = Object.keys(a);
+    const bk = Object.keys(b);
+    if (ak.length !== bk.length) return false;
+    return ak.every((k) => Object.hasOwn(b, k) && deepEqual(a[k], b[k]));
+  }
+  return false;
+}
+
 function summaryOf(row: EntryRow): RevisionSummary {
   return {
     id: row.id,
@@ -189,21 +209,27 @@ export async function createRevisionsDefault(config: RevisionsConfig, deps: Revi
 
   return {
     async record(entry: NewRevision): Promise<Result<RevisionSummary, RevisionsError>> {
-      let parentId = entry.parentId ?? null;
-      if (entry.parentId === undefined) {
-        const head = await headOf(entry.collection, entry.documentId, entry.locale);
-        if (isErr(head)) return head;
-        parentId = head.value;
-      }
+      const head = await headOf(entry.collection, entry.documentId, entry.locale);
+      if (isErr(head)) return head;
+      const parentId = entry.parentId === undefined ? head.value : entry.parentId;
+      let parentRow: EntryRow | null = null;
       if (parentId !== null) {
         const parent = await db.findOne<EntryRow>(ENTRIES, { id: parentId, collection: entry.collection, documentId: entry.documentId, locale: entry.locale });
         if (isErr(parent)) return err(storageError(parent.error));
         if (!parent.value) return err(failure("NOT_FOUND", `revisions/default: no revision "${parentId}" of ${entry.collection}/${entry.documentId} (${entry.locale})`));
+        parentRow = parent.value;
       }
       const bytes = Buffer.byteLength(JSON.stringify(entry.fields));
       const skipped = bytes > config.maxSnapshotBytes;
       if (skipped) {
         logWarn(logger, "revisions/default: snapshot exceeds maxSnapshotBytes, recorded without content", { collection: entry.collection, documentId: entry.documentId, locale: entry.locale, bytes, maxSnapshotBytes: config.maxSnapshotBytes });
+      }
+      // Unchanged save on top of the head: nothing to record, the head already reflects this state.
+      if (entry.kind === "save" && parentId === head.value && parentRow && !parentRow.skipped && !skipped) {
+        const status = entry.status ?? null;
+        if (status === parentRow.status && deepEqual(entry.fields, parentRow.snapshot)) {
+          return ok(summaryOf(parentRow));
+        }
       }
       const created = await db.createOne<EntryRow>(ENTRIES, {
         collection: entry.collection,
@@ -222,8 +248,8 @@ export async function createRevisionsDefault(config: RevisionsConfig, deps: Revi
         snapshot: skipped ? null : entry.fields,
       });
       if (isErr(created)) return err(storageError(created.error));
-      const head = await setHead(entry.collection, entry.documentId, entry.locale, created.value.id);
-      if (isErr(head)) return head;
+      const headSet = await setHead(entry.collection, entry.documentId, entry.locale, created.value.id);
+      if (isErr(headSet)) return headSet;
       if (!config.pruneOnWrite) return ok(summaryOf(created.value));
       const pruned = await pruneGroup(entry.collection, entry.documentId, entry.locale);
       if (isErr(pruned)) return pruned;

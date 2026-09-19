@@ -16,7 +16,15 @@ async function make(patch: Partial<RevisionsConfig> = {}, logger = silentLogger)
   return createRevisionsDefault(config(patch), { db: createFakePersistence(), logger });
 }
 
-const entry = (patch: Partial<NewRevision> = {}): NewRevision => ({ collection: "pages", documentId: "p1", locale: "de", fields: { title: "A", status: "draft" }, author: AUTHOR, kind: "save", ...patch });
+let sequence = 0;
+
+// Each call changes the title unless the caller names its own fields, so an ordinary `entry()`
+// never collides with the no-op-save behaviour tested via the contract suite above.
+const entry = (patch: Partial<NewRevision> = {}): NewRevision => {
+  sequence += 1;
+  const fields = patch.fields ?? { title: `A${sequence}`, status: "draft" };
+  return { collection: "pages", documentId: "p1", locale: "de", author: AUTHOR, kind: "save", ...patch, fields };
+};
 
 // The contract suite prunes explicitly, so the impl runs with the retention off for it.
 revisionsContractTests(async (options) => make({ keep: options.keep }));
@@ -44,6 +52,28 @@ describe("revisions/default", () => {
     expect(expectOk(await revisions.read("pages", "p1", recorded.id))?.snapshot).toBeNull();
     expect(warnings[0]?.message).toContain("maxSnapshotBytes");
     expect(warnings[0]?.fields).toMatchObject({ collection: "pages", documentId: "p1", locale: "de" });
+  });
+
+  it("does not treat a skipped head as identical to a later save with the same fields", async () => {
+    const revisions = await make({ maxSnapshotBytes: 32 });
+    const first = expectOk(await revisions.record(entry({ fields: { title: "x".repeat(200), status: "draft" } })));
+    expect(first.skipped).toBe(true);
+    const second = expectOk(await revisions.record(entry({ fields: { title: "x".repeat(200), status: "draft" } })));
+    expect(second.id).not.toBe(first.id);
+    expect(second.skipped).toBe(true);
+    expect(expectOk(await revisions.list("pages", "p1", "de")).total).toBe(2);
+  });
+
+  it("does not treat a save that is itself oversized as identical to the head", async () => {
+    const db = createFakePersistence();
+    const fields = { title: "A", status: "draft" };
+    const roomy = await createRevisionsDefault(config({ maxSnapshotBytes: 1048576 }), { db, logger: silentLogger });
+    const first = expectOk(await roomy.record(entry({ fields })));
+    const strict = await createRevisionsDefault(config({ maxSnapshotBytes: 4 }), { db, logger: silentLogger });
+    const second = expectOk(await strict.record(entry({ fields })));
+    expect(second.id).not.toBe(first.id);
+    expect(second.skipped).toBe(true);
+    expect(expectOk(await roomy.list("pages", "p1", "de")).total).toBe(2);
   });
 
   it("marks a revision live when its status field carries a configured live value", async () => {

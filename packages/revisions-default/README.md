@@ -40,6 +40,13 @@ loads that group's rows including their snapshots, so a history that grows into 
 every save of that document more expensive — cap it with a stricter `liveStatuses`, labels used
 sparingly, or `pruneOnWrite: false` plus the cron.
 
+**No-op saves.** A `save` whose parent is the current head and whose snapshot and status both
+match that head exactly (deep, key-order-independent comparison) is not recorded; `record` still
+succeeds and returns the head's summary. This is what keeps an editor's repeated saves of an
+unchanged document from flooding the history and defeating retention. A `restore` is always
+recorded, and so is the first save after one, since its parent is the restored revision, not the
+head. A skipped (oversized) snapshot never counts as identical, on either side of the comparison.
+
 **Size guard.** A snapshot beyond `maxSnapshotBytes` is recorded as `skipped: true` with no content
 and a `warn` log line. The save itself never fails for it; only restoring such a revision does, with
 409.

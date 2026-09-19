@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+
+- `revisions@1` `record`: a `save` whose snapshot and status are identical (deep, key-order-independent)
+  to the current head's is no longer recorded; the call succeeds and returns the head's summary
+  instead. A `restore` is always recorded, and so is the first save after one, since its parent is
+  not the head. A skipped (oversized) snapshot never counts as identical, on either side. Both
+  `revisions-default` and `testing/fakeRevisions` implement this, and the contract test suite covers
+  it.
+
 ## 5.7.0 – 2026-09-19
 
 ### Added

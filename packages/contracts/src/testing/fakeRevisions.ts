@@ -13,6 +13,26 @@ type Stored = Revision;
 
 const groupKey = (collection: string, documentId: string, locale: string): string => JSON.stringify([collection, documentId, locale]);
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Structural equality of JSON values, independent of object key order. */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((v, i) => deepEqual(v, b[i]));
+  }
+  if (isRecord(a) && isRecord(b)) {
+    const ak = Object.keys(a);
+    const bk = Object.keys(b);
+    if (ak.length !== bk.length) return false;
+    return ak.every((k) => Object.hasOwn(b, k) && deepEqual(a[k], b[k]));
+  }
+  return false;
+}
+
 function summaryOf(entry: Stored): RevisionSummary {
   const { snapshot: _snapshot, ...summary } = entry;
   void _snapshot;
@@ -57,10 +77,18 @@ export function createFakeRevisions(options: FakeRevisionsOptions = {}): Revisio
   return {
     async record(entry: NewRevision): Promise<Result<RevisionSummary, RevisionsError>> {
       const key = groupKey(entry.collection, entry.documentId, entry.locale);
-      const parentId = entry.parentId === undefined ? (heads.get(key) ?? null) : entry.parentId;
+      const headId = heads.get(key) ?? null;
+      const parentId = entry.parentId === undefined ? headId : entry.parentId;
       const parent = parentId === null ? null : entries.get(parentId);
       if (parentId !== null && (!parent || groupKey(parent.collection, parent.documentId, parent.locale) !== key)) {
         return err(failure("NOT_FOUND", `revisions: no revision "${parentId}" of ${entry.collection}/${entry.documentId} (${entry.locale})`));
+      }
+      // Unchanged save on top of the head: nothing to record, the head already reflects this state.
+      if (entry.kind === "save" && parentId === headId && parent && !parent.skipped) {
+        const status = entry.status ?? null;
+        if (status === parent.status && deepEqual(entry.fields, parent.snapshot)) {
+          return ok(summaryOf(parent));
+        }
       }
       const snapshot = { ...entry.fields };
       const stored: Stored = {

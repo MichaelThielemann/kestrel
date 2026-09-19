@@ -8,6 +8,8 @@ export function revisionsContractTests(make: (options: { keep: number }) => Prom
   describe("revisions@1", () => {
     let revisions: Revisions;
 
+    let sequence = 0;
+
     const entry = (patch: Partial<NewRevision> = {}): NewRevision => ({
       collection: "pages",
       documentId: "p1",
@@ -18,7 +20,13 @@ export function revisionsContractTests(make: (options: { keep: number }) => Prom
       ...patch,
     });
 
-    const record = async (patch: Partial<NewRevision> = {}): Promise<RevisionSummary> => expectOk(await revisions.record(entry(patch)));
+    // Each call changes the title unless the caller names its own fields, so an ordinary `record()`
+    // never collides with the no-op-save behaviour under test elsewhere in this suite.
+    const record = async (patch: Partial<NewRevision> = {}): Promise<RevisionSummary> => {
+      sequence += 1;
+      const withFields = patch.fields === undefined ? { ...patch, fields: { title: `A${sequence}`, status: "draft" } } : patch;
+      return expectOk(await revisions.record(entry(withFields)));
+    };
     const ids = async (documentId = "p1", locale = "de"): Promise<string[]> => expectOk(await revisions.list("pages", documentId, locale)).items.map((r) => r.id);
 
     beforeEach(async () => {
@@ -158,6 +166,52 @@ export function revisionsContractTests(make: (options: { keep: number }) => Prom
       const survivors = expectOk(await revisions.list("pages", "p1", "de")).items;
       expect(survivors.map((r) => r.id).sort()).toEqual([root.id, tip.id, branch.id, branchTip.id].sort());
       expect(survivors.find((r) => r.id === tip.id)?.parentId).toBe(root.id);
+    });
+
+    it("does not record a save identical to the head and returns the head instead", async () => {
+      const first = await record({ fields: { title: "A", status: "draft" }, status: "draft" });
+      const second = await record({ fields: { title: "A", status: "draft" }, status: "draft" });
+      expect(second).toEqual(first);
+      expect(await ids()).toEqual([first.id]);
+      expect(expectOk(await revisions.head("pages", "p1", "de"))).toBe(first.id);
+    });
+
+    it("does not record an identical save regardless of field key order", async () => {
+      const first = await record({ fields: { title: "A", status: "draft" }, status: "draft" });
+      const second = await record({ fields: { status: "draft", title: "A" }, status: "draft" });
+      expect(second).toEqual(first);
+      expect(await ids()).toEqual([first.id]);
+    });
+
+    it("records a save that changes a field even when the status is unchanged", async () => {
+      const first = await record({ fields: { title: "A", status: "draft" }, status: "draft" });
+      const second = await record({ fields: { title: "B", status: "draft" }, status: "draft" });
+      expect(second.id).not.toBe(first.id);
+      expect(await ids()).toEqual([second.id, first.id]);
+    });
+
+    it("records a save that changes only the status", async () => {
+      const first = await record({ fields: { title: "A", status: "draft" }, status: "draft" });
+      const second = await record({ fields: { title: "A", status: "draft" }, status: "published" });
+      expect(second.id).not.toBe(first.id);
+      expect(await ids()).toEqual([second.id, first.id]);
+    });
+
+    it("always records a restore, even identical to the head", async () => {
+      const first = await record({ fields: { title: "A", status: "draft" }, status: "draft" });
+      const restore = await record({ fields: { title: "A", status: "draft" }, status: "draft", kind: "restore" });
+      expect(restore.id).not.toBe(first.id);
+      expect(restore.kind).toBe("restore");
+      expect(await ids()).toEqual([restore.id, first.id]);
+    });
+
+    it("always records a save whose parent is not the head, even identical to that parent", async () => {
+      const first = await record({ fields: { title: "A", status: "draft" }, status: "draft" });
+      const second = await record({ fields: { title: "B", status: "draft" }, status: "draft" });
+      const afterRestore = await record({ fields: { title: "A", status: "draft" }, status: "draft", parentId: first.id, kind: "save" });
+      expect(afterRestore.id).not.toBe(first.id);
+      expect(afterRestore.parentId).toBe(first.id);
+      expect(await ids()).toEqual([afterRestore.id, second.id, first.id]);
     });
 
     it("prunes only the named scope", async () => {
