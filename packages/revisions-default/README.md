@@ -13,7 +13,8 @@ it works with any `content@1` implementation and with no content module at all.
 (collection, document, locale); a save whose run restored revision R gets R as its parent, which
 forks the line at R. Switching branches is therefore the same gesture as going back: restoring the
 tip of a branch and saving again continues that branch. The head is kept per group in
-`revisions_heads`; the document row itself stays the only live state.
+`revisions_heads`; the document row itself stays the only live state. Recorded timestamps are
+strictly increasing, so several saves within one millisecond still list in order.
 
 **No merges.** Restoring is a new save, so the model is append-only and two branches never have to
 be reconciled. Merging block trees (repeaters recursively, word diffs on text) would cost more than
@@ -65,7 +66,8 @@ the context as `restoreReport`, and `revisions.reportRestore` puts them into the
 the step that shapes the response. `revisions.read` runs the same comparison and returns it next to
 the snapshot, so a UI can warn before anyone restores anything.
 
-The model comes from the optional `content@1` dependency's `model()`; without it, or for a
+The model comes from the optional `content@1` dependency's `model()` and is read for two things
+only: the default locale, and which fields a restore may still write; without it, or for a
 collection the model does not describe, the snapshot goes over unchanged as before and no report is
 written — an unknown field then fails the update chain with the 400 it always did.
 

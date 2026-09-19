@@ -6,7 +6,8 @@ default locale has no prefix unless `?prefixPrimary=true` – onto one document 
 strings and richtext, `{ type: "internal", collection, id }` objects) to public paths in the
 document's locale; targets not served there become `href="#" data-kestrel-broken="…"` / `broken: true`,
 and `_links` maps every referenced id to its path. With `?fallback=true` a locale without its own
-slug is found through the default locale, but localized filters are re-checked strictly.
+slug is found through the default locale, but localized filters are re-checked strictly, so a locale
+that is not published itself stays unserved.
 Steps: `site.resolve:<t>?home=home&status=published&fallback=true` (`NOT_FOUND` otherwise) and
 `site.resolveLinks:<t>?…` with the same arguments. Config `{}`.
 Not included: rendering, storage, redirects (see delivery-static, redirects-default).

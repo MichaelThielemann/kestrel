@@ -6,6 +6,11 @@ Keys must be relative, without `.`/`..` segments, and must not end in `.meta.jso
 that suffix are ignored by `list` and cannot be written. Config: `{ root: "./data/blobs" }`.
 For local development and tests; on ephemeral disks use `blobstore-s3`.
 
+## Errors
+
+Four transient IO codes (`EBUSY`, `EMFILE`, `ENFILE`, `EAGAIN`) become an `Err(TRANSIENT)`;
+everything else is rethrown, because it is a wiring bug rather than an expected failure.
+
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
 `@michaelthielemann/kestrel-blobstore-filesystem` – module `blobstore/filesystem`: provides `blobstore@1`.

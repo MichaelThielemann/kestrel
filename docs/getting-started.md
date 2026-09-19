@@ -77,7 +77,10 @@ field types, `single` vs. `multi`, `localized`, `ref` — is described in
 
 Optional but recommended: it binds `definePipeline` to the steps the configured modules actually
 register, so a mistyped step name is a `tsc` error instead of a boot error. The list must hold the
-same modules as `config.modules`.
+same modules as `config.modules`, in the same order. Under the CLI the list only carries the step
+catalogue's type, because the CLI loads the real modules by their `use` string; a host that boots
+embedded passes both lists to `boot()`, which pairs them positionally, so a module added to the
+config without its import there shows up only at boot.
 
 ```ts
 import { pipelineDefiner, type StepCatalogue } from "@michaelthielemann/kestrel";

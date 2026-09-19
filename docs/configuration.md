@@ -51,8 +51,9 @@ Three forms, all equal-standing inputs to the same runner:
 ```
 
 - **http** — `<METHOD> <path>` with `GET|POST|PUT|PATCH|DELETE`. `:name` captures one segment,
-  `*name` as the last segment captures the rest of the path; exact routes beat wildcards. Route
-  parameters arrive as `ctx.params`.
+  `*name` as the last segment captures the rest of the path; exact routes beat wildcards. Per
+  segment the order is literal, then `:param`, then the end of the route, then `*rest`, so a literal
+  route wins whenever it was registered. Route parameters arrive as `ctx.params`.
 - **event** — needs a module providing the event trigger hook (`events-inmemory` or
   `events-queue`); without one, configured event triggers abort the boot. An event that nothing
   emits is a boot warning, not an error.

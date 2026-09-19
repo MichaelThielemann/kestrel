@@ -87,6 +87,31 @@ consumer's job.
 
 Not included: image resizing, tags, linking media to content documents.
 
+## Internals
+
+**Filename safety.** The length cap is applied before a `.meta.json` ending is neutralised, so
+truncation can never re-create the sidecar suffix it removes; a filename that would otherwise land
+on a metadata-sidecar key is rewritten.
+
+**Subtree queries.** `persistence@1` takes one operator per field, so a folder subtree is not
+expressible as a single `gte` + `lt` range. Rows are queried with `folder >= "<path>/"` sorted
+ascending and read until the first row whose value leaves the `<path>/` prefix — the sort keeps
+every matching row contiguous at the front, so no `LIKE` is involved. The upper marker is
+`"<path>0"`: `0` (0x30) is the first codepoint after `/` (0x2F) among the characters `safeFolder`
+allows, so a row at or past it is neither `<path>` nor a descendant of it.
+
+**Search.** `media.list`'s `q` runs as SQL `LIKE`, which folds case for ASCII letters only and can
+therefore only narrow the candidate set; the exact match is applied in JS afterwards.
+
+**Write ordering.** `media.update` builds and validates the whole patch, text fields included,
+before the blob is touched, so a rejected patch never leaves a moved blob without a matching row. A
+repeated move finds the source blob already gone; when the target is there, only the row update is
+left to do.
+
+**Migration.** A folder or filename that `safeFolder`/`safeName` would themselves change or reject,
+and a key that would land on a metadata-sidecar suffix, are left for manual cleanup instead of being
+renamed or moved automatically.
+
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
 `@michaelthielemann/kestrel-media-default` – module `media/default`: provides no contract; requires `blobstore@1`, `persistence@1`.

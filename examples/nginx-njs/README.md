@@ -12,8 +12,14 @@ NGINX reverse proxy in front of a static bucket periodically fetches `redirects.
   since `js_periodic` has no stop/restart API).
 - If a fetch fails or the response isn't an array, the last-known-good list is left unchanged.
   `[]` is a valid state ("no redirects") and does overwrite the old list.
-- `location /` walks the list, first matching pattern wins, `$n` is substituted from the capture
-  groups; no match → `internalRedirect("@origin")`.
+- `location /` walks the list with an indexed loop (njs has no `for...of`, see
+  [njs compatibility](https://nginx.org/en/docs/njs/compatibility.html)), first matching pattern
+  wins, `$n` is substituted from the capture groups; no match → `internalRedirect("@origin")`. The
+  list comes from Kestrel's compiler and is guaranteed `{ pattern, target, status }`, so the handler
+  checks no item shapes.
+- For a 3xx code the second argument of `r.return()` is the redirect URL and sets `Location`
+  internally; setting `r.headersOut.Location` beforehand has no effect, because nginx's built-in
+  redirect response generation overwrites it.
 - `absolute_redirect off;` makes nginx emit `Location` exactly as authored (`/new/x`) instead of
   absolutizing it with the request's scheme/host – important behind a TLS-terminating edge.
 
