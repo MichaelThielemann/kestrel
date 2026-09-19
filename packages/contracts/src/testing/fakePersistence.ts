@@ -16,7 +16,6 @@ function isCondition(value: unknown): value is Record<string, unknown> {
   return keys.length === 1 && keys.every((key) => OPERATORS.has(key));
 }
 
-// Without a schema (standalone matchesFilter) the column type is inferred from the stored value.
 function columnOf(schema: Schema | undefined, field: string, value: unknown): Column {
   if (field === "id") return "id";
   const declared = schema?.[field];
@@ -44,7 +43,6 @@ function encode(column: Column, value: unknown): SqlValue {
   }
 }
 
-// SQLite renders a REAL as %!.15g: always a fractional digit, exponential below 1e-4.
 function realText(value: number): string {
   if (!Number.isFinite(value)) return value > 0 ? "Inf" : "-Inf";
   const [mantissa = "", exponent] = (value !== 0 && Math.abs(value) < 1e-4 ? value.toExponential(14) : value.toPrecision(15)).split("e");
@@ -68,7 +66,6 @@ function compareNullable(a: SqlValue, b: SqlValue): number {
   return compare(a, b);
 }
 
-// LIKE folds case for ASCII letters only.
 function likeToRegExp(pattern: string): RegExp {
   const literal = (ch: string) => (/[A-Za-z]/.test(ch) ? `[${ch.toLowerCase()}${ch.toUpperCase()}]` : ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   const source = [...pattern].map((ch) => (ch === "%" ? ".*" : ch === "_" ? "." : literal(ch))).join("");

@@ -65,7 +65,6 @@ interface Unwrapped {
 const def = (schema: ZodTypeAny): Def => boundaryCast<Def>(schema._def, "host");
 const kind = (schema: ZodTypeAny): string => def(schema).typeName ?? "";
 
-/** Peels optional/default/nullable/effects/branded/pipeline/catch/lazy wrappers off, remembering what they said. */
 function unwrap(schema: ZodTypeAny): Unwrapped {
   const out: Unwrapped = { inner: schema, optional: false, nullable: false };
   let current = schema;
@@ -262,13 +261,10 @@ interface Ancestors {
 function collectVariables(schema: ZodTypeAny, raw: unknown, parsed: unknown, path: string[], out: ConfigVariable[], ancestors: Ancestors): void {
   const { inner } = unwrap(schema);
   if (kind(inner) !== "ZodObject") return;
-  // zod substitutes an ancestor's `.default()` only while that ancestor is absent from the raw config;
-  // a parent spelled out there hands its children nothing and leaves them to their own defaults.
   const inherited = valueAt(raw, path) === undefined ? ancestors.default : undefined;
   for (const [key, child] of Object.entries(def(inner).shape?.() ?? {})) {
     const childPath = [...path, key];
     const unwrapped = unwrap(child);
-    // `.describe(SECRET)` reaches this as `writeOnly`; a hand-written JSON Schema says so itself.
     const secret = isSecretSchema(toJsonSchema(child));
     const rawValue = valueAt(raw, childPath);
     const set = rawValue !== undefined;

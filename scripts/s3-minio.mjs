@@ -1,13 +1,8 @@
 #!/usr/bin/env node
-// Starts MinIO in Podman, runs the blobstore-s3 contract test against it, always stops the
-// container afterwards. Exits non-zero on any failure (container start, bucket creation, or
-// the test run itself).
 import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-// @aws-sdk/client-s3 is only a dependency of packages/blobstore-s3, not of the workspace root,
-// so resolve it from there rather than adding it to the root package.json.
 const require = createRequire(fileURLToPath(new URL("../packages/blobstore-s3/package.json", import.meta.url)));
 const { S3Client, CreateBucketCommand, HeadBucketCommand } = require("@aws-sdk/client-s3");
 
@@ -32,8 +27,8 @@ async function waitForHealth(timeoutMs) {
     try {
       const res = await fetch(`${ENDPOINT}/minio/health/live`);
       if (res.ok) return;
+      // eslint-disable-next-line no-empty -- an unreachable endpoint means the container is not up yet
     } catch {
-      // not up yet
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }

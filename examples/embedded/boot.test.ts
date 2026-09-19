@@ -8,8 +8,6 @@ import listMigrations from "./pipelines/listMigrations.ts";
 import login from "./pipelines/login.ts";
 import resolvePage from "./pipelines/resolvePage.ts";
 
-// The hand-wired examples pair config.modules with the modules array positionally, so a module added
-// to the config without its import fails only at boot - which nothing but this test would notice.
 describe("examples/embedded boots", () => {
   it("boots the config with its hand-wired modules, resolves a page and stops", async () => {
     const kestrel = await boot({ config, modules, pipelines: [login, createPage, resolvePage, countPages, listMigrations] });

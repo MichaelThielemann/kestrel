@@ -19,8 +19,6 @@ export function logWarn(logger: Logger, message: string, data?: Record<string, u
   else logger.info(message, data);
 }
 
-// ISO 8601 with the local UTC offset (not "Z"), since consoleLogger runs on one machine
-// and log lines should read in local time without losing offset information.
 export function localIso(date: Date): string {
   const pad = (n: number, width = 2) => String(n).padStart(width, "0");
   const offsetMinutes = -date.getTimezoneOffset();

@@ -1,7 +1,3 @@
-// The query vocabulary shared by data contracts (`persistence@1`, `content@1`, `site@1`):
-// a filter/condition language, find options, and a paged result shape. Declared once here
-// so contracts can express queries without depending on `persistence@1` itself.
-
 export type Condition =
   | { eq: unknown }
   | { ne: unknown }

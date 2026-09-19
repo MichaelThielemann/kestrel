@@ -18,7 +18,6 @@ const description = { summary: "test", reads: [], writes: [] };
 const writesResult = { summary: "test", reads: [], writes: ["result"] };
 const input = { trigger: { kind: "http" as const, name: "POST /x" }, payload: { a: 1 } };
 
-/** A step whose return value the runner has to reject; `Step` is the narrower of the two types. */
 function looseStep(name: string, fn: (ctx: Context) => Promise<unknown>): ResolvedStep {
   return { name, description, fn: boundaryCast<Step>(fn, "host") };
 }

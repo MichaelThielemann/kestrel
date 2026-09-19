@@ -35,8 +35,6 @@ export interface StepDescription {
   binary?: boolean;
 }
 
-// A naked type parameter, so the union `Step | StepFactory` of the default `StepMap` distributes and
-// `StepDescriptions<StepMap>` stays the loose map a hand-built ModuleDefinition widens to.
 type DescriptionOf<F> = F extends StepFactory ? (arg: string) => StepDescription : StepDescription;
 
 export type StepDescriptions<T extends StepMap = StepMap> = {

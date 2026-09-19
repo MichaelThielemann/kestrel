@@ -140,8 +140,6 @@ describe("write pipelines validate their payload", () => {
     ]);
   });
 
-  // The media texts are plain text: media.update checks length and control characters itself,
-  // sanitizing them through the HTML allowlist would rewrite legitimate text like "5 < 6".
   it("leaves the media texts to the plain-text check in media.update", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
     expect(pipelines.get("updateMedia")).toEqual(["authn.requireUser", "authz.require:media.write", "media.update", "events.emit:media.updated"]);

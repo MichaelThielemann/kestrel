@@ -887,8 +887,6 @@ describe("boot", () => {
       },
     });
     const ping = definePipeline({ name: "ping", steps: ["teardown.ping"] });
-    // "GET //bad" clears the top-level config regex (method + non-whitespace path) but fails
-    // inside parseRoute() on the empty path segment, i.e. after module setup already ran.
     await expect(
       boot({
         config: { modules: [{ use: "./trigger", config: {} }], triggers: [{ http: "GET //bad", pipeline: "ping" }] },
