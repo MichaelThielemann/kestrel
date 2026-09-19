@@ -2,8 +2,17 @@
 
 ## Unreleased
 
+### Fixed
+
+- `examples/minimal` now documents and tests its bootstrap `admin` password (`kestrel-demo`,
+  the same demo password `examples/embedded` documents) instead of shipping an undocumented
+  scrypt hash nobody could log in with.
+
 ### Changed
 
+- Engines: every package (and the root workspace) now requires Node `>=22.18.0`, the true
+  minimum — `.ts` config and pipeline files are loaded through Node's type stripping, which is
+  unflagged only from 22.18 onward; `node:sqlite` alone only needed 22.13.
 - `revisions@1` `record`: a `save` whose snapshot and status are identical (deep, key-order-independent)
   to the current head's is no longer recorded; the call succeeds and returns the head's summary
   instead. A `restore` is always recorded, and so is the first save after one, since its parent is

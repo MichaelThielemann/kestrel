@@ -15,7 +15,7 @@ export default defineConfig({
         identifier: "username",
         minPasswordLength: 8,
         sessionTtlSeconds: 86400,
-        bootstrap: { username: "admin", passwordHash: "scrypt$522f4ac87bfe4bcd100ba47a7d2aaec2$dbfc3f2d6cc38a76b21973d7c6f6d310a09506581c665f1f6601fd8fb3fa9bc3959689aea3e389f4d53eb8c7e70791ad4065e308763dd44609904134f0f5ee98", roles: ["admin"] },
+        bootstrap: { username: "admin", passwordHash: "scrypt$154f59bdfe2d034df7e9e4656a660413$5da171463df807a5e548951ba97f43f10af3b1992559e028c24fce6a65fe3664e410689a9ae565b1ff6b48d22c25a8d3652f06389dcbffd2d406b116148739fd", roles: ["admin"] },
       },
     },
     { use: "@michaelthielemann/kestrel-authz-roles", config: { roles: { admin: ["*"], editor: ["pages.*", "media.*", "images.read", "settings.read", "redirects.*"] }, anonymous: ["pages.read", "settings.read", "media.read"] } },
