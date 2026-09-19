@@ -38,7 +38,7 @@ username is `CONFLICT` (409), the last admin guard is `LAST_ADMIN` (409).
 | `authn.cleanupSessions` | – | `result` | `TRANSIENT` |
 
 Not included: self-service registration, password reset by mail, login rate limiting (pipeline
-concerns), an e-mail field (a model change with its own use, its own ticket).
+concerns), an e-mail field.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest

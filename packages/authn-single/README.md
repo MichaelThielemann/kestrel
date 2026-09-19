@@ -15,7 +15,7 @@ pipeline that runs `authn.requireUser` first (boot's dataflow check enforces it)
 | `authn.loadIdentity` | `identity` | `result` | `UNAUTHENTICATED` |
 | `authn.logout` | `token` | `result` | `UNAUTHENTICATED` |
 
-Generate a hash: `node -e "import('./modules/authn/single/impl.ts').then(m => console.log(m.hashPassword(process.argv[1])))" -- <password>`
+Generate a hash: `node -e "import('@michaelthielemann/kestrel-authn-single/impl').then(m => console.log(m.hashPassword(process.argv[1])))" -- <password>`
 Not included: multiple users, persistence of sessions across restarts, password change.
 
 <!-- kestrel-docs:start -->

@@ -5,6 +5,11 @@ A submodule is a package `@michaelthielemann/kestrel-<module>-<submodule>` (in t
 point, plus `package.json`. It doesn't have to fulfill a contract (`provides: []`) — a submodule
 may also provide only steps, e.g. `audit/persistence` with the step `audit.record`.
 
+This page describes the packaged form. A submodule that stays inside one consumer project needs no
+package at all: a `module.ts` somewhere in the project, referenced by a relative `use` path, is
+enough — `getting-started.md` § Your own module shows the smallest working one. Everything below
+about `module.ts`, `describe()` and the checklist applies to both.
+
 ```
 module.ts        Shell: name, provides, requires, optional?, configSchema, setup, steps, optional emits/attach/teardown
 impl.ts          Entry point. Imports only kestrel-contracts, its own files, Node, package.json deps

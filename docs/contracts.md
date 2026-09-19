@@ -17,8 +17,8 @@ may define its own contracts with the same `defineContract`; the core treats the
   `blobstore@1` is its own contract (different technology), `user-persistence@1` is not.
 - Contracts don't change once frozen. A change request → ask a human.
 - The query vocabulary types (`Filter`, `Condition`, `FindOptions`, `Page`) live in
-  `contracts/query.ts` and are shared by `persistence@1`, `content@1` and `site@1`; `content@1`
-  therefore no longer imports anything from `persistence.ts`.
+  `contracts/query.ts` and are shared by `persistence@1`, `content@1` and `site@1`, so no contract
+  file has to import another one for them.
 - **Every async contract method returns `Promise<Result<T, E>>`**, never a rejection. Absence
   stays inside `Ok` (`Result<T | null, E>` — a `findOne`/`resolve`/`get` that finds nothing is
   not an error); only the *mutation* of something that must exist (`updateOne`, `move`)
@@ -53,7 +53,7 @@ export type PersistenceError = KestrelError<"CONFLICT" | "NOT_FOUND" | "TRANSIEN
 export interface Persistence {
   ensureCollection(name: string, schema: Schema): Promise<Result<void, PersistenceError>>;   // throws when stored rows already violate a new unique field
   createOne<T extends Document>(collection: string, data: NewDocument<T>): Promise<Result<T, PersistenceError>>;   // CONFLICT: id or a unique value already exists
-  createMany<T extends Document>(collection: string, data: NewDocument<T>[]): Promise<Result<T[], PersistenceError>>;   // all or nothing, as today
+  createMany<T extends Document>(collection: string, data: NewDocument<T>[]): Promise<Result<T[], PersistenceError>>;   // all or nothing
   findOne<T extends Document>(collection: string, filter: Filter): Promise<Result<T | null, PersistenceError>>;   // nothing found is Ok(null), never an Err
   findMany<T extends Document>(collection: string, filter: Filter, options?: FindOptions): Promise<Result<Page<T>, PersistenceError>>;
   count(collection: string, filter: Filter): Promise<Result<number, PersistenceError>>;
@@ -185,10 +185,10 @@ persistenceContractTests(async () => createPersistenceSqlite({ file: ":memory:" 
 
 | Contract | Capability | `E` (async, `Result<T, E>`) | Typical submodules |
 |---|---|---|---|
-| `authn@1` | Who you are | `KestrelError<"TRANSIENT">` — wrong credentials are `Ok(null)`, never `Err` | `single` (one user from config), `multi` (users + sessions in persistence), later `siam` |
-| `authz@1` | Are you allowed to (role/capability, optionally object-scoped) | `KestrelError<"TRANSIENT">` | `admin-only`, `roles` |
-| `persistence@1` | Store/find documents (raw storage for modules) | `KestrelError<"CONFLICT" \| "NOT_FOUND" \| "TRANSIENT">` | `sqlite`, `mariadb` |
-| `content@1` | Typed documents from a config-declared model: `single`/`multi`, field types, validation, timestamps. Generic document CRUD, no website vocabulary | `KestrelError<"VALIDATION" \| "NOT_FOUND" \| "CONFLICT" \| "TRANSIENT">` | `default` (on persistence), later `external` |
+| `authn@1` | Who you are | `KestrelError<"TRANSIENT">` — wrong credentials are `Ok(null)`, never `Err` | `single` (one user from config), `multi` (users + sessions in persistence) |
+| `authz@1` | Are you allowed to (role/capability, optionally object-scoped) | `KestrelError<"TRANSIENT">` | `roles` |
+| `persistence@1` | Store/find documents (raw storage for modules) | `KestrelError<"CONFLICT" \| "NOT_FOUND" \| "TRANSIENT">` | `sqlite` |
+| `content@1` | Typed documents from a config-declared model: `single`/`multi`, field types, validation, timestamps. Generic document CRUD, no website vocabulary | `KestrelError<"VALIDATION" \| "NOT_FOUND" \| "CONFLICT" \| "TRANSIENT">` | `default` (on persistence) |
 | `site@1` | Website vocabulary over `content@1`: `resolve` (path → document per `SiteRules`), `pathOf` (document → path), `resolveLinks` (internal references → public paths) | `KestrelError<"TRANSIENT">` — an unresolvable path is `Ok(null)` | `default` (on content) |
 | `blobstore@1` | Bytes by key: `put(key, bytes, { contentType? })` (the type is a write-time hint for stores that serve objects directly), `get` → bytes, `remove`, `move`, `list(prefix)` → `{ key, size }` | `KestrelError<"NOT_FOUND" \| "TRANSIENT">` — `move` from a missing key is `NOT_FOUND`, `get`/`remove` of a missing key is `Ok` | `filesystem`, `s3` |
 | – (steps only) | Media: upload into blobstore, metadata in persistence | – | `media-default` |
@@ -199,11 +199,12 @@ persistenceContractTests(async () => createPersistenceSqlite({ file: ":memory:" 
 | – (steps only) | Find, check, report external links | – | `links-default` |
 | – (steps only) | Redirects: validate rules, resolve within the site pipeline, export `redirects.json` | – | `redirects-default` |
 | – (steps only) | Sanitize uploaded SVGs | – | `sanitize-svg` |
-| `events@1` | Emit/listen to events; synchronous; listener errors → AggregateError | unchanged (no `Result`, `emit` still throws `AggregateError`) | `inmemory` |
+| `events@1` | Emit/listen to events; synchronous; listener errors → AggregateError | no `Result`: `emit` throws an `AggregateError` | `inmemory`, `queue` |
 | `renderer@1` | Render a document into a format (`formats()`, `render()` with assets) | `KestrelError<"TRANSIENT" \| "RENDER_FAILED">` — both contract-specific or core codes, status 503/500 respectively | `plain` (reference), a Nuxt renderer in the kestrel-web layer (separate repository) |
 | – (steps only) | Static delivery: render, store in blobstore, per-language status | – | `delivery-static` |
-| `validate@1` | Check a payload field against a schema: `targets()` (`"<collection>.<field>"`), `check(target, value)` → `{ ok, problems: [{ path, message }] }` | unchanged (synchronous, no `Promise`) | `jsonschema` (ajv; HTML sanitization stays a step) |
+| `validate@1` | Check a payload field against a schema: `targets()` (`"<collection>.<field>"`), `check(target, value)` → `{ ok, problems: [{ path, message }] }` | no `Result`: synchronous, no `Promise` | `jsonschema` (ajv; HTML sanitization stays a step) |
 | `revisions@1` | Append-only version history per (collection, document, locale): `record` a full snapshot, `list`/`read`, `label`, `head`, `prune`, `remove`. Branching follows from `parentId` alone; no merge | `KestrelError<"NOT_FOUND" \| "TRANSIENT">` — an unknown revision in `read` is `Ok(null)`, only `record` with an unknown parent and `label` answer `NOT_FOUND` | `default` (on persistence; content optional, only for the default locale) |
+| `insights@1` | One view of the running instance: `manifest()` (what is wired) and `stats()` (how it runs) | no `Result`: both synchronous | `default` (reads the core's manifest and run observer) |
 | `migrations@1` | Manage content migrations (`{ id, collection, up }`): `list`/`check` (pending/applied), `apply` (also `dry`) — applies every migration to every document and every stored language exactly once, logs to a ledger | `KestrelError<"CONFLICT" \| "TRANSIENT" \| "MIGRATION_FAILED">` — `MIGRATION_FAILED` (500) carries `details: { migration, document, locale?, problems? }` | `default` (on content, persistence, events; validate optional) |
 
 `blobstore@1.move(from, to)` against a missing `from` key fails with an error message that
@@ -256,12 +257,10 @@ translation is `null`, the frontend decides what to do. `fallback: true` (step a
 Website routing is not `content@1`'s job but `site@1`'s (`site-default`, activated after
 `content-default`): `site.resolve:pages?home=home&status=published&fallback=true` on a
 wildcard route (`GET /site/*path`): `/`, `/<slug>`, `/<lang>`, `/<lang>/<slug>` — the primary
-language without a prefix. Translation *workflow* (missing translations, per-language approval)
-will later be a steps-only module.
+language without a prefix.
 
 **Status** is an `enum` field the consumer defines. The rule "public only shows published" is a
 pipeline concern: `content.list:pages?status=published` — a fixed filter in the step argument
 that the client cannot override.
 
 A type only becomes its own module once it needs *behavior* (media: upload into `blobstore@1`).
-Noted for later: custom field types defined by the consumer (needs a registration mechanism).

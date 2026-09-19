@@ -122,6 +122,9 @@ pipeline.
 
 ## Triggers (in `kestrel.config.ts`)
 
+This section covers what a trigger does to a run. Every config key with its type and default is in
+`configuration.md`.
+
 ```ts
 export default defineConfig({
   modules: [
@@ -289,7 +292,7 @@ ctx.fail(code: CoreCode, message: string, details?: Record<string, unknown>): Er
 ctx.fail(error: KestrelError): Err<KestrelError>   // passes a contract's error through unchanged
 ```
 
-There is no status parameter anymore — the status follows from `code` alone. A step that
+There is no status parameter — the status follows from `code` alone. A step that
 needs a different status (e.g. `MIGRATION_FAILED` with 500) passes a ready-made
 `KestrelError` from its contract file: `ctx.fail(migrationFailed(message, details))`.
 Success is `ok(ctx)` or `ok({ ...ctx, result })`; `ctx.done(result)` remains the only way to
@@ -382,11 +385,10 @@ binds the parameter, it is never satisfied — except for a pipeline with no tri
 reachable only by calling `run()` directly (as in a test), where the caller supplies the
 params itself. For every step in order: every read must be covered by an earlier write,
 otherwise boot aborts with a `KestrelBootError` (naming the pipeline, step, path and the
-writes so far); afterwards the step's `writes` are applied. This is why the old defensive
-fallbacks are gone, like using `params.id` as a stand-in for a missing `result.id` — a step
-like `delivery.publish:<type>` declares `reads: ["result.id"]`, the boot check proves every
-pipeline supplies it, and the remaining `if (typeof id !== "string") throw …` is a pure bug
-path.
+writes so far); afterwards the step's `writes` are applied. A step therefore needs no defensive
+fallback for context it declared: `delivery.publish:<type>` declares `reads: ["result.id"]`, the
+boot check proves every pipeline supplies it, and a remaining `if (typeof id !== "string") throw …`
+is a pure bug path.
 
 The runner holds a step to that declaration at run time, in every environment (like the
 payload validation). After a step returned `Ok<Context>` it compares the context it passed in

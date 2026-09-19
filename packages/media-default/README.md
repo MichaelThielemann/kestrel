@@ -54,7 +54,7 @@ one file returns the item unchanged, two or more return `{ items, errors, ids }`
 `{ filename, status, code, message }` entry in `errors` and only the newly stored items in `ids` — a
 rejected or conflicting file doesn't stop the others, partial success is a 200; a `TRANSIENT`
 blobstore or database failure is not per-file and fails the whole request), `media.get`, `media.list` (folder, recursive, search, sort, ids, paging),
-`media.listFolders`, `media.createFolder`, `media.renameFolder`, `media.folderItems` (for
+`media.listFolders`, `media.createFolder`, `media.renameFolder`, `media.listFolderItems` (for
 `references.guardAll:media`), `media.removeFolder`, `media.update`, `media.download`,
 `media.remove`, `media.reconcile`, `media.reconcileDelete`, `media.export:<dir>`.
 

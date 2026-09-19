@@ -116,7 +116,7 @@ In both cases: only pipelines with a trigger are reachable from outside.
 7. Call every module's `attach(instance, { describe, observe })` with the read-only view of the
    booted instance: `describe()` is the static manifest (`kestrel.describe()`), `observe()`
    registers a run observer that sees every run and step start and end (`kestrel.observe()`);
-   a returned function runs on `stop()`. `insights-default` is the module that uses it.
+   a returned function runs on `stop()`. `insights/default` is the module that uses it.
 
 If any step fails: abort with `KestrelBootError { module, reason }`.
 
@@ -168,9 +168,8 @@ field, every value is reachable from every other value.
   belongs in Kestrel.
 - No dependency-injection framework. `setup(config, deps)` is enough.
 
-## Recommended build order
+## Where to go next
 
-1. `packages/core` and `packages/contracts` (one instance, then freeze).
-2. Vertical slice: `authn-single` + `persistence-sqlite` + `content-default` + pipelines for
-   login and pages (see `../examples/minimal`).
-3. Only once that runs: distribute further submodules across multiple instances in parallel.
+`getting-started.md` builds an instance from scratch, `configuration.md` is the reference for
+`kestrel.config.ts`, `pipelines.md` covers writing steps and pipelines, `contracts.md` covers
+defining a contract, and `submodule-template.md` covers packaging a submodule.
