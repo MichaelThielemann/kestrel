@@ -13,7 +13,6 @@ export interface RestoreReport {
   missing: string[];
 }
 
-// Only importing this contract puts the branch point of the next recorded revision on the context.
 declare global {
   namespace Kestrel {
     interface ContextExtensions {

@@ -57,7 +57,6 @@ const SANITIZE_SVG = "sanitize.svg";
 const EVENTS_EMIT = "events.emit";
 const BARREL = new Set(["module", "index", "src", "dist"]);
 
-/** `use` is a package name or a path and never equals `mod.name`; both "@scope/kestrel-authn-multi" and "./modules/authn/multi/module.ts" reduce to ["authn", "multi"]. */
 function useTokens(use: string): string[] {
   const parts = (use.split(/[?#]/)[0] ?? use).split("/").filter((p) => p !== "" && p !== "." && p !== "..");
   if (parts[0]?.startsWith("@")) parts.shift();
@@ -72,8 +71,6 @@ function entryNamesModule(use: string, moduleName: string): boolean {
   const last = tokens.at(-1);
   if (last === undefined) return false;
   const wanted = moduleName.split("/");
-  // Too few tokens to spell out "<module>/<submodule>": accept a hit on either half, which still
-  // separates any two modules whose names differ in that half.
   if (tokens.length < wanted.length) return wanted.includes(last);
   return wanted.every((w, i) => tokens[tokens.length - wanted.length + i] === w);
 }
@@ -112,7 +109,6 @@ function settledWithin(promise: Promise<void>, ms: number): Promise<boolean> {
   });
 }
 
-/** A connection that goes idle after close() would otherwise hold the server until keepAliveTimeout. */
 async function drainConnections(server: Server, closing: Promise<void>, deadline: number): Promise<boolean> {
   let closed = false;
   void closing.then(() => {
@@ -153,8 +149,6 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     if (seen.has(mod.name)) throw new KestrelBootError(mod.name, `listed twice in kestrel.config (${entry.use})`);
     seen.add(mod.name);
     if (!entryNamesModule(entry.use, mod.name)) {
-      // A `use` that names no loaded module at all is not evidence of anything — third-party
-      // packages need not be named after their module. Only a hit on a different one is.
       const other = input.modules.find((m) => m !== mod && entryNamesModule(entry.use, m.name));
       if (other) throw new KestrelBootError(CORE, `config.modules[${i}] "${entry.use}" names module "${other.name}", not "${mod.name}"; config entries and loaded modules must be in the same order`);
     }

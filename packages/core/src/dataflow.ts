@@ -12,7 +12,6 @@ function routeParams(route: Route): Set<string> {
   return names;
 }
 
-/** Only a param every route binds is guaranteed to be there, whichever route served the run. */
 function commonParams(routes: readonly Route[]): string[] {
   const [first, ...rest] = routes;
   if (first === undefined) return [];
@@ -27,7 +26,6 @@ function satisfied(read: string, available: ReadonlySet<string>): boolean {
   return false;
 }
 
-/** A plain write of a parent path replaces whatever was written under it. */
 function apply(write: string, sets: readonly Set<string>[]): void {
   if (write.endsWith("?")) return;
   for (const set of sets) {
@@ -45,12 +43,9 @@ export function checkDataflow(pipeline: ResolvedPipeline, httpRoutes: readonly R
 
   for (const step of pipeline.steps) {
     for (const read of step.description.reads) {
-      // The client owns the payload; the dev validator checks it against describe().input instead.
       if (read.startsWith("payload.")) continue;
       let ok: boolean;
       if (read.startsWith("params.")) {
-        // An event envelope carries opaque params, so it can satisfy any of them; a pipeline with
-        // no trigger at all is only reachable through run(), where the caller supplies them.
         ok = available.has(read) || hasEventTrigger || (httpRoutes.length === 0 && !hasCronTrigger);
       } else {
         ok = satisfied(read, available);

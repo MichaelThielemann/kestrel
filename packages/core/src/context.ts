@@ -95,7 +95,6 @@ export function first(value: unknown): string | undefined {
   return undefined;
 }
 
-/** The value is echoed into a response header, so anything but short printable ASCII is dropped. */
 const REQUEST_ID = /^[\x20-\x7e]{1,200}$/;
 
 export function requestIdOf(value: unknown): string | undefined {

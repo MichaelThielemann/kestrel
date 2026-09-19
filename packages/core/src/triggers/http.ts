@@ -25,7 +25,6 @@ export function parseRoute(http: string, pipeline: string): Route {
   return { method, segments, pipeline };
 }
 
-/** literal > :param > end of route > *rest, so a literal route wins no matter when it was registered. */
 function specificity(segment: string | undefined): number {
   if (segment === undefined) return 1;
   if (segment.startsWith("*")) return 0;
@@ -67,7 +66,6 @@ export function matchRoute(routes: readonly Route[], method: string, pathname: s
     for (const [i, seg] of route.segments.entries()) {
       if (i === wildcard) {
         const rest = parts.slice(i).map(decodeSegment);
-        // An encoded "/" would make the rest indistinguishable from a deeper path, so it never matches.
         if (rest.some((p) => p === undefined || p.includes("/"))) ok = false;
         else params[seg.slice(1)] = rest.join("/");
         break;
@@ -161,7 +159,6 @@ export function buildResponse(status: number, body: unknown, meta: ResponseMeta 
     return {
       status,
       headers: {
-        // Caller headers may add, never weaken: the mandatory ones are spread last.
         ...Object.fromEntries(Object.entries(body.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v])),
         ...headers,
         "content-type": body.contentType,
@@ -196,7 +193,6 @@ export function responseForRun(result: RunResult, extraInline: readonly string[]
   return buildResponse(result.status, result.result, metaOf(result), extraInline);
 }
 
-/** Fixed code for errors raised before a pipeline runs, where there is no KestrelError to read one from. */
 const EDGE_CODE_BY_STATUS: Readonly<Record<number, CoreCode>> = {
   400: "VALIDATION",
   403: "FORBIDDEN",
@@ -263,8 +259,6 @@ function headerValues(value: string | string[] | undefined): string[] {
     .filter((v) => v !== "");
 }
 
-// A proxy appends the peer it saw to X-Forwarded-For, so only the entries counted from the right are
-// trustworthy; the left end is whatever the client sent. A trusted header names the client outright.
 export function clientIp(req: IncomingMessage, options: boolean | ClientIpOptions = {}): string | undefined {
   const { trustProxy = false, proxyHops = 1, trustedHeader } = typeof options === "boolean" ? { trustProxy: options } : options;
   if (trustedHeader !== undefined) return headerValues(req.headers[trustedHeader.toLowerCase()])[0];

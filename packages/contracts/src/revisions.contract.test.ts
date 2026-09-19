@@ -20,8 +20,6 @@ export function revisionsContractTests(make: (options: { keep: number }) => Prom
       ...patch,
     });
 
-    // Each call changes the title unless the caller names its own fields, so an ordinary `record()`
-    // never collides with the no-op-save behaviour under test elsewhere in this suite.
     const record = async (patch: Partial<NewRevision> = {}): Promise<RevisionSummary> => {
       sequence += 1;
       const withFields = patch.fields === undefined ? { ...patch, fields: { title: `A${sequence}`, status: "draft" } } : patch;

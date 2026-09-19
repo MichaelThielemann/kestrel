@@ -20,7 +20,6 @@ export default defineConfig({
       use: "@michaelthielemann/kestrel-authn-single",
       config: {
         username: "editor",
-        // password: kestrel-demo
         passwordHash: "scrypt$15233414288dd1d644855dc092f3774f$c7e5ae3a04256111b1f1e17178012b3824d7618701aa12a8a386bae97f0d4ecaf5e4bf211f153b32b0063d92cac951bad78e055643419c28640833db52c9daff",
         roles: ["editor"],
       },

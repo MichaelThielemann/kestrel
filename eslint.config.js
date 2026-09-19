@@ -61,8 +61,6 @@ export default tseslint.config(
     },
   },
   {
-    // tests may exercise a module against another module it declares as a devDependency; pnpm's
-    // non-hoisted node_modules still rejects anything undeclared
     files: ["packages/*/**/*.test.ts"],
     ignores: ["packages/core/**", "packages/contracts/**"],
     rules: {

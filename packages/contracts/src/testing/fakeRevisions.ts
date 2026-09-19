@@ -17,7 +17,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Structural equality of JSON values, independent of object key order. */
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (Array.isArray(a) || Array.isArray(b)) {
@@ -59,7 +58,6 @@ export function createFakeRevisions(options: FakeRevisionsOptions = {}): Revisio
     for (const entry of group) {
       if (entry.parentId !== null) children.set(entry.parentId, (children.get(entry.parentId) ?? 0) + 1);
     }
-    // A child count other than one means a branch tip (none) or a branch point (several); both stay.
     const kept = new Set(
       group.filter((entry, index) => index < keep || entry.live || entry.label !== null || entry.id === headId || (children.get(entry.id) ?? 0) !== 1).map((entry) => entry.id),
     );
@@ -83,7 +81,6 @@ export function createFakeRevisions(options: FakeRevisionsOptions = {}): Revisio
       if (parentId !== null && (!parent || groupKey(parent.collection, parent.documentId, parent.locale) !== key)) {
         return err(failure("NOT_FOUND", `revisions: no revision "${parentId}" of ${entry.collection}/${entry.documentId} (${entry.locale})`));
       }
-      // Unchanged save on top of the head: nothing to record, the head already reflects this state.
       if (entry.kind === "save" && parentId === headId && parent && !parent.skipped) {
         const status = entry.status ?? null;
         if (status === parent.status && deepEqual(entry.fields, parent.snapshot)) {

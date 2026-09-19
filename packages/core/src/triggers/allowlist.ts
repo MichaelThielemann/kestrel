@@ -10,8 +10,6 @@ function invalid(entry: string, reason: string): Error {
   return new Error(`ip allowlist: invalid entry ${JSON.stringify(entry)} (${reason})`);
 }
 
-// Strips an IPv6 zone id and unwraps an IPv4-mapped IPv6 address so both sides of the check use
-// the same family the operator wrote into the list.
 export function normalizeIp(ip: string): { address: string; family: "ipv4" | "ipv6" } | null {
   const bare = ip.includes("%") ? (ip.split("%")[0] ?? "") : ip;
   const mapped = MAPPED_IPV4.exec(bare);

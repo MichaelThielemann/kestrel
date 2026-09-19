@@ -8,7 +8,7 @@ function logLine(calls: unknown[][], index: number): Record<string, unknown> {
 
 describe("localIso", () => {
   it("formats with milliseconds and the local UTC offset", () => {
-    const date = new Date(2026, 7, 29, 21, 45, 12, 345); // month is 0-based: August
+    const date = new Date(2026, 7, 29, 21, 45, 12, 345);
     const offsetMinutes = -date.getTimezoneOffset();
     const sign = offsetMinutes >= 0 ? "+" : "-";
     const abs = Math.abs(offsetMinutes);

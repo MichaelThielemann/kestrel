@@ -20,8 +20,6 @@ const CONTEXT_PATH = /^[a-zA-Z][A-Za-z0-9]*(\.[A-Za-z0-9_-]+)*\??$/;
 /** The argument a factory step's describe() sees when no pipeline supplies one. */
 export const PLACEHOLDER_ARG = "<arg>";
 
-// Walks the prototype chain (like `missingMethods` in defineContract.ts, via
-// property access) so a class-instance step map registers its inherited methods too.
 function stepKeys(steps: StepMap): string[] {
   const keys = new Set<string>();
   let obj: object | null = steps;

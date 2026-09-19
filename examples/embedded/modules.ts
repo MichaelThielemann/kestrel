@@ -7,7 +7,6 @@ import migrationsDefault from "@michaelthielemann/kestrel-migrations-default";
 import persistenceSqlite from "@michaelthielemann/kestrel-persistence-sqlite";
 import siteDefault from "@michaelthielemann/kestrel-site-default";
 
-/** Same order as `config.modules`; boot pairs the two lists positionally. */
 const modules = [eventsInmemory, persistenceSqlite, authnSingle, authzRoles, contentDefault, siteDefault, migrationsDefault] as const;
 
 export default modules;
