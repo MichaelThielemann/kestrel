@@ -106,6 +106,11 @@ export interface Revisions {
   /**
    * Appends a revision and makes it the head. `NOT_FOUND` when a named `parentId` is not a
    * revision of the same collection, document and locale, so an edge never leaves its history.
+   *
+   * A `save` whose parent is the current head and whose snapshot and status are both identical
+   * (deep, key-order-independent) to that head's is not recorded; the call succeeds and returns
+   * the head's summary unchanged. A skipped (oversized) snapshot never counts as identical. A
+   * `restore`, and a `save` whose parent is not the head, are always recorded.
    */
   record(entry: NewRevision): Promise<Result<RevisionSummary, RevisionsError>>;
   list(collection: string, documentId: string, locale: string, options?: RevisionListOptions): Promise<Result<RevisionPage, RevisionsError>>;
