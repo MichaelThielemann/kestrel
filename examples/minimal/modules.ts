@@ -11,6 +11,7 @@ import contentDefault from "@michaelthielemann/kestrel-content-default";
 import siteDefault from "@michaelthielemann/kestrel-site-default";
 import referencesDefault from "@michaelthielemann/kestrel-references-default";
 import linksDefault from "@michaelthielemann/kestrel-links-default";
+import revisionsDefault from "@michaelthielemann/kestrel-revisions-default";
 import validateJsonschema from "@michaelthielemann/kestrel-validate-jsonschema";
 import migrationsDefault from "@michaelthielemann/kestrel-migrations-default";
 import rendererPlain from "@michaelthielemann/kestrel-renderer-plain";
@@ -35,6 +36,7 @@ const modules = [
   siteDefault,
   referencesDefault,
   linksDefault,
+  revisionsDefault,
   validateJsonschema,
   migrationsDefault,
   rendererPlain,

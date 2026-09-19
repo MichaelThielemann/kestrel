@@ -152,6 +152,9 @@ importers:
       '@michaelthielemann/kestrel-replication-sqlite':
         specifier: workspace:*
         version: link:../../packages/replication-sqlite
+      '@michaelthielemann/kestrel-revisions-default':
+        specifier: workspace:*
+        version: link:../../packages/revisions-default
       '@michaelthielemann/kestrel-sanitize-svg':
         specifier: workspace:*
         version: link:../../packages/sanitize-svg
@@ -565,6 +568,22 @@ importers:
         version: 3.2.7(@types/node@22.20.1)
 
   packages/replication-sqlite:
+    dependencies:
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@michaelthielemann/kestrel':
+        specifier: workspace:*
+        version: link:../core
+      '@michaelthielemann/kestrel-contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@22.20.1)
+
+  packages/revisions-default:
     dependencies:
       zod:
         specifier: ^3.23.8

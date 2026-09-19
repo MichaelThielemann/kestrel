@@ -515,7 +515,7 @@ an event receives this data as its `payload`.
 | Event | `id` is |
 |---|---|
 | `auth.loggedIn` / `auth.loggedOut` | user id |
-| `page.created` / `page.updated` / `page.deleted` | document id |
+| `page.created` / `page.updated` / `page.deleted` / `page.restored` | document id |
 | `media.uploaded` / `media.updated` / `media.deleted` | document id (for a bulk upload of several files: `null`, plus `ids: string[]` — the newly stored items only) |
 | `user.created` / `user.updated` / `user.deactivated` / `user.deleted` | document id |
 | `migrations.applied` | – (no envelope: the `migrations/default` module sends its own `{ migrations: [id], documents }` after a run; deliberately no `page.updated` per document it migrated). The named exception to rule 3: `apply()` is a contract method that also runs at boot, and after a partial failure the event still has to cover the migrations already applied — an `events.emit` step after a failing `migrations.apply` would never run. The module declares it as `emits: ["migrations.applied"]`, so a trigger on it boots without the warning above |
@@ -555,6 +555,28 @@ steps `events.readQueueStatus`, `events.listDead`, `events.retryDead:all|one`,
 must be idempotent (the envelope's `eventId` is the dedup key). A persistence failure on write
 fails the `events.emit` step with 503 `TRANSIENT` rather than dropping the event. The payload
 rules stay the same: no tokens (`identity` only), a frozen shallow copy per handler.
+
+## Replaying a Stored Payload
+
+A flow that has to save something the system stored earlier — restoring a revision, replaying an
+import — does not get a second write path. One step puts the stored fields into `body` and
+`payload` (declaring both in its `writes`), and behind it stands the ordinary write chain:
+
+```ts
+steps: ["authn.requireUser", "authz.require:pages.write", "revisions.restore:pages",
+        "validate.check:pages.body", "validate.sanitize:pages.body", "validate.check:pages.body",
+        "references.check:pages", "content.update:pages", "revisions.record:pages",
+        "references.index:pages", "links.extract:pages", "delivery.publish:pages",
+        "delivery.exportLlms", "events.emit:page.restored"]
+```
+
+Everything after the third step is `updatePage` verbatim. Old content therefore passes the same
+validation, sanitizing, reference check and delivery as a hand-typed edit, the schema check the
+runner performs per step applies to it (which is why `body` is written, not only `payload`), and a
+change to the write flow cannot be forgotten in the replay. A step that needs to tell a later step
+*how* the payload came about puts that on the context, not in the payload:
+`revisions.restore` writes `revisionParent`, and `revisions.record` reads it to hang the new
+revision off the restored one instead of off the head.
 
 ## Rules
 

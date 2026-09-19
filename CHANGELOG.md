@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Added
+
+- New contract `revisions@1` (`@michaelthielemann/kestrel-contracts/revisions`) with a contract test
+  suite and the in-memory `testing/fakeRevisions` for other packages' tests: an append-only history
+  per collection, document and locale. `record` appends a full snapshot and moves the head, `list`
+  pages it newest first without snapshots and names the head, `read` adds the snapshot, `label`
+  names a revision, `prune` applies retention and `remove` drops a document's or one locale's
+  history. Importing the contract puts `revisionParent` on the context: the revision the next
+  `record` of that run branches from.
+- New module `revisions/default` (`@michaelthielemann/kestrel-revisions-default`) providing
+  `revisions@1` on `persistence@1`, with `content@1` optional for the default locale. Branching
+  follows from `parentId` alone: a save's parent is the head, a save made by a restore is the
+  restored revision, which forks the line there — switching branches is restoring that branch's tip
+  and saving again. Deliberately no merge. Steps `revisions.record:<collection>` (after
+  `content.create`/`content.update`, reads the saved document from the result),
+  `revisions.restore:<collection>` (puts the snapshot into `body` and `payload` so the existing
+  update chain validates, sanitizes, saves, indexes and publishes it), `revisions.list`,
+  `revisions.read`, `revisions.label`, `revisions.prune` (cron), `revisions.remove` and
+  `revisions.removeTranslation`.
+- `revisions/default` retention: `keep` (50) newest per document and locale plus every revision that
+  was ever live (`statusField`/`liveStatuses`), every labelled one, the head, every branch tip and
+  every branch point; survivors are re-parented onto their nearest surviving ancestor, so a
+  `parentId` chain never breaks. `pruneOnWrite` (true) prunes the written group on every save, the
+  `revisions.prune` step does the whole store. A snapshot beyond `maxSnapshotBytes` (1 MiB) is
+  recorded as `skipped: true` with a `warn` log line and no content — the save never fails for it,
+  only restoring such a revision does (409).
+- `examples/minimal`: `GET /admin/pages/:id/revisions`, `GET …/:revisionId`,
+  `POST …/:revisionId/restore`, `PATCH …/:revisionId` (label) and a nightly `pruneRevisions` cron;
+  listing and reading need `pages.manage`, restoring and labelling `pages.write`. `createPage` and
+  `updatePage` record right after the content step, `deletePage` and `deletePageTranslation` drop
+  the history with the document or the translation. Restoring emits `page.restored`.
+
 ## 5.6.0 – 2026-09-19
 
 ### Added

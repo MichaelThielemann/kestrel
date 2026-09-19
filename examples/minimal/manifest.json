@@ -9,6 +9,7 @@
     "authn@1",
     "content@1",
     "site@1",
+    "revisions@1",
     "validate@1",
     "events@1",
     "migrations@1",
@@ -1469,6 +1470,146 @@
         "links.check",
         "links.report",
         "links.rebuild"
+      ],
+      "eventHook": false,
+      "emits": []
+    },
+    {
+      "name": "revisions/default",
+      "use": "@michaelthielemann/kestrel-revisions-default",
+      "version": "5.6.0",
+      "provides": [
+        "revisions@1"
+      ],
+      "requires": [
+        "persistence@1"
+      ],
+      "optional": [
+        "content@1"
+      ],
+      "config": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "keep": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 50
+            },
+            "maxSnapshotBytes": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 1048576
+            },
+            "pruneOnWrite": {
+              "type": "boolean",
+              "default": true
+            },
+            "statusField": {
+              "type": "string",
+              "minLength": 1,
+              "default": "status"
+            },
+            "liveStatuses": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "default": [
+                "published"
+              ]
+            },
+            "maxLimit": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 100
+            }
+          },
+          "additionalProperties": false
+        },
+        "variables": [
+          {
+            "path": "keep",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": 50,
+            "redacted": false,
+            "default": 50
+          },
+          {
+            "path": "maxSnapshotBytes",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 1048576,
+            "redacted": false,
+            "default": 1048576
+          },
+          {
+            "path": "pruneOnWrite",
+            "type": "boolean",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": true,
+            "redacted": false,
+            "default": true
+          },
+          {
+            "path": "statusField",
+            "type": "string",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": "status",
+            "redacted": false,
+            "default": "status"
+          },
+          {
+            "path": "liveStatuses",
+            "type": "array",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": [
+              "published"
+            ],
+            "redacted": false,
+            "default": [
+              "published"
+            ]
+          },
+          {
+            "path": "maxLimit",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 100,
+            "redacted": false,
+            "default": 100
+          }
+        ]
+      },
+      "steps": [
+        "revisions.record",
+        "revisions.list",
+        "revisions.read",
+        "revisions.restore",
+        "revisions.label",
+        "revisions.prune",
+        "revisions.remove",
+        "revisions.removeTranslation"
       ],
       "eventHook": false,
       "emits": []
@@ -6740,6 +6881,494 @@
       }
     },
     {
+      "name": "revisions.record",
+      "module": "revisions/default",
+      "factory": true,
+      "description": {
+        "summary": "Record the saved <arg> document from the result as a revision; its parent is the head, or the revision a restore put on the context",
+        "reads": [
+          "result"
+        ],
+        "writes": [],
+        "query": {
+          "locale": {
+            "type": "string"
+          }
+        },
+        "errors": {
+          "503": "the revision could not be written"
+        }
+      }
+    },
+    {
+      "name": "revisions.list",
+      "module": "revisions/default",
+      "factory": true,
+      "description": {
+        "summary": "Revisions of one <arg> document and locale, newest first and without snapshots",
+        "reads": [
+          "params.id"
+        ],
+        "writes": [
+          "result"
+        ],
+        "query": {
+          "locale": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "collection": {
+                    "type": "string"
+                  },
+                  "documentId": {
+                    "type": "string"
+                  },
+                  "locale": {
+                    "type": "string"
+                  },
+                  "parentId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "author": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "name": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name"
+                    ]
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "save",
+                      "restore"
+                    ]
+                  },
+                  "label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "live": {
+                    "type": "boolean"
+                  },
+                  "bytes": {
+                    "type": "number"
+                  },
+                  "skipped": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "id",
+                  "collection",
+                  "documentId",
+                  "locale",
+                  "parentId",
+                  "createdAt",
+                  "author",
+                  "kind",
+                  "label",
+                  "status",
+                  "live",
+                  "bytes",
+                  "skipped"
+                ]
+              }
+            },
+            "total": {
+              "type": "number"
+            },
+            "head": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "items",
+            "total",
+            "head"
+          ]
+        },
+        "errors": {
+          "400": "missing id"
+        }
+      }
+    },
+    {
+      "name": "revisions.read",
+      "module": "revisions/default",
+      "factory": true,
+      "description": {
+        "summary": "One revision of a <arg> document including its snapshot",
+        "reads": [
+          "params.id",
+          "params.revisionId"
+        ],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "collection": {
+              "type": "string"
+            },
+            "documentId": {
+              "type": "string"
+            },
+            "locale": {
+              "type": "string"
+            },
+            "parentId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "createdAt": {
+              "type": "number"
+            },
+            "author": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "save",
+                "restore"
+              ]
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "live": {
+              "type": "boolean"
+            },
+            "bytes": {
+              "type": "number"
+            },
+            "skipped": {
+              "type": "boolean"
+            },
+            "snapshot": {
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "collection",
+            "documentId",
+            "locale",
+            "parentId",
+            "createdAt",
+            "author",
+            "kind",
+            "label",
+            "status",
+            "live",
+            "bytes",
+            "skipped",
+            "snapshot"
+          ]
+        },
+        "errors": {
+          "400": "missing id or revisionId",
+          "404": "no such revision"
+        }
+      }
+    },
+    {
+      "name": "revisions.restore",
+      "module": "revisions/default",
+      "factory": true,
+      "description": {
+        "summary": "Put a <arg> revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision",
+        "reads": [
+          "params.id",
+          "params.revisionId"
+        ],
+        "writes": [
+          "body",
+          "payload",
+          "revisionParent"
+        ],
+        "errors": {
+          "400": "missing id or revisionId",
+          "404": "no such revision",
+          "409": "the revision carries no snapshot"
+        }
+      }
+    },
+    {
+      "name": "revisions.label",
+      "module": "revisions/default",
+      "factory": true,
+      "description": {
+        "summary": "Name a <arg> revision, or clear its name with null; a labelled revision is never pruned",
+        "reads": [
+          "params.id",
+          "params.revisionId"
+        ],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "label"
+          ],
+          "additionalProperties": false
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "collection": {
+              "type": "string"
+            },
+            "documentId": {
+              "type": "string"
+            },
+            "locale": {
+              "type": "string"
+            },
+            "parentId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "createdAt": {
+              "type": "number"
+            },
+            "author": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "save",
+                "restore"
+              ]
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "live": {
+              "type": "boolean"
+            },
+            "bytes": {
+              "type": "number"
+            },
+            "skipped": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "collection",
+            "documentId",
+            "locale",
+            "parentId",
+            "createdAt",
+            "author",
+            "kind",
+            "label",
+            "status",
+            "live",
+            "bytes",
+            "skipped"
+          ]
+        },
+        "errors": {
+          "400": "missing id or revisionId",
+          "404": "no such revision"
+        }
+      }
+    },
+    {
+      "name": "revisions.prune",
+      "module": "revisions/default",
+      "factory": false,
+      "description": {
+        "summary": "Apply the retention rules to every recorded document and locale",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "inspected": {
+              "type": "number"
+            },
+            "removed": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "inspected",
+            "removed"
+          ]
+        }
+      }
+    },
+    {
+      "name": "revisions.remove",
+      "module": "revisions/default",
+      "factory": true,
+      "description": {
+        "summary": "Drop every revision of a <arg> document, in every locale",
+        "reads": [
+          "params.id"
+        ],
+        "writes": [],
+        "errors": {
+          "400": "missing id"
+        }
+      }
+    },
+    {
+      "name": "revisions.removeTranslation",
+      "module": "revisions/default",
+      "factory": true,
+      "description": {
+        "summary": "Drop the revisions of one locale of a <arg> document",
+        "reads": [
+          "params.id"
+        ],
+        "writes": [],
+        "query": {
+          "locale": {
+            "type": "string"
+          }
+        },
+        "errors": {
+          "400": "missing id"
+        }
+      }
+    },
+    {
       "name": "validate.sanitize",
       "module": "validate/jsonschema",
       "factory": true,
@@ -9057,6 +9686,26 @@
           }
         },
         {
+          "spec": "revisions.record:pages",
+          "name": "revisions.record",
+          "module": "revisions/default",
+          "description": {
+            "summary": "Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context",
+            "reads": [
+              "result"
+            ],
+            "writes": [],
+            "query": {
+              "locale": {
+                "type": "string"
+              }
+            },
+            "errors": {
+              "503": "the revision could not be written"
+            }
+          }
+        },
+        {
           "spec": "references.index:pages",
           "name": "references.index",
           "module": "references/default",
@@ -9717,6 +10366,21 @@
           }
         },
         {
+          "spec": "revisions.remove:pages",
+          "name": "revisions.remove",
+          "module": "revisions/default",
+          "description": {
+            "summary": "Drop every revision of a pages document, in every locale",
+            "reads": [
+              "params.id"
+            ],
+            "writes": [],
+            "errors": {
+              "400": "missing id"
+            }
+          }
+        },
+        {
           "spec": "references.unindex:pages",
           "name": "references.unindex",
           "module": "references/default",
@@ -9964,6 +10628,26 @@
               "400": "unknown or missing locale",
               "404": "document or translation not found",
               "409": "last translation – remove the document"
+            }
+          }
+        },
+        {
+          "spec": "revisions.removeTranslation:pages",
+          "name": "revisions.removeTranslation",
+          "module": "revisions/default",
+          "description": {
+            "summary": "Drop the revisions of one locale of a pages document",
+            "reads": [
+              "params.id"
+            ],
+            "writes": [],
+            "query": {
+              "locale": {
+                "type": "string"
+              }
+            },
+            "errors": {
+              "400": "missing id"
             }
           }
         },
@@ -12135,6 +12819,168 @@
       ]
     },
     {
+      "name": "labelPageRevision",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:pages.write",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission pages.write",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission pages.write"
+            }
+          }
+        },
+        {
+          "spec": "revisions.label:pages",
+          "name": "revisions.label",
+          "module": "revisions/default",
+          "description": {
+            "summary": "Name a pages revision, or clear its name with null; a labelled revision is never pruned",
+            "reads": [
+              "params.id",
+              "params.revisionId"
+            ],
+            "writes": [
+              "result"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "label"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "collection": {
+                  "type": "string"
+                },
+                "documentId": {
+                  "type": "string"
+                },
+                "locale": {
+                  "type": "string"
+                },
+                "parentId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "author": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "save",
+                    "restore"
+                  ]
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "live": {
+                  "type": "boolean"
+                },
+                "bytes": {
+                  "type": "number"
+                },
+                "skipped": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "collection",
+                "documentId",
+                "locale",
+                "parentId",
+                "createdAt",
+                "author",
+                "kind",
+                "label",
+                "status",
+                "live",
+                "bytes",
+                "skipped"
+              ]
+            },
+            "errors": {
+              "400": "missing id or revisionId",
+              "404": "no such revision"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "listAllPages",
       "steps": [
         {
@@ -13784,6 +14630,339 @@
       ]
     },
     {
+      "name": "pageRevision",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:pages.manage",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission pages.manage",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission pages.manage"
+            }
+          }
+        },
+        {
+          "spec": "revisions.read:pages",
+          "name": "revisions.read",
+          "module": "revisions/default",
+          "description": {
+            "summary": "One revision of a pages document including its snapshot",
+            "reads": [
+              "params.id",
+              "params.revisionId"
+            ],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "collection": {
+                  "type": "string"
+                },
+                "documentId": {
+                  "type": "string"
+                },
+                "locale": {
+                  "type": "string"
+                },
+                "parentId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "author": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "save",
+                    "restore"
+                  ]
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "live": {
+                  "type": "boolean"
+                },
+                "bytes": {
+                  "type": "number"
+                },
+                "skipped": {
+                  "type": "boolean"
+                },
+                "snapshot": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "collection",
+                "documentId",
+                "locale",
+                "parentId",
+                "createdAt",
+                "author",
+                "kind",
+                "label",
+                "status",
+                "live",
+                "bytes",
+                "skipped",
+                "snapshot"
+              ]
+            },
+            "errors": {
+              "400": "missing id or revisionId",
+              "404": "no such revision"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "pageRevisions",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:pages.manage",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission pages.manage",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission pages.manage"
+            }
+          }
+        },
+        {
+          "spec": "revisions.list:pages",
+          "name": "revisions.list",
+          "module": "revisions/default",
+          "description": {
+            "summary": "Revisions of one pages document and locale, newest first and without snapshots",
+            "reads": [
+              "params.id"
+            ],
+            "writes": [
+              "result"
+            ],
+            "query": {
+              "locale": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "collection": {
+                        "type": "string"
+                      },
+                      "documentId": {
+                        "type": "string"
+                      },
+                      "locale": {
+                        "type": "string"
+                      },
+                      "parentId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "number"
+                      },
+                      "author": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name"
+                        ]
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "save",
+                          "restore"
+                        ]
+                      },
+                      "label": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "live": {
+                        "type": "boolean"
+                      },
+                      "bytes": {
+                        "type": "number"
+                      },
+                      "skipped": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "collection",
+                      "documentId",
+                      "locale",
+                      "parentId",
+                      "createdAt",
+                      "author",
+                      "kind",
+                      "label",
+                      "status",
+                      "live",
+                      "bytes",
+                      "skipped"
+                    ]
+                  }
+                },
+                "total": {
+                  "type": "number"
+                },
+                "head": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "items",
+                "total",
+                "head"
+              ]
+            },
+            "errors": {
+              "400": "missing id"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "pruneImages",
       "steps": [
         {
@@ -13860,6 +15039,38 @@
             },
             "errors": {
               "400": "missing sizes, or a name is still declared or has no variants"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "pruneRevisions",
+      "steps": [
+        {
+          "spec": "revisions.prune",
+          "name": "revisions.prune",
+          "module": "revisions/default",
+          "description": {
+            "summary": "Apply the retention rules to every recorded document and locale",
+            "reads": [],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "object",
+              "properties": {
+                "inspected": {
+                  "type": "number"
+                },
+                "removed": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "inspected",
+                "removed"
+              ]
             }
           }
         }
@@ -15429,6 +16640,486 @@
       ]
     },
     {
+      "name": "restorePageRevision",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:pages.write",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission pages.write",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission pages.write"
+            }
+          }
+        },
+        {
+          "spec": "revisions.restore:pages",
+          "name": "revisions.restore",
+          "module": "revisions/default",
+          "description": {
+            "summary": "Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision",
+            "reads": [
+              "params.id",
+              "params.revisionId"
+            ],
+            "writes": [
+              "body",
+              "payload",
+              "revisionParent"
+            ],
+            "errors": {
+              "400": "missing id or revisionId",
+              "404": "no such revision",
+              "409": "the revision carries no snapshot"
+            }
+          }
+        },
+        {
+          "spec": "validate.check:pages.body",
+          "name": "validate.check",
+          "module": "validate/jsonschema",
+          "description": {
+            "summary": "Validate payload field pages.body against its JSON Schema",
+            "reads": [],
+            "writes": [],
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "errors": {
+              "400": "schema violation (path and message per problem)"
+            }
+          }
+        },
+        {
+          "spec": "validate.sanitize:pages.body",
+          "name": "validate.sanitize",
+          "module": "validate/jsonschema",
+          "description": {
+            "summary": "Sanitize HTML at format:\"html\" positions of payload field pages.body",
+            "reads": [],
+            "writes": [
+              "payload.body?"
+            ],
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        {
+          "spec": "validate.check:pages.body",
+          "name": "validate.check",
+          "module": "validate/jsonschema",
+          "description": {
+            "summary": "Validate payload field pages.body against its JSON Schema",
+            "reads": [],
+            "writes": [],
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "errors": {
+              "400": "schema violation (path and message per problem)"
+            }
+          }
+        },
+        {
+          "spec": "references.check:pages",
+          "name": "references.check",
+          "module": "references/default",
+          "description": {
+            "summary": "Referenced ids of pages must exist",
+            "reads": [],
+            "writes": [],
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "errors": {
+              "400": "a referenced document does not exist"
+            }
+          }
+        },
+        {
+          "spec": "content.update:pages",
+          "name": "content.update",
+          "module": "content/default",
+          "description": {
+            "summary": "Update a pages",
+            "reads": [
+              "params.id"
+            ],
+            "writes": [
+              "result"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "slug": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "title": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "body": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "status": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "finished",
+                        "published"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "hero": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a media"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "seo": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "locale": {
+                  "type": "string",
+                  "enum": [
+                    "de",
+                    "en"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                },
+                "slug": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "title": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "body": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "status": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "finished",
+                        "published"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "hero": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a media"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "seo": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "_locales": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "origin locale per field, only with fallback"
+                },
+                "_translations": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "description": "per locale: required localized fields present"
+                }
+              },
+              "required": [
+                "id",
+                "createdAt",
+                "updatedAt"
+              ]
+            },
+            "errors": {
+              "400": "validation failed",
+              "404": "not found"
+            }
+          }
+        },
+        {
+          "spec": "revisions.record:pages",
+          "name": "revisions.record",
+          "module": "revisions/default",
+          "description": {
+            "summary": "Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context",
+            "reads": [
+              "result"
+            ],
+            "writes": [],
+            "query": {
+              "locale": {
+                "type": "string"
+              }
+            },
+            "errors": {
+              "503": "the revision could not be written"
+            }
+          }
+        },
+        {
+          "spec": "references.index:pages",
+          "name": "references.index",
+          "module": "references/default",
+          "description": {
+            "summary": "Index the references of a pages document",
+            "reads": [
+              "result.id"
+            ],
+            "writes": []
+          }
+        },
+        {
+          "spec": "links.extract:pages",
+          "name": "links.extract",
+          "module": "links/default",
+          "description": {
+            "summary": "Index external links of pages",
+            "reads": [
+              "result.id"
+            ],
+            "writes": []
+          }
+        },
+        {
+          "spec": "delivery.publish:pages",
+          "name": "delivery.publish",
+          "module": "delivery/static",
+          "description": {
+            "summary": "Render and store published locales of a pages",
+            "reads": [
+              "result.id"
+            ],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "object",
+              "properties": {
+                "document": {
+                  "type": "object"
+                },
+                "delivery": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string"
+                      },
+                      "docId": {
+                        "type": "string"
+                      },
+                      "locale": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "live",
+                          "error",
+                          "draft"
+                        ]
+                      },
+                      "path": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "publishedAt": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "updatedAt": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "docId",
+                      "locale",
+                      "state",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "spec": "delivery.exportLlms",
+          "name": "delivery.exportLlms",
+          "module": "delivery/static",
+          "description": {
+            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",
+            "reads": [],
+            "writes": [
+              "result.llms"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "llms": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "integer"
+                    },
+                    "full": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "entries",
+                    "full"
+                  ]
+                }
+              },
+              "required": [
+                "llms"
+              ]
+            }
+          }
+        },
+        {
+          "spec": "events.emit:page.restored",
+          "name": "events.emit",
+          "module": "events/inmemory",
+          "description": {
+            "summary": "Emit event \"page.restored\" to every subscribed handler pipeline",
+            "reads": [],
+            "writes": []
+          }
+        }
+      ]
+    },
+    {
       "name": "resumeImages",
       "steps": [
         {
@@ -16900,6 +18591,26 @@
           }
         },
         {
+          "spec": "revisions.record:pages",
+          "name": "revisions.record",
+          "module": "revisions/default",
+          "description": {
+            "summary": "Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context",
+            "reads": [
+              "result"
+            ],
+            "writes": [],
+            "query": {
+              "locale": {
+                "type": "string"
+              }
+            },
+            "errors": {
+              "503": "the revision could not be written"
+            }
+          }
+        },
+        {
           "spec": "references.index:pages",
           "name": "references.index",
           "module": "references/default",
@@ -17719,6 +19430,26 @@
         "pipeline": "deletePageTranslation"
       },
       {
+        "method": "GET",
+        "path": "/admin/pages/:id/revisions",
+        "pipeline": "pageRevisions"
+      },
+      {
+        "method": "GET",
+        "path": "/admin/pages/:id/revisions/:revisionId",
+        "pipeline": "pageRevision"
+      },
+      {
+        "method": "POST",
+        "path": "/admin/pages/:id/revisions/:revisionId/restore",
+        "pipeline": "restorePageRevision"
+      },
+      {
+        "method": "PATCH",
+        "path": "/admin/pages/:id/revisions/:revisionId",
+        "pipeline": "labelPageRevision"
+      },
+      {
         "method": "POST",
         "path": "/media",
         "pipeline": "uploadMedia"
@@ -17884,6 +19615,10 @@
       {
         "expression": "*/5 * * * *",
         "pipeline": "sweepRateLimits"
+      },
+      {
+        "expression": "15 3 * * *",
+        "pipeline": "pruneRevisions"
       },
       {
         "expression": "*/5 * * * *",
