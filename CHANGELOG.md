@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 5.7.0 – 2026-09-19
+
 ### Added
 
 - New contract `revisions@1` (`@michaelthielemann/kestrel-contracts/revisions`) with a contract test
