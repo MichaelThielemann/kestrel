@@ -92,12 +92,15 @@ export type RevisionsError = KestrelError<"NOT_FOUND" | "TRANSIENT">;
  * revision, which forks the line there. There is no merge.
  */
 export interface Revisions {
-  /** Appends a revision and makes it the head. `NOT_FOUND` when a named `parentId` does not exist. */
+  /**
+   * Appends a revision and makes it the head. `NOT_FOUND` when a named `parentId` is not a
+   * revision of the same collection, document and locale, so an edge never leaves its history.
+   */
   record(entry: NewRevision): Promise<Result<RevisionSummary, RevisionsError>>;
   list(collection: string, documentId: string, locale: string, options?: RevisionListOptions): Promise<Result<RevisionPage, RevisionsError>>;
-  /** The revision including its snapshot; an unknown id is `Ok(null)`, not an error. */
+  /** The revision including its snapshot; an id of another document or collection is `Ok(null)`, like an unknown one. */
   read(collection: string, documentId: string, revisionId: string): Promise<Result<Revision | null, RevisionsError>>;
-  /** Sets or, with `null`, clears the label. */
+  /** Sets or, with `null`, clears the label; an id of another document or collection is `NOT_FOUND`. */
   label(collection: string, documentId: string, revisionId: string, label: string | null): Promise<Result<RevisionSummary, RevisionsError>>;
   head(collection: string, documentId: string, locale: string): Promise<Result<string | null, RevisionsError>>;
   /** Applies the retention rules; a removed revision's children are re-parented, never orphaned. */

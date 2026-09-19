@@ -58,7 +58,10 @@ export function createFakeRevisions(options: FakeRevisionsOptions = {}): Revisio
     async record(entry: NewRevision): Promise<Result<RevisionSummary, RevisionsError>> {
       const key = groupKey(entry.collection, entry.documentId, entry.locale);
       const parentId = entry.parentId === undefined ? (heads.get(key) ?? null) : entry.parentId;
-      if (parentId !== null && !entries.has(parentId)) return err(failure("NOT_FOUND", `revisions: no revision "${parentId}"`));
+      const parent = parentId === null ? null : entries.get(parentId);
+      if (parentId !== null && (!parent || groupKey(parent.collection, parent.documentId, parent.locale) !== key)) {
+        return err(failure("NOT_FOUND", `revisions: no revision "${parentId}" of ${entry.collection}/${entry.documentId} (${entry.locale})`));
+      }
       const snapshot = { ...entry.fields };
       const stored: Stored = {
         id: randomUUID(),
