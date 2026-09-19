@@ -11,6 +11,10 @@ passed to the handler pipeline as `parentRunId`, so its step log lines point bac
 emitted the event.
 Not included: delivery across processes or restarts (use a broker-backed events module).
 
+The step argument follows the `name:arg` shape every other step uses, query string included:
+`events.emit:page.created?with=result` parses the same way `authz.require:x` parses its own
+colon-delimited argument.
+
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
 `@michaelthielemann/kestrel-events-inmemory` – module `events/inmemory`: provides `events@1`; provides the event trigger hook.

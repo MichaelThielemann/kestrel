@@ -8,8 +8,14 @@ the SDK's retry limit including the first try). `put` stores the `contentType` h
 `Content-Type`, so a bucket served directly answers with the right type; `get` returns bytes only
 and `list` reports key and size. The store never wrote sidecar files.
 
+`move` copies through `CopyObject`, whose `CopySource` is a path: the segments are percent-encoded,
+the slashes separating them are not.
+
 `pnpm test:s3` runs the `blobstore@1` contract test against a real MinIO instance in Podman
-(starts it, creates the bucket, runs `minio.test.ts`, always stops the container).
+(starts it, creates the bucket, runs `minio.test.ts`, always stops the container). Only a real
+S3-compatible target exercises the `CopySource` encoding and the `NoSuchKey`/404 detection on
+`CopyObject`, which a fake says nothing about. `@aws-sdk/client-s3` is a dependency of this package
+alone and not of the workspace root, so the script resolves it from here.
 
 ## Errors
 

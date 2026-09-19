@@ -64,6 +64,25 @@ library — a cancel would only add a state in which rows are half-written and t
 has to guess whether to trust them. Stopping it is `close()` (teardown), which pauses the job at its
 cursor.
 
+## Internals
+
+**Concurrency.** Callers that reach the same media id at once — an upload event and the sync loop,
+say — share one render: the second awaits the first caller's in-flight promise instead of reading
+and writing the variant rows of its own. Two callers starting a sync in the same tick share the
+start the same way, so only one job row is ever created.
+
+**Blob keys.** A size whose format changed renders to a new blob key, so the variant's previous blob
+is deleted along with the rewrite; nothing references it any more.
+
+**Chunking.** SQLite caps the number of bound parameters, so a large `in` filter over media ids is
+sent as several queries instead of one.
+
+**Progress.** The job's counters and cursor are written per image, not per chunk: a long chunk would
+otherwise look stalled to `images.readStatus` and trip the `staleAfterMs` takeover.
+
+**Export.** `images.export:<dir>` nests its counts under their own key in `result`, so running it
+after `media.export` in one pipeline keeps that step's counts.
+
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
 `@michaelthielemann/kestrel-images-default` – module `images/default`: provides no contract; requires `blobstore@1`, `persistence@1`.

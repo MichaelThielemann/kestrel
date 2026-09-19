@@ -29,11 +29,15 @@ timeout is `Err(TRANSIENT)` (503, `retryable`, `details.retryAfterSeconds: 1`), 
 included; for a unique field the error carries `details: { collection, field }` and applies to
 `createOne`, `createMany`, `updateOne` and `updateMany` alike. `updateOne` on a missing id is `Err(NOT_FOUND)`, `deleteOne` on one is `Ok`. Everything
 else – unknown collection, unknown field, `id` in a schema, a non-string for a string column –
-stays a throw, because it is a wiring bug.
+stays a throw, because it is a wiring bug. `node:sqlite` reports the *extended* result code in
+`errcode` (a primary-key collision is 1555), so the mapping masks it with `0xff` to get the primary
+code: 5 `SQLITE_BUSY`, 6 `SQLITE_LOCKED`, 19 `SQLITE_CONSTRAINT`.
 
 `persistence.snapshot:<file>` writes a transactionally consistent copy via
 `VACUUM INTO` (safe while writes are in flight) – back that file up, not the live database.
-`persistence.checkpoint` folds the WAL into the main file.
+`persistence.checkpoint` folds the WAL into the main file. Both are maintenance calls outside
+`persistence@1`, so they signal a locked database by throwing; the steps turn that into the same
+`TRANSIENT` the contract methods return.
 
 | Step | reads | writes | errors |
 |---|---|---|---|

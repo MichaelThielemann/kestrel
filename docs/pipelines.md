@@ -144,7 +144,9 @@ export default defineConfig({
 ```
 
 Routes: `:name` captures one segment, `*name` as the last segment captures the rest of the
-path (possibly empty); exact routes win over wildcards. `use` is a package name or a
+path (possibly empty); exact routes win over wildcards, and per segment the order is literal,
+`:param`, end of route, `*rest`. A percent-encoded `/` inside a segment never matches, because it
+would make the rest of the path indistinguishable from a deeper one. `use` is a package name or a
 relative path; the default export must be a `defineModule()`. Only installed or listed
 modules are active — Kestrel brings nothing along implicitly.
 
@@ -181,7 +183,8 @@ survives as a comma-separated string, which is why cookie auth works.
 ### HTTP Operation
 
 Every response carries `X-Kestrel-Run-Id` (error responses also in the body),
-`X-Content-Type-Options: nosniff` and `Cache-Control: no-store`. A submitted
+`X-Content-Type-Options: nosniff` and `Cache-Control: no-store`. Headers a step sets may add to
+those, never weaken them: the mandatory ones are written last. A submitted
 `X-Request-Id` shows up as `requestId` in the context, in the `http` log line and again in
 the response header. Each request produces one `http` log line with method, path, pipeline,
 status, duration, IP and — if present — `requestId`. `http.timeouts` sets `requestMs`
@@ -196,7 +199,8 @@ first value is the client, a missing header yields no address. `http.allow` (def
 restricts the whole server to a list of IPv4/IPv6 addresses or CIDR ranges
 (`["203.0.113.0/24", "2001:db8::/32", "10.0.0.5"]`): every request — health, CORS preflight and
 routes alike — is checked before routing against that client address, an IPv4-mapped IPv6 peer
-(`::ffff:10.0.0.5`) counts as IPv4, no address or one outside the list answers `403 forbidden`
+(`::ffff:10.0.0.5`) counts as IPv4 and an IPv6 zone id (`fe80::1%eth0`) is stripped, so both sides
+of the check use the family the operator wrote; no address or one outside the list answers `403 forbidden`
 without details; an entry that is neither an address nor a CIDR range stops the boot naming the
 entry. Rate limits are a step:
 `ratelimit.check:login` before `authn.login` (module `ratelimit-memory`).

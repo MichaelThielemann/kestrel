@@ -7,7 +7,10 @@ error union of each contract is declared next to it (`PersistenceError`, `Conten
 `errors.ts` re-exports the core error model the contract files build on. A `throw` is left for
 wiring bugs only.
 `testing/fakePersistence` is an in-memory `persistence@1` for tests of modules that need one;
-`failNext(code)` makes its next call answer `Err`. `testing/result` holds `expectOk` / `expectErr`
+`failNext(code)` makes its next call answer `Err`. It mirrors SQLite's own semantics so a module
+behaves the same against both: a REAL renders as `%!.15g` (always a fractional digit, exponential
+below 1e-4), `LIKE` folds case for ASCII letters only, and without a declared schema the column type
+is inferred from the stored value. `testing/result` holds `expectOk` / `expectErr`
 for the suites.
 `links` is not a contract but a pure helper pair shared by the modules that read internal
 references (`INTERNAL_REF`, `collectInternalRefs`).

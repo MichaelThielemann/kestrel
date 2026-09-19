@@ -41,6 +41,10 @@ and `timeouts: { requestMs, headersMs, keepAliveMs }` (defaults 30000 / 10000 / 
 `x-request-id` header of short printable ASCII becomes `ctx.requestId`, appears in the `http` log
 line and is echoed as the `x-request-id` response header next to `x-kestrel-run-id`.
 
+## Logging
+`consoleLogger` stamps every line with ISO 8601 and the local UTC offset rather than `Z`: it runs on
+one machine, and the offset keeps the line readable in local time without losing the absolute point.
+
 ## Shutdown
 `stop()` closes the listener, waits for the in-flight runs and for connections still sending a
 request or receiving a response, then drops the remaining connections, stops the cron and event

@@ -9,6 +9,10 @@ compiled at boot – unreadable or invalid files and invalid inline schemas stop
 watch) and reloaded on change: a broken update (unreadable,
 invalid JSON, or a schema ajv rejects) is reported through the Kestrel logger at level `error`
 and the previous, still-working schema stays in effect – a broken schema file never stops the process.
+A failed read is retried once after a short delay, because an editor or git write can leave the file
+briefly truncated between the change event and the final content; reloads of one target run on a
+promise chain of their own, so a slow reload from an earlier event cannot overwrite the result of a
+later one that already finished.
 Recommended on for standalone dev (`pnpm start`), off in production. Step `validate.check:<type>.<field>` before `content.create/update`: `VALIDATION` (400) with
 `details.problems` (`<path> <message>` per problem, same text also in the error message) and, for
 each problem at the field's root (`path: "/"`), a matching `details.fields` entry
@@ -21,7 +25,8 @@ through an allowlist (`HTML_ALLOWLIST` in `sanitize.ts`: text/list/table tags, `
 else is dropped) – run it before `validate.check`. `validate.sanitizeHtml:<field>` does the same for a
 whole string field (richtext content fields). `oneOf` unions whose branches carry `properties.type.const` (block libraries) are turned into ajv
 discriminators at load time: only the matching branch is validated, an unknown `type` yields one
-problem. Not included: `$ref` to remote schemas, custom keywords.
+problem. A plain nullable wrapper (`anyOf: [schema, { type: "null" }]`) carries no discriminator, so
+the sanitizer selects its branch by `type` instead. Not included: `$ref` to remote schemas, custom keywords.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest

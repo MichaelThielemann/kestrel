@@ -38,6 +38,20 @@ row whose blob is gone).
 
 Not included: sitemap, CDN invalidation.
 
+## Internals
+
+**Media URL matching.** Negative lookaheads pin each match to a segment boundary: `/file-x` and
+`/fileabc` do not match `/file`, and `thumb.webp.bak` does not match `thumb.webp`, while `?` and `/`
+stay outside the class so a query string or a deeper path segment still terminates a match.
+
+**Media paths.** Blob keys are built from a path this module sanitizes itself, the same check the
+renderer-asset branch applies to `asset.path`, rather than from the stored row as it is.
+
+**llms-full.txt.** Pages sit at `###` under their section heading, so a body's own `<h1>` starts at
+`####`. The body match is greedy to the last `</main>`, so a nested `<main>` does not cut it short,
+and editor-authored text is escaped: a newline in it would forge a second document line and a
+leading marker a heading.
+
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
 `@michaelthielemann/kestrel-delivery-static` – module `delivery/static`: provides no contract; requires `content@1`, `renderer@1`, `blobstore@1`, `persistence@1`, `site@1`.

@@ -74,7 +74,10 @@ In both cases: only pipelines with a trigger are reachable from outside.
 
 ## The five rules
 
-1. **Submodules don't know each other.** Only contracts are the shared language.
+1. **Submodules don't know each other.** Only contracts are the shared language. ESLint holds a
+   module's imports to the core, the contracts, its own files, Node and its package dependencies;
+   test files may reach for another module the package declares as a devDependency, and pnpm's
+   non-hoisted `node_modules` still rejects anything undeclared.
 2. **Contracts are domain-neutral.** Test question: "Would a shop or a forum need the same
    interface?" If not, domain knowledge has slipped into the wrong layer.
    Example: `persistence@1` knows nothing about users. `authn/multi` brings its own schema.
@@ -94,7 +97,10 @@ In both cases: only pipelines with a trigger are reachable from outside.
 ## Boot sequence
 
 1. Read `kestrel.config.ts`.
-2. Load active submodules (`use` is a package name or a relative path), sort topologically by
+2. Load active submodules (`use` is a package name or a relative path, so it never equals the
+   module name; boot reduces both to name tokens to check that config and module agree, and a `use`
+   naming no loaded module at all is not an error — a third-party package need not be named after
+   the module it ships), sort topologically by
    `requires`. `optional` additionally orders a submodule after the provider of a contract, if
    that provider is active — a missing optional provider is not a boot error, and
    `deps.find(contract)` then returns `undefined` instead of throwing.

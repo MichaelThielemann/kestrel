@@ -1,7 +1,9 @@
 # replication/sqlite
 Continuous replication of the SQLite database into `blobstore@1`, Litestream-style but in-process:
 a generation starts with a full snapshot (`VACUUM INTO`), then every `replication.sync` ships the
-committed WAL frames written since the last run as a segment. Point-in-time restore = snapshot +
+committed WAL frames written since the last run as a segment. Frames written before this process
+took its first snapshot are already covered by that snapshot, and without a generation there is
+nowhere to ship them to, so they are skipped. Point-in-time restore = snapshot +
 segments up to the requested time, applied page by page. Because the writing connection lives in
 the same Node process, checkpoints (`wal_checkpoint(TRUNCATE)`) run between two synchronous steps
 and can never lose frames. Config: `file`, `prefix`, `checkpointBytes`/`checkpointSeconds`,

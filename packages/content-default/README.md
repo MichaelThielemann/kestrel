@@ -10,7 +10,9 @@ a missing translation is `null`; `fallback: true` (step argument `?fallback=true
 the default locale and reports the origin per field in `_locales`; `_translations` says per locale
 whether the required localized fields are present. `completeWhen: { field: "status", equals: "published" }` on a type refuses to set that value for
 a locale whose required localized fields are missing (`VALIDATION` naming them).
-Validates every write (unknown fields, types, required, unique, reserved names), sets
+Validates every write (unknown fields, types, required, unique, reserved names — persistence backs
+`unique` with an index, so a race that slips past the pre-check still answers the same field-shaped
+error), sets
 `createdAt`/`updatedAt`, stores dates as milliseconds. One persistence collection per type.
 Every `content@1` method returns a `Result`: a failure is an `Err(KestrelError)`, never an
 exception. Only wiring bugs throw (unknown type, `get` of a multi type without id, `create` on a
@@ -27,7 +29,9 @@ single type, `set` on a multi type, a filter on an unknown field).
 | `content.remove:<t>` | `params.id` | `result` | VALIDATION (missing id), TRANSIENT |
 | `content.removeTranslation:<t>` | `params.id` | `result` | VALIDATION, NOT_FOUND, CONFLICT, TRANSIENT |
 
-`get:<t>` reads `params.id` (none for a single type) and takes `?fallback=true`; `list:<t>` or
+`get:<t>` reads `params.id` (none for a single type) and takes `?fallback=true`; a single type
+answers with an empty document rather than a 404, unless the step argument pins a fixed filter the
+stored document can miss; `list:<t>` or
 `list:<t>?status=published` pins a fixed filter the client cannot override and reads `limit`,
 `offset` and `sort=-field` from the payload. `limit` and `offset` must be integers (`limit` ≥ 1,
 `offset` ≥ 0), `limit` at most `maxLimit` (config, default 200), `sort` a known field; anything
