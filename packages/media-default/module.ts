@@ -94,7 +94,6 @@ export default defineModule({
         if (!file) throw new Error("media/default: upload: expected exactly one file");
         const uploaded = await media.upload(file, folder, ctx.payload.provenance);
         if (isErr(uploaded)) return ctx.fail(uploaded.error);
-        // nothing was stored, so a following events.emit:media.uploaded would announce an upload that did not happen
         return uploaded.value.created ? ok({ ...ctx, result: uploaded.value.item }) : ctx.done(uploaded.value.item);
       }
       const items: MediaItem[] = [];
@@ -107,8 +106,6 @@ export default defineModule({
           if (uploaded.value.created) ids.push(uploaded.value.item.id);
           continue;
         }
-        // a per-file rejection is reported next to the files that made it through; a failing
-        // blobstore or database is not per-file and fails the whole request
         if (uploaded.error.code === "TRANSIENT") return ctx.fail(uploaded.error);
         errors.push({ filename: file.filename, status: uploaded.error.status, code: uploaded.error.code, message: uploaded.error.message });
       }

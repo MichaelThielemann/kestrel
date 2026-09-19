@@ -158,7 +158,6 @@ export function parseProvenance(value: unknown): Result<Provenance, MediaError> 
 }
 
 const MAX_TEXT_CHARS = 2000;
-// every C0/C1 control character except tab and newline, which are legitimate in a description
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F]/;
 
@@ -189,8 +188,6 @@ function exportTargetPath(base: string, folder: string, filename: string, used: 
 
 const META_SUFFIX = ".meta.json";
 const MAX_NAME_BYTES = 200;
-// image variants are owned by images/default, which this module cannot query; a media prefix that
-// happens to cover their keys must not make reconcile() report or delete them.
 const VARIANTS_PREFIX = "media-variants/";
 
 function capName(name: string): string {
@@ -205,9 +202,7 @@ function capName(name: string): string {
 export function safeName(filename: string): string {
   const base = filename.split(/[\\/]/).pop() ?? "file";
   const cleaned = base.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+/, "");
-  // capping before the .meta.json fix, so truncation can never re-create the suffix it removes
   const named = capName(cleaned === "" ? "file" : cleaned);
-  // a filename ending in .meta.json would collide with a metadata sidecar key; neutralise it here, not just in migration
   return named.replace(/\.meta\.json$/i, "-meta.json");
 }
 
@@ -219,15 +214,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
   if (isErr(items)) throw new Error(`media/default: cannot prepare collection "${COLLECTION}": ${items.error.message}`);
   const folders = await db.ensureCollection(FOLDERS, { path: "string", createdAt: "number" });
   if (isErr(folders)) throw new Error(`media/default: cannot prepare collection "${FOLDERS}": ${folders.error.message}`);
-  // rows written before `status` existed are complete uploads; without this backfill they would
-  // drop out of every `status: "ready"` filter, because SQL comparisons against NULL never match.
   const backfilled = await db.updateMany(COLLECTION, { status: { eq: null } }, { status: "ready" });
   if (isErr(backfilled)) throw new Error(`media/default: cannot backfill the status of "${COLLECTION}": ${backfilled.error.message}`);
 
-  // media shares the blobstore with replication snapshots, the static site and redirects.json, so every
-  // media blob lives under config.prefix; the stored row key is the full blobstore key.
   const blobKey = (folder: string, filename: string): string => config.prefix + keyFor(folder, filename);
-  // a repeated move finds the source already gone: if the target is there, only the row update is left to do
   const moveBlob = async (from: string, to: string): Promise<Result<void, MediaError>> => {
     const moved = await blobs.move(from, to);
     if (!isErr(moved) || moved.error.code !== "NOT_FOUND") return moved;
@@ -246,8 +236,6 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     if (isErr(taken)) return taken;
     return taken.value ? err(keyConflict(key)) : ok();
   };
-  // an upload of bytes that are already stored under this key is a repeat, not a collision: the caller gets
-  // the row that is there. Anything else under the key — other bytes, or an upload still in flight — conflicts.
   const existingFor = async (key: string, checksum: string): Promise<Result<MediaItem | null, MediaError>> => {
     const row = await db.findOne<Document>(COLLECTION, { key });
     if (isErr(row)) return row;
@@ -255,7 +243,6 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     const item = resolveWith(row.value, fallbackLocale);
     return item.status === "ready" && item.checksum === checksum ? ok(item) : err(keyConflict(key));
   };
-  // a row from an upload whose blob write failed owns nothing; it must not block its filename forever
   const releaseFailed = async (key: string): Promise<Result<void, MediaError>> => {
     const row = await db.findOne<MediaItem>(COLLECTION, { key });
     if (isErr(row)) return row;
@@ -284,10 +271,6 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     }
     return ok(n);
   };
-  // Persistence supports only one operator per field, so a subtree can't be expressed as a single gte+lt range filter.
-  // Query `field >= "<path>/"` sorted ascending and stop once a row's value leaves the "<path>/" prefix — the sort
-  // keeps every matching row contiguous at the front, so this never needs LIKE (which mistreats "_" as a wildcard
-  // and is case-insensitive on SQLite).
   const eachInSubtree = async <T extends Document>(collection: string, field: string, path: string, fn: (item: T) => Promise<Result<void, MediaError>>): Promise<Result<number, MediaError>> => {
     const prefix = `${path}/`;
     let n = 0;
@@ -305,8 +288,6 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     }
     return ok(n);
   };
-  // Same one-operator-per-field constraint as eachInSubtree. "0" (0x30) is the first codepoint after "/" (0x2F)
-  // among the characters safeFolder allows, so a row at or past "<path>0" can never be "<path>" or a descendant.
   const recursiveFolderItems = async (path: string): Promise<Result<MediaItem[], MediaError>> => {
     const boundary = `${path}0`;
     const descendant = `${path}/`;
@@ -447,7 +428,6 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       }
       const sort: Record<string, "asc" | "desc"> = { [sortBy ?? "createdAt"]: direction ?? (sortBy === undefined ? "desc" : "asc") };
       if (query !== undefined) {
-        // LIKE is ASCII case-insensitive in SQL, so it can only narrow; the exact match is applied here.
         filter.filename = { like: `%${query.replace(/[%_]/g, "")}%` };
         const page = await db.findMany<Document>(COLLECTION, filter, { sort });
         if (isErr(page)) return page;
@@ -521,8 +501,6 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         else texts[key.value] = value;
         fields[field] = texts;
       }
-      // fields is fully built and validated (including text fields) before we touch the blob, so a rejected
-      // patch never leaves the blob moved with no matching row.
       let moved: { from: string; to: string } | null = null;
       if (patch.filename !== undefined || patch.folder !== undefined) {
         const nextFolder = boundaryCast<string | undefined>(fields.folder, "host") ?? boundaryCast<string>(existing.folder, "host");
@@ -567,14 +545,12 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const item = found.value;
       const deleted = await db.deleteOne(COLLECTION, id);
       if (isErr(deleted)) return deleted;
-      // rows written before `key` was unique may still share this blob; deleting it would take their bytes too
       const shared = await db.count(COLLECTION, { key: item.key });
       if (isErr(shared)) {
         logger.error(`media/default: could not check whether blob ${item.key} of removed item ${id} is still referenced, keeping it`, { id, key: item.key, error: shared.error.message });
         return ok();
       }
       if (shared.value > 0) return ok();
-      // the row is gone, so the blob is already unreachable; media.reconcile sweeps it up later
       const dropped = await blobs.remove(item.key);
       if (isErr(dropped)) logger.error(`media/default: could not delete blob ${item.key} of removed item ${id}`, { id, key: item.key, error: dropped.error.message });
       return ok();
@@ -690,9 +666,6 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         let key = blobKey(item.folder, filename);
         const desired = key;
         if (key === item.key) return ok();
-        // a folder/filename that safeFolder/safeName would themselves change (or reject), or a key that
-        // would land on a metadata-sidecar suffix, is not safe to migrate automatically; leave it for
-        // manual cleanup instead of silently renaming or moving it.
         const cleanFolder = safeFolder(item.folder);
         if (isErr(cleanFolder) || cleanFolder.value !== item.folder || safeName(item.filename) !== item.filename || key.endsWith(META_SUFFIX)) {
           skipped += 1;
@@ -702,7 +675,6 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         const current = await blobs.get(item.key);
         if (isErr(current)) return current;
         if (current.value === null) {
-          // an interrupted earlier run may have moved the blob already; then only the row is behind
           const already = await blobs.get(desired);
           if (isErr(already)) return already;
           if (already.value !== null) {

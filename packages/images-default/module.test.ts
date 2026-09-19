@@ -201,8 +201,6 @@ describe("teardown", () => {
     await addImage(db, blobs, "a", await jpeg(200, 200));
 
     expectOk(await steps.sync(fakeCtx()));
-    // the sync loop is scheduled via setImmediate and has not run its first chunk yet, so
-    // teardown() below stops it before any variant is rendered.
     await module.teardown!(images);
 
     const job = expectOk(await db.findOne<Job>(JOBS, {}));
@@ -214,7 +212,6 @@ describe("serve step", () => {
   it("sets x-kestrel-variant: pending when the variant isn't done yet", async () => {
     const { db, blobs, steps } = await make();
     await addImage(db, blobs, "a", await jpeg(400, 300));
-    // no images.generate() call: the "thumb" variant row does not exist yet, so read() falls back
     const ctx = expectOk(await steps.serve(fakeCtx({ params: { id: "a", file: "thumb.webp" } })));
     const result = boundaryCast<{ binary: true; headers?: Record<string, string> }>(ctx.result, "host");
     expect(result.binary).toBe(true);

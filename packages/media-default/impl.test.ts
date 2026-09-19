@@ -243,7 +243,6 @@ describe("media/default", () => {
     it("remove keeps a blob another row still points at", async () => {
       const { media, blobs, db } = await make();
       const a = expectOk(await media.upload(png)).item;
-      // a pair written before the key was unique: two ids, one blob
       expectOk(await db.ensureCollection(COLLECTION, { filename: "string", folder: "string", contentType: "string", size: "number", key: "string", checksum: "string", status: "string", createdAt: "number", updatedAt: "number", provenance: "json", width: "number", height: "number", alt: "json", title: "json", description: "json" }));
       const twin = expectOk(await db.createOne(COLLECTION, { filename: a.filename, folder: "", contentType: "image/png", size: 3, key: a.key, checksum: a.checksum, status: "ready", createdAt: 1, updatedAt: 1, provenance: { origin: "unknown" }, width: null, height: null, alt: {}, title: {}, description: {} }));
       expectOk(await media.remove(twin.id));
@@ -440,7 +439,6 @@ describe("media/default", () => {
   it("update and renameFolder finish a move whose blob already reached the target", async () => {
     const { media, blobs } = await make();
     const a = expectOk(await media.upload(png, "alt")).item;
-    // simulate a crash after blobs.move but before the row update
     blobs.blobs.set("media/neu/evil-name.PNG", blobs.blobs.get(a.key)!);
     blobs.blobs.delete(a.key);
     expect(expectOk(await media.update(a.id, { folder: "neu" }))?.key).toBe("media/neu/evil-name.PNG");
@@ -615,7 +613,6 @@ describe("media/default", () => {
       const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, blobs, db, noLogger, () => ++t);
       const first = expectOk(await media.upload({ ...png, filename: "shot.png", data: new Uint8Array([1]) }, "gallery")).item;
       const second = expectOk(await media.upload({ ...png, filename: "shot2.png", data: new Uint8Array([2, 2]) }, "gallery")).item;
-      // bypass upload's per-folder filename uniqueness to exercise exportTo's own conflict-suffixing on export-target paths
       expectOk(await db.updateOne(COLLECTION, second.id, { filename: "shot.png" }));
 
       const result = expectOk(await media.exportTo(dir));

@@ -44,10 +44,8 @@ export const LLMS_KEY = "llms.txt";
 export const LLMS_FULL_KEY = "llms-full.txt";
 export const LLMS_CONTENT_TYPE = "text/plain; charset=utf-8";
 
-// Pages sit at `###` under their section, so a body's own <h1> starts at `####`.
 const BODY_HEADING_OFFSET = 3;
 
-// Editor-authored text: a newline would forge a second document line, a leading marker a heading.
 function oneLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -86,7 +84,6 @@ export function buildLlmsFullTxt(opts: { siteName: string; siteDescription?: str
   return `${blocks.join("\n\n")}\n`;
 }
 
-// Greedy to the last </main> so a nested <main> does not cut the body short.
 export function extractMain(html: string): string | null {
   const main = /<main\b[^>]*>([\s\S]*)<\/main>/i.exec(html);
   if (main) return main[1] ?? "";

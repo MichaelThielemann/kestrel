@@ -41,8 +41,6 @@ export interface Delivery {
 
 const PAGE = 100;
 
-// Collections are addressed by generated id or by delivery's own filters and every locale comes from
-// the content model, so only a transient failure of a dependency is expected here.
 function isTransientError(error: KestrelError): error is DeliveryError {
   return error.code === "TRANSIENT";
 }
@@ -81,9 +79,6 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// The negative lookaheads pin the match to a segment boundary: "/file-x" or "/fileabc" must not
-// match "/file", and "thumb.webp.bak" must not match "thumb.webp" — but "?" and "/" (query strings,
-// trailing path segments) are not in the class, so those still terminate a match correctly.
 function mediaPattern(publicPath: string): RegExp {
   return new RegExp(`${escapeRegExp(publicPath)}/([0-9a-f-]{36})/(?:file(?![A-Za-z0-9._-])|variants/([a-z][a-z0-9-]*)\\.([a-z0-9]+)(?![A-Za-z0-9._-]))`, "g");
 }
@@ -100,8 +95,6 @@ function mediaMatches(html: string, publicPath: string): MediaMatch[] {
   return out;
 }
 
-// Pure so it can be unit-tested without a Persistence/Blobstore fake: resolution of ids and copying
-// of blobs happens beforehand, this only substitutes text it already has the answer for.
 export function rewriteMedia(html: string, publicPath: string, resolve: (match: MediaMatch) => string | undefined): string {
   return html.replace(mediaPattern(publicPath), (raw, id: string, size: string | undefined) => resolve({ raw, id, ...(size === undefined ? {} : { size }) }) ?? raw);
 }
@@ -120,8 +113,6 @@ interface VariantRow extends Document {
   state: string;
 }
 
-// Mirrors the check the renderer-asset branch already applies to asset.path: media rows are normally
-// sanitized by media-default, but delivery-static must not trust that blindly when building blob keys.
 function assertSafeMediaSegment(value: string, label: string, id: string): void {
   if (value.startsWith("/") || value.split("/").some((p) => p === "..")) throw new Error(`delivery/static: invalid media ${label} ${JSON.stringify(value)} for ${id}`);
 }
@@ -210,8 +201,6 @@ export async function createDeliveryStatic(config: Config, deps: { content: Cont
     return ok();
   };
 
-  // Resolution (findMany) and copying (blobs.get/put) both need to happen before the pure rewriteMedia()
-  // substitution, so this batches them up front and then feeds a synchronous resolver into it.
   const rewriteAndCopyMedia = async (html: string, logged: Set<string>): Promise<Result<string, DeliveryError>> => {
     const media = config.media;
     if (!media) return ok(html);
@@ -273,9 +262,6 @@ export async function createDeliveryStatic(config: Config, deps: { content: Cont
       if (uploadedAssets.has(destKey)) continue;
       const blob = await blobs.get(source);
       if (isErr(blob)) return err(transientOnly(blob.error, "blobstore@1"));
-      // a row without its blob is not "unresolved" (which leaves the URL untouched) — the HTML would
-      // otherwise be rewritten to a path nothing ever writes, so this fails the publish like any other
-      // copy failure instead.
       if (!blob.value) throw new Error(`delivery/static: media blob ${source} missing for ${id}`);
       const stored = await blobs.put(destKey, blob.value, { contentType: contentTypeByExtension(dest) });
       if (isErr(stored)) return err(transientOnly(stored.error, "blobstore@1"));
