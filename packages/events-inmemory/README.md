@@ -25,6 +25,6 @@ Config: `{}` – nothing to set.
 |---|---|---|---|---|---|---|
 | `events.emit:<arg>` | Emit event "<arg>" to every subscribed handler pipeline | – | – | – | – | – |
 
-Used by 14 of 77 pipelines in `examples/minimal`.
+Used by 14 of 82 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

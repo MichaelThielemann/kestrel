@@ -11,6 +11,25 @@
   keeps its closed field type set; no config or contract change was needed. Tests cover the boot of
   such a resolved model, the rejection of a model that still names the custom type, and valid,
   invalid, localized, absent and `null` values.
+### Added
+
+- Deleting a user now decides what happens to what they wrote. `authn.deleteUser` takes an optional
+  `reassignTo` (an existing, active user, not the deleted one; 400/404 otherwise, and the user stays),
+  answers `{ ok: true, reassignTo: { id, name } | null }` and travels in the `user.deleted` payload
+  when the event is emitted with `?with=result`.
+- New step `revisions.reassignAuthor` in `revisions-default`: it rewrites the author of every
+  revision of one user, either to another user or, without a target, to the anonymous author
+  `{ id: null, name: null }`; content, snapshots, count and order stay untouched. The capability sits
+  on the module instance, not in `revisions@1` — that contract is published and therefore frozen, so
+  it grows the way `authn/multi` offers user administration beside `authn@1`.
+- New steps `audit.anonymize` (clears `identityId` and every param naming one user; the event and its
+  time stay, and an entry is never moved to another user) and `audit.prune` with the new config key
+  `retentionDays` in `audit-persistence`.
+- `examples/minimal` wires both: two pipelines on the event `user.deleted`
+  (`reassignRevisionAuthor`, `anonymizeAuditUser`), the admin routes
+  `POST /admin/users/:id/revisions/reassign` and `POST /admin/users/:id/audit/anonymize` to re-run a
+  failed one (both steps are idempotent), a nightly `pruneAudit` cron and `retentionDays: 365`.
+  `docs/api.md` gained a "Personal data" section listing what is stored where and how it disappears.
 
 ### Fixed
 

@@ -55,6 +55,6 @@ Not included: cascading deletes, automatic clearing of dangling references, expa
 | `references.report` | Broken references | – | `result` | ?target: string | object[] | – |
 | `references.rebuild` | Rebuild the reference index | – | `result` | – | { documents?: number, entries?: number, … } | – |
 
-Used by 14 of 77 pipelines in `examples/minimal`.
+Used by 14 of 82 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

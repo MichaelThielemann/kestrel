@@ -77,10 +77,26 @@ its own problem list unchanged. A block type that no longer exists is therefore 
 restore repairs — that is a content migration, which rewrites the stored documents (and, if it
 matters, the snapshots) before anyone restores them.
 
+**The author reference.** A revision keeps `author: { id, name }` as a snapshot of who saved it, so a
+later rename does not rewrite history. That reference is the only personal datum in the store, and
+`reassignAuthor(fromId, to)` is what a user deletion needs: it rewrites every revision of one author,
+either to another user or, with `null`, to the anonymous author `{ id: null, name: null }` — a
+display name for that is the frontend's business. Content, snapshots, order and count stay exactly as
+they were. The method is not part of `revisions@1`: the contract is published and therefore frozen
+(`docs/contracts.md`), so the capability lives on this module's instance and is reachable through its
+step, the same way `authn/multi` offers user administration beside `authn@1`.
+
+The step `revisions.reassignAuthor` takes the former author from `params.id` or, in a pipeline
+started by an event, from the payload's `id`, and the target from `reassignTo` — either directly in
+the payload (`{ "reassignTo": { "id", "name" } }` or `null`) or, for a `user.deleted` emitted with
+`?with=result`, from `payload.result.reassignTo`. It answers `{ from, to, revisions }`, is idempotent
+(a second run finds nothing left to move and reports `revisions: 0`) and can therefore be re-run by
+hand after a failure, through an admin route of its own.
+
 **Steps.** `revisions.record:<collection>` after `content.create`/`content.update`,
 `revisions.restore:<collection>` before the ordinary update chain (it only fills the body, the
 existing steps validate, sanitize, save, index and publish), `revisions.reportRestore` at its end,
-plus `list`, `read`, `label`, `prune`, `remove` and `removeTranslation`.
+plus `list`, `read`, `label`, `prune`, `reassignAuthor`, `remove` and `removeTranslation`.
 
 **Not included.** No diff — a block-aware diff belongs in the admin UI. No merge, no conflict
 detection, no undo stack (that is the editor's, per session). No pipelines and no routes: the
@@ -107,6 +123,7 @@ consumer wires those, `docs/api.md` shows the example instance's.
 | `revisions.restore:<arg>` | Put a <arg> revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out | `params.id`, `params.revisionId` | `body`, `payload`, `revisionParent`, `restoreReport?` | – | – | 400 missing id or revisionId; the restored fields fail validation; 404 no such revision; 409 the revision carries no snapshot |
 | `revisions.reportRestore` | Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is | – | `result.restore?` | – | { restore?: object, … } | – |
 | `revisions.label:<arg>` | Name a <arg> revision, or clear its name with null; a labelled revision is never pruned | `params.id`, `params.revisionId` | `result` | { label: string \| null } | { id: string, collection: string, documentId: string, locale: string, parentId: string \| null, createdAt: number, author: object, kind: "save" \| "restore", label: string \| null, status: string \| null, live: boolean, bytes: number, skipped: boolean, … } | 400 missing id or revisionId; 404 no such revision |
+| `revisions.reassignAuthor` | Replace the author of every revision written by the user in `params.id` or the event payload's `id`: with `reassignTo` that user, without it the anonymous author `{ id: null, name: null }` | `params.id`, `payload` | `result` | { reassignTo?: object \| null, … } | { from: string, to: object \| null, revisions: number, … } | 400 no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again |
 | `revisions.prune` | Apply the retention rules to every recorded document and locale | – | `result` | – | { inspected: number, removed: number, … } | – |
 | `revisions.remove:<arg>` | Drop every revision of a <arg> document, in every locale | `params.id` | – | – | – | 400 missing id |
 | `revisions.removeTranslation:<arg>` | Drop the revisions of one locale of a <arg> document | `params.id` | – | ?locale: string | – | 400 missing id |
@@ -120,7 +137,9 @@ Pipelines in `examples/minimal` using these steps:
 - **pageRevision** (GET /admin/pages/:id/revisions/:revisionId): `authn.requireUser` → `authz.require:pages.manage` → **`revisions.read:pages`**
 - **pageRevisions** (GET /admin/pages/:id/revisions): `authn.requireUser` → `authz.require:pages.manage` → **`revisions.list:pages`**
 - **pruneRevisions** (cron 15 3 * * *): **`revisions.prune`**
+- **reassignRevisionAuthor** (event user.deleted): **`revisions.reassignAuthor`**
 - **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.require:pages.write` → **`revisions.restore:pages`** → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.update:pages` → **`revisions.record:pages`** → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → **`revisions.reportRestore`** → `events.emit:page.restored`
+- **retryReassignRevisionAuthor** (POST /admin/users/:id/revisions/reassign): `authn.requireUser` → `authz.require:users.manage` → **`revisions.reassignAuthor`**
 - **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.update:pages` → **`revisions.record:pages`** → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.updated`
 
 <!-- kestrel-docs:end -->

@@ -21,6 +21,6 @@ Not included: ownership/resource checks (the `resource` argument is ignored), ro
 |---|---|---|---|---|---|---|
 | `authz.require:<arg>` | Requires permission <arg> | – | – | – | – | 401 not authenticated; 403 missing permission <arg> |
 
-Used by 61 of 77 pipelines in `examples/minimal`.
+Used by 63 of 82 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

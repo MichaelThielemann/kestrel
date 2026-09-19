@@ -5784,6 +5784,287 @@
         ]
       }
     },
+    "/admin/users/{id}/audit/anonymize": {
+      "post": {
+        "operationId": "retryAnonymizeAuditUser",
+        "summary": "Require a valid session → Requires permission users.manage → Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay",
+        "tags": [
+          "admin"
+        ],
+        "x-kestrel-pipeline": "retryAnonymizeAuditUser",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:users.manage",
+          "audit.anonymize"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "entries"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "no user id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission users.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "temporarily unavailable; retry after the Retry-After header",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/users/{id}/revisions/reassign": {
+      "post": {
+        "operationId": "retryReassignRevisionAuthor",
+        "summary": "Require a valid session → Requires permission users.manage → Replace the author of every revision written by the user in `params.id` or the event payload's `id`: with `reassignTo` that user, without it the anonymous author `{ id: null, name: null }`",
+        "tags": [
+          "admin"
+        ],
+        "x-kestrel-pipeline": "retryReassignRevisionAuthor",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:users.manage",
+          "revisions.reassignAuthor"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
+                    },
+                    "revisions": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "revisions"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission users.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "temporarily unavailable; retry after the Retry-After header",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reassignTo": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name"
+                    ]
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/login": {
       "post": {
         "operationId": "login",
@@ -11013,7 +11294,7 @@
     "/users/{id}": {
       "delete": {
         "operationId": "deleteUser",
-        "summary": "Require a valid session → Requires permission users.manage → Delete a user and their sessions for good → Emit event \"user.deleted\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission users.manage → Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised → Emit event \"user.deleted?with=result\" to every subscribed handler pipeline",
         "tags": [
           "users"
         ],
@@ -11022,7 +11303,7 @@
           "authn.requireUser",
           "authz.require:users.manage",
           "authn.deleteUser",
-          "events.emit:user.deleted"
+          "events.emit:user.deleted?with=result"
         ],
         "parameters": [
           {
@@ -11044,17 +11325,36 @@
                   "properties": {
                     "ok": {
                       "type": "boolean"
+                    },
+                    "reassignTo": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
                     }
                   },
                   "required": [
-                    "ok"
+                    "ok",
+                    "reassignTo"
                   ]
                 }
               }
             }
           },
           "400": {
-            "description": "cannot delete yourself",
+            "description": "cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id",
             "content": {
               "application/json": {
                 "schema": {
@@ -11084,7 +11384,7 @@
             }
           },
           "404": {
-            "description": "user not found",
+            "description": "user not found, or `reassignTo` names no user",
             "content": {
               "application/json": {
                 "schema": {
@@ -11128,6 +11428,25 @@
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reassignTo": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
               }
             }
           }

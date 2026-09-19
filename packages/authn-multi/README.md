@@ -30,12 +30,22 @@ username is `CONFLICT` (409), the last admin guard is `LAST_ADMIN` (409).
 | `authn.listUsers` | – | `result` | `TRANSIENT` |
 | `authn.getUser` | `params.id` | `result` | `NOT_FOUND`, `TRANSIENT` |
 | `authn.updateUser` | `params.id` | `result` | `VALIDATION`, `CONFLICT`, `NOT_FOUND`, `LAST_ADMIN`, `TRANSIENT` |
-| `authn.deleteUser` | `identity`, `params.id` | `result` | `VALIDATION` (self), `NOT_FOUND`, `LAST_ADMIN`, `TRANSIENT` |
+| `authn.deleteUser` | `identity`, `params.id`, `payload.reassignTo` | `result` | `VALIDATION` (self, bad target), `NOT_FOUND`, `LAST_ADMIN`, `TRANSIENT` |
 | `authn.setPassword` | `params.id` | `result` | `VALIDATION`, `NOT_FOUND`, `TRANSIENT` |
 | `authn.changePassword` | `identity` | `result` | `VALIDATION`, `UNAUTHENTICATED`, `TRANSIENT` |
 | `authn.deactivateUser` | `params.id` | `result` | `VALIDATION` (self), `NOT_FOUND`, `LAST_ADMIN`, `TRANSIENT` |
 | `authn.activateUser` | `params.id` | `result` | `NOT_FOUND`, `TRANSIENT` |
 | `authn.cleanupSessions` | – | `result` | `TRANSIENT` |
+
+**Deleting and the authored history.** `authn.deleteUser` takes an optional `reassignTo` in the
+body: the id of an existing, active user who is not the one being deleted. An unknown id is 404, an
+inactive one, the deleted user themselves or a value that is not a string is 400 — and in each case
+the user stays. On success the step answers `{ ok: true, reassignTo: { id, name } | null }`, `name`
+being the target's username at that moment. Emit the event with `events.emit:user.deleted?with=result`
+so the target travels in the payload, and let the pipelines behind that event decide what happens to
+what the user wrote: `revisions.reassignAuthor` moves or anonymises their revisions,
+`audit.anonymize` strips them from the audit log. The module itself deletes only the user row and
+their sessions; it knows nothing about revisions or audit entries.
 
 Not included: self-service registration, password reset by mail, login rate limiting (pipeline
 concerns), an e-mail field.
@@ -66,13 +76,13 @@ concerns), an e-mail field.
 | `authn.listUsers` | List users | – | `result` | – | object[] | – |
 | `authn.getUser` | One user | `params.id` | `result` | – | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 404 user not found |
 | `authn.updateUser` | Rename a user or set their roles (a role change ends their sessions) | `params.id` | `result` | { username?: string, roles?: string[] } | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 400 neither username nor roles given, or an empty one; 404 user not found; 409 username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`) |
-| `authn.deleteUser` | Delete a user and their sessions for good | `identity`, `params.id` | `result` | – | { ok: boolean, … } | 400 cannot delete yourself; 404 user not found; 409 the last active admin cannot be deleted (`LAST_ADMIN`) |
+| `authn.deleteUser` | Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised | `identity`, `params.id`, `payload.reassignTo` | `result` | { reassignTo?: string \| null } | { ok: boolean, reassignTo: object \| null, … } | 400 cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id; 404 user not found, or `reassignTo` names no user; 409 the last active admin cannot be deleted (`LAST_ADMIN`) |
 | `authn.setPassword` | Set a user's password (ends their sessions) | `params.id` | `result` | { password: string } | { ok: boolean, … } | 400 password missing or too short; 404 user not found |
 | `authn.changePassword` | Change own password | `identity` | `result` | { currentPassword: string, newPassword: string } | { ok: boolean, … } | 400 wrong current password, missing fields, or new one too short; 401 not authenticated |
 | `authn.deactivateUser` | Deactivate a user (ends their sessions) | `params.id` | `result` | – | { ok: boolean, … } | 400 cannot deactivate yourself; 404 user not found; 409 the last active admin cannot be deactivated (`LAST_ADMIN`) |
 | `authn.activateUser` | Activate a user | `params.id` | `result` | – | { ok: boolean, … } | 404 user not found |
 | `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed?: number, … } | – |
 
-Used by 67 of 77 pipelines in `examples/minimal`.
+Used by 69 of 82 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

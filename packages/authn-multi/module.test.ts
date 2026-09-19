@@ -45,6 +45,7 @@ const setPasswordPipeline = definePipeline({ name: "setPassword", steps: ["authn
 const changePasswordPipeline = definePipeline({ name: "changePassword", steps: ["authn.requireUser", "authn.changePassword"] });
 const updateUserPipeline = definePipeline({ name: "updateUser", steps: ["authn.updateUser"] });
 const deleteUserPipeline = definePipeline({ name: "deleteUser", steps: ["authn.requireUser", "authn.deleteUser"] });
+const deleteUserAsAdminPipeline = definePipeline({ name: "deleteUserAsAdmin", steps: ["authn.deleteUser"] });
 const deactivateUserPipeline = definePipeline({ name: "deactivateUser", steps: ["authn.deactivateUser"] });
 const activateUserPipeline = definePipeline({ name: "activateUser", steps: ["authn.activateUser"] });
 const cleanupSessionsPipeline = definePipeline({ name: "cleanupSessions", steps: ["authn.cleanupSessions"] });
@@ -145,6 +146,46 @@ describe("authn/multi module steps via runPipeline", () => {
     expect(deleted.status).toBe(200);
     const gone = await runPipeline(getUserPipeline, { params: { id: otherId } }, { modules: [{ module, instance }] });
     expect(gone).toMatchObject({ status: 404, code: "NOT_FOUND" });
+  });
+
+  it("deleteUser reports the reassign target it resolved, and none without one", async () => {
+    const { instance } = await boot();
+    const carol = await runPipeline(createUserPipeline, { body: { username: "carol", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const carolId = boundaryCast<{ id: string }>(carol.result, "json").id;
+    const dora = await runPipeline(createUserPipeline, { body: { username: "dora", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const doraId = boundaryCast<{ id: string }>(dora.result, "json").id;
+    const erin = await runPipeline(createUserPipeline, { body: { username: "erin", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const erinId = boundaryCast<{ id: string }>(erin.result, "json").id;
+
+    const reassigned = await runPipeline(deleteUserAsAdminPipeline, { params: { id: carolId }, body: { reassignTo: doraId } }, { modules: [{ module, instance }] });
+    expect(reassigned.status).toBe(200);
+    expect(reassigned.result).toEqual({ ok: true, reassignTo: { id: doraId, name: "dora" } });
+
+    const anonymised = await runPipeline(deleteUserAsAdminPipeline, { params: { id: erinId } }, { modules: [{ module, instance }] });
+    expect(anonymised.result).toEqual({ ok: true, reassignTo: null });
+  });
+
+  it("deleteUser keeps the user when the reassign target is unknown, inactive, themselves or not an id", async () => {
+    const { instance } = await boot();
+    const carol = await runPipeline(createUserPipeline, { body: { username: "carol", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const carolId = boundaryCast<{ id: string }>(carol.result, "json").id;
+    const dora = await runPipeline(createUserPipeline, { body: { username: "dora", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const doraId = boundaryCast<{ id: string }>(dora.result, "json").id;
+    await runPipeline(deactivateUserPipeline, { params: { id: doraId } }, { modules: [{ module, instance }] });
+
+    const unknown = await runPipeline(deleteUserAsAdminPipeline, { params: { id: carolId }, body: { reassignTo: "nobody" } }, { modules: [{ module, instance }] });
+    expect(unknown).toMatchObject({ status: 404, code: "NOT_FOUND" });
+
+    const inactive = await runPipeline(deleteUserAsAdminPipeline, { params: { id: carolId }, body: { reassignTo: doraId } }, { modules: [{ module, instance }] });
+    expect(inactive).toMatchObject({ status: 400, code: "VALIDATION" });
+
+    const itself = await runPipeline(deleteUserAsAdminPipeline, { params: { id: carolId }, body: { reassignTo: carolId } }, { modules: [{ module, instance }] });
+    expect(itself).toMatchObject({ status: 400, code: "VALIDATION" });
+
+    const wrongType = await runPipeline(deleteUserAsAdminPipeline, { params: { id: carolId }, body: { reassignTo: 7 } }, { modules: [{ module, instance }] });
+    expect(wrongType).toMatchObject({ status: 400, code: "VALIDATION" });
+
+    expect((await runPipeline(getUserPipeline, { params: { id: carolId } }, { modules: [{ module, instance }] })).status).toBe(200);
   });
 
   it("login answers 400 VALIDATION when a field has the wrong type", async () => {

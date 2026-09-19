@@ -43,6 +43,50 @@ describe("audit/persistence", () => {
     expect(result.error.retryable).toBe(true);
   });
 
+  it("anonymises a user's entries without touching the event, the time or other users", async () => {
+    const db = createFakePersistence();
+    const audit = await createAuditPersistence(db);
+    expectOk(await audit.record({ eventId: null, event: "auth.loggedIn", at: 1, identityId: "u1", params: {} }));
+    expectOk(await audit.record({ eventId: null, event: "user.deleted", at: 2, identityId: "admin", params: { id: "u1" } }));
+    expectOk(await audit.record({ eventId: null, event: "auth.loggedIn", at: 3, identityId: "u2", params: {} }));
+
+    expect(expectOk(await audit.anonymize("u1"))).toBe(2);
+    expect(expectOk(await db.count(COLLECTION, { identityId: "u1" }))).toBe(0);
+    expect(expectOk(await db.count(COLLECTION, { event: "auth.loggedIn", at: 1 }))).toBe(1);
+    expect(expectOk(await db.findOne<{ id: string; params: Record<string, string> }>(COLLECTION, { at: 2 }))?.params).toEqual({});
+    expect(expectOk(await db.count(COLLECTION, { identityId: "u2" }))).toBe(1);
+  });
+
+  it("changes nothing on a second anonymise of the same user", async () => {
+    const db = createFakePersistence();
+    const audit = await createAuditPersistence(db);
+    expectOk(await audit.record({ eventId: null, event: "auth.loggedIn", at: 1, identityId: "u1", params: {} }));
+    expect(expectOk(await audit.anonymize("u1"))).toBe(1);
+    expect(expectOk(await audit.anonymize("u1"))).toBe(0);
+    expect(expectOk(await db.count(COLLECTION, {}))).toBe(1);
+  });
+
+  it("never moves an entry to another user", async () => {
+    const db = createFakePersistence();
+    const audit = await createAuditPersistence(db);
+    expectOk(await audit.record({ eventId: null, event: "auth.loggedIn", at: 1, identityId: "u1", params: {} }));
+    expectOk(await audit.anonymize("u1"));
+    expect(expectOk(await db.findOne<{ id: string; identityId: string | null }>(COLLECTION, {}))?.identityId).toBeNull();
+  });
+
+  it("prunes entries older than the retention window and keeps the newer ones", async () => {
+    const db = createFakePersistence();
+    const day = 86400000;
+    const now = 100 * day;
+    const audit = await createAuditPersistence(db, () => now);
+    expectOk(await audit.record({ eventId: null, event: "auth.loggedIn", at: now - 31 * day, identityId: "u1", params: {} }));
+    expectOk(await audit.record({ eventId: null, event: "auth.loggedIn", at: now - 29 * day, identityId: "u1", params: {} }));
+
+    expect(expectOk(await audit.prune(30))).toBe(1);
+    expect(expectOk(await db.count(COLLECTION, {}))).toBe(1);
+    expect(expectOk(await audit.prune(30))).toBe(0);
+  });
+
   it("maps event data to an entry and drops everything else", () => {
     const entry = entryFromEventData({ eventId: "e1", event: "auth.loggedIn", at: 5, identity: { id: "u1", claims: {} }, params: { id: "x" }, result: { token: "secret" } });
     expect(entry).toEqual({ eventId: "e1", event: "auth.loggedIn", at: 5, identityId: "u1", params: { id: "x" } });

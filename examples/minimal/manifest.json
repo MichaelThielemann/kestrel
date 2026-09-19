@@ -1608,6 +1608,7 @@
         "revisions.restore",
         "revisions.reportRestore",
         "revisions.label",
+        "revisions.reassignAuthor",
         "revisions.prune",
         "revisions.remove",
         "revisions.removeTranslation"
@@ -2401,13 +2402,32 @@
       "config": {
         "schema": {
           "type": "object",
-          "properties": {},
+          "properties": {
+            "retentionDays": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "How long an entry is kept; without it `audit.prune` has no rule to apply and fails"
+            }
+          },
           "additionalProperties": false
         },
-        "variables": []
+        "variables": [
+          {
+            "path": "retentionDays",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": 365,
+            "redacted": false
+          }
+        ]
       },
       "steps": [
-        "audit.record"
+        "audit.record",
+        "audit.anonymize",
+        "audit.prune"
       ],
       "eventHook": false,
       "emits": []
@@ -5630,28 +5650,60 @@
       "module": "authn/multi",
       "factory": false,
       "description": {
-        "summary": "Delete a user and their sessions for good",
+        "summary": "Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised",
         "reads": [
           "identity",
-          "params.id"
+          "params.id",
+          "payload.reassignTo"
         ],
         "writes": [
           "result"
         ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "reassignTo": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
         "output": {
           "type": "object",
           "properties": {
             "ok": {
               "type": "boolean"
+            },
+            "reassignTo": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ]
             }
           },
           "required": [
-            "ok"
+            "ok",
+            "reassignTo"
           ]
         },
         "errors": {
-          "400": "cannot delete yourself",
-          "404": "user not found",
+          "400": "cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id",
+          "404": "user not found, or `reassignTo` names no user",
           "409": "the last active admin cannot be deleted (`LAST_ADMIN`)"
         }
       }
@@ -7376,6 +7428,82 @@
       }
     },
     {
+      "name": "revisions.reassignAuthor",
+      "module": "revisions/default",
+      "factory": false,
+      "description": {
+        "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`: with `reassignTo` that user, without it the anonymous author `{ id: null, name: null }`",
+        "reads": [
+          "params.id",
+          "payload"
+        ],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "reassignTo": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ]
+            },
+            "revisions": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "from",
+            "to",
+            "revisions"
+          ]
+        },
+        "errors": {
+          "400": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again"
+        }
+      }
+    },
+    {
       "name": "revisions.prune",
       "module": "revisions/default",
       "factory": false,
@@ -8019,6 +8147,65 @@
         "input": {
           "type": "object",
           "additionalProperties": true
+        }
+      }
+    },
+    {
+      "name": "audit.anonymize",
+      "module": "audit/persistence",
+      "factory": false,
+      "description": {
+        "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay",
+        "reads": [
+          "params.id",
+          "payload"
+        ],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "entries": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "entries"
+          ]
+        },
+        "errors": {
+          "400": "no user id"
+        }
+      }
+    },
+    {
+      "name": "audit.prune",
+      "module": "audit/persistence",
+      "factory": false,
+      "description": {
+        "summary": "Remove every audit entry older than the configured `retentionDays`",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "removed": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "removed"
+          ]
+        },
+        "errors": {
+          "400": "no `retentionDays` configured"
         }
       }
     },
@@ -8797,6 +8984,44 @@
             },
             "errors": {
               "404": "user not found"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "anonymizeAuditUser",
+      "steps": [
+        {
+          "spec": "audit.anonymize",
+          "name": "audit.anonymize",
+          "module": "audit/persistence",
+          "description": {
+            "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay",
+            "reads": [
+              "params.id",
+              "payload"
+            ],
+            "writes": [
+              "result"
+            ],
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "entries": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "entries"
+              ]
+            },
+            "errors": {
+              "400": "no user id"
             }
           }
         }
@@ -10906,38 +11131,70 @@
           "name": "authn.deleteUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Delete a user and their sessions for good",
+            "summary": "Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised",
             "reads": [
               "identity",
-              "params.id"
+              "params.id",
+              "payload.reassignTo"
             ],
             "writes": [
               "result"
             ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "reassignTo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
             "output": {
               "type": "object",
               "properties": {
                 "ok": {
                   "type": "boolean"
+                },
+                "reassignTo": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ]
                 }
               },
               "required": [
-                "ok"
+                "ok",
+                "reassignTo"
               ]
             },
             "errors": {
-              "400": "cannot delete yourself",
-              "404": "user not found",
+              "400": "cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id",
+              "404": "user not found, or `reassignTo` names no user",
               "409": "the last active admin cannot be deleted (`LAST_ADMIN`)"
             }
           }
         },
         {
-          "spec": "events.emit:user.deleted",
+          "spec": "events.emit:user.deleted?with=result",
           "name": "events.emit",
           "module": "events/inmemory",
           "description": {
-            "summary": "Emit event \"user.deleted\" to every subscribed handler pipeline",
+            "summary": "Emit event \"user.deleted?with=result\" to every subscribed handler pipeline",
             "reads": [],
             "writes": []
           }
@@ -15057,6 +15314,37 @@
       ]
     },
     {
+      "name": "pruneAudit",
+      "steps": [
+        {
+          "spec": "audit.prune",
+          "name": "audit.prune",
+          "module": "audit/persistence",
+          "description": {
+            "summary": "Remove every audit entry older than the configured `retentionDays`",
+            "reads": [],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "object",
+              "properties": {
+                "removed": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "removed"
+              ]
+            },
+            "errors": {
+              "400": "no `retentionDays` configured"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "pruneImages",
       "steps": [
         {
@@ -15618,6 +15906,87 @@
             "errors": {
               "400": "unknown locale",
               "404": "not found"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "reassignRevisionAuthor",
+      "steps": [
+        {
+          "spec": "revisions.reassignAuthor",
+          "name": "revisions.reassignAuthor",
+          "module": "revisions/default",
+          "description": {
+            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`: with `reassignTo` that user, without it the anonymous author `{ id: null, name: null }`",
+            "reads": [
+              "params.id",
+              "payload"
+            ],
+            "writes": [
+              "result"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "reassignTo": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ]
+                },
+                "revisions": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "revisions"
+              ]
+            },
+            "errors": {
+              "400": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again"
             }
           }
         }
@@ -17340,6 +17709,76 @@
       ]
     },
     {
+      "name": "retryAnonymizeAuditUser",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:users.manage",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission users.manage",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission users.manage"
+            }
+          }
+        },
+        {
+          "spec": "audit.anonymize",
+          "name": "audit.anonymize",
+          "module": "audit/persistence",
+          "description": {
+            "summary": "Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay",
+            "reads": [
+              "params.id",
+              "payload"
+            ],
+            "writes": [
+              "result"
+            ],
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "entries": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "entries"
+              ]
+            },
+            "errors": {
+              "400": "no user id"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "retryFailedImages",
       "steps": [
         {
@@ -17478,6 +17917,119 @@
             "errors": {
               "404": "media item not found",
               "409": "images are shutting down"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "retryReassignRevisionAuthor",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:users.manage",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission users.manage",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission users.manage"
+            }
+          }
+        },
+        {
+          "spec": "revisions.reassignAuthor",
+          "name": "revisions.reassignAuthor",
+          "module": "revisions/default",
+          "description": {
+            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`: with `reassignTo` that user, without it the anonymous author `{ id: null, name: null }`",
+            "reads": [
+              "params.id",
+              "payload"
+            ],
+            "writes": [
+              "result"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "reassignTo": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ]
+                },
+                "revisions": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "revisions"
+              ]
+            },
+            "errors": {
+              "400": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again"
             }
           }
         }
@@ -19438,6 +19990,16 @@
       },
       {
         "method": "POST",
+        "path": "/admin/users/:id/revisions/reassign",
+        "pipeline": "retryReassignRevisionAuthor"
+      },
+      {
+        "method": "POST",
+        "path": "/admin/users/:id/audit/anonymize",
+        "pipeline": "retryAnonymizeAuditUser"
+      },
+      {
+        "method": "POST",
         "path": "/users/:id/deactivate",
         "pipeline": "deactivateUser"
       },
@@ -19734,6 +20296,14 @@
       {
         "event": "auth.loggedOut",
         "pipeline": "auditAuth"
+      },
+      {
+        "event": "user.deleted",
+        "pipeline": "reassignRevisionAuthor"
+      },
+      {
+        "event": "user.deleted",
+        "pipeline": "anonymizeAuditUser"
       }
     ],
     "crons": [
@@ -19764,6 +20334,10 @@
       {
         "expression": "* * * * *",
         "pipeline": "replicate"
+      },
+      {
+        "expression": "45 3 * * *",
+        "pipeline": "pruneAudit"
       }
     ]
   }

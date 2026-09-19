@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { err, failure, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Document, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
-import type { NewRevision, PruneReport, PruneScope, RestoreReport, Revision, RevisionListOptions, RevisionPage, Revisions, RevisionsError, RevisionSummary } from "@michaelthielemann/kestrel-contracts/revisions";
+import type { NewRevision, PruneReport, PruneScope, RestoreReport, Revision, RevisionAuthor, RevisionListOptions, RevisionPage, Revisions, RevisionsError, RevisionSummary } from "@michaelthielemann/kestrel-contracts/revisions";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 
@@ -48,6 +48,16 @@ export interface RevisionsDeps {
   db: Persistence;
   logger: Logger;
   now?: () => number;
+}
+
+/** `revisions@1` plus what only this submodule can do: rewrite the author reference of a whole history. */
+export interface RevisionsDefault extends Revisions {
+  /**
+   * Replaces the author of every revision written by `fromId`, `null` anonymises them to
+   * `{ id: null, name: null }`. Returns how many revisions changed; a second call with the same
+   * `fromId` changes nothing and returns 0.
+   */
+  reassignAuthor(fromId: string, to: RevisionAuthor | null): Promise<Result<number, RevisionsError>>;
 }
 
 function storageError(error: PersistenceError): RevisionsError {
@@ -122,7 +132,7 @@ export function survivingParent(parentId: string | null, kept: ReadonlySet<strin
   return current;
 }
 
-export async function createRevisionsDefault(config: RevisionsConfig, deps: RevisionsDeps): Promise<Revisions> {
+export async function createRevisionsDefault(config: RevisionsConfig, deps: RevisionsDeps): Promise<RevisionsDefault> {
   const { db, logger } = deps;
   const clock = deps.now ?? Date.now;
 
@@ -297,6 +307,12 @@ export async function createRevisionsDefault(config: RevisionsConfig, deps: Revi
         report.removed += pruned.value.removed;
       }
       return ok(report);
+    },
+
+    async reassignAuthor(fromId: string, to: RevisionAuthor | null): Promise<Result<number, RevisionsError>> {
+      const changed = await db.updateMany<EntryRow>(ENTRIES, { authorId: fromId }, { authorId: to === null ? null : to.id, authorName: to === null ? null : to.name });
+      if (isErr(changed)) return err(storageError(changed.error));
+      return ok(changed.value);
     },
 
     async remove(collection: string, documentId: string, locale?: string): Promise<Result<number, RevisionsError>> {

@@ -172,14 +172,22 @@ never relies on that.
 | PUT | `/users/:id/password` | `{ password }` | `{ ok: true }`; ends that user's sessions |
 | POST | `/users/:id/deactivate` | – | `{ ok: true }`; ends that user's sessions; 400 for self, 409 (`LAST_ADMIN`) for the last admin |
 | POST | `/users/:id/activate` | – | `{ ok: true }` |
-| DELETE | `/users/:id` | – | deletes the user and their sessions (`{ ok: true }`); 400 for self, 409 (`LAST_ADMIN`) for the last admin |
+| DELETE | `/users/:id` | `{ reassignTo? }` | deletes the user and their sessions (`{ ok: true, reassignTo: { id, name } \| null }`); 400 for self or an unusable target, 404 for an unknown target, 409 (`LAST_ADMIN`) for the last admin |
+| POST | `/admin/users/:id/revisions/reassign` | `{ reassignTo: { id, name } \| null }` | re-runs the author reassignment for that user: `{ from, to, revisions }` |
+| POST | `/admin/users/:id/audit/anonymize` | – | re-runs the audit anonymisation for that user: `{ entries }` |
 
 The username is the identity — a user has no e-mail field. Roles are free strings; which ones
 exist is the authz configuration's business (`authz.roles` in `kestrel.config.ts`). `LAST_ADMIN`
 (409) protects the last active user who still holds `users.manage` (`authn.adminPermission`):
-they can neither be deactivated, nor deleted, nor stripped of the role that grants it. Deleting
-removes the row; events already recorded by `audit-persistence` keep the identity id they were
-written with. Password hashes never appear in responses.
+they can neither be deactivated, nor deleted, nor stripped of the role that grants it. Password
+hashes never appear in responses.
+
+Deleting removes the user row and their sessions and then, through the `user.deleted` event, takes
+care of what they authored — see [Personal data](#personal-data). `reassignTo` is the id of the
+user their revisions move to; it must exist, be active and not be the deleted user themselves
+(400/404 otherwise, and the user is *not* deleted). Without it the author reference is anonymised.
+The response repeats the resolved target with the username it had at that moment, which is what the
+event payload carries too.
 
 ## Content
 
@@ -295,7 +303,9 @@ revision need `pages.manage`, restoring and labelling need `pages.write` (a rest
 
 `Revision`: `{ id, collection, documentId, locale, parentId, createdAt, author: { id, name },
 kind: "save" | "restore", label, status, live, bytes, skipped }`. `author.name` is the username at
-save time, so a later rename does not rewrite history. `status` is the value of the document's
+save time, so a later rename does not rewrite history. **Both `author.id` and `author.name` can be
+`null`**: that is the anonymous author a user deletion leaves behind, and a client has to render it
+(e.g. as "deleted user") instead of assuming a name. `status` is the value of the document's
 `status` field then, `live` says whether that counted as published.
 
 **The tree.** `parentId` is the whole structure: a normal save points at the head, a save made by a
@@ -650,6 +660,36 @@ suggestion, the step names and response shapes are not.
 | GET `/admin/events/dead` | `events.listDead` | `{ items: [{ id, name, attempts, error, createdAt, availableAt }] }` – most recently failed first (`?limit`, max 500) |
 | POST `/admin/events/retry` | `events.retryDead:all` | `{ retried }` – requeues every dead-letter event with `attempts` reset |
 | POST `/admin/events/dead/:id/retry` | `events.retryDead:one` | `{ retried: 1 }` – requeues one; 404 when there is no dead event with that id |
+
+## Personal data
+
+Page content belongs to the operator and is not personal data about the editor. What is personal is
+the *reference*: who wrote something and who was logged in when.
+
+| Where | What is stored | How it disappears |
+|---|---|---|
+| `authn_users` | username, scrypt password hash, roles, active, createdAt | `DELETE /users/:id` removes the row for good |
+| `authn_sessions` | session token, user id, expiry | deleted with the user, on logout, on a role or password change, and by the hourly cleanup cron |
+| `revisions_entries` | `author: { id, name }` per revision — the username as a snapshot of that moment | the `user.deleted` event moves every revision to `reassignTo` or anonymises it to `{ id: null, name: null }`; snapshots, count and order stay untouched |
+| `audit_entries` | `identityId` (who acted) and route params (which may carry a user id) per login and logout | the same event anonymises them — `identityId` becomes `null`, params naming that user are dropped, event and time remain — and `audit.prune` deletes everything older than `retentionDays` (365 in this instance) via the nightly cron |
+| Log lines | run id, pipeline, step, duration, status | the process's logs, never stored by Kestrel itself |
+
+Nothing else carries a user reference: page documents, media items, the reference and link indexes,
+delivery status and revision *snapshots* hold no user id. Tokens and password hashes never leave the
+backend, and neither ever appears in an event payload.
+
+**How a deletion runs.** `DELETE /users/:id` deletes the user and their sessions and emits
+`user.deleted` with `{ eventId, event, at, runId, identity, params, id, result: { ok: true,
+reassignTo: { id, name } | null } }` — ids and the target's username snapshot, no secrets. Two
+pipelines listen to it: one runs `revisions.reassignAuthor`, the other `audit.anonymize`. The audit
+log is only ever anonymised, never reassigned: a login belongs to nobody else.
+
+**When one of them fails.** Each listener is a run of its own, so a failure shows up in
+`GET /admin/insights/stats` under `recentFailures` with the pipeline, step and message. Both steps
+are idempotent, so repeating them is safe: `POST /admin/users/:id/revisions/reassign` with
+`{ "reassignTo": { "id", "name" } }` (or `null` to anonymise) and
+`POST /admin/users/:id/audit/anonymize`, both with `users.manage`. A repeat that finds nothing left
+to change answers `revisions: 0` or `entries: 0`.
 
 ## What the frontend does not need to do
 
