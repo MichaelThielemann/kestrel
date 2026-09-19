@@ -40,6 +40,7 @@
   "devDependencies": {
     "@michaelthielemann/kestrel": "workspace:*",
     "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-validate-jsonschema": "workspace:*",
     "vitest": "^3.2.0"
   },
   "repository": {

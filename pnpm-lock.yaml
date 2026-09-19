@@ -292,6 +292,9 @@ importers:
       '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@michaelthielemann/kestrel-validate-jsonschema':
+        specifier: workspace:*
+        version: link:../validate-jsonschema
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@22.20.1)

@@ -11,6 +11,7 @@ import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { ok } from "@michaelthielemann/kestrel/result";
 import type { RunResult } from "@michaelthielemann/kestrel/runner";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
+import validateModule, { configSchema as validateConfigSchema } from "@michaelthielemann/kestrel-validate-jsonschema";
 import module, { configSchema } from "./module.ts";
 
 const MODEL = {
@@ -145,5 +146,119 @@ describe("content/default module steps", () => {
     expect(res.status).toBe(400);
     expect(res.code).toBe("VALIDATION");
     expect(res.details?.problems).toEqual([{ path: "$.limit", message: "expected integer, got string" }]);
+  });
+});
+
+const CUSTOM_TYPE_MODEL = {
+  locales: ["de", "en"],
+  defaultLocale: "de",
+  types: {
+    pages: {
+      kind: "multi",
+      fields: {
+        slug: { type: "slug", required: true, unique: true },
+        title: { type: "text", required: true, localized: true },
+        accent: { type: "text" },
+        cta: { type: "json", localized: true },
+      },
+    },
+  },
+};
+
+const CUSTOM_TYPE_SCHEMAS = {
+  "pages.accent": { type: "string", pattern: "^#[0-9a-f]{6}$" },
+  "pages.cta": { type: "object", properties: { href: { type: "string" }, label: { type: "string" } }, required: ["href", "label"], additionalProperties: false },
+};
+
+const CREATE_PAGE = ["validate.check:pages.accent", "validate.check:pages.cta", "content.create:pages"];
+const UPDATE_PAGE = ["validate.check:pages.accent", "validate.check:pages.cta", "content.update:pages"];
+
+async function bootWithValidator() {
+  const db = createFakePersistence();
+  const providers = new Map<string, unknown>([[PERSISTENCE.name, db]]);
+  const deps: Deps = {
+    get<T>(contract: Contract<T>): T {
+      if (!providers.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
+      return boundaryCast<T>(providers.get(contract.name), "host");
+    },
+    find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
+    logger: silentLogger,
+    root: process.cwd(),
+  };
+  const content = await module.setup(configSchema.parse(CUSTOM_TYPE_MODEL), deps);
+  const validator = await validateModule.setup(validateConfigSchema.parse({ schemas: CUSTOM_TYPE_SCHEMAS }), deps);
+  return { content, validator };
+}
+
+function runWithValidator(steps: string[], input: Record<string, unknown>, content: unknown, validator: unknown): Promise<RunResult> {
+  return runPipeline(definePipeline({ name: "test", steps }), input, {
+    modules: [
+      { module, instance: content },
+      { module: validateModule, instance: validator },
+    ],
+  });
+}
+
+describe("content/default carries a custom field type as its storage type", () => {
+  it("refuses a config that still names the custom type, naming the field", () => {
+    const parsed = configSchema.safeParse({ types: { pages: { kind: "multi", fields: { accent: { type: "color" } } } } });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.path.join(".")).toBe("types.pages.fields.accent");
+  });
+
+  it("boots with the resolved model, stores the values and describes the storage type", async () => {
+    const { content, validator } = await bootWithValidator();
+    const created = await runWithValidator(CREATE_PAGE, { body: { slug: "a", title: "A", accent: "#2266cc", cta: { href: "/x", label: "X" } } }, content, validator);
+    expect(created.status).toBe(200);
+    const doc = boundaryCast<ContentDocument>(created.result, "host");
+    expect(doc.accent).toBe("#2266cc");
+    expect(doc.cta).toEqual({ href: "/x", label: "X" });
+
+    const described = await runWithValidator(["content.describeModel"], {}, content, validator);
+    expect(boundaryCast<{ types: { pages: { fields: Record<string, unknown> } } }>(described.result, "host").types.pages.fields).toMatchObject({ accent: { type: "text" }, cta: { type: "json", localized: true } });
+  });
+
+  it("answers an invalid value with 400 VALIDATION naming the field", async () => {
+    const { content, validator } = await bootWithValidator();
+    const res = await runWithValidator(CREATE_PAGE, { body: { slug: "a", title: "A", accent: "rebeccapurple" } }, content, validator);
+    expect(res).toMatchObject({ status: 400, code: "VALIDATION", step: "validate.check:pages.accent" });
+    expect(res.details?.fields).toEqual([{ field: "accent", message: 'must match pattern "^#[0-9a-f]{6}$"' }]);
+    expect(res.details?.problems).toEqual([{ path: "/", message: 'must match pattern "^#[0-9a-f]{6}$"' }]);
+    expect(res.error).toContain("pages.accent");
+  });
+
+  it("names a json-backed field whose object shape is wrong", async () => {
+    const { content, validator } = await bootWithValidator();
+    const res = await runWithValidator(CREATE_PAGE, { body: { slug: "a", title: "A", cta: { href: "/x" } } }, content, validator);
+    expect(res).toMatchObject({ status: 400, code: "VALIDATION", step: "validate.check:pages.cta" });
+    expect(res.details?.fields).toEqual([{ field: "cta", message: "must have required property 'label'" }]);
+  });
+
+  it("validates and stores a localized custom field per locale", async () => {
+    const { content, validator } = await bootWithValidator();
+    const created = await runWithValidator(CREATE_PAGE, { body: { slug: "a", title: "A", cta: { href: "/de", label: "DE" } } }, content, validator);
+    const id = boundaryCast<ContentDocument>(created.result, "host").id;
+
+    const broken = await runWithValidator(UPDATE_PAGE, { params: { id }, body: { title: "A-en", cta: { href: "/en" } }, query: { locale: "en" } }, content, validator);
+    expect(broken).toMatchObject({ status: 400, code: "VALIDATION", step: "validate.check:pages.cta" });
+    expect(broken.details?.fields).toEqual([{ field: "cta", message: "must have required property 'label'" }]);
+
+    const updated = await runWithValidator(UPDATE_PAGE, { params: { id }, body: { title: "A-en", cta: { href: "/en", label: "EN" } }, query: { locale: "en" } }, content, validator);
+    expect(updated.status).toBe(200);
+    expect(boundaryCast<ContentDocument>(updated.result, "host").cta).toEqual({ href: "/en", label: "EN" });
+
+    const german = await runWithValidator(["content.get:pages"], { params: { id }, query: { locale: "de" } }, content, validator);
+    expect(boundaryCast<ContentDocument>(german.result, "host").cta).toEqual({ href: "/de", label: "DE" });
+  });
+
+  it("leaves required-ness to the content model: an absent or null custom field passes the schema check", async () => {
+    const { content, validator } = await bootWithValidator();
+    const absent = await runWithValidator(CREATE_PAGE, { body: { slug: "a", title: "A" } }, content, validator);
+    expect(absent.status).toBe(200);
+    expect(boundaryCast<ContentDocument>(absent.result, "host").accent).toBeNull();
+
+    const cleared = await runWithValidator(CREATE_PAGE, { body: { slug: "b", title: "B", accent: null } }, content, validator);
+    expect(cleared.status).toBe(200);
+    expect(boundaryCast<ContentDocument>(cleared.result, "host").accent).toBeNull();
   });
 });
