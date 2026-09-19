@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-blobstore-filesystem",
-  "version": "5.7.0",
+  "version": "5.8.0",
   "description": "blobstore@1 on the local filesystem.",
   "type": "module",
   "license": "Apache-2.0",

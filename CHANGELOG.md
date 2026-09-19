@@ -2,15 +2,8 @@
 
 ## Unreleased
 
-### Changed
+## 5.8.0 – 2026-09-20
 
-- `content-default`: the README now states how a consumer-defined field type reaches the backend —
-  declared as the `content/default` type it is stored as, its value shape enforced by a `validate@1`
-  provider through `validate.check:<type>.<field>` before `content.create/update/set`, which answers
-  `VALIDATION` (400) with `details.fields` naming the field, localized fields included. The module
-  keeps its closed field type set; no config or contract change was needed. Tests cover the boot of
-  such a resolved model, the rejection of a model that still names the custom type, and valid,
-  invalid, localized, absent and `null` values.
 ### Added
 
 - Deleting a user now decides what happens to what they wrote. `authn.deleteUser` takes an optional
@@ -31,14 +24,15 @@
   failed one (both steps are idempotent), a nightly `pruneAudit` cron and `retentionDays: 365`.
   `docs/api.md` gained a "Personal data" section listing what is stored where and how it disappears.
 
-### Fixed
-
-- `examples/minimal` now documents and tests its bootstrap `admin` password (`kestrel-demo`,
-  the same demo password `examples/embedded` documents) instead of shipping an undocumented
-  scrypt hash nobody could log in with.
-
 ### Changed
 
+- `content-default`: the README now states how a consumer-defined field type reaches the backend —
+  declared as the `content/default` type it is stored as, its value shape enforced by a `validate@1`
+  provider through `validate.check:<type>.<field>` before `content.create/update/set`, which answers
+  `VALIDATION` (400) with `details.fields` naming the field, localized fields included. The module
+  keeps its closed field type set; no config or contract change was needed. Tests cover the boot of
+  such a resolved model, the rejection of a model that still names the custom type, and valid,
+  invalid, localized, absent and `null` values.
 - Engines: every package (and the root workspace) now requires Node `>=22.18.0`, the true
   minimum — `.ts` config and pipeline files are loaded through Node's type stripping, which is
   unflagged only from 22.18 onward; `node:sqlite` alone only needed 22.13.
@@ -48,6 +42,12 @@
   not the head. A skipped (oversized) snapshot never counts as identical, on either side. Both
   `revisions-default` and `testing/fakeRevisions` implement this, and the contract test suite covers
   it.
+
+### Fixed
+
+- `examples/minimal` now documents and tests its bootstrap `admin` password (`kestrel-demo`,
+  the same demo password `examples/embedded` documents) instead of shipping an undocumented
+  scrypt hash nobody could log in with.
 
 ## 5.7.0 – 2026-09-19
 

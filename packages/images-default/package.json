@@ -1,6 +1,6 @@
 {
   "name": "@michaelthielemann/kestrel-images-default",
-  "version": "5.7.0",
+  "version": "5.8.0",
   "description": "Steps images.register/generate/sync/resume/prune: image variant size registry, generation on upload, resumable sync.",
   "type": "module",
   "license": "Apache-2.0",
