@@ -6,7 +6,8 @@
 
 - New contract `revisions@1` (`@michaelthielemann/kestrel-contracts/revisions`) with a contract test
   suite and the in-memory `testing/fakeRevisions` for other packages' tests: an append-only history
-  per collection, document and locale. `record` appends a full snapshot and moves the head, `list`
+  per collection, document and locale. `record` appends a full snapshot and moves the head and
+  answers `NOT_FOUND` for a `parentId` outside that history, `list`
   pages it newest first without snapshots and names the head, `read` adds the snapshot, `label`
   names a revision, `prune` applies retention and `remove` drops a document's or one locale's
   history. Importing the contract puts `revisionParent` on the context: the revision the next

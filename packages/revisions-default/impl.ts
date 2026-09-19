@@ -196,9 +196,9 @@ export async function createRevisionsDefault(config: RevisionsConfig, deps: Revi
         parentId = head.value;
       }
       if (parentId !== null) {
-        const parent = await db.findOne<EntryRow>(ENTRIES, { id: parentId });
+        const parent = await db.findOne<EntryRow>(ENTRIES, { id: parentId, collection: entry.collection, documentId: entry.documentId, locale: entry.locale });
         if (isErr(parent)) return err(storageError(parent.error));
-        if (!parent.value) return err(failure("NOT_FOUND", `revisions/default: no revision "${parentId}"`));
+        if (!parent.value) return err(failure("NOT_FOUND", `revisions/default: no revision "${parentId}" of ${entry.collection}/${entry.documentId} (${entry.locale})`));
       }
       const bytes = Buffer.byteLength(JSON.stringify(entry.fields));
       const skipped = bytes > config.maxSnapshotBytes;

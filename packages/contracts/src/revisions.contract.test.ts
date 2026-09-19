@@ -58,6 +58,26 @@ export function revisionsContractTests(make: (options: { keep: number }) => Prom
       expectErr(await revisions.record(entry({ parentId: "nope" })), "NOT_FOUND");
     });
 
+    it("refuses a parent from another document, locale or collection", async () => {
+      const mine = await record();
+      const otherDocument = await record({ documentId: "p2" });
+      const otherLocale = await record({ locale: "en" });
+      const otherCollection = await record({ collection: "posts" });
+      expectErr(await revisions.record(entry({ parentId: otherDocument.id })), "NOT_FOUND");
+      expectErr(await revisions.record(entry({ parentId: otherLocale.id })), "NOT_FOUND");
+      expectErr(await revisions.record(entry({ parentId: otherCollection.id })), "NOT_FOUND");
+      expect(await ids()).toEqual([mine.id]);
+    });
+
+    it("does not read or label a revision of another document or collection", async () => {
+      const mine = await record();
+      expect(expectOk(await revisions.read("pages", "p2", mine.id))).toBeNull();
+      expect(expectOk(await revisions.read("posts", "p1", mine.id))).toBeNull();
+      expectErr(await revisions.label("pages", "p2", mine.id, "x"), "NOT_FOUND");
+      expectErr(await revisions.label("posts", "p1", mine.id, "x"), "NOT_FOUND");
+      expect(expectOk(await revisions.read("pages", "p1", mine.id))?.label).toBeNull();
+    });
+
     it("lists newest first without snapshots, paged", async () => {
       const first = await record();
       const second = await record();
