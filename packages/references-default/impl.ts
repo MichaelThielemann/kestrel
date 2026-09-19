@@ -135,7 +135,6 @@ export function createReferencesDefault(config: Config, content: Content, db: Pe
     if (isErr(prepared)) throw new Error(`references/default: cannot prepare collection "${INDEX}": ${prepared.error.message}`);
   })();
 
-  // Rows written before `via` existed have no value for it; persistence adds the column but leaves them null.
   const withVia = (row: IndexEntry): IndexEntry => (row.via === "body" ? row : { ...row, via: "field" });
 
   const index: References["index"] = async (type, id) => {

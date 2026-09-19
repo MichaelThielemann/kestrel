@@ -114,8 +114,6 @@ function describeContent(content: ContentInstance) {
   const localeQuery = (): Record<string, JsonSchema> => (model.locales ? { locale: { type: "string", enum: model.locales } } : {});
   const pageSchema = (type: string): JsonSchema => ({ type: "object", properties: { items: { type: "array", items: docSchema(type) }, total: { type: "number" } }, required: ["items", "total"] });
   const typeOf = (arg: string): string => parseTarget(arg).type;
-  // A single type answers with an empty document instead of 404 — unless the step argument pins a
-  // fixed filter the stored document can miss.
   const canMiss = (arg: string): boolean => {
     const { type, fixed } = parseTarget(arg);
     const { fallback: _fallback, ...filter } = fixed;

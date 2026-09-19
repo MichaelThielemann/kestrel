@@ -22,8 +22,6 @@ export default defineModule({
   triggers: { event: (events, entries, run, logger) => startEventTriggers(events, entries, run, logger) },
 
   steps: (events) => ({
-    // Arg syntax mirrors other steps ("name:arg"): "events.emit:page.created?with=result"
-    // parses the same way authz.require:x parses its own colon-delimited argument.
     emit: stepFactory((spec: string) => async (ctx: Context) => {
       const questionMark = spec.indexOf("?");
       const name = questionMark === -1 ? spec : spec.slice(0, questionMark);

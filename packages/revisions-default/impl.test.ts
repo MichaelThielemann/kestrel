@@ -18,15 +18,12 @@ async function make(patch: Partial<RevisionsConfig> = {}, logger = silentLogger)
 
 let sequence = 0;
 
-// Each call changes the title unless the caller names its own fields, so an ordinary `entry()`
-// never collides with the no-op-save behaviour tested via the contract suite above.
 const entry = (patch: Partial<NewRevision> = {}): NewRevision => {
   sequence += 1;
   const fields = patch.fields ?? { title: `A${sequence}`, status: "draft" };
   return { collection: "pages", documentId: "p1", locale: "de", author: AUTHOR, kind: "save", ...patch, fields };
 };
 
-// The contract suite prunes explicitly, so the impl runs with the retention off for it.
 revisionsContractTests(async (options) => make({ keep: options.keep }));
 
 describe("revisions/default", () => {

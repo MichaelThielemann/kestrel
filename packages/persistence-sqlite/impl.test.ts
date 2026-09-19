@@ -117,7 +117,6 @@ const ctx = (params: Record<string, string> = {}, payload: Record<string, unknow
 
 const stepsOf = (db: PersistenceSqlite) => module.steps!(db);
 
-/** The steps take the module's own instance, so the fake needs the three maintenance calls too. */
 function fakeDb(): PersistenceSqlite & { failNext(code: "TRANSIENT" | "CONFLICT"): void } {
   return Object.assign(createFakePersistence(), { checkpoint: () => {}, snapshot: () => {}, close: () => {} });
 }

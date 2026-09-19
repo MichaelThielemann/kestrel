@@ -46,8 +46,6 @@ function jsonType(value: unknown): string {
   return typeof value;
 }
 
-// A tagged union (block nodes) is selected by properties.type.const; a plain
-// `anyOf: [schema, {type:"null"}]` wrapper has no discriminator and is selected by type.
 function pickBranch(root: Node, branches: unknown[], value: unknown): Node | undefined {
   const schemas = branches.map((b) => resolveRef(root, b));
   const tag = isNode(value) ? value.type : undefined;

@@ -78,7 +78,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** The fields the content model has for a collection right now, `null` when nothing describes it. */
 function modelFieldsOf(content: Content | undefined, collection: string): string[] | null {
   const type = content?.model().types[collection];
   return type === undefined ? null : Object.keys(type.fields);
@@ -93,7 +92,6 @@ export default defineModule({
   name: "revisions/default",
   provides: [REVISIONS],
   requires: [PERSISTENCE],
-  // Only to read the model: its default locale, and which fields a restore can still write.
   optional: [CONTENT],
   configSchema,
 

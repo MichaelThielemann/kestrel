@@ -91,7 +91,6 @@ function isTransient(error: KestrelError<"CONFLICT" | "NOT_FOUND" | "TRANSIENT">
   return error.code === "TRANSIENT";
 }
 
-/** findOne/deleteOne calls in login/resolve/logout can only ever answer TRANSIENT; a CONFLICT or NOT_FOUND there is a persistence bug, not an authn@1 failure. */
 function transientOnly(error: KestrelError<"CONFLICT" | "NOT_FOUND" | "TRANSIENT">): AuthnError {
   if (!isTransient(error)) throw new Error(`authn/multi: unexpected persistence error ${error.code}: ${error.message}`);
   return error;
@@ -123,7 +122,6 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
     return ok(found.value);
   };
 
-  /** Who counts as an admin is the authz module's answer, never a role name spelled out here; without one, nobody does and the last-admin guard cannot bite. */
   const isAdmin = async (user: User): Promise<Result<boolean, AuthnMultiError>> => {
     if (!authz || !user.active) return ok(false);
     const allowed = await authz.can(identity(user), config.adminPermission);

@@ -29,7 +29,6 @@ function isTransient(error: ContentError | BlobstoreError): error is RedirectsEr
   return error.code === "TRANSIENT";
 }
 
-/** content@1 and blobstore@1 only ever answer TRANSIENT here (no locale option, no move); anything else is a bug. */
 function transientOnly(error: ContentError | BlobstoreError, from: string): RedirectsError {
   if (!isTransient(error)) throw new Error(`redirects/default: unexpected ${from} error ${error.code}: ${error.message}`);
   return error;
@@ -64,8 +63,6 @@ export function createRedirects(config: Config, deps: { content: Content; blobs:
       rules = compiled.rules;
     } catch (e) {
       if (!(e instanceof RedirectRuleError)) throw e;
-      // A stored field that is neither absent nor a list is a broken container, not a bad row: fail
-      // open on lookups so a live site keeps resolving pages instead of 500ing on every request.
       deps.logger.error("redirects/default: rules are not a list, ignoring redirects", { type: config.type, error: e });
       rules = [];
     }

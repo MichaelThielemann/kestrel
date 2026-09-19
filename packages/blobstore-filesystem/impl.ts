@@ -26,7 +26,6 @@ function errno(cause: unknown): string | undefined {
 
 const TRANSIENT_CODES = new Set(["EBUSY", "EAGAIN", "EMFILE", "ENFILE"]);
 
-/** Rethrows anything but the four transient IO codes; those become a TRANSIENT Err instead of a bug. */
 function transientOrRethrow(cause: unknown): Err<BlobstoreError> {
   const code = errno(cause);
   if (code !== undefined && TRANSIENT_CODES.has(code)) {

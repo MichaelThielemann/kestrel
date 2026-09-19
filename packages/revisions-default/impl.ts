@@ -65,7 +65,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Structural equality of JSON values, independent of object key order. */
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (Array.isArray(a) || Array.isArray(b)) {
@@ -147,7 +146,6 @@ export async function createRevisionsDefault(config: RevisionsConfig, deps: Revi
   const preparedHeads = await db.ensureCollection(HEADS, { collection: "string", documentId: "string", locale: "string", revisionId: "string", updatedAt: "number" });
   if (isErr(preparedHeads)) throw new Error(`revisions/default: cannot prepare "${HEADS}": ${preparedHeads.error.message}`);
 
-  // Strictly increasing timestamps, so several saves within one millisecond still list in order.
   const newest = await db.findMany<EntryRow>(ENTRIES, {}, { sort: { createdAt: "desc" }, limit: 1 });
   let last = isErr(newest) ? 0 : (newest.value.items[0]?.createdAt ?? 0);
   const now = (): number => {
@@ -224,7 +222,6 @@ export async function createRevisionsDefault(config: RevisionsConfig, deps: Revi
       if (skipped) {
         logWarn(logger, "revisions/default: snapshot exceeds maxSnapshotBytes, recorded without content", { collection: entry.collection, documentId: entry.documentId, locale: entry.locale, bytes, maxSnapshotBytes: config.maxSnapshotBytes });
       }
-      // Unchanged save on top of the head: nothing to record, the head already reflects this state.
       if (entry.kind === "save" && parentId === head.value && parentRow && !parentRow.skipped && !skipped) {
         const status = entry.status ?? null;
         if (status === parentRow.status && deepEqual(entry.fields, parentRow.snapshot)) {
@@ -254,7 +251,6 @@ export async function createRevisionsDefault(config: RevisionsConfig, deps: Revi
       const pruned = await pruneGroup(entry.collection, entry.documentId, entry.locale);
       if (isErr(pruned)) return pruned;
       if (pruned.value.removed === 0) return ok(summaryOf(created.value));
-      // Pruning may have removed the parent and re-parented this revision onto its grandparent.
       const fresh = await db.findOne<EntryRow>(ENTRIES, { id: created.value.id });
       if (isErr(fresh)) return err(storageError(fresh.error));
       return ok(summaryOf(fresh.value ?? created.value));
