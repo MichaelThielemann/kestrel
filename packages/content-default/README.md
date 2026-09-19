@@ -58,6 +58,6 @@ rewriting (see site-default), custom field types, versioning.
 | `content.describeModel` | The content model: locales, default locale and every type with its fields | – | `result` | – | { locales?: string[], defaultLocale?: string, types: object, … } | – |
 | `content.removeTranslation:<arg>` | Remove one translation of a <arg> (locale from the route or ?locale=); the document stays in its other locales | `params.id` | `result` | ?locale: "de" \| "en" | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 unknown or missing locale; 404 document or translation not found; 409 last translation – remove the document |
 
-Used by 13 of 71 pipelines in `examples/minimal`.
+Used by 13 of 72 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

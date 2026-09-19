@@ -5,7 +5,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { binaryResult, first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { DEFAULT_MAX_ATTEMPTS, createImages, type Images, type Variant } from "./impl.ts";
+import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, createImages, type Images, type Variant } from "./impl.ts";
 import { sizeSchema } from "./sizes.ts";
 
 export const configSchema = z
@@ -17,6 +17,7 @@ export const configSchema = z
     chunk: z.number().int().min(1).max(500).default(20),
     staleAfterMs: z.number().int().positive().default(60000),
     maxAttempts: z.number().int().positive().default(DEFAULT_MAX_ATTEMPTS),
+    renderTimeoutMs: z.number().int().positive().default(DEFAULT_RENDER_TIMEOUT_MS),
   })
   .strict();
 
@@ -38,6 +39,7 @@ const SIZE_INPUT_SCHEMA = { type: "object", properties: { name: { type: "string"
 const GENERATE_INPUT_SCHEMA = { type: "object", properties: { id: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, additionalProperties: true, description: "reached either directly (id/ids) or as the media.uploaded event envelope, which carries further fields this step ignores" };
 const VARIANT_SCHEMA = { type: "object", properties: { id: { type: "string" }, mediaId: { type: "string" }, size: { type: "string" }, spec: { type: "string" }, width: { type: "number" }, height: { type: "number" }, format: { type: "string" }, key: { type: "string" }, bytes: { type: "number" }, state: { type: "string", enum: ["pending", "done", "error", "failed"] }, error: { type: ["string", "null"] }, attempts: { type: "number" }, updatedAt: { type: "number" } }, required: ["id", "mediaId", "size", "spec", "width", "height", "format", "key", "bytes", "state", "error", "attempts", "updatedAt"] };
 const JOB_SCHEMA = { type: "object", properties: { id: { type: "string" }, state: { type: "string", enum: ["running", "paused", "done", "error"] }, total: { type: "number" }, done: { type: "number" }, failed: { type: "number" }, cursor: { type: "string" }, startedAt: { type: "number" }, updatedAt: { type: "number" }, finishedAt: { type: ["number", "null"] }, error: { type: ["string", "null"] } }, required: ["id", "state", "total", "done", "failed", "cursor", "startedAt", "updatedAt", "finishedAt", "error"] };
+const FAILED_VARIANT_SCHEMA = { type: "object", properties: { mediaId: { type: "string" }, size: { type: "string" }, attempts: { type: "number" }, error: { type: ["string", "null"] }, updatedAt: { type: "number" } }, required: ["mediaId", "size", "attempts", "error", "updatedAt"] };
 const ATTACHED_VARIANT_SCHEMA = { type: "object", properties: { size: { type: "string" }, width: { type: "number" }, height: { type: "number" }, format: { type: "string" }, bytes: { type: "number" }, state: { type: "string", enum: ["pending", "done", "error", "failed"] }, path: { type: "string" } }, required: ["size", "width", "height", "format", "bytes", "state", "path"] };
 
 export default defineModule({
@@ -93,6 +95,18 @@ export default defineModule({
       const job = await images.resume();
       if (isErr(job)) return ctx.fail(job.error);
       return ok({ ...ctx, result: job.value });
+    },
+
+    retryFailed: async (ctx: Context) => {
+      const id = mediaId(ctx);
+      if (id !== undefined) {
+        const known = await images.exists(id);
+        if (isErr(known)) return ctx.fail(known.error);
+        if (!known.value) return ctx.fail("NOT_FOUND", `images: media/${id} not found`);
+      }
+      const retried = await images.retryFailed(id);
+      if (isErr(retried)) return ctx.fail(retried.error);
+      return ok({ ...ctx, result: retried.value });
     },
 
     prune: async (ctx: Context) => {
@@ -183,9 +197,17 @@ export default defineModule({
     generate: { summary: "Generate variants for one media item (id from params.id or payload.id), or for each id in payload.ids (unknown ids are skipped)", reads: [], writes: ["result"], input: GENERATE_INPUT_SCHEMA, output: { oneOf: [{ type: "object", properties: { id: { type: "string" }, variants: { type: "array", items: VARIANT_SCHEMA } }, required: ["id", "variants"] }, { type: "object", properties: { items: { type: "array", items: { type: "object", properties: { id: { type: "string" }, variants: { type: "array", items: VARIANT_SCHEMA } }, required: ["id", "variants"] } } }, required: ["items"] }] }, errors: { 400: "missing media id", 404: "media item not found" } },
     sync: { summary: "Start a sync job, or resume a paused/error/stale one", reads: [], writes: ["result"], output: JOB_SCHEMA, errors: { 409: "a fresh job is already running" } },
     resume: { summary: "Resume a paused/error/stale job, or no-op (for cron)", reads: [], writes: ["result"], output: { oneOf: [JOB_SCHEMA, { type: "null" }] } },
+    retryFailed: {
+      summary: "Put every variant that gave up after maxAttempts back to pending with a fresh attempt budget – all of them, or one media item's (id from params.id or payload.id) – and start the work that regenerates them",
+      reads: [],
+      writes: ["result"],
+      input: { type: "object", properties: { id: { type: "string" } }, additionalProperties: false },
+      output: { type: "object", properties: { variants: { type: "number" }, media: { type: "number" }, job: { oneOf: [JOB_SCHEMA, { type: "null" }] } }, required: ["variants", "media", "job"] },
+      errors: { 404: "media item not found", 409: "images are shutting down" },
+    },
     prune: { summary: "Delete the variants of sizes that are no longer declared", reads: [], writes: ["result"], input: { type: "object", properties: { sizes: { type: "array", items: { type: "string" } } }, required: ["sizes"], additionalProperties: false }, output: { type: "object", properties: { sizes: { type: "number" }, variants: { type: "number" } }, required: ["sizes", "variants"] }, errors: { 400: "missing sizes, or a name is still declared or has no variants" } },
     readStatus: {
-      summary: "Sizes with usage/variant counts, current job, and sizes whose variants are left over from a size the code no longer declares",
+      summary: "Sizes with usage/variant counts, current job, the variants that gave up with their last error, and sizes whose variants are left over from a size the code no longer declares",
       reads: [],
       writes: ["result"],
       output: {
@@ -195,8 +217,9 @@ export default defineModule({
           job: { oneOf: [JOB_SCHEMA, { type: "null" }] },
           orphaned: { type: "object", properties: { sizes: { type: "array", items: { type: "string" } }, variants: { type: "number" } }, required: ["sizes", "variants"] },
           registrySeen: { type: "boolean" },
+          failed: { type: "object", properties: { variants: { type: "number" }, recent: { type: "array", items: FAILED_VARIANT_SCHEMA } }, required: ["variants", "recent"] },
         },
-        required: ["sizes", "job", "orphaned", "registrySeen"],
+        required: ["sizes", "job", "orphaned", "registrySeen", "failed"],
       },
     },
     remove: { summary: "Delete one media item's variants (blob + rows)", reads: ["params.id"], writes: [], errors: { 400: "missing id" } },

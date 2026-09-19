@@ -73,6 +73,6 @@ concerns), an e-mail field (a model change with its own use, its own ticket).
 | `authn.activateUser` | Activate a user | `params.id` | `result` | – | { ok: boolean, … } | 404 user not found |
 | `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed?: number, … } | – |
 
-Used by 62 of 71 pipelines in `examples/minimal`.
+Used by 63 of 72 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

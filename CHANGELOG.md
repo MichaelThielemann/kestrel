@@ -4,6 +4,24 @@
 
 ### Added
 
+- `images/default`: config `renderTimeoutMs` (default 30000). A render that does not return within
+  it is given up on and counts as a normal failed attempt with the error text `render timed out
+  after <n>ms`. Previously a hung-but-alive render kept its entry in the in-flight map for good:
+  the attempt was never counted, the variant never reached `failed`, and the sync job stopped at
+  that image. sharp offers no way to abort a render, so the timed-out render is left to settle in
+  the background and its result is dropped rather than written over the recorded failure.
+- `images/default`: step `images.retryFailed` (`POST /admin/images/retry-failed` in
+  `examples/minimal`, behind `images.manage`). It sets every variant that gave up after
+  `maxAttempts` back to `pending` with `attempts: 0` — all of them, or one media item's via
+  `params.id`/`payload.id` — and then does the work: one item is regenerated right away
+  (`job: null`), all of them start a sync job at the first media item, because a paused job's
+  cursor may already have passed the affected ones. Answers `{ variants, media, job }`, `404` for
+  an unknown id. Until now only redefining a size or deleting the media item lifted the quarantine.
+- `images/default`: `images.readStatus` additionally reports `failed: { variants, recent }` — the
+  number of variants that gave up across all sizes (the per-size counts only cover declared sizes)
+  and the twenty most recent ones with `mediaId`, `size`, `attempts`, `error` and `updatedAt`, so
+  an admin UI can show why they failed. Additive; the per-size `variants` counts are unchanged.
+
 - `core`: every `ConfigVariable` in the manifest (`kestrel.describe()`, `insights.readManifest`)
   carries `value` — the effective value, i.e. what the config sets, otherwise the default, `null`
   when `status` is `missing` — and `redacted`. The value is a JSON snapshot: functions, class

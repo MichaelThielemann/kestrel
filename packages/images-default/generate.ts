@@ -27,6 +27,8 @@ export function contentTypeOf(format: string): string {
   return CONTENT_TYPES[format] ?? `image/${format}`;
 }
 
+export type Renderer = (data: Uint8Array, size: Size) => Promise<Rendered>;
+
 export async function render(data: Uint8Array, size: Size): Promise<Rendered> {
   const image = sharp(data, { failOn: "error" });
   const meta = await image.metadata();

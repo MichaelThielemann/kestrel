@@ -397,8 +397,9 @@ database: variants for a size nobody declares any more are reported under `orpha
 | PUT | `/admin/images/sizes` | `{ sizes: [{ name, width, height?, fit: "inside"\|"cover", format: "webp"\|"original", quality? }] }` (non-empty) | effective sizes after replacing the registered list (`images.write`); 400 on an empty list or an invalid definition, 409 on a name collision with a config size |
 | GET | `/admin/images/sizes` | – | effective sizes (defaults/config merged with registered ones) (`images.read`) |
 | POST | `/admin/images/sync` | – | starts or resumes a sync job, keeps running in the background; `{ id, state, total, done, failed, cursor, startedAt, updatedAt, finishedAt, error }` (`images.manage`); 409 `images: sync job <id> is running` if a fresh job is already running |
-| GET | `/admin/images/status` | – | `{ sizes: [{ …size, source, used, variants: { done, pending, error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen }` – `used` = registered in this process (defaults are never "used" but are still generated); `orphaned` are sizes that still have variants but that nobody declares any more; `registrySeen: false` means this process has never seen `register()` — `orphaned` is then always empty, because "no longer declared" can't be told apart from "not yet registered" (`images.read`) |
+| GET | `/admin/images/status` | – | `{ sizes: [{ …size, source, used, variants: { done, pending, error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen, failed: { variants: n, recent: [{ mediaId, size, attempts, error, updatedAt }] } }` – `used` = registered in this process (defaults are never "used" but are still generated); `orphaned` are sizes that still have variants but that nobody declares any more; `registrySeen: false` means this process has never seen `register()` — `orphaned` is then always empty, because "no longer declared" can't be told apart from "not yet registered"; `failed` counts the variants that gave up across *all* sizes and carries the twenty that failed most recently with their last error text (`images.read`) |
 | POST | `/admin/images/prune` | `{ sizes: [name] }` | deletes the variants (blob + row) for the named *orphaned* sizes; `{ sizes, variants }` (`images.manage`); 400 if a name is still declared or has no variants |
+| POST | `/admin/images/retry-failed` | `{ id? }` | puts every variant that gave up back to `pending` with `attempts: 0` — all of them, or with `id` only that media item's — and does the work: for one item right away (`job: null`), for all of them by starting a sync job from the first media item; `{ variants, media, job }`, `{ variants: 0, media: 0, job: null }` when nothing had given up (`images.manage`); 404 for an unknown `id` |
 | GET | `/media/:id/variants/:file` | – | variant image bytes, `Content-Type: image/webp`; 404 for an unknown size or unknown medium; if the variant isn't ready yet (pending/error), the original bytes are served instead with header `x-kestrel-variant: pending`; if the variant has permanently given up after `maxAttempts` tries (`failed`), there is no original as a fallback, instead 404 with the reason (`images: variant <size> for media/<id> failed after <n> attempts: <error>`) (`media.read`, `identifyUser`) |
 
 `GET /media/:id` and `GET /media` additionally return
@@ -407,6 +408,13 @@ database: variants for a size nobody declares any more are reported under `orpha
 affected variant — upload and sync keep running unaffected. A cron job (every 5 minutes) calls
 `images.resume` and automatically continues a paused/failed/stuck sync job, even without a manual
 `POST /admin/images/sync`.
+
+A render that hangs is given up on after `renderTimeoutMs` (default 30000) and counts as a normal
+failed attempt (`render timed out after <n>ms`); the render itself cannot be aborted, so it is left
+to finish in the background and whatever it produces is dropped. After `maxAttempts` failures the
+variant is `failed` and no longer retried — `POST /admin/images/retry-failed` is the way back.
+There is deliberately no cancel for a running sync job: it holds nothing, writes one idempotent
+variant at a time and stops at the end of the library; shutdown pauses it at its cursor.
 
 Embedded hosts (without HTTP) register sizes at boot directly via the pipeline API:
 `kestrel.run("registerImageSizesBoot", { trigger: { kind: "event", name: "boot" }, payload: { sizes } })`
