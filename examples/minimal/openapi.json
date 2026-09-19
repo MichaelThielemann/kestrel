@@ -3483,7 +3483,7 @@
     "/admin/pages/{id}/revisions/{revisionId}": {
       "get": {
         "operationId": "pageRevision",
-        "summary": "Require a valid session → Requires permission pages.manage → One revision of a pages document including its snapshot",
+        "summary": "Require a valid session → Requires permission pages.manage → One revision of a pages document including its snapshot and, where the content model is known, the dry run of its restore under `restore`",
         "tags": [
           "admin"
         ],
@@ -3593,6 +3593,31 @@
                       "type": [
                         "object",
                         "null"
+                      ]
+                    },
+                    "restore": {
+                      "type": "object",
+                      "properties": {
+                        "revisionId": {
+                          "type": "string"
+                        },
+                        "dropped": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "missing": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "revisionId",
+                        "dropped",
+                        "missing"
                       ]
                     }
                   },
@@ -3921,7 +3946,7 @@
     "/admin/pages/{id}/revisions/{revisionId}/restore": {
       "post": {
         "operationId": "restorePageRevision",
-        "summary": "Require a valid session → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.restored\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is → Emit event \"page.restored\" to every subscribed handler pipeline",
         "tags": [
           "admin"
         ],
@@ -3940,6 +3965,7 @@
           "links.extract:pages",
           "delivery.publish:pages",
           "delivery.exportLlms",
+          "revisions.reportRestore",
           "events.emit:page.restored"
         ],
         "parameters": [
@@ -4045,6 +4071,31 @@
                       "required": [
                         "entries",
                         "full"
+                      ]
+                    },
+                    "restore": {
+                      "type": "object",
+                      "properties": {
+                        "revisionId": {
+                          "type": "string"
+                        },
+                        "dropped": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "missing": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "revisionId",
+                        "dropped",
+                        "missing"
                       ]
                     }
                   },

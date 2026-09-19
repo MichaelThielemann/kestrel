@@ -592,6 +592,9 @@ importers:
       '@michaelthielemann/kestrel':
         specifier: workspace:*
         version: link:../core
+      '@michaelthielemann/kestrel-content-default':
+        specifier: workspace:*
+        version: link:../content-default
       '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../contracts

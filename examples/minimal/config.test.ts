@@ -96,7 +96,7 @@ describe("examples/minimal revisions wiring", () => {
     const restore = pipelines.get("restorePageRevision")!;
     const update = pipelines.get("updatePage")!;
     expect(restore.indexOf("revisions.restore:pages")).toBe(2);
-    expect(restore.slice(3)).toEqual([...update.slice(2, -1), "events.emit:page.restored"]);
+    expect(restore.slice(3)).toEqual([...update.slice(2, -1), "revisions.reportRestore", "events.emit:page.restored"]);
     expect(pipelines.get("pageRevisions")).toEqual(["authn.requireUser", "authz.require:pages.manage", "revisions.list:pages"]);
     expect(pipelines.get("pageRevision")).toEqual(["authn.requireUser", "authz.require:pages.manage", "revisions.read:pages"]);
     expect(pipelines.get("labelPageRevision")).toEqual(["authn.requireUser", "authz.require:pages.write", "revisions.label:pages"]);

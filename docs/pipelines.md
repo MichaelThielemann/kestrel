@@ -567,16 +567,18 @@ steps: ["authn.requireUser", "authz.require:pages.write", "revisions.restore:pag
         "validate.check:pages.body", "validate.sanitize:pages.body", "validate.check:pages.body",
         "references.check:pages", "content.update:pages", "revisions.record:pages",
         "references.index:pages", "links.extract:pages", "delivery.publish:pages",
-        "delivery.exportLlms", "events.emit:page.restored"]
+        "delivery.exportLlms", "revisions.reportRestore", "events.emit:page.restored"]
 ```
 
-Everything after the third step is `updatePage` verbatim. Old content therefore passes the same
-validation, sanitizing, reference check and delivery as a hand-typed edit, the schema check the
-runner performs per step applies to it (which is why `body` is written, not only `payload`), and a
-change to the write flow cannot be forgotten in the replay. A step that needs to tell a later step
-*how* the payload came about puts that on the context, not in the payload:
-`revisions.restore` writes `revisionParent`, and `revisions.record` reads it to hang the new
-revision off the restored one instead of off the head.
+Everything between the third step and `revisions.reportRestore` is `updatePage` verbatim. Old
+content therefore passes the same validation, sanitizing, reference check and delivery as a
+hand-typed edit, the schema check the runner performs per step applies to it (which is why `body` is
+written, not only `payload`), and a change to the write flow cannot be forgotten in the replay. A
+step that needs to tell a later step *how* the payload came about puts that on the context, not in
+the payload: `revisions.restore` writes `revisionParent`, and `revisions.record` reads it to hang the
+new revision off the restored one instead of off the head. The same channel carries what the replay
+had to leave out — `restoreReport` — which `revisions.reportRestore` adds to the finished result,
+last because only there is the response shape settled.
 
 ## Rules
 
