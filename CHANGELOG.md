@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Changed
+
+- `content-default`: the README now states how a consumer-defined field type reaches the backend —
+  declared as the `content/default` type it is stored as, its value shape enforced by a `validate@1`
+  provider through `validate.check:<type>.<field>` before `content.create/update/set`, which answers
+  `VALIDATION` (400) with `details.fields` naming the field, localized fields included. The module
+  keeps its closed field type set; no config or contract change was needed. Tests cover the boot of
+  such a resolved model, the rejection of a model that still names the custom type, and valid,
+  invalid, localized, absent and `null` values.
+
 ### Fixed
 
 - `examples/minimal` now documents and tests its bootstrap `admin` password (`kestrel-demo`,

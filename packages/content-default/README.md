@@ -36,8 +36,19 @@ stored document can miss; `list:<t>` or
 `offset` and `sort=-field` from the payload. `limit` and `offset` must be integers (`limit` ≥ 1,
 `offset` ≥ 0), `limit` at most `maxLimit` (config, default 200), `sort` a known field; anything
 else is `VALIDATION` (400). An unknown `?locale=` is `VALIDATION` too, on every step.
+The field type set is closed. An unknown `type` fails the config schema at boot, naming the field
+(`types.pages.fields.accent: Invalid input`), so a consumer-defined field type is declared here as
+the `content/default` type it is *stored* as – a colour as `text`, a link object as `json`. Its
+value shape is enforced by a `validate@1` provider beside this module, not by the model:
+`validate.check:<type>.<field>` with an inline JSON Schema, run before `content.create`,
+`content.update` or `content.set`, answers `VALIDATION` (400) with `details.fields` naming the
+field. That holds for localized fields too – the payload carries the plain field name and the
+locale comes from `params.locale` or `payload.locale`. An absent or `null` value passes the schema
+check; `required` stays this module's job. `content.describeModel` reports the storage type, so a
+UI that wants the consumer's own type name keeps that mapping on its side.
+
 Not included: referential integrity (see references-default), URL paths and internal link
-rewriting (see site-default), custom field types, versioning.
+rewriting (see site-default), versioning.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
