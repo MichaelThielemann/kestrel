@@ -28,8 +28,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// node:sqlite reports the *extended* result code in `errcode` (a primary-key collision is 1555);
-// masking with 0xff yields the primary code: 5 SQLITE_BUSY, 6 SQLITE_LOCKED, 19 SQLITE_CONSTRAINT.
 export function persistenceFailure(cause: unknown): PersistenceError | null {
   const errcode = isRecord(cause) && typeof cause.errcode === "number" ? cause.errcode : 0;
   const primary = errcode & 0xff;

@@ -37,13 +37,11 @@ function causeOf(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
 }
 
-/** Every collection and locale reaching content@1 comes from the model itself, so anything but a transient failure there is a wiring bug. */
 function fromContent(error: ContentError): MigrationsError {
   if (error.code !== "TRANSIENT") throw new Error(`migrations: unexpected content@1 error ${error.code}: ${error.message}`);
   return boundaryCast<MigrationsError>(error, "host");
 }
 
-/** The ledger is read by filter and written with a fresh id, so persistence@1 never answers NOT_FOUND here. */
 function fromPersistence(error: PersistenceError): MigrationsError {
   if (error.code === "NOT_FOUND") throw new Error(`migrations: unexpected persistence@1 error ${error.code}: ${error.message}`);
   return boundaryCast<MigrationsError>(error, "host");

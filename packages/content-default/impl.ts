@@ -186,7 +186,6 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
     return ok();
   };
 
-  // The persistence enforces `unique` with an index; a race that slips past assertUnique still answers the same field error.
   const uniqueConflict = (typeName: string, error: PersistenceError, fields: Record<string, unknown>): Err<ContentError> => {
     const column = error.details?.field;
     if (error.code !== "CONFLICT" || typeof column !== "string") return err(error);

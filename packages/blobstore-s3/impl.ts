@@ -49,7 +49,6 @@ export interface BlobstoreS3 extends Blobstore {
 const TRANSIENT_NAMES = new Set(["TimeoutError", "NetworkingError", "AbortError"]);
 const TRANSIENT_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "EAI_AGAIN"]);
 
-/** After the SDK's own `maxAttempts` are spent, this is the only line separating "retry the caller" from "the operation is broken". */
 function isTransient(cause: unknown): boolean {
   const e = boundaryCast<{ name?: string; code?: string; $retryable?: unknown; $metadata?: { httpStatusCode?: number } }>(cause, "host");
   const status = e.$metadata?.httpStatusCode;
@@ -101,7 +100,6 @@ export function createBlobstoreS3(config: Config, client: S3Like = createClient(
     },
     async move(from, to): Promise<Result<void, BlobstoreError>> {
       const source = fullKey(from);
-      // CopySource is a path: the segments are percent-encoded, the slashes separating them are not
       const copySource = `${config.bucket}/${source.split("/").map(encodeURIComponent).join("/")}`;
       try {
         await client.send(new CopyObjectCommand({ Bucket: config.bucket, Key: fullKey(to), CopySource: copySource, MetadataDirective: "COPY" }));

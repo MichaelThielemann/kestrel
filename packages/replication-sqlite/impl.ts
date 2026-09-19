@@ -150,8 +150,6 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     return ok({ generation: gen, bytes: data.byteLength });
   };
 
-  // Frames written before this process took its first snapshot are covered by that snapshot; without a
-  // generation there is nowhere to ship them to.
   const shipNewFrames = async (): Promise<Result<{ bytes: number; frames: number }, BlobstoreError>> => {
     const currentGeneration = generation;
     if (currentGeneration === null || !existsSync(walFile)) return ok({ bytes: 0, frames: 0 });
@@ -267,8 +265,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     close() {
       try {
         release();
+        // eslint-disable-next-line no-empty -- release() on an already released lock throws; nothing is left to do
       } catch {
-        /* already released */
       }
       conn.close();
     },

@@ -157,8 +157,6 @@ export async function createValidator(config: Config, root: string, logger: Logg
     compiled.set(target, loaded.fn);
   }
 
-  // Retried once after a short delay: an editor/git write can leave the file briefly
-  // truncated or half-written between the change event and the actual final content.
   async function reloadTarget(target: string): Promise<void> {
     const path = paths.get(target);
     if (!path) return;
@@ -167,8 +165,8 @@ export async function createValidator(config: Config, root: string, logger: Logg
       raw.set(target, loaded.schema);
       compiled.set(target, loaded.fn);
       return;
+      // eslint-disable-next-line no-empty -- a failed first read is retried below
     } catch {
-      // fall through to retry
     }
     await new Promise((r) => setTimeout(r, RELOAD_RETRY_DELAY_MS));
     try {
@@ -180,8 +178,6 @@ export async function createValidator(config: Config, root: string, logger: Logg
     }
   }
 
-  // Per-target promise chain: a slow reload from an earlier event must not overwrite
-  // the result of a later one that already finished.
   const reloadChains = new Map<string, Promise<void>>();
   function scheduleReload(target: string): void {
     const chained = (reloadChains.get(target) ?? Promise.resolve()).then(() => reloadTarget(target));

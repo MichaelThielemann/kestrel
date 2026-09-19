@@ -191,10 +191,6 @@ describe("module steps", () => {
     expect(Reflect.get(passedThrough, DONE)).toBeUndefined();
   });
 
-  // Actual pipeline order (redirects.lookup before site.resolve) is asserted in
-  // examples/minimal/config.test.ts; here we only pin what "wins" means: ctx.done short-circuits
-  // the pipeline, so a matched path never reaches a later site.resolve step regardless of
-  // whether that step would also have resolved a page under the same path.
   it("lookup wins over what a later site.resolve would find (ctx.done short-circuits the pipeline)", async () => {
     const s = await steps(rules);
     const done = expectOk(await s.lookup(ctx({ path: "event" })));

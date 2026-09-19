@@ -7,8 +7,6 @@ import { createBlobstoreS3, createClient, type Config } from "./impl.ts";
 
 const endpoint = process.env.KESTREL_S3_ENDPOINT;
 
-// Only runs against a real S3-compatible target (see scripts/s3-minio.mjs); a fake proves
-// nothing about CopySource encoding or NoSuchKey/404 detection on CopyObject.
 describe.skipIf(!endpoint)("blobstore/s3 against MinIO", () => {
   const bucket = process.env.KESTREL_S3_BUCKET ?? "kestrel-test";
   const baseConfig: Config = {

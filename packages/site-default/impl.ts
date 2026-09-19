@@ -78,7 +78,6 @@ function isTransient(error: ContentError): error is SiteError {
   return error.code === "TRANSIENT";
 }
 
-/** Every locale site/default passes to content@1 comes from the model's own locale list, so a VALIDATION or NOT_FOUND there is a bug, not a site@1 failure. */
 function transientOnly(error: ContentError): SiteError {
   if (!isTransient(error)) throw new Error(`site/default: unexpected content@1 error ${error.code}: ${error.message}`);
   return error;
@@ -111,8 +110,6 @@ export function createSiteDefault(content: Content): SiteDefault {
           const raw = fields[field];
           return raw !== undefined && typeof raw !== "string" && raw.localized === true;
         };
-        // The slug may only exist in the default locale, so the lookup drops the localized filters and
-        // re-checks them strictly afterwards: a locale that is not published itself must stay unserved.
         const shared = Object.fromEntries(Object.entries(rules.filter).filter(([f]) => !isLocalized(f)));
         const viaDefaultPage = await content.list(type, { ...shared, [rules.slugField]: slug }, { limit: 1 });
         if (isErr(viaDefaultPage)) return err(transientOnly(viaDefaultPage.error));

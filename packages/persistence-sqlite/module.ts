@@ -8,8 +8,6 @@ import { createPersistenceSqlite, persistenceFailure, type PersistenceSqlite } f
 
 export const configSchema = z.object({ file: z.string().min(1), busyTimeoutMs: z.number().int().min(0).optional() }).strict();
 
-// checkpoint/snapshot are maintenance calls outside persistence@1, so they signal a locked database
-// by throwing; the step turns that into the same TRANSIENT the contract methods return.
 function guard(ctx: Context, fn: () => void): Err<KestrelError> | null {
   try {
     fn();

@@ -1,11 +1,3 @@
-/**
- * Compile the editor-authored redirect rows into the flat `redirects.json` artifact the edge consumes.
- *
- * Editors never write a regex: `from` is a path with `*` (one segment) or `**` (one or more) wildcards,
- * and `to` may reference them positionally as `$1`, `$2`, … in authored order. The translation happens
- * here so the edge script only has to match and substitute.
- */
-
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 
 /** One entry of the published artifact. `pattern` is a regex SOURCE string, anchored, path-only. */
@@ -30,13 +22,6 @@ function escapeLiteral(s: string): string {
   return s.replace(ESCAPE, "\\$&");
 }
 
-/**
- * What a wildcard may capture. This is a SECURITY boundary: a capture comes from the request, not the
- * editor, so `normalizeTarget`'s checks (which only ever saw the authored literal) say nothing about it —
- * the pattern is the guard instead. Excludes a backslash (every browser resolves `Location: /\host` as
- * `//host`, an open redirect) and CR/LF/NUL/DEL. A multi-segment capture also may not START with `/`, or
- * a target of `/$1` would become the protocol-relative `//host`.
- */
 const SEGMENT_CHAR = "[^/\\\\\\x00-\\x1f\\x7f]";
 const PATH_CHAR = "[^\\\\\\x00-\\x1f\\x7f]";
 const ONE_SEGMENT = `(${SEGMENT_CHAR}+)`;
@@ -57,8 +42,6 @@ export function patternToRegexSource(from: string): string {
   if (CONTROL.test(raw)) throw new RedirectRuleError('"From" must not contain control characters');
   if (raw.includes("\\")) throw new RedirectRuleError('"From" must not contain a backslash');
   if (raw.split("/").some((seg) => seg === "..")) throw new RedirectRuleError('"From" must not contain ".."');
-  // Two `**` with only a separator between them match the same thing through every split point — quadratic
-  // on a long path — and is never what the author meant, so it is rejected rather than tuned.
   if (/\*\*\/?\*\*/.test(raw)) throw new RedirectRuleError('"From" has two `**` in a row — one already matches any number of segments');
 
   const path = `/${raw.replace(/^\/+/, "").replace(/\/+$/, "")}`;
@@ -73,7 +56,6 @@ export function patternToRegexSource(from: string): string {
   return `^${body + escapeLiteral(path.slice(last))}/?$`;
 }
 
-/** Number of capture groups `patternToRegexSource` emits for an authored `from`. */
 function wildcardCount(from: string): number {
   return (from.trim().match(/\*\*|\*/g) ?? []).length;
 }
@@ -105,12 +87,6 @@ export function normalizeTarget(to: string): string {
   return raw;
 }
 
-/**
- * A placeholder inside an absolute target's HOST would let a visitor choose the destination
- * (`https://neu.example.com$1` + a request of `/blog/.evil.com` → `https://neu.example.com.evil.com`).
- * The capture classes cannot prevent that — the hazard is where `$n` sits, not what it holds — so it is
- * rejected at authoring time.
- */
 function assertPlaceholdersAfterHost(target: string): void {
   if (!SCHEME.test(target)) return;
   const firstPlaceholder = target.indexOf("$");
@@ -155,9 +131,6 @@ export function compileRedirects(rows: unknown): RedirectRule[] {
           throw new RedirectRuleError(`"To" references $${n} but "From" has ${groups} wildcard(s)`);
         }
       }
-      // `${1}` is the plausible typo — it compiles clean and then ships verbatim in every Location, a rule
-      // that silently 404s. A bare `$` is left alone: it is a legal path character, only `$` followed by
-      // digits is reserved.
       if (/\$\{/.test(target)) {
         throw new RedirectRuleError('"To" writes a placeholder as $1, $2, … — not ${1}');
       }
