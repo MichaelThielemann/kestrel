@@ -1,7 +1,8 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { describe, it, expect } from "vitest";
+import type { ModuleDefinition } from "../packages/core/src/defineModule.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -32,5 +33,27 @@ describe("core VERSION", () => {
     const { VERSION } = await import("../packages/core/src/version.ts");
     const pkg = JSON.parse(readFileSync(join(root, "packages", "core", "package.json"), "utf-8")) as { version: string };
     expect(VERSION).toBe(pkg.version);
+  });
+});
+
+function modulePackages(): string[] {
+  return readdirSync(join(root, "packages"))
+    .filter((name) => existsSync(join(root, "packages", name, "module.ts")))
+    .sort();
+}
+
+describe("config secrets", () => {
+  it("every package marks a credential-looking config variable in its schema, so the manifest shows no value for it", async () => {
+    const { describeConfig } = await import("../packages/core/src/zodSchema.ts");
+    const { canHoldSecret, isSecretName } = await import("../packages/core/src/configValue.ts");
+    const unmarked: string[] = [];
+    for (const name of modulePackages()) {
+      const mod = (await import(pathToFileURL(join(root, "packages", name, "module.ts")).href)) as { default: ModuleDefinition };
+      for (const variable of describeConfig(mod.default.configSchema, undefined).variables) {
+        const key = variable.path.split(".").at(-1) ?? variable.path;
+        if (isSecretName(key) && canHoldSecret(variable.type) && !variable.secret) unmarked.push(`${name}: ${variable.path}`);
+      }
+    }
+    expect(unmarked).toEqual([]);
   });
 });

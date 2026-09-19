@@ -29,8 +29,18 @@ const STEP_DESCRIPTION: JsonSchema = {
 };
 const VARIABLE: JsonSchema = {
   type: "object",
-  properties: { path: { type: "string" }, type: { type: "string" }, required: { type: "boolean" }, default: {}, secret: { type: "boolean" }, set: { type: "boolean" }, status: { type: "string", enum: ["set", "default", "missing"], description: "set: the raw config carries the path; default: it does not and the value comes from this node's or an ancestor's default; missing: no value at all" } },
-  required: ["path", "type", "required", "secret", "set", "status"],
+  properties: {
+    path: { type: "string" },
+    type: { type: "string" },
+    required: { type: "boolean" },
+    default: {},
+    secret: { type: "boolean" },
+    set: { type: "boolean" },
+    status: { type: "string", enum: ["set", "default", "missing"], description: "set: the raw config carries the path; default: it does not and the value comes from this node's or an ancestor's default; missing: no value at all" },
+    value: { description: "The effective value as a JSON snapshot: what the config sets, else the default; null when the variable is missing or redacted" },
+    redacted: { type: "boolean", description: "The value is withheld: the schema marks the variable secret, its key name looks like a credential, or an ancestor is redacted" },
+  },
+  required: ["path", "type", "required", "secret", "set", "status", "value", "redacted"],
 };
 const MODULE: JsonSchema = {
   type: "object",

@@ -238,8 +238,11 @@ Not included: self-service registration, password reset (own pipelines).
 - [ ] If the submodule holds a connection, a watcher, etc.: `teardown` closes it
 - [ ] If the submodule contributes a trigger (`triggers.event`): the returned stop function
       unregisters all of it
-- [ ] Config fields that hold credentials carry `.describe("secret")`, so the manifest
-      (`kestrel.describe()`, `insights`) shows neither their default nor anything derived
+- [ ] Config fields that hold credentials carry `.describe("secret")`: the manifest
+      (`kestrel.describe()`, `insights`) shows every other variable's effective value, and a marked
+      one only `value: null, redacted: true` — no default, nothing derived. Key names that read like
+      a credential (`password`, `token`, `apiKey`, …) are redacted by a second net and are checked
+      against the marker by `scripts/workspace.test.ts`, but the marker is what a reviewer reads
 - [ ] `pnpm docs:generate` after changing `configSchema` or `describe()`: the generated section of
       the README (between the `kestrel-docs` markers) and `examples/minimal/manifest.json` are
       checked by CI

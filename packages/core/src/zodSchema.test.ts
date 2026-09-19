@@ -35,12 +35,12 @@ describe("toJsonSchema", () => {
     expect(props.ttl).toEqual({ anyOf: [{ type: "number" }, { type: "null" }] });
   });
 
-  it("keeps the secret marker and secret defaults out of the schema", () => {
+  it("keeps the secret marker and secret defaults out of the schema and marks the property writeOnly", () => {
     const props = boundaryCast<Record<string, Record<string, unknown>>>(toJsonSchema(schema).properties, "json");
-    expect(props.passwordHash).toEqual({ type: "string", pattern: "^scrypt\\$" });
+    expect(props.passwordHash).toEqual({ type: "string", pattern: "^scrypt\\$", writeOnly: true });
     const bootstrap = boundaryCast<Record<string, unknown>>(props.bootstrap?.properties, "json");
-    expect(bootstrap.token).toEqual({ type: "string" });
-    expect(JSON.stringify(toJsonSchema(schema))).not.toContain("secret");
+    expect(bootstrap.token).toEqual({ type: "string", writeOnly: true });
+    expect(JSON.stringify(toJsonSchema(schema))).not.toContain('"secret"');
   });
 
   it("carries a plain description through", () => {
@@ -49,62 +49,82 @@ describe("toJsonSchema", () => {
 });
 
 describe("describeConfig", () => {
-  it("lists one row per path with type, required, default, secret, set and status", () => {
+  it("lists one row per path with type, required, default, secret, set, status, value and redacted", () => {
     const { variables } = describeConfig(schema, { file: "./x.db", buckets: {}, passwordHash: "scrypt$abc", bootstrap: { username: "admin" }, kind: "a", up: () => {}, ttl: null });
     const byPath = Object.fromEntries(variables.map((v) => [v.path, v]));
-    expect(byPath.file).toEqual({ path: "file", type: "string", required: true, secret: false, set: true, status: "set" });
-    expect(byPath.port).toEqual({ path: "port", type: "integer", required: false, default: 3000, secret: false, set: false, status: "default" });
-    expect(byPath.mode).toEqual({ path: "mode", type: "enum", required: false, default: "apply", secret: false, set: false, status: "default" });
-    expect(byPath.tags).toEqual({ path: "tags", type: "array", required: false, secret: false, set: false, status: "missing" });
-    expect(byPath.buckets).toEqual({ path: "buckets", type: "record", required: true, secret: false, set: true, status: "set" });
-    expect(byPath.passwordHash).toEqual({ path: "passwordHash", type: "string", required: true, secret: true, set: true, status: "set" });
-    expect(byPath.bootstrap).toEqual({ path: "bootstrap", type: "object", required: false, secret: false, set: true, status: "set" });
-    expect(byPath["bootstrap.username"]).toEqual({ path: "bootstrap.username", type: "string", required: false, secret: false, set: true, status: "set" });
-    expect(byPath["bootstrap.token"]).toEqual({ path: "bootstrap.token", type: "string", required: false, secret: true, set: false, status: "default" });
-    expect(byPath.kind).toEqual({ path: "kind", type: "union", required: true, secret: false, set: true, status: "set" });
-    expect(byPath.up).toEqual({ path: "up", type: "unknown", required: true, secret: false, set: true, status: "set" });
-    expect(byPath.ttl).toEqual({ path: "ttl", type: "number", required: true, secret: false, set: true, status: "set" });
+    expect(byPath.file).toEqual({ path: "file", type: "string", required: true, secret: false, set: true, status: "set", value: "./x.db", redacted: false });
+    expect(byPath.port).toEqual({ path: "port", type: "integer", required: false, default: 3000, secret: false, set: false, status: "default", value: 3000, redacted: false });
+    expect(byPath.mode).toEqual({ path: "mode", type: "enum", required: false, default: "apply", secret: false, set: false, status: "default", value: "apply", redacted: false });
+    expect(byPath.tags).toEqual({ path: "tags", type: "array", required: false, secret: false, set: false, status: "missing", value: null, redacted: false });
+    expect(byPath.buckets).toEqual({ path: "buckets", type: "record", required: true, secret: false, set: true, status: "set", value: {}, redacted: false });
+    expect(byPath.passwordHash).toEqual({ path: "passwordHash", type: "string", required: true, secret: true, set: true, status: "set", value: null, redacted: true });
+    expect(byPath.bootstrap).toEqual({ path: "bootstrap", type: "object", required: false, secret: false, set: true, status: "set", value: { username: "admin" }, redacted: false });
+    expect(byPath["bootstrap.username"]).toEqual({ path: "bootstrap.username", type: "string", required: false, secret: false, set: true, status: "set", value: "admin", redacted: false });
+    expect(byPath["bootstrap.token"]).toEqual({ path: "bootstrap.token", type: "string", required: false, secret: true, set: false, status: "default", value: null, redacted: true });
+    expect(byPath.kind).toEqual({ path: "kind", type: "union", required: true, secret: false, set: true, status: "set", value: "a", redacted: false });
+    expect(byPath.up).toEqual({ path: "up", type: "unknown", required: true, secret: false, set: true, status: "set", value: "[function]", redacted: false });
+    expect(byPath.ttl).toEqual({ path: "ttl", type: "number", required: true, secret: false, set: true, status: "set", value: null, redacted: false });
   });
 
   it("a defaulted object hands its default down: the child is optional and reports the inherited value", () => {
     const nested = z.object({ media: z.object({ collection: z.string().min(1) }).default({ collection: "media_items" }) }).strict();
     const byPath = Object.fromEntries(describeConfig(nested, {}).variables.map((v) => [v.path, v]));
-    expect(byPath.media).toEqual({ path: "media", type: "object", required: false, default: { collection: "media_items" }, secret: false, set: false, status: "default" });
-    expect(byPath["media.collection"]).toEqual({ path: "media.collection", type: "string", required: false, default: "media_items", secret: false, set: false, status: "default" });
+    expect(byPath.media).toEqual({ path: "media", type: "object", required: false, default: { collection: "media_items" }, secret: false, set: false, status: "default", value: { collection: "media_items" }, redacted: false });
+    expect(byPath["media.collection"]).toEqual({ path: "media.collection", type: "string", required: false, default: "media_items", secret: false, set: false, status: "default", value: "media_items", redacted: false });
   });
 
   it("a spelled-out parent gets no inherited default, an own default still applies", () => {
     const nested = z.object({ media: z.object({ collection: z.string(), locale: z.string().default("de") }).default({ collection: "media_items" }) }).strict();
     const byPath = Object.fromEntries(describeConfig(nested, { media: { collection: "assets" } }).variables.map((v) => [v.path, v]));
-    expect(byPath["media.collection"]).toEqual({ path: "media.collection", type: "string", required: false, secret: false, set: true, status: "set" });
-    expect(byPath["media.locale"]).toEqual({ path: "media.locale", type: "string", required: false, default: "de", secret: false, set: false, status: "default" });
+    expect(byPath["media.collection"]).toEqual({ path: "media.collection", type: "string", required: false, secret: false, set: true, status: "set", value: "assets", redacted: false });
+    expect(byPath["media.locale"]).toEqual({ path: "media.locale", type: "string", required: false, default: "de", secret: false, set: false, status: "default", value: "de", redacted: false });
   });
 
   it("a required child of an optional object is optional and missing, of a required object required and missing", () => {
     const nested = z
       .object({
-        maybe: z.object({ token: z.string() }).optional(),
-        always: z.object({ token: z.string() }),
+        maybe: z.object({ name: z.string() }).optional(),
+        always: z.object({ name: z.string() }),
       })
       .strict();
     const byPath = Object.fromEntries(describeConfig(nested, { always: {} }).variables.map((v) => [v.path, v]));
-    expect(byPath["maybe.token"]).toEqual({ path: "maybe.token", type: "string", required: false, secret: false, set: false, status: "missing" });
-    expect(byPath.always).toEqual({ path: "always", type: "object", required: true, secret: false, set: true, status: "set" });
-    expect(byPath["always.token"]).toEqual({ path: "always.token", type: "string", required: true, secret: false, set: false, status: "missing" });
+    expect(byPath["maybe.name"]).toEqual({ path: "maybe.name", type: "string", required: false, secret: false, set: false, status: "missing", value: null, redacted: false });
+    expect(byPath.always).toEqual({ path: "always", type: "object", required: true, secret: false, set: true, status: "set", value: {}, redacted: false });
+    expect(byPath["always.name"]).toEqual({ path: "always.name", type: "string", required: true, secret: false, set: false, status: "missing", value: null, redacted: false });
   });
 
   it("a top-level default reaches a grandchild the raw config never mentions", () => {
     const nested = z.object({ store: z.object({ media: z.object({ collection: z.string() }) }).default({ media: { collection: "media_items" } }) }).strict();
     const byPath = Object.fromEntries(describeConfig(nested, undefined).variables.map((v) => [v.path, v]));
-    expect(byPath["store.media"]).toMatchObject({ required: false, set: false, status: "default", default: { collection: "media_items" } });
-    expect(byPath["store.media.collection"]).toEqual({ path: "store.media.collection", type: "string", required: false, default: "media_items", secret: false, set: false, status: "default" });
+    expect(byPath["store.media"]).toMatchObject({ required: false, set: false, status: "default", default: { collection: "media_items" }, value: { collection: "media_items" } });
+    expect(byPath["store.media.collection"]).toEqual({ path: "store.media.collection", type: "string", required: false, default: "media_items", secret: false, set: false, status: "default", value: "media_items", redacted: false });
   });
 
-  it("never copies a value into the output", () => {
-    const out = describeConfig(schema, { file: "/very/secret/path.db", passwordHash: "scrypt$topsecret" });
+  it("reads the effective value from the parsed config, defaults included", () => {
+    const parsed = schema.parse({ file: "./x.db", buckets: { a: { limit: 1 } }, passwordHash: "scrypt$abc", kind: "a", up: () => {}, ttl: null });
+    const byPath = Object.fromEntries(describeConfig(schema, { file: "./x.db", buckets: { a: { limit: 1 } }, passwordHash: "scrypt$abc", kind: "a", up: () => {}, ttl: null }, parsed).variables.map((v) => [v.path, v]));
+    expect(byPath.port).toMatchObject({ status: "default", value: 3000 });
+    expect(byPath.buckets).toMatchObject({ status: "set", value: { a: { limit: 1 } } });
+    expect(byPath.passwordHash).toMatchObject({ redacted: true, value: null });
+  });
+
+  it("never copies a secret value into the output", () => {
+    const out = describeConfig(schema, { file: "/very/public/path.db", passwordHash: "scrypt$topsecret", bootstrap: { username: "admin", token: "hunter2" } });
     const text = JSON.stringify(out);
-    expect(text).not.toContain("/very/secret/path.db");
+    expect(text).toContain("/very/public/path.db");
     expect(text).not.toContain("topsecret");
+    expect(text).not.toContain("hunter2");
+  });
+
+  it("redacts a key that only looks like a credential, and everything below it", () => {
+    const nested = z.object({ apiKey: z.string(), store: z.object({ url: z.string() }), credentials: z.object({ user: z.string() }) }).strict();
+    const byPath = Object.fromEntries(
+      describeConfig(nested, { apiKey: "abc123", store: { url: "postgres://user:pw@db/app" }, credentials: { user: "admin" } }).variables.map((v) => [v.path, v]),
+    );
+    expect(byPath.apiKey).toMatchObject({ secret: false, redacted: true, value: null });
+    expect(byPath["store.url"]).toMatchObject({ redacted: true, value: null });
+    expect(byPath.credentials).toMatchObject({ redacted: true, value: null });
+    expect(byPath["credentials.user"]).toMatchObject({ redacted: true, value: null });
   });
 
   it("yields no rows for a non-object schema", () => {

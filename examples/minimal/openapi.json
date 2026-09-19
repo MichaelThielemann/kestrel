@@ -1167,6 +1167,13 @@
                                         "missing"
                                       ],
                                       "description": "set: the raw config carries the path; default: it does not and the value comes from this node's or an ancestor's default; missing: no value at all"
+                                    },
+                                    "value": {
+                                      "description": "The effective value as a JSON snapshot: what the config sets, else the default; null when the variable is missing or redacted"
+                                    },
+                                    "redacted": {
+                                      "type": "boolean",
+                                      "description": "The value is withheld: the schema marks the variable secret, its key name looks like a credential, or an ancestor is redacted"
                                     }
                                   },
                                   "required": [
@@ -1175,7 +1182,9 @@
                                     "required",
                                     "secret",
                                     "set",
-                                    "status"
+                                    "status",
+                                    "value",
+                                    "redacted"
                                   ]
                                 }
                               }

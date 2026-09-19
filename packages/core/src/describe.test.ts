@@ -75,18 +75,18 @@ describe("kestrel.describe()", () => {
     expect(storeManifest).toMatchObject({ name: "store/memory", use: "./modules/store.ts", version: null, provides: ["store@1"], requires: [], optional: [], steps: ["store.find", "store.ping"], eventHook: false, emits: [] });
     expect(storeManifest!.config.schema).toMatchObject({ type: "object", additionalProperties: false });
     expect(storeManifest!.config.variables).toEqual([
-      { path: "file", type: "string", required: true, secret: false, set: true, status: "set" },
-      { path: "token", type: "string", required: false, secret: true, set: true, status: "set" },
-      { path: "retries", type: "integer", required: false, default: 3, secret: false, set: false, status: "default" },
+      { path: "file", type: "string", required: true, secret: false, set: true, status: "set", value: "/data/secret.db", redacted: false },
+      { path: "token", type: "string", required: false, secret: true, set: true, status: "set", value: null, redacted: true },
+      { path: "retries", type: "integer", required: false, default: 3, secret: false, set: false, status: "default", value: 3, redacted: false },
     ]);
     expect(busManifest).toMatchObject({ name: "bus/memory", requires: ["store@1"], eventHook: true, version: null, steps: [] });
     await kestrel.stop();
   });
 
-  it("never contains a config value", async () => {
+  it("shows the effective config value but never a secret one", async () => {
     const kestrel = await booted();
     const text = JSON.stringify(kestrel.describe());
-    expect(text).not.toContain("secret.db");
+    expect(text).toContain("/data/secret.db");
     expect(text).not.toContain("hunter2");
     await kestrel.stop();
   });

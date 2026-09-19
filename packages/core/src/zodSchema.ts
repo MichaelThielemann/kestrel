@@ -1,5 +1,6 @@
 import type { ZodTypeAny } from "zod";
 import { boundaryCast } from "./cast.ts";
+import { canHoldSecret, isSecretName, isSecretSchema, isSecretValue, snapshotValue, type JsonValue } from "./configValue.ts";
 import type { JsonSchema } from "./defineModule.ts";
 
 export type ConfigStatus = "set" | "default" | "missing";
@@ -12,6 +13,10 @@ export interface ConfigVariable {
   secret: boolean;
   set: boolean;
   status: ConfigStatus;
+  /** The effective value as a JSON-serialisable snapshot: what the config sets, else the default, `null` when missing or redacted. */
+  value: JsonValue;
+  /** True when the value is withheld because the schema marks it secret, the key name looks like a credential or an ancestor is redacted. */
+  redacted: boolean;
 }
 
 export interface ConfigDescription {
@@ -202,6 +207,7 @@ export function toJsonSchema(schema: ZodTypeAny): JsonSchema {
   if (nullable) out = { anyOf: [out, { type: "null" }] };
   if (defaultValue && description !== SECRET) out = { ...out, default: defaultValue() };
   if (description !== undefined && description !== SECRET) out = { ...out, description };
+  if (description === SECRET) out = { ...out, writeOnly: true };
   return out;
 }
 
@@ -250,9 +256,10 @@ function valueAt(raw: unknown, path: string[]): unknown {
 interface Ancestors {
   optional: boolean;
   default: unknown;
+  redacted: boolean;
 }
 
-function collectVariables(schema: ZodTypeAny, raw: unknown, path: string[], out: ConfigVariable[], ancestors: Ancestors): void {
+function collectVariables(schema: ZodTypeAny, raw: unknown, parsed: unknown, path: string[], out: ConfigVariable[], ancestors: Ancestors): void {
   const { inner } = unwrap(schema);
   if (kind(inner) !== "ZodObject") return;
   // zod substitutes an ancestor's `.default()` only while that ancestor is absent from the raw config;
@@ -261,22 +268,32 @@ function collectVariables(schema: ZodTypeAny, raw: unknown, path: string[], out:
   for (const [key, child] of Object.entries(def(inner).shape?.() ?? {})) {
     const childPath = [...path, key];
     const unwrapped = unwrap(child);
-    const secret = unwrapped.description === SECRET;
-    const set = valueAt(raw, childPath) !== undefined;
+    // `.describe(SECRET)` reaches this as `writeOnly`; a hand-written JSON Schema says so itself.
+    const secret = isSecretSchema(toJsonSchema(child));
+    const rawValue = valueAt(raw, childPath);
+    const set = rawValue !== undefined;
     const fromAncestor = valueAt(inherited, [key]);
     const effective = fromAncestor === undefined ? unwrapped.defaultValue?.() : fromAncestor;
     const optional = ancestors.optional || unwrapped.optional;
     const status: ConfigStatus = set ? "set" : effective === undefined ? "missing" : "default";
-    const variable: ConfigVariable = { path: childPath.join("."), type: typeOf(unwrapped.inner), required: !optional, secret, set, status };
-    if (effective !== undefined && !secret) variable.default = effective;
+    const parsedValue = valueAt(parsed, childPath);
+    const configured = parsedValue !== undefined ? parsedValue : set ? rawValue : effective;
+    const type = typeOf(unwrapped.inner);
+    const redacted = secret || ancestors.redacted || (isSecretName(key) && canHoldSecret(type)) || isSecretValue(configured);
+    const variable: ConfigVariable = { path: childPath.join("."), type, required: !optional, secret, set, status, value: redacted ? null : snapshotValue(configured), redacted };
+    if (effective !== undefined && !redacted) variable.default = effective;
     out.push(variable);
-    if (kind(unwrapped.inner) === "ZodObject") collectVariables(unwrapped.inner, raw, childPath, out, { optional, default: effective });
+    if (kind(unwrapped.inner) === "ZodObject") collectVariables(unwrapped.inner, raw, parsed, childPath, out, { optional, default: effective, redacted });
   }
 }
 
-/** JSON Schema plus one row per config path; `raw` is the consumer's entry before parsing and only decides `set`/`status`, never lands in the output. */
-export function describeConfig(schema: ZodTypeAny, raw: unknown): ConfigDescription {
+/**
+ * JSON Schema plus one row per config path. `raw` is the consumer's entry before parsing and decides
+ * `set`/`status`; `parsed` is the same entry after the schema applied its defaults and is the source
+ * of the effective `value` — without it the value falls back to `raw` and the declared defaults.
+ */
+export function describeConfig(schema: ZodTypeAny, raw: unknown, parsed?: unknown): ConfigDescription {
   const variables: ConfigVariable[] = [];
-  collectVariables(schema, raw, [], variables, { optional: false, default: undefined });
+  collectVariables(schema, raw, parsed, [], variables, { optional: false, default: undefined, redacted: false });
   return { schema: toJsonSchema(schema), variables };
 }

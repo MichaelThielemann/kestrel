@@ -11,6 +11,7 @@ import { VERSION } from "./version.ts";
 import { describeConfig, type ConfigVariable } from "./zodSchema.ts";
 
 export type { ConfigStatus, ConfigVariable } from "./zodSchema.ts";
+export { SECRET } from "./zodSchema.ts";
 export { PLACEHOLDER_ARG } from "./registry.ts";
 
 export interface ModuleManifest {
@@ -65,6 +66,8 @@ export interface ManifestInput {
   modules: readonly ModuleDefinition[];
   uses: readonly string[];
   rawConfigs: ReadonlyMap<ModuleDefinition, unknown>;
+  /** The same configs after their schema parsed them; absent outside a boot, where only the raw entries and the declared defaults are known. */
+  parsedConfigs?: ReadonlyMap<ModuleDefinition, unknown>;
   contracts: readonly string[];
   steps: StepRegistry;
   pipelines: ReadonlyMap<string, ResolvedPipeline>;
@@ -120,7 +123,7 @@ export function buildManifest(input: ManifestInput): Manifest {
       provides: mod.provides.map((c) => c.name),
       requires: mod.requires.map((c) => c.name),
       optional: (mod.optional ?? []).map((c) => c.name),
-      config: describeConfig(mod.configSchema, input.rawConfigs.get(mod)),
+      config: describeConfig(mod.configSchema, input.rawConfigs.get(mod), input.parsedConfigs?.get(mod)),
       steps: registered.filter((s) => s.owner === mod.name).map((s) => s.name),
       eventHook: mod.triggers?.event !== undefined,
       emits: [...(mod.emits ?? [])],
