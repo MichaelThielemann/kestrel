@@ -80,6 +80,9 @@
       "path": "./packages/replication-sqlite"
     },
     {
+      "path": "./packages/revisions-default"
+    },
+    {
       "path": "./packages/sanitize-svg"
     },
     {

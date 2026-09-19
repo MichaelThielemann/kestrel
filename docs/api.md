@@ -278,6 +278,37 @@ language). The frontend needs no URL rule and no individual lookups. The rendere
 `limit`, the list returns every match. Write calls need `pages.write`, deletion needs `pages.delete`
 (deleting a single translation is a write, `pages.write`).
 
+### Page revisions
+
+Every `POST /pages` and `PATCH /pages/:id` records a full snapshot of what was saved, per language.
+Restoring is a new save: it runs the same chain as `PATCH`, so validation, sanitizing, the reference
+index, static delivery and `llms.txt` all behave exactly as on a normal edit — a restored page that
+carries the status `published` is republished immediately, a draft is not. Listing and reading a
+revision need `pages.manage`, restoring and labelling need `pages.write` (a restore *is* a write).
+
+| Method | Path | Body / Query | Response |
+|---|---|---|---|
+| GET | `/admin/pages/:id/revisions` | `?locale=&limit=&offset=` | `{ items: [Revision], total, head }` – newest first, without `snapshot`; `head` is the revision the next save will hang off (`pages.manage`) |
+| GET | `/admin/pages/:id/revisions/:revisionId` | – | one `Revision` plus `snapshot` (the saved fields, `null` when the revision was skipped); 404 for an unknown revision (`pages.manage`) |
+| POST | `/admin/pages/:id/revisions/:revisionId/restore` | – | `{ document, delivery: [...], llms }` – the same shape `PATCH /pages/:id` returns; 404 for an unknown revision, 409 when the revision carries no snapshot, and every 400 a normal save can produce (`pages.write`); event `page.restored` |
+| PATCH | `/admin/pages/:id/revisions/:revisionId` | `{ label: string \| null }` | the `Revision` – names a revision so retention keeps it forever; `null` or an empty string clears the name (`pages.write`) |
+
+`Revision`: `{ id, collection, documentId, locale, parentId, createdAt, author: { id, name },
+kind: "save" | "restore", label, status, live, bytes, skipped }`. `author.name` is the username at
+save time, so a later rename does not rewrite history. `status` is the value of the document's
+`status` field then, `live` says whether that counted as published.
+
+**The tree.** `parentId` is the whole structure: a normal save points at the head, a save made by a
+restore points at the restored revision — that is where the history forks. Switching to another
+branch is the same gesture as going back: restore that branch's tip and save. There are no merges
+(see the module README for why), and no separate branch id is needed to draw the tree.
+
+**Retention.** A nightly cron keeps, per page and language, the newest 50 plus every revision that
+was ever live, every labelled one, the head, every branch tip and every branch point; removed
+revisions hand their children to their nearest surviving ancestor, so the chain never breaks. A
+snapshot beyond 1 MiB is recorded as `skipped: true` without content — the save still succeeds, only
+restoring that revision answers 409.
+
 ### Settings (single)
 
 | Method | Path | Body | Response |

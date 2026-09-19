@@ -3244,6 +3244,986 @@
         ]
       }
     },
+    "/admin/pages/{id}/revisions": {
+      "get": {
+        "operationId": "pageRevisions",
+        "summary": "Require a valid session → Requires permission pages.manage → Revisions of one pages document and locale, newest first and without snapshots",
+        "tags": [
+          "admin"
+        ],
+        "x-kestrel-pipeline": "pageRevisions",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:pages.manage",
+          "revisions.list:pages"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "collection": {
+                            "type": "string"
+                          },
+                          "documentId": {
+                            "type": "string"
+                          },
+                          "locale": {
+                            "type": "string"
+                          },
+                          "parentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "number"
+                          },
+                          "author": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name"
+                            ]
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "save",
+                              "restore"
+                            ]
+                          },
+                          "label": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "status": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "live": {
+                            "type": "boolean"
+                          },
+                          "bytes": {
+                            "type": "number"
+                          },
+                          "skipped": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "collection",
+                          "documentId",
+                          "locale",
+                          "parentId",
+                          "createdAt",
+                          "author",
+                          "kind",
+                          "label",
+                          "status",
+                          "live",
+                          "bytes",
+                          "skipped"
+                        ]
+                      }
+                    },
+                    "total": {
+                      "type": "number"
+                    },
+                    "head": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total",
+                    "head"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "missing id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission pages.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "temporarily unavailable; retry after the Retry-After header",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/pages/{id}/revisions/{revisionId}": {
+      "get": {
+        "operationId": "pageRevision",
+        "summary": "Require a valid session → Requires permission pages.manage → One revision of a pages document including its snapshot",
+        "tags": [
+          "admin"
+        ],
+        "x-kestrel-pipeline": "pageRevision",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:pages.manage",
+          "revisions.read:pages"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "collection": {
+                      "type": "string"
+                    },
+                    "documentId": {
+                      "type": "string"
+                    },
+                    "locale": {
+                      "type": "string"
+                    },
+                    "parentId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "author": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "save",
+                        "restore"
+                      ]
+                    },
+                    "label": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "live": {
+                      "type": "boolean"
+                    },
+                    "bytes": {
+                      "type": "number"
+                    },
+                    "skipped": {
+                      "type": "boolean"
+                    },
+                    "snapshot": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "collection",
+                    "documentId",
+                    "locale",
+                    "parentId",
+                    "createdAt",
+                    "author",
+                    "kind",
+                    "label",
+                    "status",
+                    "live",
+                    "bytes",
+                    "skipped",
+                    "snapshot"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "missing id or revisionId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission pages.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "temporarily unavailable; retry after the Retry-After header",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "labelPageRevision",
+        "summary": "Require a valid session → Requires permission pages.write → Name a pages revision, or clear its name with null; a labelled revision is never pruned",
+        "tags": [
+          "admin"
+        ],
+        "x-kestrel-pipeline": "labelPageRevision",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:pages.write",
+          "revisions.label:pages"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "collection": {
+                      "type": "string"
+                    },
+                    "documentId": {
+                      "type": "string"
+                    },
+                    "locale": {
+                      "type": "string"
+                    },
+                    "parentId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "author": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "save",
+                        "restore"
+                      ]
+                    },
+                    "label": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "live": {
+                      "type": "boolean"
+                    },
+                    "bytes": {
+                      "type": "number"
+                    },
+                    "skipped": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "collection",
+                    "documentId",
+                    "locale",
+                    "parentId",
+                    "createdAt",
+                    "author",
+                    "kind",
+                    "label",
+                    "status",
+                    "live",
+                    "bytes",
+                    "skipped"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "missing id or revisionId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission pages.write",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "temporarily unavailable; retry after the Retry-After header",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "label"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/pages/{id}/revisions/{revisionId}/restore": {
+      "post": {
+        "operationId": "restorePageRevision",
+        "summary": "Require a valid session → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.restored\" to every subscribed handler pipeline",
+        "tags": [
+          "admin"
+        ],
+        "x-kestrel-pipeline": "restorePageRevision",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:pages.write",
+          "revisions.restore:pages",
+          "validate.check:pages.body",
+          "validate.sanitize:pages.body",
+          "validate.check:pages.body",
+          "references.check:pages",
+          "content.update:pages",
+          "revisions.record:pages",
+          "references.index:pages",
+          "links.extract:pages",
+          "delivery.publish:pages",
+          "delivery.exportLlms",
+          "events.emit:page.restored"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "document": {
+                      "type": "object"
+                    },
+                    "delivery": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string"
+                          },
+                          "docId": {
+                            "type": "string"
+                          },
+                          "locale": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "live",
+                              "error",
+                              "draft"
+                            ]
+                          },
+                          "path": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "publishedAt": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "updatedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "docId",
+                          "locale",
+                          "state",
+                          "updatedAt"
+                        ]
+                      }
+                    },
+                    "llms": {
+                      "type": "object",
+                      "properties": {
+                        "entries": {
+                          "type": "integer"
+                        },
+                        "full": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "entries",
+                        "full"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "llms"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission pages.write",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the revision carries no snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "the revision could not be written",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slug": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "body": {
+                    "anyOf": [
+                      {},
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "status": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "draft",
+                          "finished",
+                          "published"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "hero": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "description": "id of a media"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "seo": {
+                    "anyOf": [
+                      {},
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "locale": {
+                    "type": "string",
+                    "enum": [
+                      "de",
+                      "en"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/admin/publish-all/pages": {
       "post": {
         "operationId": "publishAllPages",
@@ -7601,7 +8581,7 @@
       },
       "post": {
         "operationId": "createPage",
-        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Create a pages → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.created\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Create a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.created\" to every subscribed handler pipeline",
         "tags": [
           "pages"
         ],
@@ -7614,13 +8594,23 @@
           "validate.check:pages.body",
           "references.check:pages",
           "content.create:pages",
+          "revisions.record:pages",
           "references.index:pages",
           "links.extract:pages",
           "delivery.publish:pages",
           "delivery.exportLlms",
           "events.emit:page.created"
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "ok",
@@ -7759,7 +8749,7 @@
             }
           },
           "503": {
-            "description": "temporarily unavailable; retry after the Retry-After header",
+            "description": "the revision could not be written",
             "headers": {
               "Retry-After": {
                 "description": "seconds until the client may retry",
@@ -7854,7 +8844,7 @@
     "/pages/{id}": {
       "delete": {
         "operationId": "deletePage",
-        "summary": "Require a valid session → Requires permission pages.delete → Refuse deletion while pages is referenced → Delete a pages → Drop indexed references of a pages document → Drop indexed links of pages → Remove rendered output of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.deleted\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission pages.delete → Refuse deletion while pages is referenced → Delete a pages → Drop every revision of a pages document, in every locale → Drop indexed references of a pages document → Drop indexed links of pages → Remove rendered output of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.deleted\" to every subscribed handler pipeline",
         "tags": [
           "pages"
         ],
@@ -7864,6 +8854,7 @@
           "authz.require:pages.delete",
           "references.guard:pages",
           "content.remove:pages",
+          "revisions.remove:pages",
           "references.unindex:pages",
           "links.unextract:pages",
           "delivery.unpublish:pages",
@@ -8204,7 +9195,7 @@
       },
       "patch": {
         "operationId": "updatePage",
-        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.updated\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.updated\" to every subscribed handler pipeline",
         "tags": [
           "pages"
         ],
@@ -8217,6 +9208,7 @@
           "validate.check:pages.body",
           "references.check:pages",
           "content.update:pages",
+          "revisions.record:pages",
           "references.index:pages",
           "links.extract:pages",
           "delivery.publish:pages",
@@ -8228,6 +9220,14 @@
             "name": "id",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -8371,7 +9371,7 @@
             }
           },
           "503": {
-            "description": "temporarily unavailable; retry after the Retry-After header",
+            "description": "the revision could not be written",
             "headers": {
               "Retry-After": {
                 "description": "seconds until the client may retry",
@@ -8482,7 +9482,7 @@
     "/pages/{id}/translations/{locale}": {
       "delete": {
         "operationId": "deletePageTranslation",
-        "summary": "Require a valid session → Requires permission pages.write → Remove one translation of a pages (locale from the route or ?locale=); the document stays in its other locales → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.translationRemoved\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission pages.write → Remove one translation of a pages (locale from the route or ?locale=); the document stays in its other locales → Drop the revisions of one locale of a pages document → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.translationRemoved\" to every subscribed handler pipeline",
         "tags": [
           "pages"
         ],
@@ -8491,6 +9491,7 @@
           "authn.requireUser",
           "authz.require:pages.write",
           "content.removeTranslation:pages",
+          "revisions.removeTranslation:pages",
           "references.index:pages",
           "links.extract:pages",
           "delivery.publish:pages",
@@ -8519,11 +9520,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string",
-              "enum": [
-                "de",
-                "en"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -8615,7 +9612,7 @@
             }
           },
           "400": {
-            "description": "unknown or missing locale",
+            "description": "missing id",
             "content": {
               "application/json": {
                 "schema": {

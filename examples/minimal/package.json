@@ -23,6 +23,7 @@
     "@michaelthielemann/kestrel-ratelimit-memory": "workspace:*",
     "@michaelthielemann/kestrel-openapi": "workspace:*",
     "@michaelthielemann/kestrel-links-default": "workspace:*",
+    "@michaelthielemann/kestrel-revisions-default": "workspace:*",
     "@michaelthielemann/kestrel-renderer-plain": "workspace:*",
     "@michaelthielemann/kestrel-delivery-static": "workspace:*",
     "@michaelthielemann/kestrel-replication-sqlite": "workspace:*",

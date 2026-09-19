@@ -61,7 +61,46 @@ describe("examples/minimal single translation removal", () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
     expect(config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline])).toContainEqual(["DELETE /pages/:id/translations/:locale", "deletePageTranslation"]);
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
-    expect(pipelines.get("deletePageTranslation")).toEqual(["authn.requireUser", "authz.require:pages.write", "content.removeTranslation:pages", "references.index:pages", "links.extract:pages", "delivery.publish:pages", "delivery.exportLlms", "events.emit:page.translationRemoved"]);
+    expect(pipelines.get("deletePageTranslation")).toEqual(["authn.requireUser", "authz.require:pages.write", "content.removeTranslation:pages", "revisions.removeTranslation:pages", "references.index:pages", "links.extract:pages", "delivery.publish:pages", "delivery.exportLlms", "events.emit:page.translationRemoved"]);
+  });
+});
+
+describe("examples/minimal revisions wiring", () => {
+  it("declares the module and the four admin routes plus the prune cron", async () => {
+    const config = await loadConfig(join(root, "kestrel.config.ts"));
+    const modules = config.modules.map((m) => m.use);
+    expect(modules.indexOf("@michaelthielemann/kestrel-content-default")).toBeLessThan(modules.indexOf("@michaelthielemann/kestrel-revisions-default"));
+    const routes = config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline]);
+    expect(routes).toEqual(
+      expect.arrayContaining([
+        ["GET /admin/pages/:id/revisions", "pageRevisions"],
+        ["GET /admin/pages/:id/revisions/:revisionId", "pageRevision"],
+        ["POST /admin/pages/:id/revisions/:revisionId/restore", "restorePageRevision"],
+        ["PATCH /admin/pages/:id/revisions/:revisionId", "labelPageRevision"],
+      ]),
+    );
+    expect(config.triggers.filter((t) => "cron" in t).map((t) => t.pipeline)).toContain("pruneRevisions");
+  });
+
+  it("records a revision right after every content write and drops them with the document", async () => {
+    const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
+    for (const [name, after] of [["createPage", "content.create:pages"], ["updatePage", "content.update:pages"]] as const) {
+      const steps = pipelines.get(name)!;
+      expect(steps.indexOf("revisions.record:pages"), name).toBe(steps.indexOf(after) + 1);
+    }
+    expect(pipelines.get("deletePage")).toContain("revisions.remove:pages");
+  });
+
+  it("restores through the same chain an update takes, so validation, references and delivery all run", async () => {
+    const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
+    const restore = pipelines.get("restorePageRevision")!;
+    const update = pipelines.get("updatePage")!;
+    expect(restore.indexOf("revisions.restore:pages")).toBe(2);
+    expect(restore.slice(3)).toEqual([...update.slice(2, -1), "events.emit:page.restored"]);
+    expect(pipelines.get("pageRevisions")).toEqual(["authn.requireUser", "authz.require:pages.manage", "revisions.list:pages"]);
+    expect(pipelines.get("pageRevision")).toEqual(["authn.requireUser", "authz.require:pages.manage", "revisions.read:pages"]);
+    expect(pipelines.get("labelPageRevision")).toEqual(["authn.requireUser", "authz.require:pages.write", "revisions.label:pages"]);
+    expect(pipelines.get("pruneRevisions")).toEqual(["revisions.prune"]);
   });
 });
 
