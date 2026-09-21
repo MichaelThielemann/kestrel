@@ -5906,7 +5906,7 @@
     "/admin/users/{id}/revisions/reassign": {
       "post": {
         "operationId": "retryReassignRevisionAuthor",
-        "summary": "Require a valid session → Requires permission users.manage → Look up `payload.reassignTo` (or the `reassignTo` an `authn.deleteUser` event hands over as `payload.result.reassignTo`) and write its canonical `{ id, name }` to `reassignTarget`; absent or `null` writes `null` → Replace the author of every revision written by the user in `params.id` or the event payload's `id` with the verified target `authn.verifyUser` wrote to `reassignTarget`, without one the anonymous author `{ id: null, name: null }`",
+        "summary": "Require a valid session → Requires permission users.manage → Look up `payload.reassignTo` (or the `reassignTo` an `authn.deleteUser` event hands over as `payload.result.reassignTo`) and write its canonical `{ id, name }` to `reassignTarget`; absent or `null` writes `null` → Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `reassignTarget` (e.g. authn.verifyUser's verified target) is used when present; without one, falls back to `reassignTo` from the payload or the event hand-over, unverified. Without any target, the anonymous author `{ id: null, name: null }`",
         "tags": [
           "admin"
         ],
@@ -5970,7 +5970,7 @@
             }
           },
           "400": {
-            "description": "no user id, or the reassign target is the former author again",
+            "description": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again",
             "content": {
               "application/json": {
                 "schema": {

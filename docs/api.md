@@ -743,14 +743,15 @@ pipelines listen to it: one runs `authn.verifyUser` then `revisions.reassignAuth
 `audit.anonymize`. The audit log is only ever anonymised, never reassigned: a login belongs to
 nobody else.
 
-**Reassignment always goes through `authn.verifyUser` first.** `revisions.reassignAuthor` never
-reads a reassignment target from the request itself; it only trusts the canonical `{ id, name }`
-`authn.verifyUser` writes to `reassignTarget` after confirming the target exists and is active — an
+**Both reassignment routes run `authn.verifyUser` first.** `revisions.reassignAuthor` prefers the
+canonical `{ id, name }` a preceding step writes to `reassignTarget` over any `reassignTo` in the
+request; `authn.verifyUser` writes it only after confirming the target exists and is active, so an
 unknown or inactive id is rejected before any revision changes. The event above hands its own
 already-resolved `reassignTo` through the same step, so both the automatic (post-delete) and the
-manual retry route re-verify the target the same way. Verifying a user reference this way needs a
-real user store, so it only works with `authn-multi`; `authn-single`'s one fixed admin has no
-second user to reassign to.
+manual retry route verify the target the same way. This is the recommended shape: a pipeline that
+skips `authn.verifyUser` still works, it just reassigns to whatever `reassignTo` the request or
+event names, unverified. Verifying a user reference this way needs a real user store, so it only
+works with `authn-multi`; `authn-single`'s one fixed admin has no second user to reassign to.
 
 **When one of them fails.** Each listener is a run of its own, so a failure shows up in
 `GET /admin/insights/stats` under `recentFailures` with the pipeline, step and message. Both steps

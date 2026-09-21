@@ -7592,11 +7592,10 @@
       "module": "revisions/default",
       "factory": false,
       "description": {
-        "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id` with the verified target `authn.verifyUser` wrote to `reassignTarget`, without one the anonymous author `{ id: null, name: null }`",
+        "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `reassignTarget` (e.g. authn.verifyUser's verified target) is used when present; without one, falls back to `reassignTo` from the payload or the event hand-over, unverified. Without any target, the anonymous author `{ id: null, name: null }`",
         "reads": [
           "params.id",
-          "payload",
-          "reassignTarget"
+          "payload"
         ],
         "writes": [
           "result"
@@ -7660,7 +7659,7 @@
           ]
         },
         "errors": {
-          "400": "no user id, or the reassign target is the former author again"
+          "400": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again"
         }
       }
     },
@@ -16265,11 +16264,10 @@
           "name": "revisions.reassignAuthor",
           "module": "revisions/default",
           "description": {
-            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id` with the verified target `authn.verifyUser` wrote to `reassignTarget`, without one the anonymous author `{ id: null, name: null }`",
+            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `reassignTarget` (e.g. authn.verifyUser's verified target) is used when present; without one, falls back to `reassignTo` from the payload or the event hand-over, unverified. Without any target, the anonymous author `{ id: null, name: null }`",
             "reads": [
               "params.id",
-              "payload",
-              "reassignTarget"
+              "payload"
             ],
             "writes": [
               "result"
@@ -16333,7 +16331,7 @@
               ]
             },
             "errors": {
-              "400": "no user id, or the reassign target is the former author again"
+              "400": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again"
             }
           }
         }
@@ -18422,11 +18420,10 @@
           "name": "revisions.reassignAuthor",
           "module": "revisions/default",
           "description": {
-            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id` with the verified target `authn.verifyUser` wrote to `reassignTarget`, without one the anonymous author `{ id: null, name: null }`",
+            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `reassignTarget` (e.g. authn.verifyUser's verified target) is used when present; without one, falls back to `reassignTo` from the payload or the event hand-over, unverified. Without any target, the anonymous author `{ id: null, name: null }`",
             "reads": [
               "params.id",
-              "payload",
-              "reassignTarget"
+              "payload"
             ],
             "writes": [
               "result"
@@ -18490,7 +18487,7 @@
               ]
             },
             "errors": {
-              "400": "no user id, or the reassign target is the former author again"
+              "400": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again"
             }
           }
         }
