@@ -6,7 +6,8 @@ import { first, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { applyPendingRestore, checkSkippedRestore, createReplicationSqlite, restoreFromBlobs, type Replication } from "./impl.ts";
+import { applyPendingRestore, createReplicationSqlite, restoreFromBlobs, type Replication } from "./impl.ts";
+import { checkSkippedRestore } from "./restoreFreshness.ts";
 
 export const configSchema = z
   .object({
@@ -33,13 +34,13 @@ export default defineModule({
 
   async setup(config, deps): Promise<ReplicationInstance> {
     const blobs = deps.get(BLOBSTORE);
-    applyPendingRestore(config.file);
+    const restoredFromMarker = applyPendingRestore(config.file);
     if (config.restoreOnStart) {
       if (!existsSync(config.file)) {
         const restored = await restoreFromBlobs(blobs, config.prefix, {}, config.file);
         if (isErr(restored) && !restored.error.message.includes("no snapshot")) throw new Error(restored.error.message, { cause: restored.error });
-      } else {
-        await checkSkippedRestore(config, blobs, deps.logger);
+      } else if (!restoredFromMarker) {
+        await checkSkippedRestore(config, blobs, deps.logger, deps.bootStartedAt ?? Date.now());
       }
     }
     return { ...createReplicationSqlite(config, blobs), logger: deps.logger };

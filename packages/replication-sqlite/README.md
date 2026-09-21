@@ -14,8 +14,10 @@ a `module-order` boot warning instead of a silent empty start. If the file alrea
 a restore point when `setup()` runs, and the file was created during this very start-up, `setup()`
 fails: that proves another module opened the database first. Delete the named file (and its `-wal`
 and `-shm` siblings) before the next start — a restart clears them on an ephemeral disk by itself,
-but not on a persistent volume, where they have to be removed by hand. Run `replication.sync` from
-a cron trigger (`* * * * *` → RPO ≤ 60 s).
+but not on a persistent volume, where they have to be removed by hand: a stale file left over from
+an earlier, unrelated failure predates this boot, so this check stays quiet about it and the file
+still has to be deleted as instructed above. Run `replication.sync` from a cron trigger
+(`* * * * *` → RPO ≤ 60 s).
 Every step returns a `Result`. A blobstore `Err` (`Err(TRANSIENT)`, 503, `retryable`) passes
 through unchanged; `replication.prepareRestore` for a point with no snapshot before it, or an
 unknown `generation`, is `Err(NOT_FOUND)`; an unparsable `at` in the payload is `Err(VALIDATION)`.
