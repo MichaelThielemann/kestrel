@@ -281,6 +281,6 @@ export default defineModule({
       output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
       errors: { 404: "user not found" },
     },
-    cleanupSessions: { summary: "Remove expired sessions", reads: [], writes: ["result"], output: { type: "object", properties: { removed: { type: "number" } } } },
+    cleanupSessions: { summary: "Remove expired sessions", reads: [], writes: ["result"], output: { type: "object", properties: { removed: { type: "number" } }, required: ["removed"] } },
   }),
 });

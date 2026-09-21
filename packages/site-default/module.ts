@@ -50,7 +50,8 @@ function describeSite(site: SiteDefault) {
       query: { locale: { type: "string" } },
       extendsOutput: {
         type: "object",
-        properties: { _links: { type: "object", additionalProperties: { type: "object", properties: { path: { type: "string" }, locale: { type: "string" }, broken: { type: "boolean" } } }, description: "internal references by target id after site.resolveLinks" } },
+        properties: { _links: { type: "object", additionalProperties: { type: "object", properties: { path: { type: "string" }, locale: { type: "string" }, broken: { type: "boolean" } }, required: [] }, description: "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve" } },
+        required: [],
       },
     }),
   };

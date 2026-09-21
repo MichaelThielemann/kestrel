@@ -42,10 +42,10 @@ Not included: multi-process setups, encryption, restore without restart.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors |
 |---|---|---|---|---|---|---|
-| `replication.sync` | Ship new WAL frames, checkpoint, snapshot and prune when due | – | `result` | – | { generation?: string, shippedBytes?: number, frames?: number, checkpointed?: boolean, pruned?: number, … } | – |
-| `replication.snapshot` | Start a new generation with a full snapshot | – | `result` | – | { generation?: string, bytes?: number, … } | – |
+| `replication.sync` | Ship new WAL frames, checkpoint, snapshot and prune when due | – | `result` | – | { generation: string, shippedBytes: number, frames: number, checkpointed: boolean, pruned: number, … } | – |
+| `replication.snapshot` | Start a new generation with a full snapshot | – | `result` | – | { generation: string, bytes: number, … } | – |
 | `replication.listPoints` | Restore points (snapshots and WAL segments) | – | `result` | – | object[] | – |
-| `replication.readStatus` | Replication status | – | `result` | – | { generation?: string \| null, lineage?: number, shippedFrames?: number, lastSyncAt?: number \| null, lastSnapshotAt?: number \| null, lastCheckpointAt?: number \| null, walBytes?: number, pendingRestore?: string \| null, … } | – |
+| `replication.readStatus` | Replication status | – | `result` | – | { generation: string \| null, lineage: number, shippedFrames: number, lastSyncAt: number \| null, lastSnapshotAt: number \| null, lastCheckpointAt: number \| null, walBytes: number, pendingRestore: string \| null, … } | – |
 | `replication.prepareRestore` | Rebuild the database at a point in time next to the live file; applied on next start | – | `result` | { generation?: string, at?: number \| string } | { generation: string, at: number, file: string, restartRequired: true, … } | 400 invalid "at" value; 404 no snapshot before the requested point |
 
 Pipelines in `examples/minimal` using these steps:

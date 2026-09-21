@@ -23,6 +23,7 @@ const ENTRY = {
     url: { type: "string" }, fromType: { type: "string" }, fromId: { type: "string" }, field: { type: "string" }, locale: { type: "string" },
     ok: { type: ["boolean", "null"] }, status: { type: ["number", "null"] }, error: { type: ["string", "null"] }, checkedAt: { type: ["number", "null"] },
   },
+  required: ["url", "fromType", "fromId", "field", "locale", "ok", "status", "error", "checkedAt"],
 };
 
 export default defineModule({
@@ -70,8 +71,8 @@ export default defineModule({
   describe: () => ({
     extract: (type: string) => ({ summary: `Index external links of ${type}`, reads: ["result.id"], writes: [] }),
     unextract: (type: string) => ({ summary: `Drop indexed links of ${type}`, reads: ["params.id"], writes: [], errors: { 400: "missing id" } }),
-    check: { summary: "Check due links", reads: [], writes: ["result"], output: { type: "object", properties: { urls: { type: "number" }, checked: { type: "number" }, broken: { type: "number" }, skipped: { type: "number" } } } },
+    check: { summary: "Check due links", reads: [], writes: ["result"], output: { type: "object", properties: { urls: { type: "number" }, checked: { type: "number" }, broken: { type: "number" }, skipped: { type: "number" } }, required: ["urls", "checked", "broken", "skipped"] } },
     report: { summary: "Broken links", reads: [], writes: ["result"], query: { type: { type: "string" } }, output: { type: "array", items: ENTRY } },
-    rebuild: { summary: "Rebuild the link index", reads: [], writes: ["result"], output: { type: "object", properties: { documents: { type: "number" }, entries: { type: "number" } } } },
+    rebuild: { summary: "Rebuild the link index", reads: [], writes: ["result"], output: { type: "object", properties: { documents: { type: "number" }, entries: { type: "number" } }, required: ["documents", "entries"] } },
   }),
 });

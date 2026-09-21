@@ -127,8 +127,21 @@ export default defineModule({
       errors: { 400: "missing ids or more than 200 ids" },
     }),
     guardAll: (target: string) => ({ summary: `Refuse while any of result.ids of ${target} is referenced`, reads: ["result.ids"], writes: [], errors: { 409: "still referenced" } }),
-    scan: { summary: "Re-check every reference", reads: [], writes: ["result"], output: { type: "object", properties: { checked: { type: "number" }, broken: { type: "number" } } } },
-    report: { summary: "Broken references", reads: [], writes: ["result"], query: { target: { type: "string" } }, output: { type: "array", items: { type: "object", properties: { fromType: { type: "string" }, fromId: { type: "string" }, field: { type: "string" }, locale: { type: "string" }, toTarget: { type: "string" }, toId: { type: "string" }, via: { type: "string", enum: ["field", "body"] }, broken: { type: "boolean" }, checkedAt: { type: ["number", "null"] } } } } },
-    rebuild: { summary: "Rebuild the reference index", reads: [], writes: ["result"], output: { type: "object", properties: { documents: { type: "number" }, entries: { type: "number" } } } },
+    scan: { summary: "Re-check every reference", reads: [], writes: ["result"], output: { type: "object", properties: { checked: { type: "number" }, broken: { type: "number" } }, required: ["checked", "broken"] } },
+    report: {
+      summary: "Broken references",
+      reads: [],
+      writes: ["result"],
+      query: { target: { type: "string" } },
+      output: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { fromType: { type: "string" }, fromId: { type: "string" }, field: { type: "string" }, locale: { type: "string" }, toTarget: { type: "string" }, toId: { type: "string" }, via: { type: "string", enum: ["field", "body"] }, broken: { type: "boolean" }, checkedAt: { type: ["number", "null"] } },
+          required: ["fromType", "fromId", "field", "locale", "toTarget", "toId", "via", "broken", "checkedAt"],
+        },
+      },
+    },
+    rebuild: { summary: "Rebuild the reference index", reads: [], writes: ["result"], output: { type: "object", properties: { documents: { type: "number" }, entries: { type: "number" } }, required: ["documents", "entries"] } },
   }),
 });

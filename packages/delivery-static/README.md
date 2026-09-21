@@ -73,10 +73,10 @@ Not included: sitemap, CDN invalidation.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors |
 |---|---|---|---|---|---|---|
-| `delivery.publish:<arg>` | Render and store published locales of a <arg> | `result.id` | `result` | – | { document?: object, delivery?: object[], … } | – |
+| `delivery.publish:<arg>` | Render and store published locales of a <arg> | `result.id` | `result` | – | { document: object, delivery: object[], … } | – |
 | `delivery.unpublish:<arg>` | Remove rendered output of a <arg> | `params.id` | – | – | – | 400 missing id |
 | `delivery.readStatus:<arg>` | Publish status per locale of a <arg> | `params.id` | `result` | – | object[] | 400 missing id |
-| `delivery.publishAll:<arg>` | Re-render every <arg> | – | `result` | – | { documents?: number, live?: number, errors?: number, … } | – |
+| `delivery.publishAll:<arg>` | Re-render every <arg> | – | `result` | – | { documents: number, live: number, errors: number, … } | – |
 | `delivery.exportLlms` | Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) | – | `result.llms` | – | { llms: object, … } | – |
 
 Pipelines in `examples/minimal` using these steps:

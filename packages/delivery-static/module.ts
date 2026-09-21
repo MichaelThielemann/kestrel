@@ -104,7 +104,7 @@ export default defineModule({
       summary: `Render and store published locales of a ${type}`,
       reads: ["result.id"],
       writes: ["result"],
-      output: { type: "object", properties: { document: { type: "object" }, delivery: { type: "array", items: STATUS_SCHEMA } } },
+      output: { type: "object", properties: { document: { type: "object" }, delivery: { type: "array", items: STATUS_SCHEMA } }, required: ["document", "delivery"] },
     }),
     unpublish: (type: string) => ({ summary: `Remove rendered output of a ${type}`, reads: ["params.id"], writes: [], errors: { 400: "missing id" } }),
     readStatus: (type: string) => ({ summary: `Publish status per locale of a ${type}`, reads: ["params.id"], writes: ["result"], output: { type: "array", items: STATUS_SCHEMA }, errors: { 400: "missing id" } }),
@@ -112,7 +112,7 @@ export default defineModule({
       summary: `Re-render every ${type}`,
       reads: [],
       writes: ["result"],
-      output: { type: "object", properties: { documents: { type: "number" }, live: { type: "number" }, errors: { type: "number" } } },
+      output: { type: "object", properties: { documents: { type: "number" }, live: { type: "number" }, errors: { type: "number" } }, required: ["documents", "live", "errors"] },
     }),
     exportLlms: {
       summary: "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",

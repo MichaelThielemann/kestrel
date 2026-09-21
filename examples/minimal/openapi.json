@@ -2191,7 +2191,18 @@
                           "null"
                         ]
                       }
-                    }
+                    },
+                    "required": [
+                      "url",
+                      "fromType",
+                      "fromId",
+                      "field",
+                      "locale",
+                      "ok",
+                      "status",
+                      "error",
+                      "checkedAt"
+                    ]
                   }
                 }
               }
@@ -2281,7 +2292,11 @@
                     "entries": {
                       "type": "number"
                     }
-                  }
+                  },
+                  "required": [
+                    "documents",
+                    "entries"
+                  ]
                 }
               }
             }
@@ -2404,7 +2419,11 @@
                     }
                   },
                   "required": [
-                    "variants"
+                    "conflicts",
+                    "missing",
+                    "skipped",
+                    "variants",
+                    "written"
                   ]
                 }
               }
@@ -4100,6 +4119,8 @@
                     }
                   },
                   "required": [
+                    "delivery",
+                    "document",
                     "llms"
                   ]
                 }
@@ -4343,6 +4364,9 @@
                     }
                   },
                   "required": [
+                    "documents",
+                    "errors",
+                    "live",
                     "llms",
                     "redirects"
                   ]
@@ -4633,7 +4657,18 @@
                           "null"
                         ]
                       }
-                    }
+                    },
+                    "required": [
+                      "fromType",
+                      "fromId",
+                      "field",
+                      "locale",
+                      "toTarget",
+                      "toId",
+                      "via",
+                      "broken",
+                      "checkedAt"
+                    ]
                   }
                 }
               }
@@ -4723,7 +4758,11 @@
                     "entries": {
                       "type": "number"
                     }
-                  }
+                  },
+                  "required": [
+                    "documents",
+                    "entries"
+                  ]
                 }
               }
             }
@@ -5591,7 +5630,11 @@
                     "bytes": {
                       "type": "number"
                     }
-                  }
+                  },
+                  "required": [
+                    "generation",
+                    "bytes"
+                  ]
                 }
               }
             }
@@ -5723,7 +5766,17 @@
                         "null"
                       ]
                     }
-                  }
+                  },
+                  "required": [
+                    "generation",
+                    "lineage",
+                    "shippedFrames",
+                    "lastSyncAt",
+                    "lastSnapshotAt",
+                    "lastCheckpointAt",
+                    "walBytes",
+                    "pendingRestore"
+                  ]
                 }
               }
             }
@@ -6764,7 +6817,11 @@
                     "total": {
                       "type": "number"
                     }
-                  }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ]
                 }
               }
             }
@@ -9042,6 +9099,8 @@
                     }
                   },
                   "required": [
+                    "delivery",
+                    "document",
                     "llms"
                   ]
                 }
@@ -9249,7 +9308,8 @@
                     }
                   },
                   "required": [
-                    "llms"
+                    "llms",
+                    "ok"
                   ]
                 }
               }
@@ -9664,6 +9724,8 @@
                     }
                   },
                   "required": [
+                    "delivery",
+                    "document",
                     "llms"
                   ]
                 }
@@ -9955,6 +10017,8 @@
                     }
                   },
                   "required": [
+                    "delivery",
+                    "document",
                     "llms"
                   ]
                 }
@@ -11054,9 +11118,10 @@
                           "broken": {
                             "type": "boolean"
                           }
-                        }
+                        },
+                        "required": []
                       },
-                      "description": "internal references by target id after site.resolveLinks"
+                      "description": "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve"
                     }
                   },
                   "required": [

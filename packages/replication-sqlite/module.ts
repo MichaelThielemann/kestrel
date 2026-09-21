@@ -86,10 +86,19 @@ export default defineModule({
   }),
 
   describe: () => ({
-    sync: { summary: "Ship new WAL frames, checkpoint, snapshot and prune when due", reads: [], writes: ["result"], output: { type: "object", properties: { generation: { type: "string" }, shippedBytes: { type: "number" }, frames: { type: "number" }, checkpointed: { type: "boolean" }, pruned: { type: "number" } } } },
-    snapshot: { summary: "Start a new generation with a full snapshot", reads: [], writes: ["result"], output: { type: "object", properties: { generation: { type: "string" }, bytes: { type: "number" } } } },
+    sync: { summary: "Ship new WAL frames, checkpoint, snapshot and prune when due", reads: [], writes: ["result"], output: { type: "object", properties: { generation: { type: "string" }, shippedBytes: { type: "number" }, frames: { type: "number" }, checkpointed: { type: "boolean" }, pruned: { type: "number" } }, required: ["generation", "shippedBytes", "frames", "checkpointed", "pruned"] } },
+    snapshot: { summary: "Start a new generation with a full snapshot", reads: [], writes: ["result"], output: { type: "object", properties: { generation: { type: "string" }, bytes: { type: "number" } }, required: ["generation", "bytes"] } },
     listPoints: { summary: "Restore points (snapshots and WAL segments)", reads: [], writes: ["result"], output: { type: "array", items: POINT } },
-    readStatus: { summary: "Replication status", reads: [], writes: ["result"], output: { type: "object", properties: { generation: { type: ["string", "null"] }, lineage: { type: "number" }, shippedFrames: { type: "number" }, lastSyncAt: { type: ["number", "null"] }, lastSnapshotAt: { type: ["number", "null"] }, lastCheckpointAt: { type: ["number", "null"] }, walBytes: { type: "number" }, pendingRestore: { type: ["string", "null"] } } } },
+    readStatus: {
+      summary: "Replication status",
+      reads: [],
+      writes: ["result"],
+      output: {
+        type: "object",
+        properties: { generation: { type: ["string", "null"] }, lineage: { type: "number" }, shippedFrames: { type: "number" }, lastSyncAt: { type: ["number", "null"] }, lastSnapshotAt: { type: ["number", "null"] }, lastCheckpointAt: { type: ["number", "null"] }, walBytes: { type: "number" }, pendingRestore: { type: ["string", "null"] } },
+        required: ["generation", "lineage", "shippedFrames", "lastSyncAt", "lastSnapshotAt", "lastCheckpointAt", "walBytes", "pendingRestore"],
+      },
+    },
     prepareRestore: { summary: "Rebuild the database at a point in time next to the live file; applied on next start", reads: [], writes: ["result"], input: { type: "object", properties: { generation: { type: "string" }, at: { type: ["number", "string"], description: "milliseconds or ISO-8601; default latest" } }, additionalProperties: false }, output: { type: "object", properties: { generation: { type: "string" }, at: { type: "number" }, file: { type: "string" }, restartRequired: { type: "boolean", enum: [true] } }, required: ["generation", "at", "file", "restartRequired"] }, errors: { 400: 'invalid "at" value', 404: "no snapshot before the requested point" } },
   }),
 });

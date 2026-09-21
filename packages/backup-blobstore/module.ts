@@ -54,7 +54,7 @@ export default defineModule({
   }),
 
   describe: () => ({
-    run: { summary: "Back up the file", reads: [], writes: ["result"], output: { type: "object", properties: { key: { type: "string" }, size: { type: "number" }, versions: { type: "array", items: { type: "string" } } } } },
+    run: { summary: "Back up the file", reads: [], writes: ["result"], output: { type: "object", properties: { key: { type: "string" }, size: { type: "number" }, versions: { type: "array", items: { type: "string" } } }, required: ["key", "size", "versions"] } },
     restore: {
       summary: "Stage the latest or a chosen version next to the file; applied on the next start",
       reads: [],
@@ -63,6 +63,6 @@ export default defineModule({
       output: { type: "object", properties: { key: { type: "string" }, size: { type: "number" }, file: { type: "string" }, pending: { type: "boolean", enum: [true] }, appliedOnRestart: { type: "boolean", enum: [true] } }, required: ["key", "size", "file", "pending", "appliedOnRestart"] },
       errors: { 400: "unknown version", 404: "no backup" },
     },
-    listVersions: { summary: "List backup versions", reads: [], writes: ["result"], output: { type: "object", properties: { versions: { type: "array", items: { type: "string" } } } } },
+    listVersions: { summary: "List backup versions", reads: [], writes: ["result"], output: { type: "object", properties: { versions: { type: "array", items: { type: "string" } } }, required: ["versions"] } },
   }),
 });

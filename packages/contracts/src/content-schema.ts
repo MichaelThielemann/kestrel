@@ -30,7 +30,7 @@ export function documentSchema(model: ContentModel, type: string, options: { sit
     properties._translations = { type: "object", additionalProperties: { type: "boolean" }, description: "per locale: required localized fields present" };
     if (options.siteFields) {
       properties._locale = { type: "string", description: "effective locale of a site-resolved document" };
-      properties._links = { type: "object", additionalProperties: { type: "object", properties: { path: { type: "string" }, locale: { type: "string" }, broken: { type: "boolean" } } }, description: "internal references by target id after site.resolveLinks" };
+      properties._links = { type: "object", additionalProperties: { type: "object", properties: { path: { type: "string" }, locale: { type: "string" }, broken: { type: "boolean" } }, required: [] }, description: "internal references by target id after site.resolveLinks" };
     }
   }
   return { type: "object", properties, required: ["id", "createdAt", "updatedAt"] };

@@ -259,7 +259,7 @@ export default defineModule({
       summary: "Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is",
       reads: [],
       writes: ["result.restore?"],
-      extendsOutput: { type: "object", properties: { restore: RESTORE_SCHEMA } },
+      extendsOutput: { type: "object", properties: { restore: RESTORE_SCHEMA }, required: [] },
     },
     label: (collection: string) => ({
       summary: `Name a ${collection} revision, or clear its name with null; a labelled revision is never pruned`,

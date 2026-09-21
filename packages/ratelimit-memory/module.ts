@@ -36,6 +36,6 @@ export default defineModule({
 
   describe: () => ({
     check: (bucket: string) => ({ summary: `Rate limit bucket ${bucket}`, reads: [], writes: [], errors: { 429: "too many requests" } }),
-    sweep: { summary: "Drop expired rate-limit windows", reads: [], writes: ["result"], output: { type: "object", properties: { removed: { type: "number" } } } },
+    sweep: { summary: "Drop expired rate-limit windows", reads: [], writes: ["result"], output: { type: "object", properties: { removed: { type: "number" } }, required: ["removed"] } },
   }),
 });

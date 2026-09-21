@@ -47,8 +47,8 @@ Not included: continuous replication (see `replication-sqlite`), restore without
 
 | Step | Summary | Reads | Writes | Input | Output | Errors |
 |---|---|---|---|---|---|---|
-| `backup.run` | Back up the file | – | `result` | – | { key?: string, size?: number, versions?: string[], … } | – |
+| `backup.run` | Back up the file | – | `result` | – | { key: string, size: number, versions: string[], … } | – |
 | `backup.restore` | Stage the latest or a chosen version next to the file; applied on the next start | – | `result` | { key?: string } | { key: string, size: number, file: string, pending: true, appliedOnRestart: true, … } | 400 unknown version; 404 no backup |
-| `backup.listVersions` | List backup versions | – | `result` | – | { versions?: string[], … } | – |
+| `backup.listVersions` | List backup versions | – | `result` | – | { versions: string[], … } | – |
 
 <!-- kestrel-docs:end -->

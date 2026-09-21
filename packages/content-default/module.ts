@@ -147,7 +147,7 @@ function describeContent(content: ContentInstance) {
       errors: { 400: "invalid limit, offset, sort or locale" },
     }),
     update: (arg: string) => ({ summary: `Update a ${typeOf(arg)}`, reads: ["params.id"], writes: ["result"], input: writeSchema(typeOf(arg), "update"), output: docSchema(typeOf(arg)), errors: { 400: "validation failed", 404: "not found" } }),
-    remove: (arg: string) => ({ summary: `Delete a ${typeOf(arg)}`, reads: ["params.id"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } } }, errors: { 400: "missing id" } }),
+    remove: (arg: string) => ({ summary: `Delete a ${typeOf(arg)}`, reads: ["params.id"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 400: "missing id" } }),
     removeTranslation: (arg: string) => ({
       summary: `Remove one translation of a ${typeOf(arg)} (locale from the route or ?locale=); the document stays in its other locales`,
       reads: ["params.id"],

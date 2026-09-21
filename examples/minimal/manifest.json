@@ -2594,7 +2594,14 @@
             "pruned": {
               "type": "number"
             }
-          }
+          },
+          "required": [
+            "generation",
+            "shippedBytes",
+            "frames",
+            "checkpointed",
+            "pruned"
+          ]
         }
       }
     },
@@ -2617,7 +2624,11 @@
             "bytes": {
               "type": "number"
             }
-          }
+          },
+          "required": [
+            "generation",
+            "bytes"
+          ]
         }
       }
     },
@@ -2715,7 +2726,17 @@
                 "null"
               ]
             }
-          }
+          },
+          "required": [
+            "generation",
+            "lineage",
+            "shippedFrames",
+            "lastSyncAt",
+            "lastSnapshotAt",
+            "lastCheckpointAt",
+            "walBytes",
+            "pendingRestore"
+          ]
         }
       }
     },
@@ -3768,7 +3789,11 @@
             "total": {
               "type": "number"
             }
-          }
+          },
+          "required": [
+            "items",
+            "total"
+          ]
         },
         "errors": {
           "400": "invalid folder or unknown locale"
@@ -4157,7 +4182,13 @@
             "conflicts": {
               "type": "number"
             }
-          }
+          },
+          "required": [
+            "written",
+            "skipped",
+            "missing",
+            "conflicts"
+          ]
         }
       }
     },
@@ -5960,7 +5991,10 @@
             "removed": {
               "type": "number"
             }
-          }
+          },
+          "required": [
+            "removed"
+          ]
         }
       }
     },
@@ -6340,7 +6374,10 @@
             "ok": {
               "type": "boolean"
             }
-          }
+          },
+          "required": [
+            "ok"
+          ]
         },
         "errors": {
           "400": "missing id"
@@ -6567,7 +6604,8 @@
                   "broken": {
                     "type": "boolean"
                   }
-                }
+                },
+                "required": []
               },
               "description": "internal references by target id after site.resolveLinks"
             }
@@ -6617,11 +6655,13 @@
                   "broken": {
                     "type": "boolean"
                   }
-                }
+                },
+                "required": []
               },
-              "description": "internal references by target id after site.resolveLinks"
+              "description": "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve"
             }
-          }
+          },
+          "required": []
         }
       }
     },
@@ -6819,7 +6859,11 @@
             "broken": {
               "type": "number"
             }
-          }
+          },
+          "required": [
+            "checked",
+            "broken"
+          ]
         }
       }
     },
@@ -6877,7 +6921,18 @@
                   "null"
                 ]
               }
-            }
+            },
+            "required": [
+              "fromType",
+              "fromId",
+              "field",
+              "locale",
+              "toTarget",
+              "toId",
+              "via",
+              "broken",
+              "checkedAt"
+            ]
           }
         }
       }
@@ -6901,7 +6956,11 @@
             "entries": {
               "type": "number"
             }
-          }
+          },
+          "required": [
+            "documents",
+            "entries"
+          ]
         }
       }
     },
@@ -6957,7 +7016,13 @@
             "skipped": {
               "type": "number"
             }
-          }
+          },
+          "required": [
+            "urls",
+            "checked",
+            "broken",
+            "skipped"
+          ]
         }
       }
     },
@@ -7020,7 +7085,18 @@
                   "null"
                 ]
               }
-            }
+            },
+            "required": [
+              "url",
+              "fromType",
+              "fromId",
+              "field",
+              "locale",
+              "ok",
+              "status",
+              "error",
+              "checkedAt"
+            ]
           }
         }
       }
@@ -7044,7 +7120,11 @@
             "entries": {
               "type": "number"
             }
-          }
+          },
+          "required": [
+            "documents",
+            "entries"
+          ]
         }
       }
     },
@@ -7413,7 +7493,8 @@
                 "missing"
               ]
             }
-          }
+          },
+          "required": []
         }
       }
     },
@@ -7968,7 +8049,11 @@
                 ]
               }
             }
-          }
+          },
+          "required": [
+            "document",
+            "delivery"
+          ]
         }
       }
     },
@@ -8079,7 +8164,12 @@
             "errors": {
               "type": "number"
             }
-          }
+          },
+          "required": [
+            "documents",
+            "live",
+            "errors"
+          ]
         }
       }
     },
@@ -8376,7 +8466,10 @@
             "removed": {
               "type": "number"
             }
-          }
+          },
+          "required": [
+            "removed"
+          ]
         }
       }
     },
@@ -9410,7 +9503,18 @@
                       "null"
                     ]
                   }
-                }
+                },
+                "required": [
+                  "url",
+                  "fromType",
+                  "fromId",
+                  "field",
+                  "locale",
+                  "ok",
+                  "status",
+                  "error",
+                  "checkedAt"
+                ]
               }
             }
           }
@@ -9506,7 +9610,18 @@
                       "null"
                     ]
                   }
-                }
+                },
+                "required": [
+                  "fromType",
+                  "fromId",
+                  "field",
+                  "locale",
+                  "toTarget",
+                  "toId",
+                  "via",
+                  "broken",
+                  "checkedAt"
+                ]
               }
             }
           }
@@ -9608,7 +9723,13 @@
                 "skipped": {
                   "type": "number"
                 }
-              }
+              },
+              "required": [
+                "urls",
+                "checked",
+                "broken",
+                "skipped"
+              ]
             }
           }
         }
@@ -9633,7 +9754,10 @@
                 "removed": {
                   "type": "number"
                 }
-              }
+              },
+              "required": [
+                "removed"
+              ]
             }
           }
         }
@@ -10232,7 +10356,11 @@
                     ]
                   }
                 }
-              }
+              },
+              "required": [
+                "document",
+                "delivery"
+              ]
             }
           }
         },
@@ -10790,7 +10918,10 @@
                 "ok": {
                   "type": "boolean"
                 }
-              }
+              },
+              "required": [
+                "ok"
+              ]
             },
             "errors": {
               "400": "missing id"
@@ -11178,7 +11309,11 @@
                     ]
                   }
                 }
-              }
+              },
+              "required": [
+                "document",
+                "delivery"
+              ]
             }
           }
         },
@@ -11451,7 +11586,13 @@
                 "conflicts": {
                   "type": "number"
                 }
-              }
+              },
+              "required": [
+                "written",
+                "skipped",
+                "missing",
+                "conflicts"
+              ]
             }
           }
         },
@@ -13927,7 +14068,11 @@
                 "total": {
                   "type": "number"
                 }
-              }
+              },
+              "required": [
+                "items",
+                "total"
+              ]
             },
             "errors": {
               "400": "invalid folder or unknown locale"
@@ -15748,7 +15893,12 @@
                 "errors": {
                   "type": "number"
                 }
-              }
+              },
+              "required": [
+                "documents",
+                "live",
+                "errors"
+              ]
             }
           }
         },
@@ -16301,7 +16451,11 @@
                 "entries": {
                   "type": "number"
                 }
-              }
+              },
+              "required": [
+                "documents",
+                "entries"
+              ]
             }
           }
         }
@@ -16361,7 +16515,11 @@
                 "entries": {
                   "type": "number"
                 }
-              }
+              },
+              "required": [
+                "documents",
+                "entries"
+              ]
             }
           }
         }
@@ -16822,7 +16980,14 @@
                 "pruned": {
                   "type": "number"
                 }
-              }
+              },
+              "required": [
+                "generation",
+                "shippedBytes",
+                "frames",
+                "checkpointed",
+                "pruned"
+              ]
             }
           }
         }
@@ -17056,7 +17221,11 @@
                 "bytes": {
                   "type": "number"
                 }
-              }
+              },
+              "required": [
+                "generation",
+                "bytes"
+              ]
             }
           }
         }
@@ -17149,7 +17318,17 @@
                     "null"
                   ]
                 }
-              }
+              },
+              "required": [
+                "generation",
+                "lineage",
+                "shippedFrames",
+                "lastSyncAt",
+                "lastSnapshotAt",
+                "lastCheckpointAt",
+                "walBytes",
+                "pendingRestore"
+              ]
             }
           }
         }
@@ -17343,7 +17522,8 @@
                       "broken": {
                         "type": "boolean"
                       }
-                    }
+                    },
+                    "required": []
                   },
                   "description": "internal references by target id after site.resolveLinks"
                 }
@@ -17393,11 +17573,13 @@
                       "broken": {
                         "type": "boolean"
                       }
-                    }
+                    },
+                    "required": []
                   },
-                  "description": "internal references by target id after site.resolveLinks"
+                  "description": "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve"
                 }
-              }
+              },
+              "required": []
             }
           }
         }
@@ -17833,7 +18015,11 @@
                     ]
                   }
                 }
-              }
+              },
+              "required": [
+                "document",
+                "delivery"
+              ]
             }
           }
         },
@@ -17910,7 +18096,8 @@
                     "missing"
                   ]
                 }
-              }
+              },
+              "required": []
             }
           }
         },
@@ -18380,7 +18567,11 @@
                 "broken": {
                   "type": "number"
                 }
-              }
+              },
+              "required": [
+                "checked",
+                "broken"
+              ]
             }
           }
         }
@@ -18947,7 +19138,10 @@
                 "removed": {
                   "type": "number"
                 }
-              }
+              },
+              "required": [
+                "removed"
+              ]
             }
           }
         }
@@ -19717,7 +19911,11 @@
                     ]
                   }
                 }
-              }
+              },
+              "required": [
+                "document",
+                "delivery"
+              ]
             }
           }
         },

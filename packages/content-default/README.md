@@ -69,7 +69,7 @@ rewriting (see site-default), versioning.
 | `content.get:<arg>` | One <arg> document | `params.id` | `result` | ?locale: "de" \| "en" | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 unknown locale; 404 not found |
 | `content.list:<arg>` | List <arg> | – | `result` | ?locale: "de" \| "en", limit: integer, offset: integer, sort: string | { items: object[], total: number, … } | 400 invalid limit, offset, sort or locale |
 | `content.update:<arg>` | Update a <arg> | `params.id` | `result` | { locale?: "de" \| "en" } | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 validation failed; 404 not found |
-| `content.remove:<arg>` | Delete a <arg> | `params.id` | `result` | – | { ok?: boolean, … } | 400 missing id |
+| `content.remove:<arg>` | Delete a <arg> | `params.id` | `result` | – | { ok: boolean, … } | 400 missing id |
 | `content.describeModel` | The content model: locales, default locale and every type with its fields | – | `result` | – | { locales?: string[], defaultLocale?: string, types: object, … } | – |
 | `content.removeTranslation:<arg>` | Remove one translation of a <arg> (locale from the route or ?locale=); the document stays in its other locales | `params.id` | `result` | ?locale: "de" \| "en" | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, … } | 400 unknown or missing locale; 404 document or translation not found; 409 last translation – remove the document |
 

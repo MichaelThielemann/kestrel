@@ -92,7 +92,7 @@ concerns), an e-mail field.
 | `authn.changePassword` | Change own password | `identity` | `result` | { currentPassword: string, newPassword: string } | { ok: boolean, … } | 400 wrong current password, missing fields, or new one too short; 401 not authenticated |
 | `authn.deactivateUser` | Deactivate a user (ends their sessions) | `params.id` | `result` | – | { ok: boolean, … } | 400 cannot deactivate yourself; 404 user not found; 409 the last active admin cannot be deactivated (`LAST_ADMIN`) |
 | `authn.activateUser` | Activate a user | `params.id` | `result` | – | { ok: boolean, … } | 404 user not found |
-| `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed?: number, … } | – |
+| `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed: number, … } | – |
 
 Used by 71 of 83 pipelines in `examples/minimal`.
 
