@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { StepDescription } from "./defineModule.ts";
-import { coerceQuery, resolveOutputSchema, validateSchema } from "./schema.ts";
+import { coerceQuery, findMissingRequired, resolveOutputSchema, validateSchema } from "./schema.ts";
 
 const step = (partial: Partial<StepDescription>): StepDescription => ({ summary: "s", reads: [], writes: [], ...partial });
 
@@ -196,6 +196,58 @@ describe("resolveOutputSchema", () => {
       properties: { a: { type: "string" }, b: { type: "string" } },
       required: ["a", "b"],
     });
+  });
+});
+
+describe("findMissingRequired", () => {
+  it("reports the root schema when it declares properties without required", () => {
+    expect(findMissingRequired({ type: "object", properties: { a: { type: "string" } } })).toEqual(["$"]);
+  });
+
+  it("stays quiet once required is declared, even as an empty array", () => {
+    expect(findMissingRequired({ type: "object", properties: { a: { type: "string" } }, required: [] })).toEqual([]);
+    expect(findMissingRequired({ type: "object", properties: { a: { type: "string" } }, required: ["a"] })).toEqual([]);
+  });
+
+  it("ignores a schema with no properties", () => {
+    expect(findMissingRequired({ type: "string" })).toEqual([]);
+    expect(findMissingRequired({ type: "object" })).toEqual([]);
+  });
+
+  it("recurses into nested object properties", () => {
+    const schema = { type: "object", properties: { meta: { type: "object", properties: { hits: { type: "integer" } } } }, required: ["meta"] };
+    expect(findMissingRequired(schema)).toEqual(["$.properties.meta"]);
+  });
+
+  it("recurses into array items, single and tuple", () => {
+    const single = { type: "array", items: { type: "object", properties: { id: { type: "string" } } } };
+    expect(findMissingRequired(single)).toEqual(["$.items"]);
+    const tuple = { type: "array", items: [{ type: "object", properties: { id: { type: "string" } } }] };
+    expect(findMissingRequired(tuple)).toEqual(["$.items[0]"]);
+  });
+
+  it("recurses into oneOf/anyOf/allOf branches", () => {
+    const branch = { type: "object", properties: { id: { type: "string" } } };
+    expect(findMissingRequired({ oneOf: [branch] })).toEqual(["$.oneOf[0]"]);
+    expect(findMissingRequired({ anyOf: [branch] })).toEqual(["$.anyOf[0]"]);
+    expect(findMissingRequired({ allOf: [branch] })).toEqual(["$.allOf[0]"]);
+  });
+
+  it("recurses into an object-valued additionalProperties", () => {
+    const schema = { type: "object", additionalProperties: { type: "object", properties: { id: { type: "string" } } } };
+    expect(findMissingRequired(schema)).toEqual(["$.additionalProperties"]);
+  });
+
+  it("ignores a boolean additionalProperties", () => {
+    expect(findMissingRequired({ type: "object", properties: { a: { type: "string" } }, required: ["a"], additionalProperties: false })).toEqual([]);
+  });
+
+  it("collects every offending path in one pass, prefixed by the given root", () => {
+    const schema = {
+      type: "object",
+      properties: { items: { type: "array", items: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } }, meta: { type: "object", properties: { hits: { type: "integer" } } } },
+    };
+    expect(findMissingRequired(schema, "$.output")).toEqual(["$.output", "$.output.properties.meta"]);
   });
 });
 

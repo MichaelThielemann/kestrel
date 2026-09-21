@@ -191,6 +191,30 @@ function mergeIntoItems(current: JsonSchema | undefined, extension: JsonSchema):
   return { ...current, properties: { ...properties, items: { ...list, items: mergeObjects([item, extension])! } } };
 }
 
+function walkForMissingRequired(schema: unknown, path: string, hits: string[]): void {
+  if (!isRecord(schema)) return;
+  const properties = isRecord(schema.properties) ? schema.properties : undefined;
+  if (properties !== undefined && !Object.hasOwn(schema, "required")) hits.push(path);
+  if (properties !== undefined) {
+    for (const [key, sub] of Object.entries(properties)) walkForMissingRequired(sub, `${path}.properties.${key}`, hits);
+  }
+  const items = schema.items;
+  if (Array.isArray(items)) items.forEach((item, i) => walkForMissingRequired(item, `${path}.items[${i}]`, hits));
+  else if (items !== undefined) walkForMissingRequired(items, `${path}.items`, hits);
+  if (isRecord(schema.additionalProperties)) walkForMissingRequired(schema.additionalProperties, `${path}.additionalProperties`, hits);
+  for (const keyword of ["oneOf", "anyOf", "allOf"] as const) {
+    const branches = schema[keyword];
+    if (Array.isArray(branches)) branches.forEach((branch, i) => walkForMissingRequired(branch, `${path}.${keyword}[${i}]`, hits));
+  }
+}
+
+/** JSON paths (dotted, `$`-rooted) of every object schema under `schema` — including `schema` itself, its properties, array items, an object-valued `additionalProperties` and `oneOf`/`anyOf`/`allOf` branches — that declares `properties` without a `required` key. */
+export function findMissingRequired(schema: JsonSchema, path = ROOT): string[] {
+  const hits: string[] = [];
+  walkForMissingRequired(schema, path, hits);
+  return hits;
+}
+
 /** Folds a pipeline's step descriptions, in order, into the schema its result ends up matching: `output` replaces the active schema, `extendsOutput` merges into it (or becomes the output if there was none yet), and `extendsItems` merges into a list output's `items[]`. */
 export function resolveOutputSchema(descriptions: readonly StepDescription[]): JsonSchema | undefined {
   let current: JsonSchema | undefined;

@@ -528,6 +528,36 @@ describe("boot", () => {
     expect(kestrel.warnings).toEqual([{ code: "undeclared-output", message: warnings[0]?.message, pipeline: "bareCreate", step: "bare.create" }]);
   });
 
+  it("warns once per object schema that declares properties without required in a step's output", async () => {
+    const loose = defineModule({
+      name: "loose/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({ create: async (ctx: Context) => ok({ ...ctx, result: { id: "x", meta: { hits: 1 } } }) }),
+      describe: () => ({
+        create: {
+          summary: "create with an output object schema that has no required",
+          reads: [],
+          writes: ["result"],
+          output: { type: "object", properties: { id: { type: "string" }, meta: { type: "object", properties: { hits: { type: "integer" } }, required: ["hits"] } } },
+        },
+      }),
+    });
+    const looseCreate = definePipeline({ name: "looseCreate", steps: ["loose.create"] });
+    const warnings: { message: string; data: Record<string, unknown> | undefined }[] = [];
+    const logger = { ...silentLogger, warn: (message: string, data?: Record<string, unknown>) => warnings.push({ message, data }) };
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./loose", config: {} }] };
+    kestrel = await boot({ config, modules: [...modules, loose], pipelines: [...pipelines, looseCreate], logger });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toMatch(/declares properties without declaring required/);
+    expect(warnings[0]?.data).toEqual({ pipeline: "looseCreate", step: "loose.create", path: "$.output" });
+    expect(kestrel.warnings).toEqual([{ code: "undeclared-required", message: warnings[0]?.message, pipeline: "looseCreate", step: "loose.create", path: "$.output" }]);
+  });
+
   it("stays quiet when a pipeline emits the event, whatever the emit step's query tail", async () => {
     const warnings: string[] = [];
     const logger = { ...silentLogger, warn: (message: string) => warnings.push(message) };

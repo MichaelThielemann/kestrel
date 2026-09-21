@@ -482,6 +482,16 @@ step (`"step writes result without declaring output, extendsOutput, extendsItems
 and add it to `kestrel.warnings` as `{ code: "undeclared-output", message, pipeline, step }` — not
 fatal today, but a boot error starting with the next major, so treat it as one now.
 
+An object schema inside `output`, `extendsOutput` or `extendsItems` — the schema itself, a nested
+property, an array's `items`, an object-valued `additionalProperties` or a `oneOf`/`anyOf`/`allOf`
+branch — that declares `properties` without a `required` key makes `boot()` log a warning naming
+the pipeline, the step and the JSON path of the offending schema (`"output schema at $.output…
+declares properties without declaring required; this becomes a boot error in the next major"`) and
+add it to `kestrel.warnings` as `{ code: "undeclared-required", message, pipeline, step, path }` —
+not fatal today, but a boot error starting with the next major. `required: []` is a schema's
+explicit statement that none of its properties are guaranteed; it silences the warning like any
+other `required` array.
+
 `@michaelthielemann/kestrel/schema` folds a pipeline's step descriptions, in order, into the
 schema its result ends up matching (`resolveOutputSchema`, from the `schema` subpath) — this is
 what `kestrel-openapi` uses for a route's response schema. Passing `validateOutput: true` to

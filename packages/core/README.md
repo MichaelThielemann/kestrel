@@ -8,11 +8,13 @@ condition that boot does not treat as fatal — for example an event trigger who
 pipeline emits and no module declares in `emits` — is both logged through `logger.warn` and
 returned as `kestrel.warnings: BootWarning[]`, so a caller can assert the list is empty even
 against a logger that discards warnings. `BootWarning` is a discriminated union on `code`;
-today's members are `{ code: "unemitted-event", message, pipeline, event }` and `{ code:
+today's members are `{ code: "unemitted-event", message, pipeline, event }`, `{ code:
 "undeclared-output", message, pipeline, step }` (a step that writes `result` without declaring
-`output`, `extendsOutput`, `extendsItems` or `binary: true`; a boot error in a future major), and a
-future minor release may add further codes, so code reading `kestrel.warnings` must handle a
-`code` it does not recognize.
+`output`, `extendsOutput`, `extendsItems` or `binary: true`; a boot error in a future major) and
+`{ code: "undeclared-required", message, pipeline, step, path }` (an object schema inside one of
+those that declares `properties` without a `required` key, at the JSON path `path`; also a boot
+error in a future major), and a future minor release may add further codes, so code reading
+`kestrel.warnings` must handle a `code` it does not recognize.
 The `kestrel` binary loads `kestrel.config.ts`, the modules named in `use` and `pipelines/*.ts`
 from the current directory. `testing/runPipeline` runs a pipeline against fake steps or, with
 `modules: [{ module, instance }]`, against a module's real steps and schemas. Before every step

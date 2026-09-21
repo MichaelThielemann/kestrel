@@ -12,6 +12,7 @@ import { KestrelBootError } from "./errors.ts";
 import { consoleLogger, logWarn, type Logger } from "./logger.ts";
 import { createObserverHub } from "./observer.ts";
 import { StepRegistry } from "./registry.ts";
+import { findMissingRequired } from "./schema.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
 import { writeRoot } from "./writes.ts";
 import { sortModules } from "./sort.ts";
@@ -46,12 +47,12 @@ export interface StopResult {
 /**
  * A condition boot detects but does not treat as fatal.
  *
- * A discriminated union on `code`; today's members are {@link UnemittedEventWarning} and
- * {@link UndeclaredOutputWarning}. A minor release may add further codes, so code reading
- * `kestrel.warnings` must handle a `code` it does not recognize instead of assuming the shape of
- * this union's current members.
+ * A discriminated union on `code`; today's members are {@link UnemittedEventWarning},
+ * {@link UndeclaredOutputWarning} and {@link UndeclaredRequiredWarning}. A minor release may add
+ * further codes, so code reading `kestrel.warnings` must handle a `code` it does not recognize
+ * instead of assuming the shape of this union's current members.
  */
-export type BootWarning = UnemittedEventWarning | UndeclaredOutputWarning;
+export type BootWarning = UnemittedEventWarning | UndeclaredOutputWarning | UndeclaredRequiredWarning;
 
 /** An event trigger's event that no pipeline emits via `events.emit` and no module declares in `emits`. */
 export interface UnemittedEventWarning {
@@ -70,6 +71,19 @@ export interface UndeclaredOutputWarning {
   message: string;
   pipeline: string;
   step: string;
+}
+
+/**
+ * An object schema inside a step's `output`, `extendsOutput` or `extendsItems` that declares
+ * `properties` without a `required` key, at the JSON path `path` (`$`-rooted, e.g.
+ * `$.output.properties.items.items`). Becomes a boot error in the next major.
+ */
+export interface UndeclaredRequiredWarning {
+  code: "undeclared-required";
+  message: string;
+  pipeline: string;
+  step: string;
+  path: string;
 }
 
 export interface Kestrel extends Introspection {
@@ -146,6 +160,30 @@ function warnUndeclaredOutput(pipelines: ReadonlyMap<string, ResolvedPipeline>, 
       const message = "step writes result without declaring output, extendsOutput, extendsItems or binary: true; this becomes a boot error in the next major";
       logWarn(logger, message, { pipeline: pipeline.name, step: step.name });
       warnings.push({ code: "undeclared-output", message, pipeline: pipeline.name, step: step.name });
+    }
+  }
+  return warnings;
+}
+
+function declaredOutputSchemas(description: StepDescription): Array<{ key: string; schema: NonNullable<StepDescription["output"]> }> {
+  const schemas: Array<{ key: string; schema: NonNullable<StepDescription["output"]> }> = [];
+  if (description.output !== undefined) schemas.push({ key: "output", schema: description.output });
+  if (description.extendsOutput !== undefined) schemas.push({ key: "extendsOutput", schema: description.extendsOutput });
+  if (description.extendsItems !== undefined) schemas.push({ key: "extendsItems", schema: description.extendsItems });
+  return schemas;
+}
+
+function warnUndeclaredRequired(pipelines: ReadonlyMap<string, ResolvedPipeline>, logger: Logger): UndeclaredRequiredWarning[] {
+  const warnings: UndeclaredRequiredWarning[] = [];
+  for (const pipeline of pipelines.values()) {
+    for (const step of pipeline.steps) {
+      for (const { key, schema } of declaredOutputSchemas(step.description)) {
+        for (const path of findMissingRequired(schema, `$.${key}`)) {
+          const message = `output schema at ${path} declares properties without declaring required; this becomes a boot error in the next major`;
+          logWarn(logger, message, { pipeline: pipeline.name, step: step.name, path });
+          warnings.push({ code: "undeclared-required", message, pipeline: pipeline.name, step: step.name, path });
+        }
+      }
     }
   }
   return warnings;
@@ -313,7 +351,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     if (eventHooks.length > 1) throw new KestrelBootError(CORE, `modules "${eventHooks[0]?.name ?? ""}" and "${eventHooks[1]?.name ?? ""}" both provide an event trigger hook`);
     if (events.length > 0 && eventHooks.length === 0) throw new KestrelBootError(CORE, "event triggers need a module that provides an event trigger hook");
     const eventHook = eventHooks[0];
-    const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUndeclaredOutput(pipelines, logger)];
+    const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUndeclaredOutput(pipelines, logger), ...warnUndeclaredRequired(pipelines, logger)];
 
     const runs = createRunTracker();
     const hub = createObserverHub(logger);
