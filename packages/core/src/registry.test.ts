@@ -118,7 +118,8 @@ describe("StepRegistry", () => {
 
   it("accepts reads and writes that follow the path grammar", () => {
     const r = new StepRegistry();
-    r.register("a/x", "a", { s: pass }, { s: { summary: "s", reads: ["payload.id", "result.items", "identity"], writes: ["result.llms", "identity?", "params.slug-2"] } });
+    r.register("a/x", "a", { s: pass }, { s: { summary: "s", reads: ["payload.id", "result.items", "identity", "verifiedUser?"], writes: ["result.llms", "identity?", "params.slug-2"] } });
+    expect(r.resolve("a.s").description.reads).toEqual(["payload.id", "result.items", "identity", "verifiedUser?"]);
     expect(r.resolve("a.s").description.writes).toEqual(["result.llms", "identity?", "params.slug-2"]);
   });
 
@@ -128,10 +129,9 @@ describe("StepRegistry", () => {
     expect(() => r.register("b/x", "b", { s: pass }, { s: { summary: "s", reads: [], writes: ["1result"] } })).toThrow(/invalid write path "1result"/);
   });
 
-  it("rejects an invalid read path and a trailing ? in reads", () => {
+  it("rejects an invalid read path", () => {
     const r = new StepRegistry();
     expect(() => r.register("a/x", "a", { s: pass }, { s: { summary: "s", reads: ["result identity"], writes: [] } })).toThrow(/invalid read path "result identity"/);
-    expect(() => r.register("b/x", "b", { s: pass }, { s: { summary: "s", reads: ["identity?"], writes: [] } })).toThrow(/step "b\.s" reads "identity\?"; the trailing "\?" is allowed in writes only/);
   });
 
   it("checks the path grammar of a factory description when it is built", () => {

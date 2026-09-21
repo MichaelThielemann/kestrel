@@ -1,6 +1,7 @@
 import { KestrelBootError } from "./errors.ts";
 import type { ResolvedPipeline } from "./runner.ts";
 import type { Route } from "./triggers/http.ts";
+import { stripOptional } from "./writes.ts";
 
 const CONTEXT_KEYS = ["payload", "headers", "files", "ip", "params"] as const;
 
@@ -41,18 +42,27 @@ export function checkDataflow(pipeline: ResolvedPipeline, httpRoutes: readonly R
   for (const param of commonParams(httpRoutes)) available.add(`params.${param}`);
   const written = new Set<string>();
 
-  for (const step of pipeline.steps) {
+  for (let i = 0; i < pipeline.steps.length; i++) {
+    const step = pipeline.steps[i]!;
     for (const read of step.description.reads) {
-      if (read.startsWith("payload.")) continue;
+      const optional = read.endsWith("?");
+      const key = stripOptional(read);
+      if (key.startsWith("payload.")) continue;
       let ok: boolean;
-      if (read.startsWith("params.")) {
-        ok = available.has(read) || hasEventTrigger || (httpRoutes.length === 0 && !hasCronTrigger);
+      if (key.startsWith("params.")) {
+        ok = available.has(key) || hasEventTrigger || (httpRoutes.length === 0 && !hasCronTrigger);
       } else {
-        ok = satisfied(read, available);
+        ok = satisfied(key, available);
       }
-      if (!ok) {
-        throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" reads "${read}" but no earlier step writes it (earlier writes: ${written.size === 0 ? "none" : [...written].join(", ")})`);
+      if (ok) continue;
+      if (optional) {
+        const laterWriter = pipeline.steps.slice(i + 1).find((later) => later.description.writes.some((write) => stripOptional(write) === key));
+        if (laterWriter) {
+          throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" optionally reads "${key}" but step "${laterWriter.name}" writes it later`);
+        }
+        continue;
       }
+      throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" reads "${read}" but no earlier step writes it (earlier writes: ${written.size === 0 ? "none" : [...written].join(", ")})`);
     }
     for (const write of step.description.writes) apply(write, [available, written]);
   }

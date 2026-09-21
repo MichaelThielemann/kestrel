@@ -21,6 +21,8 @@ const DECLARED: Record<string, Pick<StepDescription, "reads" | "writes">> = {
   "probe.llms": { reads: ["result.llms"], writes: [] },
   "redirects.render": { reads: ["payload.rows"], writes: ["result"] },
   "site.resolve": { reads: ["params.path"], writes: ["result"] },
+  "verify.user": { reads: [], writes: ["verifiedUser"] },
+  "revisions.reassignAuthor": { reads: ["verifiedUser?"], writes: ["result"] },
 };
 
 function pipeline(name: string, steps: readonly string[]): ResolvedPipeline {
@@ -119,5 +121,23 @@ describe("checkDataflow", () => {
     const p = pipeline("serve", ["images.serve"]);
     expect(() => checkDataflow(p, routes("serve", "GET /images/:id/:file"), false, false)).not.toThrow();
     expect(() => checkDataflow(p, routes("serve", "GET /images/:id"), false, false)).toThrow(/reads "params.file"/);
+  });
+
+  it("accepts an optional read of a key nothing in the pipeline writes", () => {
+    const p = pipeline("reassign", ["revisions.reassignAuthor"]);
+    expect(() => checkDataflow(p, routes("reassign", "POST /reassign"), false, false)).not.toThrow();
+  });
+
+  it("accepts an optional read of a key an earlier step writes", () => {
+    const p = pipeline("reassign", ["verify.user", "revisions.reassignAuthor"]);
+    expect(() => checkDataflow(p, routes("reassign", "POST /reassign"), false, false)).not.toThrow();
+  });
+
+  it("rejects an optional read of a key only a later step writes", () => {
+    const p = pipeline("reassign", ["revisions.reassignAuthor", "verify.user"]);
+    expect(() => checkDataflow(p, routes("reassign", "POST /reassign"), false, false)).toThrow(KestrelBootError);
+    expect(() => checkDataflow(p, routes("reassign", "POST /reassign"), false, false)).toThrow(
+      /\[pipelines\/reassign\] step "revisions.reassignAuthor" optionally reads "verifiedUser" but step "verify.user" writes it later/,
+    );
   });
 });

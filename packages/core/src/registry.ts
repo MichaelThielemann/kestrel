@@ -38,7 +38,6 @@ function validPath(path: string): boolean {
 
 function checkPaths(owner: string, name: string, description: StepDescription): StepDescription {
   for (const path of description.reads) {
-    if (path.endsWith("?")) throw new KestrelBootError(owner, `step "${name}" reads "${path}"; the trailing "?" is allowed in writes only`);
     if (!validPath(path)) throw new KestrelBootError(owner, `step "${name}" declares an invalid read path "${path}"`);
   }
   for (const path of description.writes) {
