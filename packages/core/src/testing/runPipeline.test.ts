@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { z } from "zod";
 import { stepFactory, type Context } from "../context.ts";
+import type { ModuleDefinition } from "../defineModule.ts";
 import { ok } from "../result.ts";
 import { definePipeline } from "../definePipeline.ts";
 import { runPipeline } from "./runPipeline.ts";
@@ -34,5 +36,24 @@ describe("testing/runPipeline", () => {
   it("unknown step in the pipeline fails loudly", async () => {
     const p = definePipeline({ name: "p", steps: ["nope.step"] });
     expect(() => runPipeline(p, {}, { steps: fakeSteps })).toThrow(/unknown step "nope.step"/);
+  });
+
+  it("fails a step whose result does not match its declared describe().output", async () => {
+    const module: ModuleDefinition = {
+      name: "widgets",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}),
+      setup: async () => ({}),
+      steps: () => ({ get: async (ctx: Context) => ok({ ...ctx, result: { name: "x" } }) }),
+      describe: () => ({
+        get: { summary: "get", reads: [], writes: ["result"], output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
+      }),
+    };
+    const p = definePipeline({ name: "getWidget", steps: ["widgets.get"] });
+    const res = await runPipeline(p, {}, { modules: [{ module, instance: {} }] });
+    expect(res.status).toBe(500);
+    expect(res.error).toContain('widgets.get');
+    expect(res.error).toContain("$.id");
   });
 });

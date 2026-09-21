@@ -39,5 +39,5 @@ export function runPipeline(pipeline: PipelineDefinition, input: Partial<Context
   }
 
   const resolved = { name: pipeline.name, steps: pipeline.steps.map((s) => registry.resolve(s, `pipelines/${pipeline.name}`)) };
-  return execute(resolved, { trigger: { kind: "http", name: "test" }, ...input }, options.logger ?? silentLogger);
+  return execute(resolved, { trigger: { kind: "http", name: "test" }, ...input }, options.logger ?? silentLogger, {}, { validateOutput: true });
 }

@@ -5,8 +5,9 @@ import type { RunEndEvent, RunObserver, RunStartEvent, StepStartEvent } from "./
 import type { ResolvedStep } from "./registry.ts";
 import { failure, isKestrelError, type KestrelError } from "./errors.ts";
 import { isErr, type Result } from "./result.ts";
-import { coerceQuery, validateSchema, type SchemaProblem } from "./schema.ts";
+import { coerceQuery, resolveOutputSchema, validateSchema, type SchemaProblem } from "./schema.ts";
 import { isRecord } from "./guards.ts";
+import type { StepDescription } from "./defineModule.ts";
 
 export interface ResolvedPipeline {
   name: string;
@@ -26,6 +27,11 @@ export interface RunResult {
 }
 
 export type Runner = (pipeline: string, input: ContextInput) => Promise<RunResult>;
+
+export interface RunPipelineOptions {
+  /** Dev/test only: after every step that writes to `result`, validates it against the pipeline's `describe().output` folded up to that step; a mismatch throws naming the step and the JSON path. Off by default, so production pays nothing for it. */
+  validateOutput?: boolean;
+}
 
 export interface RunTracker {
   track<T>(fn: () => Promise<T>): Promise<T>;
@@ -106,6 +112,20 @@ function checkWrites(step: ResolvedStep, before: Context, after: Context): void 
   }
 }
 
+function writesResult(step: ResolvedStep): boolean {
+  return step.description.writes.some((path) => writeRoot(path) === "result");
+}
+
+function checkOutput(step: ResolvedStep, descriptionsSoFar: readonly StepDescription[], result: unknown): void {
+  if (step.description.output === "untyped") return;
+  const schema = resolveOutputSchema(descriptionsSoFar);
+  if (schema === undefined) return;
+  const problems = validateSchema(schema, result);
+  if (problems.length > 0) {
+    throw new Error(`step "${step.name}": result does not match describe().output (${problems.map((p) => `${p.path} ${p.message}`).join("; ")})`);
+  }
+}
+
 function inputProblems(description: ResolvedStep["description"], ctx: Context): SchemaProblem[] {
   const problems: SchemaProblem[] = description.input === undefined ? [] : validateSchema(description.input, ctx.body);
   const query = description.query;
@@ -130,8 +150,9 @@ function truncate(message: string): string {
   return message.length > MESSAGE_LIMIT ? `${message.slice(0, MESSAGE_LIMIT)}…` : message;
 }
 
-export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInput, logger: Logger, observer: RunObserver = {}): Promise<RunResult> {
+export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInput, logger: Logger, observer: RunObserver = {}, options: RunPipelineOptions = {}): Promise<RunResult> {
   const runId = randomUUID();
+  const descriptionsSoFar: StepDescription[] = [];
   let ctx = createContext(input, runId);
   const requestId = ctx.requestId;
   const trace = (result: RunResult): RunResult => (requestId === undefined ? result : { ...result, requestId });
@@ -203,6 +224,8 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
       }
       checkWrites(step, ctx, out.value);
       ctx = Object.freeze(out.value);
+      descriptionsSoFar.push(step.description);
+      if (options.validateOutput && writesResult(step)) checkOutput(step, descriptionsSoFar, ctx.result);
       log("ok", 200);
       if (Reflect.get(ctx, DONE) === true) return finish(trace({ runId, status: 200, result: ctx.result }));
     } catch (caught) {
