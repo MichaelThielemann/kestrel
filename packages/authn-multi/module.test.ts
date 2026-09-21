@@ -1,5 +1,7 @@
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { authnStepsContractTests } from "@michaelthielemann/kestrel-contracts/authn.steps.contract.test";
+import { authnStepsContractTests, writesByStepOf } from "@michaelthielemann/kestrel-contracts/authn.steps.contract.test";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -11,11 +13,20 @@ import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import type { AuthnMulti } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
 
+const OBJECT_BINDING_PROOF_FILE = join(process.cwd(), "node_modules", ".cache", "kestrel-object-binding-proofs.ndjson");
+
+function provesObjectBinding(moduleName: string, step: string): void {
+  mkdirSync(dirname(OBJECT_BINDING_PROOF_FILE), { recursive: true });
+  appendFileSync(OBJECT_BINDING_PROOF_FILE, `${moduleName}#${step}\n`);
+}
+
+const SHARED_STEPS = ["login", "identifyUser", "requireUser", "loadIdentity", "logout"];
+
 authnStepsContractTests(async () => {
   const { instance } = await boot();
   const credentials = { username: "alice", password: "long-enough" };
   await runPipeline(definePipeline({ name: "createUser", steps: ["authn.createUser"] }), { body: credentials }, { modules: [{ module, instance }] });
-  return { modules: [{ module, instance }], credentials };
+  return { modules: [{ module, instance }], credentials, writesByStep: writesByStepOf("authn", module.describe!(instance), SHARED_STEPS) };
 });
 
 function makeDeps(db: ReturnType<typeof createFakePersistence>): Deps {
@@ -194,6 +205,7 @@ describe("authn/multi module steps via runPipeline", () => {
     expect(wrongType).toMatchObject({ status: 400, code: "VALIDATION" });
 
     expect((await runPipeline(getUserPipeline, { params: { id: carolId } }, { modules: [{ module, instance }] })).status).toBe(200);
+    provesObjectBinding("authn/multi", "deleteUser");
   });
 
   it("login answers 400 VALIDATION when a field has the wrong type", async () => {

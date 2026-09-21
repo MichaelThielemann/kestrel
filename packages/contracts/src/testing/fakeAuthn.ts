@@ -34,7 +34,7 @@ export function createAuthnFake(username = "alice", password = "long-enough"): A
 }
 
 /** What each of `fakeAuthnSteps()`'s steps writes onto the context, for `runPipeline`'s dataflow check. */
-export const FAKE_AUTHN_WRITES: Record<string, readonly string[]> = {
+export const FAKE_AUTHN_WRITES: Readonly<Record<string, readonly string[]>> = {
   "authn.login": ["token", "identity", "result"],
   "authn.identifyUser": ["token?", "identity?"],
   "authn.requireUser": ["token", "identity"],

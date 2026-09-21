@@ -1,10 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import type { StepDescription, StepDescriptions } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { runPipeline, type RunPipelineOptions } from "@michaelthielemann/kestrel/testing/runPipeline";
+import { FAKE_AUTHN_WRITES } from "./testing/fakeAuthn.ts";
 
 export interface AuthnStepsFixture extends RunPipelineOptions {
   credentials: Record<string, string>;
+  writesByStep: Readonly<Record<string, readonly string[]>>;
+}
+
+export function writesByStepOf(prefix: string, describeMap: StepDescriptions, steps: readonly string[]): Record<string, readonly string[]> {
+  const entry = (description: StepDescription | ((arg: string) => StepDescription) | undefined): StepDescription => {
+    if (description === undefined) throw new Error(`writesByStepOf: no describe() entry for a step of "${prefix}"`);
+    return typeof description === "function" ? description("<arg>") : description;
+  };
+  return Object.fromEntries(steps.map((step) => [`${prefix}.${step}`, entry(describeMap[step]).writes]));
 }
 
 const loginPipeline = definePipeline({ name: "login", steps: ["authn.login"] });
@@ -50,6 +61,13 @@ export function authnStepsContractTests(make: () => Promise<AuthnStepsFixture>) 
       expect((await runPipeline(requirePipeline, { headers }, fixture)).status).toBe(401);
       const identified = await runPipeline(identifyPipeline, { headers }, fixture);
       expect(identified.status).toBe(200);
+    });
+
+    it("declares the same writes as the fake for each of the five steps", async () => {
+      const { writesByStep } = await make();
+      for (const step of Object.keys(FAKE_AUTHN_WRITES)) {
+        expect(writesByStep[step], `writes for "${step}"`).toEqual(FAKE_AUTHN_WRITES[step]);
+      }
     });
   });
 }

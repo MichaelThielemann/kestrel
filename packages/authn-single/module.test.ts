@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authnStepsContractTests } from "@michaelthielemann/kestrel-contracts/authn.steps.contract.test";
+import { authnStepsContractTests, writesByStepOf } from "@michaelthielemann/kestrel-contracts/authn.steps.contract.test";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
@@ -9,7 +9,12 @@ import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { hashPassword } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
 
-authnStepsContractTests(async () => ({ modules: [{ module, instance: await boot() }], credentials: { username: "admin", password: "secret" } }));
+const SHARED_STEPS = ["login", "identifyUser", "requireUser", "loadIdentity", "logout"];
+
+authnStepsContractTests(async () => {
+  const instance = await boot();
+  return { modules: [{ module, instance }], credentials: { username: "admin", password: "secret" }, writesByStep: writesByStepOf("authn", module.describe!(instance), SHARED_STEPS) };
+});
 
 const deps: Deps = {
   get<T>(contract: Contract<T>): T {

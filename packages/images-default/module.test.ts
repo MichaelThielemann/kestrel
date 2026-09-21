@@ -1,6 +1,7 @@
+import { appendFileSync, mkdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
@@ -44,6 +45,13 @@ interface ImageSteps {
   attach: Step;
   serve: Step;
   export: StepFactory;
+}
+
+const OBJECT_BINDING_PROOF_FILE = join(process.cwd(), "node_modules", ".cache", "kestrel-object-binding-proofs.ndjson");
+
+function provesObjectBinding(moduleName: string, step: string): void {
+  mkdirSync(dirname(OBJECT_BINDING_PROOF_FILE), { recursive: true });
+  appendFileSync(OBJECT_BINDING_PROOF_FILE, `${moduleName}#${step}\n`);
 }
 
 function fakeCtx(overrides: Partial<Context> = {}): Context {
@@ -436,6 +444,21 @@ describe("images/default steps via runPipeline", () => {
     const res = await runPipeline(pipeline("images.serve"), { params: { id: "a", file: "thumb.webp" } }, { modules: [{ module, instance: images }] });
     expect(res.status).toBe(200);
     expect(res.result).toMatchObject({ binary: true });
+  });
+
+  it("serve: does not return another media item's variant for the same size name", async () => {
+    const { images, db, blobs } = await makeInstance();
+    await addImage(db, blobs, "a", await jpeg(400, 300));
+    await addImage(db, blobs, "b", await jpeg(400, 300));
+    expectOk(await images.generate("b"));
+
+    const own = await runPipeline(pipeline("images.serve"), { params: { id: "a", file: "thumb.webp" } }, { modules: [{ module, instance: images }] });
+    expect(own.result).toMatchObject({ binary: true, headers: { "x-kestrel-variant": "pending" } });
+
+    const other = await runPipeline(pipeline("images.serve"), { params: { id: "b", file: "thumb.webp" } }, { modules: [{ module, instance: images }] });
+    expect(other.result).toMatchObject({ binary: true });
+    expect(other.result).not.toHaveProperty("headers");
+    provesObjectBinding("images/default", "serve");
   });
 
   it("export: copies every done variant to the target directory", async () => {

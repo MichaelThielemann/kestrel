@@ -4,5 +4,6 @@ import { createAuthnFake, fakeAuthnSteps, FAKE_AUTHN_WRITES } from "./fakeAuthn.
 authnStepsContractTests(async () => ({
   steps: fakeAuthnSteps(createAuthnFake("alice", "long-enough")),
   writes: FAKE_AUTHN_WRITES,
+  writesByStep: FAKE_AUTHN_WRITES,
   credentials: { username: "alice", password: "long-enough" },
 }));

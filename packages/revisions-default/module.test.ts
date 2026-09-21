@@ -1,3 +1,5 @@
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import contentModule from "@michaelthielemann/kestrel-content-default";
 import { createContentDefault } from "@michaelthielemann/kestrel-content-default/impl";
@@ -15,6 +17,13 @@ import { ok } from "@michaelthielemann/kestrel/result";
 import type { RunResult } from "@michaelthielemann/kestrel/runner";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import module, { configSchema } from "./module.ts";
+
+const OBJECT_BINDING_PROOF_FILE = join(process.cwd(), "node_modules", ".cache", "kestrel-object-binding-proofs.ndjson");
+
+function provesObjectBinding(moduleName: string, step: string): void {
+  mkdirSync(dirname(OBJECT_BINDING_PROOF_FILE), { recursive: true });
+  appendFileSync(OBJECT_BINDING_PROOF_FILE, `${moduleName}#${step}\n`);
+}
 
 const model: ContentModel = { locales: ["de", "en"], defaultLocale: "de", types: { pages: { kind: "multi", fields: { title: "text", status: "enum" } } } };
 
@@ -111,12 +120,19 @@ describe("revisions/default module steps", () => {
     expect(readOtherDoc.status).toBe(404);
     const readOtherCollection = await run(["revisions.read:posts"], { params: { id: "p1", revisionId } }, instance);
     expect(readOtherCollection.status).toBe(404);
+    provesObjectBinding("revisions/default", "read");
 
     const restoreOtherDoc = await run(["revisions.restore:pages"], { params: { id: "p2", revisionId } }, instance);
     expect(restoreOtherDoc.status).toBe(404);
+    const restoreOtherCollection = await run(["revisions.restore:posts"], { params: { id: "p1", revisionId } }, instance);
+    expect(restoreOtherCollection.status).toBe(404);
+    provesObjectBinding("revisions/default", "restore");
 
     const labelOtherDoc = await run(["revisions.label:pages"], { params: { id: "p2", revisionId }, body: { label: "x" } }, instance);
     expect(labelOtherDoc.status).toBe(404);
+    const labelOtherCollection = await run(["revisions.label:posts"], { params: { id: "p1", revisionId }, body: { label: "x" } }, instance);
+    expect(labelOtherCollection.status).toBe(404);
+    provesObjectBinding("revisions/default", "label");
   });
 
   it("restore puts the snapshot into the body and the next record branches at the restored revision", async () => {
