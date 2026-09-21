@@ -16,7 +16,7 @@ export default defineConfig({
   modules: [
     { use: "@michaelthielemann/kestrel-events-inmemory", config: {} },
     { use: "@michaelthielemann/kestrel-events-direct", config: {} },
-    { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: ":memory:" } },
+    { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: ":memory:", acquireTimeoutMs: 15000 } },
     {
       use: "@michaelthielemann/kestrel-authn-single",
       config: {

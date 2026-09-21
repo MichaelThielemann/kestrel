@@ -23,7 +23,7 @@ const deps: Deps = {
 };
 
 async function boot(): Promise<PersistenceSqlite> {
-  const instance = boundaryCast<PersistenceSqlite>(await module.setup(configSchema.parse({ file: ":memory:" }), deps), "host");
+  const instance = boundaryCast<PersistenceSqlite>(await module.setup(configSchema.parse({ file: ":memory:", acquireTimeoutMs: 15000 }), deps), "host");
   await instance.ensureCollection("t", { a: "string" });
   return instance;
 }

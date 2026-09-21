@@ -1,7 +1,9 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { AtomicOutcome, AtomicScopeInfo, AtomicVerdict } from "@michaelthielemann/kestrel/atomic";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { err, failure, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { fieldDefinition, type Document, type FieldDefinition, type FieldType, type Filter, type FindOptions, type NewDocument, type Page, type Persistence, type PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
@@ -9,6 +11,14 @@ import { fieldDefinition, type Document, type FieldDefinition, type FieldType, t
 export interface Config {
   file: string;
   busyTimeoutMs?: number | undefined;
+  acquireTimeoutMs?: number | undefined;
+  scopeTimeoutMs?: number | undefined;
+}
+
+class AcquireTimeout extends Error {}
+
+interface ScopeStore {
+  state: "open" | "committed" | "rolled-back";
 }
 
 type Row = Record<string, unknown>;
@@ -58,6 +68,8 @@ export interface PersistenceSqlite extends Persistence {
   checkpoint(): void;
   snapshot(file: string): void;
   close(): void;
+  /** Runs `body` inside `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK`, holding the single connection for its duration. */
+  scope(info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
 }
 
 export function createPersistenceSqlite(config: Config): PersistenceSqlite {
@@ -68,6 +80,39 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
   db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA synchronous = NORMAL");
   const schemas = new Map<string, Record<string, FieldDefinition>>();
+  const acquireTimeoutMs = config.acquireTimeoutMs ?? 5000;
+  const defaultScopeTimeoutMs = config.scopeTimeoutMs ?? 5000;
+  const als = new AsyncLocalStorage<ScopeStore>();
+  let unusable = false;
+
+  let tail: Promise<void> = Promise.resolve();
+  const enqueue = <T>(fn: () => Promise<T> | T, deadline?: number): Promise<T> => {
+    const run = tail.then(
+      () => (deadline !== undefined && Date.now() > deadline ? Promise.reject(new AcquireTimeout()) : fn()),
+      () => (deadline !== undefined && Date.now() > deadline ? Promise.reject(new AcquireTimeout()) : fn()),
+    );
+    tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
+  const unusableError = (): PersistenceError =>
+    boundaryCast<PersistenceError>(failure("INTERNAL", "persistence/sqlite: the store is unusable after a failed rollback"), "host");
+  const routed = <T>(collection: string, fn: () => Result<T, PersistenceError> | Promise<Result<T, PersistenceError>>): Promise<Result<T, PersistenceError>> => {
+    const store = als.getStore();
+    if (store?.state === "rolled-back") {
+      throw new Error(`persistence/sqlite: the atomic scope was rolled back; this call was not executed (collection "${collection}")`);
+    }
+    if (store?.state === "open") return Promise.resolve(fn());
+    if (unusable) return Promise.resolve(err(unusableError()));
+    if (store?.state === "committed") console.warn("persistence/sqlite: call after the atomic scope committed");
+    return enqueue(fn, undefined).catch((cause: unknown) => {
+      if (cause instanceof AcquireTimeout) return err(failure("TRANSIENT", "persistence/sqlite: timed out waiting for the connection"));
+      throw cause;
+    });
+  };
 
   const schemaOf = (collection: string): Record<string, FieldDefinition> => {
     const schema = schemas.get(collection);
@@ -168,6 +213,79 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
     };
   };
 
+  const insertAll = <T extends Document>(collection: string, data: NewDocument<T>[]): Result<T[], PersistenceError> => {
+    const out: T[] = [];
+    for (const d of data) {
+      const created = insert(collection, d);
+      if (isErr(created)) return created;
+      out.push(boundaryCast<T>(created.value, "host"));
+    }
+    return ok(out);
+  };
+
+  const runScope = async (body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
+    const begun = run(() => db.exec("BEGIN IMMEDIATE"));
+    if (isErr(begun)) return { kind: "failed", phase: "begin", error: begun.error };
+
+    const store: ScopeStore = { state: "open" };
+    let timedOut = false;
+    const timer = new Promise<"rollback">((resolve) => {
+      const t = setTimeout(() => {
+        timedOut = true;
+        resolve("rollback");
+      }, defaultScopeTimeoutMs);
+      t.unref?.();
+    });
+    let verdict: AtomicVerdict;
+    let thrown: unknown;
+    let didThrow = false;
+    try {
+      verdict = await Promise.race([als.run(store, body), timer]);
+    } catch (caught) {
+      didThrow = true;
+      thrown = caught;
+      verdict = "rollback";
+    }
+
+    if (verdict === "commit") {
+      const committed = run(() => db.exec("COMMIT"));
+      if (!isErr(committed)) {
+        store.state = "committed";
+        return { kind: "settled", verdict: "commit" };
+      }
+      const rolledBack = run(() => db.exec("ROLLBACK"));
+      store.state = "rolled-back";
+      if (isErr(rolledBack)) {
+        unusable = true;
+        return { kind: "failed", phase: "rollback", error: failure("INTERNAL", "persistence/sqlite: rollback after a failed commit also failed"), original: committed.error };
+      }
+      return { kind: "failed", phase: "commit", error: committed.error };
+    }
+
+    const rolledBack = run(() => db.exec("ROLLBACK"));
+    store.state = "rolled-back";
+    if (isErr(rolledBack)) {
+      unusable = true;
+      return { kind: "failed", phase: "rollback", error: failure("INTERNAL", "persistence/sqlite: rollback failed") };
+    }
+    if (timedOut) return { kind: "failed", phase: "timeout", error: failure("TRANSIENT", "persistence/sqlite: atomic scope timed out") };
+    if (didThrow) throw thrown;
+    return { kind: "settled", verdict: "rollback" };
+  };
+
+  const scope = async (_info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
+    if (als.getStore() !== undefined) {
+      return { kind: "failed", phase: "begin", error: failure("INTERNAL", "persistence/sqlite: an atomic scope is already open in this call chain") };
+    }
+    const deadline = Date.now() + acquireTimeoutMs;
+    try {
+      return await enqueue(() => runScope(body), deadline);
+    } catch (cause) {
+      if (cause instanceof AcquireTimeout) return { kind: "failed", phase: "begin", error: failure("TRANSIENT", "persistence/sqlite: timed out waiting for the connection") };
+      throw cause;
+    }
+  };
+
   return {
     checkpoint() {
       db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
@@ -180,127 +298,146 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
     close() {
       db.close();
     },
+    scope,
 
     async ensureCollection(name, schema) {
-      const table = quote(name, "collection");
-      const definitions: Record<string, FieldDefinition> = {};
-      for (const [field, raw] of Object.entries(schema)) {
-        if (field === "id") throw new Error(`persistence/sqlite: field "id" is implicit in collection "${name}"`);
-        quote(field, "field");
-        definitions[field] = fieldDefinition(raw);
-      }
-      const columns = Object.entries(definitions).map(([f, { type }]) => `${quote(f, "field")} ${COLUMN_TYPE[type]}`);
-      const created = run(() => {
-        db.exec(`CREATE TABLE IF NOT EXISTS ${table} ("id" TEXT PRIMARY KEY${columns.map((c) => `, ${c}`).join("")})`);
-        const existing = new Set(boundaryCast<Array<{ name: string }>>(db.prepare(`PRAGMA table_info(${table})`).all(), "host").map((c) => c.name));
-        for (const [field, { type }] of Object.entries(definitions)) {
-          if (!existing.has(field)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${quote(field, "field")} ${COLUMN_TYPE[type]}`);
+      if (als.getStore()?.state === "open") throw new Error("persistence/sqlite: ensureCollection must not run inside an atomic scope");
+      return routed(name, () => {
+        const table = quote(name, "collection");
+        const definitions: Record<string, FieldDefinition> = {};
+        for (const [field, raw] of Object.entries(schema)) {
+          if (field === "id") throw new Error(`persistence/sqlite: field "id" is implicit in collection "${name}"`);
+          quote(field, "field");
+          definitions[field] = fieldDefinition(raw);
         }
-        const indexes = new Set(boundaryCast<Array<{ name: string }>>(db.prepare(`PRAGMA index_list(${table})`).all(), "host").map((i) => i.name));
-        for (const [field, { unique }] of Object.entries(definitions)) {
-          const index = uniqueIndexName(name, field);
-          if (unique) {
-            const duplicate = boundaryCast<{ value: SqlValue; n: number } | undefined>(db.prepare(`SELECT ${quote(field, "field")} AS value, COUNT(*) AS n FROM ${table} WHERE ${quote(field, "field")} IS NOT NULL GROUP BY ${quote(field, "field")} HAVING n > 1 LIMIT 1`).get(), "host");
-            if (duplicate) throw new Error(`persistence/sqlite: cannot make "${name}.${field}" unique: value ${JSON.stringify(duplicate.value)} is stored ${duplicate.n} times`);
-            db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${quote(index, "index")} ON ${table} (${quote(field, "field")})`);
-          } else if (indexes.has(index)) {
-            db.exec(`DROP INDEX ${quote(index, "index")}`);
+        const columns = Object.entries(definitions).map(([f, { type }]) => `${quote(f, "field")} ${COLUMN_TYPE[type]}`);
+        const created = run(() => {
+          db.exec(`CREATE TABLE IF NOT EXISTS ${table} ("id" TEXT PRIMARY KEY${columns.map((c) => `, ${c}`).join("")})`);
+          const existing = new Set(boundaryCast<Array<{ name: string }>>(db.prepare(`PRAGMA table_info(${table})`).all(), "host").map((c) => c.name));
+          for (const [field, { type }] of Object.entries(definitions)) {
+            if (!existing.has(field)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${quote(field, "field")} ${COLUMN_TYPE[type]}`);
           }
-        }
+          const indexes = new Set(boundaryCast<Array<{ name: string }>>(db.prepare(`PRAGMA index_list(${table})`).all(), "host").map((i) => i.name));
+          for (const [field, { unique }] of Object.entries(definitions)) {
+            const index = uniqueIndexName(name, field);
+            if (unique) {
+              const duplicate = boundaryCast<{ value: SqlValue; n: number } | undefined>(db.prepare(`SELECT ${quote(field, "field")} AS value, COUNT(*) AS n FROM ${table} WHERE ${quote(field, "field")} IS NOT NULL GROUP BY ${quote(field, "field")} HAVING n > 1 LIMIT 1`).get(), "host");
+              if (duplicate) throw new Error(`persistence/sqlite: cannot make "${name}.${field}" unique: value ${JSON.stringify(duplicate.value)} is stored ${duplicate.n} times`);
+              db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${quote(index, "index")} ON ${table} (${quote(field, "field")})`);
+            } else if (indexes.has(index)) {
+              db.exec(`DROP INDEX ${quote(index, "index")}`);
+            }
+          }
+        });
+        if (isErr(created)) return created;
+        schemas.set(name, definitions);
+        return ok();
       });
-      if (isErr(created)) return created;
-      schemas.set(name, definitions);
-      return ok();
     },
 
     async createOne<T extends Document>(collection: string, data: NewDocument<T>): Promise<Result<T, PersistenceError>> {
-      const created = insert(collection, data);
-      if (isErr(created)) return created;
-      return ok(boundaryCast<T>(created.value, "host"));
+      return routed(collection, () => {
+        const created = insert(collection, data);
+        if (isErr(created)) return created;
+        return ok(boundaryCast<T>(created.value, "host"));
+      });
     },
 
     async createMany<T extends Document>(collection: string, data: NewDocument<T>[]): Promise<Result<T[], PersistenceError>> {
-      const begun = run(() => db.exec("BEGIN"));
-      if (isErr(begun)) return begun;
-      try {
-        const out: T[] = [];
-        for (const d of data) {
-          const created = insert(collection, d);
-          if (isErr(created)) {
+      return routed(collection, () => {
+        if (als.getStore()?.state === "open") return insertAll<T>(collection, data);
+        const begun = run(() => db.exec("BEGIN IMMEDIATE"));
+        if (isErr(begun)) return begun;
+        try {
+          const out = insertAll<T>(collection, data);
+          if (isErr(out)) {
             db.exec("ROLLBACK");
-            return created;
+            return out;
           }
-          out.push(boundaryCast<T>(created.value, "host"));
-        }
-        const committed = run(() => db.exec("COMMIT"));
-        if (isErr(committed)) {
+          const committed = run(() => db.exec("COMMIT"));
+          if (isErr(committed)) {
+            db.exec("ROLLBACK");
+            return committed;
+          }
+          return out;
+        } catch (cause) {
           db.exec("ROLLBACK");
-          return committed;
+          throw cause;
         }
-        return ok(out);
-      } catch (cause) {
-        db.exec("ROLLBACK");
-        throw cause;
-      }
+      });
     },
 
     async findOne<T extends Document>(collection: string, filter: Filter): Promise<Result<T | null, PersistenceError>> {
-      const w = where(collection, filter);
-      const row = run(() => db.prepare(`SELECT * FROM ${quote(collection, "collection")}${w.sql} LIMIT 1`).get(...w.params) as Row | undefined);
-      if (isErr(row)) return row;
-      return ok(row.value ? decode<T>(collection, row.value) : null);
+      return routed(collection, () => {
+        const w = where(collection, filter);
+        const row = run(() => db.prepare(`SELECT * FROM ${quote(collection, "collection")}${w.sql} LIMIT 1`).get(...w.params) as Row | undefined);
+        if (isErr(row)) return row;
+        return ok(row.value ? decode<T>(collection, row.value) : null);
+      });
     },
 
     async findMany<T extends Document>(collection: string, filter: Filter, options: FindOptions = {}): Promise<Result<Page<T>, PersistenceError>> {
-      const table = quote(collection, "collection");
-      const w = where(collection, filter);
-      const order = Object.entries(options.sort ?? {}).map(([field, dir]) => {
-        fieldType(collection, field);
-        return `${quote(field, "field")} ${dir === "desc" ? "DESC" : "ASC"}`;
-      });
-      let sql = `SELECT * FROM ${table}${w.sql}`;
-      if (order.length > 0) sql += ` ORDER BY ${order.join(", ")}`;
-      if (options.limit !== undefined || options.offset !== undefined) sql += ` LIMIT ${options.limit ?? -1} OFFSET ${options.offset ?? 0}`;
-      return run(() => {
-        const rows = db.prepare(sql).all(...w.params) as Row[];
-        const total = boundaryCast<{ n: number }>(db.prepare(`SELECT COUNT(*) AS n FROM ${table}${w.sql}`).get(...w.params), "host").n;
-        return { items: rows.map((r) => decode<T>(collection, r)), total };
+      return routed(collection, () => {
+        const table = quote(collection, "collection");
+        const w = where(collection, filter);
+        const order = Object.entries(options.sort ?? {}).map(([field, dir]) => {
+          fieldType(collection, field);
+          return `${quote(field, "field")} ${dir === "desc" ? "DESC" : "ASC"}`;
+        });
+        let sql = `SELECT * FROM ${table}${w.sql}`;
+        if (order.length > 0) sql += ` ORDER BY ${order.join(", ")}`;
+        if (options.limit !== undefined || options.offset !== undefined) sql += ` LIMIT ${options.limit ?? -1} OFFSET ${options.offset ?? 0}`;
+        return run(() => {
+          const rows = db.prepare(sql).all(...w.params) as Row[];
+          const total = boundaryCast<{ n: number }>(db.prepare(`SELECT COUNT(*) AS n FROM ${table}${w.sql}`).get(...w.params), "host").n;
+          return { items: rows.map((r) => decode<T>(collection, r)), total };
+        });
       });
     },
 
     async count(collection, filter) {
-      const w = where(collection, filter);
-      return run(() => boundaryCast<{ n: number }>(db.prepare(`SELECT COUNT(*) AS n FROM ${quote(collection, "collection")}${w.sql}`).get(...w.params), "host").n);
+      return routed(collection, () => {
+        const w = where(collection, filter);
+        return run(() => boundaryCast<{ n: number }>(db.prepare(`SELECT COUNT(*) AS n FROM ${quote(collection, "collection")}${w.sql}`).get(...w.params), "host").n);
+      });
     },
 
     async updateOne<T extends Document>(collection: string, id: string, patch: Partial<Omit<T, "id">>): Promise<Result<T, PersistenceError>> {
-      const set = setClause(collection, patch);
-      if (set.sql !== "") {
-        const updated = run(() => db.prepare(`UPDATE ${quote(collection, "collection")} SET ${set.sql} WHERE "id" = ?`).run(...set.params, id));
-        if (isErr(updated)) return updated;
-      }
-      const doc = selectById(collection, id);
-      if (isErr(doc)) return doc;
-      if (doc.value === null) return err(failure("NOT_FOUND", `persistence/sqlite: "${collection}/${id}" does not exist`));
-      return ok(boundaryCast<T>(doc.value, "host"));
+      return routed(collection, () => {
+        const set = setClause(collection, patch);
+        if (set.sql !== "") {
+          const updated = run(() => db.prepare(`UPDATE ${quote(collection, "collection")} SET ${set.sql} WHERE "id" = ?`).run(...set.params, id));
+          if (isErr(updated)) return updated;
+        }
+        const doc = selectById(collection, id);
+        if (isErr(doc)) return doc;
+        if (doc.value === null) return err(failure("NOT_FOUND", `persistence/sqlite: "${collection}/${id}" does not exist`));
+        return ok(boundaryCast<T>(doc.value, "host"));
+      });
     },
 
     async updateMany(collection, filter, patch) {
-      const set = setClause(collection, patch);
-      if (set.sql === "") return ok(0);
-      const w = where(collection, filter);
-      return run(() => Number(db.prepare(`UPDATE ${quote(collection, "collection")} SET ${set.sql}${w.sql}`).run(...set.params, ...w.params).changes));
+      return routed(collection, () => {
+        const set = setClause(collection, patch);
+        if (set.sql === "") return ok(0);
+        const w = where(collection, filter);
+        return run(() => Number(db.prepare(`UPDATE ${quote(collection, "collection")} SET ${set.sql}${w.sql}`).run(...set.params, ...w.params).changes));
+      });
     },
 
     async deleteOne(collection, id) {
-      const deleted = run(() => db.prepare(`DELETE FROM ${quote(collection, "collection")} WHERE "id" = ?`).run(id));
-      if (isErr(deleted)) return deleted;
-      return ok();
+      return routed(collection, () => {
+        const deleted = run(() => db.prepare(`DELETE FROM ${quote(collection, "collection")} WHERE "id" = ?`).run(id));
+        if (isErr(deleted)) return deleted;
+        return ok();
+      });
     },
 
     async deleteMany(collection, filter) {
-      const w = where(collection, filter);
-      return run(() => Number(db.prepare(`DELETE FROM ${quote(collection, "collection")}${w.sql}`).run(...w.params).changes));
+      return routed(collection, () => {
+        const w = where(collection, filter);
+        return run(() => Number(db.prepare(`DELETE FROM ${quote(collection, "collection")}${w.sql}`).run(...w.params).changes));
+      });
     },
   };
 }

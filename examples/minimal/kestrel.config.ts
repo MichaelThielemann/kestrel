@@ -5,7 +5,7 @@ export default defineConfig({
   modules: [
     { use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: "./data/blobs" } },
     { use: "@michaelthielemann/kestrel-replication-sqlite", config: { file: "./data/kestrel.db" } },
-    { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "./data/kestrel.db" } },
+    { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "./data/kestrel.db", acquireTimeoutMs: 15000 } },
     { use: "@michaelthielemann/kestrel-sanitize-svg", config: {} },
     { use: "@michaelthielemann/kestrel-media-default", config: { allowedTypes: ["image/*", "application/pdf"], deniedTypes: ["text/html", "application/xhtml+xml"], maxBytes: 5242880, locales: ["de", "en"], defaultLocale: "de", prefix: "media/" } },
     { use: "@michaelthielemann/kestrel-images-default", config: {} },

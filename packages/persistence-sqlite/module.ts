@@ -6,7 +6,26 @@ import type { KestrelError } from "@michaelthielemann/kestrel/errors";
 import { isErr, ok, type Err } from "@michaelthielemann/kestrel/result";
 import { createPersistenceSqlite, persistenceFailure, type PersistenceSqlite } from "./impl.ts";
 
-export const configSchema = z.object({ file: z.string().min(1), busyTimeoutMs: z.number().int().min(0).optional() }).strict();
+export const configSchema = z
+  .object({
+    file: z.string().min(1),
+    busyTimeoutMs: z.number().int().min(0).optional(),
+    /** How long a request may wait for its turn at the connection before it is answered 503. */
+    acquireTimeoutMs: z.number().int().min(100).default(5000),
+    /** How long an atomic group may hold the connection once it has it, measured from BEGIN IMMEDIATE. */
+    scopeTimeoutMs: z.number().int().min(100).default(5000),
+  })
+  .strict()
+  .superRefine((config, ctx) => {
+    const busy = config.busyTimeoutMs ?? 5000;
+    if (config.acquireTimeoutMs <= busy) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["acquireTimeoutMs"],
+        message: `must be greater than busyTimeoutMs (${busy}); BEGIN IMMEDIATE blocks the event loop for up to that long, so an equal budget expires exactly when the wait succeeded`,
+      });
+    }
+  });
 
 function guard(ctx: Context, fn: () => void): Err<KestrelError> | null {
   try {
@@ -30,6 +49,8 @@ export default defineModule({
   },
 
   teardown: (db) => db.close(),
+
+  atomicScope: (db, info, body) => db.scope(info, body),
 
   steps: (db) => ({
     checkpoint: async (ctx: Context) => guard(ctx, () => db.checkpoint()) ?? ok(ctx),
