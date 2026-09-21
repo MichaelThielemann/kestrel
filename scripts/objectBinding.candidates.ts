@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
+import { stripOptional } from "../packages/core/src/writes.ts";
 
 export interface ObjectBindingCandidate {
   module: string;
@@ -104,8 +105,9 @@ function stringArray(node: ts.Node | undefined, context: string): string[] {
 }
 
 function hasAnotherRequestControlledRead(reads: readonly string[], hasQuery: boolean): boolean {
-  const paramsReads = reads.filter((r) => r === "params" || r.startsWith("params."));
-  const payloadReads = reads.filter((r) => r === "payload" || r.startsWith("payload."));
+  const bare = reads.map(stripOptional);
+  const paramsReads = bare.filter((r) => r === "params" || r.startsWith("params."));
+  const payloadReads = bare.filter((r) => r === "payload" || r.startsWith("payload."));
   return paramsReads.length >= 2 || payloadReads.length >= 1 || hasQuery;
 }
 
@@ -154,7 +156,7 @@ function scanModule(file: string): { moduleName: string; stepCount: number; cand
     const reads = [...new Set(facts.flatMap((f) => f.reads))];
     const hasInput = facts.some((f) => f.hasInput);
     const hasQuery = facts.some((f) => f.hasQuery);
-    const hasParams = reads.some((r) => r === "params" || r.startsWith("params."));
+    const hasParams = reads.some((r) => stripOptional(r) === "params" || stripOptional(r).startsWith("params."));
     if (hasParams && (hasAnotherRequestControlledRead(reads, hasQuery) || hasInput)) candidates.push({ module: moduleName, step: key, reads, hasInput, hasQuery });
   }
   return { moduleName, stepCount: stepsObj.size, candidates };

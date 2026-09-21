@@ -178,4 +178,19 @@ describe("scanObjectBindingCandidates: shapes it must reject", () => {
     expect(result.stepCount).toBe(2);
     expect(result.candidates).toEqual([]);
   });
+
+  it("counts an optional params/payload read as request-controlled", () => {
+    const source = moduleSource(`{
+      name: "widget/optional",
+      provides: [],
+      requires: [],
+      configSchema: {},
+      async setup() { return {}; },
+      steps: () => ({ act: async (ctx) => ctx }),
+      describe: () => ({ act: { summary: "s", reads: ["params.id?", "payload?"], writes: [] } }),
+    }`);
+    const result = writeAndScan(join(scratchRoot, "optional-module"), source);
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({ module: "widget/optional", step: "act", reads: ["params.id?", "payload?"] });
+  });
 });
