@@ -15,6 +15,17 @@
 - `revisions.read`/`restore`/`label` are now pinned to reject a revision id that belongs to another
   document or collection, and `images.serve`/`images.read` to never return another media item's
   variant for a matching size name.
+- `core`: `testing/runPipeline` validates `ctx.result` after every step that writes `result`
+  against the pipeline's output schema folded up to that point (`@michaelthielemann/kestrel/schema`,
+  new `resolveOutputSchema`), failing with the step name and the JSON path on a mismatch. Dev/test
+  only — `runPipeline`'s new `validateOutput` option defaults to off, so production pays nothing
+  for it.
+
+### Changed
+
+- `openapi`: the fold that derives a pipeline's response schema from its steps' `describe().output`
+  moved into `@michaelthielemann/kestrel/schema` (`resolveOutputSchema`, `mergeObjects`); the
+  generated OpenAPI document is unchanged.
 
 ## 5.8.0 – 2026-09-20
 

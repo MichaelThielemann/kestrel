@@ -187,6 +187,15 @@ schema. `extendsItems` behaves the same but merges the schema into `properties.i
 predecessor when its output is a list (otherwise it merges at the root like `extendsOutput`) — for
 steps like `images.attach` that extend each list item.
 
+A step whose `writes` touches `result` must declare `output` (or `extendsOutput`/`extendsItems`),
+or mark it explicitly as `output: "untyped"` for a result that is not meaningfully representable
+as a schema (a binary body, or a caller-defined document shape). A module scan fails a
+result-writing step with neither. In `testing/runPipeline` and in tests via `modules: [{ module,
+instance }]`, `ctx.result` is validated after every result-writing step against the schema its
+`output`/`extendsOutput`/`extendsItems` fold to at that point (skipped for a step marked
+`"untyped"`); a mismatch fails naming the step and the JSON path. Production does not run this
+check.
+
 ## `impl.test.ts`
 
 ```ts

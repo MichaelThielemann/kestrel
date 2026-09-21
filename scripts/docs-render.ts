@@ -63,7 +63,8 @@ export function stepTable(steps: StepManifest[]): string[] {
     const name = `\`${s.name}${s.factory ? ":<arg>" : ""}\``;
     const d = s.description;
     const paths = (list: readonly string[]) => (list.length === 0 ? "–" : list.map((p) => `\`${p}\``).join(", "));
-    return `| ${name} | ${cell(d.summary)} | ${paths(d.reads)} | ${paths(d.writes)} | ${cell(inputCell(d))} | ${cell(brief(d.output ?? d.extendsOutput ?? d.extendsItems))} | ${cell(errors(d)) || "–"} |`;
+    const output = d.output === "untyped" ? "*(untyped)*" : brief(d.output ?? d.extendsOutput ?? d.extendsItems);
+    return `| ${name} | ${cell(d.summary)} | ${paths(d.reads)} | ${paths(d.writes)} | ${cell(inputCell(d))} | ${cell(output)} | ${cell(errors(d)) || "–"} |`;
   });
   return ["| Step | Summary | Reads | Writes | Input | Output | Errors |", "|---|---|---|---|---|---|---|", ...rows, ""];
 }

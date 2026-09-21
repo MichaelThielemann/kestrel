@@ -456,6 +456,27 @@ Two checks keep the declarations honest: a static test in the core's suite parse
 each step once through `testing/runPipeline` with `modules: [{ module, instance }]`, so the
 real schemas apply to a representative payload.
 
+## Output Validation
+
+A step whose `writes` touches `result` declares the shape of what it produces: `output` (a JSON
+Schema, replacing whatever the pipeline's result schema was so far), `extendsOutput` (merges into
+it — becomes the output if there was none yet), or `extendsItems` (merges into
+`properties.items.items` of a list output, or at the root otherwise). `output: "untyped"` is an
+explicit opt-out for a result that isn't meaningfully representable as a schema — a binary body
+(`media.download`, `images.serve`), or a shape the module doesn't own (`persistence.createOne`,
+`.findOne`, `.updateOne` return whatever document the caller stored; `site.resolveLinks` and
+`redirects.lookup` likewise). A step that writes `result` with none of the four is a module-scan
+failure (the same static test in the core's suite that checks `input`/`query`, described in
+[Payload Validation](#payload-validation)).
+
+`@michaelthielemann/kestrel/schema` folds a pipeline's step descriptions, in order, into the
+schema its result ends up matching (`resolveOutputSchema`) — this is what `kestrel-openapi` uses
+for a route's response schema, and what `testing/runPipeline` uses in dev/test: after every step
+that writes `result`, it validates `ctx.result` against the schema folded up to that point and
+fails naming the step and the JSON path (skipped for a step marked `"untyped"`). Production never
+runs this check — it costs a JSON Schema walk per result-writing step, and by the time a real
+request runs a pipeline, its `describe()` blocks have already been exercised in tests.
+
 ## Pipeline Test
 
 ```ts
