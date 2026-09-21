@@ -6469,6 +6469,24 @@
             "_locale": {
               "type": "string",
               "description": "effective locale of a site-resolved document"
+            },
+            "_links": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "locale": {
+                    "type": "string"
+                  },
+                  "broken": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "description": "internal references by target id after site.resolveLinks"
             }
           },
           "required": [
@@ -17110,6 +17128,24 @@
                 "_locale": {
                   "type": "string",
                   "description": "effective locale of a site-resolved document"
+                },
+                "_links": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "locale": {
+                        "type": "string"
+                      },
+                      "broken": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "description": "internal references by target id after site.resolveLinks"
                 }
               },
               "required": [
