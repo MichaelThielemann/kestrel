@@ -48,6 +48,7 @@ function describeSite(site: SiteDefault) {
       reads: ["result"],
       writes: ["result"],
       query: { locale: { type: "string" } },
+      output: "untyped" as const,
     }),
   };
 }
