@@ -10,6 +10,7 @@ export type { RunObserver, RunStartEvent, RunEndEvent, StepStartEvent, StepEndEv
 export type { ResolvedPipeline } from "./runner.ts";
 export type { ResolvedStep } from "./registry.ts";
 export { definePipeline, pipelineDefiner, isAtomicGroup, pipelineSteps, type PipelineDefinition, type PipelineEntry, type AtomicGroup } from "./definePipeline.ts";
+export type { AtomicScope, AtomicScopeInfo, AtomicVerdict, AtomicOutcome } from "./atomic.ts";
 export type { StepsOf, StepCatalogue } from "./catalogue.ts";
 export { createContext, binaryResult, isBinaryResult, first, requestIdOf, stepFactory, isStepFactory, type BinaryResult, type Context, type ContextInput, type Step, type StepFactory, type StepMap, type StepResult, type Trigger, type UploadedFile } from "./context.ts";
 export { KestrelBootError, STATUS_OF, failure, customFailure, isKestrelError, type CoreCode, type FailureOptions, type KestrelError } from "./errors.ts";

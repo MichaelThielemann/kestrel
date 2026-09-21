@@ -1,4 +1,5 @@
 import type { ZodTypeAny, output } from "zod";
+import type { AtomicOutcome, AtomicScopeInfo, AtomicVerdict } from "./atomic.ts";
 import type { StepFactory, StepMap } from "./context.ts";
 import type { Contract } from "./defineContract.ts";
 import type { Manifest } from "./describe.ts";
@@ -51,6 +52,12 @@ export interface StepDescription {
   security?: "required" | "optional";
   multipart?: boolean;
   binary?: boolean;
+  /**
+   * The step may run inside an atomic group: it reaches nothing but `persistence@1`, it issues those calls
+   * from its own async flow, it starts no work it does not await, it never runs another pipeline, and the
+   * work it does is bounded by the request rather than by the size of a collection. Default: false.
+   */
+  atomicSafe?: boolean;
 }
 
 type DescriptionOf<F> = F extends StepFactory ? (arg: string) => StepDescription : StepDescription;
@@ -93,6 +100,8 @@ export interface ModuleDefinition<N extends string = string, T extends StepMap =
   /** Runs once at the end of boot, after every module is set up and every pipeline resolved; a returned function runs on `stop()`. */
   attach?(instance: unknown, kestrel: Introspection): Detach | void;
   teardown?(instance: unknown): void | Promise<void>;
+  /** Wraps an atomic group of a pipeline in one all-or-nothing scope of this module's store. At most one loaded module may declare it. */
+  atomicScope?(instance: unknown, info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
 }
 
 type WithSteps<P, T extends StepMap> = { steps(instance: P): T; describe(instance: P): StepDescriptions<T> };
@@ -110,6 +119,7 @@ export type ModuleInput<N extends string, S extends ZodTypeAny, P, T extends Ste
   triggers?: ModuleTriggers<P>;
   attach?(instance: P, kestrel: Introspection): Detach | void;
   teardown?(instance: P): void | Promise<void>;
+  atomicScope?(instance: P, info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
 } & (WithSteps<P, T> | WithoutSteps);
 
 export function defineModule<const N extends string, S extends ZodTypeAny, P, T extends StepMap = Record<never, never>>(def: ModuleInput<N, S, P, T>): ModuleDefinition<N, T> {

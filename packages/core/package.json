@@ -12,6 +12,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./atomic": "./src/atomic.ts",
     "./cast": "./src/cast.ts",
     "./catalogue": "./src/catalogue.ts",
     "./context": "./src/context.ts",
@@ -33,6 +34,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
+      },
+      "./atomic": {
+        "types": "./dist/atomic.d.ts",
+        "default": "./dist/atomic.js"
       },
       "./cast": {
         "types": "./dist/cast.d.ts",
