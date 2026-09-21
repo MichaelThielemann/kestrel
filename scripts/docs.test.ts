@@ -2,10 +2,11 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { StepDescription, StepManifest } from "../packages/core/src/index.ts";
-import { brief, errors, inputCell, orderPackages, rootTable, splice, stepTable, ROOT_ORDER, type PackageInfo } from "./docs-render.ts";
+import { boot, loadConfig, loadModules, loadPipelines, silentLogger, type BootWarning, type StepDescription, type StepManifest } from "../packages/core/src/index.ts";
+import { brief, errors, formatBootWarning, inputCell, orderPackages, rootTable, splice, stepTable, unexpectedBootWarnings, ROOT_ORDER, type PackageInfo } from "./docs-render.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const example = join(root, "examples", "minimal");
 
 function realPackages(): PackageInfo[] {
   return readdirSync(join(root, "packages"))
@@ -152,5 +153,47 @@ describe("root package table", () => {
     expect(ordered.slice(0, 4).map((p) => p.name)).toEqual(ROOT_ORDER);
     const rest = ordered.slice(4).map((p) => p.name);
     expect(rest).toEqual([...rest].sort((a, b) => a.localeCompare(b)));
+  });
+});
+
+describe("unexpectedBootWarnings", () => {
+  const unemitted: BootWarning = { code: "unemitted-event", message: "event trigger listens to an event no pipeline emits via events.emit and no module declares in emits", pipeline: "onCreated", event: "page.creted" };
+
+  it("returns an empty array when boot produced no warnings", () => {
+    expect(unexpectedBootWarnings([], [])).toEqual([]);
+  });
+
+  it("returns a warning that is not on the allowlist", () => {
+    expect(unexpectedBootWarnings([unemitted], [])).toEqual([unemitted]);
+  });
+
+  it("accepts a warning that matches the allowlist by code, pipeline and event", () => {
+    expect(unexpectedBootWarnings([unemitted], [unemitted])).toEqual([]);
+  });
+
+  it("still flags a warning whose pipeline or event differs from the allowlist entry", () => {
+    const other: BootWarning = { ...unemitted, pipeline: "onOther" };
+    expect(unexpectedBootWarnings([unemitted], [other])).toEqual([unemitted]);
+  });
+});
+
+describe("formatBootWarning", () => {
+  it("names the pipeline and the event", () => {
+    const warning: BootWarning = { code: "unemitted-event", message: "event trigger listens to an event no pipeline emits via events.emit and no module declares in emits", pipeline: "onCreated", event: "page.creted" };
+    expect(formatBootWarning(warning)).toBe('pipeline "onCreated", event "page.creted": event trigger listens to an event no pipeline emits via events.emit and no module declares in emits');
+  });
+});
+
+describe("example config with an event trigger no pipeline emits", () => {
+  it("makes the boot warning list non-empty, naming the pipeline and the event", async () => {
+    const config = await loadConfig(join(example, "kestrel.config.ts"));
+    const modules = await loadModules(example, config);
+    const pipelines = await loadPipelines(example, config.pipelinesDir ?? "./pipelines");
+    const withBadTrigger = { ...config, http: null, triggers: [...config.triggers, { event: "content.bogus", pipeline: "createPage" }] };
+    const kestrel = await boot({ config: withBadTrigger, modules, pipelines, logger: silentLogger, root: example });
+    const unexpected = unexpectedBootWarnings(kestrel.warnings, []);
+    await kestrel.stop();
+    expect(unexpected).toEqual([{ code: "unemitted-event", message: "event trigger listens to an event no pipeline emits via events.emit and no module declares in emits", pipeline: "createPage", event: "content.bogus" }]);
+    expect(unexpected.map(formatBootWarning)).toEqual(['pipeline "createPage", event "content.bogus": event trigger listens to an event no pipeline emits via events.emit and no module declares in emits']);
   });
 });

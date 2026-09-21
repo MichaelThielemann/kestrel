@@ -2,11 +2,13 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { boot, loadConfig, loadModules, loadPipelines, silentLogger, type Manifest, type ModuleDefinition } from "../packages/core/src/index.ts";
+import { boot, loadConfig, loadModules, loadPipelines, silentLogger, type BootWarning, type Manifest, type ModuleDefinition } from "../packages/core/src/index.ts";
 import { buildManifest } from "../packages/core/src/describe.ts";
 import { stepPrefix } from "../packages/core/src/defineModule.ts";
 import { StepRegistry } from "../packages/core/src/registry.ts";
-import { orderPackages, render, rootTable, splice, type PackageInfo, type Section } from "./docs-render.ts";
+import { formatBootWarning, orderPackages, render, rootTable, splice, unexpectedBootWarnings, type PackageInfo, type Section } from "./docs-render.ts";
+
+const ALLOWED_BOOT_WARNINGS: readonly BootWarning[] = [];
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const example = join(workspace, "examples", "minimal");
@@ -42,6 +44,11 @@ async function exampleManifest(): Promise<Manifest> {
   const modules = await loadModules(example, config);
   const pipelines = await loadPipelines(example, config.pipelinesDir ?? "./pipelines");
   const kestrel = await boot({ config: { ...config, http: null }, modules, pipelines, logger: silentLogger, root: example });
+  const unexpected = unexpectedBootWarnings(kestrel.warnings, ALLOWED_BOOT_WARNINGS);
+  if (unexpected.length > 0) {
+    await kestrel.stop();
+    throw new Error(`example config produced unexpected boot warnings:\n${unexpected.map((w) => `  ${formatBootWarning(w)}`).join("\n")}`);
+  }
   const manifest = kestrel.describe();
   await kestrel.stop();
   return manifest;
@@ -92,5 +99,10 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  await main();
+  try {
+    await main();
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
 }

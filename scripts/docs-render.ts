@@ -1,4 +1,4 @@
-import type { JsonSchema, Manifest, ModuleManifest, StepDescription, StepManifest } from "../packages/core/src/index.ts";
+import type { BootWarning, JsonSchema, Manifest, ModuleManifest, StepDescription, StepManifest } from "../packages/core/src/index.ts";
 
 export const START = "<!-- kestrel-docs:start -->";
 export const END = "<!-- kestrel-docs:end -->";
@@ -109,4 +109,17 @@ export function orderPackages(packages: PackageInfo[]): PackageInfo[] {
 export function rootTable(packages: PackageInfo[]): string {
   const rows = packages.map((p) => `| \`${p.name}\` | ${cell(p.description)} |`);
   return [START, "| Package | Purpose |", "|---|---|", ...rows, END].join("\n");
+}
+
+function bootWarningKey(warning: Pick<BootWarning, "code" | "pipeline" | "event">): string {
+  return `${warning.code}:${warning.pipeline}:${warning.event}`;
+}
+
+export function unexpectedBootWarnings(warnings: readonly BootWarning[], allowlist: readonly BootWarning[]): BootWarning[] {
+  const allowed = new Set(allowlist.map(bootWarningKey));
+  return warnings.filter((warning) => !allowed.has(bootWarningKey(warning)));
+}
+
+export function formatBootWarning(warning: BootWarning): string {
+  return `pipeline "${warning.pipeline}", event "${warning.event}": ${warning.message}`;
 }

@@ -40,12 +40,26 @@ export interface StopResult {
   drained: boolean;
 }
 
+/**
+ * A condition boot detects but does not treat as fatal.
+ *
+ * `code` identifies the check that produced it; `pipeline` and `event` are set for
+ * the "unemitted-event" warning and name the trigger's pipeline and event.
+ */
+export interface BootWarning {
+  code: "unemitted-event";
+  message: string;
+  pipeline: string;
+  event: string;
+}
+
 export interface Kestrel extends Introspection {
   config: KestrelConfig;
   contracts: Deps & { names(): string[] };
   steps: StepRegistry;
   pipelines: ReadonlyMap<string, ResolvedPipeline>;
   triggers: Triggers;
+  warnings: readonly BootWarning[];
   run(pipeline: string, input: ContextInput): Promise<RunResult>;
   start(): Promise<{ http?: AddressInfo }>;
   stop(options?: StopOptions): Promise<StopResult>;
@@ -82,7 +96,7 @@ function emittedEvent(spec: string): string | undefined {
   return query === -1 ? arg : arg.slice(0, query);
 }
 
-function warnUnemittedEvents(modules: readonly ModuleDefinition[], pipelines: ReadonlyMap<string, ResolvedPipeline>, events: readonly EventEntry[], logger: Logger): void {
+function warnUnemittedEvents(modules: readonly ModuleDefinition[], pipelines: ReadonlyMap<string, ResolvedPipeline>, events: readonly EventEntry[], logger: Logger): BootWarning[] {
   const emitted = new Set<string>();
   for (const pipeline of pipelines.values()) {
     for (const step of pipeline.steps) {
@@ -91,10 +105,14 @@ function warnUnemittedEvents(modules: readonly ModuleDefinition[], pipelines: Re
     }
   }
   for (const mod of modules) for (const event of mod.emits ?? []) emitted.add(event);
+  const warnings: BootWarning[] = [];
   for (const entry of events) {
     if (emitted.has(entry.event)) continue;
-    logWarn(logger, "event trigger listens to an event no pipeline emits via events.emit and no module declares in emits", { event: entry.event, pipeline: entry.pipeline });
+    const message = "event trigger listens to an event no pipeline emits via events.emit and no module declares in emits";
+    logWarn(logger, message, { event: entry.event, pipeline: entry.pipeline });
+    warnings.push({ code: "unemitted-event", message, pipeline: entry.pipeline, event: entry.event });
   }
+  return warnings;
 }
 
 function settledWithin(promise: Promise<void>, ms: number): Promise<boolean> {
@@ -259,7 +277,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     if (eventHooks.length > 1) throw new KestrelBootError(CORE, `modules "${eventHooks[0]?.name ?? ""}" and "${eventHooks[1]?.name ?? ""}" both provide an event trigger hook`);
     if (events.length > 0 && eventHooks.length === 0) throw new KestrelBootError(CORE, "event triggers need a module that provides an event trigger hook");
     const eventHook = eventHooks[0];
-    warnUnemittedEvents(ordered, pipelines, events, logger);
+    const warnings = warnUnemittedEvents(ordered, pipelines, events, logger);
 
     const runs = createRunTracker();
     const hub = createObserverHub(logger);
@@ -285,6 +303,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
       steps,
       pipelines,
       triggers,
+      warnings,
       describe,
       observe: hub.observe,
       run,

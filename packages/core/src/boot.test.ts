@@ -502,6 +502,7 @@ describe("boot", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]?.message).toMatch(/no pipeline emits via events\.emit and no module declares in emits/);
     expect(warnings[0]?.data).toEqual({ event: "page.creted", pipeline: "onCreated" });
+    expect(kestrel.warnings).toEqual([{ code: "unemitted-event", message: warnings[0]?.message, pipeline: "onCreated", event: "page.creted" }]);
   });
 
   it("stays quiet when a pipeline emits the event, whatever the emit step's query tail", async () => {
@@ -510,6 +511,7 @@ describe("boot", () => {
     const archive = definePipeline({ name: "archivePage", steps: ["store.create:pages", "events.emit:page.archived?with=result"] });
     kestrel = await boot({ config: { ...baseConfig, triggers: [{ event: "page.archived", pipeline: "onCreated" }] }, modules, pipelines: [...pipelines, archive], logger });
     expect(warnings).toEqual([]);
+    expect(kestrel.warnings).toEqual([]);
   });
 
   it("stays quiet when a module declares the event in emits", async () => {
@@ -528,6 +530,7 @@ describe("boot", () => {
     const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./migrations", config: {} }], triggers: [{ event: "migrations.applied", pipeline: "onCreated" }] };
     kestrel = await boot({ config, modules: [...modules, migrations], pipelines, logger });
     expect(warnings).toEqual([]);
+    expect(kestrel.warnings).toEqual([]);
   });
 
   it("http: null keeps the routes for adapters but serves nothing", async () => {

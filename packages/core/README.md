@@ -3,7 +3,11 @@ The core: `defineContract`, `defineModule`, `definePipeline`, `defineConfig`, th
 the pipeline runner with HTTP, event and cron triggers. It ships no contracts and no modules;
 a config without modules boots as an empty shell. `boot()` reads the config, sorts modules by
 `requires`, runs `setup()`, checks every provided contract's methods, registers steps, resolves
-pipelines and validates triggers; any problem throws `KestrelBootError { module, reason }`.
+pipelines and validates triggers; any problem throws `KestrelBootError { module, reason }`. A
+condition that boot does not treat as fatal — for example an event trigger whose event no
+pipeline emits and no module declares in `emits` — is both logged through `logger.warn` and
+returned as `kestrel.warnings: BootWarning[]` (`{ code, message, pipeline, event }`), so a caller
+can assert the list is empty even against a logger that discards warnings.
 The `kestrel` binary loads `kestrel.config.ts`, the modules named in `use` and `pipelines/*.ts`
 from the current directory. `testing/runPipeline` runs a pipeline against fake steps or, with
 `modules: [{ module, instance }]`, against a module's real steps and schemas. Before every step
