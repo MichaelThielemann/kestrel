@@ -9,7 +9,7 @@ export { REDACTED, type JsonValue } from "./configValue.ts";
 export type { RunObserver, RunStartEvent, RunEndEvent, StepStartEvent, StepEndEvent, Unobserve } from "./observer.ts";
 export type { ResolvedPipeline } from "./runner.ts";
 export type { ResolvedStep } from "./registry.ts";
-export { definePipeline, pipelineDefiner, type PipelineDefinition } from "./definePipeline.ts";
+export { definePipeline, pipelineDefiner, isAtomicGroup, pipelineSteps, type PipelineDefinition, type PipelineEntry, type AtomicGroup } from "./definePipeline.ts";
 export type { StepsOf, StepCatalogue } from "./catalogue.ts";
 export { createContext, binaryResult, isBinaryResult, first, requestIdOf, stepFactory, isStepFactory, type BinaryResult, type Context, type ContextInput, type Step, type StepFactory, type StepMap, type StepResult, type Trigger, type UploadedFile } from "./context.ts";
 export { KestrelBootError, STATUS_OF, failure, customFailure, isKestrelError, type CoreCode, type FailureOptions, type KestrelError } from "./errors.ts";
