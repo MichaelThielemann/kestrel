@@ -200,7 +200,7 @@ persistenceContractTests(async () => createPersistenceSqlite({ file: ":memory:" 
 | – (steps only) | Find, check, report external links | – | `links-default` |
 | – (steps only) | Redirects: validate rules, resolve within the site pipeline, export `redirects.json` | – | `redirects-default` |
 | – (steps only) | Sanitize uploaded SVGs | – | `sanitize-svg` |
-| `events@1` | Emit/listen to events; synchronous; listener errors → AggregateError | no `Result`: `emit` throws an `AggregateError` | `inmemory`, `queue` |
+| `events@1` | Emit/listen to events; synchronous; listener errors → AggregateError | no `Result`: `emit` throws an `AggregateError` | `inmemory` (the bus only; delivering event-trigger pipelines is a separate module, `events-direct` or `events-queue`, neither of which provides this contract) |
 | `renderer@1` | Render a document into a format (`formats()`, `render()` with assets) | `KestrelError<"TRANSIENT" \| "RENDER_FAILED">` — both contract-specific or core codes, status 503/500 respectively | `plain` (reference); a site brings its own, built on its frontend framework |
 | – (steps only) | Static delivery: render, store in blobstore, per-language status | – | `delivery-static` |
 | `validate@1` | Check a payload field against a schema: `targets()` (`"<collection>.<field>"`), `check(target, value)` → `{ ok, problems: [{ path, message }] }` | no `Result`: synchronous, no `Promise` | `jsonschema` (ajv; HTML sanitization stays a step) |

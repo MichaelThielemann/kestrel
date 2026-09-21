@@ -160,6 +160,7 @@ export default defineConfig({
     { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "./data.db" } },
     { use: "@michaelthielemann/kestrel-authn-multi", config: { identifier: "email" } },
     { use: "@michaelthielemann/kestrel-events-inmemory", config: {} },
+    { use: "@michaelthielemann/kestrel-events-direct", config: {} },
     { use: "./modules/my-authz/module.ts", config: {} },   // local submodule instead of a published package
   ],
   triggers: [
@@ -180,7 +181,8 @@ relative path; the default export must be a `defineModule()`. Only installed or 
 modules are active — Kestrel brings nothing along implicitly.
 
 HTTP, event and cron are equal-standing inputs. An event trigger is served by the module
-that supplies the `triggers.event` hook (here `events-inmemory`); if none is present, boot
+that supplies the `triggers.event` hook — the one configured delivery module, `events-direct`
+(here) or `events-queue`, never the bus module `events-inmemory` itself; if none is present, boot
 aborts. Boot also warns (once per trigger, never aborting) when an event trigger names an
 event that no pipeline emits through an `events.emit:<name>` step and no module declares in
 its `emits` — the symptom of a typo like `auth.logedIn`, whose listener pipeline would
@@ -621,23 +623,33 @@ replaces `ctx.result` with `{ document, delivery }`) — an event pipeline that 
 `with=result` is coupled to that pipeline's step order and can vary per consumer
 configuration.
 
-With `events-inmemory`, `emit` is synchronous: the triggering pipeline waits for every listener,
-and the HTTP response only goes out afterward. Listener errors are logged and don't fail the
-response; long-running work belongs in a job the listener starts (like `images.sync`).
+`events-inmemory` is the `events@1` bus and nothing else: it registers no step and delivers
+nothing. Every instance additionally configures exactly one **delivery** module, `events-direct`
+or `events-queue`, which owns `events.emit` and the event trigger hook.
 
-With `events-queue` instead (same steps and envelope — a deployment picks one bus, never both),
-`emit` writes the event to the `events_queue` collection of `persistence@1` and returns
-immediately; the HTTP response goes out before any listener runs.
+With `events-direct`, `emit` is synchronous: the step calls the bus, the triggering pipeline waits
+for every listener pipeline, and the HTTP response only goes out afterward. A listener pipeline
+that ends with a failure status, or a programmatic `events.on` handler that throws, makes the
+`events.emit` step itself answer 500 `INTERNAL` with the failure as `cause`; long-running work
+belongs in a job the listener starts (like `images.sync`).
 
-A worker in the same process claims due rows every `pollMs` and runs the listener pipelines. If a
-listener pipeline ends with a failure status, or a handler throws, that counts as a failed
-attempt: the row is requeued after `backoffSeconds[attempt - 1]`, and after `maxAttempts` it moves
-to the dead-letter state (managed via the admin steps `events.readQueueStatus`, `events.listDead`,
-`events.retryDead:all|one`, `events.purgeDone`). A row stuck at `running` because its process
-crashed is picked up again after `lockTtlSeconds`.
+With `events-queue` instead (same steps and envelope), `emit` writes one row per pipeline
+subscribed to the event directly to the `events_queue` collection of `persistence@1` and returns
+immediately, without touching the bus; the HTTP response goes out before any listener runs. A
+programmatic bus subscriber therefore sees only events raised through `events@1` by a module (for
+example `migrations.applied`), never an event a pipeline step emitted.
+
+A worker in the same process claims due rows every `pollMs` and runs the pipeline named on each
+row. If that run ends with a failure status, that row's attempt failed: it is requeued after
+`backoffSeconds[attempt - 1]`, and after `maxAttempts` it moves to the dead-letter state (managed
+via the admin steps `events.readQueueStatus`, `events.listDead`, `events.retryDead:all|one`,
+`events.purgeDone`; each dead-letter entry names its `pipeline`). A row stuck at `running` because
+its process crashed is picked up again after `lockTtlSeconds`. **No ordering is guaranteed between
+the pipelines subscribed to one event:** each is its own row, claimed and retried independently.
 
 Guarantees: at-least-once delivery, no ordering across events — so a listener pipeline must be
-idempotent (the envelope's `eventId` is the dedup key). If persistence itself fails on write, the
+idempotent (the envelope's `eventId` is the dedup key, guaranteed present on every delivered event
+including one raised through `events@1` directly). If persistence itself fails on write, the
 `events.emit` step fails with 503 `TRANSIENT` rather than silently dropping the event. Payload
 rules are unchanged: no tokens (only `identity`), a frozen shallow copy per handler.
 

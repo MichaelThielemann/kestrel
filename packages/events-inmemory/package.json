@@ -1,7 +1,7 @@
 {
   "name": "@michaelthielemann/kestrel-events-inmemory",
   "version": "5.8.1",
-  "description": "events@1 in process; enables event triggers.",
+  "description": "events@1 in process. The bus only; add events-direct or events-queue to deliver event-trigger pipelines.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {

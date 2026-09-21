@@ -79,6 +79,18 @@
   `authn.verifyUser:result.reassignTo` reads `payload.result.reassignTo` (an event hand-over
   shape). It does not check the caller, so an HTTP pipeline needs its own `authn.requireUser` and
   `authz.require` in front of it.
+- New package `@michaelthielemann/kestrel-events-direct`: inline event delivery, split out of
+  `events-inmemory`. Requires `events@1`, provides the event trigger hook and `events.emit`.
+- `@michaelthielemann/kestrel-contracts` gains `defineStepSet`/`stepSets`
+  (`contracts/stepSet.ts`): a declared step set names a role (e.g. `events.delivery`), the step
+  prefix it governs and the exact steps every provider of that role registers. `AUTHN_STEPS` and
+  the new `EVENT_DELIVERY_STEPS` (`events.emit`) are collected in `STEP_SETS`. The generated
+  README step tables and the new `docs/step-portability.md` mark every step as portable (a set
+  member), beside (under a governed prefix but not a member) or none.
+- `@michaelthielemann/kestrel-contracts` gains `EventIdentity`, `EventEnvelope`,
+  `withEventIdentity` and the shared `eventDeliveryStepTests` suite (`events.envelope.ts`,
+  `events.steps.contract.test.ts`), so `events-direct` and `events-queue` produce and verify the
+  same `events.emit` envelope from one implementation.
 
 ### Changed
 
@@ -149,6 +161,22 @@
   declare `output: { type: "object" }`; `redirects.lookup` declares its real
   `{ redirect: { to, status } }`; `site.resolveLinks` restates the `_links` field as its own
   `extendsOutput`, alongside `site.resolve`'s existing `output`.
+
+### Changed
+
+- `revisions.reassignAuthor` prefers a preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s
+  verified target) when one is present, ignoring the payload's own `reassignTo`. Without a
+  preceding step it behaves exactly as before: it reads the unverified `reassignTo` from the
+  payload or the event hand-over, so a pipeline built before this release, e.g.
+  `authn.requireUser → authz.require:users.manage → revisions.reassignAuthor`, keeps booting and
+  working unchanged — it simply does not verify the target user exists or is active.
+  `examples/minimal`'s `reassignRevisionAuthor` and `retryReassignRevisionAuthor` pipelines now run
+  `authn.verifyUser:result.reassignTo` and `authn.verifyUser:reassignTo` respectively first; new
+  pipelines should do the same to get a verified target.
+- `revisions.reassignAuthor`'s `reassignTo` input no longer requires a `name` alongside `id`, and
+  now also accepts a bare user id string, matching what a client sends when `authn.verifyUser`
+  precedes it: previously `{ reassignTo: { id } }` failed schema validation demanding `name`, and a
+  bare id passed `authn.verifyUser` only to then fail `revisions.reassignAuthor`'s own schema.
 
 ### Fixed
 

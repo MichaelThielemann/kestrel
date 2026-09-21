@@ -113,8 +113,9 @@ Modules can contribute triggers as well as steps: `triggers.event(instance, entr
 receives the event triggers from `kestrel.config.ts` at startup and returns the stop function
 that the core calls in `stop()`. The core knows no contract name for this — it only looks for
 the module with the hook; without such a module, boot aborts as soon as event triggers are
-configured, and two modules with the hook are also a boot error. `events-inmemory` provides the
-reference implementation.
+configured, and two modules with the hook are also a boot error. `events-direct` provides the
+reference implementation; the bus module `events-inmemory` registers no hook at all — delivering
+event-trigger pipelines is a separate module's job (also `events-queue`, an outbox).
 
 ## `impl.ts` – example
 

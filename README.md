@@ -37,8 +37,8 @@ running instance with a login, a content type and a step of your own.
 | `@michaelthielemann/kestrel-content-default` | content@1: typed documents from a config-declared model, on top of persistence@1. |
 | `@michaelthielemann/kestrel-delivery-static` | Steps delivery.publish/unpublish/readStatus/publishAll: renders published documents per locale via renderer@1, stores them in blobstore@1 and tracks a publish status. |
 | `@michaelthielemann/kestrel-events-direct` | Inline event delivery: subscribes event-trigger pipelines to events@1 and runs them within the emitting request. |
-| `@michaelthielemann/kestrel-events-inmemory` | events@1 in process; enables event triggers. |
-| `@michaelthielemann/kestrel-events-queue` | events@1 with a persistent queue: emit returns after the write, an in-process worker runs the listener pipelines with retry, backoff and dead-letter. |
+| `@michaelthielemann/kestrel-events-inmemory` | events@1 in process. The bus only; add events-direct or events-queue to deliver event-trigger pipelines. |
+| `@michaelthielemann/kestrel-events-queue` | Outbox event delivery: emit writes one row per subscribed pipeline and returns, an in-process worker runs them with retry, backoff and dead-letter. |
 | `@michaelthielemann/kestrel-images-default` | Steps images.register/generate/sync/resume/prune: image variant size registry, generation on upload, resumable sync. |
 | `@michaelthielemann/kestrel-insights` | insights@1: the instance manifest (modules, config schemas, steps, pipelines, triggers) and live per-process run statistics from the core's observer hook. |
 | `@michaelthielemann/kestrel-links-default` | Steps links.extract/check/report/rebuild: finds external URLs in content, checks them periodically and reports broken links. |
