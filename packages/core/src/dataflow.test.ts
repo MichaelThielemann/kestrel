@@ -23,6 +23,11 @@ const DECLARED: Record<string, Pick<StepDescription, "reads" | "writes">> = {
   "site.resolve": { reads: ["params.path"], writes: ["result"] },
   "verify.user": { reads: [], writes: ["verifiedUser"] },
   "revisions.reassignAuthor": { reads: ["verifiedUser?"], writes: ["result"] },
+  "probe.identity": { reads: ["identity?"], writes: [] },
+  "probe.resultX": { reads: ["result.x?"], writes: [] },
+  "probe.result": { reads: ["result?"], writes: [] },
+  "content.replace": { reads: [], writes: ["result"] },
+  "content.setX": { reads: [], writes: ["result.x"] },
 };
 
 function pipeline(name: string, steps: readonly string[]): ResolvedPipeline {
@@ -138,6 +143,25 @@ describe("checkDataflow", () => {
     expect(() => checkDataflow(p, routes("reassign", "POST /reassign"), false, false)).toThrow(KestrelBootError);
     expect(() => checkDataflow(p, routes("reassign", "POST /reassign"), false, false)).toThrow(
       /\[pipelines\/reassign\] step "revisions.reassignAuthor" optionally reads "verifiedUser" but step "verify.user" writes it later/,
+    );
+  });
+
+  it("accepts an optional read after an earlier optional write, even with a required writer later (real authn.identifyUser/requireUser shape)", () => {
+    const p = pipeline("me", ["authn.identifyUser", "probe.identity", "authn.requireUser"]);
+    expect(() => checkDataflow(p, routes("me", "GET /me"), false, false)).not.toThrow();
+  });
+
+  it("rejects a dotted optional read only a later bare write provides", () => {
+    const p = pipeline("replace", ["probe.resultX", "content.replace"]);
+    expect(() => checkDataflow(p, routes("replace", "POST /replace"), false, false)).toThrow(
+      /\[pipelines\/replace\] step "probe.resultX" optionally reads "result.x" but step "content.replace" writes it later/,
+    );
+  });
+
+  it("rejects a bare optional read only a later dotted write provides", () => {
+    const p = pipeline("setX", ["probe.result", "content.setX"]);
+    expect(() => checkDataflow(p, routes("setX", "POST /setX"), false, false)).toThrow(
+      /\[pipelines\/setX\] step "probe.result" optionally reads "result" but step "content.setX" writes it later/,
     );
   });
 });

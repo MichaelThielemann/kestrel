@@ -19,10 +19,13 @@ function commonParams(routes: readonly Route[]): string[] {
   return [...routeParams(first)].filter((name) => rest.every((route) => routeParams(route).has(name)));
 }
 
+function overlaps(a: string, b: string): boolean {
+  return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+}
+
 function satisfied(read: string, available: ReadonlySet<string>): boolean {
-  if (available.has(read)) return true;
   for (const written of available) {
-    if (read.startsWith(`${written}.`) || written.startsWith(`${read}.`)) return true;
+    if (overlaps(read, written)) return true;
   }
   return false;
 }
@@ -41,6 +44,7 @@ export function checkDataflow(pipeline: ResolvedPipeline, httpRoutes: readonly R
   const available = new Set<string>(CONTEXT_KEYS);
   for (const param of commonParams(httpRoutes)) available.add(`params.${param}`);
   const written = new Set<string>();
+  const optionallyWritten = new Set<string>();
 
   for (let i = 0; i < pipeline.steps.length; i++) {
     const step = pipeline.steps[i]!;
@@ -56,7 +60,8 @@ export function checkDataflow(pipeline: ResolvedPipeline, httpRoutes: readonly R
       }
       if (ok) continue;
       if (optional) {
-        const laterWriter = pipeline.steps.slice(i + 1).find((later) => later.description.writes.some((write) => stripOptional(write) === key));
+        if (satisfied(key, optionallyWritten)) continue;
+        const laterWriter = pipeline.steps.slice(i + 1).find((later) => later.description.writes.some((write) => overlaps(key, stripOptional(write))));
         if (laterWriter) {
           throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" optionally reads "${key}" but step "${laterWriter.name}" writes it later`);
         }
@@ -64,6 +69,9 @@ export function checkDataflow(pipeline: ResolvedPipeline, httpRoutes: readonly R
       }
       throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" reads "${read}" but no earlier step writes it (earlier writes: ${written.size === 0 ? "none" : [...written].join(", ")})`);
     }
-    for (const write of step.description.writes) apply(write, [available, written]);
+    for (const write of step.description.writes) {
+      if (write.endsWith("?")) optionallyWritten.add(stripOptional(write));
+      apply(write, [available, written]);
+    }
   }
 }
