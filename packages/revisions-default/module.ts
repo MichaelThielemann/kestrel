@@ -87,6 +87,19 @@ function formerAuthorOf(ctx: Context): string | null {
   return typeof ctx.payload.id === "string" ? ctx.payload.id : null;
 }
 
+function rawTarget(ctx: Context): unknown {
+  if (ctx.payload.reassignTo !== undefined) return ctx.payload.reassignTo;
+  const result = ctx.payload.result;
+  return isRecord(result) ? result.reassignTo : null;
+}
+
+function targetAuthor(raw: unknown): RevisionAuthor | null | undefined {
+  if (raw === null || raw === undefined) return null;
+  if (!isRecord(raw)) return undefined;
+  const { id, name } = raw;
+  return typeof id === "string" && typeof name === "string" ? { id, name } : undefined;
+}
+
 function modelFieldsOf(content: Content | undefined, collection: string): string[] | null {
   const type = content?.model().types[collection];
   return type === undefined ? null : Object.keys(type.fields);
@@ -183,8 +196,8 @@ export default defineModule({
     reassignAuthor: async (ctx: Context) => {
       const fromId = formerAuthorOf(ctx);
       if (fromId === null) return ctx.fail("VALIDATION", "revisions.reassignAuthor: no user id in params.id or the event payload");
-      if (ctx.reassignTarget === undefined) throw new Error("revisions.reassignAuthor: no reassignTarget on context (boot's dataflow check already proved an earlier step writes it)");
-      const to = ctx.reassignTarget;
+      const to = ctx.reassignTarget !== undefined ? ctx.reassignTarget : targetAuthor(rawTarget(ctx));
+      if (to === undefined) return ctx.fail("VALIDATION", "revisions.reassignAuthor: reassignTo must be null or { id, name }");
       if (to !== null && to.id === fromId) return ctx.fail("VALIDATION", "revisions.reassignAuthor: reassignTo must not be the former author");
       const changed = await revisions.reassignAuthor(fromId, to);
       if (isErr(changed)) return ctx.fail(changed.error);
@@ -256,12 +269,13 @@ export default defineModule({
       errors: { 400: "missing id or revisionId", 404: "no such revision" },
     }),
     reassignAuthor: {
-      summary: "Replace the author of every revision written by the user in `params.id` or the event payload's `id` with the verified target `authn.verifyUser` wrote to `reassignTarget`, without one the anonymous author `{ id: null, name: null }`",
-      reads: ["params.id", "payload", "reassignTarget"],
+      summary:
+        "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `reassignTarget` (e.g. authn.verifyUser's verified target) is used when present; without one, falls back to `reassignTo` from the payload or the event hand-over, unverified. Without any target, the anonymous author `{ id: null, name: null }`",
+      reads: ["params.id", "payload"],
       writes: ["result"],
       input: REASSIGN_INPUT,
       output: REASSIGN_SCHEMA,
-      errors: { 400: "no user id, or the reassign target is the former author again" },
+      errors: { 400: "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again" },
     },
     prune: { summary: "Apply the retention rules to every recorded document and locale", reads: [], writes: ["result"], output: REPORT_SCHEMA },
     remove: (collection: string) => ({ summary: `Drop every revision of a ${collection} document, in every locale`, reads: ["params.id"], writes: [], errors: { 400: "missing id" } }),

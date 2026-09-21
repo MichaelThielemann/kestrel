@@ -44,7 +44,8 @@ export const OBJECT_BINDING_REGISTRY: Record<string, ObjectBindingDisposition> =
   [key("revisions/default", "removeTranslation")]: { kind: "waiver", reason: "the only request-controlled value beside params.id is the query locale, not an object id." },
   [key("revisions/default", "reassignAuthor")]: {
     kind: "waiver",
-    reason: "reads reassignTarget, the verified { id, name } authn.verifyUser writes after checking the target exists and is active; the example pipelines must run it first.",
+    reason:
+      "prefers reassignTarget, the verified { id, name } authn.verifyUser writes after checking the target exists and is active; without a preceding step it falls back to the unverified reassignTo in the payload, so every example pipeline must run authn.verifyUser first.",
     upstream: "authn.verifyUser",
   },
 };
