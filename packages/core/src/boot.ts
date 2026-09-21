@@ -1,5 +1,6 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { AtomicScope } from "./atomic.ts";
 import { boundaryCast } from "./cast.ts";
 import type { ContextInput } from "./context.ts";
 import { missingMethods, type Contract } from "./defineContract.ts";
@@ -375,6 +376,25 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     if (eventHooks.length > 1) throw new KestrelBootError(CORE, `modules "${eventHooks[0]?.name ?? ""}" and "${eventHooks[1]?.name ?? ""}" both provide an event trigger hook`);
     if (events.length > 0 && eventHooks.length === 0) throw new KestrelBootError(CORE, "event triggers need a module that provides an event trigger hook");
     const eventHook = eventHooks[0];
+
+    const scopeHooks = ordered.filter((mod) => mod.atomicScope !== undefined);
+    if (scopeHooks.length > 1) throw new KestrelBootError(CORE, `modules "${scopeHooks[0]?.name ?? ""}" and "${scopeHooks[1]?.name ?? ""}" both provide an atomic scope`);
+    const grouped = [...pipelines.values()].filter((p) => p.steps.some((s) => s.atomic !== undefined));
+    if (grouped.length > 0 && scopeHooks.length === 0) {
+      throw new KestrelBootError(CORE, `pipeline "${grouped[0]?.name ?? ""}" has an atomic group but no module provides an atomic scope`);
+    }
+    const scopeHook = scopeHooks[0];
+    const atomicScope: AtomicScope | undefined = scopeHook
+      ? (info, body) => scopeHook.atomicScope!(instances.get(scopeHook), info, body)
+      : undefined;
+
+    for (const [name, pipeline] of pipelines) {
+      for (const step of pipeline.steps) {
+        if (step.atomic === undefined || step.description.atomicSafe === true) continue;
+        throw new KestrelBootError(`pipelines/${name}`, `step "${step.name}" is in an atomic group but does not declare atomicSafe`);
+      }
+    }
+
     const warnings = [...moduleOrderWarnings, ...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUndeclaredOutput(pipelines, logger), ...warnUndeclaredRequired(pipelines, logger)];
 
     const runs = createRunTracker();
@@ -383,7 +403,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     const run = (name: string, ctxInput: ContextInput): Promise<RunResult> => {
       const pipeline = pipelines.get(name);
       if (!pipeline) throw new Error(`unknown pipeline "${name}"`);
-      return runs.track(() => runPipeline(pipeline, ctxInput, logger, hub.observer, { validateOutput }));
+      return runs.track(() => runPipeline(pipeline, ctxInput, logger, hub.observer, { validateOutput, ...(atomicScope === undefined ? {} : { atomicScope }) }));
     };
     const triggers: Triggers = { http: routes, events, crons };
     let manifest: Manifest | undefined;

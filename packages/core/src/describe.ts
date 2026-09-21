@@ -24,6 +24,7 @@ export interface ModuleManifest {
   config: { schema: JsonSchema; variables: ConfigVariable[] };
   steps: string[];
   eventHook: boolean;
+  atomicScope: boolean;
   emits: string[];
 }
 
@@ -39,6 +40,8 @@ export interface PipelineStepManifest {
   name: string;
   module: string;
   description: StepDescription;
+  /** The 1-based ordinal of the atomic group this step belongs to; absent outside a group. */
+  atomic?: number;
 }
 
 export interface PipelineManifest {
@@ -126,13 +129,20 @@ export function buildManifest(input: ManifestInput): Manifest {
       config: describeConfig(mod.configSchema, input.rawConfigs.get(mod), input.parsedConfigs?.get(mod)),
       steps: registered.filter((s) => s.owner === mod.name).map((s) => s.name),
       eventHook: mod.triggers?.event !== undefined,
+      atomicScope: mod.atomicScope !== undefined,
       emits: [...(mod.emits ?? [])],
     };
   });
   const steps = registered.map((s): StepManifest => ({ name: s.name, module: s.owner, factory: s.factory, description: typeof s.describe === "function" ? s.describe(PLACEHOLDER_ARG) : s.describe }));
   const pipelines = [...input.pipelines.values()].map((p): PipelineManifest => ({
     name: p.name,
-    steps: p.steps.map((s) => ({ spec: s.name, name: stepName(s.name), module: input.steps.owner(stepName(s.name)) ?? "", description: s.description })),
+    steps: p.steps.map((s) => ({
+      spec: s.name,
+      name: stepName(s.name),
+      module: input.steps.owner(stepName(s.name)) ?? "",
+      description: s.description,
+      ...(s.atomic === undefined ? {} : { atomic: s.atomic }),
+    })),
   }));
   return {
     core: { version: coreVersion() },
