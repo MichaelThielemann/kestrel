@@ -79,10 +79,18 @@ function entryLiterals(node: ts.Node, source: ts.SourceFile, context: string): t
   throw new Error(`${context}: describe() entry could not be read as an object literal or a ternary of two object literals`);
 }
 
+function templateHead(node: ts.Node): string | undefined {
+  if (ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isTemplateExpression(node)) return node.head.text;
+  return undefined;
+}
+
 function literalArrayOf(node: ts.ArrayLiteralExpression, context: string): string[] {
   return node.elements.map((element) => {
-    if (!ts.isStringLiteral(element)) throw new Error(`${context}: "reads" contains a non-literal element`);
-    return element.text;
+    if (ts.isStringLiteral(element)) return element.text;
+    const head = templateHead(element);
+    if (head !== undefined) return head;
+    throw new Error(`${context}: "reads" contains a non-literal element`);
   });
 }
 

@@ -19,6 +19,10 @@ function fullStepName(candidate: ObjectBindingCandidate): string {
   return `${stepPrefix(candidate.module)}.${candidate.step}`;
 }
 
+function upstreamIndexOf(steps: readonly string[], upstream: string): number {
+  return steps.findIndex((step) => step === upstream || step.startsWith(`${upstream}:`));
+}
+
 export function upstreamViolations(candidates: readonly ObjectBindingCandidate[], registry: Record<string, ObjectBindingDisposition>, pipelines: readonly ExamplePipeline[]): string[] {
   const violations: string[] = [];
   for (const candidate of candidates) {
@@ -28,7 +32,7 @@ export function upstreamViolations(candidates: readonly ObjectBindingCandidate[]
     for (const pipeline of pipelines) {
       const at = pipeline.steps.indexOf(name);
       if (at === -1) continue;
-      const upstreamAt = pipeline.steps.indexOf(entry.upstream);
+      const upstreamAt = upstreamIndexOf(pipeline.steps, entry.upstream);
       if (upstreamAt === -1 || upstreamAt >= at) violations.push(`${pipeline.file}: "${pipeline.name}" runs ${name} without ${entry.upstream} before it`);
     }
   }
@@ -92,6 +96,14 @@ describe("upstreamViolations", () => {
   it("ignores a pipeline that does not use the candidate at all", () => {
     const other: ExamplePipeline[] = [{ file: "r.ts", name: "r", steps: ["authz.require"] }];
     expect(upstreamViolations([candidate], registry, other)).toEqual([]);
+  });
+
+  it("matches a bare upstream name against a factory step spec carrying an arg", () => {
+    const factoryRegistry: Record<string, ObjectBindingDisposition> = { "widget/default#reassign": { kind: "waiver", reason: "x", upstream: "authn.verifyUser" } };
+    const withArg: ExamplePipeline[] = [{ file: "p.ts", name: "p", steps: ["authn.verifyUser:reassignTo", "widget.reassign"] }];
+    expect(upstreamViolations([candidate], factoryRegistry, withArg)).toEqual([]);
+    const withDifferentArg: ExamplePipeline[] = [{ file: "q.ts", name: "q", steps: ["authn.verifyUser:result.reassignTo", "widget.reassign"] }];
+    expect(upstreamViolations([candidate], factoryRegistry, withDifferentArg)).toEqual([]);
   });
 });
 

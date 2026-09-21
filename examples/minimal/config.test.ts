@@ -400,9 +400,9 @@ describe("user deletion wiring", () => {
 
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
     expect(pipelines.get("deleteUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authn.deleteUser", "events.emit:user.deleted?with=result"]);
-    expect(pipelines.get("reassignRevisionAuthor")).toEqual(["authn.verifyUser", "revisions.reassignAuthor"]);
+    expect(pipelines.get("reassignRevisionAuthor")).toEqual(["authn.verifyUser:result.reassignTo", "revisions.reassignAuthor"]);
     expect(pipelines.get("anonymizeAuditUser")).toEqual(["audit.anonymize"]);
-    expect(pipelines.get("retryReassignRevisionAuthor")).toEqual(["authn.requireUser", "authz.require:users.manage", "authn.verifyUser", "revisions.reassignAuthor"]);
+    expect(pipelines.get("retryReassignRevisionAuthor")).toEqual(["authn.requireUser", "authz.require:users.manage", "authn.verifyUser:reassignTo", "revisions.reassignAuthor"]);
     expect(pipelines.get("retryAnonymizeAuditUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "audit.anonymize"]);
     expect(pipelines.get("pruneAudit")).toEqual(["audit.prune"]);
   });
@@ -512,6 +512,47 @@ describe("user deletion wiring", () => {
 
       const revisions = await revisionsOf(kestrel, admin, pageId);
       expect(revisions.items[0]?.author).toEqual({ id: target.id, name: "hana" });
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("retryReassignRevisionAuthor accepts a bare id or { id } alone, name is never required", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const editor = await createEditor(kestrel, admin, "ivy");
+      const target = await createEditor(kestrel, admin, "jill");
+
+      const bareId = await kestrel.run("retryReassignRevisionAuthor", { trigger, headers: bearer(admin.token), params: { id: editor.id }, payload: { reassignTo: target.id }, body: { reassignTo: target.id } });
+      expect(bareId.status).toBe(200);
+      expect(bareId.result).toMatchObject({ to: { id: target.id, name: "jill" } });
+
+      const idOnly = await kestrel.run("retryReassignRevisionAuthor", {
+        trigger,
+        headers: bearer(admin.token),
+        params: { id: editor.id },
+        payload: { reassignTo: { id: target.id } },
+        body: { reassignTo: { id: target.id } },
+      });
+      expect(idOnly.status).toBe(200);
+      expect(idOnly.result).toMatchObject({ to: { id: target.id, name: "jill" } });
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("retryReassignRevisionAuthor rejects a reassignTo that is neither a user id, an object with id, nor null", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const editor = await createEditor(kestrel, admin, "kim");
+
+      const wrongType = await kestrel.run("retryReassignRevisionAuthor", { trigger, headers: bearer(admin.token), params: { id: editor.id }, payload: { reassignTo: 7 }, body: { reassignTo: 7 } });
+      expect(wrongType.status).toBe(400);
+
+      const noId = await kestrel.run("retryReassignRevisionAuthor", { trigger, headers: bearer(admin.token), params: { id: editor.id }, payload: { reassignTo: { name: "no-id" } }, body: { reassignTo: { name: "no-id" } } });
+      expect(noId.status).toBe(400);
     } finally {
       await dispose();
     }

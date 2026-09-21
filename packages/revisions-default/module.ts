@@ -2,7 +2,7 @@ import { z } from "zod";
 import "@michaelthielemann/kestrel-contracts/authn";
 import { CONTENT, type Content } from "@michaelthielemann/kestrel-contracts/content";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
-import "@michaelthielemann/kestrel-contracts/reassignTarget";
+import "@michaelthielemann/kestrel-contracts/verifiedUser";
 import { REVISIONS, type NewRevision, type RestoreReport, type RevisionAuthor } from "@michaelthielemann/kestrel-contracts/revisions";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";
@@ -53,7 +53,8 @@ const REPORT_SCHEMA: JsonSchema = { type: "object", properties: { inspected: { t
 const LABEL_SCHEMA: JsonSchema = { type: "object", properties: { label: { type: ["string", "null"], maxLength: 200 } }, required: ["label"], additionalProperties: false };
 const LOCALE_QUERY: Record<string, JsonSchema> = { locale: { type: "string" } };
 const TARGET_SCHEMA: JsonSchema = { type: ["object", "null"], properties: { id: { type: "string" }, name: { type: "string" } }, required: ["id", "name"] };
-const REASSIGN_INPUT: JsonSchema = { type: "object", properties: { reassignTo: TARGET_SCHEMA }, additionalProperties: true };
+const REASSIGN_INPUT_TARGET: JsonSchema = { type: ["string", "object", "null"], properties: { id: { type: "string" }, name: { type: "string" } }, required: ["id"] };
+const REASSIGN_INPUT: JsonSchema = { type: "object", properties: { reassignTo: REASSIGN_INPUT_TARGET }, additionalProperties: true };
 const REASSIGN_SCHEMA: JsonSchema = { type: "object", properties: { from: { type: "string" }, to: TARGET_SCHEMA, revisions: { type: "number" } }, required: ["from", "to", "revisions"] };
 
 function localeOf(ctx: Context, fallback: string): string {
@@ -196,7 +197,7 @@ export default defineModule({
     reassignAuthor: async (ctx: Context) => {
       const fromId = formerAuthorOf(ctx);
       if (fromId === null) return ctx.fail("VALIDATION", "revisions.reassignAuthor: no user id in params.id or the event payload");
-      const to = ctx.reassignTarget !== undefined ? ctx.reassignTarget : targetAuthor(rawTarget(ctx));
+      const to = ctx.verifiedUser !== undefined ? ctx.verifiedUser : targetAuthor(rawTarget(ctx));
       if (to === undefined) return ctx.fail("VALIDATION", "revisions.reassignAuthor: reassignTo must be null or { id, name }");
       if (to !== null && to.id === fromId) return ctx.fail("VALIDATION", "revisions.reassignAuthor: reassignTo must not be the former author");
       const changed = await revisions.reassignAuthor(fromId, to);
@@ -270,12 +271,12 @@ export default defineModule({
     }),
     reassignAuthor: {
       summary:
-        "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `reassignTarget` (e.g. authn.verifyUser's verified target) is used when present; without one, falls back to `reassignTo` from the payload or the event hand-over, unverified. Without any target, the anonymous author `{ id: null, name: null }`",
+        "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
       reads: ["params.id", "payload"],
       writes: ["result"],
       input: REASSIGN_INPUT,
       output: REASSIGN_SCHEMA,
-      errors: { 400: "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again" },
+      errors: { 400: "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again" },
     },
     prune: { summary: "Apply the retention rules to every recorded document and locale", reads: [], writes: ["result"], output: REPORT_SCHEMA },
     remove: (collection: string) => ({ summary: `Drop every revision of a ${collection} document, in every locale`, reads: ["params.id"], writes: [], errors: { 400: "missing id" } }),

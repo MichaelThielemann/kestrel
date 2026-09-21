@@ -66,12 +66,12 @@ const helpers: Record<string, Step | StepFactory> = {
   "test.identify": async (ctx: Context) => ok({ ...ctx, identity: IDENTITY }),
   "test.seed": async (ctx: Context) => ok({ ...ctx, result: { id: "p1", title: "A", status: "draft" } }),
   "test.save": async (ctx: Context) => ok({ ...ctx, result: { id: "p1", ...ctx.payload } }),
-  "test.reassignTarget": async (ctx: Context) => {
+  "test.verifiedUser": async (ctx: Context) => {
     const raw = ctx.payload.verifiedReassignTo;
     if (raw === undefined) return ok(ctx);
-    if (raw === null) return ok({ ...ctx, reassignTarget: null });
-    if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.name !== "string") throw new Error("test.reassignTarget: verifiedReassignTo must be { id, name } or null");
-    return ok({ ...ctx, reassignTarget: { id: raw.id, name: raw.name } });
+    if (raw === null) return ok({ ...ctx, verifiedUser: null });
+    if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.name !== "string") throw new Error("test.verifiedUser: verifiedReassignTo must be { id, name } or null");
+    return ok({ ...ctx, verifiedUser: { id: raw.id, name: raw.name } });
   },
 };
 
@@ -79,7 +79,7 @@ function run(steps: string[], input: Record<string, unknown>, instance: unknown)
   return runPipeline(definePipeline({ name: "test", steps }), input, {
     modules: [{ module, instance }],
     steps: helpers,
-    writes: { "test.identify": ["identity"], "test.seed": ["result"], "test.save": ["result"], "test.reassignTarget": ["reassignTarget?"] },
+    writes: { "test.identify": ["identity"], "test.seed": ["result"], "test.save": ["result"], "test.verifiedUser": ["verifiedUser?"] },
   });
 }
 
@@ -291,11 +291,11 @@ describe("revisions/default module steps", () => {
     expect(page((await run(["revisions.list:pages"], { params: { id: "p1" } }, instance)).result).items[0]?.author).toEqual({ id: "u1", name: "alice" });
   });
 
-  it("reassignAuthor prefers a preceding step's reassignTarget over the raw payload", async () => {
+  it("reassignAuthor prefers a preceding step's verifiedUser over the raw payload", async () => {
     const instance = await boot();
     await run(["test.identify", "test.seed", "revisions.record:pages"], {}, instance);
     const reassigned = await run(
-      ["test.reassignTarget", "revisions.reassignAuthor"],
+      ["test.verifiedUser", "revisions.reassignAuthor"],
       { params: { id: "u1" }, payload: { reassignTo: { id: "u3", name: "ignored" }, verifiedReassignTo: { id: "u2", name: "bob" } } },
       instance,
     );
@@ -303,11 +303,11 @@ describe("revisions/default module steps", () => {
     expect(reassigned.result).toEqual({ from: "u1", to: { id: "u2", name: "bob" }, revisions: 1 });
   });
 
-  it("reassignAuthor anonymises when a preceding step's reassignTarget is null, ignoring a raw payload target", async () => {
+  it("reassignAuthor anonymises when a preceding step's verifiedUser is null, ignoring a raw payload target", async () => {
     const instance = await boot();
     await run(["test.identify", "test.seed", "revisions.record:pages"], {}, instance);
     const reassigned = await run(
-      ["test.reassignTarget", "revisions.reassignAuthor"],
+      ["test.verifiedUser", "revisions.reassignAuthor"],
       { params: { id: "u1" }, payload: { reassignTo: { id: "u3", name: "ignored" }, verifiedReassignTo: null } },
       instance,
     );
