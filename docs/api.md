@@ -519,8 +519,8 @@ so it's reachable only via `kestrel.run`.
 When a page is created or changed, `delivery-static` renders every language whose own `status` is
 `published` through the site's renderer (`renderer@1`, a module the site brings) and stores the result in the blob store: `site/<slug>/index.html` (primary
 language), `site/en/<slug>/index.html`, home page (`slug = home`) → `site/index.html` and
-`site/en/index.html` respectively. Assets delivered by the renderer (`_nuxt/…`) land under
-`site/_nuxt/…`. Languages that are no longer published are removed.
+`site/en/index.html` respectively. Assets delivered by the renderer (`_assets/…`) land under
+`site/_assets/…`. Languages that are no longer published are removed.
 
 | Method | Path | Response |
 |---|---|---|
@@ -764,7 +764,7 @@ interface Renderer {
   formats(): string[];                                   // e.g. ["html"] or ["html", "pdf"]
   render(input: { type, id, locale?, path, format, document }): Promise<Result<{
     data: Uint8Array | string; contentType: string; extension: string;
-    assets?: Array<{ path: string; data: Uint8Array | string; contentType: string }>;   // _nuxt/*, CSS – for hydration
+    assets?: Array<{ path: string; data: Uint8Array | string; contentType: string }>;   // scripts, CSS – for hydration
   }, RendererError>>;
 }
 ```

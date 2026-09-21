@@ -1,7 +1,7 @@
 # renderer/plain
 Reference `renderer@1`: one HTML page per document (title as heading, the document as JSON).
 Formats: `html`. Meant for examples and tests; real sites provide their own renderer module
-(e.g. one that renders through Nuxt) implementing the same contract – `delivery-static` does not care which.
+(for example one built on the site's frontend framework) implementing the same contract – `delivery-static` does not care which.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest

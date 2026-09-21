@@ -12,6 +12,11 @@ project installs exactly the packages it uses and swapping an implementation cha
 pipelines. Wiring mistakes — an unknown step, a missing contract, a step reading context nothing
 wrote — stop the boot instead of failing on a request.
 
+> **Status:** Kestrel is under rapid development. Breaking changes arrive as new major versions, and
+> majors follow each other quickly; every one of them is listed in [`CHANGELOG.md`](CHANGELOG.md). Only the
+> latest major receives fixes. For a project that has to run unchanged for years this is a limited fit —
+> pin exact versions and plan time for upgrades.
+
 New here? [`docs/getting-started.md`](docs/getting-started.md) goes from an empty folder to a
 running instance with a login, a content type and a step of your own.
 
@@ -110,8 +115,6 @@ comments only where a hidden constraint is not obvious from the code.
 | [`docs/submodule-template.md`](docs/submodule-template.md) | Shipping a submodule as a package: file layout, `module.ts`/`impl.ts` shape, checklist before "done". |
 | [`docs/api.md`](docs/api.md) | The HTTP API of the example instance — read before touching a route or a response shape. |
 | [`examples/minimal`](examples/minimal) | Every shipped module wired up in one instance; the reference `docs/api.md` describes. |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Setup, the checks to run before a pull request, and the design rules that decide most reviews. |
-| [`SECURITY.md`](SECURITY.md) | Supported versions and how to report a vulnerability privately. |
 | [`RELEASING.md`](RELEASING.md) | Version bump, smoke test and publish steps. |
 | [`CHANGELOG.md`](CHANGELOG.md) | Every behaviour change visible to a consumer, newest first under `## Unreleased`. |
 
