@@ -35,6 +35,22 @@ export function sortModules(modules: readonly ModuleDefinition[]): ModuleDefinit
     dependsOn.set(m, deps);
   }
 
+  const hook = modules.find((m) => m.triggers?.event !== undefined);
+  if (hook) {
+    const needed = new Set<ModuleDefinition>();
+    const collect = (m: ModuleDefinition): void => {
+      if (needed.has(m)) return;
+      needed.add(m);
+      for (const d of dependsOn.get(m) ?? []) collect(d);
+    };
+    collect(hook);
+    for (const m of modules) {
+      if (needed.has(m)) continue;
+      if ((m.emits ?? []).length === 0) continue;
+      dependsOn.get(m)?.push(hook);
+    }
+  }
+
   const sorted: ModuleDefinition[] = [];
   const state = new Map<ModuleDefinition, "visiting" | "done">();
   const visit = (m: ModuleDefinition, path: string[]): void => {
