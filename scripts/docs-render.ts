@@ -130,5 +130,61 @@ export function unexpectedBootWarnings(warnings: readonly BootWarning[], allowli
 }
 
 export function formatBootWarning(warning: BootWarning): string {
-  return `pipeline "${warning.pipeline}", event "${warning.event}": ${warning.message}`;
+  switch (warning.code) {
+    case "unemitted-event":
+      return `pipeline "${warning.pipeline}", event "${warning.event}": ${warning.message}`;
+    default: {
+      const exhaustive: never = warning.code;
+      return exhaustive;
+    }
+  }
+}
+
+export interface LogEntry {
+  level: "info" | "warn" | "error";
+  message: string;
+  data?: Record<string, unknown>;
+}
+
+export function collectingLogger(entries: LogEntry[]): Logger {
+  return {
+    step() {},
+    info(message, data) {
+      entries.push(data === undefined ? { level: "info", message } : { level: "info", message, data });
+    },
+    warn(message, data) {
+      entries.push(data === undefined ? { level: "warn", message } : { level: "warn", message, data });
+    },
+    error(message, data) {
+      entries.push(data === undefined ? { level: "error", message } : { level: "error", message, data });
+    },
+  };
+}
+
+function matchesBootWarning(entry: LogEntry, warning: BootWarning): boolean {
+  switch (warning.code) {
+    case "unemitted-event":
+      return entry.message === warning.message && entry.data?.pipeline === warning.pipeline && entry.data?.event === warning.event;
+    default: {
+      const exhaustive: never = warning.code;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * Warn- or error-level entries from a boot's logger that are not already accounted for by one of
+ * `bootWarnings` (a `kestrel.warnings` entry is also logged through `logger.warn`, so it is
+ * matched off here rather than reported a second time).
+ */
+export function unexpectedLogEntries(entries: readonly LogEntry[], bootWarnings: readonly BootWarning[]): LogEntry[] {
+  const remaining = [...bootWarnings];
+  const unexpected: LogEntry[] = [];
+  for (const entry of entries) {
+    if (entry.level !== "warn" && entry.level !== "error") continue;
+    const index = remaining.findIndex((warning) => matchesBootWarning(entry, warning));
+    if (index === -1) unexpected.push(entry);
+    else remaining.splice(index, 1);
+  }
+  return unexpected;
 }

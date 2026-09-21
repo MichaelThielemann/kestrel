@@ -2,11 +2,11 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { boot, loadConfig, loadModules, loadPipelines, silentLogger, type Manifest, type ModuleDefinition } from "../packages/core/src/index.ts";
+import { boot, loadConfig, loadModules, loadPipelines, type Manifest, type ModuleDefinition } from "../packages/core/src/index.ts";
 import { buildManifest } from "../packages/core/src/describe.ts";
 import { stepPrefix } from "../packages/core/src/defineModule.ts";
 import { StepRegistry } from "../packages/core/src/registry.ts";
-import { formatBootWarning, orderPackages, render, rootTable, splice, unexpectedBootWarnings, type BootWarningKey, type PackageInfo, type Section } from "./docs-render.ts";
+import { collectingLogger, formatBootWarning, orderPackages, render, rootTable, splice, unexpectedBootWarnings, unexpectedLogEntries, type BootWarningKey, type LogEntry, type PackageInfo, type Section } from "./docs-render.ts";
 
 const ALLOWED_BOOT_WARNINGS: readonly BootWarningKey[] = [];
 
@@ -45,11 +45,14 @@ async function exampleManifest(): Promise<Manifest> {
   const config = await loadConfig(join(example, "kestrel.config.ts"));
   const modules = await loadModules(example, config);
   const pipelines = await loadPipelines(example, config.pipelinesDir ?? "./pipelines");
-  const kestrel = await boot({ config: { ...config, http: null }, modules, pipelines, logger: silentLogger, root: example });
+  const logged: LogEntry[] = [];
+  const kestrel = await boot({ config: { ...config, http: null }, modules, pipelines, logger: collectingLogger(logged), root: example });
   try {
-    const unexpected = unexpectedBootWarnings(kestrel.warnings, ALLOWED_BOOT_WARNINGS);
-    if (unexpected.length > 0) {
-      throw new UnexpectedBootWarnings(`example config produced unexpected boot warnings:\n${unexpected.map((w) => `  ${formatBootWarning(w)}`).join("\n")}`);
+    const unexpectedWarnings = unexpectedBootWarnings(kestrel.warnings, ALLOWED_BOOT_WARNINGS);
+    const unexpectedLogs = unexpectedLogEntries(logged, kestrel.warnings);
+    if (unexpectedWarnings.length > 0 || unexpectedLogs.length > 0) {
+      const lines = [...unexpectedWarnings.map((w) => `  ${formatBootWarning(w)}`), ...unexpectedLogs.map((e) => `  ${e.level}: ${e.message}`)];
+      throw new UnexpectedBootWarnings(`example config produced unexpected boot warnings:\n${lines.join("\n")}`);
     }
     return kestrel.describe();
   } finally {

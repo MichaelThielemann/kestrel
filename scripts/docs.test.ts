@@ -2,8 +2,9 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { boot, loadConfig, loadModules, loadPipelines, silentLogger, type BootWarning, type StepDescription, type StepManifest } from "../packages/core/src/index.ts";
-import { brief, errors, formatBootWarning, inputCell, orderPackages, rootTable, splice, stepTable, unexpectedBootWarnings, ROOT_ORDER, type PackageInfo } from "./docs-render.ts";
+import { z } from "zod";
+import { boot, defineModule, loadConfig, loadModules, loadPipelines, silentLogger, type BootWarning, type StepDescription, type StepManifest } from "../packages/core/src/index.ts";
+import { brief, collectingLogger, errors, formatBootWarning, inputCell, orderPackages, rootTable, splice, stepTable, unexpectedBootWarnings, unexpectedLogEntries, ROOT_ORDER, type LogEntry, type PackageInfo } from "./docs-render.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const example = join(root, "examples", "minimal");
@@ -195,5 +196,75 @@ describe("example config with an event trigger no pipeline emits", () => {
     await kestrel.stop();
     expect(unexpected).toEqual([{ code: "unemitted-event", message: "event trigger listens to an event no pipeline emits via events.emit and no module declares in emits", pipeline: "createPage", event: "content.bogus" }]);
     expect(unexpected.map(formatBootWarning)).toEqual(['pipeline "createPage", event "content.bogus": event trigger listens to an event no pipeline emits via events.emit and no module declares in emits']);
+  });
+});
+
+describe("collectingLogger", () => {
+  it("records a warn call with its message and data", () => {
+    const entries: LogEntry[] = [];
+    const logger = collectingLogger(entries);
+    logger.warn?.("something odd", { pipeline: "p", event: "e" });
+    expect(entries).toEqual([{ level: "warn", message: "something odd", data: { pipeline: "p", event: "e" } }]);
+  });
+
+  it("records info and error calls, and ignores step calls", () => {
+    const entries: LogEntry[] = [];
+    const logger = collectingLogger(entries);
+    logger.info("hello");
+    logger.error("boom");
+    logger.step({ runId: "r", pipeline: "p", step: "s", ms: 1, outcome: "ok" });
+    expect(entries).toEqual([{ level: "info", message: "hello" }, { level: "error", message: "boom" }]);
+  });
+});
+
+describe("unexpectedLogEntries", () => {
+  const unemitted: BootWarning = { code: "unemitted-event", message: "event trigger listens to an event no pipeline emits via events.emit and no module declares in emits", pipeline: "onCreated", event: "page.creted" };
+
+  it("returns an empty array when there are no warn or error entries", () => {
+    const entries: LogEntry[] = [{ level: "info", message: "hi" }];
+    expect(unexpectedLogEntries(entries, [])).toEqual([]);
+  });
+
+  it("does not report a warn entry that matches a boot warning's message, pipeline and event", () => {
+    const entries: LogEntry[] = [{ level: "warn", message: unemitted.message, data: { pipeline: unemitted.pipeline, event: unemitted.event } }];
+    expect(unexpectedLogEntries(entries, [unemitted])).toEqual([]);
+  });
+
+  it("reports a warn entry that does not match any boot warning", () => {
+    const entries: LogEntry[] = [{ level: "warn", message: "a module warned directly" }];
+    expect(unexpectedLogEntries(entries, [])).toEqual(entries);
+  });
+
+  it("reports an error entry unconditionally", () => {
+    const entries: LogEntry[] = [{ level: "error", message: "a module errored" }];
+    expect(unexpectedLogEntries(entries, [])).toEqual(entries);
+  });
+
+  it("matches each boot warning to at most one log entry, so a leftover duplicate is still reported", () => {
+    const entries: LogEntry[] = [
+      { level: "warn", message: unemitted.message, data: { pipeline: unemitted.pipeline, event: unemitted.event } },
+      { level: "warn", message: unemitted.message, data: { pipeline: unemitted.pipeline, event: unemitted.event } },
+    ];
+    expect(unexpectedLogEntries(entries, [unemitted])).toEqual([entries[1]]);
+  });
+});
+
+describe("a module that logs a warning from setup() directly", () => {
+  it("makes the boot's collected log entries flag that warning, not covered by kestrel.warnings", async () => {
+    const warns = defineModule({
+      name: "warns/setup",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(_config, deps): Promise<null> {
+        deps.logger.warn?.("setup emitted a warning directly through the logger");
+        return null;
+      },
+    });
+    const entries: LogEntry[] = [];
+    const kestrel = await boot({ config: { modules: [{ use: "./warns", config: {} }], triggers: [], http: null }, modules: [warns], pipelines: [], logger: collectingLogger(entries) });
+    const unexpected = unexpectedLogEntries(entries, kestrel.warnings);
+    await kestrel.stop();
+    expect(unexpected).toEqual([{ level: "warn", message: "setup emitted a warning directly through the logger" }]);
   });
 });
