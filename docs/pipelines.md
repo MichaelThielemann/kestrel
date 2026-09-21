@@ -460,22 +460,25 @@ real schemas apply to a representative payload.
 
 A step whose `writes` touches `result` declares the shape of what it produces: `output` (a JSON
 Schema, replacing whatever the pipeline's result schema was so far), `extendsOutput` (merges into
-it — becomes the output if there was none yet), or `extendsItems` (merges into
-`properties.items.items` of a list output, or at the root otherwise). `output: "untyped"` is an
-explicit opt-out for a result that isn't meaningfully representable as a schema — a binary body
-(`media.download`, `images.serve`), or a shape the module doesn't own (`persistence.createOne`,
-`.findOne`, `.updateOne` return whatever document the caller stored; `site.resolveLinks` and
-`redirects.lookup` likewise). A step that writes `result` with none of the four is a module-scan
-failure (the same static test in the core's suite that checks `input`/`query`, described in
-[Payload Validation](#payload-validation)).
+it — becomes the output if there was none yet), `extendsItems` (merges into
+`properties.items.items` of a list output, or at the root otherwise), or `binary: true` for a step
+whose result is a binary body rather than JSON (`media.download`, `images.serve`). Boot checks
+every pipeline's resolved steps against this rule (`packages/core/src/registry.ts`'s `resolve()`
+produces the real description, factory argument included) and, for a step that writes `result`
+with none of the four, adds a `kestrel.warnings` entry `{ code: "undeclared-output", message,
+pipeline, step }` — logged through `logger.warn`, never fatal today. This becomes a boot error in
+a future major.
 
 `@michaelthielemann/kestrel/schema` folds a pipeline's step descriptions, in order, into the
-schema its result ends up matching (`resolveOutputSchema`) — this is what `kestrel-openapi` uses
-for a route's response schema, and what `testing/runPipeline` uses in dev/test: after every step
-that writes `result`, it validates `ctx.result` against the schema folded up to that point and
-fails naming the step and the JSON path (skipped for a step marked `"untyped"`). Production never
-runs this check — it costs a JSON Schema walk per result-writing step, and by the time a real
-request runs a pipeline, its `describe()` blocks have already been exercised in tests.
+schema its result ends up matching (`resolveOutputSchema`, exported from the `schema` subpath
+only) — this is what `kestrel-openapi` uses for a route's response schema. `boot({ validateOutput:
+true })` and `testing/runPipeline` (always on) use the same fold at runtime: after every step that
+writes `result` — except a step whose write is declared optional (`result?`) and left `ctx.result`
+unchanged — they validate it against the schema folded up to that point and fail naming the step
+and the JSON path. `validateOutput` defaults to off, so production pays nothing for it unless a
+deployment opts in. `docs:check` boots the shipped example (the declaration check runs regardless
+of `validateOutput`) and asserts the warning list stays empty; the example's own integration suite
+boots with `validateOutput: true` to also exercise the runtime check against real results.
 
 ## Pipeline Test
 

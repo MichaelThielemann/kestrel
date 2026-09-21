@@ -8,24 +8,33 @@
   logging them through `logger.warn`. `BootWarning` is a discriminated union on `code`; a future
   minor release may add further codes, so code reading `kestrel.warnings` must handle one it does
   not recognize. Currently emitted: `unemitted-event`, for an event trigger whose event no pipeline
-  emits via `events.emit` and no module declares in `emits`.
+  emits via `events.emit` and no module declares in `emits`; and `undeclared-output`, for a step
+  that writes `result` without declaring `output`, `extendsOutput`, `extendsItems` or
+  `binary: true` — **this becomes a boot error in the next major.**
 - `authn-single` and `authn-multi` share one behavioural test suite for the five steps both
   register (`login`, `identifyUser`, `requireUser`, `loadIdentity`, `logout`), also run against a
   new in-memory `authn@1` fake, so the three stay in lockstep.
 - `revisions.read`/`restore`/`label` are now pinned to reject a revision id that belongs to another
   document or collection, and `images.serve`/`images.read` to never return another media item's
   variant for a matching size name.
-- `core`: `testing/runPipeline` validates `ctx.result` after every step that writes `result`
-  against the pipeline's output schema folded up to that point (`@michaelthielemann/kestrel/schema`,
-  new `resolveOutputSchema`), failing with the step name and the JSON path on a mismatch. Dev/test
-  only — `runPipeline`'s new `validateOutput` option defaults to off, so production pays nothing
-  for it.
+- `core`: new `boot({ validateOutput })` (default off) and `testing/runPipeline` (always on)
+  validate `ctx.result` after every step that writes it against the pipeline's output schema
+  folded up to that point (`@michaelthielemann/kestrel/schema`'s new `resolveOutputSchema`,
+  subpath-only), failing with the step name and the JSON path on a mismatch. A step whose write is
+  declared optional (`result?`) and left `ctx.result` unchanged is skipped. `validateOutput`
+  defaults to off, so production pays nothing for it unless a deployment opts in.
+- `persistence-sqlite`, `redirects-default`, `site-default`: `createOne`/`findOne`/`updateOne` now
+  declare `output: { type: "object" }`; `redirects.lookup` declares its real
+  `{ redirect: { to, status } }`; `site.resolveLinks` restates the `_links` field as its own
+  `extendsOutput`, alongside `site.resolve`'s existing `output`.
 
 ### Changed
 
 - `openapi`: the fold that derives a pipeline's response schema from its steps' `describe().output`
-  moved into `@michaelthielemann/kestrel/schema` (`resolveOutputSchema`, `mergeObjects`); the
-  generated OpenAPI document is unchanged.
+  moved into `@michaelthielemann/kestrel/schema` (`resolveOutputSchema`, subpath-only); the
+  generated OpenAPI document is unchanged except for one route's `required` array order (the
+  `resolvePage` route in `examples/minimal`, now folded through a merge instead of passed through
+  unchanged — same fields, alphabetical order).
 
 ## 5.8.0 – 2026-09-20
 

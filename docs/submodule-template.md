@@ -187,14 +187,16 @@ schema. `extendsItems` behaves the same but merges the schema into `properties.i
 predecessor when its output is a list (otherwise it merges at the root like `extendsOutput`) — for
 steps like `images.attach` that extend each list item.
 
-A step whose `writes` touches `result` must declare `output` (or `extendsOutput`/`extendsItems`),
-or mark it explicitly as `output: "untyped"` for a result that is not meaningfully representable
-as a schema (a binary body, or a caller-defined document shape). A module scan fails a
-result-writing step with neither. In `testing/runPipeline` and in tests via `modules: [{ module,
-instance }]`, `ctx.result` is validated after every result-writing step against the schema its
-`output`/`extendsOutput`/`extendsItems` fold to at that point (skipped for a step marked
-`"untyped"`); a mismatch fails naming the step and the JSON path. Production does not run this
-check.
+A step whose `writes` touches `result` must declare `output`, `extendsOutput`, `extendsItems`, or
+`binary: true` for a step whose result is a binary body rather than JSON (`media.download`,
+`images.serve`). Boot checks this against every pipeline's resolved steps and adds an
+`undeclared-output` entry to `kestrel.warnings` for one with none of the four — logged, not fatal
+today, a boot error in a future major. `boot({ validateOutput: true })` and `testing/runPipeline`
+(always on) additionally validate `ctx.result` after every step that writes it (skipped when the
+write is declared optional, `result?`, and `ctx.result` is unchanged) against the schema its
+`output`/`extendsOutput`/`extendsItems` fold to at that point, failing with the step name and the
+JSON path on a mismatch. Production leaves `validateOutput` off by default, so it pays nothing for
+this check unless a deployment opts in.
 
 ## `impl.test.ts`
 
