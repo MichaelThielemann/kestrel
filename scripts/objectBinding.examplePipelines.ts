@@ -12,12 +12,32 @@ function bareStepName(spec: string): string {
   return spec.split(":")[0]!.split("?")[0]!;
 }
 
+function atomicGroupSteps(node: ts.Node): string[] | undefined {
+  if (!ts.isObjectLiteralExpression(node)) return undefined;
+  for (const prop of node.properties) {
+    if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name) || prop.name.text !== "atomic") continue;
+    if (!ts.isArrayLiteralExpression(prop.initializer)) return undefined;
+    const inner: string[] = [];
+    for (const element of prop.initializer.elements) {
+      if (!ts.isStringLiteral(element)) return undefined;
+      inner.push(element.text);
+    }
+    return inner;
+  }
+  return undefined;
+}
+
 function stringArrayLiteral(node: ts.Node | undefined): string[] | undefined {
   if (!node || !ts.isArrayLiteralExpression(node)) return undefined;
   const out: string[] = [];
   for (const element of node.elements) {
-    if (!ts.isStringLiteral(element)) return undefined;
-    out.push(element.text);
+    if (ts.isStringLiteral(element)) {
+      out.push(element.text);
+      continue;
+    }
+    const group = atomicGroupSteps(element);
+    if (group === undefined) return undefined;
+    out.push(...group);
   }
   return out;
 }
