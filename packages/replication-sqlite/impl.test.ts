@@ -12,7 +12,7 @@ import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
-import { applyPendingRestore, checkSkippedRestore, createReplicationSqlite, fileBirthMs, restoreFromBlobs, restoreMarker, type Replication } from "./impl.ts";
+import { applyPendingRestore, checkSkippedRestore, createReplicationSqlite, fileBirthMs, freshnessOf, restoreFromBlobs, restoreMarker, type Replication } from "./impl.ts";
 import module from "./module.ts";
 
 function fakeBlobs(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }>; failNext(code: "TRANSIENT"): void } {
@@ -334,7 +334,7 @@ describe("replication/sqlite module setup: restore-on-start skip check", () => {
     app.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
     app.prepare("INSERT INTO t (v) VALUES ('x')").run();
     app.close();
-    if (fileBirthMs(file) <= 0) return;
+    if (freshnessOf(fileBirthMs(file)) !== "fresh") return;
     const blobs = fakeBlobs();
     putSnapshot(blobs);
     let thrown: unknown;
@@ -343,8 +343,8 @@ describe("replication/sqlite module setup: restore-on-start skip check", () => {
     } catch (e) {
       thrown = e;
     }
-    expect(thrown).toBeInstanceOf(Error);
-    const message = (thrown as Error).message;
+    if (!(thrown instanceof Error)) throw new Error("expected setup() to reject with an Error");
+    const message = thrown.message;
     expect(message).toContain(file);
     expect(message).toMatch(/was created during this start-up while the replica holds a restore point/);
     expect(message).toMatch(/list replication-sqlite before the persistence module/);
@@ -361,7 +361,7 @@ describe("checkSkippedRestore", () => {
     writeFileSync(file, "x");
     const blobs = fakeBlobs();
     putSnapshot(blobs);
-    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger, () => performance.timeOrigin + 1000)).rejects.toThrow(/was created during this start-up/);
+    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger, () => Date.now())).rejects.toThrow(/was created during this start-up/);
   });
 
   it("logs and stays clean when the stubbed birth time is before the process origin", async () => {
@@ -408,7 +408,7 @@ describe("checkSkippedRestore", () => {
     writeFileSync(file, "x");
     const blobs = fakeBlobs();
     const { infos, logger } = infoLogger();
-    await checkSkippedRestore(skippedConfig(file), blobs, logger, () => performance.timeOrigin + 1000);
+    await checkSkippedRestore(skippedConfig(file), blobs, logger, () => Date.now());
     expect(infos).toEqual([{ message: "replication/sqlite: restore-on-start skipped", data: { file, reason: "file present, no restore point" } }]);
   });
 
@@ -417,7 +417,7 @@ describe("checkSkippedRestore", () => {
     dirs.push(dir);
     const file = join(dir, "live.db");
     writeFileSync(file, "x");
-    if (fileBirthMs(file) <= 0) return;
+    if (freshnessOf(fileBirthMs(file)) !== "fresh") return;
     const blobs = fakeBlobs();
     putSnapshot(blobs);
     await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger)).rejects.toThrow(/was created during this start-up/);

@@ -10,8 +10,8 @@ import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok } from "@michaelthielemann/kestrel/result";
-import { silentLogger } from "@michaelthielemann/kestrel/logger";
-import { applyPendingRestore, createBackupBlobstore, exists, pendingRestoreFile, restoreMarker, versionKey } from "./impl.ts";
+import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
+import { applyPendingRestore, checkSkippedRestore, createBackupBlobstore, exists, fileBirthMs, freshnessOf, pendingRestoreFile, restoreMarker, versionKey } from "./impl.ts";
 import module from "./module.ts";
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }>; failNext(code: "TRANSIENT"): void } {
@@ -157,14 +157,14 @@ describe("backup/blobstore", () => {
     const blobs = fakeBlobstore();
     blobs.blobs.set("backups/db", { data: new TextEncoder().encode("from-backup"), contentType: "application/octet-stream" });
     await writeFile(file, "live");
-    const instance = await module.setup(module.configSchema.parse({ file, key: "backups/db", restoreOnStart: true, versions: 0 }), deps(blobs, dir));
+    const instance = await module.setup(module.configSchema.parse({ file, key: "backups/db", restoreOnStart: false, versions: 0 }), deps(blobs, dir));
     const restore = module.steps!(instance).restore;
 
     const result = expectOk(await restore(createContext({ trigger: { kind: "http", name: "t" }, payload: {} })));
     expect(result.result).toEqual({ key: "backups/db", size: 11, file: pendingRestoreFile(file), pending: true, appliedOnRestart: true });
     expect(await readFile(file, "utf8")).toBe("live");
 
-    await module.setup(module.configSchema.parse({ file, key: "backups/db", restoreOnStart: true, versions: 0 }), deps(blobs, dir));
+    await module.setup(module.configSchema.parse({ file, key: "backups/db", restoreOnStart: false, versions: 0 }), deps(blobs, dir));
     expect(await readFile(file, "utf8")).toBe("from-backup");
   });
 
@@ -228,5 +228,97 @@ describe("backup/blobstore", () => {
     const error = expectErr(await run(createContext({ trigger: { kind: "http", name: "t" }, payload: {} })), "TRANSIENT");
     expect(error.status).toBe(503);
     expect(error.retryable).toBe(true);
+  });
+});
+
+function skippedConfig(file: string) {
+  return { file, key: "backups/db", restoreOnStart: true, versions: 0 };
+}
+
+function infoLogger(): { infos: { message: string; data?: Record<string, unknown> }[]; logger: Logger } {
+  const infos: { message: string; data?: Record<string, unknown> }[] = [];
+  return { infos, logger: { ...silentLogger, info: (message, data) => infos.push(data === undefined ? { message } : { message, data }) } };
+}
+
+describe("backup/blobstore module setup: restore-on-start skip check", () => {
+  it("setup() rejects when the file was created during this start-up while a restore point exists", async () => {
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "kestrel-backup-fresh-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    await writeFile(file, "live");
+    if (freshnessOf(fileBirthMs(file)) !== "fresh") return;
+    const blobs = fakeBlobstore();
+    blobs.blobs.set("backups/db", { data: new TextEncoder().encode("from-backup"), contentType: "application/octet-stream" });
+    let thrown: unknown;
+    try {
+      await module.setup(module.configSchema.parse(skippedConfig(file)), deps(blobs, dir));
+    } catch (e) {
+      thrown = e;
+    }
+    if (!(thrown instanceof Error)) throw new Error("expected setup() to reject with an Error");
+    const message = thrown.message;
+    expect(message).toContain(file);
+    expect(message).toMatch(/was created during this start-up while the backup holds a restore point/);
+    expect(message).toMatch(/list backup-blobstore before the persistence module/);
+    expect(message).toContain(`${file}.restore-pending`);
+    expect(message).toContain(`${file}.restore-marker`);
+  });
+});
+
+describe("checkSkippedRestore", () => {
+  it("rejects when the stubbed birth time is at or after the process origin", async () => {
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "kestrel-backup-check-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    await writeFile(file, "live");
+    const blobs = fakeBlobstore();
+    blobs.blobs.set("backups/db", { data: new TextEncoder().encode("from-backup"), contentType: "application/octet-stream" });
+    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger, () => Date.now())).rejects.toThrow(/was created during this start-up/);
+  });
+
+  it("logs and stays clean when the stubbed birth time is before the process origin", async () => {
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "kestrel-backup-check-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    await writeFile(file, "live");
+    const blobs = fakeBlobstore();
+    blobs.blobs.set("backups/db", { data: new TextEncoder().encode("from-backup"), contentType: "application/octet-stream" });
+    const { infos, logger } = infoLogger();
+    await checkSkippedRestore(skippedConfig(file), blobs, logger, () => performance.timeOrigin - 1000);
+    expect(infos).toEqual([{ message: "backup/blobstore: restore-on-start skipped", data: { file, reason: "file present, older than this process" } }]);
+  });
+
+  it("logs that the order is not checked when the birth time is unavailable, and stays clean", async () => {
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "kestrel-backup-check-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    await writeFile(file, "live");
+    const blobs = fakeBlobstore();
+    blobs.blobs.set("backups/db", { data: new TextEncoder().encode("from-backup"), contentType: "application/octet-stream" });
+    const { infos, logger } = infoLogger();
+    await checkSkippedRestore(skippedConfig(file), blobs, logger, () => 0);
+    expect(infos).toEqual([{ message: "backup/blobstore: restore-on-start skipped", data: { file, reason: "file present, birth time unavailable on this file system; the order is not checked here" } }]);
+  });
+
+  it("stays quiet when no restore point exists, whatever the birth time", async () => {
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "kestrel-backup-check-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    await writeFile(file, "live");
+    const blobs = fakeBlobstore();
+    const { infos, logger } = infoLogger();
+    await checkSkippedRestore(skippedConfig(file), blobs, logger, () => Date.now());
+    expect(infos).toEqual([{ message: "backup/blobstore: restore-on-start skipped", data: { file, reason: "file present, no restore point" } }]);
+  });
+
+  it("uses the real fileBirthMs by default; nothing to assert where the file system reports none", async () => {
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "kestrel-backup-check-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    await writeFile(file, "live");
+    if (freshnessOf(fileBirthMs(file)) !== "fresh") return;
+    const blobs = fakeBlobstore();
+    blobs.blobs.set("backups/db", { data: new TextEncoder().encode("from-backup"), contentType: "application/octet-stream" });
+    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger)).rejects.toThrow(/was created during this start-up/);
   });
 });

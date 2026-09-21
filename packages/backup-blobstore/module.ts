@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { first, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { applyPendingRestore, createBackupBlobstore, type Backup } from "./impl.ts";
+import { applyPendingRestore, checkSkippedRestore, createBackupBlobstore, exists, type Backup } from "./impl.ts";
 
 export const configSchema = z
   .object({
@@ -19,13 +20,18 @@ export default defineModule({
   name: "backup/blobstore",
   provides: [],
   requires: [BLOBSTORE],
+  before: [PERSISTENCE],
   configSchema,
 
   async setup(cfg, deps): Promise<Backup> {
+    const blobs = deps.get(BLOBSTORE);
     const applied = await applyPendingRestore(cfg.file);
     if (applied) deps.logger.info("backup/blobstore: applied pending restore", { file: cfg.file, key: applied.key, size: applied.size });
-    const backup = createBackupBlobstore(cfg, deps.get(BLOBSTORE));
-    if (cfg.restoreOnStart) await backup.restoreWhenMissing();
+    const backup = createBackupBlobstore(cfg, blobs);
+    if (cfg.restoreOnStart) {
+      if (await exists(cfg.file)) await checkSkippedRestore(cfg, blobs, deps.logger);
+      else await backup.restoreWhenMissing();
+    }
     return backup;
   },
 

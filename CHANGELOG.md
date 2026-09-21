@@ -10,6 +10,11 @@
   error names the file and its `-wal`/`-shm` siblings and says to delete them before the next
   start. A skip that is safe is now always logged with its reason. The module also declares
   `before: [persistence@1]` (see the `defineModule` entry below).
+- `backup-blobstore`: `setup()` now fails with the same reasoning as `replication-sqlite` when
+  `restoreOnStart` is set, the file already exists, a restore point exists in the blobstore, and
+  the file was created during this start-up; there is no table-count fallback, since the backed-up
+  file is not necessarily SQLite. A safe skip is always logged. The module also declares
+  `before: [persistence@1]`.
 - `defineModule`: a module may declare `before: readonly Contract<unknown>[]`, naming contracts it
   must be set up before the provider of. On this release the declaration is only checked: a module
   that ends up after the provider of a contract it named in `before` produces a new `BootWarning`
