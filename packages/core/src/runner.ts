@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { AtomicScope } from "./atomic.ts";
 import { createContext, DONE, type Context, type ContextInput } from "./context.ts";
 import type { Logger, StepLog } from "./logger.ts";
 import type { RunEndEvent, RunObserver, RunStartEvent, StepStartEvent } from "./observer.ts";
@@ -8,6 +9,7 @@ import { isErr, type Result } from "./result.ts";
 import { coerceQuery, resolveOutputSchema, validateSchema, type SchemaProblem } from "./schema.ts";
 import { isRecord } from "./guards.ts";
 import type { StepDescription } from "./defineModule.ts";
+import { logWarn } from "./logger.ts";
 import { writeRoot } from "./writes.ts";
 
 export interface ResolvedPipeline {
@@ -32,6 +34,8 @@ export type Runner = (pipeline: string, input: ContextInput) => Promise<RunResul
 export interface RunPipelineOptions {
   /** Dev/test only: after every step that writes to `result`, validates it against the pipeline's `describe().output` folded up to that step; a mismatch throws naming the step and the JSON path. Off by default, so production pays nothing for it. */
   validateOutput?: boolean;
+  /** Wraps an atomic group in one all-or-nothing scope; absent when no loaded module provides one, in which case no pipeline has a group (boot guarantees it). */
+  atomicScope?: AtomicScope;
 }
 
 export interface RunTracker {
@@ -149,6 +153,106 @@ function truncate(message: string): string {
   return message.length > MESSAGE_LIMIT ? `${message.slice(0, MESSAGE_LIMIT)}…` : message;
 }
 
+type StepOutcome =
+  | { kind: "ok"; ctx: Context }
+  | { kind: "done"; result: RunResult }
+  | { kind: "err"; result: RunResult }
+  | { kind: "throw"; result: RunResult; thrownMessage: string };
+
+async function runStep(
+  step: ResolvedStep,
+  ctx: Context,
+  pipelineName: string,
+  runId: string,
+  parentRunId: string | undefined,
+  logger: Logger,
+  observer: RunObserver,
+  validateOutput: boolean,
+  descriptionsSoFar: StepDescription[],
+): Promise<StepOutcome> {
+  const started = performance.now();
+  const stepEvent: StepStartEvent = { runId, pipeline: pipelineName, step: step.name, at: Date.now() };
+  observer.stepStart?.(stepEvent);
+  const log = (outcome: StepLog["outcome"], status: number) => {
+    const ms = elapsed(started);
+    logger.step({
+      runId,
+      ...(parentRunId === undefined ? {} : { parentRunId }),
+      pipeline: pipelineName,
+      step: step.name,
+      ms,
+      outcome,
+    });
+    observer.stepEnd?.({ ...stepEvent, ms, status, outcome });
+  };
+  const problems = inputProblems(step.description, ctx);
+  if (problems.length > 0) {
+    const error = failure("VALIDATION", `${step.name}: payload does not match schema (${problems.map((p) => `${p.path} ${p.message}`).join("; ")})`, { details: { problems } });
+    log("fail(VALIDATION)", error.status);
+    return { kind: "err", result: { runId, status: error.status, error: error.message, code: error.code, retryable: error.retryable, step: step.name, details: { problems } } };
+  }
+  try {
+    const out: unknown = await step.fn(ctx);
+    if (!isResult(out)) {
+      throw new Error(`step "${step.name}" returned ${typeof out} instead of a Result<Context>`);
+    }
+    if (isErr(out)) {
+      const error = out.error;
+      log(`fail(${error.code})`, error.status);
+      if (error.cause !== undefined) {
+        const cause = error.cause instanceof Error ? { stack: error.cause.stack ?? error.cause.message } : { cause: error.cause };
+        logger.error(`pipeline "${pipelineName}" step "${step.name}" failed with a cause`, { runId, code: error.code, ...cause });
+      }
+      return {
+        kind: "err",
+        result: {
+          runId,
+          status: error.status,
+          error: error.message,
+          code: error.code,
+          retryable: error.retryable,
+          step: step.name,
+          ...(error.details === undefined ? {} : { details: error.details }),
+        },
+      };
+    }
+    if (!isContext(out.value)) {
+      throw new Error(`step "${step.name}" returned ${typeof out.value} instead of a Result<Context>`);
+    }
+    checkWrites(step, ctx, out.value);
+    const before = ctx;
+    const after = Object.freeze(out.value);
+    if (validateOutput) {
+      descriptionsSoFar.push(step.description);
+      if (writesResult(step)) checkOutput(step, descriptionsSoFar, before, after);
+    }
+    log("ok", 200);
+    if (Reflect.get(after, DONE) === true) return { kind: "done", result: { runId, status: 200, result: after.result } };
+    return { kind: "ok", ctx: after };
+  } catch (caught) {
+    log("error", 500);
+    const error = caught instanceof Error ? caught : new Error(String(caught));
+    logger.error(`pipeline "${pipelineName}" step "${step.name}" threw`, { runId, stack: error.stack ?? error.message });
+    return {
+      kind: "throw",
+      thrownMessage: `${pipelineName}/${step.name}: unexpected ${error.name}`,
+      result: { runId, status: 500, error: `${pipelineName}/${step.name}: ${error.message}`, code: "INTERNAL", retryable: false, step: step.name },
+    };
+  }
+}
+
+function errorResult(runId: string, step: string, error: KestrelError): RunResult {
+  return {
+    runId,
+    status: error.status,
+    error: error.message,
+    code: error.code,
+    retryable: error.retryable,
+    step,
+    ...(error.details === undefined ? {} : { details: error.details }),
+  };
+}
+
 export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInput, logger: Logger, observer: RunObserver = {}, options: RunPipelineOptions = {}): Promise<RunResult> {
   const runId = randomUUID();
   const descriptionsSoFar: StepDescription[] = [];
@@ -171,73 +275,101 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
     observer.runEnd?.(end);
     return result;
   };
-
-  for (const step of pipeline.steps) {
-    const started = performance.now();
-    const stepEvent: StepStartEvent = { runId, pipeline: pipeline.name, step: step.name, at: Date.now() };
-    observer.stepStart?.(stepEvent);
-    const log = (outcome: StepLog["outcome"], status: number) => {
-      const ms = elapsed(started);
-      logger.step({
-        runId,
-        ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
-        pipeline: pipeline.name,
-        step: step.name,
-        ms,
-        outcome,
-      });
-      observer.stepEnd?.({ ...stepEvent, ms, status, outcome });
-    };
-    const problems = inputProblems(step.description, ctx);
-    if (problems.length > 0) {
-      const error = failure("VALIDATION", `${step.name}: payload does not match schema (${problems.map((p) => `${p.path} ${p.message}`).join("; ")})`, { details: { problems } });
-      log("fail(VALIDATION)", error.status);
-      return finish(trace({ runId, status: error.status, error: error.message, code: error.code, retryable: error.retryable, step: step.name, details: { problems } }));
-    }
-    try {
-      const out: unknown = await step.fn(ctx);
-      if (!isResult(out)) {
-        throw new Error(`step "${step.name}" returned ${typeof out} instead of a Result<Context>`);
-      }
-      if (isErr(out)) {
-        const error = out.error;
-        log(`fail(${error.code})`, error.status);
-        if (error.cause !== undefined) {
-          const cause = error.cause instanceof Error ? { stack: error.cause.stack ?? error.cause.message } : { cause: error.cause };
-          logger.error(`pipeline "${pipeline.name}" step "${step.name}" failed with a cause`, { runId, code: error.code, ...cause });
-        }
-        return finish(
-          trace({
-            runId,
-            status: error.status,
-            error: error.message,
-            code: error.code,
-            retryable: error.retryable,
-            step: step.name,
-            ...(error.details === undefined ? {} : { details: error.details }),
-          }),
-        );
-      }
-      if (!isContext(out.value)) {
-        throw new Error(`step "${step.name}" returned ${typeof out.value} instead of a Result<Context>`);
-      }
-      checkWrites(step, ctx, out.value);
-      const before = ctx;
-      ctx = Object.freeze(out.value);
-      if (options.validateOutput) {
-        descriptionsSoFar.push(step.description);
-        if (writesResult(step)) checkOutput(step, descriptionsSoFar, before, ctx);
-      }
-      log("ok", 200);
-      if (Reflect.get(ctx, DONE) === true) return finish(trace({ runId, status: 200, result: ctx.result }));
-    } catch (caught) {
+  const runOne = (step: ResolvedStep, currentCtx: Context): Promise<StepOutcome> =>
+    runStep(step, currentCtx, pipeline.name, runId, input.parentRunId, logger, observer, options.validateOutput === true, descriptionsSoFar);
+  const takeOutcome = (outcome: { kind: "err" | "throw"; result: RunResult; thrownMessage?: string }): RunResult => {
+    if (outcome.kind === "throw") {
       thrown = true;
-      log("error", 500);
-      const error = caught instanceof Error ? caught : new Error(String(caught));
-      logger.error(`pipeline "${pipeline.name}" step "${step.name}" threw`, { runId, stack: error.stack ?? error.message });
-      thrownMessage = `${pipeline.name}/${step.name}: unexpected ${error.name}`;
-      return finish(trace({ runId, status: 500, error: `${pipeline.name}/${step.name}: ${error.message}`, code: "INTERNAL", retryable: false, step: step.name }));
+      thrownMessage = outcome.thrownMessage;
     }
+    return outcome.result;
+  };
+
+  let i = 0;
+  while (i < pipeline.steps.length) {
+    const step = pipeline.steps[i]!;
+    if (step.atomic === undefined) {
+      const outcome = await runOne(step, ctx);
+      if (outcome.kind === "ok") {
+        ctx = outcome.ctx;
+        i++;
+        continue;
+      }
+      if (outcome.kind === "done") return finish(trace(outcome.result));
+      return finish(trace(takeOutcome(outcome)));
+    }
+
+    const groupOrdinal = step.atomic;
+    const groupSteps: ResolvedStep[] = [];
+    let j = i;
+    while (j < pipeline.steps.length && pipeline.steps[j]!.atomic === groupOrdinal) {
+      groupSteps.push(pipeline.steps[j]!);
+      j++;
+    }
+    const firstStepName = groupSteps[0]!.name;
+    const lastStepName = groupSteps[groupSteps.length - 1]!.name;
+    const { atomicScope } = options;
+    if (atomicScope === undefined) {
+      throw new Error(`pipeline "${pipeline.name}" step "${firstStepName}" is in an atomic group but no atomic scope was provided`);
+    }
+
+    let runningStep = firstStepName;
+    let groupCtx = ctx;
+    let doneResult: RunResult | undefined;
+    let cause: { kind: "err" | "throw"; result: RunResult; thrownMessage?: string } | undefined;
+
+    const outcome = await atomicScope({ pipeline: pipeline.name, group: groupOrdinal }, async () => {
+      for (const s of groupSteps) {
+        runningStep = s.name;
+        const stepOutcome = await runOne(s, groupCtx);
+        if (stepOutcome.kind === "ok") {
+          groupCtx = stepOutcome.ctx;
+          continue;
+        }
+        if (stepOutcome.kind === "done") {
+          doneResult = stepOutcome.result;
+          return "commit";
+        }
+        cause = stepOutcome;
+        return "rollback";
+      }
+      return "commit";
+    });
+
+    if (outcome.kind === "failed") {
+      if (outcome.phase === "begin") {
+        logWarn(logger, "atomic group could not begin", { pipeline: pipeline.name, step: firstStepName, runId });
+        return finish(trace(errorResult(runId, firstStepName, outcome.error)));
+      }
+      if (outcome.phase === "timeout") {
+        logger.error("atomic group timed out", { pipeline: pipeline.name, step: runningStep, runId });
+        return finish(trace(errorResult(runId, runningStep, outcome.error)));
+      }
+      if (outcome.phase === "commit") {
+        logger.error("atomic group failed to commit", { pipeline: pipeline.name, step: lastStepName, runId });
+        return finish(trace(errorResult(runId, lastStepName, outcome.error)));
+      }
+      logger.error("atomic group failed to roll back", {
+        pipeline: pipeline.name,
+        step: cause?.result.step ?? lastStepName,
+        runId,
+        stack: outcome.error.message,
+        code: cause?.result.code ?? outcome.original?.code,
+      });
+      if (cause !== undefined) return finish(trace(takeOutcome(cause)));
+      const original = outcome.original ?? outcome.error;
+      return finish(trace(errorResult(runId, lastStepName, original)));
+    }
+
+    if (outcome.verdict === "rollback") {
+      logWarn(logger, "atomic group rolled back", { pipeline: pipeline.name, step: cause?.result.step ?? lastStepName, runId, code: cause?.result.code });
+      if (cause !== undefined) return finish(trace(takeOutcome(cause)));
+      return finish(trace(errorResult(runId, lastStepName, failure("INTERNAL", "atomic group rolled back with no recorded cause"))));
+    }
+
+    if (doneResult !== undefined) return finish(trace(doneResult));
+    ctx = groupCtx;
+    i = j;
   }
 
   const done: RunResult = { runId, status: 200 };

@@ -1,6 +1,7 @@
 import type { ContextInput, Step, StepFactory } from "../context.ts";
+import type { AtomicScope } from "../atomic.ts";
 import { stepPrefix, type ModuleDefinition } from "../defineModule.ts";
-import type { PipelineDefinition } from "../definePipeline.ts";
+import { resolveEntries, type PipelineDefinition } from "../definePipeline.ts";
 import { silentLogger, type Logger } from "../logger.ts";
 import { StepRegistry } from "../registry.ts";
 import { runPipeline as execute, type RunResult } from "../runner.ts";
@@ -15,6 +16,8 @@ export interface RunPipelineOptions {
   writes?: Record<string, readonly string[]>;
   modules?: readonly ModuleUnderTest[];
   logger?: Logger;
+  /** Wraps an atomic group in one all-or-nothing scope; no default, so a default cannot invert the core's dependency on the contracts package. A test whose pipeline has a group must pass one, e.g. `fake.scope`. */
+  atomicScope?: AtomicScope;
 }
 
 /** Runs a pipeline through the real runner: `steps` are stand-ins registered with a bare description, `modules` register a module's own steps and `describe()` against a prepared instance, so their input and query schemas apply. */
@@ -38,6 +41,9 @@ export function runPipeline(pipeline: PipelineDefinition, input: Partial<Context
     registry.register("test", prefix, group, descriptions);
   }
 
-  const resolved = { name: pipeline.name, steps: pipeline.steps.map((s) => registry.resolve(s, `pipelines/${pipeline.name}`)) };
-  return execute(resolved, { trigger: { kind: "http", name: "test" }, ...input }, options.logger ?? silentLogger, {}, { validateOutput: true });
+  const resolved = { name: pipeline.name, steps: resolveEntries(pipeline.steps, (s) => registry.resolve(s, `pipelines/${pipeline.name}`)) };
+  return execute(resolved, { trigger: { kind: "http", name: "test" }, ...input }, options.logger ?? silentLogger, {}, {
+    validateOutput: true,
+    ...(options.atomicScope === undefined ? {} : { atomicScope: options.atomicScope }),
+  });
 }
