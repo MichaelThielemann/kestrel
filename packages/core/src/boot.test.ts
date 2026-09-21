@@ -535,6 +535,23 @@ describe("boot", () => {
     expect(recorded).toEqual(kestrel.triggers.events);
   });
 
+  it("deps.eventTriggers is the configured list, not the effective one — it still names a pipeline that turns out not to exist", async () => {
+    let recorded: unknown;
+    const probe = defineModule({
+      name: "probe/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(_config, deps): Promise<null> {
+        recorded = deps.eventTriggers;
+        return null;
+      },
+    });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./probe", config: {} }], triggers: [{ event: "page.created", pipeline: "noSuchPipeline" }] };
+    await expect(boot({ config, modules: [...modules, probe], pipelines, logger: silentLogger })).rejects.toThrow(/trigger references unknown pipeline "noSuchPipeline"/);
+    expect(recorded).toEqual([{ event: "page.created", pipeline: "noSuchPipeline" }]);
+  });
+
   it("warns once for an event trigger no pipeline emits and no module declares", async () => {
     const warnings: { message: string; data: Record<string, unknown> | undefined }[] = [];
     const logger = { ...silentLogger, warn: (message: string, data?: Record<string, unknown>) => warnings.push({ message, data }) };
