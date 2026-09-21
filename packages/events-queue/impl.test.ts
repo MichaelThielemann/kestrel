@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { failure } from "@michaelthielemann/kestrel/errors";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
+import { err } from "@michaelthielemann/kestrel/result";
 import type { RunResult, Runner } from "@michaelthielemann/kestrel/runner";
 import { createEventsQueue, QUEUE, QueueWriteError, retryTarget, type Config, type QueueRow } from "./impl.ts";
 
@@ -205,6 +208,46 @@ describe("events/queue worker", () => {
     queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
     expect(await queue.tick()).toBe(0);
     expect(await rows()).toEqual([]);
+  });
+
+  it("keeps a fanned row pending on a tick before setDelivery is ever called, instead of marking it done", async () => {
+    const { db, queue, rows } = await make();
+    await db.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "p1", state: "pending", attempts: 0, createdAt: 1_000_000, availableAt: 1_000_000, lockedAt: null, lockedBy: null, finishedAt: null, error: null });
+    expect(await queue.tick()).toBe(1);
+    expect((await rows())[0]).toMatchObject({ state: "pending", attempts: 1 });
+  });
+
+  it("fans out an unfanned row exactly once when two instances tick concurrently on one store", async () => {
+    const db = createFakePersistence();
+    const clock = { t: 1_000_000 };
+    const queueA = await createEventsQueue(CONFIG, { db, logger: silentLogger, now: () => clock.t, instanceId: "a@host" });
+    const queueB = await createEventsQueue(CONFIG, { db, logger: silentLogger, now: () => clock.t, instanceId: "b@host" });
+    await db.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: null, state: "pending", attempts: 0, createdAt: 1_000_000, availableAt: 1_000_000, lockedAt: null, lockedBy: null, finishedAt: null, error: null });
+    queueA.setDelivery([{ event: "x", pipeline: "p1" }, { event: "x", pipeline: "p2" }], async () => OK);
+    queueB.setDelivery([{ event: "x", pipeline: "p1" }, { event: "x", pipeline: "p2" }], async () => OK);
+
+    await Promise.all([queueA.fanOutUnfanned(), queueB.fanOutUnfanned()]);
+
+    const stored = expectOk(await db.findMany<QueueRow>(QUEUE, {}, { sort: { createdAt: "asc" } })).items;
+    expect(stored.map((r) => r.pipeline).sort()).toEqual(["p1", "p2"]);
+  });
+
+  it("leaves the original row when a fan-out copy fails to write, instead of deleting it", async () => {
+    const { db, queue, rows } = await make();
+    const created = expectOk(await db.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: null, state: "pending", attempts: 0, createdAt: 1_000_000, availableAt: 1_000_000, lockedAt: null, lockedBy: null, finishedAt: null, error: null }));
+    queue.setDelivery([{ event: "x", pipeline: "p1" }, { event: "x", pipeline: "p2" }], async () => OK);
+
+    const originalCreateOne = db.createOne.bind(db);
+    let calls = 0;
+    db.createOne = boundaryCast<typeof db.createOne>(async (collection: string, data: unknown) => {
+      calls++;
+      if (calls === 2) return err(failure("TRANSIENT", "boom"));
+      return originalCreateOne(collection, boundaryCast<Parameters<typeof originalCreateOne>[1]>(data, "host"));
+    }, "host");
+
+    expect(await queue.fanOutUnfanned()).toBe(0);
+    const stored = await rows();
+    expect(stored.find((r) => r.id === created.id)).toMatchObject({ pipeline: null });
   });
 });
 
