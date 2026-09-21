@@ -15,7 +15,8 @@ may define its own contracts with the same `defineContract`; the core treats the
   (in the package under `packages/contracts/src/`).
 - New contracts only when a different *implementation* is needed, not different *fields*.
   `blobstore@1` is its own contract (different technology), `user-persistence@1` is not.
-- Contracts don't change once frozen. A capability that needs a different shape becomes a new major (`persistence@2`) next to the old one.
+- Contracts don't change once frozen. A capability that needs a different shape becomes a new
+  major (`persistence@2`) next to the old one.
 - The query vocabulary types (`Filter`, `Condition`, `FindOptions`, `Page`) live in
   `contracts/query.ts` and are shared by `persistence@1`, `content@1` and `site@1`, so no contract
   file has to import another one for them.
@@ -200,7 +201,7 @@ persistenceContractTests(async () => createPersistenceSqlite({ file: ":memory:" 
 | – (steps only) | Redirects: validate rules, resolve within the site pipeline, export `redirects.json` | – | `redirects-default` |
 | – (steps only) | Sanitize uploaded SVGs | – | `sanitize-svg` |
 | `events@1` | Emit/listen to events; synchronous; listener errors → AggregateError | no `Result`: `emit` throws an `AggregateError` | `inmemory`, `queue` |
-| `renderer@1` | Render a document into a format (`formats()`, `render()` with assets) | `KestrelError<"TRANSIENT" \| "RENDER_FAILED">` — both contract-specific or core codes, status 503/500 respectively | `plain` (reference), a Nuxt renderer in the kestrel-web layer (separate repository) |
+| `renderer@1` | Render a document into a format (`formats()`, `render()` with assets) | `KestrelError<"TRANSIENT" \| "RENDER_FAILED">` — both contract-specific or core codes, status 503/500 respectively | `plain` (reference); a site brings its own, e.g. one that renders through Nuxt |
 | – (steps only) | Static delivery: render, store in blobstore, per-language status | – | `delivery-static` |
 | `validate@1` | Check a payload field against a schema: `targets()` (`"<collection>.<field>"`), `check(target, value)` → `{ ok, problems: [{ path, message }] }` | no `Result`: synchronous, no `Promise` | `jsonschema` (ajv; HTML sanitization stays a step) |
 | `revisions@1` | Append-only version history per (collection, document, locale): `record` a full snapshot, `list`/`read`, `label`, `head`, `prune`, `remove`. Branching follows from `parentId` alone; no merge | `KestrelError<"NOT_FOUND" \| "TRANSIENT">` — an unknown revision in `read` is `Ok(null)`, only `record` with an unknown parent and `label` answer `NOT_FOUND` | `default` (on persistence; content optional, only for the default locale) |
@@ -248,7 +249,7 @@ Two origins are indexed, distinguished by the `via` field of each index row: `"f
 (all languages), i.e. exactly what `site.resolveLinks` later rewrites into paths. A `<type>`
 that is not a configured target is ignored. The deletion guard therefore also sees media and
 pages that are only used inside a block. `references.referrers`/`referrersMany`/`report`
-include `via` in their output; rows from before the field existed read as `"field"`.
+include `via` in their output; a row without `via` reads as `"field"`.
 
 **i18n** is part of the model, not a module: `localized` fields are stored per language,
 `required`/`unique` apply per language. Reading with `locale` is **strict** — a missing

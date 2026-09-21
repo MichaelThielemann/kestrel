@@ -83,7 +83,7 @@ later rename does not rewrite history. That reference is the only personal datum
 either to another user or, with `null`, to the anonymous author `{ id: null, name: null }` — a
 display name for that is the frontend's business. Content, snapshots, order and count stay exactly as
 they were. The method is not part of `revisions@1`: the contract is published and therefore frozen
-(`docs/contracts.md`), so the capability lives on this module's instance and is reachable through its
+([`docs/contracts.md`](https://github.com/MichaelThielemann/kestrel/blob/main/docs/contracts.md)), so the capability lives on this module's instance and is reachable through its
 step, the same way `authn/multi` offers user administration beside `authn@1`.
 
 The step `revisions.reassignAuthor` takes the former author from `params.id` or, in a pipeline
@@ -100,7 +100,8 @@ plus `list`, `read`, `label`, `prune`, `reassignAuthor`, `remove` and `removeTra
 
 **Not included.** No diff — a block-aware diff belongs in the admin UI. No merge, no conflict
 detection, no undo stack (that is the editor's, per session). No pipelines and no routes: the
-consumer wires those, `docs/api.md` shows the example instance's.
+consumer wires those;
+[`docs/api.md`](https://github.com/MichaelThielemann/kestrel/blob/main/docs/api.md) shows the example instance's.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest

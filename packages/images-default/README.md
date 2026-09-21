@@ -45,7 +45,7 @@ would hold its slot for good and the sync job would never reach the next image.
 
 **Repeated failure** is bounded by `maxAttempts`: the last failure sets `state: "failed"` instead of
 `"error"`, and generate/sync/resume skip the variant from then on, so one broken original cannot
-burn the whole budget of the job forever. `images.serve` no longer hides such a variant behind the
+burn the whole budget of the job forever. `images.serve` does not hide such a variant behind the
 original: a `pending` one still falls back to it, a `failed` one is `NOT_FOUND` naming the attempt
 count and the error. `images.readStatus` counts `failed` per size next to `done`/`pending`/`error`
 and adds `failed: { variants, recent }` — the totals over all sizes plus the twenty most recently

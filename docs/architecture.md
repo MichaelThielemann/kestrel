@@ -87,8 +87,8 @@ In both cases: only pipelines with a trigger are reachable from outside.
 3. **Submodules provide steps, not triggers.** No submodule has a route or throws events. The
    one exception: a submodule emits from a contract method itself when the fact arises without a
    pipeline (`apply()` also runs at boot) or when a partial failure of that method has already
-   produced the fact (a `fail` would end the pipeline before an `events.emit` step); today that is
-   only `migrations.applied`. Every further exception needs a row with its reason in the event
+   produced the fact (a `fail` would end the pipeline before an `events.emit` step); only
+   `migrations.applied` does this. Every further exception needs a row with its reason in the event
    table of `pipelines.md`.
 4. **Business logic lives in pipelines.** A pipeline file shows the complete flow.
 5. **Errors at boot, not at runtime.** A missing contract, a missing method, an unknown step,

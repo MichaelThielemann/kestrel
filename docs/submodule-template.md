@@ -216,7 +216,7 @@ the first user. Steps for user management (createUser, setPassword, deactivateUs
 Not included: self-service registration, password reset (own pipelines).
 ```
 
-## Checklist before "done"
+## Checklist before publishing
 
 - [ ] `module.ts`/`impl.ts` present, further flat files only with their own test, no subfolders
 - [ ] Steps with an argument (`name:arg`) are marked with `stepFactory()`

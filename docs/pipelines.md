@@ -524,7 +524,8 @@ an event receives this data as its `payload`.
 | `page.created` / `page.updated` / `page.deleted` / `page.restored` | document id |
 | `media.uploaded` / `media.updated` / `media.deleted` | document id (for a bulk upload of several files: `null`, plus `ids: string[]` — the newly stored items only) |
 | `user.created` / `user.updated` / `user.deactivated` / `user.deleted` | document id |
-| `migrations.applied` | – (no envelope: the `migrations/default` module sends its own `{ migrations: [id], documents }` after a run; deliberately no `page.updated` per document it migrated). The named exception to rule 3: `apply()` is a contract method that also runs at boot, and after a partial failure the event still has to cover the migrations already applied — an `events.emit` step after a failing `migrations.apply` would never run. The module declares it as `emits: ["migrations.applied"]`, so a trigger on it boots without the warning above |
+| `migrations.applied` | – (no envelope: the `migrations/default` module sends its own `{ migrations: [id], documents }` after a run; deliberately no `page.updated` per document it migrated). The one exception to the rule that submodules provide steps and emit nothing themselves
+(`architecture.md` § The five rules): `apply()` is a contract method that also runs at boot, and after a partial failure the event still has to cover the migrations already applied — an `events.emit` step after a failing `migrations.apply` would never run. The module declares it as `emits: ["migrations.applied"]`, so a trigger on it boots without the warning above |
 
 Whatever the bus delivers is a shallowly frozen copy of the emitted data, like the context between
 steps: a handler cannot change what the next handler sees, and assigning to the object throws in
@@ -597,12 +598,3 @@ last because only there is the response shape settled.
   `validate.sanitizeHtml`, `sanitize.svg`); plain-text fields are only validated — length,
   no control characters — and escaped on output, since sanitizing would corrupt legitimate
   text like `5 < 6`. The frontend also escapes; the backend never relies on that alone.
-
-## Presets in kestrel-web
-
-In the kestrel-web layer (separate repository), a preset supplies the default pipelines,
-triggers and schemas for a typical setup, grouped by feature and wired to the configured
-Kestrel modules. Pipelines remain exactly the model described above — strings plus
-`definePipeline`; the preset only composes existing pipelines (base → feature patches →
-overrides/exclude/schedules) and introduces no new concept. See the kestrel-web
-documentation for details.
