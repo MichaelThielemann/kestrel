@@ -48,14 +48,10 @@ function describeSite(site: SiteDefault) {
       reads: ["result"],
       writes: ["result"],
       query: { locale: { type: "string" } },
-      ...(model.locales
-        ? {
-            extendsOutput: {
-              type: "object",
-              properties: { _links: { type: "object", additionalProperties: { type: "object", properties: { path: { type: "string" }, locale: { type: "string" }, broken: { type: "boolean" } } }, description: "internal references by target id after site.resolveLinks" } },
-            },
-          }
-        : {}),
+      extendsOutput: {
+        type: "object",
+        properties: { _links: { type: "object", additionalProperties: { type: "object", properties: { path: { type: "string" }, locale: { type: "string" }, broken: { type: "boolean" } } }, description: "internal references by target id after site.resolveLinks" } },
+      },
     }),
   };
 }
