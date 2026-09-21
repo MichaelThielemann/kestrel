@@ -111,11 +111,13 @@ export function rootTable(packages: PackageInfo[]): string {
   return [START, "| Package | Purpose |", "|---|---|", ...rows, END].join("\n");
 }
 
-function bootWarningKey(warning: Pick<BootWarning, "code" | "pipeline" | "event">): string {
+export type BootWarningKey = Pick<BootWarning, "code" | "pipeline" | "event">;
+
+function bootWarningKey(warning: BootWarningKey): string {
   return `${warning.code}:${warning.pipeline}:${warning.event}`;
 }
 
-export function unexpectedBootWarnings(warnings: readonly BootWarning[], allowlist: readonly BootWarning[]): BootWarning[] {
+export function unexpectedBootWarnings(warnings: readonly BootWarning[], allowlist: readonly BootWarningKey[]): BootWarning[] {
   const allowed = new Set(allowlist.map(bootWarningKey));
   return warnings.filter((warning) => !allowed.has(bootWarningKey(warning)));
 }

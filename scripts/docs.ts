@@ -2,13 +2,13 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { boot, loadConfig, loadModules, loadPipelines, silentLogger, type BootWarning, type Manifest, type ModuleDefinition } from "../packages/core/src/index.ts";
+import { boot, loadConfig, loadModules, loadPipelines, silentLogger, type Manifest, type ModuleDefinition } from "../packages/core/src/index.ts";
 import { buildManifest } from "../packages/core/src/describe.ts";
 import { stepPrefix } from "../packages/core/src/defineModule.ts";
 import { StepRegistry } from "../packages/core/src/registry.ts";
-import { formatBootWarning, orderPackages, render, rootTable, splice, unexpectedBootWarnings, type PackageInfo, type Section } from "./docs-render.ts";
+import { formatBootWarning, orderPackages, render, rootTable, splice, unexpectedBootWarnings, type BootWarningKey, type PackageInfo, type Section } from "./docs-render.ts";
 
-const ALLOWED_BOOT_WARNINGS: readonly BootWarning[] = [];
+const ALLOWED_BOOT_WARNINGS: readonly BootWarningKey[] = [];
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const example = join(workspace, "examples", "minimal");
@@ -39,19 +39,22 @@ function allPackages(): PackageInfo[] {
   return orderPackages(all);
 }
 
+class UnexpectedBootWarnings extends Error {}
+
 async function exampleManifest(): Promise<Manifest> {
   const config = await loadConfig(join(example, "kestrel.config.ts"));
   const modules = await loadModules(example, config);
   const pipelines = await loadPipelines(example, config.pipelinesDir ?? "./pipelines");
   const kestrel = await boot({ config: { ...config, http: null }, modules, pipelines, logger: silentLogger, root: example });
-  const unexpected = unexpectedBootWarnings(kestrel.warnings, ALLOWED_BOOT_WARNINGS);
-  if (unexpected.length > 0) {
-    await kestrel.stop();
-    throw new Error(`example config produced unexpected boot warnings:\n${unexpected.map((w) => `  ${formatBootWarning(w)}`).join("\n")}`);
+  try {
+    const unexpected = unexpectedBootWarnings(kestrel.warnings, ALLOWED_BOOT_WARNINGS);
+    if (unexpected.length > 0) {
+      throw new UnexpectedBootWarnings(`example config produced unexpected boot warnings:\n${unexpected.map((w) => `  ${formatBootWarning(w)}`).join("\n")}`);
+    }
+    return kestrel.describe();
+  } finally {
+    await kestrel.stop().catch(() => undefined);
   }
-  const manifest = kestrel.describe();
-  await kestrel.stop();
-  return manifest;
 }
 
 function registerStandaloneSteps(registry: StepRegistry, mod: ModuleDefinition): void {
@@ -102,7 +105,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   try {
     await main();
   } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
+    console.error(err instanceof UnexpectedBootWarnings ? err.message : err);
     process.exit(1);
   }
 }
