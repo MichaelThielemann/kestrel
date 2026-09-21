@@ -6,13 +6,19 @@ Copies one local file (typically a SQLite snapshot) to `blobstore@1` and restore
 ephemeral disks such as Cloud Foundry. List this module **before** `persistence-sqlite` in
 `kestrel.config.ts` so setup runs before the database is opened; it also declares
 `before: [persistence@1]` so a misordered list produces a `module-order` boot warning instead of a
-silent empty start. If the file already exists and holds a restore point when `setup()` runs, and
-the file was created during this very start-up, `setup()` fails: that proves another module opened
-the file first. Delete the named file before the next start – a restart clears it on an ephemeral
-disk by itself, but not on a persistent volume, where it has to be removed by hand: a stale file
-left over from an earlier, unrelated failure predates this boot, so this check stays quiet about it
-and the file still has to be deleted as instructed above. The pending restore's staged file and
-marker are left untouched either way.
+silent empty start. If the file already exists and holds a restore point when `setup()` runs, was
+not itself just restored, and was created during this very boot (judged by birth time against the
+start of this boot; where the file system reports none, the order is left to the `module-order`
+warning instead), `setup()` fails: that proves another module opened the file first. Move the named
+file aside and start again – an ephemeral disk clears it for you on the next restart, a persistent
+volume does not, so move it by hand there: a stale file left over from an earlier, unrelated
+failure predates this boot, so this check stays quiet about it and the file still has to be moved
+aside as instructed above. The pending restore's staged file and marker are left untouched either
+way. When either this module or `replication-sqlite` restores the file, it writes
+`<file>.restored-at` (the epoch ms this boot started) next to it; the other module, if configured
+on the same file, recognizes a matching value as "this boot already restored the file" and skips
+its own check — neither module has to know the other exists. A sidecar from an earlier boot is
+ignored and simply overwritten on the next restore.
 `versions` (default 24) keeps timestamped copies `<key>.<iso-time>` next to the latest one and
 prunes older ones; `backup.restore` takes an optional `key` from the payload to restore a specific
 version, `backup.listVersions` lists them.

@@ -10,7 +10,7 @@ import { failure } from "@michaelthielemann/kestrel/errors";
 import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Backup } from "./impl.ts";
-import { checkSkippedRestore, fileBirthMs, freshnessOf } from "./restoreFreshness.ts";
+import { checkSkippedRestore, fileBirthMs, freshnessOf, markRestoredThisBoot } from "./restoreFreshness.ts";
 import module from "./module.ts";
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
@@ -79,6 +79,20 @@ afterAll(async () => {
   for (const d of dirs) await rm(d, { recursive: true, force: true });
 });
 
+describe("fileBirthMs", () => {
+  it("returns the birth time in ms when it differs from the change time", () => {
+    expect(fileBirthMs("/irrelevant", () => ({ birthtimeNs: 1_700_000_000_123_000_000n, ctimeNs: 1_700_000_001_456_000_000n }))).toBe(1_700_000_000_123);
+  });
+
+  it("returns 0 when the birth time is zero, the file system reports none at all", () => {
+    expect(fileBirthMs("/irrelevant", () => ({ birthtimeNs: 0n, ctimeNs: 1_700_000_001_456_000_000n }))).toBe(0);
+  });
+
+  it("returns 0 when the birth time equals the change time, the signature of a file system that fakes it from the change time", () => {
+    expect(fileBirthMs("/irrelevant", () => ({ birthtimeNs: 1_700_000_000_123_000_000n, ctimeNs: 1_700_000_000_123_000_000n }))).toBe(0);
+  });
+});
+
 describe("backup/blobstore module setup: restore-on-start skip check", () => {
   it("setup() rejects when the file was created during this boot while a restore point exists", async () => {
     const bootStartedAt = Date.now();
@@ -116,6 +130,34 @@ describe("backup/blobstore module setup: restore-on-start skip check", () => {
     await writeFile(`${file}.restore-marker`, "backups/db");
     const instance = boundaryCast<Backup>(await module.setup(module.configSchema.parse(skippedConfig(file)), deps(blobs, dir, bootStartedAt)), "host");
     expect(instance.key).toBe("backups/db");
+  });
+});
+
+describe("checkSkippedRestore: the restore sidecar", () => {
+  it("skips a fresh, restore-point-holding file another module already restored in this boot", async () => {
+    const bootStartedAt = Date.now();
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "kestrel-backup-check-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    await writeFile(file, "live");
+    markRestoredThisBoot(file, bootStartedAt);
+    const blobs = fakeBlobstore();
+    blobs.blobs.set("backups/db", { data: new TextEncoder().encode("from-backup"), contentType: "application/octet-stream" });
+    const { infos, logger } = infoLogger();
+    await checkSkippedRestore(skippedConfig(file), blobs, logger, bootStartedAt, () => Date.now());
+    expect(infos).toEqual([{ message: "backup/blobstore: restore-on-start skipped", data: { file, reason: "file restored earlier in this boot" } }]);
+  });
+
+  it("ignores a sidecar left by a different boot and judges freshness normally", async () => {
+    const bootStartedAt = Date.now();
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "kestrel-backup-check-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    await writeFile(file, "live");
+    markRestoredThisBoot(file, bootStartedAt - 999_999);
+    const blobs = fakeBlobstore();
+    blobs.blobs.set("backups/db", { data: new TextEncoder().encode("from-backup"), contentType: "application/octet-stream" });
+    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger, bootStartedAt, () => Date.now())).rejects.toThrow(/was created during this start-up/);
   });
 });
 

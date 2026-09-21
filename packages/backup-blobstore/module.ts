@@ -5,7 +5,7 @@ import { first, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { applyPendingRestore, createBackupBlobstore, exists, type Backup } from "./impl.ts";
-import { checkSkippedRestore } from "./restoreFreshness.ts";
+import { checkSkippedRestore, markRestoredThisBoot } from "./restoreFreshness.ts";
 
 export const configSchema = z
   .object({
@@ -26,12 +26,19 @@ export default defineModule({
 
   async setup(cfg, deps): Promise<Backup> {
     const blobs = deps.get(BLOBSTORE);
+    const bootStartedAt = deps.bootStartedAt ?? Date.now();
     const applied = await applyPendingRestore(cfg.file);
-    if (applied) deps.logger.info("backup/blobstore: applied pending restore", { file: cfg.file, key: applied.key, size: applied.size });
+    if (applied) {
+      deps.logger.info("backup/blobstore: applied pending restore", { file: cfg.file, key: applied.key, size: applied.size });
+      markRestoredThisBoot(cfg.file, bootStartedAt);
+    }
     const backup = createBackupBlobstore(cfg, blobs);
     if (cfg.restoreOnStart && !applied) {
-      if (await exists(cfg.file)) await checkSkippedRestore(cfg, blobs, deps.logger, deps.bootStartedAt ?? Date.now());
-      else await backup.restoreWhenMissing();
+      if (await exists(cfg.file)) await checkSkippedRestore(cfg, blobs, deps.logger, bootStartedAt);
+      else {
+        const result = await backup.restoreWhenMissing();
+        if (result.restored) markRestoredThisBoot(cfg.file, bootStartedAt);
+      }
     }
     return backup;
   },
