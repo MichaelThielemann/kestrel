@@ -4,6 +4,12 @@
 
 ### Added
 
+- `defineModule`: a module may declare `before: readonly Contract<unknown>[]`, naming contracts it
+  must be set up before the provider of. On this release the declaration is only checked: a module
+  that ends up after the provider of a contract it named in `before` produces a new `BootWarning`
+  with `code: "module-order"`, logged at `warn`; the setup order itself is unchanged. This becomes
+  a real ordering edge, and the violation a boot error, in the next major.
+
 - `authz-roles`: the factory step `authz.validateRoles:<path>` reads an array of role names at
   `payload.<path>` and rejects it with 400 `VALIDATION` (unknown names in `details.unknown`) unless
   every entry is a configured role name; an absent value passes. It writes nothing and needs no

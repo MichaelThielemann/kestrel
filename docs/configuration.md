@@ -36,9 +36,17 @@ directory of the config file. Kestrel activates nothing implicitly — a module 
 not listed here does not exist for the instance.
 
 `config` is parsed against that module's `configSchema`; an invalid value aborts the boot naming
-the module. Modules are set up in the listed order after a topological sort by their `requires`, so
-a provider always runs before its consumers. Relative paths inside a module's config resolve
-against `deps.root`, the directory of the loaded config file.
+the module. Relative paths inside a module's config resolve against `deps.root`, the directory of
+the loaded config file.
+
+Setup order follows these rules, applied in order:
+
+1. a module is set up after the provider of every contract in its `requires`;
+2. and after the provider of every contract in its `optional` that is active;
+3. and, if it declares `before`, that is checked but does not reorder: a module that ends up after
+   the provider of a contract it names in `before` produces a `module-order` boot warning
+   (`kestrel.warnings`) and becomes a boot error in the next major version;
+4. otherwise, the listed order is kept.
 
 ## `triggers`
 

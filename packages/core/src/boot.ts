@@ -15,7 +15,7 @@ import { StepRegistry } from "./registry.ts";
 import { findMissingRequired } from "./schema.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
 import { writeRoot } from "./writes.ts";
-import { sortModules } from "./sort.ts";
+import { findModuleOrderViolations, sortModules } from "./sort.ts";
 import { createCronEntry, startCron, type CronEntry } from "./triggers/cron.ts";
 import { createAllowlist } from "./triggers/allowlist.ts";
 import { createHttpServer, listen, parseRoute, routePattern, type Route } from "./triggers/http.ts";
@@ -48,11 +48,20 @@ export interface StopResult {
  * A condition boot detects but does not treat as fatal.
  *
  * A discriminated union on `code`; today's members are {@link UnemittedEventWarning},
- * {@link UndeclaredOutputWarning} and {@link UndeclaredRequiredWarning}. A minor release may add
- * further codes, so code reading `kestrel.warnings` must handle a `code` it does not recognize
- * instead of assuming the shape of this union's current members.
+ * {@link UndeclaredOutputWarning}, {@link UndeclaredRequiredWarning} and {@link ModuleOrderWarning}.
+ * A minor release may add further codes, so code reading `kestrel.warnings` must handle a `code`
+ * it does not recognize instead of assuming the shape of this union's current members.
  */
-export type BootWarning = UnemittedEventWarning | UndeclaredOutputWarning | UndeclaredRequiredWarning;
+export type BootWarning = UnemittedEventWarning | UndeclaredOutputWarning | UndeclaredRequiredWarning | ModuleOrderWarning;
+
+/** A module declaring `before: [C]` that was set up after the module providing `C`; becomes a boot error in the next major. */
+export interface ModuleOrderWarning {
+  code: "module-order";
+  message: string;
+  module: string;
+  contract: string;
+  provider: string;
+}
 
 /** An event trigger's event that no pipeline emits via `events.emit` and no module declares in `emits`. */
 export interface UnemittedEventWarning {
@@ -189,6 +198,16 @@ function warnUndeclaredRequired(pipelines: ReadonlyMap<string, ResolvedPipeline>
   return warnings;
 }
 
+function warnModuleOrder(ordered: readonly ModuleDefinition[], logger: Logger): ModuleOrderWarning[] {
+  const warnings: ModuleOrderWarning[] = [];
+  for (const violation of findModuleOrderViolations(ordered)) {
+    const message = `module "${violation.module}" declares before "${violation.contract}" but was set up after "${violation.provider}"; move it earlier in kestrel.config.modules`;
+    logWarn(logger, message, { module: violation.module, contract: violation.contract, provider: violation.provider });
+    warnings.push({ code: "module-order", message, module: violation.module, contract: violation.contract, provider: violation.provider });
+  }
+  return warnings;
+}
+
 function settledWithin(promise: Promise<void>, ms: number): Promise<boolean> {
   if (ms <= 0) return Promise.resolve(false);
   return new Promise<boolean>((resolve) => {
@@ -247,6 +266,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     configByModule.set(mod, entry.config ?? {});
   }
   const ordered = sortModules(input.modules);
+  const moduleOrderWarnings = warnModuleOrder(ordered, logger);
   for (const mod of ordered) {
     if (mod.provides.length === 0) continue;
     const prefix = stepPrefix(mod.name);
@@ -351,7 +371,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     if (eventHooks.length > 1) throw new KestrelBootError(CORE, `modules "${eventHooks[0]?.name ?? ""}" and "${eventHooks[1]?.name ?? ""}" both provide an event trigger hook`);
     if (events.length > 0 && eventHooks.length === 0) throw new KestrelBootError(CORE, "event triggers need a module that provides an event trigger hook");
     const eventHook = eventHooks[0];
-    const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUndeclaredOutput(pipelines, logger), ...warnUndeclaredRequired(pipelines, logger)];
+    const warnings = [...moduleOrderWarnings, ...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUndeclaredOutput(pipelines, logger), ...warnUndeclaredRequired(pipelines, logger)];
 
     const runs = createRunTracker();
     const hub = createObserverHub(logger);
