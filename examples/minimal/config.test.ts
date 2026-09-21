@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { boot } from "@michaelthielemann/kestrel";
+import { boot, KestrelBootError } from "@michaelthielemann/kestrel";
 import { loadConfig, loadModules, loadPipelines } from "@michaelthielemann/kestrel/load";
 import type { RevisionPage } from "@michaelthielemann/kestrel-contracts/revisions";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -105,6 +105,17 @@ describe("examples/minimal revisions wiring", () => {
     expect(pipelines.get("pageRevision")).toEqual(["authn.requireUser", "authz.require:pages.manage", "revisions.read:pages"]);
     expect(pipelines.get("labelPageRevision")).toEqual(["authn.requireUser", "authz.require:pages.write", "revisions.label:pages"]);
     expect(pipelines.get("pruneRevisions")).toEqual(["revisions.prune"]);
+  });
+
+  it("rejects reassignRevisionAuthor with the verify step moved after the reassign step", async () => {
+    const config = await loadConfig(join(root, "kestrel.config.ts"));
+    const modules = await loadModules(root, config);
+    const pipelines = await loadPipelines(root, "pipelines");
+    const reordered = pipelines.map((p) => (p.name === "reassignRevisionAuthor" ? { ...p, steps: [...p.steps].reverse() } : p));
+    await expect(boot({ config: { ...config, http: null }, modules, pipelines: reordered, root })).rejects.toThrow(
+      /\[pipelines\/reassignRevisionAuthor\] step "revisions\.reassignAuthor" optionally reads "verifiedUser" but step "authn\.verifyUser:result\.reassignTo" writes it later/,
+    );
+    await expect(boot({ config: { ...config, http: null }, modules, pipelines: reordered, root })).rejects.toThrow(KestrelBootError);
   });
 });
 

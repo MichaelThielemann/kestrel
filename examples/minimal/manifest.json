@@ -7180,7 +7180,8 @@
       "description": {
         "summary": "Record the saved <arg> document from the result as a revision; its parent is the head, or the revision a restore put on the context",
         "reads": [
-          "result"
+          "result",
+          "revisionParent?"
         ],
         "writes": [],
         "query": {
@@ -7506,7 +7507,9 @@
       "factory": false,
       "description": {
         "summary": "Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is",
-        "reads": [],
+        "reads": [
+          "restoreReport?"
+        ],
         "writes": [
           "result.restore?"
         ],
@@ -7676,7 +7679,8 @@
         "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
         "reads": [
           "params.id",
-          "payload"
+          "payload",
+          "verifiedUser?"
         ],
         "writes": [
           "result"
@@ -10293,7 +10297,8 @@
           "description": {
             "summary": "Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context",
             "reads": [
-              "result"
+              "result",
+              "revisionParent?"
             ],
             "writes": [],
             "query": {
@@ -16401,7 +16406,8 @@
             "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
             "reads": [
               "params.id",
-              "payload"
+              "payload",
+              "verifiedUser?"
             ],
             "writes": [
               "result"
@@ -17981,7 +17987,8 @@
           "description": {
             "summary": "Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context",
             "reads": [
-              "result"
+              "result",
+              "revisionParent?"
             ],
             "writes": [],
             "query": {
@@ -18138,7 +18145,9 @@
           "module": "revisions/default",
           "description": {
             "summary": "Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is",
-            "reads": [],
+            "reads": [
+              "restoreReport?"
+            ],
             "writes": [
               "result.restore?"
             ],
@@ -18549,7 +18558,8 @@
             "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
             "reads": [
               "params.id",
-              "payload"
+              "payload",
+              "verifiedUser?"
             ],
             "writes": [
               "result"
@@ -19882,7 +19892,8 @@
           "description": {
             "summary": "Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context",
             "reads": [
-              "result"
+              "result",
+              "revisionParent?"
             ],
             "writes": [],
             "query": {

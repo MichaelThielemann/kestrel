@@ -229,7 +229,7 @@ export default defineModule({
   describe: (revisions) => ({
     record: (collection: string) => ({
       summary: `Record the saved ${collection} document from the result as a revision; its parent is the head, or the revision a restore put on the context`,
-      reads: ["result"],
+      reads: ["result", "revisionParent?"],
       writes: [],
       query: LOCALE_QUERY,
       errors: { 503: "the revision could not be written" },
@@ -257,7 +257,7 @@ export default defineModule({
     }),
     reportRestore: {
       summary: "Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is",
-      reads: [],
+      reads: ["restoreReport?"],
       writes: ["result.restore?"],
       extendsOutput: { type: "object", properties: { restore: RESTORE_SCHEMA }, required: [] },
     },
@@ -272,7 +272,7 @@ export default defineModule({
     reassignAuthor: {
       summary:
         "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
-      reads: ["params.id", "payload"],
+      reads: ["params.id", "payload", "verifiedUser?"],
       writes: ["result"],
       input: REASSIGN_INPUT,
       output: REASSIGN_SCHEMA,
