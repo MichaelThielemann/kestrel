@@ -2,7 +2,7 @@ export { boot, type Kestrel, type BootInput, type BootWarning, type UnemittedEve
 export { matchRoute, routePattern, parseRequestBody, parseQuery, buildResponse, responseForRun, errorResponse, clientIp, BodyTooLarge, type Route, type ParsedBody, type HttpResponse, type HttpTimeouts, type ClientIpOptions, type ResponseMeta } from "./triggers/http.ts";
 export { defineConfig, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
 export { defineContract, type Contract } from "./defineContract.ts";
-export { defineModule, type ModuleDefinition, type ModuleInput, type ModuleTriggers, type Deps, type EventEntry, type ContextPath, type JsonSchema, type StepDescription, type StepDescriptions, type Introspection, type Detach } from "./defineModule.ts";
+export { defineModule, type ModuleDefinition, type ModuleInput, type ModuleTriggers, type ContractLookup, type Deps, type EventEntry, type ContextPath, type JsonSchema, type StepDescription, type StepDescriptions, type Introspection, type Detach } from "./defineModule.ts";
 export type { Manifest, ModuleManifest, StepManifest, PipelineManifest, PipelineStepManifest, TriggersManifest, ConfigStatus, ConfigVariable } from "./describe.ts";
 export { SECRET } from "./describe.ts";
 export { REDACTED, type JsonValue } from "./configValue.ts";

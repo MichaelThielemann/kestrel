@@ -286,7 +286,7 @@ describe("validate/jsonschema", () => {
   });
 
   it("two boots keep their own schemas; the first instance's step factories still resolve against it", async () => {
-    const deps: Deps = { get: () => { throw new Error("not needed"); }, find: () => undefined, logger: stubLogger(), root: dir };
+    const deps: Deps = { get: () => { throw new Error("not needed"); }, find: () => undefined, logger: stubLogger(), root: dir, eventTriggers: [] };
     const schemaPath = "blocks.json";
     const first = boundaryCast<Validator>(await module.setup(module.configSchema.parse({ schemas: { "pages.a": schemaPath } }), deps), "host");
     const second = boundaryCast<Validator>(await module.setup(module.configSchema.parse({ schemas: { "pages.b": schemaPath } }), deps), "host");

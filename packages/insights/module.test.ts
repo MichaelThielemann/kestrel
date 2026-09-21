@@ -16,6 +16,7 @@ const deps: Deps = {
   find: () => undefined,
   logger: silentLogger,
   root: process.cwd(),
+  eventTriggers: [],
 };
 
 const manifestPipeline = definePipeline({ name: "insightsManifest", steps: ["insights.readManifest"] });

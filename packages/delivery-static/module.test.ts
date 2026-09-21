@@ -116,6 +116,7 @@ function moduleDeps(providers: { content: Content; site: Site; renderer: Rendere
     find: <T>(): T | undefined => undefined,
     logger: silentLogger,
     root: process.cwd(),
+    eventTriggers: [],
   };
 }
 

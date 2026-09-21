@@ -274,6 +274,7 @@ async function makeInstance(overrides: Partial<Config> = {}): Promise<{ media: M
       find: () => undefined,
       logger: silentLogger,
       root: process.cwd(),
+      eventTriggers: [],
     }),
     "host",
   );

@@ -23,6 +23,7 @@ const deps: Deps = {
   find: () => undefined,
   logger: silentLogger,
   root: process.cwd(),
+  eventTriggers: [],
 };
 
 async function boot() {

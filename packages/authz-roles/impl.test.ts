@@ -39,7 +39,7 @@ describe("authz/roles", () => {
   });
 
   it("two boots keep their own anonymous config; the first instance is unaffected by a later boot", async () => {
-    const deps: Deps = { get: () => { throw new Error("not needed"); }, find: () => undefined, logger: { step() {}, info() {}, error() {} }, root: process.cwd() };
+    const deps: Deps = { get: () => { throw new Error("not needed"); }, find: () => undefined, logger: { step() {}, info() {}, error() {} }, root: process.cwd(), eventTriggers: [] };
     const first = await module.setup(module.configSchema.parse({ roles: {}, anonymous: ["pages.read"] }), deps);
     await module.setup(module.configSchema.parse({ roles: {}, anonymous: [] }), deps);
     const require = (module.steps!(first).require as (permission: string) => (ctx: ReturnType<typeof createContext>) => Promise<unknown>)("pages.read");

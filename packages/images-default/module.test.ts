@@ -323,6 +323,7 @@ async function makeInstance(config: Partial<Config> = {}) {
       find: () => undefined,
       logger: silentLogger,
       root: process.cwd(),
+      eventTriggers: [],
     }),
     "host",
   );

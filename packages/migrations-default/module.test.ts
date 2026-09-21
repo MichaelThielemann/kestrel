@@ -67,6 +67,7 @@ async function boot(migrations: Migration[], options: BootOptions = {}) {
     find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
     logger: noLogger,
     root: ".",
+    eventTriggers: [],
   };
   const config = configSchema.parse({ migrations, mode: options.mode ?? "off" });
   const instance = boundaryCast<MigrationsDefault>(await module.setup(config, deps), "host");

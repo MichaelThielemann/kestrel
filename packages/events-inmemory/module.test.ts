@@ -214,6 +214,7 @@ async function makeInstance(): Promise<Events & { logger: Logger }> {
     find: () => undefined,
     logger: silentLogger,
     root: process.cwd(),
+    eventTriggers: [],
   });
   return boundaryCast<Events & { logger: Logger }>(instance, "host");
 }

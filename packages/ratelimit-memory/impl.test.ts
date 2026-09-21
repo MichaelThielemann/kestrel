@@ -28,7 +28,7 @@ describe("ratelimit/memory", () => {
   });
 
   it("two boots keep their own buckets; the first instance's check step still resolves against it", async () => {
-    const deps: Deps = { get: () => { throw new Error("not needed"); }, find: () => undefined, logger: { step() {}, info() {}, error() {} }, root: process.cwd() };
+    const deps: Deps = { get: () => { throw new Error("not needed"); }, find: () => undefined, logger: { step() {}, info() {}, error() {} }, root: process.cwd(), eventTriggers: [] };
     const first = await module.setup(module.configSchema.parse({ buckets: { login: { limit: 1, windowSeconds: 60 } } }), deps);
     await module.setup(module.configSchema.parse({ buckets: { other: { limit: 5, windowSeconds: 60 } } }), deps);
     const check = module.steps!(first).check;
@@ -37,7 +37,7 @@ describe("ratelimit/memory", () => {
   });
 
   it("check step fails RATE_LIMITED with details.retryAfterSeconds once the bucket is exhausted", async () => {
-    const deps: Deps = { get: () => { throw new Error("not needed"); }, find: () => undefined, logger: { step() {}, info() {}, error() {} }, root: process.cwd() };
+    const deps: Deps = { get: () => { throw new Error("not needed"); }, find: () => undefined, logger: { step() {}, info() {}, error() {} }, root: process.cwd(), eventTriggers: [] };
     const instance = await module.setup(module.configSchema.parse({ buckets: { login: { limit: 1, windowSeconds: 60 } } }), deps);
     const check = module.steps!(instance).check("login");
     const ctx = createContext({ trigger: { kind: "http", name: "t" }, ip: "1.2.3.4" });
@@ -54,7 +54,7 @@ describe("ratelimit/memory", () => {
   });
 
   it("counts requests without a client ip in one shared bucket key instead of skipping them", async () => {
-    const deps: Deps = { get: () => { throw new Error("not needed"); }, find: () => undefined, logger: { step() {}, info() {}, error() {} }, root: process.cwd() };
+    const deps: Deps = { get: () => { throw new Error("not needed"); }, find: () => undefined, logger: { step() {}, info() {}, error() {} }, root: process.cwd(), eventTriggers: [] };
     const instance = await module.setup(module.configSchema.parse({ buckets: { login: { limit: 1, windowSeconds: 60 } } }), deps);
     const check = module.steps!(instance).check("login");
     expect(isErr(await check(createContext({ trigger: { kind: "http", name: "t" } })))).toBe(false);

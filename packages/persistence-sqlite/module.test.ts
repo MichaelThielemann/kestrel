@@ -19,6 +19,7 @@ const deps: Deps = {
   find: <T>(): T | undefined => undefined,
   logger: silentLogger,
   root: process.cwd(),
+  eventTriggers: [],
 };
 
 async function boot(): Promise<PersistenceSqlite> {

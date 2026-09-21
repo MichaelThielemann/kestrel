@@ -23,6 +23,7 @@ async function setup(overrides: Record<string, unknown> = {}) {
     find: () => undefined,
     logger: silentLogger,
     root: process.cwd(),
+    eventTriggers: [],
   };
   const instance = boundaryCast<EventsQueue>(await module.setup(configSchema.parse({ maxAttempts: 1, ...overrides }), deps), "host");
   return { db, instance };

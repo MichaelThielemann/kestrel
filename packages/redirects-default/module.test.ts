@@ -59,6 +59,7 @@ async function boot(initial?: unknown) {
     find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
     logger: silentLogger,
     root: process.cwd(),
+    eventTriggers: [],
   };
   const config = configSchema.parse({ prefix: "site/" });
   const instance = await module.setup(config, deps);

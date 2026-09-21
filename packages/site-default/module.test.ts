@@ -87,6 +87,7 @@ describe("site/default module steps (schema-checked)", () => {
       find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
       logger: silentLogger,
       root: process.cwd(),
+      eventTriggers: [],
     };
     const instance = await module.setup(module.configSchema.parse({}), deps);
     return { instance, content };

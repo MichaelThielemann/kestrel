@@ -6,7 +6,8 @@ import type { Logger } from "./logger.ts";
 import type { RunObserver, Unobserve } from "./observer.ts";
 import type { Runner } from "./runner.ts";
 
-export interface Deps {
+/** Looking a contract up, plus the two ambient values every module needs. */
+export interface ContractLookup {
   get<T>(contract: Contract<T>): T;
   find<T>(contract: Contract<T>): T | undefined;
   logger: Logger;
@@ -18,6 +19,16 @@ export interface Deps {
    * instant falls back to `Date.now()`.
    */
   bootStartedAt?: number;
+}
+
+/** What a module's `setup()` receives. */
+export interface Deps extends ContractLookup {
+  /**
+   * The event triggers from `kestrel.config`, in configuration order. Available during `setup()`, i.e.
+   * before the pipelines are resolved, so a `pipeline` named here is not yet known to exist; boot rejects an
+   * unknown one afterwards.
+   */
+  eventTriggers: readonly EventEntry[];
 }
 
 export type JsonSchema = Record<string, unknown>;

@@ -41,6 +41,7 @@ function makeDeps(db: ReturnType<typeof createFakePersistence>): Deps {
     find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
     logger: silentLogger,
     root: process.cwd(),
+    eventTriggers: [],
   };
 }
 

@@ -16,6 +16,7 @@ async function makeInstance(overrides: { maxBytes?: number } = {}) {
     find: () => undefined,
     logger: silentLogger,
     root: process.cwd(),
+    eventTriggers: [],
   });
 }
 

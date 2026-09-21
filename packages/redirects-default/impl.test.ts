@@ -175,6 +175,7 @@ describe("module steps", () => {
       find: () => undefined,
       logger,
       root: process.cwd(),
+      eventTriggers: [],
     };
     const instance = await module.setup(module.configSchema.parse({ prefix: "site/" }), deps);
     return module.steps!(instance);

@@ -517,6 +517,24 @@ describe("boot", () => {
     expect(await db.all("log")).toHaveLength(1);
   });
 
+  it("gives a consumer-style module the configured event triggers during setup()", async () => {
+    let recorded: unknown;
+    const probe = defineModule({
+      name: "probe/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(_config, deps): Promise<null> {
+        recorded = deps.eventTriggers;
+        return null;
+      },
+    });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./probe", config: {} }], triggers: [{ event: "page.created", pipeline: "onCreated" }] };
+    kestrel = await boot({ config, modules: [...modules, probe], pipelines, logger: silentLogger });
+    expect(recorded).toEqual([{ event: "page.created", pipeline: "onCreated" }]);
+    expect(recorded).toEqual(kestrel.triggers.events);
+  });
+
   it("warns once for an event trigger no pipeline emits and no module declares", async () => {
     const warnings: { message: string; data: Record<string, unknown> | undefined }[] = [];
     const logger = { ...silentLogger, warn: (message: string, data?: Record<string, unknown>) => warnings.push({ message, data }) };

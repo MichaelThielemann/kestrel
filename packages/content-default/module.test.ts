@@ -41,6 +41,7 @@ async function boot() {
     find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
     logger: silentLogger,
     root: process.cwd(),
+    eventTriggers: [],
   };
   const config = configSchema.parse(MODEL);
   const instance = await module.setup(config, deps);
@@ -184,6 +185,7 @@ async function bootWithValidator() {
     find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
     logger: silentLogger,
     root: process.cwd(),
+    eventTriggers: [],
   };
   const content = await module.setup(configSchema.parse(CUSTOM_TYPE_MODEL), deps);
   const validator = await validateModule.setup(validateConfigSchema.parse({ schemas: CUSTOM_TYPE_SCHEMAS }), deps);

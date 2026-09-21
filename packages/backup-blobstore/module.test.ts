@@ -50,6 +50,7 @@ function moduleDeps(blobs: Blobstore, root: string): Deps {
     find: <T>(): T | undefined => undefined,
     logger: silentLogger,
     root,
+    eventTriggers: [],
   };
 }
 

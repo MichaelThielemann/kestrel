@@ -5,7 +5,7 @@ import type { ContextInput } from "./context.ts";
 import { missingMethods, type Contract } from "./defineContract.ts";
 import { checkDataflow } from "./dataflow.ts";
 import { configSchema, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
-import { stepPrefix, type Deps, type EventEntry, type Introspection, type ModuleDefinition, type StepDescription } from "./defineModule.ts";
+import { stepPrefix, type ContractLookup, type Deps, type EventEntry, type Introspection, type ModuleDefinition, type StepDescription } from "./defineModule.ts";
 import { buildManifest, type Manifest } from "./describe.ts";
 import type { PipelineDefinition } from "./definePipeline.ts";
 import { KestrelBootError } from "./errors.ts";
@@ -97,7 +97,7 @@ export interface UndeclaredRequiredWarning {
 
 export interface Kestrel extends Introspection {
   config: KestrelConfig;
-  contracts: Deps & { names(): string[] };
+  contracts: ContractLookup & { names(): string[] };
   steps: StepRegistry;
   pipelines: ReadonlyMap<string, ResolvedPipeline>;
   triggers: Triggers;
@@ -251,6 +251,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
   const parsed = configSchema.safeParse(input.config);
   if (!parsed.success) throw new KestrelBootError(CORE, `invalid kestrel.config: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
   const config = parsed.data;
+  const eventTriggers: readonly EventEntry[] = config.triggers.flatMap((t) => ("event" in t ? [{ event: t.event, pipeline: t.pipeline }] : []));
   if (input.modules.length !== config.modules.length) throw new KestrelBootError(CORE, `config lists ${config.modules.length} modules but ${input.modules.length} were loaded`);
 
   const configByModule = new Map<ModuleDefinition, unknown>();
@@ -289,6 +290,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     root,
     bootStartedAt,
   };
+  const deps: Deps = { ...contracts, eventTriggers };
   const instances = new Map<ModuleDefinition, unknown>();
   const parsedByModule = new Map<ModuleDefinition, unknown>();
   try {
@@ -298,7 +300,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
       parsedByModule.set(mod, cfg.data);
       let instance: unknown;
       try {
-        instance = await mod.setup(cfg.data, contracts);
+        instance = await mod.setup(cfg.data, deps);
       } catch (err) {
         throw new KestrelBootError(mod.name, `setup() threw: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -339,7 +341,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     }
 
     const routes: Route[] = [];
-    const events: EventEntry[] = [];
+    const events = eventTriggers;
     const crons: CronEntry[] = [];
     const byPattern = new Map<string, string>();
     for (const t of config.triggers) {
@@ -347,8 +349,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
       let route: Route | undefined;
       try {
         if ("http" in t) route = parseRoute(t.http, t.pipeline);
-        else if ("event" in t) events.push({ event: t.event, pipeline: t.pipeline });
-        else crons.push(createCronEntry(t.cron, t.pipeline));
+        else if (!("event" in t)) crons.push(createCronEntry(t.cron, t.pipeline));
       } catch (err) {
         throw new KestrelBootError(CORE, `invalid trigger for "${t.pipeline}": ${err instanceof Error ? err.message : String(err)}`);
       }

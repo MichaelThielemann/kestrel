@@ -26,6 +26,7 @@ describe("validate/jsonschema module", () => {
       find: () => undefined,
       logger: silentLogger,
       root: dir,
+      eventTriggers: [],
     }), "host");
     expect(instance.targets()).toEqual(["pages.title"]);
     expect(dir).not.toBe(process.cwd());
@@ -49,6 +50,7 @@ async function makeInstance(schemas: Record<string, unknown>): Promise<Validator
     find: () => undefined,
     logger: silentLogger,
     root: process.cwd(),
+    eventTriggers: [],
   }), "host");
 }
 
