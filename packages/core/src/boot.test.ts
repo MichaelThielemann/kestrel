@@ -679,6 +679,42 @@ describe("boot", () => {
     expect(message).toContain("events/second");
   });
 
+  it("two modules both registering events.emit fail at step registration, naming the second owner", async () => {
+    const direct = defineModule({
+      name: "events/direct",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      triggers: { event: () => () => {} },
+      steps: () => ({ emit: async (ctx: Context) => ok(ctx) }),
+      describe: () => ({ emit: { summary: "emit", reads: [], writes: [] } }),
+    });
+    const queueLike = defineModule({
+      name: "events/queue",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({ emit: async (ctx: Context) => ok(ctx) }),
+      describe: () => ({ emit: { summary: "emit", reads: [], writes: [] } }),
+    });
+    const config = { modules: [{ use: "./direct", config: {} }, { use: "./queue", config: {} }], triggers: [] };
+    await expect(boot({ config, modules: [direct, queueLike], pipelines: [], logger: silentLogger })).rejects.toThrow(
+      '[events/queue] step "events.emit" is already registered by events/direct',
+    );
+  });
+
+  it("a pipeline using events.emit without a delivery module fails to resolve", async () => {
+    const useEmit = definePipeline({ name: "useEmit", steps: ["events.emit:x"] });
+    const config = { modules: [{ use: "./store", config: { file: "x" } }], triggers: [] };
+    await expect(boot({ config, modules: [store], pipelines: [useEmit], logger: silentLogger })).rejects.toThrow('[pipelines/useEmit] unknown step "events.emit"');
+  });
+
   it("validates cron expressions at boot", async () => {
     await expect(boot({ config: { ...baseConfig, triggers: [{ cron: "x y", pipeline: "onCreated" }] }, modules, pipelines, logger: silentLogger })).rejects.toThrow(/5 fields/);
     kestrel = await boot({ config: { ...baseConfig, triggers: [{ cron: "0 3 * * *", pipeline: "onCreated" }] }, modules, pipelines, logger: silentLogger });
