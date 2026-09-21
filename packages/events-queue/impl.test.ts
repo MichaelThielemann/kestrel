@@ -76,26 +76,34 @@ describe("events/queue worker", () => {
     expect(stored.map((r) => r.pipeline).sort()).toEqual(["p1", "p2"]);
   });
 
-  it("a failing pipeline's retries do not re-run the other pipeline of the same event", async () => {
-    const { queue, clock, rows } = await make({ maxAttempts: 1 });
+  it("retries and dead-letter are counted per pipeline, not per event", async () => {
+    const { queue, clock, rows } = await make({ maxAttempts: 2 });
     let goodRuns = 0;
+    let badRuns = 0;
     const run: Runner = async (pipeline) => {
       if (pipeline === "good") {
         goodRuns++;
         return OK;
       }
+      badRuns++;
       return { runId: "r", status: 500, error: "bad", code: "INTERNAL", retryable: false };
     };
     queue.setDelivery([{ event: "x", pipeline: "good" }, { event: "x", pipeline: "bad" }], run);
     await queue.enqueue("x", {});
     await queue.tick();
-    const stored = await rows();
-    expect(stored.find((r) => r.pipeline === "good")).toMatchObject({ state: "done" });
-    expect(stored.find((r) => r.pipeline === "bad")).toMatchObject({ state: "dead", error: "bad" });
+    let stored = await rows();
+    expect(stored.find((r) => r.pipeline === "good")).toMatchObject({ state: "done", attempts: 0 });
+    expect(stored.find((r) => r.pipeline === "bad")).toMatchObject({ state: "pending", attempts: 1, error: "bad" });
     expect(goodRuns).toBe(1);
+    expect(badRuns).toBe(1);
+
     clock.t += 200_000;
     await queue.tick();
+    stored = await rows();
+    expect(stored.find((r) => r.pipeline === "good")).toMatchObject({ state: "done", attempts: 0 });
+    expect(stored.find((r) => r.pipeline === "bad")).toMatchObject({ state: "dead", attempts: 2, error: "bad" });
     expect(goodRuns).toBe(1);
+    expect(badRuns).toBe(2);
   });
 
   it("a redelivered row carries the same eventId on every attempt", async () => {
@@ -225,26 +233,82 @@ describe("events/queue worker", () => {
     expect(await rows()).toEqual([]);
   });
 
-  it("keeps a fanned row pending on a tick before setDelivery is ever called, instead of marking it done", async () => {
+  it("claims no rows at all on a tick before setDelivery is ever called", async () => {
     const { db, queue, rows } = await make();
     await db.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "p1", state: "pending", attempts: 0, createdAt: 1_000_000, availableAt: 1_000_000, lockedAt: null, lockedBy: null, finishedAt: null, error: null });
-    expect(await queue.tick()).toBe(1);
-    expect((await rows())[0]).toMatchObject({ state: "pending", attempts: 1 });
+    expect(await queue.tick()).toBe(0);
+    expect((await rows())[0]).toMatchObject({ state: "pending", attempts: 0 });
   });
 
-  it("fans out an unfanned row exactly once when two instances tick concurrently on one store", async () => {
-    const db = createFakePersistence();
+  it("fans out an unfanned row exactly once when two instances both read it before either writes", async () => {
+    const realDb = createFakePersistence();
+    let findManyCalls = 0;
+    const waiters: Array<() => void> = [];
+    const db: typeof realDb = {
+      ...realDb,
+      findMany: boundaryCast<typeof realDb.findMany>(async (collection: string, filter: Record<string, unknown>, options?: Record<string, unknown>) => {
+        const result = await realDb.findMany<QueueRow>(collection, filter, options);
+        findManyCalls++;
+        if (findManyCalls === 1) {
+          await new Promise<void>((resolve) => waiters.push(resolve));
+        } else {
+          for (const release of waiters.splice(0)) release();
+        }
+        return result;
+      }, "host"),
+    };
     const clock = { t: 1_000_000 };
     const queueA = await createEventsQueue(CONFIG, { db, logger: silentLogger, now: () => clock.t, instanceId: "a@host" });
     const queueB = await createEventsQueue(CONFIG, { db, logger: silentLogger, now: () => clock.t, instanceId: "b@host" });
-    await db.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: null, state: "pending", attempts: 0, createdAt: 1_000_000, availableAt: 1_000_000, lockedAt: null, lockedBy: null, finishedAt: null, error: null });
+    await realDb.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: null, state: "pending", attempts: 0, createdAt: 1_000_000, availableAt: 1_000_000, lockedAt: null, lockedBy: null, finishedAt: null, error: null });
     queueA.setDelivery([{ event: "x", pipeline: "p1" }, { event: "x", pipeline: "p2" }], async () => OK);
     queueB.setDelivery([{ event: "x", pipeline: "p1" }, { event: "x", pipeline: "p2" }], async () => OK);
 
     await Promise.all([queueA.fanOutUnfanned(), queueB.fanOutUnfanned()]);
 
-    const stored = expectOk(await db.findMany<QueueRow>(QUEUE, {}, { sort: { createdAt: "asc" } })).items;
+    const stored = expectOk(await realDb.findMany<QueueRow>(QUEUE, {}, { sort: { createdAt: "asc" } })).items;
     expect(stored.map((r) => r.pipeline).sort()).toEqual(["p1", "p2"]);
+  });
+
+  it("claims a row exactly once when two instances both read it as due before either updates it", async () => {
+    const realDb = createFakePersistence();
+    let findManyCalls = 0;
+    const waiters: Array<() => void> = [];
+    function isClaimQuery(filter: Record<string, unknown>): boolean {
+      const pipeline = filter.pipeline;
+      return !!pipeline && typeof pipeline === "object" && "ne" in pipeline;
+    }
+    const db: typeof realDb = {
+      ...realDb,
+      findMany: boundaryCast<typeof realDb.findMany>(async (collection: string, filter: Record<string, unknown>, options?: Record<string, unknown>) => {
+        const result = await realDb.findMany<QueueRow>(collection, filter, options);
+        if (!isClaimQuery(filter)) return result;
+        findManyCalls++;
+        if (findManyCalls === 1) {
+          await new Promise<void>((resolve) => waiters.push(resolve));
+        } else {
+          for (const release of waiters.splice(0)) release();
+        }
+        return result;
+      }, "host"),
+    };
+    const clock = { t: 1_000_000 };
+    const runsByInstance: Record<string, number> = { a: 0, b: 0 };
+    const queueA = await createEventsQueue(CONFIG, { db, logger: silentLogger, now: () => clock.t, instanceId: "a@host" });
+    const queueB = await createEventsQueue(CONFIG, { db, logger: silentLogger, now: () => clock.t, instanceId: "b@host" });
+    await realDb.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "p1", state: "pending", attempts: 0, createdAt: 1_000_000, availableAt: 1_000_000, lockedAt: null, lockedBy: null, finishedAt: null, error: null });
+    queueA.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      runsByInstance.a = (runsByInstance.a ?? 0) + 1;
+      return OK;
+    });
+    queueB.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      runsByInstance.b = (runsByInstance.b ?? 0) + 1;
+      return OK;
+    });
+
+    const [handledA, handledB] = await Promise.all([queueA.tick(), queueB.tick()]);
+    expect(handledA + handledB).toBe(1);
+    expect((runsByInstance.a ?? 0) + (runsByInstance.b ?? 0)).toBe(1);
   });
 
   it("leaves the original row when a fan-out copy fails to write, instead of deleting it", async () => {

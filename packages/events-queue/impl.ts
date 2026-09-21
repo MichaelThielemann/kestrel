@@ -156,12 +156,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     }
     let fanned = 0;
     let dropped = 0;
-    for (const stub of stale.value.items) {
-      const claimed = await db.updateOne<QueueRow>(QUEUE, stub.id, { lockedAt: now(), lockedBy: instanceId });
-      if (isErr(claimed)) continue;
-      const reread = await db.findOne<QueueRow>(QUEUE, { id: stub.id });
-      if (isErr(reread) || !reread.value || reread.value.lockedBy !== instanceId) continue;
-      const row = reread.value;
+    for (const row of stale.value.items) {
       const pipelines = delivery.table.get(row.name) ?? [];
       if (pipelines.length === 0) {
         const deleted = await db.deleteOne(QUEUE, row.id);
@@ -172,16 +167,16 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
         dropped++;
         continue;
       }
-      let allWritten = true;
+      let allPresent = true;
       for (const pipeline of pipelines) {
-        const created = await db.createOne<QueueRow>(QUEUE, { name: row.name, payload: row.payload, pipeline, state: "pending", attempts: 0, createdAt: row.createdAt, availableAt: now(), lockedAt: null, lockedBy: null, finishedAt: null, error: null });
-        if (isErr(created)) {
-          allWritten = false;
+        const created = await db.createOne<QueueRow>(QUEUE, { id: `${row.id}:${pipeline}`, name: row.name, payload: row.payload, pipeline, state: "pending", attempts: 0, createdAt: row.createdAt, availableAt: now(), lockedAt: null, lockedBy: null, finishedAt: null, error: null });
+        if (isErr(created) && created.error.code !== "CONFLICT") {
+          allPresent = false;
           logger.error("events/queue: cannot fan out a stored event, leaving the original for the next tick", { id: row.id, event: row.name, pipeline, error: created.error.message });
           break;
         }
       }
-      if (!allWritten) continue;
+      if (!allPresent) continue;
       const deleted = await db.deleteOne(QUEUE, row.id);
       if (isErr(deleted)) {
         logger.error("events/queue: fanned out a stored event but could not delete the original", { id: row.id, error: deleted.error.message });
@@ -195,6 +190,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
   }
 
   async function claim(): Promise<QueueRow[]> {
+    if (!delivery) return [];
     const at = now();
     const expired = await db.updateMany<QueueRow>(QUEUE, { state: "running", lockedAt: { lte: at - config.lockTtlSeconds * 1000 } }, { state: "pending", lockedAt: null, lockedBy: null });
     if (isErr(expired)) throw new Error(expired.error.message);
@@ -203,9 +199,9 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     if (isErr(due)) throw new Error(due.error.message);
     const claimed: QueueRow[] = [];
     for (const row of due.value.items) {
-      const locked = await db.updateOne<QueueRow>(QUEUE, row.id, { state: "running", lockedAt: at, lockedBy: instanceId });
-      if (isErr(locked)) continue;
-      claimed.push(locked.value);
+      const won = await db.updateMany<QueueRow>(QUEUE, { id: row.id, state: "pending" }, { state: "running", lockedAt: at, lockedBy: instanceId });
+      if (isErr(won) || won.value !== 1) continue;
+      claimed.push({ ...row, state: "running", lockedAt: at, lockedBy: instanceId });
     }
     return claimed;
   }
