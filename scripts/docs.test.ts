@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, loadConfig, loadModules, loadPipelines, silentLogger, type BootWarning, type StepDescription, type StepManifest } from "../packages/core/src/index.ts";
+import { generateOpenApi } from "../packages/openapi/index.ts";
 import { brief, collectingLogger, errors, formatBootWarning, inputCell, orderPackages, rootTable, splice, stepTable, unexpectedBootWarnings, unexpectedLogEntries, ROOT_ORDER, type LogEntry, type PackageInfo } from "./docs-render.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -196,6 +197,30 @@ describe("example config with an event trigger no pipeline emits", () => {
     await kestrel.stop();
     expect(unexpected).toEqual([{ code: "unemitted-event", message: "event trigger listens to an event no pipeline emits via events.emit and no module declares in emits", pipeline: "createPage", event: "content.bogus" }]);
     expect(unexpected.map(formatBootWarning)).toEqual(['pipeline "createPage", event "content.bogus": event trigger listens to an event no pipeline emits via events.emit and no module declares in emits']);
+  });
+});
+
+describe("example config's own steps", () => {
+  it("every result-writing step folds under the output rule: no undeclared-output warning (exemption: binary)", async () => {
+    const config = await loadConfig(join(example, "kestrel.config.ts"));
+    const modules = await loadModules(example, config);
+    const pipelines = await loadPipelines(example, config.pipelinesDir ?? "./pipelines");
+    const kestrel = await boot({ config: { ...config, http: null }, modules, pipelines, logger: silentLogger, root: example });
+    const undeclared = kestrel.warnings.filter((w) => w.code === "undeclared-output");
+    await kestrel.stop();
+    expect(undeclared).toEqual([]);
+  });
+
+  it("generates the same OpenAPI document as the checked-in examples/minimal/openapi.json", async () => {
+    const config = await loadConfig(join(example, "kestrel.config.ts"));
+    const modules = await loadModules(example, config);
+    const pipelines = await loadPipelines(example, config.pipelinesDir ?? "./pipelines");
+    const kestrel = await boot({ config: { ...config, http: null }, modules, pipelines, logger: silentLogger, root: example });
+    const pkg = JSON.parse(readFileSync(join(example, "package.json"), "utf8")) as { name?: string; version?: string };
+    const generated = generateOpenApi(kestrel, { title: pkg.name ?? "Kestrel", version: pkg.version ?? "0.0.0", servers: ["http://127.0.0.1:4000"] });
+    await kestrel.stop();
+    const onDisk = JSON.parse(readFileSync(join(example, "openapi.json"), "utf8")) as unknown;
+    expect(generated).toEqual(onDisk);
   });
 });
 

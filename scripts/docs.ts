@@ -6,6 +6,7 @@ import { boot, loadConfig, loadModules, loadPipelines, type Manifest, type Modul
 import { buildManifest } from "../packages/core/src/describe.ts";
 import { stepPrefix } from "../packages/core/src/defineModule.ts";
 import { StepRegistry } from "../packages/core/src/registry.ts";
+import { generateOpenApi } from "../packages/openapi/index.ts";
 import { collectingLogger, formatBootWarning, orderPackages, render, rootTable, splice, unexpectedBootWarnings, unexpectedLogEntries, type BootWarningKey, type LogEntry, type PackageInfo, type Section } from "./docs-render.ts";
 
 const ALLOWED_BOOT_WARNINGS: readonly BootWarningKey[] = [];
@@ -41,7 +42,12 @@ function allPackages(): PackageInfo[] {
 
 class UnexpectedBootWarnings extends Error {}
 
-async function exampleManifest(): Promise<Manifest> {
+interface ExampleOutputs {
+  manifest: Manifest;
+  openapi: Record<string, unknown>;
+}
+
+async function exampleOutputs(): Promise<ExampleOutputs> {
   const config = await loadConfig(join(example, "kestrel.config.ts"));
   const modules = await loadModules(example, config);
   const pipelines = await loadPipelines(example, config.pipelinesDir ?? "./pipelines");
@@ -54,7 +60,9 @@ async function exampleManifest(): Promise<Manifest> {
       const lines = [...unexpectedWarnings.map((w) => `  ${formatBootWarning(w)}`), ...unexpectedLogs.map((e) => `  ${e.level}: ${e.message}`)];
       throw new UnexpectedBootWarnings(`example config produced unexpected boot warnings:\n${lines.join("\n")}`);
     }
-    return kestrel.describe();
+    const pkg = JSON.parse(readFileSync(join(example, "package.json"), "utf8")) as { name?: string; version?: string };
+    const openapi = generateOpenApi(kestrel, { title: pkg.name ?? "Kestrel", version: pkg.version ?? "0.0.0", servers: ["http://127.0.0.1:4000"] });
+    return { manifest: kestrel.describe(), openapi };
   } finally {
     await kestrel.stop().catch(() => undefined);
   }
@@ -78,7 +86,7 @@ async function standalone(pkg: Package): Promise<Section> {
 }
 
 async function main(): Promise<void> {
-  const manifest = await exampleManifest();
+  const { manifest, openapi } = await exampleOutputs();
   const byUse = new Map(manifest.modules.map((m) => [m.use, m]));
   const outputs = new Map<string, string>();
   for (const pkg of packages()) {
@@ -88,6 +96,7 @@ async function main(): Promise<void> {
     outputs.set(readmeFile, splice(existsSync(readmeFile) ? readFileSync(readmeFile, "utf8") : `# ${section.module.name}\n`, render(section), rel(readmeFile)));
   }
   outputs.set(join(example, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  outputs.set(join(example, "openapi.json"), `${JSON.stringify(openapi, null, 2)}\n`);
   const rootReadmeFile = join(workspace, "README.md");
   outputs.set(rootReadmeFile, splice(readFileSync(rootReadmeFile, "utf8"), rootTable(allPackages()), rel(rootReadmeFile)));
 
