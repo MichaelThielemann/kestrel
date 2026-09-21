@@ -3,7 +3,11 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { StepDescription, StepDescriptions } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { runPipeline, type RunPipelineOptions } from "@michaelthielemann/kestrel/testing/runPipeline";
+import { AUTHN_STEPS } from "./authn.steps.ts";
 import { FAKE_AUTHN_WRITES } from "./testing/fakeAuthn.ts";
+
+/** The bare step keys of {@link AUTHN_STEPS}, in the shape `writesByStepOf` and each module's own fixture expect. */
+export const AUTHN_STEP_KEYS: readonly string[] = AUTHN_STEPS.steps.map((step) => step.slice("authn.".length));
 
 export interface AuthnStepsFixture extends RunPipelineOptions {
   credentials: Record<string, string>;
@@ -23,6 +27,11 @@ const identifyPipeline = definePipeline({ name: "identify", steps: ["authn.ident
 const requirePipeline = definePipeline({ name: "require", steps: ["authn.requireUser"] });
 const loadIdentityPipeline = definePipeline({ name: "loadIdentity", steps: ["authn.requireUser", "authn.loadIdentity"] });
 const logoutPipeline = definePipeline({ name: "logout", steps: ["authn.requireUser", "authn.logout"] });
+
+const EXERCISED = new Set<string>([loginPipeline, identifyPipeline, requirePipeline, loadIdentityPipeline, logoutPipeline].flatMap((p) => p.steps));
+for (const step of AUTHN_STEPS.steps) {
+  if (!EXERCISED.has(step)) throw new Error(`authnStepsContractTests: no pipeline exercises "${step}"`);
+}
 
 /** Shared behaviour of the five steps authn-single and authn-multi both register: login, identifyUser, requireUser, loadIdentity, logout. */
 export function authnStepsContractTests(make: () => Promise<AuthnStepsFixture>) {
@@ -63,9 +72,9 @@ export function authnStepsContractTests(make: () => Promise<AuthnStepsFixture>) 
       expect(identified.status).toBe(200);
     });
 
-    it("declares the same writes as the fake for each of the five steps", async () => {
+    it("declares the same writes as the fake for every step of AUTHN_STEPS", async () => {
       const { writesByStep } = await make();
-      for (const step of Object.keys(FAKE_AUTHN_WRITES)) {
+      for (const step of AUTHN_STEPS.steps) {
         expect(writesByStep[step], `writes for "${step}"`).toEqual(FAKE_AUTHN_WRITES[step]);
       }
     });

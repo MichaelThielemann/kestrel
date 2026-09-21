@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { authnStepsContractTests, writesByStepOf } from "@michaelthielemann/kestrel-contracts/authn.steps.contract.test";
+import { AUTHN_STEP_KEYS, authnStepsContractTests, writesByStepOf } from "@michaelthielemann/kestrel-contracts/authn.steps.contract.test";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -22,13 +22,11 @@ function provesObjectBinding(moduleName: string, step: string): void {
   appendFileSync(OBJECT_BINDING_PROOF_FILE, `${moduleName}#${step}\n`);
 }
 
-const SHARED_STEPS = ["login", "identifyUser", "requireUser", "loadIdentity", "logout"];
-
 authnStepsContractTests(async () => {
   const { instance } = await boot();
   const credentials = { username: "alice", password: "long-enough" };
   await runPipeline(definePipeline({ name: "createUser", steps: ["authn.createUser"] }), { body: credentials }, { modules: [{ module, instance }] });
-  return { modules: [{ module, instance }], credentials, writesByStep: writesByStepOf("authn", module.describe!(instance), SHARED_STEPS) };
+  return { modules: [{ module, instance }], credentials, writesByStep: writesByStepOf("authn", module.describe!(instance), AUTHN_STEP_KEYS) };
 });
 
 function makeDeps(db: ReturnType<typeof createFakePersistence>): Deps {
