@@ -8,6 +8,7 @@ import { loadConfig, loadModules, loadPipelines } from "@michaelthielemann/kestr
 import type { RevisionPage } from "@michaelthielemann/kestrel-contracts/revisions";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { KestrelConfigInput } from "@michaelthielemann/kestrel/defineConfig";
+import type { PipelineDefinition } from "@michaelthielemann/kestrel/definePipeline";
 
 const root = dirname(fileURLToPath(import.meta.url));
 
@@ -111,11 +112,25 @@ describe("examples/minimal revisions wiring", () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
     const modules = await loadModules(root, config);
     const pipelines = await loadPipelines(root, "pipelines");
-    const reordered = pipelines.map((p) => (p.name === "reassignRevisionAuthor" ? { ...p, steps: [...p.steps].reverse() } : p));
-    await expect(boot({ config: { ...config, http: null }, modules, pipelines: reordered, root })).rejects.toThrow(
+    const swapped = pipelines.map((p) => {
+      if (p.name !== "reassignRevisionAuthor") return p;
+      const verify = p.steps.indexOf("authn.verifyUser:result.reassignTo");
+      const reassign = p.steps.indexOf("revisions.reassignAuthor");
+      const steps = [...p.steps];
+      [steps[verify], steps[reassign]] = [steps[reassign]!, steps[verify]!];
+      return { ...p, steps };
+    });
+    await expect(boot({ config: { ...config, http: null }, modules, pipelines: swapped, root })).rejects.toThrow(
       /\[pipelines\/reassignRevisionAuthor\] step "revisions\.reassignAuthor" optionally reads "verifiedUser" but step "authn\.verifyUser:result\.reassignTo" writes it later/,
     );
-    await expect(boot({ config: { ...config, http: null }, modules, pipelines: reordered, root })).rejects.toThrow(KestrelBootError);
+    await expect(boot({ config: { ...config, http: null }, modules, pipelines: swapped, root })).rejects.toThrow(KestrelBootError);
+  });
+
+  it("boots when the verified target is written both before and after the reassign step", async () => {
+    const { dispose } = await bootIsolated((pipelines) =>
+      pipelines.map((p) => (p.name === "retryReassignRevisionAuthor" ? { ...p, steps: [...p.steps, "authn.verifyUser:reassignTo"] } : p)),
+    );
+    await dispose();
   });
 });
 
@@ -304,7 +319,7 @@ describe("content model wiring", () => {
   });
 });
 
-async function bootIsolated(): Promise<{ kestrel: Awaited<ReturnType<typeof boot>>; dispose: () => Promise<void> }> {
+async function bootIsolated(withPipelines?: (pipelines: PipelineDefinition[]) => PipelineDefinition[]): Promise<{ kestrel: Awaited<ReturnType<typeof boot>>; dispose: () => Promise<void> }> {
   const configInput = await loadConfig(join(root, "kestrel.config.ts"));
   const dataDir = mkdtempSync(join(tmpdir(), "kestrel-minimal-"));
   const isolated: KestrelConfigInput = {
@@ -324,7 +339,8 @@ async function bootIsolated(): Promise<{ kestrel: Awaited<ReturnType<typeof boot
     }),
   };
   const modules = await loadModules(root, isolated);
-  const pipelines = await loadPipelines(root, "pipelines");
+  const loaded = await loadPipelines(root, "pipelines");
+  const pipelines = withPipelines ? withPipelines(loaded) : loaded;
   const kestrel = await boot({ config: isolated, modules, pipelines, root, validateOutput: true });
   await kestrel.start();
   return {
