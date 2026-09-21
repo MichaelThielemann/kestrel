@@ -6799,18 +6799,23 @@
                           }
                         },
                         "required": [
+                          "alt",
                           "checksum",
                           "contentType",
                           "createdAt",
+                          "description",
                           "filename",
                           "folder",
+                          "height",
                           "id",
                           "key",
                           "provenance",
                           "size",
                           "status",
+                          "title",
                           "updatedAt",
-                          "variants"
+                          "variants",
+                          "width"
                         ]
                       }
                     },
@@ -7025,7 +7030,12 @@
                         "status",
                         "createdAt",
                         "updatedAt",
-                        "provenance"
+                        "provenance",
+                        "width",
+                        "height",
+                        "alt",
+                        "title",
+                        "description"
                       ]
                     },
                     {
@@ -7145,7 +7155,12 @@
                               "status",
                               "createdAt",
                               "updatedAt",
-                              "provenance"
+                              "provenance",
+                              "width",
+                              "height",
+                              "alt",
+                              "title",
+                              "description"
                             ]
                           }
                         },
@@ -7618,18 +7633,23 @@
                     }
                   },
                   "required": [
+                    "alt",
                     "checksum",
                     "contentType",
                     "createdAt",
+                    "description",
                     "filename",
                     "folder",
+                    "height",
                     "id",
                     "key",
                     "provenance",
                     "size",
                     "status",
+                    "title",
                     "updatedAt",
-                    "variants"
+                    "variants",
+                    "width"
                   ]
                 }
               }
@@ -7858,7 +7878,12 @@
                     "status",
                     "createdAt",
                     "updatedAt",
-                    "provenance"
+                    "provenance",
+                    "width",
+                    "height",
+                    "alt",
+                    "title",
+                    "description"
                   ]
                 }
               }

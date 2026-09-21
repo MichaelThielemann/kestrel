@@ -319,6 +319,13 @@ describe("media/default steps via runPipeline", () => {
     expect(emitted).toBe(1);
   });
 
+  it("upload: multiple files return items and errors matching the declared output schema", async () => {
+    const { media } = await makeInstance();
+    const res = await runPipeline(pipeline("media.upload"), { files: [file("a.png"), file("b.png", new Uint8Array([1, 2, 3]))] }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect(boundaryCast<{ items: unknown[] }>(res.result, "host").items).toHaveLength(2);
+  });
+
   it("get: query.locale is validated and coerced", async () => {
     const { media } = await makeInstance();
     const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) })).item;

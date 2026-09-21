@@ -3118,7 +3118,12 @@
                 "status",
                 "createdAt",
                 "updatedAt",
-                "provenance"
+                "provenance",
+                "width",
+                "height",
+                "alt",
+                "title",
+                "description"
               ]
             },
             {
@@ -3238,7 +3243,12 @@
                       "status",
                       "createdAt",
                       "updatedAt",
-                      "provenance"
+                      "provenance",
+                      "width",
+                      "height",
+                      "alt",
+                      "title",
+                      "description"
                     ]
                   }
                 },
@@ -3481,7 +3491,12 @@
             "status",
             "createdAt",
             "updatedAt",
-            "provenance"
+            "provenance",
+            "width",
+            "height",
+            "alt",
+            "title",
+            "description"
           ]
         },
         "errors": {
@@ -3620,7 +3635,12 @@
             "status",
             "createdAt",
             "updatedAt",
-            "provenance"
+            "provenance",
+            "width",
+            "height",
+            "alt",
+            "title",
+            "description"
           ]
         },
         "errors": {
@@ -3782,7 +3802,12 @@
                   "status",
                   "createdAt",
                   "updatedAt",
-                  "provenance"
+                  "provenance",
+                  "width",
+                  "height",
+                  "alt",
+                  "title",
+                  "description"
                 ]
               }
             },
@@ -12012,7 +12037,12 @@
                 "status",
                 "createdAt",
                 "updatedAt",
-                "provenance"
+                "provenance",
+                "width",
+                "height",
+                "alt",
+                "title",
+                "description"
               ]
             },
             "errors": {
@@ -14061,7 +14091,12 @@
                       "status",
                       "createdAt",
                       "updatedAt",
-                      "provenance"
+                      "provenance",
+                      "width",
+                      "height",
+                      "alt",
+                      "title",
+                      "description"
                     ]
                   }
                 },
@@ -19482,7 +19517,12 @@
                 "status",
                 "createdAt",
                 "updatedAt",
-                "provenance"
+                "provenance",
+                "width",
+                "height",
+                "alt",
+                "title",
+                "description"
               ]
             },
             "errors": {
@@ -20270,7 +20310,12 @@
                     "status",
                     "createdAt",
                     "updatedAt",
-                    "provenance"
+                    "provenance",
+                    "width",
+                    "height",
+                    "alt",
+                    "title",
+                    "description"
                   ]
                 },
                 {
@@ -20390,7 +20435,12 @@
                           "status",
                           "createdAt",
                           "updatedAt",
-                          "provenance"
+                          "provenance",
+                          "width",
+                          "height",
+                          "alt",
+                          "title",
+                          "description"
                         ]
                       }
                     },
