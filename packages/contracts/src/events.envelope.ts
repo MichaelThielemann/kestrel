@@ -61,6 +61,6 @@ export function withEventIdentity(event: string, data: EventData): EventData & E
     return boundaryCast<EventData & EventIdentity>(data, "json");
   }
   const out: Record<string, unknown> = { ...identity };
-  for (const [key, value] of Object.entries(data)) if (!(key in identity)) out[key] = value;
+  for (const [key, value] of Object.entries(data)) if (!Object.hasOwn(identity, key)) out[key] = value;
   return boundaryCast<EventData & EventIdentity>(out, "json");
 }

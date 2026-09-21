@@ -104,4 +104,13 @@ describe("withEventIdentity", () => {
     expect(out.a).toBe(1);
     expect(Object.keys(out).sort()).toEqual(["a", "at", "event", "eventId"]);
   });
+
+  it("keeps emitter fields named like a prototype property", () => {
+    const out = withEventIdentity("x.happened", { constructor: "mine", toString: "x", hasOwnProperty: 1, real: 2 });
+    expect(Reflect.get(out, "constructor")).toBe("mine");
+    expect(Reflect.get(out, "toString")).toBe("x");
+    expect(Reflect.get(out, "hasOwnProperty")).toBe(1);
+    expect(out.real).toBe(2);
+    expect(Object.keys(out).sort()).toEqual(["at", "constructor", "event", "eventId", "hasOwnProperty", "real", "toString"]);
+  });
 });
