@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, definePipeline, silentLogger } from "@michaelthielemann/kestrel";
-import { EVENTS } from "@michaelthielemann/kestrel-contracts/events";
+import { EVENTS, type EventData } from "@michaelthielemann/kestrel-contracts/events";
+import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/events.envelope";
+import { eventDeliveryStepTests, type EventDeliveryFixture } from "@michaelthielemann/kestrel-contracts/events.steps.contract.test";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
+import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import type { Context } from "@michaelthielemann/kestrel/context";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
@@ -12,8 +15,38 @@ import { ok } from "@michaelthielemann/kestrel/result";
 import type { RunResult, Runner } from "@michaelthielemann/kestrel/runner";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { createEventsInmemory } from "@michaelthielemann/kestrel-events-inmemory/impl";
-import type { EventsQueue } from "./impl.ts";
+import { createEventsQueue, type EventsQueue } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
+
+function jsonCopy(value: unknown): EventData {
+  return boundaryCast<EventData>(JSON.parse(JSON.stringify(value)), "json");
+}
+
+async function eventDeliveryFixture(): Promise<EventDeliveryFixture> {
+  const db = createFakePersistence();
+  const queue = await createEventsQueue({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5], lockTtlSeconds: 300, retentionDays: 7 }, { db, logger: silentLogger });
+  queue.setDelivery([{ event: "x.happened", pipeline: "onX" }], async () => ({ runId: "r", status: 200 }));
+  const delivered: EventData[] = [];
+  const spied: EventsQueue = {
+    ...queue,
+    async enqueue(name, data) {
+      delivered.push(jsonCopy(data));
+      await queue.enqueue(name, data);
+    },
+  };
+  return {
+    steps: module.steps!(spied),
+    describe: module.describe!(spied),
+    async raise(event, data) {
+      await spied.enqueue(event, withEventIdentity(event, data));
+    },
+    async delivered() {
+      return delivered;
+    },
+  };
+}
+
+eventDeliveryStepTests(eventDeliveryFixture);
 
 const FAIL_RUN: Runner = async () => ({ runId: "r", status: 500, error: "no", code: "INTERNAL", retryable: false });
 
@@ -181,5 +214,60 @@ describe("events/queue in a booted instance", () => {
     expect(seen?.trigger).toEqual({ kind: "event", name: "doc.created" });
     expect(seen?.payload).toMatchObject({ event: "doc.created", id: "doc-1", runId: res.runId });
     await kestrel.stop();
+  });
+
+  it("queues a contract-level events@1 emit, and a failed insert rejects it with an AggregateError", async () => {
+    const db = createFakePersistence();
+    const persistenceCapturing = defineModule({
+      name: "persistence/fake",
+      provides: [PERSISTENCE],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return db;
+      },
+    });
+    const migrationsLike = defineModule({
+      name: "migrations/fake",
+      provides: [],
+      requires: [PERSISTENCE, EVENTS],
+      configSchema: z.object({}).strict(),
+      emits: ["migrations.applied"],
+      async setup(_config, deps): Promise<null> {
+        await deps.get(EVENTS).emit("migrations.applied", { migrations: ["1"] });
+        return null;
+      },
+    });
+    const onMigrated = definePipeline({ name: "onMigrated", steps: ["probe.noop"] });
+    const probe = defineModule({
+      name: "probe/noop",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ noop: async (ctx: Context) => ok(ctx) }),
+      describe: () => ({ noop: { summary: "n", reads: [], writes: [] } }),
+    });
+    const bootConfig = {
+      config: { modules: [{ use: "./persistence.ts", config: {} }, { use: "./events.ts", config: {} }, { use: "@michaelthielemann/kestrel-events-queue", config: {} }, { use: "./migrations.ts", config: {} }, { use: "./probe.ts", config: {} }], triggers: [{ event: "migrations.applied", pipeline: "onMigrated" }], http: null },
+      modules: [persistenceCapturing, bus, module, migrationsLike, probe],
+      pipelines: [onMigrated],
+      logger: silentLogger,
+    };
+    const kestrel = await boot(bootConfig);
+    expect(expectOk(await db.count("events_queue", { name: "migrations.applied" }))).toBe(1);
+    await kestrel.stop();
+
+    db.failNext("TRANSIENT");
+    let caught: unknown;
+    try {
+      await boot(bootConfig);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    if (caught instanceof Error) expect(caught.message).toMatch(/setup\(\) threw/);
   });
 });
