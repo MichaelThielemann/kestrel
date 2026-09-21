@@ -13,7 +13,7 @@ export type QueueState = "pending" | "running" | "done" | "dead";
 export interface QueueRow extends Document {
   name: string;
   payload: EventData;
-  /** The one pipeline this row delivers to; `null` means the row is not fanned out yet. */
+  /** The one pipeline this row delivers to; `null` means the row is not fanned out to a pipeline yet. */
   pipeline: string | null;
   state: QueueState;
   attempts: number;
@@ -46,7 +46,7 @@ export interface QueueStatus {
 export interface DeadEntry {
   id: string;
   name: string;
-  /** The pipeline this row failed to deliver to; `""` for a row stored before pipeline-level delivery. */
+  /** The pipeline this row failed to deliver to; `""` when the row names no pipeline. */
   pipeline: string;
   attempts: number;
   error: string;

@@ -64,9 +64,10 @@ Three forms, all equal-standing inputs to the same runner:
   `*name` as the last segment captures the rest of the path; exact routes beat wildcards. Per
   segment the order is literal, then `:param`, then the end of the route, then `*rest`, so a literal
   route wins whenever it was registered. Route parameters arrive as `ctx.params`.
-- **event** — needs a module providing the event trigger hook (`events-inmemory` or
-  `events-queue`); without one, configured event triggers abort the boot. An event that nothing
-  emits is a boot warning, not an error.
+- **event** — needs a module providing the event trigger hook (`events-direct` or
+  `events-queue`; the bus module `events-inmemory` provides `events@1` but no hook); without one,
+  configured event triggers abort the boot. An event that nothing emits is a boot warning, not an
+  error.
 - **cron** — five fields (minute, hour, day of month, month, day of week) with `*`, lists, ranges
   and `/step`. The scheduler ticks once a minute; if the previous run of that pipeline is still
   going, the tick is skipped and logged.

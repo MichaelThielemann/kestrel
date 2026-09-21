@@ -27,7 +27,8 @@ applies to both; embedded, `status`/`result` correspond to the HTTP status/body.
 
 ```
 pnpm add @michaelthielemann/kestrel @michaelthielemann/kestrel-h3 \
-  @michaelthielemann/kestrel-events-inmemory @michaelthielemann/kestrel-persistence-sqlite \
+  @michaelthielemann/kestrel-events-inmemory @michaelthielemann/kestrel-events-direct \
+  @michaelthielemann/kestrel-persistence-sqlite \
   @michaelthielemann/kestrel-authn-multi @michaelthielemann/kestrel-authz-roles \
   @michaelthielemann/kestrel-content-default @michaelthielemann/kestrel-site-default   # … depending on the config
 ```
@@ -40,6 +41,7 @@ set `http: null` in the config (Nuxt is the server). Then:
 import { boot } from "@michaelthielemann/kestrel";
 import { createKestrelHandler } from "@michaelthielemann/kestrel-h3";
 import eventsInmemory from "@michaelthielemann/kestrel-events-inmemory";
+import eventsDirect from "@michaelthielemann/kestrel-events-direct";
 import persistenceSqlite from "@michaelthielemann/kestrel-persistence-sqlite";
 import authnMulti from "@michaelthielemann/kestrel-authn-multi";
 import authzRoles from "@michaelthielemann/kestrel-authz-roles";
@@ -52,7 +54,7 @@ import resolvePage from "~~/pipelines/resolvePage";
 
 export const kestrel = await boot({
   config,
-  modules: [eventsInmemory, persistenceSqlite, authnMulti, authzRoles, contentDefault, siteDefault],   // order matches config.modules
+  modules: [eventsInmemory, eventsDirect, persistenceSqlite, authnMulti, authzRoles, contentDefault, siteDefault],   // order matches config.modules
   pipelines: [login, resolvePage /* … */],
 });
 await kestrel.start();                     // event and cron triggers; no HTTP because of http: null
@@ -708,14 +710,15 @@ Stats: `failed` counts every run or step whose outcome is not ok — 4xx include
 
 ### Event queue
 
-The example instance runs `events-inmemory`, so it wires no queue routes. A deployment that swaps
-in `events-queue` gets four admin steps to put behind triggers of its own; the paths below are a
-suggestion, the step names and response shapes are not.
+The example instance runs `events-direct` for inline delivery, so it wires no queue routes. A
+deployment that swaps in `events-queue` (next to `events-inmemory`, never in place of it) gets
+four admin steps to put behind triggers of its own; the paths below are a suggestion, the step
+names and response shapes are not.
 
 | Suggested route | Step | Response |
 |---|---|---|
 | GET `/admin/events/status` | `events.readQueueStatus` | `{ pending, running, dead, done24h, oldestPendingAt, worker: { running, lastTickAt } }` – queue counters and the worker of this process |
-| GET `/admin/events/dead` | `events.listDead` | `{ items: [{ id, name, attempts, error, createdAt, availableAt }] }` – most recently failed first (`?limit`, max 500) |
+| GET `/admin/events/dead` | `events.listDead` | `{ items: [{ id, name, pipeline, attempts, error, createdAt, availableAt }] }` – most recently failed first (`?limit`, max 500) |
 | POST `/admin/events/retry` | `events.retryDead:all` | `{ retried }` – requeues every dead-letter event with `attempts` reset |
 | POST `/admin/events/dead/:id/retry` | `events.retryDead:one` | `{ retried: 1 }` – requeues one; 404 when there is no dead event with that id |
 
