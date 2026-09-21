@@ -977,7 +977,8 @@
       },
       "steps": [
         "authz.require",
-        "authz.describeAccess"
+        "authz.describeAccess",
+        "authz.listRoles"
       ],
       "eventHook": false,
       "emits": []
@@ -5281,13 +5282,12 @@
       "module": "authz/roles",
       "factory": false,
       "description": {
-        "summary": "The caller's concrete permissions and the configured role names",
+        "summary": "The caller's concrete permissions",
         "reads": [
           "identity"
         ],
         "writes": [
-          "result.permissions",
-          "result.roles"
+          "result.permissions"
         ],
         "extendsOutput": {
           "type": "object",
@@ -5297,7 +5297,31 @@
               "items": {
                 "type": "string"
               }
-            },
+            }
+          },
+          "required": [
+            "permissions"
+          ]
+        },
+        "security": "required",
+        "errors": {
+          "401": "not authenticated"
+        }
+      }
+    },
+    {
+      "name": "authz.listRoles",
+      "module": "authz/roles",
+      "factory": false,
+      "description": {
+        "summary": "The configured role names, in config order",
+        "reads": [],
+        "writes": [
+          "result.roles"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
             "roles": {
               "type": "array",
               "items": {
@@ -5306,13 +5330,8 @@
             }
           },
           "required": [
-            "permissions",
             "roles"
           ]
-        },
-        "security": "required",
-        "errors": {
-          "401": "not authenticated"
         }
       }
     },
@@ -14309,6 +14328,69 @@
       ]
     },
     {
+      "name": "listRoles",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:users.manage",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission users.manage",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission users.manage"
+            }
+          }
+        },
+        {
+          "spec": "authz.listRoles",
+          "name": "authz.listRoles",
+          "module": "authz/roles",
+          "description": {
+            "summary": "The configured role names, in config order",
+            "reads": [],
+            "writes": [
+              "result.roles"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "roles"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "listUsers",
       "steps": [
         {
@@ -14599,13 +14681,12 @@
           "name": "authz.describeAccess",
           "module": "authz/roles",
           "description": {
-            "summary": "The caller's concrete permissions and the configured role names",
+            "summary": "The caller's concrete permissions",
             "reads": [
               "identity"
             ],
             "writes": [
-              "result.permissions",
-              "result.roles"
+              "result.permissions"
             ],
             "extendsOutput": {
               "type": "object",
@@ -14615,17 +14696,10 @@
                   "items": {
                     "type": "string"
                   }
-                },
-                "roles": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
                 }
               },
               "required": [
-                "permissions",
-                "roles"
+                "permissions"
               ]
             },
             "security": "required",
@@ -20144,6 +20218,11 @@
         "method": "GET",
         "path": "/users",
         "pipeline": "listUsers"
+      },
+      {
+        "method": "GET",
+        "path": "/roles",
+        "pipeline": "listRoles"
       },
       {
         "method": "POST",

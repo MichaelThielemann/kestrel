@@ -158,7 +158,7 @@ never relies on that.
 |---|---|---|---|
 | POST | `/login` | `{ username, password }` | `{ token, identity: { id, claims: { username, roles } } }`; 401 on wrong credentials; 429 after 5 failed attempts/minute per IP |
 | POST | `/logout` | – | `{ ok: true }` |
-| GET | `/me` | – | `{ id, claims: { username, roles }, permissions, roles }`; `permissions` are the caller's concrete, granted permissions and `roles` are the configured role names – both from the server, so a client needs no copy of the role table or the pattern matcher |
+| GET | `/me` | – | `{ id, claims: { username, roles }, permissions }`; `permissions` are the caller's concrete, granted permissions from the server, so a client needs no copy of the pattern matcher |
 | POST | `/me/password` | `{ currentPassword, newPassword }` | `{ ok: true }`; ends every other session |
 
 ## Users (permission `users.manage`, i.e. admin)
@@ -166,6 +166,7 @@ never relies on that.
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/users` | – | `[{ id, username, roles, active, createdAt }]` |
+| GET | `/roles` | – | `{ roles }`, the configured role names in config order – gated by `users.manage` like the rest of user management, not by every authenticated caller |
 | POST | `/users` | `{ username, password, roles? }` | user; 409 (`CONFLICT`) on a duplicate, 400 (`VALIDATION`) on a password that's too short |
 | GET | `/users/:id` | – | user |
 | PATCH | `/users/:id` | `{ username?, roles? }` | user; 400 (`VALIDATION`) without either field, 409 (`CONFLICT`) on a duplicate name, 409 (`LAST_ADMIN`) when the last admin would lose the permission; a role change ends that user's sessions |

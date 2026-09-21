@@ -6301,7 +6301,7 @@
     "/me": {
       "get": {
         "operationId": "me",
-        "summary": "Require a valid session → Current identity → The caller's concrete permissions and the configured role names",
+        "summary": "Require a valid session → Current identity → The caller's concrete permissions",
         "tags": [
           "me"
         ],
@@ -6332,19 +6332,12 @@
                       "items": {
                         "type": "string"
                       }
-                    },
-                    "roles": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
                     }
                   },
                   "required": [
                     "claims",
                     "id",
-                    "permissions",
-                    "roles"
+                    "permissions"
                   ]
                 }
               }
@@ -10440,6 +10433,98 @@
             }
           }
         }
+      }
+    },
+    "/roles": {
+      "get": {
+        "operationId": "listRoles",
+        "summary": "Require a valid session → Requires permission users.manage → The configured role names, in config order",
+        "tags": [
+          "roles"
+        ],
+        "x-kestrel-pipeline": "listRoles",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:users.manage",
+          "authz.listRoles"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "roles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "roles"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission users.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "temporarily unavailable; retry after the Retry-After header",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/settings": {

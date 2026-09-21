@@ -23,16 +23,26 @@
   subpath-only), failing with the step name and the JSON path on a mismatch. A step whose write is
   declared optional (`result?`) and left `ctx.result` unchanged is skipped. `validateOutput`
   defaults to off, so production pays nothing for it unless a deployment opts in.
-- `authz-roles`: new step `authz.describeAccess`, meant to run after `authn.loadIdentity`. It writes
-  `result.permissions` (the caller's roles' patterns expanded against every permission a booted
-  pipeline requires via an `authz.require:<perm>` argument) and `result.roles` (the configured role
-  names, in config order), so a client can learn its concrete permissions and the instance's role
-  names without a copy of the role table or the pattern matcher. `examples/minimal`'s `me` pipeline
-  now runs it.
+- `authz-roles`: two new steps. `authz.describeAccess`, meant to run after `authn.loadIdentity`,
+  writes `result.permissions` — the caller's roles' patterns expanded against every permission a
+  booted pipeline requires via an `authz.require:<perm>` argument — so a client can learn its
+  concrete permissions without a copy of the pattern matcher. `authz.listRoles` writes
+  `result.roles`, the configured role names in config order; it performs no check of its own and is
+  meant to sit behind an `authz.require:<perm>` step, so only callers who may already manage the
+  instance (not every authenticated caller) learn the role table. `examples/minimal`'s `me`
+  pipeline runs `describeAccess`; a new `listRoles` pipeline (`GET /roles`, behind
+  `authz.require:users.manage`) runs `listRoles`.
 - `persistence-sqlite`, `redirects-default`, `site-default`: `createOne`/`findOne`/`updateOne` now
   declare `output: { type: "object" }`; `redirects.lookup` declares its real
   `{ redirect: { to, status } }`; `site.resolveLinks` restates the `_links` field as its own
   `extendsOutput`, alongside `site.resolve`'s existing `output`.
+
+### Fixed
+
+- `authz-roles`: a caller whose role claim is `constructor`, `toString`, `valueOf`,
+  `hasOwnProperty`, `__proto__` or another `Object.prototype` key no longer trips an inherited,
+  non-array value and a 500; role lookups go through a `Map`, not a plain object index, in both
+  `authz.can`/`authz.require` and the new `describeAccess`.
 
 ### Changed
 

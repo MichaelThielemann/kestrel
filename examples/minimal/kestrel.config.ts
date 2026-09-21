@@ -62,6 +62,7 @@ export default defineConfig({
     { http: "GET /me", pipeline: "me" },
     { http: "POST /me/password", pipeline: "changePassword" },
     { http: "GET /users", pipeline: "listUsers" },
+    { http: "GET /roles", pipeline: "listRoles" },
     { http: "POST /users", pipeline: "createUser" },
     { http: "GET /users/:id", pipeline: "getUser" },
     { http: "PATCH /users/:id", pipeline: "updateUser" },
