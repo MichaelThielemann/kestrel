@@ -1455,6 +1455,9 @@
                           "eventHook": {
                             "type": "boolean"
                           },
+                          "atomicScope": {
+                            "type": "boolean"
+                          },
                           "emits": {
                             "type": "array",
                             "items": {
@@ -1472,6 +1475,7 @@
                           "config",
                           "steps",
                           "eventHook",
+                          "atomicScope",
                           "emits"
                         ]
                       }
@@ -1644,6 +1648,9 @@
                                     "reads",
                                     "writes"
                                   ]
+                                },
+                                "atomic": {
+                                  "type": "number"
                                 }
                               },
                               "required": [

@@ -59,6 +59,8 @@ Not included: migrations beyond adding columns, transactions across calls, full-
 |---|---|---|---|
 | `file` | string | yes | – |
 | `busyTimeoutMs` | integer | no | – |
+| `acquireTimeoutMs` | integer | no | `5000` |
+| `scopeTimeoutMs` | integer | no | `5000` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
 |---|---|---|---|---|---|---|---|

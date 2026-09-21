@@ -54,11 +54,16 @@ const MODULE: JsonSchema = {
     config: { type: "object", properties: { schema: { type: "object" }, variables: { type: "array", items: VARIABLE } }, required: ["schema", "variables"] },
     steps: STRINGS,
     eventHook: { type: "boolean" },
+    atomicScope: { type: "boolean" },
     emits: STRINGS,
   },
-  required: ["name", "use", "version", "provides", "requires", "optional", "config", "steps", "eventHook", "emits"],
+  required: ["name", "use", "version", "provides", "requires", "optional", "config", "steps", "eventHook", "atomicScope", "emits"],
 };
-const PIPELINE_STEP: JsonSchema = { type: "object", properties: { spec: { type: "string" }, name: { type: "string" }, module: { type: "string" }, description: STEP_DESCRIPTION }, required: ["spec", "name", "module", "description"] };
+const PIPELINE_STEP: JsonSchema = {
+  type: "object",
+  properties: { spec: { type: "string" }, name: { type: "string" }, module: { type: "string" }, description: STEP_DESCRIPTION, atomic: { type: "number" } },
+  required: ["spec", "name", "module", "description"],
+};
 const TRIGGER = (key: string): JsonSchema => ({ type: "object", properties: { [key]: { type: "string" }, pipeline: { type: "string" } }, required: [key, "pipeline"] });
 
 export const MANIFEST_SCHEMA: JsonSchema = {

@@ -55,6 +55,7 @@
       },
       "steps": [],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -195,6 +196,7 @@
         "replication.prepareRestore"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -217,6 +219,16 @@
             "busyTimeoutMs": {
               "type": "integer",
               "minimum": 0
+            },
+            "acquireTimeoutMs": {
+              "type": "integer",
+              "minimum": 100,
+              "default": 5000
+            },
+            "scopeTimeoutMs": {
+              "type": "integer",
+              "minimum": 100,
+              "default": 5000
             }
           },
           "required": [
@@ -244,6 +256,28 @@
             "status": "missing",
             "value": null,
             "redacted": false
+          },
+          {
+            "path": "acquireTimeoutMs",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": 15000,
+            "redacted": false,
+            "default": 5000
+          },
+          {
+            "path": "scopeTimeoutMs",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 5000,
+            "redacted": false,
+            "default": 5000
           }
         ]
       },
@@ -257,6 +291,7 @@
         "persistence.deleteOne"
       ],
       "eventHook": false,
+      "atomicScope": true,
       "emits": []
     },
     {
@@ -296,6 +331,7 @@
         "sanitize.svg"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -462,6 +498,7 @@
         "media.export"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -696,6 +733,7 @@
         "images.export"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -883,6 +921,7 @@
         "authn.cleanupSessions"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -983,6 +1022,7 @@
         "authz.validateRoles"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -1252,6 +1292,7 @@
         "content.removeTranslation"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -1278,6 +1319,7 @@
         "site.resolveLinks"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -1366,6 +1408,7 @@
         "references.rebuild"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -1476,6 +1519,7 @@
         "links.rebuild"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -1618,6 +1662,7 @@
         "revisions.removeTranslation"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -1724,6 +1769,7 @@
         "validate.check"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -1835,6 +1881,7 @@
         "migrations.apply"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": [
         "migrations.applied"
       ]
@@ -1892,6 +1939,7 @@
       },
       "steps": [],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -2300,6 +2348,7 @@
         "delivery.exportLlms"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -2392,6 +2441,7 @@
         "redirects.render"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -2434,6 +2484,7 @@
         "audit.prune"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -2455,6 +2506,7 @@
       },
       "steps": [],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -2478,6 +2530,7 @@
         "events.emit"
       ],
       "eventHook": true,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -2541,6 +2594,7 @@
         "ratelimit.sweep"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     },
     {
@@ -2584,6 +2638,7 @@
         "insights.readStats"
       ],
       "eventHook": false,
+      "atomicScope": false,
       "emits": []
     }
   ],
@@ -5607,7 +5662,8 @@
         "errors": {
           "400": "the value is neither a user id, { id } nor null, or the user is not active",
           "404": "user not found"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -5894,7 +5950,8 @@
           "400": "cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id",
           "404": "user not found, or `reassignTo` names no user",
           "409": "the last active admin cannot be deleted (`LAST_ADMIN`)"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6087,7 +6144,8 @@
         },
         "errors": {
           "400": "validation failed"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6149,7 +6207,8 @@
         "errors": {
           "400": "validation failed",
           "409": "a document with that id already exists"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6210,7 +6269,8 @@
         },
         "errors": {
           "400": "validation failed"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6270,7 +6330,8 @@
         "errors": {
           "400": "unknown locale",
           "404": "not found"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6355,7 +6416,8 @@
         },
         "errors": {
           "400": "invalid limit, offset, sort or locale"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6419,7 +6481,8 @@
         "errors": {
           "400": "validation failed",
           "404": "not found"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6447,7 +6510,8 @@
         },
         "errors": {
           "400": "missing id"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6550,7 +6614,8 @@
           "required": [
             "types"
           ]
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6611,7 +6676,8 @@
           "400": "unknown or missing locale",
           "404": "document or translation not found",
           "409": "last translation – remove the document"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6745,7 +6811,8 @@
         },
         "errors": {
           "400": "a referenced document does not exist"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6757,7 +6824,8 @@
         "reads": [
           "result.id"
         ],
-        "writes": []
+        "writes": [],
+        "atomicSafe": true
       }
     },
     {
@@ -6772,7 +6840,8 @@
         "writes": [],
         "errors": {
           "400": "missing id"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6788,7 +6857,8 @@
         "errors": {
           "400": "missing id",
           "409": "still referenced"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6835,7 +6905,8 @@
               "via"
             ]
           }
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -6888,7 +6959,8 @@
         },
         "errors": {
           "400": "missing ids or more than 200 ids"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -7000,7 +7072,8 @@
               "checkedAt"
             ]
           }
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -7039,7 +7112,8 @@
         "reads": [
           "result.id"
         ],
-        "writes": []
+        "writes": [],
+        "atomicSafe": true
       }
     },
     {
@@ -7054,7 +7128,8 @@
         "writes": [],
         "errors": {
           "400": "missing id"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -7164,7 +7239,8 @@
               "checkedAt"
             ]
           }
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -7212,7 +7288,8 @@
         },
         "errors": {
           "503": "the revision could not be written"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -7355,7 +7432,8 @@
         },
         "errors": {
           "400": "missing id"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -7496,7 +7574,8 @@
         "errors": {
           "400": "missing id or revisionId",
           "404": "no such revision"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -7519,7 +7598,8 @@
           "400": "missing id or revisionId; the restored fields fail validation",
           "404": "no such revision",
           "409": "the revision carries no snapshot"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -7564,7 +7644,8 @@
             }
           },
           "required": []
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -7689,7 +7770,8 @@
         "errors": {
           "400": "missing id or revisionId",
           "404": "no such revision"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -7766,7 +7848,8 @@
         },
         "errors": {
           "400": "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -7808,7 +7891,8 @@
         "writes": [],
         "errors": {
           "400": "missing id"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -7828,7 +7912,8 @@
         },
         "errors": {
           "400": "missing id"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -8212,7 +8297,8 @@
         },
         "errors": {
           "400": "missing id"
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -8685,6 +8771,9 @@
                   "eventHook": {
                     "type": "boolean"
                   },
+                  "atomicScope": {
+                    "type": "boolean"
+                  },
                   "emits": {
                     "type": "array",
                     "items": {
@@ -8702,6 +8791,7 @@
                   "config",
                   "steps",
                   "eventHook",
+                  "atomicScope",
                   "emits"
                 ]
               }
@@ -8874,6 +8964,9 @@
                             "reads",
                             "writes"
                           ]
+                        },
+                        "atomic": {
+                          "type": "number"
                         }
                       },
                       "required": [
@@ -9589,7 +9682,8 @@
                   "checkedAt"
                 ]
               }
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -9696,7 +9790,8 @@
                   "checkedAt"
                 ]
               }
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -9956,7 +10051,8 @@
               "required": [
                 "types"
               ]
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -10139,7 +10235,8 @@
             },
             "errors": {
               "400": "a referenced document does not exist"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -10311,7 +10408,8 @@
             "errors": {
               "400": "validation failed",
               "409": "a document with that id already exists"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -10332,7 +10430,8 @@
             },
             "errors": {
               "503": "the revision could not be written"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -10344,7 +10443,8 @@
             "reads": [
               "result.id"
             ],
-            "writes": []
+            "writes": [],
+            "atomicSafe": true
           }
         },
         {
@@ -10356,7 +10456,8 @@
             "reads": [
               "result.id"
             ],
-            "writes": []
+            "writes": [],
+            "atomicSafe": true
           }
         },
         {
@@ -10753,7 +10854,8 @@
             "errors": {
               "400": "missing id",
               "409": "still referenced"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -11002,7 +11104,8 @@
             "errors": {
               "400": "missing id",
               "409": "still referenced"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -11030,7 +11133,8 @@
             },
             "errors": {
               "400": "missing id"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -11045,7 +11149,8 @@
             "writes": [],
             "errors": {
               "400": "missing id"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -11060,7 +11165,8 @@
             "writes": [],
             "errors": {
               "400": "missing id"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -11075,7 +11181,8 @@
             "writes": [],
             "errors": {
               "400": "missing id"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -11299,7 +11406,8 @@
               "400": "unknown or missing locale",
               "404": "document or translation not found",
               "409": "last translation – remove the document"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -11319,7 +11427,8 @@
             },
             "errors": {
               "400": "missing id"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -11331,7 +11440,8 @@
             "reads": [
               "result.id"
             ],
-            "writes": []
+            "writes": [],
+            "atomicSafe": true
           }
         },
         {
@@ -11343,7 +11453,8 @@
             "reads": [
               "result.id"
             ],
-            "writes": []
+            "writes": [],
+            "atomicSafe": true
           }
         },
         {
@@ -11570,7 +11681,8 @@
               "400": "cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id",
               "404": "user not found, or `reassignTo` names no user",
               "409": "the last active admin cannot be deleted (`LAST_ADMIN`)"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -12302,7 +12414,8 @@
             },
             "errors": {
               "400": "unknown locale"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -12421,7 +12534,8 @@
             },
             "errors": {
               "400": "unknown locale"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -12962,6 +13076,9 @@
                       "eventHook": {
                         "type": "boolean"
                       },
+                      "atomicScope": {
+                        "type": "boolean"
+                      },
                       "emits": {
                         "type": "array",
                         "items": {
@@ -12979,6 +13096,7 @@
                       "config",
                       "steps",
                       "eventHook",
+                      "atomicScope",
                       "emits"
                     ]
                   }
@@ -13151,6 +13269,9 @@
                                 "reads",
                                 "writes"
                               ]
+                            },
+                            "atomic": {
+                              "type": "number"
                             }
                           },
                           "required": [
@@ -13699,7 +13820,8 @@
             "errors": {
               "400": "missing id or revisionId",
               "404": "no such revision"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -13884,7 +14006,8 @@
             },
             "errors": {
               "400": "invalid limit, offset, sort or locale"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -14614,7 +14737,8 @@
             },
             "errors": {
               "400": "invalid limit, offset, sort or locale"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -15087,7 +15211,8 @@
                   "via"
                 ]
               }
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -15177,7 +15302,8 @@
             },
             "errors": {
               "400": "missing ids or more than 200 ids"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -15284,7 +15410,8 @@
             },
             "errors": {
               "400": "missing id"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -15368,7 +15495,8 @@
                   "via"
                 ]
               }
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -15458,7 +15586,8 @@
             },
             "errors": {
               "400": "missing ids or more than 200 ids"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -15636,7 +15765,8 @@
             "errors": {
               "400": "missing id or revisionId",
               "404": "no such revision"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -15816,7 +15946,8 @@
             },
             "errors": {
               "400": "missing id"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -16262,7 +16393,8 @@
             "errors": {
               "400": "unknown locale",
               "404": "not found"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -16419,7 +16551,8 @@
             "errors": {
               "400": "unknown locale",
               "404": "not found"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -16446,7 +16579,8 @@
             "errors": {
               "400": "the value is neither a user id, { id } nor null, or the user is not active",
               "404": "user not found"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -16523,7 +16657,8 @@
             },
             "errors": {
               "400": "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -17771,7 +17906,8 @@
               "400": "missing id or revisionId; the restored fields fail validation",
               "404": "no such revision",
               "409": "the revision carries no snapshot"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -17838,7 +17974,8 @@
             },
             "errors": {
               "400": "a referenced document does not exist"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -18028,7 +18165,8 @@
             "errors": {
               "400": "validation failed",
               "404": "not found"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -18049,7 +18187,8 @@
             },
             "errors": {
               "503": "the revision could not be written"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -18061,7 +18200,8 @@
             "reads": [
               "result.id"
             ],
-            "writes": []
+            "writes": [],
+            "atomicSafe": true
           }
         },
         {
@@ -18073,7 +18213,8 @@
             "reads": [
               "result.id"
             ],
-            "writes": []
+            "writes": [],
+            "atomicSafe": true
           }
         },
         {
@@ -18232,7 +18373,8 @@
                 }
               },
               "required": []
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -18601,7 +18743,8 @@
             "errors": {
               "400": "the value is neither a user id, { id } nor null, or the user is not active",
               "404": "user not found"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -18678,7 +18821,8 @@
             },
             "errors": {
               "400": "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again"
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]
@@ -19012,7 +19156,8 @@
             },
             "errors": {
               "400": "validation failed"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -19217,7 +19362,8 @@
             },
             "errors": {
               "400": "validation failed"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -19749,7 +19895,8 @@
             },
             "errors": {
               "400": "a referenced document does not exist"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -19939,7 +20086,8 @@
             "errors": {
               "400": "validation failed",
               "404": "not found"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -19960,7 +20108,8 @@
             },
             "errors": {
               "503": "the revision could not be written"
-            }
+            },
+            "atomicSafe": true
           }
         },
         {
@@ -19972,7 +20121,8 @@
             "reads": [
               "result.id"
             ],
-            "writes": []
+            "writes": [],
+            "atomicSafe": true
           }
         },
         {
@@ -19984,7 +20134,8 @@
             "reads": [
               "result.id"
             ],
-            "writes": []
+            "writes": [],
+            "atomicSafe": true
           }
         },
         {
