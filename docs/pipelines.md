@@ -462,23 +462,21 @@ A step whose `writes` touches `result` declares the shape of what it produces: `
 Schema, replacing whatever the pipeline's result schema was so far), `extendsOutput` (merges into
 it — becomes the output if there was none yet), `extendsItems` (merges into
 `properties.items.items` of a list output, or at the root otherwise), or `binary: true` for a step
-whose result is a binary body rather than JSON (`media.download`, `images.serve`). Boot checks
-every pipeline's resolved steps against this rule (`packages/core/src/registry.ts`'s `resolve()`
-produces the real description, factory argument included) and, for a step that writes `result`
-with none of the four, adds a `kestrel.warnings` entry `{ code: "undeclared-output", message,
-pipeline, step }` — logged through `logger.warn`, never fatal today. This becomes a boot error in
-a future major.
+whose result is a binary body rather than JSON (`media.download`, `images.serve`). A step that
+writes `result` with none of the four makes `boot()` log a warning naming the pipeline and the
+step (`"step writes result without declaring output, extendsOutput, extendsItems or binary: true"`)
+and add it to `kestrel.warnings` as `{ code: "undeclared-output", message, pipeline, step }` — not
+fatal today, but a boot error starting with the next major, so treat it as one now.
 
 `@michaelthielemann/kestrel/schema` folds a pipeline's step descriptions, in order, into the
-schema its result ends up matching (`resolveOutputSchema`, exported from the `schema` subpath
-only) — this is what `kestrel-openapi` uses for a route's response schema. `boot({ validateOutput:
-true })` and `testing/runPipeline` (always on) use the same fold at runtime: after every step that
-writes `result` — except a step whose write is declared optional (`result?`) and left `ctx.result`
-unchanged — they validate it against the schema folded up to that point and fail naming the step
-and the JSON path. `validateOutput` defaults to off, so production pays nothing for it unless a
-deployment opts in. `docs:check` boots the shipped example (the declaration check runs regardless
-of `validateOutput`) and asserts the warning list stays empty; the example's own integration suite
-boots with `validateOutput: true` to also exercise the runtime check against real results.
+schema its result ends up matching (`resolveOutputSchema`, from the `schema` subpath) — this is
+what `kestrel-openapi` uses for a route's response schema. Passing `validateOutput: true` to
+`boot()` (off by default) applies the same fold at runtime: after every step that writes `result`
+— except a step whose write is declared optional (`result?`) and left `ctx.result` unchanged —
+it validates the result against the schema folded up to that point and fails the run naming the
+step and the JSON path, the way a `writes` mismatch already does. `testing/runPipeline` always
+validates this way, so a module's own tests catch a mismatch before it ships; turn the same check
+on in a running deployment by passing `validateOutput: true` to `boot()`.
 
 ## Pipeline Test
 
