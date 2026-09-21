@@ -101,6 +101,24 @@ describe("revisions/default module steps", () => {
     expect(missing.code).toBe("NOT_FOUND");
   });
 
+  it("read, restore and label ignore a revision id that belongs to another document or collection", async () => {
+    const instance = await boot();
+    await run(["test.seed", "revisions.record:pages"], {}, instance);
+    const [only] = page((await run(["revisions.list:pages"], { params: { id: "p1" } }, instance)).result).items;
+    const revisionId = only?.id ?? "";
+
+    const readOtherDoc = await run(["revisions.read:pages"], { params: { id: "p2", revisionId } }, instance);
+    expect(readOtherDoc.status).toBe(404);
+    const readOtherCollection = await run(["revisions.read:posts"], { params: { id: "p1", revisionId } }, instance);
+    expect(readOtherCollection.status).toBe(404);
+
+    const restoreOtherDoc = await run(["revisions.restore:pages"], { params: { id: "p2", revisionId } }, instance);
+    expect(restoreOtherDoc.status).toBe(404);
+
+    const labelOtherDoc = await run(["revisions.label:pages"], { params: { id: "p2", revisionId }, body: { label: "x" } }, instance);
+    expect(labelOtherDoc.status).toBe(404);
+  });
+
   it("restore puts the snapshot into the body and the next record branches at the restored revision", async () => {
     const instance = await boot();
     await run(["test.seed", "revisions.record:pages"], {}, instance);

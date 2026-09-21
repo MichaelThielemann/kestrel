@@ -395,6 +395,19 @@ describe("read", () => {
     const fallback = expectOk(await images.read("a", "small.webp"));
     expect(fallback).toMatchObject({ fallback: true, contentType: "image/jpeg" });
   });
+
+  it("does not serve another media item's variant of the same size name", async () => {
+    const { images, db, blobs } = await make();
+    await addImage(db, blobs, "a", await jpeg(600, 400));
+    await addImage(db, blobs, "b", await jpeg(600, 400));
+    expectOk(await images.generate("b"));
+
+    const own = expectOk(await images.read("a", "thumb.webp"));
+    expect(own).toMatchObject({ fallback: true });
+
+    const other = expectOk(await images.read("b", "thumb.webp"));
+    expect(other).toMatchObject({ fallback: false });
+  });
 });
 
 describe("exportTo", () => {
