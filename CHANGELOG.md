@@ -11,6 +11,16 @@
   `authz.validateRoles:roles` right after `authz.require:users.manage`, so a role name typo no
   longer creates or updates a user silently. A pipeline that omits the step still boots and works
   unchanged — it simply does not validate role names.
+- A step may now declare a trailing `?` in `reads`, not only in `writes`: an optional read does not
+  require the key to be available at boot. Boot still rejects a pipeline where a *later* step
+  writes that key, since the read would then always see nothing — the same
+  `checkDataflow`/`KestrelBootError` mechanism as an undeclared or unsatisfied read, naming the
+  pipeline, the reading step, the writing step and the key. `revisions.record` now declares
+  `revisionParent?`, `revisions.reportRestore` declares `restoreReport?`, and
+  `revisions.reassignAuthor` declares `verifiedUser?`, closing a gap where all three read a context
+  key no describe() named. **Behaviour change:** a pipeline that writes one of these keys after the
+  step that reads it now fails to boot; this can only affect a pipeline that already ran the steps
+  in the wrong order and never saw the key it meant to read.
 - `authn-multi`: the factory step `authn.verifyUser:<path>` looks up the user id at `payload.<path>`
   — a plain path, no fallback between locations — rejects an unknown or inactive one (404
   `NOT_FOUND` / 400 `VALIDATION`), and writes the canonical `{ id, name }` to a new context key,

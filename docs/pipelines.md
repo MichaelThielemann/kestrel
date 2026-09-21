@@ -405,10 +405,12 @@ export interface StepDescription {
 ```
 
 A `ContextPath` is a context key, optionally followed by dotted sub-keys
-(`^[a-zA-Z][A-Za-z0-9]*(\.[A-Za-z0-9_-]+)*\??$`); a `?` is only allowed in `writes` and
-means "may write" (`authn.identifyUser` writes `identity?`) — an optional write never
-satisfies a read. A read on `a.b` is satisfied if an earlier step wrote `a.b` or `a`; a read
-on `a` is satisfied if an earlier step wrote `a` or any `a.x`. A `result` write with no
+(`^[a-zA-Z][A-Za-z0-9]*(\.[A-Za-z0-9_-]+)*\??$`); a trailing `?` is allowed in both `reads` and
+`writes`. In `writes` it means "may write" (`authn.identifyUser` writes `identity?`) — an optional
+write never satisfies a read. In `reads` it means "may be absent"
+(`revisions.reassignAuthor` reads `verifiedUser?`) — an optional read does not need an earlier step,
+or the trigger, to supply the key. A read on `a.b` is satisfied if an earlier step wrote `a.b` or
+`a`; a read on `a` is satisfied if an earlier step wrote `a` or any `a.x`. A `result` write with no
 sub-key replaces the whole object, and with it every previously written `result.<key>`.
 `payload.*` reads are never checked (the client owns the payload; [Payload
 Validation](#payload-validation) checks it against `describe().input`/`query` instead).
@@ -416,7 +418,13 @@ Validation](#payload-validation) checks it against `describe().input`/`query` in
 After resolving each pipeline, boot runs a dataflow check (`checkDataflow`,
 `@michaelthielemann/kestrel/dataflow`): for every step in order, each field it reads must already
 have been written by an earlier step, or boot aborts with a `KestrelBootError` naming the pipeline,
-step, path, and the writes seen so far. Once a step passes the check, its `writes` are applied.
+step, path, and the writes seen so far. An optional read is exempt from that rule, but not from
+ordering: if no earlier step supplies the key but a *later* step in the same pipeline writes it
+(with or without `?`), boot aborts, naming the pipeline, the reading step, the writing step and the
+key — the read would silently see nothing on every run, which is what an unordered pair of steps
+almost always means, not what "optional" is for. A key nothing in the pipeline ever writes is fine;
+the step is expected to run stand-alone as often as chained. Once a step passes the check, its
+`writes` are applied.
 
 What's available from the start: `payload`, `headers`, `files`, `ip`, `params`, plus `params.<p>`
 for every route parameter that all of the pipeline's HTTP routes bind. Under an event trigger, any
@@ -652,10 +660,11 @@ content therefore passes the same validation, sanitizing, reference check and de
 hand-typed edit, the schema check the runner performs per step applies to it (which is why `body` is
 written, not only `payload`), and a change to the write flow cannot be forgotten in the replay. A
 step that needs to tell a later step *how* the payload came about puts that on the context, not in
-the payload: `revisions.restore` writes `revisionParent`, and `revisions.record` reads it to hang the
-new revision off the restored one instead of off the head. The same channel carries what the replay
-had to leave out — `restoreReport` — which `revisions.reportRestore` adds to the finished result,
-last because only there is the response shape settled.
+the payload: `revisions.restore` writes `revisionParent`, and `revisions.record` optionally reads it
+(`revisionParent?`) to hang the new revision off the restored one instead of off the head, since a
+plain save never restores anything and never sets it. The same channel carries what the replay had
+to leave out — `restoreReport` — which `revisions.reportRestore` optionally reads (`restoreReport?`)
+and adds to the finished result, last because only there is the response shape settled.
 
 ## Rules
 
