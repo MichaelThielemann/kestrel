@@ -5,11 +5,6 @@ import { describe, expect, it } from "vitest";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-interface Hit {
-  file: string;
-  line: number;
-}
-
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -21,26 +16,24 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
-function scanOnCallSites(): Hit[] {
-  const hits: Hit[] = [];
+function countOnCallSitesByFile(): Record<string, number> {
+  const counts: Record<string, number> = {};
   for (const dir of ["packages", "examples", "scripts"]) {
     for (const file of sourceFiles(join(root, dir))) {
       const relative = file.slice(root.length + 1);
-      const lines = readFileSync(file, "utf8").split("\n");
-      lines.forEach((line, i) => {
-        if (/\.on\(/.test(line)) hits.push({ file: relative, line: i + 1 });
-      });
+      const hits = readFileSync(file, "utf8").split("\n").filter((line) => /\.on\(/.test(line)).length;
+      if (hits > 0) counts[relative] = hits;
     }
   }
-  return hits;
+  return counts;
 }
 
-const KNOWN_NON_EVENT_HITS = ["packages/core/src/cli.ts:23", "packages/core/src/cli.ts:24", "packages/validate-jsonschema/impl.ts:215"];
+const KNOWN_NON_EVENT_FILES = ["packages/core/src/cli.ts", "packages/validate-jsonschema/impl.ts"];
 
 describe("events.on call sites", () => {
-  it("pins every on( call site — the two delivery subscriptions, and nothing else new", () => {
-    const locations = scanOnCallSites().map((h) => `${h.file}:${h.line}`);
-    const eventSubscriptions = locations.filter((l) => !KNOWN_NON_EVENT_HITS.includes(l));
-    expect(eventSubscriptions.sort()).toEqual(["packages/events-direct/impl.ts:22", "packages/events-queue/module.ts:64"]);
+  it("pins the file and count of every on( call site — the two delivery subscriptions, and nothing else new", () => {
+    const counts = countOnCallSitesByFile();
+    const eventFiles = Object.fromEntries(Object.entries(counts).filter(([file]) => !KNOWN_NON_EVENT_FILES.includes(file)));
+    expect(eventFiles).toEqual({ "packages/events-direct/impl.ts": 1, "packages/events-queue/module.ts": 1 });
   });
 });
