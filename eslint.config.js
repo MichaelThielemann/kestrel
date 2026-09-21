@@ -96,6 +96,22 @@ export default tseslint.config(
     },
   },
   {
+    files: ["packages/contracts/**/*.ts"],
+    ignores: ["packages/contracts/**/*.contract.test.ts", "packages/contracts/src/testing/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            { group: ["@michaelthielemann/*", "!@michaelthielemann/kestrel", "!@michaelthielemann/kestrel/*", "!@michaelthielemann/kestrel-contracts", "!@michaelthielemann/kestrel-contracts/*"], message: "A contract imports only the core and its own files." },
+            { group: ["zod", "h3", "nuxt", "nuxt/*", "\\#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "A contract file is domain-neutral TypeScript: no validation library, no host framework." },
+            { group: ["@michaelthielemann/kestrel/definePipeline", "@michaelthielemann/kestrel/testing/runPipeline"], message: "A contract file stays runner-free; definePipeline and runPipeline belong to *.contract.test.ts and src/testing/*." },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["packages/h3/**/*.ts"],
     rules: {
       "no-restricted-imports": [

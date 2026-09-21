@@ -14,7 +14,7 @@
   ],
   "exclude": [
     "dist",
-    "src/testing/fakePersistence.impl.test.ts"
+    "src/testing/*.impl.test.ts"
   ],
   "references": [
     {

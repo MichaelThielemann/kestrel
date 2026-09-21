@@ -11,7 +11,9 @@ wiring bugs only.
 behaves the same against both: a REAL renders as `%!.15g` (always a fractional digit, exponential
 below 1e-4), `LIKE` folds case for ASCII letters only, and without a declared schema the column type
 is inferred from the stored value. `testing/result` holds `expectOk` / `expectErr`
-for the suites.
+for the suites. `testing/fakeAuthn` is a minimal `authn@1` for the shared step-contract suite
+(`authn.steps.contract.test`), which every `authn@1` implementation runs its five shared steps
+(`login`, `identifyUser`, `requireUser`, `loadIdentity`, `logout`) against.
 `links` is not a contract but a pure helper pair shared by the modules that read internal
 references (`INTERNAL_REF`, `collectInternalRefs`).
 Consumers may define their own contracts with `defineContract` from the core; the core treats
