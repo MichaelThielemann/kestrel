@@ -236,12 +236,20 @@ Field types: `text richtext number boolean date slug json enum ref`. Per field: 
 
 **References**: `{ type: "ref", to: "media" }` stores an ID. `content@1` only validates the
 format; the steps-only module `references-default` takes care of the rest with its own index
-(`references_index`): `references.check:<type>` before `content.create/update` (the target must
-exist), `references.index:<type>` afterwards and `references.unindex:<type>` after
-`content.remove` maintain the index, `references.guard:<target>` reads it before deletion (409),
-`references.scan` marks broken references via cron, `references.report` lists them,
-`references.rebuild` rebuilds the index from scratch. Targets are declared by its config:
-content types by name, everything else (media) by persistence collection.
+(`references_index`):
+
+- `references.check:<type>` runs before `content.create`/`content.update` and confirms the target
+  exists.
+- `references.index:<type>` runs afterwards and adds the reference to the index.
+- `references.unindex:<type>` runs after `content.remove` and removes it from the index.
+- `references.guard:<target>` reads the index before deletion and answers 409 if something still
+  refers to the target.
+- `references.scan` marks broken references via cron.
+- `references.report` lists them.
+- `references.rebuild` rebuilds the index from scratch.
+
+Targets are declared by its config: content types by name, everything else (media) by persistence
+collection.
 
 Two origins are indexed, distinguished by the `via` field of each index row: `"field"` for
 `ref` fields, `"body"` for internal references **inside the block tree** — every

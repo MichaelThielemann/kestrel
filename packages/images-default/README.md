@@ -23,9 +23,20 @@ without an id, `NOT_FOUND` for an unknown one), `images.sync` (`CONFLICT` while 
 (`VALIDATION` for a name that is still declared or has no variants), `images.readStatus`,
 `images.remove` (`VALIDATION` without an id), `images.removeMany` (after `media.folderItems`, reads
 `result.ids`), `images.attach` (adds `variants[]` to `result`), `images.serve` (binary;
-`VALIDATION` without id/file, `NOT_FOUND` otherwise), `images.export:<dir>`.
+`VALIDATION` without id/file, `NOT_FOUND` otherwise), `images.export:<dir>` (nests its counts under
+their own key in `result`, so running it after `media.export` in one pipeline keeps that step's counts).
 Every step passes a persistence or blobstore failure through unchanged, so a busy database is a
 retryable `TRANSIENT` (503).
+
+## Behaviour
+
+Concurrent requests to generate variants for the same media item share one render instead of running
+it twice; two callers that start a sync job in the same instant share the same start, so only one job
+row is ever created.
+
+Changing a size's format regenerates its variant under a new storage key; the previous blob is removed
+as part of that rewrite.
+
 Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered HTML.
 
 ## What happens when generation fails or hangs
@@ -34,7 +45,9 @@ Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered
 counted, never at a stale `"done"`. The next `images.generate` or sync pass picks it up, and
 `images.serve` hands out the full-size original meanwhile (header `x-kestrel-variant: pending`).
 A job row whose `updatedAt` is older than `staleAfterMs` counts as abandoned, so `images.sync` and
-the `images.resume` cron take it over instead of answering `CONFLICT`.
+the `images.resume` cron take it over instead of answering `CONFLICT`. The job's counters are
+written after each image rather than only at the end of a chunk, so a long-running chunk is never
+mistaken for a stalled job by `images.readStatus` or the `staleAfterMs` takeover.
 
 **A render that hangs** (a pathological image that keeps sharp busy, a blocked file descriptor) is
 given up on after `renderTimeoutMs`. sharp cannot be aborted, so the render is left to finish in the
@@ -63,25 +76,6 @@ step it takes is a single idempotent variant write, and it stops by itself at th
 library — a cancel would only add a state in which rows are half-written and the next `images.sync`
 has to guess whether to trust them. Stopping it is `close()` (teardown), which pauses the job at its
 cursor.
-
-## Internals
-
-**Concurrency.** Callers that reach the same media id at once — an upload event and the sync loop,
-say — share one render: the second awaits the first caller's in-flight promise instead of reading
-and writing the variant rows of its own. Two callers starting a sync in the same tick share the
-start the same way, so only one job row is ever created.
-
-**Blob keys.** A size whose format changed renders to a new blob key, so the variant's previous blob
-is deleted along with the rewrite; nothing references it any more.
-
-**Chunking.** SQLite caps the number of bound parameters, so a large `in` filter over media ids is
-sent as several queries instead of one.
-
-**Progress.** The job's counters and cursor are written per image, not per chunk: a long chunk would
-otherwise look stalled to `images.readStatus` and trip the `staleAfterMs` takeover.
-
-**Export.** `images.export:<dir>` nests its counts under their own key in `result`, so running it
-after `media.export` in one pipeline keeps that step's counts.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest

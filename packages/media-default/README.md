@@ -49,11 +49,12 @@ Config: `allowedTypes` (`image/*`, `application/pdf`, `*`), `deniedTypes` (defau
 `image/svg+xml`, `text/html`, `application/xhtml+xml` — they can carry scripts), `maxBytes`,
 `prefix` (default `media/`, must end with `/`), `locales`/`defaultLocale`.
 
-Steps: `media.upload` (processes every file in `ctx.files`, in order, with the same checks; exactly
-one file returns the item unchanged, two or more return `{ items, errors, ids }` with a per-file
-`{ filename, status, code, message }` entry in `errors` and only the newly stored items in `ids` — a
-rejected or conflicting file doesn't stop the others, partial success is a 200; a `TRANSIENT`
-blobstore or database failure is not per-file and fails the whole request), `media.get`, `media.list` (folder, recursive, search, sort, ids, paging),
+Steps: `media.upload` processes every file in `ctx.files`, in the order given, with the same checks
+applied to each. A single file returns the item unchanged. Two or more files return
+`{ items, errors, ids }`: `errors` holds one `{ filename, status, code, message }` entry per rejected
+or conflicting file, and `ids` lists only the newly stored items — one bad file does not block the
+rest, so the response is still 200. A `TRANSIENT` blobstore or database failure is the exception: it
+is not per file, and fails the whole request. Other steps: `media.get`, `media.list` (folder, recursive, search, sort, ids, paging),
 `media.listFolders`, `media.createFolder`, `media.renameFolder`, `media.listFolderItems` (for
 `references.guardAll:media`), `media.removeFolder`, `media.update`, `media.download`,
 `media.remove`, `media.reconcile`, `media.reconcileDelete`, `media.export:<dir>`.
@@ -85,32 +86,23 @@ query. A row of an upload that is in flight right now shows up under `rowsWithou
 from a cron trigger rather than after every write; no trigger is wired here, that is the
 consumer's job.
 
+## Behaviour
+
+Filenames are capped at 200 bytes, and only after truncation checked for a trailing `.meta.json`,
+which is rewritten to `-meta.json`; this order means truncating a filename can never accidentally
+produce the internal metadata-sidecar suffix.
+
+`media.list`'s `q` is a case-sensitive substring match on the filename.
+
+`media.update` validates the whole patch, text fields included, before moving any blob, so a
+rejected patch never leaves a moved blob without a matching row. Retrying a move that failed partway
+finds the blob already at the target and only has to update the row.
+
+At setup, item keys already on disk are migrated automatically to `<prefix><folder>/<filename>`. An
+item whose folder or filename does not match what the sanitizing rules for uploads would produce, or
+whose target key would end in `.meta.json`, is skipped and logged.
+
 Not included: image resizing, tags, linking media to content documents.
-
-## Internals
-
-**Filename safety.** The length cap is applied before a `.meta.json` ending is neutralised, so
-truncation can never re-create the sidecar suffix it removes; a filename that would otherwise land
-on a metadata-sidecar key is rewritten.
-
-**Subtree queries.** `persistence@1` takes one operator per field, so a folder subtree is not
-expressible as a single `gte` + `lt` range. Rows are queried with `folder >= "<path>/"` sorted
-ascending and read until the first row whose value leaves the `<path>/` prefix — the sort keeps
-every matching row contiguous at the front, so no `LIKE` is involved. The upper marker is
-`"<path>0"`: `0` (0x30) is the first codepoint after `/` (0x2F) among the characters `safeFolder`
-allows, so a row at or past it is neither `<path>` nor a descendant of it.
-
-**Search.** `media.list`'s `q` runs as SQL `LIKE`, which folds case for ASCII letters only and can
-therefore only narrow the candidate set; the exact match is applied in JS afterwards.
-
-**Write ordering.** `media.update` builds and validates the whole patch, text fields included,
-before the blob is touched, so a rejected patch never leaves a moved blob without a matching row. A
-repeated move finds the source blob already gone; when the target is there, only the row update is
-left to do.
-
-**Migration.** A folder or filename that `safeFolder`/`safeName` would themselves change or reject,
-and a key that would land on a metadata-sidecar suffix, are left for manual cleanup instead of being
-renamed or moved automatically.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest

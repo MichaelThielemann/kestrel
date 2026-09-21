@@ -190,20 +190,24 @@ the response header. Each request produces one `http` log line with method, path
 status, duration, IP and — if present — `requestId`. `http.timeouts` sets `requestMs`
 (30 s), `headersMs` (10 s) and `keepAliveMs` (5 s) on the server. `http.healthPath` (default
 `/health`, `null` disables it) answers without running a pipeline, with
-`{ ok, uptimeSeconds }`. The client address (`ctx.ip`, the `http` log line, `http.allow`) is the
-socket peer unless a proxy sits in front: with `http.trustProxy` it is the `X-Forwarded-For` entry
-`http.proxyHops` (default 1) counted from the **right** — the end the proxies append to; the left
-end is whatever the client sent and is never used — and a chain shorter than `proxyHops` yields no
-address at all. `http.trustedHeader` (e.g. a platform's trusted-client header) wins over both: its
-first value is the client, a missing header yields no address. `http.allow` (default `[]` = open)
-restricts the whole server to a list of IPv4/IPv6 addresses or CIDR ranges
-(`["203.0.113.0/24", "2001:db8::/32", "10.0.0.5"]`): every request — health, CORS preflight and
-routes alike — is checked before routing against that client address, an IPv4-mapped IPv6 peer
-(`::ffff:10.0.0.5`) counts as IPv4 and an IPv6 zone id (`fe80::1%eth0`) is stripped, so both sides
-of the check use the family the operator wrote; no address or one outside the list answers `403 forbidden`
-without details; an entry that is neither an address nor a CIDR range stops the boot naming the
-entry. Rate limits are a step:
-`ratelimit.check:login` before `authn.login` (module `ratelimit-memory`).
+`{ ok, uptimeSeconds }`.
+
+**Client address.** `ctx.ip` (also used in the `http` log line and by `http.allow`) is the socket
+peer, unless a proxy sits in front. With `http.trustProxy`, it's the `X-Forwarded-For` entry
+`http.proxyHops` (default 1) counted from the right — the end proxies append to, never the
+client-supplied left end; a chain shorter than `proxyHops` yields no address. `http.trustedHeader`
+(e.g. a platform's trusted-client header) wins over both: its first value is the client, and a
+missing header yields no address.
+
+**IP allowlisting.** `http.allow` (default `[]`, meaning open) restricts the whole server to a list
+of IPv4/IPv6 addresses or CIDR ranges, e.g. `["203.0.113.0/24", "2001:db8::/32", "10.0.0.5"]`.
+Every request — health check, CORS preflight, or a normal route — is checked against it before
+routing. An IPv4-mapped IPv6 peer (`::ffff:10.0.0.5`) counts as IPv4, and an IPv6 zone id
+(`fe80::1%eth0`) is stripped first, so both sides compare the same address family. No address, or
+one outside the list, answers `403 forbidden` with no further detail; an entry that's neither a
+valid address nor a CIDR range stops the boot and names the bad entry.
+
+Rate limits are a step: `ratelimit.check:login` before `authn.login` (module `ratelimit-memory`).
 
 ## Runner Behavior (in the core, `runner.ts`)
 
@@ -380,19 +384,21 @@ sub-key replaces the whole object, and with it every previously written `result.
 `payload.*` reads are never checked (the client owns the payload; [Payload
 Validation](#payload-validation) checks it against `describe().input`/`query` instead).
 
-After resolving each pipeline, boot checks the dataflow (`checkDataflow`,
-`@michaelthielemann/kestrel/dataflow`): available from the start are `payload`, `headers`,
-`files`, `ip`, `params` plus `params.<p>` for every route parameter that **all** of the
-pipeline's HTTP routes bind; a `params.<p>` read is always satisfied under an event trigger
-(the envelope carries arbitrary params); in a pure cron pipeline, or when no HTTP route
-binds the parameter, it is never satisfied — except for a pipeline with no trigger at all,
-reachable only by calling `run()` directly (as in a test), where the caller supplies the
-params itself. For every step in order: every read must be covered by an earlier write,
-otherwise boot aborts with a `KestrelBootError` (naming the pipeline, step, path and the
-writes so far); afterwards the step's `writes` are applied. A step therefore needs no defensive
-fallback for context it declared: `delivery.publish:<type>` declares `reads: ["result.id"]`, the
-boot check proves every pipeline supplies it, and a remaining `if (typeof id !== "string") throw …`
-is a pure bug path.
+After resolving each pipeline, boot runs a dataflow check (`checkDataflow`,
+`@michaelthielemann/kestrel/dataflow`): for every step in order, each field it reads must already
+have been written by an earlier step, or boot aborts with a `KestrelBootError` naming the pipeline,
+step, path, and the writes seen so far. Once a step passes the check, its `writes` are applied.
+
+What's available from the start: `payload`, `headers`, `files`, `ip`, `params`, plus `params.<p>`
+for every route parameter that all of the pipeline's HTTP routes bind. Under an event trigger, any
+`params.<p>` read counts as satisfied, since the envelope can carry arbitrary params. In a pure
+cron pipeline, or when no HTTP route binds a given parameter, that read is never satisfied —
+except in a pipeline with no trigger at all (reachable only via a direct `run()` call, as in a
+test), where the caller supplies the params itself.
+
+This is why a step never needs a defensive fallback for context it declared: `delivery.publish:<type>`
+declares `reads: ["result.id"]`, boot has already proven every pipeline supplies it, so a leftover
+`if (typeof id !== "string") throw …` would only ever catch a bug, never a real gap.
 
 The runner holds a step to that declaration at run time, in every environment (like the
 payload validation). After a step returned `Ok<Context>` it compares the context it passed in
@@ -550,18 +556,21 @@ With `events-inmemory`, `emit` is synchronous: the triggering pipeline waits for
 and the HTTP response only goes out afterward. Listener errors are logged and don't fail the
 response; long-running work belongs in a job the listener starts (like `images.sync`).
 
-With `events-queue` instead (same steps, same envelope, one of the two — never both), `emit`
-writes the event to the `events_queue` collection of `persistence@1` and returns; the response
-goes out before any listener ran. A worker in the same process claims due rows every `pollMs`
-and runs the listener pipelines; a listener pipeline that ends with a failure status, or a
-handler that throws, counts as a failed attempt and the row is requeued after
-`backoffSeconds[attempt - 1]`, until `maxAttempts` moves it to the dead-letter state (admin
-steps `events.readQueueStatus`, `events.listDead`, `events.retryDead:all|one`,
-`events.purgeDone`). A row left `running` by a crashed process is picked up again after
-`lockTtlSeconds`. Guarantees: at least once, no ordering across events — a listener pipeline
-must be idempotent (the envelope's `eventId` is the dedup key). A persistence failure on write
-fails the `events.emit` step with 503 `TRANSIENT` rather than dropping the event. The payload
-rules stay the same: no tokens (`identity` only), a frozen shallow copy per handler.
+With `events-queue` instead (same steps and envelope — a deployment picks one bus, never both),
+`emit` writes the event to the `events_queue` collection of `persistence@1` and returns
+immediately; the HTTP response goes out before any listener runs.
+
+A worker in the same process claims due rows every `pollMs` and runs the listener pipelines. If a
+listener pipeline ends with a failure status, or a handler throws, that counts as a failed
+attempt: the row is requeued after `backoffSeconds[attempt - 1]`, and after `maxAttempts` it moves
+to the dead-letter state (managed via the admin steps `events.readQueueStatus`, `events.listDead`,
+`events.retryDead:all|one`, `events.purgeDone`). A row stuck at `running` because its process
+crashed is picked up again after `lockTtlSeconds`.
+
+Guarantees: at-least-once delivery, no ordering across events — so a listener pipeline must be
+idempotent (the envelope's `eventId` is the dedup key). If persistence itself fails on write, the
+`events.emit` step fails with 503 `TRANSIENT` rather than silently dropping the event. Payload
+rules are unchanged: no tokens (only `identity`), a frozen shallow copy per handler.
 
 ## Replaying a Stored Payload
 

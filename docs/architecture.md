@@ -97,16 +97,15 @@ In both cases: only pipelines with a trigger are reachable from outside.
 ## Boot sequence
 
 1. Read `kestrel.config.ts`.
-2. Load active submodules (`use` is a package name or a relative path, so it never equals the
-   module name; boot reduces both to name tokens to check that config and module agree, and a `use`
-   naming no loaded module at all is not an error — a third-party package need not be named after
-   the module it ships), sort topologically by
-   `requires`. `optional` additionally orders a submodule after the provider of a contract, if
-   that provider is active — a missing optional provider is not a boot error, and
-   `deps.find(contract)` then returns `undefined` instead of throwing.
-3. For every submodule: check `requires` against the registry → call `setup(config, deps)` →
-   check the return value against the contract type (is every method present?) → register it
-   under `provides`.
+2. Load active submodules. `use` is a package name or a relative path, so it never equals the
+   module name; boot reduces both to name tokens to check that config and module agree. A `use`
+   naming no loaded module at all is not an error, since a third-party package need not be named
+   after the module it ships. Submodules are then sorted topologically by `requires`; `optional`
+   additionally orders a submodule after the provider of a contract if that provider is active,
+   but a missing optional provider is not a boot error — `deps.find(contract)` then returns
+   `undefined` instead of throwing.
+3. For every submodule: check `requires` against the registry, call `setup(config, deps)`, confirm
+   the return value matches the contract type, then register it under `provides`.
 4. Add every submodule's steps to the step registry (`authn.requireUser` etc.); every step needs
    a `describe()` entry with `summary`, `reads`, `writes` (required, otherwise
    `KestrelBootError`); a factory's `describe(arg)` is called once with the placeholder argument
@@ -130,10 +129,22 @@ If any step fails: abort with `KestrelBootError { module, reason }`.
 
 | Level | Mechanism | Cost |
 |---|---|---|
-| Compile | Contracts are TS interfaces, `setup()` returns the contract type. ESLint `no-restricted-imports` forbids submodule→submodule imports and, in adapted form, any contract or module import in `core`, anything but the core in `contracts`, and any contract or module in the `h3` adapter; the core package exports a fixed list of subpaths, so boot internals are not importable at all. Step names are a type: `StepCatalogue<Modules>` plus `pipelineDefiner<Known>()` turn an unknown or mistyped step in a pipeline file into a `tsc` error instead of a boot error (`pipelines.md` § Step catalogue). `@typescript-eslint/no-unsafe-type-assertion` is enforced in every package, so a narrowing `as T` on an `unknown` value has to become a type guard or a `boundaryCast<T>(value, boundary)` at the untyped source. | immediate |
+| Compile | Types, ESLint import rules, step-name types, no unsafe casts (see below). | immediate |
 | Test | One contract test per contract, every implementation must pass it. | seconds |
 | Boot | Registry check as above; `describe()` is required for every step, and `checkDataflow` proves that every `reads` path was written before it's used. | at startup |
 | Value (runtime) | Expected errors are `Result` values, not a `throw`: every async contract method and every step returns `Result<T, KestrelError>` (`{ code, status, message, retryable, details?, cause? }`, a code-→-status table `STATUS_OF`); `throw` is reserved for wiring errors and becomes a 500 `INTERNAL`. Details: `pipelines.md` § Errors as values, `contracts.md`. | per call |
+
+### Compile-time guarantees
+
+Contracts are TS interfaces, and `setup()` returns the contract type, so a submodule that doesn't
+implement its contract fails to compile. ESLint's `no-restricted-imports` forbids submodule→submodule
+imports and, in adapted form, any contract or module import in `core`, anything but the core in
+`contracts`, and any contract or module in the `h3` adapter; the core package exports a fixed list of
+subpaths, so boot internals are not importable at all. Step names are a type: `StepCatalogue<Modules>`
+plus `pipelineDefiner<Known>()` turn an unknown or mistyped step in a pipeline file into a `tsc` error
+instead of a boot error (`pipelines.md` § Step catalogue). `@typescript-eslint/no-unsafe-type-assertion`
+is enforced in every package, so a narrowing `as T` on an `unknown` value has to become a type guard or
+a `boundaryCast<T>(value, boundary)` at the untyped source.
 
 ## Config and context
 

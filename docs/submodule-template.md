@@ -23,8 +23,8 @@ self-contained unit with its own test — e.g. `rules.ts`, `sizes.ts`/`generate.
 published exports (`exports` in `package.json`, e.g. `./wal`); ESLint (`no-restricted-imports`)
 enforces this.
 
-Pattern: **Fastify plugin** (a shell with `name` and registration) + **vertical slice**
-(everything in one folder, no layers).
+Pattern: a small named shell (`module.ts`) plus a vertical slice — everything for one submodule
+lives in one folder, no layers.
 
 `package.json`: `peerDependencies` on `@michaelthielemann/kestrel` and `-contracts`, export
 `"."` → `./module.ts`, `publishConfig.exports` → `dist/`, script `build: tsc -b`.
@@ -170,18 +170,22 @@ must work without a real argument. The runner compares what a step actually wrot
 `writes` after every successful step and ends the run with 500 `INTERNAL` on a mismatch, so a
 write that only happens on some paths is marked `"<path>?"`.
 
-A step that reads `ctx.payload` (directly or through a helper) must declare what it reads:
-`input` (a JSON Schema for the body, with `additionalProperties` stated
-explicitly — `false` unless the step deliberately takes open objects) and/or `query` (a map of
-query-parameter name → schema; never closed, undeclared parameters are ignored). The runner
-enforces both before the step in every environment (`pipelines.md` § Payload Validation), a
-static test in the core's suite fails for undeclared reads, and the module's `module.test.ts`
-runs every step once through `testing/runPipeline` with `modules: [{ module, instance }]`.
-Further optional fields — output schema, errors, security, etc. — feed `kestrel-openapi`; a step that extends `ctx.result` with fields instead of replacing it
-(e.g. `redirects.export`) sets `extendsOutput` instead of `output` — the generator merges it
-into the predecessor's output schema. `extendsItems` behaves the same but merges the schema into
-`properties.items.items` of the predecessor when its output is a list (otherwise it merges at
-the root like `extendsOutput`) — for steps like `images.attach` that extend each list item.
+A step that reads `ctx.payload` (directly or through a helper) must declare what it reads: `input`
+(a JSON Schema for the body, with `additionalProperties` stated explicitly — `false` unless the
+step deliberately takes open objects) and/or `query` (a map of query-parameter name → schema;
+never closed, undeclared parameters are ignored).
+
+The runner enforces both before the step in every environment (`pipelines.md` § Payload
+Validation). A static test in the core's suite fails for undeclared reads, and the module's
+`module.test.ts` runs every step once through `testing/runPipeline` with
+`modules: [{ module, instance }]`.
+
+Further optional fields — output schema, errors, security, etc. — feed `kestrel-openapi`. A step
+that extends `ctx.result` with fields instead of replacing it (e.g. `redirects.export`) sets
+`extendsOutput` instead of `output`, so the generator merges it into the predecessor's output
+schema. `extendsItems` behaves the same but merges the schema into `properties.items.items` of the
+predecessor when its output is a list (otherwise it merges at the root like `extendsOutput`) — for
+steps like `images.attach` that extend each list item.
 
 ## `impl.test.ts`
 

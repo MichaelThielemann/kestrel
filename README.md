@@ -110,6 +110,8 @@ comments only where a hidden constraint is not obvious from the code.
 | [`docs/submodule-template.md`](docs/submodule-template.md) | Shipping a submodule as a package: file layout, `module.ts`/`impl.ts` shape, checklist before "done". |
 | [`docs/api.md`](docs/api.md) | The HTTP API of the example instance — read before touching a route or a response shape. |
 | [`examples/minimal`](examples/minimal) | Every shipped module wired up in one instance; the reference `docs/api.md` describes. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Setup, the checks to run before a pull request, and the design rules that decide most reviews. |
+| [`SECURITY.md`](SECURITY.md) | Supported versions and how to report a vulnerability privately. |
 | [`RELEASING.md`](RELEASING.md) | Version bump, smoke test and publish steps. |
 | [`CHANGELOG.md`](CHANGELOG.md) | Every behaviour change visible to a consumer, newest first under `## Unreleased`. |
 

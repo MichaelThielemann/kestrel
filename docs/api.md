@@ -205,25 +205,29 @@ redirects (single): rules (json, list of {from, to, status}, order = priority)
 
 `body` is checked against the JSON Schema of the block library (the example instance's is
 [`../examples/minimal/schemas/blocks.json`](../examples/minimal/schemas/blocks.json); body = an
-array of blocks `{ id, type, props, slots? }`): a violation → `400 pages.body: /0 must have
-required property 'type'` (path + message per problem); depth > 32 or > 20,000 nodes → 400. If
-`body` is missing from the payload or is `null`, `validate.check` checks nothing — the step only
-validates a field that is present, required-field checking is the content model's job. Schema paths
-in the `validate-jsonschema` config resolve against `deps.root` (the directory of the loaded
-`kestrel.config`, default `process.cwd()`); the preset therefore always passes absolute paths.
-**HTML is sanitized on write** (order: `validate.check` first, then `validate.sanitize`, then
-`validate.check` again — an invalid body is rejected before anything is sanitized, and the
-sanitized body is checked against the schema again before saving): strings at schema positions with
-`format: "html"` (the rich-text fields of the block library) pass through an allowlist before
-saving — the response contains the sanitized HTML. Allowed: text/list/table tags (`p br hr h1–h6
-blockquote pre code em strong b i u s sub sup small mark ul ol li dl dt dd figure figcaption table
-thead tbody tfoot tr th td caption span div`), `a[href title target rel data-kestrel-broken]`
-(`target=_blank` gets `rel="noopener noreferrer"`), `img[src alt title width height loading]`,
-`th/td[colspan rowspan]`, `id class lang dir` everywhere; schemes `http https mailto tel kestrel`
-(`img` also `data`). Everything else — `script`, `iframe`, `style`, event handlers, `javascript:` —
-is removed. The same list lives in
+array of blocks `{ id, type, props, slots? }`). A violation answers `400 pages.body: /0 must have
+required property 'type'` (path + message per problem); a body deeper than 32 levels or larger
+than 20,000 nodes also answers 400. If `body` is missing from the payload or is `null`,
+`validate.check` checks nothing — the step only validates a field that is present, required-field
+checking is the content model's job. Schema paths in the `validate-jsonschema` config resolve
+against `deps.root` (the directory of the loaded `kestrel.config`, default `process.cwd()`); the
+preset therefore always passes absolute paths.
+
+**HTML is sanitized on write.** Save order is `validate.check`, then `validate.sanitize`, then
+`validate.check` again: an invalid body is rejected before anything is sanitized, and the
+sanitized body is checked against the schema again before saving. Sanitizing runs on strings at
+schema positions with `format: "html"` (the rich-text fields of the block library) — the response
+contains the sanitized HTML.
+
+Allowed by the sanitizer: text/list/table tags (`p br hr h1–h6 blockquote pre code em strong b i u
+s sub sup small mark ul ol li dl dt dd figure figcaption table thead tbody tfoot tr th td caption
+span div`), `a[href title target rel data-kestrel-broken]` (`target=_blank` gets
+`rel="noopener noreferrer"`), `img[src alt title width height loading]`, `th`/`td[colspan
+rowspan]`, `id class lang dir` on any tag, and the schemes `http https mailto tel kestrel` (`img`
+also `data`). Everything else — `script`, `iframe`, `style`, event handlers, `javascript:` — is
+removed. The same list lives in
 [`../packages/validate-jsonschema/sanitize.ts`](../packages/validate-jsonschema/sanitize.ts)
-(`HTML_ALLOWLIST`) for an identical filter when rendering.
+(`HTML_ALLOWLIST`) and is reused when rendering.
 `status = published` can only be set for a language once that language's localized required fields
 (`slug`, `title`) are present — otherwise `400 pages: status cannot be "published" for en: slug,
 title missing` (model rule `completeWhen`). Documents always carry `id`, `createdAt`, `updatedAt`,
@@ -276,7 +280,7 @@ language). The frontend needs no URL rule and no individual lookups. The rendere
 | GET | `/pages/:id` | `?locale=` | document (strict, no fallback) – published only, otherwise 404 |
 | POST | `/pages` | fields (+ `locale`) | `{ document, delivery: [{ locale, state, path, error, publishedAt }], llms: { entries, full } }` – the document plus the outcome of static delivery per language and of the freshly rewritten `llms.txt`; 400 with a field name on a validation error, e.g. `pages: slug must be unique, "home" exists` or `pages: hero references media/<id> which does not exist` |
 | PATCH | `/pages/:id` | partial fields (+ `locale`) | `{ document, delivery: [...], llms }` as with POST |
-| DELETE | `/pages/:id/translations/:locale` | – | `{ …document in the default language, delivery: [...], llms }` – deletes only this translation (all localized fields of that language become `null`, `_translations[locale]` becomes `false`, non-localized fields are untouched); 400 for an unknown language, 404 if the document or translation is missing, 409 `… is the last translation – remove the document` for the last remaining translation (even the default language can be deleted as long as another one remains — its URL then becomes 404). Afterwards `references.index`, `links.extract`, `delivery.publish` (removes the static file for that language) and `delivery.exportLlms` run; event `page.translationRemoved` (language in `params.locale`). Permission `pages.write` |
+| DELETE | `/pages/:id/translations/:locale` | – | `{ …document in the default language, delivery: [...], llms }` – deletes only this translation, see below (`pages.write`) |
 | DELETE | `/pages/:id` | – | `{ ok: true, llms }`; 409 if other documents reference it, e.g. `pages/<id> is referenced by pages/<id2> (hero)` (no 409 on `PATCH`, only on `DELETE`) |
 
 `sort` is a field name, a leading `-` means descending; an unknown field → 400 (`unknown sort field
@@ -284,6 +288,15 @@ language). The frontend needs no URL rule and no individual lookups. The rendere
 `limit` above the ceiling (`maxLimit` in the `content/default` config, default 200) → 400. Without
 `limit`, the list returns every match. Write calls need `pages.write`, deletion needs `pages.delete`
 (deleting a single translation is a write, `pages.write`).
+
+**Deleting a translation.** `DELETE /pages/:id/translations/:locale` empties only that language:
+all localized fields of that language become `null` and `_translations[locale]` becomes `false`;
+non-localized fields are untouched. It answers 400 for an unknown language, 404 if the document or
+translation is missing, and 409 (`… is the last translation – remove the document`) for the last
+remaining translation — even the default language can be deleted as long as another one remains,
+though its URL then answers 404. Afterwards `references.index`, `links.extract`,
+`delivery.publish` (which removes the static file for that language) and `delivery.exportLlms` all
+run, and the event `page.translationRemoved` fires with the language in `params.locale`.
 
 ### Page revisions
 
@@ -357,7 +370,7 @@ anyway, `redirects.read` only protects the editor view.
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| POST | `/media` | `multipart/form-data`: field `file`, repeatable for multiple files in one request, optional `folder`, optional `provenance` (`human`/`ai`/`mixed`/`unknown` or JSON `{ origin, tool?, model?, at? }`, applies to every file in the request; `unknown` if omitted) | exactly one file: `{ id, filename, folder, contentType, size, key, checksum, status, createdAt, provenance }` (`media.write`); multiple files: `{ items: [...same shape...], errors: [{ filename, status, message }], ids }` – each file is checked independently (type, size, 409 on a name conflict), a failed file doesn't stop the rest (partial success, 200); `ids` are the *newly stored* items only; the blob key is `media/<folder>/<filename>` (no folder → `media/<filename>`; the `media/` prefix is configurable and separates media from replication snapshots, the site export and `redirects.json`), so on disk `data/blobs/media/2026/press/photo.jpg`; 409 (`details: { collection: "media_items", field: "key" }`) for the same filename in the same folder with *different* bytes (for multiple files, as an entry in `errors`, not as an HTTP status); the same bytes again are idempotent, see below; no `file` field → 400 |
+| POST | `/media` | `multipart/form-data`: repeatable `file` field, optional `folder`, optional `provenance` | one file or several, see below (`media.write`) |
 | GET | `/media/folders` | – | `[{ folder, count }]` – every folder, including empty ones (persisted in `media_folders`) and implicit parent folders (the client builds the prefix tree; `folder` is a label). The root is not a folder: files without a folder don't create a `""` entry |
 | POST | `/media/folders` | `{ path }` | `{ folder, count }` – creates the folder (idempotent), including implicit parent folders (`media.write`); `count` is the number of files already there (0 for a new folder, otherwise the existing count) |
 | PATCH | `/media/folders/*path` | `{ path }` | `{ folder, moved }` – renames or moves the folder; subfolders and files move with it, blobs are renamed accordingly (`media.write`); 404 if the folder doesn't exist, 409 on a target conflict. If a rename aborts partway (the process dies between the blob move and the row update), the target folder stays occupied and a repeated PATCH answers 409: move the remaining files individually via `PATCH /media/:id`, then delete the source folder |
@@ -369,6 +382,24 @@ anyway, `redirects.read` only protects the editor view.
 | GET | `/media/:id/variants/:file` | – | image variant, `:file` = `<size>.<ext>` (e.g. `thumb.webp`), see [Image variants](#image-variants) |
 | PATCH | `/media/:id` | `{ filename?, folder?, provenance?, locale?, alt?, title?, description? }` | metadata (`media.write`); changing `filename`/`folder` moves the underlying blob (key `media/<folder>/<filename>`), 409 on a conflict with an existing file; text fields apply to `locale` (body or query, default `de`), `null` or `""` clears that language's text; `updatedAt` advances on every PATCH |
 | DELETE | `/media/:id` | – | `{ ok: true }`; deletes the row first, then the blob — if deleting the blob fails, the request still succeeds and the blob is logged (`media.reconcile` cleans it up later); 409 if a page references it — via a `ref` field (`hero`) or via an internal link in a `json` field (a block tree, e.g. `body`), e.g. `media/<id> is referenced by pages/<id2> (hero)` (`media.delete`); also deletes every image variant of that item |
+
+**POST `/media`.** The body is `multipart/form-data` with a repeatable `file` field (send several
+for a multi-file upload), an optional `folder`, and an optional `provenance` (`human`/`ai`/`mixed`/
+`unknown`, or `{ origin, tool?, model?, at? }`; applies to every file in the request; defaults to
+`unknown` if omitted). A request with no `file` field answers 400.
+
+A single file returns `{ id, filename, folder, contentType, size, key, checksum, status, createdAt,
+provenance }` (needs `media.write`). Several files return `{ items: [...same shape...], errors:
+[{ filename, status, message }], ids }` — each file is checked independently (type, size, a 409 on
+a name conflict), and one failed file doesn't stop the rest (partial success still answers 200);
+`ids` lists only the newly stored items.
+
+The blob key is `media/<folder>/<filename>` (or `media/<filename>` with no folder; the `media/`
+prefix is configurable and separates media from replication snapshots, the site export and
+`redirects.json`), so on disk e.g. `data/blobs/media/2026/press/photo.jpg`. The same filename in
+the same folder with *different* bytes answers 409 (`details: { collection: "media_items", field:
+"key" }`; for multi-file uploads, as an entry in `errors` rather than an HTTP status) — the same
+bytes again are idempotent, as described below.
 
 Rules: allows `image/*` (including SVG) and `application/pdf`, forbids `text/html` (415,
 `UNSUPPORTED`); max. 5 MB (413, `PAYLOAD_TOO_LARGE`). **SVG** is sanitized on upload
@@ -447,10 +478,22 @@ database: variants for a size nobody declares any more are reported under `orpha
 | PUT | `/admin/images/sizes` | `{ sizes: [{ name, width, height?, fit: "inside"\|"cover", format: "webp"\|"original", quality? }] }` (non-empty) | effective sizes after replacing the registered list (`images.write`); 400 on an empty list or an invalid definition, 409 on a name collision with a config size |
 | GET | `/admin/images/sizes` | – | effective sizes (defaults/config merged with registered ones) (`images.read`) |
 | POST | `/admin/images/sync` | – | starts or resumes a sync job, keeps running in the background; `{ id, state, total, done, failed, cursor, startedAt, updatedAt, finishedAt, error }` (`images.manage`); 409 `images: sync job <id> is running` if a fresh job is already running |
-| GET | `/admin/images/status` | – | `{ sizes: [{ …size, source, used, variants: { done, pending, error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen, failed: { variants: n, recent: [{ mediaId, size, attempts, error, updatedAt }] } }` – `used` = registered in this process (defaults are never "used" but are still generated); `orphaned` are sizes that still have variants but that nobody declares any more; `registrySeen: false` means this process has never seen `register()` — `orphaned` is then always empty, because "no longer declared" can't be told apart from "not yet registered"; `failed` counts the variants that gave up across *all* sizes and carries the twenty that failed most recently with their last error text (`images.read`) |
+| GET | `/admin/images/status` | – | status of all sizes, the sync job, orphaned sizes and failed variants, see below (`images.read`) |
 | POST | `/admin/images/prune` | `{ sizes: [name] }` | deletes the variants (blob + row) for the named *orphaned* sizes; `{ sizes, variants }` (`images.manage`); 400 if a name is still declared or has no variants |
 | POST | `/admin/images/retry-failed` | `{ id? }` | puts every variant that gave up back to `pending` with `attempts: 0` — all of them, or with `id` only that media item's — and does the work: for one item right away (`job: null`), for all of them by starting a sync job from the first media item; `{ variants, media, job }`, `{ variants: 0, media: 0, job: null }` when nothing had given up (`images.manage`); 404 for an unknown `id` |
 | GET | `/media/:id/variants/:file` | – | variant image bytes, `Content-Type: image/webp`; 404 for an unknown size or unknown medium; if the variant isn't ready yet (pending/error), the original bytes are served instead with header `x-kestrel-variant: pending`; if the variant has permanently given up after `maxAttempts` tries (`failed`), there is no original as a fallback, instead 404 with the reason (`images: variant <size> for media/<id> failed after <n> attempts: <error>`) (`media.read`, `identifyUser`) |
+
+**GET `/admin/images/status`** returns `{ sizes: [{ …size, source, used, variants: { done, pending,
+error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen, failed:
+{ variants: n, recent: [{ mediaId, size, attempts, error, updatedAt }] } }` (needs `images.read`).
+
+- `used`: registered in this process. Default sizes are still generated even though they're never
+  marked `used`.
+- `orphaned`: sizes that still have stored variants but that nothing currently declares.
+- `registrySeen: false`: this process has never seen `register()` run, so `orphaned` reads as
+  empty — there's no way yet to tell "no longer declared" apart from "not yet registered".
+- `failed`: variants that gave up across all sizes, plus the twenty most recent failures with
+  their last error text.
 
 `GET /media/:id` and `GET /media` additionally return
 `variants: [{ size, width, height, format, bytes, state, path }]`; `path` is the stable public path
@@ -578,7 +621,17 @@ replication (point-in-time recovery).
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/admin/migrations` | – | `{ applied: [{ id, appliedAt, documents, durationMs }], pending: [{ id, collection }] }` – ledger in chronological order, pending in config order |
-| POST | `/admin/migrations/apply` | `{ dry?: true }` | without `dry`: `{ applied: [LedgerEntry] }` (empty if nothing was pending); with `dry: true`: `{ dry: true, changes: [{ id, documents }] }` – counts affected documents including validation, writes nothing; 409 (`CONFLICT`) `migrations: apply is running` while a run is in progress; 500 with code `MIGRATION_FAILED` and `migrations: "<id>" failed on <collection>/<docId> locale <l>: <cause>` (`details: { migration, document, locale?, problems? }`) — documents already migrated by this migration stay migrated, the ledger is unchanged |
+| POST | `/admin/migrations/apply` | `{ dry?: true }` | applies pending migrations, or previews with `dry`, see below |
+
+**POST `/admin/migrations/apply`** — body `{ dry?: true }`.
+
+- Without `dry`: `{ applied: [LedgerEntry] }` (empty array if nothing was pending).
+- With `dry: true`: `{ dry: true, changes: [{ id, documents }] }` — counts affected documents,
+  including validation, but writes nothing.
+- `409 CONFLICT` (`migrations: apply is running`) if a run is already in progress.
+- `500 MIGRATION_FAILED` (`migrations: "<id>" failed on <collection>/<docId> locale <l>: <cause>`,
+  with `details: { migration, document, locale?, problems? }`) on failure — documents already
+  migrated stay migrated, and the ledger is unchanged.
 
 For the UI: show the 500's error message verbatim (it names the migration, document and language);
 offer "dry run" before "apply".
@@ -621,14 +674,20 @@ beyond 20 keys gain a `…[+n items]` / `"…": "[+n keys]"` marker, and nesting
 or a cycle reads `"[object]"` / `"[circular]"`. Filesystem paths are shown as they are.
 
 `redacted: true` means the value is withheld and `value` is `null` (a `default` is left out too).
-A variable is redacted when its schema marks it secret — `writeOnly: true`, `format: "password"` or
-`x-secret: true` in the config JSON Schema, which `.describe("secret")` in a zod schema produces —
-or when its key name looks like a credential (`password`, `secret`, `token`, `credential(s)`,
-`authorization`, `passphrase`, `salt`, `dsn`, a connection string, and `key`/`keys` together with
-`api`, `access`, `private`, `signing`, … — a bare `key` is an object name and stays visible), or when
-its value is a URL carrying `user:password@`, or when an ancestor is redacted. The same net runs
-inside a shown value: a nested credential key reads `"[redacted]"`. Numbers and booleans are never
-redacted by name alone, so `minPasswordLength` keeps its value.
+A variable is redacted when any of the following is true:
+
+- its schema marks it secret (`writeOnly: true`, `format: "password"`, `x-secret: true` — which a
+  zod `.describe("secret")` produces),
+- its key name looks like a credential (`password`, `secret`, `token`, `credential(s)`,
+  `authorization`, `passphrase`, `salt`, `dsn`, a connection string, or `key`/`keys` combined with
+  `api`, `access`, `private`, `signing`, … — a bare `key` on its own is treated as an object name
+  and stays visible),
+- its value is a URL containing `user:password@`, or
+- an ancestor field is redacted.
+
+The same check runs inside a value that's otherwise shown: a nested credential key still reads
+`"[redacted]"`. Numbers and booleans are never redacted by name alone, so `minPasswordLength` keeps
+its value.
 `Step`: `{ name: "content.list", module: "content/default", factory: boolean, description: StepDescription }` — a factory step's description is evaluated with the placeholder argument `<arg>`; a `describe()` that throws for it stops the boot, so the field is never `null`.
 `Pipeline`: `{ name, steps: [{ spec: "content.list:pages", name: "content.list", module, description: StepDescription }] }` with the real arguments. `StepDescription` is the module's `describe()` entry: `summary`, `reads`, `writes`, `input`/`output`/`query` (JSON Schema), `errors`, `security`, `multipart`, `binary`.
 Stats: `failed` counts every run or step whose outcome is not ok — 4xx included, so a 401 on `/me` is a failed run; `errors` is the 5xx share of that (thrown steps, `INTERNAL`, `TRANSIENT`). `p50Ms`/`p95Ms` are nearest-rank percentiles over the last 1000 samples per key, `count`/`failed` are unbounded. `step` in `steps` is the spec as written in the pipeline (`authz.require:pages.read`). `events` counts event-triggered runs per event name — an event nobody listens to is invisible. `ratelimit` is always `[]` in this release (no ratelimit contract exists yet); the field stays so a client can render it later.

@@ -10,23 +10,29 @@ locale in `delivery_publish_status` (`live` | `error` | `draft`, `path`, `error`
 render keeps the previous live output. `delivery.unpublish:<type>` after remove, `delivery.readStatus:<type>`
 for the editor's second lamp, `delivery.publishAll:<type>` to re-render everything.
 Formats come from the renderer (`html`, `pdf`, …) – `formats: ["html", "pdf"]` writes both.
-Assets the renderer returns (`assets: [{ path: "/_nuxt/app.js", … }]` – hydration bundles, CSS)
+Assets the renderer returns (`assets: [{ path: "/_assets/app.js", … }]` – hydration bundles, CSS)
 are stored under `<prefix><path>` once per process; they are never removed on unpublish.
 With `media` configured, text output is scanned for `<publicPath>/<id>/file` and `<publicPath>/<id>/variants/<size>.<ext>` (HTML-escaped slashes, e.g. `&#x2F;`, are not matched) and copied to
 `<prefix><target><folder>/<filename>[.<size>.<ext>]`, rewritten in place; each target is copied once per process, so a file re-uploaded under the same name is refreshed in the export only by `publishAll`.
-Unresolved references are logged and left untouched.
+A match is precise to a path segment: `/file` never matches `/file-x` or `/fileabc`, and `thumb.webp.bak`
+never matches `thumb.webp`. Unresolved references are logged and left untouched.
 `delivery.exportLlms` (always on; `llms` defaults to paths instead of URLs and no full file) (no argument; append it after `delivery.publish`/`unpublish`/`publishAll`
 and after saving the settings) writes `<prefix>llms.txt` per [llmstxt.org](https://llmstxt.org) from the `live` status rows
 of every delivered type: `# <settings title>`, `> <settings description>`, one `## <headings[type] ?? type>` section with
 `- [<seo.title || title>](<siteUrl><path>): <seo.description>` per page; `seo.noindex === true` excludes a page. `full: true`
-also writes `<prefix>llms-full.txt` – the stored HTML of every page, restricted to `<main>`, converted with turndown
-(headings shifted three levels, root-relative links and images made absolute with `siteUrl`) – and needs `"html"` in
-`formats`; `full: false` removes a stale `llms-full.txt`. The result gains `llms: { entries, full }`.
+also writes `<prefix>llms-full.txt` – the stored HTML of every page, restricted to `<main>` (matched
+greedily up to the last `</main>` tag, so a nested `<main>` does not cut it short), converted with turndown
+(headings shifted three levels, so a page's own top-level heading becomes `####` under its `###` page
+heading and `##` section heading; root-relative links and images made absolute with `siteUrl`) – and
+needs `"html"` in `formats`; `full: false` removes a stale `llms-full.txt`. Titles and descriptions are
+escaped so that editor-authored text cannot introduce a stray line break or start with a heading marker
+in the generated file. The result gains `llms: { entries, full }`.
 Every `Delivery` method returns a `Result`; a failure is an `Err(KestrelError)`, never an exception.
 A render failure (`RENDER_FAILED` or `TRANSIENT` from `renderer@1`) is not a step failure: it is
 recorded on the status row as `state: "error"` with the message and the remaining locales are still
-published. Only wiring bugs throw (unknown type, unconfigured type, unsafe media/asset path, a media
-row whose blob is gone).
+published. Only wiring bugs throw (unknown type, unconfigured type, a media path that is absolute or
+contains a `..` segment, an asset path that is empty or contains a `..` segment, a media row whose blob
+is gone).
 
 | Step | reads | writes | codes |
 |---|---|---|---|
@@ -37,20 +43,6 @@ row whose blob is gone).
 | `delivery.exportLlms` | – | `result.llms` | TRANSIENT |
 
 Not included: sitemap, CDN invalidation.
-
-## Internals
-
-**Media URL matching.** Negative lookaheads pin each match to a segment boundary: `/file-x` and
-`/fileabc` do not match `/file`, and `thumb.webp.bak` does not match `thumb.webp`, while `?` and `/`
-stay outside the class so a query string or a deeper path segment still terminates a match.
-
-**Media paths.** Blob keys are built from a path this module sanitizes itself, the same check the
-renderer-asset branch applies to `asset.path`, rather than from the stored row as it is.
-
-**llms-full.txt.** Pages sit at `###` under their section heading, so a body's own `<h1>` starts at
-`####`. The body match is greedy to the last `</main>`, so a nested `<main>` does not cut it short,
-and editor-authored text is escaped: a newline in it would forge a second document line and a
-leading marker a heading.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
