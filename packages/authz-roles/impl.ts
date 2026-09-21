@@ -11,7 +11,6 @@ export interface Config {
 
 export interface Access {
   permissions: string[];
-  roles: string[];
 }
 
 export function matches(granted: string, permission: string): boolean {
@@ -48,13 +47,15 @@ export interface AuthzRoles extends Authz {
   canAnonymous(permission: string): boolean;
   attach(kestrel: Introspection): Detach;
   describeAccess(identity: Identity): Access;
+  listRoles(): string[];
 }
 
 export function createAuthzRoles(config: Config): AuthzRoles {
+  const roles = new Map(Object.entries(config.roles));
   let universe: string[] | undefined;
   return {
     async can(identity, permission): Promise<Result<boolean, AuthzError>> {
-      return ok(rolesOf(identity, config.roleClaim).some((role) => (config.roles[role] ?? []).some((granted) => matches(granted, permission))));
+      return ok(rolesOf(identity, config.roleClaim).some((role) => (roles.get(role) ?? []).some((granted) => matches(granted, permission))));
     },
     canAnonymous(permission) {
       return anonymousCan(config, permission);
@@ -69,12 +70,15 @@ export function createAuthzRoles(config: Config): AuthzRoles {
       if (!universe) throw new Error("authz/roles: not attached to a booted instance");
       const granted = new Set<string>();
       for (const role of rolesOf(identity, config.roleClaim)) {
-        const patterns = config.roles[role] ?? [];
+        const patterns = roles.get(role) ?? [];
         for (const permission of universe) {
           if (patterns.some((pattern) => matches(pattern, permission))) granted.add(permission);
         }
       }
-      return { permissions: [...granted].sort(), roles: Object.keys(config.roles) };
+      return { permissions: [...granted].sort() };
+    },
+    listRoles(): string[] {
+      return [...roles.keys()];
     },
   };
 }

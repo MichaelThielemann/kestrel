@@ -68,10 +68,39 @@ describe("authz/roles: permission universe", () => {
     const authz = createAuthzRoles({ roles: { admin: ["*"], editor: ["pages.*"] }, roleClaim: "roles", anonymous: [] });
     expect(() => authz.describeAccess({ id: "a", claims: { roles: ["admin"] } })).toThrow();
     const detach = authz.attach({ describe: () => manifestOf(["authz.require:pages.read", "authz.require:pages.write", "authz.require:users.manage"]), observe: () => () => {} });
-    expect(authz.describeAccess({ id: "e", claims: { roles: ["editor"] } })).toEqual({ permissions: ["pages.read", "pages.write"], roles: ["admin", "editor"] });
-    expect(authz.describeAccess({ id: "v", claims: { roles: ["ghost"] } })).toEqual({ permissions: [], roles: ["admin", "editor"] });
+    expect(authz.describeAccess({ id: "e", claims: { roles: ["editor"] } })).toEqual({ permissions: ["pages.read", "pages.write"] });
+    expect(authz.describeAccess({ id: "v", claims: { roles: ["ghost"] } })).toEqual({ permissions: [] });
     detach();
     expect(() => authz.describeAccess({ id: "a", claims: { roles: ["admin"] } })).toThrow();
+  });
+
+  it("listRoles answers the configured role names in config order", () => {
+    const authz = createAuthzRoles({ roles: { chef: ["pages.*"], autor: ["media.read"] }, roleClaim: "roles", anonymous: [] });
+    expect(authz.listRoles()).toEqual(["chef", "autor"]);
+  });
+});
+
+const DANGEROUS_ROLE_NAMES = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];
+
+describe("authz/roles: a role name shaped like an Object.prototype key never yields an inherited value", () => {
+  const dangerousConfig = { roles: { editor: ["pages.*"] }, roleClaim: "roles", anonymous: [] };
+
+  it.each(DANGEROUS_ROLE_NAMES)("authz.can answers false, never throws, for role %s", async (role) => {
+    const authz = createAuthzRoles(dangerousConfig);
+    await expect(authz.can({ id: "x", claims: { roles: [role] } }, "pages.write")).resolves.toEqual({ ok: true, value: false });
+  });
+
+  it.each(DANGEROUS_ROLE_NAMES)("describeAccess answers no permissions, never throws, for role %s", (role) => {
+    const authz = createAuthzRoles(dangerousConfig);
+    authz.attach({ describe: () => manifestOf(["authz.require:pages.read", "authz.require:pages.write"]), observe: () => () => {} });
+    expect(authz.describeAccess({ id: "x", claims: { roles: [role] } })).toEqual({ permissions: [] });
+  });
+
+  it.each(DANGEROUS_ROLE_NAMES)("module.ts's require step answers 403 FORBIDDEN, never 500, for role %s", async (role) => {
+    const authz = createAuthzRoles(dangerousConfig);
+    const require = module.steps!(authz).require("pages.write");
+    const error = expectErr(await require(withIdentity({ id: "x", claims: { roles: [role] } })), "FORBIDDEN");
+    expect(error.status).toBe(403);
   });
 });
 

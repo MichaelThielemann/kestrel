@@ -73,6 +73,35 @@ describe("authz/roles module steps via runPipeline", () => {
     const res = await runPipeline(pipeline, {}, { modules: [{ module, instance }], steps: { "identity.set": withIdentity({ id: "e", claims: { roles: ["editor"] } }) }, writes: setsIdentity });
     expect(res).toMatchObject({ status: 500, code: "INTERNAL" });
   });
+
+  it("listRoles answers the configured role names, in config order", async () => {
+    const instance = await module.setup(configSchema.parse({ roles: { chef: ["pages.*"], autor: ["media.read"] } }), deps);
+    const res = await runPipeline(definePipeline({ name: "listRoles", steps: ["authz.listRoles"] }), {}, { modules: [{ module, instance }] });
+    expect(res.status).toBe(200);
+    expect(res.result).toEqual({ roles: ["chef", "autor"] });
+  });
+
+  it("describeAccess fails with a wiring error when a prior step replaced ctx.result with a non-object", async () => {
+    const instance = await boot();
+    const pipeline = definePipeline({ name: "badResult", steps: ["identity.set", "authz.describeAccess"] });
+    const res = await runPipeline(pipeline, {}, {
+      modules: [{ module, instance }],
+      steps: { "identity.set": async (ctx: Context) => ok({ ...ctx, identity: { id: "e", claims: { roles: ["editor"] } }, result: "not an object" }) },
+      writes: { "identity.set": ["identity?", "result"] },
+    });
+    expect(res).toMatchObject({ status: 500, code: "INTERNAL" });
+  });
+
+  it("listRoles fails with a wiring error when a prior step replaced ctx.result with a non-object", async () => {
+    const instance = await boot();
+    const pipeline = definePipeline({ name: "badResult", steps: ["set.result", "authz.listRoles"] });
+    const res = await runPipeline(pipeline, {}, {
+      modules: [{ module, instance }],
+      steps: { "set.result": async (ctx: Context) => ok({ ...ctx, result: 42 }) },
+      writes: { "set.result": ["result"] },
+    });
+    expect(res).toMatchObject({ status: 500, code: "INTERNAL" });
+  });
 });
 
 function identityModule(identity: Identity) {
@@ -89,7 +118,7 @@ function identityModule(identity: Identity) {
   });
 }
 
-describe("authz/roles: permissions and roles from a booted instance", () => {
+describe("authz/roles: permissions from a booted instance", () => {
   const roles = { chef: ["pages.*"], autor: ["media.read"] };
 
   async function bootWithUniverse(identity: Identity) {
@@ -140,11 +169,11 @@ describe("authz/roles: permissions and roles from a booted instance", () => {
     await kestrel.stop();
   });
 
-  it("answers the configured role names in config order, regardless of the caller's own roles", async () => {
+  it("no longer reports role names on describeAccess: that is listRoles' job", async () => {
     const kestrel = await bootWithUniverse({ id: "a", claims: { roles: ["autor"] } });
     const trigger = { kind: "http" as const, name: "test" };
     const res = await kestrel.run("me", { trigger });
-    expect(res.result).toMatchObject({ roles: ["chef", "autor"], permissions: ["media.read"] });
+    expect(res.result).toEqual({ permissions: ["media.read"] });
     await kestrel.stop();
   });
 });
