@@ -41,6 +41,6 @@ describe("events.on call sites", () => {
   it("pins every on( call site — the two delivery subscriptions, and nothing else new", () => {
     const locations = scanOnCallSites().map((h) => `${h.file}:${h.line}`);
     const eventSubscriptions = locations.filter((l) => !KNOWN_NON_EVENT_HITS.includes(l));
-    expect(eventSubscriptions.sort()).toEqual(["packages/events-direct/impl.ts:11", "packages/events-queue/module.ts:64"]);
+    expect(eventSubscriptions.sort()).toEqual(["packages/events-direct/impl.ts:22", "packages/events-queue/module.ts:64"]);
   });
 });

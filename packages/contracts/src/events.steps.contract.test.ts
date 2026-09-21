@@ -157,5 +157,18 @@ export function eventDeliveryStepTests(make: () => Promise<EventDeliveryFixture>
         expect(entry.a).toBe(1);
       }
     });
+
+    it("the identity is established once per emit: both subscribed pipelines see the same eventId, and two emits get different ones", async () => {
+      const fixture = await make();
+      await fixture.raise("x.happened", { a: 1 });
+      const [first, second] = await fixture.delivered();
+      expect(first?.eventId).toBeDefined();
+      expect(first?.eventId).toBe(second?.eventId);
+
+      await fixture.raise("x.happened", { a: 2 });
+      const [, , third, fourth] = await fixture.delivered();
+      expect(third?.eventId).toBe(fourth?.eventId);
+      expect(third?.eventId).not.toBe(first?.eventId);
+    });
   });
 }
