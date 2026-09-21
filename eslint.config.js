@@ -2,7 +2,7 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["**/node_modules/**", "**/dist/**", "**/.*/**", "examples/nginx-njs/**"] },
+  { ignores: ["**/node_modules/**", "**/dist/**", "**/.*/**", "examples/nginx-njs/**", "test-fixtures/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
@@ -54,7 +54,7 @@ export default tseslint.config(
         {
           patterns: [
             { group: ["@michaelthielemann/kestrel-*", "!@michaelthielemann/kestrel-contracts", "!@michaelthielemann/kestrel-contracts/*", "../*"], message: "A module may only import the core, the contracts, its own files, Node and its package dependencies." },
-            { group: ["h3", "nuxt", "nuxt/*", "#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "A module may not import a host framework; adapters (e.g. kestrel-h3) bind the runtime, modules stay framework-agnostic." },
+            { group: ["h3", "nuxt", "nuxt/*", "\\#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "A module may not import a host framework; adapters (e.g. kestrel-h3) bind the runtime, modules stay framework-agnostic." },
           ],
         },
       ],
@@ -75,7 +75,7 @@ export default tseslint.config(
         {
           patterns: [
             { group: ["@michaelthielemann/kestrel-*"], message: "The core knows no contract and no module." },
-            { group: ["h3", "nuxt", "nuxt/*", "#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "The core binds no host framework; adapters (e.g. kestrel-h3) do." },
+            { group: ["h3", "nuxt", "nuxt/*", "\\#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "The core binds no host framework; adapters (e.g. kestrel-h3) do." },
           ],
         },
       ],
@@ -89,7 +89,7 @@ export default tseslint.config(
         {
           patterns: [
             { group: ["@michaelthielemann/*", "!@michaelthielemann/kestrel", "!@michaelthielemann/kestrel/*", "!@michaelthielemann/kestrel-contracts", "!@michaelthielemann/kestrel-contracts/*"], message: "A contract imports only the core and its own files." },
-            { group: ["zod", "h3", "nuxt", "nuxt/*", "#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "A contract file is domain-neutral TypeScript: no validation library, no host framework." },
+            { group: ["zod", "h3", "nuxt", "nuxt/*", "\\#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "A contract file is domain-neutral TypeScript: no validation library, no host framework." },
           ],
         },
       ],
