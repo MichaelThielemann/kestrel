@@ -1,5 +1,6 @@
 import type { JsonSchema, Kestrel, ResolvedPipeline, Route, StepDescription } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { mergeObjects, resolveOutputSchema } from "@michaelthielemann/kestrel/schema";
 
 export interface OpenApiInfo {
   title: string;
@@ -41,45 +42,10 @@ function pathOf(route: Route, mountPath: string): { path: string; params: string
   return { path: `${mountPath}/${segments.join("/")}`.replace(/\/+$/, "") || "/", params };
 }
 
-function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
-  if (schemas.length === 0) return undefined;
-  if (schemas.length === 1) return schemas[0];
-  const properties: Record<string, unknown> = {};
-  const required = new Set<string>();
-  for (const s of schemas) {
-    Object.assign(properties, boundaryCast<Record<string, unknown>>(s.properties ?? {}, "json"));
-    for (const r of boundaryCast<string[]>(s.required ?? [], "json")) required.add(r);
-  }
-  const merged: JsonSchema = { type: "object", properties };
-  if (required.size > 0) merged.required = [...required].sort();
-  if (schemas.some((s) => s.additionalProperties === false)) merged.additionalProperties = false;
-  return merged;
-}
-
-function mergeIntoItems(current: JsonSchema | undefined, extension: JsonSchema): JsonSchema {
-  const properties = boundaryCast<Record<string, JsonSchema> | undefined>(current?.properties, "json");
-  const list = properties?.items;
-  const item = boundaryCast<JsonSchema | undefined>(list?.items, "json");
-  if (current === undefined || item === undefined || typeof item !== "object" || Array.isArray(item)) {
-    return current === undefined ? extension : mergeObjects([current, extension])!;
-  }
-  return { ...current, properties: { ...properties, items: { ...list, items: mergeObjects([item, extension])! } } };
-}
-
-function resolveOutput(descriptions: StepDescription[]): JsonSchema | undefined {
-  let current: JsonSchema | undefined;
-  for (const d of descriptions) {
-    if (d.output !== undefined) current = d.output;
-    else if (d.extendsOutput !== undefined) current = current === undefined ? d.extendsOutput : mergeObjects([current, d.extendsOutput]);
-    if (d.extendsItems !== undefined) current = mergeIntoItems(current, d.extendsItems);
-  }
-  return current;
-}
-
 function operation(route: Route, pipeline: ResolvedPipeline, params: string[]): Record<string, unknown> {
   const descriptions = pipeline.steps.map((s) => s.description).filter((d): d is StepDescription => d !== undefined);
   const inputs = descriptions.map((d) => d.input).filter((i): i is JsonSchema => i !== undefined);
-  const output = resolveOutput(descriptions);
+  const output = resolveOutputSchema(descriptions);
   const binary = descriptions.some((d) => d.binary);
   const multipart = descriptions.some((d) => d.multipart);
   const errors: Record<number, string> = { ...DEFAULT_ERRORS };

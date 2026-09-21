@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { coerceQuery, validateSchema } from "./schema.ts";
+import type { StepDescription } from "./defineModule.ts";
+import { coerceQuery, mergeObjects, resolveOutputSchema, validateSchema } from "./schema.ts";
+
+const step = (partial: Partial<StepDescription>): StepDescription => ({ summary: "s", reads: [], writes: [], ...partial });
 
 const paths = (schema: Record<string, unknown>, value: unknown) => validateSchema(schema, value).map((p) => p.path);
 const ok = (schema: Record<string, unknown>, value: unknown) => validateSchema(schema, value);
@@ -156,6 +159,56 @@ describe("coerceQuery", () => {
     expect(coerceQuery(query, values)).toEqual({ limit: 10 });
     expect(values.limit).toBe("10");
     expect(coerceQuery(query, { sort: 5 })).toEqual({ sort: 5 });
+  });
+});
+
+describe("resolveOutputSchema", () => {
+  it("takes the last declared output", () => {
+    const first = { type: "object", properties: { a: { type: "string" } } };
+    const second = { type: "object", properties: { b: { type: "string" } } };
+    expect(resolveOutputSchema([step({ output: first }), step({ output: second })])).toEqual(second);
+  });
+
+  it("merges extendsOutput into the preceding output", () => {
+    const output = { type: "object", properties: { a: { type: "string" } }, required: ["a"] };
+    const extension = { type: "object", properties: { b: { type: "string" } }, required: ["b"] };
+    expect(resolveOutputSchema([step({ output }), step({ extendsOutput: extension })])).toEqual({
+      type: "object",
+      properties: { a: { type: "string" }, b: { type: "string" } },
+      required: ["a", "b"],
+    });
+  });
+
+  it("leaves the active output unchanged through a step with neither output nor extendsOutput", () => {
+    const output = { type: "object", properties: { a: { type: "string" } } };
+    expect(resolveOutputSchema([step({ output }), step({})])).toEqual(output);
+  });
+
+  it("output: \"untyped\" passes through without erasing an earlier output, and never becomes the output itself", () => {
+    const output = { type: "object", properties: { a: { type: "string" } } };
+    expect(resolveOutputSchema([step({ output }), step({ output: "untyped" })])).toEqual(output);
+    expect(resolveOutputSchema([step({ output: "untyped" })])).toBeUndefined();
+  });
+
+  it("returns undefined when nothing declares an output", () => {
+    expect(resolveOutputSchema([step({}), step({})])).toBeUndefined();
+  });
+});
+
+describe("mergeObjects", () => {
+  it("passes a single schema through unchanged", () => {
+    const schema = { type: "object", properties: { a: { type: "string" } } };
+    expect(mergeObjects([schema])).toBe(schema);
+  });
+
+  it("unions properties and required, sorted, and returns undefined for an empty list", () => {
+    expect(mergeObjects([])).toBeUndefined();
+    expect(
+      mergeObjects([
+        { type: "object", properties: { b: { type: "string" } }, required: ["b"] },
+        { type: "object", properties: { a: { type: "string" } }, required: ["a"] },
+      ]),
+    ).toEqual({ type: "object", properties: { a: { type: "string" }, b: { type: "string" } }, required: ["a", "b"] });
   });
 });
 

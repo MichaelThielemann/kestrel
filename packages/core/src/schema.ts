@@ -1,4 +1,5 @@
-import type { JsonSchema } from "./defineModule.ts";
+import { boundaryCast } from "./cast.ts";
+import type { JsonSchema, StepDescription } from "./defineModule.ts";
 import { isRecord } from "./guards.ts";
 
 export interface SchemaProblem {
@@ -163,4 +164,41 @@ export function validateSchema(schema: JsonSchema, value: unknown): SchemaProble
   const problems: SchemaProblem[] = [];
   check(schema, value, ROOT, problems);
   return problems;
+}
+
+/** Merges a list of object schemas into one (union of `properties`, union of `required`, `additionalProperties: false` if any schema has it); a single schema passes through unchanged. */
+export function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
+  if (schemas.length === 0) return undefined;
+  if (schemas.length === 1) return schemas[0];
+  const properties: Record<string, unknown> = {};
+  const required = new Set<string>();
+  for (const s of schemas) {
+    Object.assign(properties, boundaryCast<Record<string, unknown>>(s.properties ?? {}, "json"));
+    for (const r of boundaryCast<string[]>(s.required ?? [], "json")) required.add(r);
+  }
+  const merged: JsonSchema = { type: "object", properties };
+  if (required.size > 0) merged.required = [...required].sort();
+  if (schemas.some((s) => s.additionalProperties === false)) merged.additionalProperties = false;
+  return merged;
+}
+
+function mergeIntoItems(current: JsonSchema | undefined, extension: JsonSchema): JsonSchema {
+  const properties = boundaryCast<Record<string, JsonSchema> | undefined>(current?.properties, "json");
+  const list = properties?.items;
+  const item = boundaryCast<JsonSchema | undefined>(list?.items, "json");
+  if (current === undefined || item === undefined || typeof item !== "object" || Array.isArray(item)) {
+    return current === undefined ? extension : mergeObjects([current, extension])!;
+  }
+  return { ...current, properties: { ...properties, items: { ...list, items: mergeObjects([item, extension])! } } };
+}
+
+/** Folds a pipeline's step descriptions, in order, into the schema its result ends up matching: `output` replaces, `extendsOutput` merges (or becomes the output if there was none yet), `extendsItems` merges into a list output's `items[]`, and `output: "untyped"` clears it (the result is deliberately not represented as a schema). */
+export function resolveOutputSchema(descriptions: readonly StepDescription[]): JsonSchema | undefined {
+  let current: JsonSchema | undefined;
+  for (const d of descriptions) {
+    if (d.output !== undefined && d.output !== "untyped") current = d.output;
+    else if (d.extendsOutput !== undefined) current = current === undefined ? d.extendsOutput : mergeObjects([current, d.extendsOutput]);
+    if (d.extendsItems !== undefined) current = mergeIntoItems(current, d.extendsItems);
+  }
+  return current;
 }
