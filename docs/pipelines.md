@@ -134,6 +134,21 @@ permission a deployment already uses for user management (`examples/minimal` use
 Whether a route is public is therefore decided by the authz config, not by a second
 pipeline.
 
+### Validating Role Names on Write
+
+A user-writing module (such as `authn-multi`'s `createUser`/`updateUser`) does not know the role
+table and accepts any role string it is given. `authz.validateRoles:<path>` reads
+`payload.<path>`, checks every entry against the configured role names, and fails with 400
+`VALIDATION` and the unknown names in `details.unknown` if any entry is not configured; an absent
+value passes, since an update may omit roles. Put it in the pipeline after `authz.require:*`,
+before the step that writes the roles:
+
+```ts
+steps: ["authn.requireUser", "authz.require:users.manage", "authz.validateRoles:roles", "authn.createUser"]
+```
+
+A pipeline that omits this step still runs; it simply does not reject an unknown role name.
+
 ## Triggers (in `kestrel.config.ts`)
 
 This section covers what a trigger does to a run. Every config key with its type and default is in

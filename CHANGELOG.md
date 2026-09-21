@@ -4,6 +4,13 @@
 
 ### Added
 
+- `authz-roles`: the factory step `authz.validateRoles:<path>` reads an array of role names at
+  `payload.<path>` and rejects it with 400 `VALIDATION` (unknown names in `details.unknown`) unless
+  every entry is a configured role name; an absent value passes. It writes nothing and needs no
+  attached instance. `examples/minimal`'s `createUser` and `updateUser` pipelines now run
+  `authz.validateRoles:roles` right after `authz.require:users.manage`, so a role name typo no
+  longer creates or updates a user silently. A pipeline that omits the step still boots and works
+  unchanged — it simply does not validate role names.
 - `authn-multi`: the factory step `authn.verifyUser:<path>` looks up the user id at `payload.<path>`
   — a plain path, no fallback between locations — rejects an unknown or inactive one (404
   `NOT_FOUND` / 400 `VALIDATION`), and writes the canonical `{ id, name }` to a new context key,
