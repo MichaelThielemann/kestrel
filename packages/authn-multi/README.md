@@ -26,6 +26,7 @@ username is `CONFLICT` (409), the last admin guard is `LAST_ADMIN` (409).
 | `authn.requireUser` | – | `token`, `identity` | `UNAUTHENTICATED`, `TRANSIENT` |
 | `authn.loadIdentity` | `identity` | `result` | `UNAUTHENTICATED` |
 | `authn.logout` | `token` | `result` | `UNAUTHENTICATED`, `TRANSIENT` |
+| `authn.verifyUser:<path>` | `payload.<path>` | `verifiedUser` | `VALIDATION`, `NOT_FOUND`, `TRANSIENT` |
 | `authn.createUser` | – | `result` | `VALIDATION`, `CONFLICT`, `TRANSIENT` |
 | `authn.listUsers` | – | `result` | `TRANSIENT` |
 | `authn.getUser` | `params.id` | `result` | `NOT_FOUND`, `TRANSIENT` |
@@ -46,6 +47,15 @@ so the target travels in the payload, and let the pipelines behind that event de
 what the user wrote: `revisions.reassignAuthor` moves or anonymises their revisions,
 `audit.anonymize` strips them from the audit log. The module itself deletes only the user row and
 their sessions; it knows nothing about revisions or audit entries.
+
+**Verifying a user reference.** `authn.verifyUser:<path>` looks up the user id at `payload.<path>`,
+answers by whether that user exists and is active (404 or 400), and writes the canonical
+`{ id, name }` to `verifiedUser` — `null` when `<path>` is absent or `null`. It does not check who is
+calling: an HTTP pipeline needs `authn.requireUser` and an `authz.require` step of its own in front
+of it, the same as any other admin-only step. `<path>` is a literal dotted path under `payload`, so
+the same step covers both a client-supplied reference (`authn.verifyUser:reassignTo` reads
+`payload.reassignTo`) and one an event hands over (`authn.verifyUser:result.reassignTo` reads
+`payload.result.reassignTo`), with no fallback between the two.
 
 Not included: self-service registration, password reset by mail, login rate limiting (pipeline
 concerns), an e-mail field.
@@ -72,7 +82,7 @@ concerns), an e-mail field.
 | `authn.requireUser` | Require a valid session | – | `token`, `identity` | – | – | 401 not authenticated |
 | `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated |
 | `authn.logout` | End the current session | `token` | `result` | – | { ok: boolean, … } | 401 not authenticated |
-| `authn.verifyUser` | Look up `payload.reassignTo` (or the `reassignTo` an `authn.deleteUser` event hands over as `payload.result.reassignTo`) and write its canonical `{ id, name }` to `reassignTarget`; absent or `null` writes `null` | `payload.reassignTo`, `payload.result` | `reassignTarget` | { reassignTo?: string \| object \| null, result?: object, … } | – | 400 reassignTo is neither a user id, { id, name } nor null, or names an inactive user; 404 user not found |
+| `authn.verifyUser:<arg>` | Verify the user reference at payload.<arg>: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over | `payload.<arg>` | `verifiedUser` | object | – | 400 the value is neither a user id, { id } nor null, or the user is not active; 404 user not found |
 | `authn.createUser` | Create a user | – | `result` | { username: string, password: string, roles?: string[] } | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 400 invalid input; 409 username already exists |
 | `authn.listUsers` | List users | – | `result` | – | object[] | – |
 | `authn.getUser` | One user | `params.id` | `result` | – | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 404 user not found |
@@ -84,6 +94,6 @@ concerns), an e-mail field.
 | `authn.activateUser` | Activate a user | `params.id` | `result` | – | { ok: boolean, … } | 404 user not found |
 | `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed?: number, … } | – |
 
-Used by 70 of 83 pipelines in `examples/minimal`.
+Used by 71 of 83 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

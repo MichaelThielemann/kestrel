@@ -174,7 +174,7 @@ never relies on that.
 | POST | `/users/:id/deactivate` | – | `{ ok: true }`; ends that user's sessions; 400 for self, 409 (`LAST_ADMIN`) for the last admin |
 | POST | `/users/:id/activate` | – | `{ ok: true }` |
 | DELETE | `/users/:id` | `{ reassignTo? }` | deletes the user and their sessions (`{ ok: true, reassignTo: { id, name } \| null }`); 400 for self or an unusable target, 404 for an unknown target, 409 (`LAST_ADMIN`) for the last admin |
-| POST | `/admin/users/:id/revisions/reassign` | `{ reassignTo: { id, name } \| null }` | re-runs the author reassignment for that user: `{ from, to, revisions }`; `reassignTo.id` is looked up again and must be an existing, active user (400/404 otherwise); a given `reassignTo.name` is ignored, the response and the stored author always carry the target's current username |
+| POST | `/admin/users/:id/revisions/reassign` | `{ reassignTo: string \| { id } \| null }` | re-runs the author reassignment for that user: `{ from, to, revisions }`; `reassignTo` names the target's id only — it is looked up and must be an existing, active user (400/404 otherwise); a name is never sent or trusted, the response and the stored author always carry the target's current username |
 | POST | `/admin/users/:id/audit/anonymize` | – | re-runs the audit anonymisation for that user: `{ entries }` |
 
 The username is the identity — a user has no e-mail field. Roles are free strings; which ones
@@ -739,26 +739,29 @@ backend, and neither ever appears in an event payload.
 **How a deletion runs.** `DELETE /users/:id` deletes the user and their sessions and emits
 `user.deleted` with `{ eventId, event, at, runId, identity, params, id, result: { ok: true,
 reassignTo: { id, name } | null } }` — ids and the target's username snapshot, no secrets. Two
-pipelines listen to it: one runs `authn.verifyUser` then `revisions.reassignAuthor`, the other
-`audit.anonymize`. The audit log is only ever anonymised, never reassigned: a login belongs to
-nobody else.
+pipelines listen to it: one runs `authn.verifyUser:result.reassignTo` then
+`revisions.reassignAuthor`, the other `audit.anonymize`. The audit log is only ever anonymised,
+never reassigned: a login belongs to nobody else.
 
-**Both reassignment routes run `authn.verifyUser` first.** `revisions.reassignAuthor` prefers the
-canonical `{ id, name }` a preceding step writes to `reassignTarget` over any `reassignTo` in the
-request; `authn.verifyUser` writes it only after confirming the target exists and is active, so an
-unknown or inactive id is rejected before any revision changes. The event above hands its own
-already-resolved `reassignTo` through the same step, so both the automatic (post-delete) and the
-manual retry route verify the target the same way. This is the recommended shape: a pipeline that
-skips `authn.verifyUser` still works, it just reassigns to whatever `reassignTo` the request or
-event names, unverified. Verifying a user reference this way needs a real user store, so it only
-works with `authn-multi`; `authn-single`'s one fixed admin has no second user to reassign to.
+**Both reassignment routes run `authn.verifyUser` first, each reading its own path.**
+`authn.verifyUser` is a factory step: `authn.verifyUser:reassignTo` reads `payload.reassignTo` (the
+manual retry route's request body), `authn.verifyUser:result.reassignTo` reads
+`payload.result.reassignTo` (the event above). Neither falls back to the other. Either one confirms
+the target exists and is active, then writes the canonical `{ id, name }` to `verifiedUser`, which
+`revisions.reassignAuthor` prefers over any `reassignTo` in the request — an unknown or inactive id
+is rejected before any revision changes. `authn.verifyUser` does not check who is calling, so the
+manual route also runs `authn.requireUser` and `authz.require:users.manage` first. This is the
+recommended shape: a pipeline that skips `authn.verifyUser` still works, it just reassigns to
+whatever `reassignTo` the request or event names, unverified. Verifying a user reference this way
+needs a real user store, so it only works with `authn-multi`; `authn-single`'s one fixed admin has
+no second user to reassign to.
 
 **When one of them fails.** Each listener is a run of its own, so a failure shows up in
 `GET /admin/insights/stats` under `recentFailures` with the pipeline, step and message. Both steps
 are idempotent, so repeating them is safe: `POST /admin/users/:id/revisions/reassign` with
-`{ "reassignTo": { "id", "name" } }` (or `null` to anonymise) and
-`POST /admin/users/:id/audit/anonymize`, both with `users.manage`. A repeat that finds nothing left
-to change answers `revisions: 0` or `entries: 0`.
+`{ "reassignTo": "<id>" }` (or `null` to anonymise) and `POST /admin/users/:id/audit/anonymize`,
+both with `users.manage`. A repeat that finds nothing left to change answers `revisions: 0` or
+`entries: 0`.
 
 ## What the frontend does not need to do
 

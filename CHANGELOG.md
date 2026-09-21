@@ -4,22 +4,30 @@
 
 ### Added
 
-- `authn-multi`: the step `authn.verifyUser` looks up the user id in `payload.reassignTo` (or the
-  `reassignTo` an `authn.deleteUser` event hands over as `payload.result.reassignTo`), rejects an
-  unknown or inactive one (404 `NOT_FOUND` / 400 `VALIDATION`), and writes the canonical
-  `{ id, name }` to a new context key, `reassignTarget` — the given `name`, if any, is ignored.
-  Absent or `null` writes `null`.
+- `authn-multi`: the factory step `authn.verifyUser:<path>` looks up the user id at `payload.<path>`
+  — a plain path, no fallback between locations — rejects an unknown or inactive one (404
+  `NOT_FOUND` / 400 `VALIDATION`), and writes the canonical `{ id, name }` to a new context key,
+  `verifiedUser`; a given name, if any, is never trusted. Absent or `null` writes `null`. It
+  verifies a user reference generically: `authn.verifyUser:reassignTo` reads `payload.reassignTo`,
+  `authn.verifyUser:result.reassignTo` reads `payload.result.reassignTo` (an event hand-over
+  shape). It does not check the caller, so an HTTP pipeline needs its own `authn.requireUser` and
+  `authz.require` in front of it.
 
 ### Changed
 
-- `revisions.reassignAuthor` prefers a preceding step's `reassignTarget` (e.g. `authn.verifyUser`'s
+- `revisions.reassignAuthor` prefers a preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s
   verified target) when one is present, ignoring the payload's own `reassignTo`. Without a
   preceding step it behaves exactly as before: it reads the unverified `reassignTo` from the
   payload or the event hand-over, so a pipeline built before this release, e.g.
   `authn.requireUser → authz.require:users.manage → revisions.reassignAuthor`, keeps booting and
   working unchanged — it simply does not verify the target user exists or is active.
   `examples/minimal`'s `reassignRevisionAuthor` and `retryReassignRevisionAuthor` pipelines now run
-  `authn.verifyUser` first; new pipelines should do the same to get a verified target.
+  `authn.verifyUser:result.reassignTo` and `authn.verifyUser:reassignTo` respectively first; new
+  pipelines should do the same to get a verified target.
+- `revisions.reassignAuthor`'s `reassignTo` input no longer requires a `name` alongside `id`, and
+  now also accepts a bare user id string, matching what a client sends when `authn.verifyUser`
+  precedes it: previously `{ reassignTo: { id } }` failed schema validation demanding `name`, and a
+  bare id passed `authn.verifyUser` only to then fail `revisions.reassignAuthor`'s own schema.
 
 - `boot()` now also returns non-fatal conditions as `kestrel.warnings: BootWarning[]`, in addition to
   logging them through `logger.warn`. `BootWarning` is a discriminated union on `code`; a future

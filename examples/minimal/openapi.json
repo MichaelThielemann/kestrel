@@ -5906,7 +5906,7 @@
     "/admin/users/{id}/revisions/reassign": {
       "post": {
         "operationId": "retryReassignRevisionAuthor",
-        "summary": "Require a valid session → Requires permission users.manage → Look up `payload.reassignTo` (or the `reassignTo` an `authn.deleteUser` event hands over as `payload.result.reassignTo`) and write its canonical `{ id, name }` to `reassignTarget`; absent or `null` writes `null` → Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `reassignTarget` (e.g. authn.verifyUser's verified target) is used when present; without one, falls back to `reassignTo` from the payload or the event hand-over, unverified. Without any target, the anonymous author `{ id: null, name: null }`",
+        "summary": "Require a valid session → Requires permission users.manage → Verify the user reference at payload.reassignTo: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over → Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
         "tags": [
           "admin"
         ],
@@ -5914,7 +5914,7 @@
         "x-kestrel-steps": [
           "authn.requireUser",
           "authz.require:users.manage",
-          "authn.verifyUser",
+          "authn.verifyUser:reassignTo",
           "revisions.reassignAuthor"
         ],
         "parameters": [
@@ -5970,7 +5970,7 @@
             }
           },
           "400": {
-            "description": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again",
+            "description": "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again",
             "content": {
               "application/json": {
                 "schema": {
@@ -6047,6 +6047,7 @@
                 "properties": {
                   "reassignTo": {
                     "type": [
+                      "string",
                       "object",
                       "null"
                     ],
@@ -6059,32 +6060,8 @@
                       }
                     },
                     "required": [
-                      "id",
-                      "name"
+                      "id"
                     ]
-                  },
-                  "result": {
-                    "type": "object",
-                    "properties": {
-                      "reassignTo": {
-                        "type": [
-                          "object",
-                          "null"
-                        ],
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "name"
-                        ]
-                      }
-                    }
                   }
                 }
               }
