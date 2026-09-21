@@ -1,0 +1,125 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { afterEach, describe, it, expect } from "vitest";
+import backupBlobstore, { configSchema as backupConfigSchema } from "@michaelthielemann/kestrel-backup-blobstore";
+import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import type { Contract } from "@michaelthielemann/kestrel/defineContract";
+import type { Deps } from "@michaelthielemann/kestrel/defineModule";
+import { failure } from "@michaelthielemann/kestrel/errors";
+import { silentLogger } from "@michaelthielemann/kestrel/logger";
+import { err, ok } from "@michaelthielemann/kestrel/result";
+import type { Replication } from "./impl.ts";
+import replicationSqlite, { configSchema as replicationConfigSchema } from "./module.ts";
+
+function fakeBlobs(): Blobstore & { blobs: Map<string, Uint8Array>; calls: string[] } {
+  const blobs = new Map<string, Uint8Array>();
+  const calls: string[] = [];
+  return {
+    blobs,
+    calls,
+    async put(key, data) {
+      calls.push(`put:${key}`);
+      blobs.set(key, new Uint8Array(data));
+      return ok();
+    },
+    async get(key) {
+      calls.push(`get:${key}`);
+      return ok(blobs.get(key) ?? null);
+    },
+    async remove(key) {
+      blobs.delete(key);
+      return ok();
+    },
+    async move(from, to) {
+      const b = blobs.get(from);
+      if (!b) return err(failure("NOT_FOUND", `${from} not found`));
+      blobs.set(to, b);
+      blobs.delete(from);
+      return ok();
+    },
+    async list(prefix) {
+      return ok([...blobs.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key, size: blobs.get(key)?.byteLength ?? 0 })));
+    },
+  };
+}
+
+function deps(blobs: Blobstore, root: string, bootStartedAt: number): Deps {
+  return {
+    get<T>(contract: Contract<T>): T {
+      if (contract.name !== BLOBSTORE.name) throw new Error(`no provider for "${contract.name}"`);
+      return boundaryCast<T>(blobs, "host");
+    },
+    find: <T>(): T | undefined => undefined,
+    logger: silentLogger,
+    root,
+    bootStartedAt,
+  };
+}
+
+function emptySqliteDb(): Uint8Array {
+  const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-shared-seed-"));
+  const file = join(dir, "seed.db");
+  const db = new DatabaseSync(file);
+  db.close();
+  const bytes = readFileSync(file);
+  rmSync(dir, { recursive: true, force: true });
+  return new Uint8Array(bytes);
+}
+
+const dirs: string[] = [];
+afterEach(() => {
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+describe("replication-sqlite and backup-blobstore configured on the same file", () => {
+  for (const order of ["replication-first", "backup-first"] as const) {
+    it(`boots cleanly on a fresh disk with a restore point for both, exactly one restore happening (${order})`, async () => {
+      const bootStartedAt = Date.now();
+      const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-shared-"));
+      dirs.push(dir);
+      const file = join(dir, "kestrel.db");
+      const blobs = fakeBlobs();
+      const seed = emptySqliteDb();
+      blobs.blobs.set("replica/gen/20260101T000000Z/snapshot.db", seed);
+      blobs.blobs.set("backups/db", seed);
+
+      const replicationConfig = replicationConfigSchema.parse({ file, prefix: "replica/" });
+      const backupConfig = backupConfigSchema.parse({ file, key: "backups/db" });
+
+      const run = async (): Promise<unknown[]> => {
+        if (order === "replication-first") {
+          const r = boundaryCast<Replication>(await replicationSqlite.setup(replicationConfig, deps(blobs, dir, bootStartedAt)), "host");
+          const b = await backupBlobstore.setup(backupConfig, deps(blobs, dir, bootStartedAt));
+          return [r, b];
+        }
+        const b = await backupBlobstore.setup(backupConfig, deps(blobs, dir, bootStartedAt));
+        const r = boundaryCast<Replication>(await replicationSqlite.setup(replicationConfig, deps(blobs, dir, bootStartedAt)), "host");
+        return [b, r];
+      };
+
+      const [first] = await run();
+      expect(existsSync(file)).toBe(true);
+      expect(blobs.calls.filter((c) => c.startsWith("get:"))).toHaveLength(1);
+      boundaryCast<{ close?(): void }>(first, "host").close?.();
+    });
+  }
+
+  it("still fails when the file turned up fresh this boot without either module having restored it", async () => {
+    const bootStartedAt = Date.now();
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-shared-"));
+    dirs.push(dir);
+    const file = join(dir, "kestrel.db");
+    const db = new DatabaseSync(file);
+    db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    db.close();
+
+    const blobs = fakeBlobs();
+    blobs.blobs.set("backups/db", emptySqliteDb());
+    const backupConfig = backupConfigSchema.parse({ file, key: "backups/db" });
+
+    await expect(backupBlobstore.setup(backupConfig, deps(blobs, dir, bootStartedAt))).rejects.toThrow(/was created during this start-up while the backup holds a restore point/);
+  });
+});

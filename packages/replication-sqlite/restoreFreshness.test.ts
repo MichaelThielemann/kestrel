@@ -11,7 +11,7 @@ import { failure } from "@michaelthielemann/kestrel/errors";
 import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Replication } from "./impl.ts";
-import { checkSkippedRestore, fileBirthMs, freshnessOf } from "./restoreFreshness.ts";
+import { checkSkippedRestore, fileBirthMs, freshnessOf, markRestoredThisBoot } from "./restoreFreshness.ts";
 import module from "./module.ts";
 
 function fakeBlobs(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
@@ -84,6 +84,20 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
+describe("fileBirthMs", () => {
+  it("returns the birth time in ms when it differs from the change time", () => {
+    expect(fileBirthMs("/irrelevant", () => ({ birthtimeNs: 1_700_000_000_123_000_000n, ctimeNs: 1_700_000_001_456_000_000n }))).toBe(1_700_000_000_123);
+  });
+
+  it("returns 0 when the birth time is zero, the file system reports none at all", () => {
+    expect(fileBirthMs("/irrelevant", () => ({ birthtimeNs: 0n, ctimeNs: 1_700_000_001_456_000_000n }))).toBe(0);
+  });
+
+  it("returns 0 when the birth time equals the change time, the signature of a file system that fakes it from the change time", () => {
+    expect(fileBirthMs("/irrelevant", () => ({ birthtimeNs: 1_700_000_000_123_000_000n, ctimeNs: 1_700_000_000_123_000_000n }))).toBe(0);
+  });
+});
+
 describe("replication/sqlite module setup: restore-on-start skip check", () => {
   it("rejects when the file already holds tables and was created during this boot, even though the table-count design would stay quiet", async () => {
     const bootStartedAt = Date.now();
@@ -126,6 +140,34 @@ describe("replication/sqlite module setup: restore-on-start skip check", () => {
     putSnapshot(blobs);
     const instance = boundaryCast<Replication>(await module.setup(module.configSchema.parse(skippedConfig(file)), moduleDeps(blobs, dir, bootStartedAt)), "host");
     instance.close();
+  });
+});
+
+describe("checkSkippedRestore: the restore sidecar", () => {
+  it("skips a fresh, restore-point-holding file another module already restored in this boot", async () => {
+    const bootStartedAt = Date.now();
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    writeFileSync(file, "x");
+    markRestoredThisBoot(file, bootStartedAt);
+    const blobs = fakeBlobs();
+    putSnapshot(blobs);
+    const { infos, logger } = infoLogger();
+    await checkSkippedRestore(skippedConfig(file), blobs, logger, bootStartedAt, () => Date.now());
+    expect(infos).toEqual([{ message: "replication/sqlite: restore-on-start skipped", data: { file, reason: "file restored earlier in this boot" } }]);
+  });
+
+  it("ignores a sidecar left by a different boot and judges freshness normally", async () => {
+    const bootStartedAt = Date.now();
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    writeFileSync(file, "x");
+    markRestoredThisBoot(file, bootStartedAt - 999_999);
+    const blobs = fakeBlobs();
+    putSnapshot(blobs);
+    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger, bootStartedAt, () => Date.now())).rejects.toThrow(/was created during this start-up/);
   });
 });
 

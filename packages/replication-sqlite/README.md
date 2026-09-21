@@ -11,13 +11,14 @@ and can never lose frames. Config: `file`, `prefix`, `checkpointBytes`/`checkpoi
 `restoreOnStart` (rebuild the file from the replica when missing). List this module **before**
 `persistence-sqlite`, and it also declares `before: [persistence@1]` so a misordered list produces
 a `module-order` boot warning instead of a silent empty start. If the file already exists and holds
-a restore point when `setup()` runs, and the file was created during this very start-up, `setup()`
-fails: that proves another module opened the database first. Delete the named file (and its `-wal`
-and `-shm` siblings) before the next start — a restart clears them on an ephemeral disk by itself,
-but not on a persistent volume, where they have to be removed by hand: a stale file left over from
-an earlier, unrelated failure predates this boot, so this check stays quiet about it and the file
-still has to be deleted as instructed above. Run `replication.sync` from a cron trigger
-(`* * * * *` → RPO ≤ 60 s).
+a restore point when `setup()` runs, was not itself just restored, and was created during this very
+boot (judged by birth time against the start of this boot, falling back to a table count where the
+file system reports none), `setup()` fails: that proves another module opened the database first.
+Move the named file (and its `-wal` and `-shm` siblings) aside and start again — an ephemeral disk
+clears them for you on the next restart, a persistent volume does not, so move them by hand there:
+a stale file left over from an earlier, unrelated failure predates this boot, so this check stays
+quiet about it and the file still has to be moved aside as instructed above. Run `replication.sync`
+from a cron trigger (`* * * * *` → RPO ≤ 60 s).
 Every step returns a `Result`. A blobstore `Err` (`Err(TRANSIENT)`, 503, `retryable`) passes
 through unchanged; `replication.prepareRestore` for a point with no snapshot before it, or an
 unknown `generation`, is `Err(NOT_FOUND)`; an unparsable `at` in the payload is `Err(VALIDATION)`.
@@ -31,7 +32,11 @@ unknown `generation`, is `Err(NOT_FOUND)`; an unparsable `at` in the payload is 
 | `replication.prepareRestore` | – | `result` (writes `<file>.restore`; applied by setup on the next start – the live database cannot be replaced while open) | `VALIDATION`, `NOT_FOUND`, `TRANSIENT` |
 
 `backup/blobstore` follows the same pattern with its own file names (`<file>.restore-pending` plus
-`<file>.restore-marker`), so both modules can point at the same database without clashing.
+`<file>.restore-marker`), so both modules can point at the same database without clashing. When
+either module restores the file, it writes `<file>.restored-at` (the epoch ms this boot started)
+next to it; the other module, if configured on the same file, recognizes a matching value as "this
+boot already restored the file" and skips its own check — neither module has to know the other
+exists. A sidecar from an earlier boot is ignored and simply overwritten on the next restore.
 Not included: multi-process setups, encryption, restore without restart.
 
 <!-- kestrel-docs:start -->

@@ -47,17 +47,24 @@
 
 - `replication-sqlite`: `setup()` no longer silently skips restoring the database when the file
   already exists. When `restoreOnStart` is set and the file was not just restored from a pending
-  marker in this same `setup()` call, `setup()` now checks whether the file was created during the
-  current boot while the replica holds a restore point (judged against `Deps.bootStartedAt`, with a
-  local table-count fallback where the file system reports no birth time) and fails naming the file
-  and its `-wal`/`-shm` siblings if so — the shape of a misordered module list that would otherwise
-  start from an empty database. The blobstore is asked whether a restore point exists only for a
-  file that already looks fresh (or whose birth time is unavailable); an old file is never checked
-  against the blobstore at all, and a blobstore failure only fails the boot for a file that already
-  looked fresh. Every other skip is now logged with its reason, where previously it was silent.
-- `backup-blobstore`: `setup()` gets the same check as `replication-sqlite`, minus the table-count
-  fallback, since the backed-up file is not necessarily SQLite; an unavailable birth time is logged
-  and left to the `module-order` warning instead of failing the boot.
+  marker or automatic restore in this same `setup()` call, `setup()` now checks whether the file
+  was created during the current boot while the replica holds a restore point (judged against
+  `Deps.bootStartedAt`, with a local table-count fallback where the file system reports no birth
+  time) and fails naming the file and its `-wal`/`-shm` siblings if so, telling the operator to
+  move them aside and start again — the shape of a misordered module list that would otherwise
+  start from an empty database. A file just restored by `backup-blobstore` configured on the same
+  file is recognized through a small sidecar file, `<file>.restored-at`, and skipped without either
+  module naming the other. A birth time is treated as unavailable, not as a false alarm, both when
+  the file system reports none and when it reports one identical to the change time (the signature
+  of a file system that fakes birth time from change time). The blobstore is asked whether a
+  restore point exists only for a file that already looks fresh (or whose birth time is
+  unavailable); an old file is never checked against the blobstore at all, and a blobstore failure
+  only fails the boot for a file that already looked fresh. Every other skip is now logged with its
+  reason, where previously it was silent.
+- `backup-blobstore`: `setup()` gets the same check as `replication-sqlite` — including the shared
+  `<file>.restored-at` sidecar and the "move aside" wording — minus the table-count fallback, since
+  the backed-up file is not necessarily SQLite; an unavailable birth time is logged and left to the
+  `module-order` warning instead of failing the boot.
 
 - `revisions.reassignAuthor` prefers a preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s
   verified target) when one is present, ignoring the payload's own `reassignTo`. Without a
