@@ -38,9 +38,9 @@ Not included: link rewriting, retries before reporting, robots.txt.
 |---|---|---|---|---|---|---|---|
 | `links.extract:<arg>` | Index external links of <arg> | `result.id` | – | – | – | – | – |
 | `links.unextract:<arg>` | Drop indexed links of <arg> | `params.id` | – | – | – | 400 missing id | – |
-| `links.check` | Check due links | – | `result` | – | { urls?: number, checked?: number, broken?: number, skipped?: number, … } | – | – |
+| `links.check` | Check due links | – | `result` | – | { urls: number, checked: number, broken: number, skipped: number, … } | – | – |
 | `links.report` | Broken links | – | `result` | ?type: string | object[] | – | – |
-| `links.rebuild` | Rebuild the link index | – | `result` | – | { documents?: number, entries?: number, … } | – | – |
+| `links.rebuild` | Rebuild the link index | – | `result` | – | { documents: number, entries: number, … } | – | – |
 
 Pipelines in `examples/minimal` using these steps:
 

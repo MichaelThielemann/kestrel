@@ -2191,7 +2191,18 @@
                           "null"
                         ]
                       }
-                    }
+                    },
+                    "required": [
+                      "url",
+                      "fromType",
+                      "fromId",
+                      "field",
+                      "locale",
+                      "ok",
+                      "status",
+                      "error",
+                      "checkedAt"
+                    ]
                   }
                 }
               }
@@ -2281,7 +2292,11 @@
                     "entries": {
                       "type": "number"
                     }
-                  }
+                  },
+                  "required": [
+                    "documents",
+                    "entries"
+                  ]
                 }
               }
             }
@@ -2404,7 +2419,11 @@
                     }
                   },
                   "required": [
-                    "variants"
+                    "conflicts",
+                    "missing",
+                    "skipped",
+                    "variants",
+                    "written"
                   ]
                 }
               }
@@ -4100,6 +4119,8 @@
                     }
                   },
                   "required": [
+                    "delivery",
+                    "document",
                     "llms"
                   ]
                 }
@@ -4343,6 +4364,9 @@
                     }
                   },
                   "required": [
+                    "documents",
+                    "errors",
+                    "live",
                     "llms",
                     "redirects"
                   ]
@@ -4633,7 +4657,18 @@
                           "null"
                         ]
                       }
-                    }
+                    },
+                    "required": [
+                      "fromType",
+                      "fromId",
+                      "field",
+                      "locale",
+                      "toTarget",
+                      "toId",
+                      "via",
+                      "broken",
+                      "checkedAt"
+                    ]
                   }
                 }
               }
@@ -4723,7 +4758,11 @@
                     "entries": {
                       "type": "number"
                     }
-                  }
+                  },
+                  "required": [
+                    "documents",
+                    "entries"
+                  ]
                 }
               }
             }
@@ -5591,7 +5630,11 @@
                     "bytes": {
                       "type": "number"
                     }
-                  }
+                  },
+                  "required": [
+                    "generation",
+                    "bytes"
+                  ]
                 }
               }
             }
@@ -5723,7 +5766,17 @@
                         "null"
                       ]
                     }
-                  }
+                  },
+                  "required": [
+                    "generation",
+                    "lineage",
+                    "shippedFrames",
+                    "lastSyncAt",
+                    "lastSnapshotAt",
+                    "lastCheckpointAt",
+                    "walBytes",
+                    "pendingRestore"
+                  ]
                 }
               }
             }
@@ -5906,7 +5959,7 @@
     "/admin/users/{id}/revisions/reassign": {
       "post": {
         "operationId": "retryReassignRevisionAuthor",
-        "summary": "Require a valid session → Requires permission users.manage → Replace the author of every revision written by the user in `params.id` or the event payload's `id`: with `reassignTo` that user, without it the anonymous author `{ id: null, name: null }`",
+        "summary": "Require a valid session → Requires permission users.manage → Verify the user reference at payload.reassignTo: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over → Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
         "tags": [
           "admin"
         ],
@@ -5914,6 +5967,7 @@
         "x-kestrel-steps": [
           "authn.requireUser",
           "authz.require:users.manage",
+          "authn.verifyUser:reassignTo",
           "revisions.reassignAuthor"
         ],
         "parameters": [
@@ -5969,7 +6023,7 @@
             }
           },
           "400": {
-            "description": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again",
+            "description": "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again",
             "content": {
               "application/json": {
                 "schema": {
@@ -5990,6 +6044,16 @@
           },
           "403": {
             "description": "missing permission users.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "user not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -6036,6 +6100,7 @@
                 "properties": {
                   "reassignTo": {
                     "type": [
+                      "string",
                       "object",
                       "null"
                     ],
@@ -6048,12 +6113,10 @@
                       }
                     },
                     "required": [
-                      "id",
-                      "name"
+                      "id"
                     ]
                   }
-                },
-                "additionalProperties": true
+                }
               }
             }
           }
@@ -6736,25 +6799,34 @@
                           }
                         },
                         "required": [
+                          "alt",
                           "checksum",
                           "contentType",
                           "createdAt",
+                          "description",
                           "filename",
                           "folder",
+                          "height",
                           "id",
                           "key",
                           "provenance",
                           "size",
                           "status",
+                          "title",
                           "updatedAt",
-                          "variants"
+                          "variants",
+                          "width"
                         ]
                       }
                     },
                     "total": {
                       "type": "number"
                     }
-                  }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ]
                 }
               }
             }
@@ -6958,7 +7030,12 @@
                         "status",
                         "createdAt",
                         "updatedAt",
-                        "provenance"
+                        "provenance",
+                        "width",
+                        "height",
+                        "alt",
+                        "title",
+                        "description"
                       ]
                     },
                     {
@@ -7078,7 +7155,12 @@
                               "status",
                               "createdAt",
                               "updatedAt",
-                              "provenance"
+                              "provenance",
+                              "width",
+                              "height",
+                              "alt",
+                              "title",
+                              "description"
                             ]
                           }
                         },
@@ -7551,18 +7633,23 @@
                     }
                   },
                   "required": [
+                    "alt",
                     "checksum",
                     "contentType",
                     "createdAt",
+                    "description",
                     "filename",
                     "folder",
+                    "height",
                     "id",
                     "key",
                     "provenance",
                     "size",
                     "status",
+                    "title",
                     "updatedAt",
-                    "variants"
+                    "variants",
+                    "width"
                   ]
                 }
               }
@@ -7791,7 +7878,12 @@
                     "status",
                     "createdAt",
                     "updatedAt",
-                    "provenance"
+                    "provenance",
+                    "width",
+                    "height",
+                    "alt",
+                    "title",
+                    "description"
                   ]
                 }
               }
@@ -9032,6 +9124,8 @@
                     }
                   },
                   "required": [
+                    "delivery",
+                    "document",
                     "llms"
                   ]
                 }
@@ -9239,7 +9333,8 @@
                     }
                   },
                   "required": [
-                    "llms"
+                    "llms",
+                    "ok"
                   ]
                 }
               }
@@ -9654,6 +9749,8 @@
                     }
                   },
                   "required": [
+                    "delivery",
+                    "document",
                     "llms"
                   ]
                 }
@@ -9945,6 +10042,8 @@
                     }
                   },
                   "required": [
+                    "delivery",
+                    "document",
                     "llms"
                   ]
                 }
@@ -11044,9 +11143,10 @@
                           "broken": {
                             "type": "boolean"
                           }
-                        }
+                        },
+                        "required": []
                       },
-                      "description": "internal references by target id after site.resolveLinks"
+                      "description": "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve"
                     }
                   },
                   "required": [
@@ -11236,7 +11336,7 @@
       },
       "post": {
         "operationId": "createUser",
-        "summary": "Require a valid session → Requires permission users.manage → Create a user → Emit event \"user.created\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission users.manage → Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept → Create a user → Emit event \"user.created\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "users"
         ],
@@ -11244,6 +11344,7 @@
         "x-kestrel-steps": [
           "authn.requireUser",
           "authz.require:users.manage",
+          "authz.validateRoles:roles",
           "authn.createUser",
           "events.emit:user.created"
         ],
@@ -11376,8 +11477,8 @@
                   }
                 },
                 "required": [
-                  "username",
-                  "password"
+                  "password",
+                  "username"
                 ],
                 "additionalProperties": false
               }
@@ -11684,7 +11785,7 @@
       },
       "patch": {
         "operationId": "updateUser",
-        "summary": "Require a valid session → Requires permission users.manage → Rename a user or set their roles (a role change ends their sessions) → Emit event \"user.updated\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission users.manage → Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept → Rename a user or set their roles (a role change ends their sessions) → Emit event \"user.updated\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "users"
         ],
@@ -11692,6 +11793,7 @@
         "x-kestrel-steps": [
           "authn.requireUser",
           "authz.require:users.manage",
+          "authz.validateRoles:roles",
           "authn.updateUser",
           "events.emit:user.updated"
         ],

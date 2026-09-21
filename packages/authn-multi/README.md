@@ -72,6 +72,7 @@ concerns), an e-mail field.
 | `authn.requireUser` | Require a valid session | – | `token`, `identity` | – | – | 401 not authenticated | portable |
 | `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated | portable |
 | `authn.logout` | End the current session | `token` | `result` | – | { ok: boolean, … } | 401 not authenticated | portable |
+| `authn.verifyUser:<arg>` | Verify the user reference at payload.<arg>: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over | `payload.<arg>` | `verifiedUser` | object | – | 400 the value is neither a user id, { id } nor null, or the user is not active; 404 user not found | beside |
 | `authn.createUser` | Create a user | – | `result` | { username: string, password: string, roles?: string[] } | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 400 invalid input; 409 username already exists | beside |
 | `authn.listUsers` | List users | – | `result` | – | object[] | – | beside |
 | `authn.getUser` | One user | `params.id` | `result` | – | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 404 user not found | beside |
@@ -81,8 +82,8 @@ concerns), an e-mail field.
 | `authn.changePassword` | Change own password | `identity` | `result` | { currentPassword: string, newPassword: string } | { ok: boolean, … } | 400 wrong current password, missing fields, or new one too short; 401 not authenticated | beside |
 | `authn.deactivateUser` | Deactivate a user (ends their sessions) | `params.id` | `result` | – | { ok: boolean, … } | 400 cannot deactivate yourself; 404 user not found; 409 the last active admin cannot be deactivated (`LAST_ADMIN`) | beside |
 | `authn.activateUser` | Activate a user | `params.id` | `result` | – | { ok: boolean, … } | 404 user not found | beside |
-| `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed?: number, … } | – | beside |
+| `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed: number, … } | – | beside |
 
-Used by 70 of 83 pipelines in `examples/minimal`.
+Used by 71 of 83 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->
