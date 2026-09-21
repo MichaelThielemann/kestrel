@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, definePipeline, silentLogger } from "@michaelthielemann/kestrel";
+import { EVENTS } from "@michaelthielemann/kestrel-contracts/events";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import type { Context } from "@michaelthielemann/kestrel/context";
@@ -8,17 +9,22 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { ok } from "@michaelthielemann/kestrel/result";
-import type { RunResult } from "@michaelthielemann/kestrel/runner";
+import type { RunResult, Runner } from "@michaelthielemann/kestrel/runner";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
+import { createEventsInmemory } from "@michaelthielemann/kestrel-events-inmemory/impl";
 import type { EventsQueue } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
 
+const FAIL_RUN: Runner = async () => ({ runId: "r", status: 500, error: "no", code: "INTERNAL", retryable: false });
+
 async function setup(overrides: Record<string, unknown> = {}) {
   const db = createFakePersistence();
+  const bus = createEventsInmemory();
   const deps: Deps = {
     get<T>(contract: Contract<T>): T {
-      if (contract.name !== PERSISTENCE.name) throw new Error(`no provider for "${contract.name}"`);
-      return boundaryCast<T>(db, "host");
+      if (contract.name === PERSISTENCE.name) return boundaryCast<T>(db, "host");
+      if (contract.name === EVENTS.name) return boundaryCast<T>(bus, "host");
+      throw new Error(`no provider for "${contract.name}"`);
     },
     find: () => undefined,
     logger: silentLogger,
@@ -26,7 +32,7 @@ async function setup(overrides: Record<string, unknown> = {}) {
     eventTriggers: [],
   };
   const instance = boundaryCast<EventsQueue>(await module.setup(configSchema.parse({ maxAttempts: 1, ...overrides }), deps), "host");
-  return { db, instance };
+  return { db, bus, instance };
 }
 
 function run(steps: string[], input: Record<string, unknown>, instance: unknown): Promise<RunResult> {
@@ -39,11 +45,12 @@ describe("events/queue module steps via runPipeline", () => {
     expect(configSchema.safeParse({ extra: 1 }).success).toBe(false);
   });
 
-  it("emit queues the envelope and answers ok before any handler ran", async () => {
+  it("emit queues the envelope and answers ok before the pipeline ran", async () => {
     const { instance } = await setup();
     let calls = 0;
-    instance.on("page.created", async () => {
+    instance.setDelivery([{ event: "page.created", pipeline: "onCreated" }], async () => {
       calls++;
+      return { runId: "r", status: 200 };
     });
     const res = await run(["events.emit:page.created"], { params: { id: "p1" } }, instance);
     expect(res.status).toBe(200);
@@ -68,23 +75,19 @@ describe("events/queue module steps via runPipeline", () => {
 
   it("listDead honours ?limit and rejects an invalid one", async () => {
     const { instance } = await setup();
-    instance.on("x", async () => {
-      throw new Error("no");
-    });
+    instance.setDelivery([{ event: "x", pipeline: "p" }], FAIL_RUN);
     for (let i = 0; i < 3; i++) await run(["events.emit:x"], {}, instance);
     await instance.tick();
     const res = await run(["events.listDead"], { query: { limit: "2" } }, instance);
     expect(res.status).toBe(200);
     expect(boundaryCast<{ items: unknown[] }>(res.result, "json").items).toHaveLength(2);
     expect((await run(["events.listDead"], { query: { limit: "0" } }, instance)).status).toBe(400);
-    expect(boundaryCast<{ items: unknown[] }>((await run(["events.listDead"], {}, instance)).result, "json").items).toHaveLength(3);
+    expect(boundaryCast<{ items: { pipeline: string }[] }>((await run(["events.listDead"], {}, instance)).result, "json").items).toMatchObject([{ pipeline: "p" }, { pipeline: "p" }, { pipeline: "p" }]);
   });
 
   it("retryDead:one needs params.id, 404s an unknown id and requeues a dead event; retryDead:all requeues every one", async () => {
     const { instance } = await setup();
-    instance.on("x", async () => {
-      throw new Error("no");
-    });
+    instance.setDelivery([{ event: "x", pipeline: "p" }], FAIL_RUN);
     await run(["events.emit:x"], {}, instance);
     await run(["events.emit:x"], {}, instance);
     await instance.tick();
@@ -117,6 +120,15 @@ describe("events/queue in a booted instance", () => {
       return createFakePersistence();
     },
   });
+  const bus = defineModule({
+    name: "events/fake",
+    provides: [EVENTS],
+    requires: [],
+    configSchema: z.object({}).strict(),
+    async setup() {
+      return createEventsInmemory();
+    },
+  });
 
   it("runs the listener pipeline from the worker after the emitting run finished, with the event trigger and parentRunId", async () => {
     const order: string[] = [];
@@ -146,6 +158,7 @@ describe("events/queue in a booted instance", () => {
       config: {
         modules: [
           { use: "./persistence.ts", config: {} },
+          { use: "./events.ts", config: {} },
           { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: 2 } },
           { use: "./probe.ts", config: {} },
         ],
@@ -155,7 +168,7 @@ describe("events/queue in a booted instance", () => {
         ],
         http: null,
       },
-      modules: [persistence, module, probe],
+      modules: [persistence, bus, module, probe],
       pipelines: [definePipeline({ name: "createDoc", steps: ["probe.create", "events.emit:doc.created"] }), definePipeline({ name: "onCreated", steps: ["probe.listen"] })],
       logger: silentLogger,
     });

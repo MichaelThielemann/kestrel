@@ -401,6 +401,9 @@ importers:
       '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@michaelthielemann/kestrel-events-inmemory':
+        specifier: workspace:*
+        version: link:../events-inmemory
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@22.20.1)

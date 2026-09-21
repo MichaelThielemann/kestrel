@@ -1,15 +1,15 @@
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import "@michaelthielemann/kestrel-contracts/authn";
 import { EVENTS } from "@michaelthielemann/kestrel-contracts/events";
+import { eventEnvelope } from "@michaelthielemann/kestrel-contracts/events.envelope";
+import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/events.envelope";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
-import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
+import type { Unsubscribe } from "@michaelthielemann/kestrel-contracts/events";
 import { createEventsQueue, persistenceFailure, retryTarget, type EventsQueue } from "./impl.ts";
-import { startEventTriggers } from "./triggers.ts";
 
 export const configSchema = z
   .object({
@@ -40,7 +40,7 @@ export const DEAD_SCHEMA: JsonSchema = {
   properties: {
     items: {
       type: "array",
-      items: { type: "object", properties: { id: { type: "string" }, name: { type: "string" }, attempts: { type: "number" }, error: { type: "string" }, createdAt: { type: "number" }, availableAt: { type: "number" } }, required: ["id", "name", "attempts", "error", "createdAt", "availableAt"] },
+      items: { type: "object", properties: { id: { type: "string" }, name: { type: "string" }, pipeline: { type: "string" }, attempts: { type: "number" }, error: { type: "string" }, createdAt: { type: "number" }, availableAt: { type: "number" } }, required: ["id", "name", "pipeline", "attempts", "error", "createdAt", "availableAt"] },
     },
   },
   required: ["items"],
@@ -49,59 +49,60 @@ const COUNT = (key: string): JsonSchema => ({ type: "object", properties: { [key
 const DEFAULT_DEAD_LIMIT = 50;
 const MAX_DEAD_LIMIT = 500;
 
-type Instance = EventsQueue & { logger: Logger };
+type Instance = EventsQueue & { offs: Unsubscribe[]; logger: Logger };
 
 export default defineModule({
   name: "events/queue",
-  provides: [EVENTS],
-  requires: [PERSISTENCE],
+  provides: [],
+  requires: [PERSISTENCE, EVENTS],
   configSchema,
 
   async setup(config, deps): Promise<Instance> {
-    return { ...(await createEventsQueue(config, { db: deps.get(PERSISTENCE), logger: deps.logger })), logger: deps.logger };
+    const bus = deps.get(EVENTS);
+    const queue = await createEventsQueue(config, { db: deps.get(PERSISTENCE), logger: deps.logger });
+    const offs = [...new Set(deps.eventTriggers.map((entry) => entry.event))].map((name) =>
+      bus.on(name, async (event, data) => {
+        await queue.enqueue(event, withEventIdentity(event, data));
+      }),
+    );
+    return { ...queue, offs, logger: deps.logger };
   },
 
   triggers: {
-    event: (events, entries, run, logger) => {
-      const off = startEventTriggers(events, entries, run, logger);
-      events.startWorker();
+    event: (instance, entries, run) => {
+      instance.setDelivery(entries, run);
+      instance.startWorker();
       return () => {
-        off();
-        void events.stopWorker();
+        void instance.stopWorker();
       };
     },
   },
 
-  teardown: (events) => events.stopWorker(),
+  teardown: (instance) => {
+    for (const off of instance.offs) off();
+  },
 
-  steps: (events) => ({
+  steps: (queue) => ({
     emit: stepFactory((spec: string) => async (ctx: Context) => {
-      const questionMark = spec.indexOf("?");
-      const name = questionMark === -1 ? spec : spec.slice(0, questionMark);
-      const withResult = questionMark !== -1 && new URLSearchParams(spec.slice(questionMark + 1)).get("with") === "result";
-      const result = boundaryCast<{ id?: unknown; document?: { id?: unknown }; ids?: unknown } | undefined>(ctx.result, "json");
-      const id = typeof result?.id === "string" ? result.id : typeof result?.document?.id === "string" ? result.document.id : typeof ctx.params.id === "string" ? ctx.params.id : null;
-      const envelope: Record<string, unknown> = { eventId: randomUUID(), event: name, at: Date.now(), runId: ctx.runId, identity: ctx.identity ?? null, params: ctx.params, id };
-      if (Array.isArray(result?.ids) && result.ids.every((v): v is string => typeof v === "string")) envelope.ids = result.ids;
-      if (withResult) envelope.result = ctx.result ?? null;
+      const { name, envelope } = eventEnvelope(spec, ctx);
       try {
-        await events.emit(name, envelope);
+        await queue.enqueue(name, { ...envelope });
       } catch (error) {
         const failure = persistenceFailure(error);
-        if (failure) return ctx.fail(failure);
-        events.logger.error("events/queue: emit failed", { event: name, error });
+        if (!failure) throw error;
+        return ctx.fail(failure);
       }
       return ok(ctx);
     }),
     readQueueStatus: async (ctx: Context) => {
-      const status = await events.status();
+      const status = await queue.status();
       if (isErr(status)) return ctx.fail(status.error);
       return ok({ ...ctx, result: status.value });
     },
     listDead: async (ctx: Context) => {
       const raw = first(ctx.payload.limit) ?? (typeof ctx.payload.limit === "number" ? String(ctx.payload.limit) : undefined);
       const limit = raw === undefined ? DEFAULT_DEAD_LIMIT : Math.min(MAX_DEAD_LIMIT, Number(raw));
-      const listed = await events.listDead(limit);
+      const listed = await queue.listDead(limit);
       if (isErr(listed)) return ctx.fail(listed.error);
       return ok({ ...ctx, result: listed.value });
     },
@@ -109,19 +110,19 @@ export default defineModule({
       const target = retryTarget(arg);
       return async (ctx: Context) => {
         if (target === "all") {
-          const retried = await events.retryDead("all");
+          const retried = await queue.retryDead("all");
           if (isErr(retried)) return ctx.fail(retried.error);
           return ok({ ...ctx, result: retried.value });
         }
         if (!ctx.params.id) return ctx.fail("VALIDATION", "missing id");
-        const retried = await events.retryDead(ctx.params.id);
+        const retried = await queue.retryDead(ctx.params.id);
         if (isErr(retried)) return ctx.fail(retried.error);
         if (retried.value.retried === 0) return ctx.fail("NOT_FOUND", `no dead event "${ctx.params.id}"`);
         return ok({ ...ctx, result: retried.value });
       };
     }),
     purgeDone: async (ctx: Context) => {
-      const removed = await events.purgeDone();
+      const removed = await queue.purgeDone();
       if (isErr(removed)) return ctx.fail(removed.error);
       return ok({ ...ctx, result: removed.value });
     },
