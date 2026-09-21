@@ -976,7 +976,8 @@
         ]
       },
       "steps": [
-        "authz.require"
+        "authz.require",
+        "authz.describeAccess"
       ],
       "eventHook": false,
       "emits": []
@@ -5272,6 +5273,46 @@
         "errors": {
           "401": "not authenticated",
           "403": "missing permission <arg>"
+        }
+      }
+    },
+    {
+      "name": "authz.describeAccess",
+      "module": "authz/roles",
+      "factory": false,
+      "description": {
+        "summary": "The caller's concrete permissions and the configured role names",
+        "reads": [
+          "identity"
+        ],
+        "writes": [
+          "result.permissions",
+          "result.roles"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "permissions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "roles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "permissions",
+            "roles"
+          ]
+        },
+        "security": "required",
+        "errors": {
+          "401": "not authenticated"
         }
       }
     },
@@ -14548,6 +14589,46 @@
                 "claims"
               ]
             },
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.describeAccess",
+          "name": "authz.describeAccess",
+          "module": "authz/roles",
+          "description": {
+            "summary": "The caller's concrete permissions and the configured role names",
+            "reads": [
+              "identity"
+            ],
+            "writes": [
+              "result.permissions",
+              "result.roles"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "permissions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "permissions",
+                "roles"
+              ]
+            },
+            "security": "required",
             "errors": {
               "401": "not authenticated"
             }

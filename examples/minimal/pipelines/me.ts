@@ -2,5 +2,5 @@ import { definePipeline } from "../modules.ts";
 
 export default definePipeline({
   name: "me",
-  steps: ["authn.requireUser", "authn.loadIdentity"],
+  steps: ["authn.requireUser", "authn.loadIdentity", "authz.describeAccess"],
 });

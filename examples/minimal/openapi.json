@@ -6301,14 +6301,15 @@
     "/me": {
       "get": {
         "operationId": "me",
-        "summary": "Require a valid session → Current identity",
+        "summary": "Require a valid session → Current identity → The caller's concrete permissions and the configured role names",
         "tags": [
           "me"
         ],
         "x-kestrel-pipeline": "me",
         "x-kestrel-steps": [
           "authn.requireUser",
-          "authn.loadIdentity"
+          "authn.loadIdentity",
+          "authz.describeAccess"
         ],
         "parameters": [],
         "responses": {
@@ -6325,11 +6326,25 @@
                     "claims": {
                       "type": "object",
                       "additionalProperties": true
+                    },
+                    "permissions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "roles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
+                    "claims",
                     "id",
-                    "claims"
+                    "permissions",
+                    "roles"
                   ]
                 }
               }

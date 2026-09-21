@@ -158,7 +158,7 @@ never relies on that.
 |---|---|---|---|
 | POST | `/login` | `{ username, password }` | `{ token, identity: { id, claims: { username, roles } } }`; 401 on wrong credentials; 429 after 5 failed attempts/minute per IP |
 | POST | `/logout` | – | `{ ok: true }` |
-| GET | `/me` | – | `{ id, claims: { username, roles } }` |
+| GET | `/me` | – | `{ id, claims: { username, roles }, permissions, roles }`; `permissions` are the caller's concrete, granted permissions and `roles` are the configured role names – both from the server, so a client needs no copy of the role table or the pattern matcher |
 | POST | `/me/password` | `{ currentPassword, newPassword }` | `{ ok: true }`; ends every other session |
 
 ## Users (permission `users.manage`, i.e. admin)

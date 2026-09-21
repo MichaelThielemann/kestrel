@@ -117,6 +117,15 @@ aborts (`requireUser` enforces login).
 steps: ["authn.identifyUser", "authz.require:pages.read", "content.list:pages?status=published"]
 ```
 
+### What a Client Can Rely On
+
+A client never gets the role table or the pattern matcher. `authz.describeAccess`, placed after
+`authn.loadIdentity` in a pipeline, writes `result.permissions` — the caller's roles' patterns
+expanded into the concrete permissions any booted pipeline actually requires (`authz.require:<perm>`
+arguments), so a permission nothing checks never appears — and `result.roles`, the configured role
+names in config order. Rendering a role-gated control means checking `permissions.includes(...)`,
+not hardcoding role names or expanding patterns client-side.
+
 Whether a route is public is therefore decided by the authz config, not by a second
 pipeline.
 

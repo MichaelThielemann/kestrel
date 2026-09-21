@@ -23,6 +23,12 @@
   subpath-only), failing with the step name and the JSON path on a mismatch. A step whose write is
   declared optional (`result?`) and left `ctx.result` unchanged is skipped. `validateOutput`
   defaults to off, so production pays nothing for it unless a deployment opts in.
+- `authz-roles`: new step `authz.describeAccess`, meant to run after `authn.loadIdentity`. It writes
+  `result.permissions` (the caller's roles' patterns expanded against every permission a booted
+  pipeline requires via an `authz.require:<perm>` argument) and `result.roles` (the configured role
+  names, in config order), so a client can learn its concrete permissions and the instance's role
+  names without a copy of the role table or the pattern matcher. `examples/minimal`'s `me` pipeline
+  now runs it.
 - `persistence-sqlite`, `redirects-default`, `site-default`: `createOne`/`findOne`/`updateOne` now
   declare `output: { type: "object" }`; `redirects.lookup` declares its real
   `{ redirect: { to, status } }`; `site.resolveLinks` restates the `_links` field as its own
