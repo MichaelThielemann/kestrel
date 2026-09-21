@@ -15,7 +15,8 @@
   "exclude": [
     "dist",
     "**/*.test.ts",
-    "**/*.contract.test.ts"
+    "**/*.contract.test.ts",
+    "__fixtures__"
   ],
   "references": [
     {
@@ -23,6 +24,9 @@
     },
     {
       "path": "../contracts"
+    },
+    {
+      "path": "../persistence-sqlite"
     }
   ]
 }

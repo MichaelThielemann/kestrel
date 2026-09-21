@@ -22,7 +22,7 @@ a rejecting `emit`, which this module deliberately does not provide).
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
-`@michaelthielemann/kestrel-events-queue` – module `events/queue`: provides `events@1`; requires `persistence@1`; provides the event trigger hook.
+`@michaelthielemann/kestrel-events-queue` – module `events/queue`: provides no contract; requires `persistence@1`, `events@1`; provides the event trigger hook.
 
 | Config | Type | Required | Default |
 |---|---|---|---|

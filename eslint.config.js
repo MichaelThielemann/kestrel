@@ -61,7 +61,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["packages/*/**/*.test.ts"],
+    files: ["packages/*/**/*.test.ts", "packages/*/__fixtures__/**/*.ts"],
     ignores: ["packages/core/**", "packages/contracts/**"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [{ group: ["../*"], message: "A module may only import the core, the contracts, its own files, Node and its package dependencies." }] }],
