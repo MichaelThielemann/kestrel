@@ -8,6 +8,7 @@ import { isErr, type Result } from "./result.ts";
 import { coerceQuery, resolveOutputSchema, validateSchema, type SchemaProblem } from "./schema.ts";
 import { isRecord } from "./guards.ts";
 import type { StepDescription } from "./defineModule.ts";
+import { writeRoot } from "./writes.ts";
 
 export interface ResolvedPipeline {
   name: string;
@@ -84,12 +85,6 @@ function isContext(value: unknown): value is Context {
   return record(value.trigger) && record(value.payload) && record(value.params) && record(value.headers) && Array.isArray(value.files) && typeof value.fail === "function" && typeof value.done === "function";
 }
 
-export function writeRoot(path: string): string {
-  const dot = path.indexOf(".");
-  const root = dot === -1 ? path : path.slice(0, dot);
-  return root.endsWith("?") ? root.slice(0, -1) : root;
-}
-
 function wrote(after: Context, path: string): boolean {
   let value: unknown = after;
   for (const segment of path.split(".")) {
@@ -117,7 +112,7 @@ function writesResult(step: ResolvedStep): boolean {
 }
 
 function optionalResultWrite(step: ResolvedStep): boolean {
-  return step.description.writes.some((path) => writeRoot(path) === "result" && path.endsWith("?"));
+  return step.description.writes.includes("result?");
 }
 
 function checkOutput(step: ResolvedStep, descriptionsSoFar: readonly StepDescription[], before: Context, after: Context): void {
@@ -229,8 +224,10 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
       checkWrites(step, ctx, out.value);
       const before = ctx;
       ctx = Object.freeze(out.value);
-      descriptionsSoFar.push(step.description);
-      if (options.validateOutput && writesResult(step)) checkOutput(step, descriptionsSoFar, before, ctx);
+      if (options.validateOutput) {
+        descriptionsSoFar.push(step.description);
+        if (writesResult(step)) checkOutput(step, descriptionsSoFar, before, ctx);
+      }
       log("ok", 200);
       if (Reflect.get(ctx, DONE) === true) return finish(trace({ runId, status: 200, result: ctx.result }));
     } catch (caught) {

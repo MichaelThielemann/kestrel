@@ -350,6 +350,31 @@ describe("runPipeline writes check", () => {
   });
 });
 
+describe("runPipeline output validation", () => {
+  const A_SCHEMA = { type: "object", properties: { a: { type: "string" } }, required: ["a"] };
+  const B_SCHEMA = { type: "object", properties: { b: { type: "string" } }, required: ["b"] };
+
+  it("skips a step whose write is declared optional (result?) and left ctx.result unchanged", async () => {
+    const res = await runPipeline(
+      { name: "p", steps: [{ name: "maybe", description: { summary: "test", reads: [], writes: ["result?"], output: A_SCHEMA }, fn: async (ctx: Context) => ok(ctx) }] },
+      input,
+      collectingLogger().logger,
+      {},
+      { validateOutput: true },
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("does not skip a step whose optional write is a sub-path (result.x?), even when ctx.result is unchanged", async () => {
+    const seed: ResolvedStep = { name: "seed", description: { summary: "test", reads: [], writes: ["result"], output: A_SCHEMA }, fn: boundaryCast<Step>(async (ctx: Context) => ok({ ...ctx, result: { a: "x" } }), "host") };
+    const extend: ResolvedStep = { name: "extend", description: { summary: "test", reads: ["result"], writes: ["result.x?"], extendsOutput: B_SCHEMA }, fn: boundaryCast<Step>(async (ctx: Context) => ok(ctx), "host") };
+    const res = await runPipeline({ name: "p", steps: [seed, extend] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    expect(res.status).toBe(500);
+    expect(res.error).toContain('step "extend": result does not match describe().output');
+    expect(res.error).toContain("$.b is required");
+  });
+});
+
 describe("runPipeline observer", () => {
   function recording() {
     const events: string[] = [];
