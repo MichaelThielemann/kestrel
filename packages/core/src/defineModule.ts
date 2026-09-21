@@ -11,6 +11,13 @@ export interface Deps {
   find<T>(contract: Contract<T>): T | undefined;
   logger: Logger;
   root: string;
+  /**
+   * Epoch ms captured once at the very start of `boot()`, before any module's `setup()` runs, and
+   * shared by every module's `setup()` call in this boot. Optional so a `Deps` built outside
+   * `boot()` (a test double, an embedding host) still type-checks; code that needs a definite
+   * instant falls back to `Date.now()`.
+   */
+  bootStartedAt?: number;
 }
 
 export type JsonSchema = Record<string, unknown>;

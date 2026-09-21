@@ -4,22 +4,18 @@
 
 ### Added
 
-- `replication-sqlite`: `setup()` now fails when `restoreOnStart` is set, the database file already
-  exists, a restore point exists in the blobstore, and the file was created during this start-up —
-  the shape of a misordered module list that would otherwise start from an empty database. The
-  error names the file and its `-wal`/`-shm` siblings and says to delete them before the next
-  start. A skip that is safe is now always logged with its reason. The module also declares
-  `before: [persistence@1]` (see the `defineModule` entry below).
-- `backup-blobstore`: `setup()` now fails with the same reasoning as `replication-sqlite` when
-  `restoreOnStart` is set, the file already exists, a restore point exists in the blobstore, and
-  the file was created during this start-up; there is no table-count fallback, since the backed-up
-  file is not necessarily SQLite. A safe skip is always logged. The module also declares
-  `before: [persistence@1]`.
 - `defineModule`: a module may declare `before: readonly Contract<unknown>[]`, naming contracts it
   must be set up before the provider of. On this release the declaration is only checked: a module
   that ends up after the provider of a contract it named in `before` produces a new `BootWarning`
   with `code: "module-order"`, logged at `warn`; the setup order itself is unchanged. This becomes
-  a real ordering edge, and the violation a boot error, in the next major.
+  a real ordering edge, and the violation a boot error, in the next major. A module that both
+  `requires` and declares `before` on the same contract is a contradiction and fails the boot
+  naming the module and the contract.
+- `Deps` gains `bootStartedAt?: number`, the epoch ms `boot()` captured at its very start, before
+  any module's `setup()` ran, and shared by every module's `setup()` call in this boot. Optional,
+  so a `Deps` built outside `boot()` still type-checks. `replication-sqlite` and `backup-blobstore`
+  declare `before: [persistence@1]` and use this field to judge whether their database or backed-up
+  file was created during the current boot (see "Changed" below).
 
 - `authz-roles`: the factory step `authz.validateRoles:<path>` reads an array of role names at
   `payload.<path>` and rejects it with 400 `VALIDATION` (unknown names in `details.unknown`) unless
@@ -48,6 +44,20 @@
   `authz.require` in front of it.
 
 ### Changed
+
+- `replication-sqlite`: `setup()` no longer silently skips restoring the database when the file
+  already exists. When `restoreOnStart` is set and the file was not just restored from a pending
+  marker in this same `setup()` call, `setup()` now checks whether the file was created during the
+  current boot while the replica holds a restore point (judged against `Deps.bootStartedAt`, with a
+  local table-count fallback where the file system reports no birth time) and fails naming the file
+  and its `-wal`/`-shm` siblings if so — the shape of a misordered module list that would otherwise
+  start from an empty database. The blobstore is asked whether a restore point exists only for a
+  file that already looks fresh (or whose birth time is unavailable); an old file is never checked
+  against the blobstore at all, and a blobstore failure only fails the boot for a file that already
+  looked fresh. Every other skip is now logged with its reason, where previously it was silent.
+- `backup-blobstore`: `setup()` gets the same check as `replication-sqlite`, minus the table-count
+  fallback, since the backed-up file is not necessarily SQLite; an unavailable birth time is logged
+  and left to the `module-order` warning instead of failing the boot.
 
 - `revisions.reassignAuthor` prefers a preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s
   verified target) when one is present, ignoring the payload's own `reassignTo`. Without a

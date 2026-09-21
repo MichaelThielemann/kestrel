@@ -244,6 +244,7 @@ async function teardownAll(ordered: readonly ModuleDefinition[], instances: Read
 }
 
 export async function boot(input: BootInput): Promise<Kestrel> {
+  const bootStartedAt = Date.now();
   const logger = input.logger ?? consoleLogger;
   const root = input.root ?? process.cwd();
 
@@ -286,6 +287,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     names: () => [...registered.keys()],
     logger,
     root,
+    bootStartedAt,
   };
   const instances = new Map<ModuleDefinition, unknown>();
   const parsedByModule = new Map<ModuleDefinition, unknown>();

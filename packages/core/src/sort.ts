@@ -11,6 +11,12 @@ export function sortModules(modules: readonly ModuleDefinition[]): ModuleDefinit
     }
   }
 
+  for (const m of modules) {
+    for (const contract of m.before ?? []) {
+      if (m.requires.some((c) => c.name === contract.name)) throw new KestrelBootError(m.name, `declares before "${contract.name}" and requires "${contract.name}"; a module cannot require what it must be set up before`);
+    }
+  }
+
   const dependsOn = new Map<ModuleDefinition, ModuleDefinition[]>();
   for (const m of modules) {
     const deps: ModuleDefinition[] = [];

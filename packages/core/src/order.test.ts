@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { defineContract, type Contract } from "./defineContract.ts";
 import { defineModule } from "./defineModule.ts";
+import { KestrelBootError } from "./errors.ts";
 import { findModuleOrderViolations, sortModules } from "./sort.ts";
 
 const C: Record<string, Contract<unknown>> = {};
@@ -62,6 +63,11 @@ describe("module setup order", () => {
     const a = mod("a/one");
     const b = mod("b/two");
     expect(sortModules([b, a]).map((m) => m.name)).toEqual(["b/two", "a/one"]);
+  });
+
+  it("rule 3: declaring before and requires on the same contract is a contradiction, not a warning", () => {
+    const contradictory = mod("consumer/one", { requires: ["db@1"], before: ["db@1"] });
+    expect(() => sortModules([contradictory])).toThrow(new KestrelBootError("consumer/one", 'declares before "db@1" and requires "db@1"; a module cannot require what it must be set up before'));
   });
 
   it("rules 1, 2 and 3 combined: a required provider is pulled ahead of a before-declaring module that has no edge to it", () => {

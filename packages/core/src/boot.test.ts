@@ -290,6 +290,28 @@ describe("boot", () => {
     expect([...kestrel.pipelines.keys()].sort()).toEqual(["createPage", "download", "onCreated", "readPage", "upload", "whoami"]);
   });
 
+  it("passes the same bootStartedAt to every module's setup(), captured before any setup() runs", async () => {
+    const before = Date.now();
+    const seen: number[] = [];
+    const probe = defineModule({
+      name: "probe/one",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(_config, deps): Promise<null> {
+        seen.push(deps.bootStartedAt ?? -1);
+        return null;
+      },
+    });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./probe", config: {} }] };
+    kestrel = await boot({ config, modules: [...modules, probe], pipelines, logger: silentLogger });
+    const after = Date.now();
+    expect(seen).toHaveLength(1);
+    const bootStartedAt = seen[0] ?? -1;
+    expect(bootStartedAt).toBeGreaterThanOrEqual(before);
+    expect(bootStartedAt).toBeLessThanOrEqual(after);
+  });
+
   it("pairs config entries with modules by name, not by index", async () => {
     const swapped = { ...baseConfig, modules: [{ use: "./auth", config: {} }, { use: "./guard", config: {} }, { use: "./store", config: { file: ":memory:" } }, { use: "./events", config: {} }] };
     await expect(boot({ config: swapped, modules, pipelines, logger: silentLogger })).rejects.toThrow(/"\.\/auth" names module "auth\/fake", not "guard\/fake"/);
