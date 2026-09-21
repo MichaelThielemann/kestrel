@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { StepDescription, StepDescriptions } from "@michaelthielemann/kestrel/defineModule";
-import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
+import { definePipeline, pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
 import { runPipeline, type RunPipelineOptions } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { AUTHN_STEPS } from "./authn.steps.ts";
 import { FAKE_AUTHN_WRITES } from "./testing/fakeAuthn.ts";
@@ -28,7 +28,7 @@ const requirePipeline = definePipeline({ name: "require", steps: ["authn.require
 const loadIdentityPipeline = definePipeline({ name: "loadIdentity", steps: ["authn.requireUser", "authn.loadIdentity"] });
 const logoutPipeline = definePipeline({ name: "logout", steps: ["authn.requireUser", "authn.logout"] });
 
-const EXERCISED = new Set<string>([loginPipeline, identifyPipeline, requirePipeline, loadIdentityPipeline, logoutPipeline].flatMap((p) => p.steps));
+const EXERCISED = new Set<string>([loginPipeline, identifyPipeline, requirePipeline, loadIdentityPipeline, logoutPipeline].flatMap((p) => pipelineSteps(p.steps)));
 for (const step of AUTHN_STEPS.steps) {
   if (!EXERCISED.has(step)) throw new Error(`authnStepsContractTests: no pipeline exercises "${step}"`);
 }

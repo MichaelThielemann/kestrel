@@ -6,6 +6,8 @@ export interface ResolvedStep {
   name: string;
   fn: Step;
   description: StepDescription;
+  /** The 1-based ordinal of the atomic group this step belongs to; absent outside a group. Steps of one group are consecutive. */
+  atomic?: number;
 }
 
 export interface RegisteredStep {

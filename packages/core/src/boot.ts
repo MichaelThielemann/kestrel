@@ -7,7 +7,7 @@ import { checkDataflow } from "./dataflow.ts";
 import { configSchema, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
 import { stepPrefix, type ContractLookup, type Deps, type EventEntry, type Introspection, type ModuleDefinition, type StepDescription } from "./defineModule.ts";
 import { buildManifest, type Manifest } from "./describe.ts";
-import type { PipelineDefinition } from "./definePipeline.ts";
+import { pipelineSteps, resolveEntries, type PipelineDefinition } from "./definePipeline.ts";
 import { KestrelBootError } from "./errors.ts";
 import { consoleLogger, logWarn, type Logger } from "./logger.ts";
 import { createObserverHub } from "./observer.ts";
@@ -336,8 +336,9 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     }
     const pipelines = new Map<string, ResolvedPipeline>();
     for (const def of definitions.values()) {
-      if (def.steps.length === 0) throw new KestrelBootError(`pipelines/${def.name}`, "has no steps");
-      pipelines.set(def.name, { name: def.name, steps: def.steps.map((s) => steps.resolve(s, `pipelines/${def.name}`)) });
+      if (pipelineSteps(def.steps).length === 0) throw new KestrelBootError(`pipelines/${def.name}`, "has no steps");
+      const resolved = resolveEntries(def.steps, (s) => steps.resolve(s, `pipelines/${def.name}`));
+      pipelines.set(def.name, { name: def.name, steps: resolved });
     }
 
     const routes: Route[] = [];
