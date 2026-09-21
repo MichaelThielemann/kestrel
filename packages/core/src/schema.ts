@@ -166,8 +166,7 @@ export function validateSchema(schema: JsonSchema, value: unknown): SchemaProble
   return problems;
 }
 
-/** Merges a list of object schemas into one (union of `properties`, union of `required`, `additionalProperties: false` if any schema has it); a single schema passes through unchanged. */
-export function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
+function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
   if (schemas.length === 0) return undefined;
   if (schemas.length === 1) return schemas[0];
   const properties: Record<string, unknown> = {};
@@ -192,11 +191,11 @@ function mergeIntoItems(current: JsonSchema | undefined, extension: JsonSchema):
   return { ...current, properties: { ...properties, items: { ...list, items: mergeObjects([item, extension])! } } };
 }
 
-/** Folds a pipeline's step descriptions, in order, into the schema its result ends up matching: `output` replaces, `extendsOutput` merges (or becomes the output if there was none yet), `extendsItems` merges into a list output's `items[]`, and `output: "untyped"` clears it (the result is deliberately not represented as a schema). */
+/** Folds a pipeline's step descriptions, in order, into the schema its result ends up matching: `output` replaces the active schema, `extendsOutput` merges into it (or becomes the output if there was none yet), and `extendsItems` merges into a list output's `items[]`. */
 export function resolveOutputSchema(descriptions: readonly StepDescription[]): JsonSchema | undefined {
   let current: JsonSchema | undefined;
   for (const d of descriptions) {
-    if (d.output !== undefined && d.output !== "untyped") current = d.output;
+    if (d.output !== undefined) current = d.output;
     else if (d.extendsOutput !== undefined) current = current === undefined ? d.extendsOutput : mergeObjects([current, d.extendsOutput]);
     if (d.extendsItems !== undefined) current = mergeIntoItems(current, d.extendsItems);
   }

@@ -1,6 +1,6 @@
 import type { JsonSchema, Kestrel, ResolvedPipeline, Route, StepDescription } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { mergeObjects, resolveOutputSchema } from "@michaelthielemann/kestrel/schema";
+import { resolveOutputSchema } from "@michaelthielemann/kestrel/schema";
 
 export interface OpenApiInfo {
   title: string;
@@ -40,6 +40,21 @@ function pathOf(route: Route, mountPath: string): { path: string; params: string
     return s;
   });
   return { path: `${mountPath}/${segments.join("/")}`.replace(/\/+$/, "") || "/", params };
+}
+
+function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
+  if (schemas.length === 0) return undefined;
+  if (schemas.length === 1) return schemas[0];
+  const properties: Record<string, unknown> = {};
+  const required = new Set<string>();
+  for (const s of schemas) {
+    Object.assign(properties, boundaryCast<Record<string, unknown>>(s.properties ?? {}, "json"));
+    for (const r of boundaryCast<string[]>(s.required ?? [], "json")) required.add(r);
+  }
+  const merged: JsonSchema = { type: "object", properties };
+  if (required.size > 0) merged.required = [...required].sort();
+  if (schemas.some((s) => s.additionalProperties === false)) merged.additionalProperties = false;
+  return merged;
 }
 
 function operation(route: Route, pipeline: ResolvedPipeline, params: string[]): Record<string, unknown> {

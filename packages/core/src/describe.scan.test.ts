@@ -9,8 +9,6 @@ interface StepFacts {
   readsPayload: boolean;
   declared: boolean;
   literalInputWithoutAdditionalProperties: boolean;
-  writesResult: boolean;
-  outputDeclared: boolean;
 }
 
 interface Scan {
@@ -66,22 +64,6 @@ function objectLiteralOf(node: ts.Node | undefined): ts.ObjectLiteralExpression 
 
 function hasKey(node: ts.Node | undefined, key: string): boolean {
   return objectProperties(node).has(key);
-}
-
-function writesRoot(path: string): string {
-  const dot = path.indexOf(".");
-  const root = dot === -1 ? path : path.slice(0, dot);
-  return root.endsWith("?") ? root.slice(0, -1) : root;
-}
-
-function writesResult(entry: ts.Node | undefined): boolean {
-  const writes = objectProperties(entry).get("writes");
-  if (!writes || !ts.isArrayLiteralExpression(writes)) return false;
-  return writes.elements.filter(ts.isStringLiteral).some((el) => writesRoot(el.text) === "result");
-}
-
-function outputDeclared(entry: ts.Node | undefined): boolean {
-  return hasKey(entry, "output") || hasKey(entry, "extendsOutput") || hasKey(entry, "extendsItems");
 }
 
 function literalInputLacksAdditionalProperties(entry: ts.Node | undefined): boolean {
@@ -151,8 +133,6 @@ function scanSource(file: string, text: string): Scan {
       readsPayload: readsPayload(handler, source, helpers),
       declared: hasKey(entry, "input") || hasKey(entry, "query"),
       literalInputWithoutAdditionalProperties: literalInputLacksAdditionalProperties(entry),
-      writesResult: writesResult(entry),
-      outputDeclared: outputDeclared(entry),
     });
   }
   return { scanned: true, hasSteps: props.has("steps"), facts };
@@ -172,10 +152,8 @@ describe("every step that reads the payload declares its schema", () => {
       if (!result.scanned || result.facts.size === 0) expect.fail(`${dir}/module.ts could not be scanned`);
       const undeclared = [...result.facts].filter(([, f]) => f.readsPayload && !f.declared).map(([name]) => name);
       const open = [...result.facts].filter(([, f]) => f.literalInputWithoutAdditionalProperties).map(([name]) => name);
-      const untypedResult = [...result.facts].filter(([, f]) => f.writesResult && !f.outputDeclared).map(([name]) => name);
       expect(undeclared, `${dir}/module.ts: steps reading ctx.payload without describe().input or .query`).toEqual([]);
       expect(open, `${dir}/module.ts: literal input schemas must state additionalProperties explicitly`).toEqual([]);
-      expect(untypedResult, `${dir}/module.ts: steps writing "result" without describe().output, .extendsOutput, .extendsItems, or output: "untyped"`).toEqual([]);
     });
   }
 
@@ -204,21 +182,5 @@ export default defineModule({
 
   it("reports a module.ts it cannot resolve as unscanned", () => {
     expect(scanSource("empty.ts", "export const nothing = 1;\n")).toMatchObject({ scanned: false, hasSteps: false });
-  });
-
-  it("flags a step that writes result without output, extendsOutput, extendsItems, or an untyped marker", () => {
-    const untyped = scanSource("untyped.ts", module(""));
-    expect(untyped.facts.get("create")).toMatchObject({ writesResult: true, outputDeclared: false });
-
-    const withOutput = scanSource(
-      "with-output.ts",
-      `export default defineModule({
-  name: "a/b",
-  steps: () => ({ create: async (ctx: Context) => ok({ ...ctx, result: 1 }) }),
-  describe: () => ({ create: { summary: "create", reads: [], writes: ["result"], output: "untyped" } }),
-});
-`,
-    );
-    expect(withOutput.facts.get("create")).toMatchObject({ writesResult: true, outputDeclared: true });
   });
 });

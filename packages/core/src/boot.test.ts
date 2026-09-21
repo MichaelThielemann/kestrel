@@ -87,10 +87,10 @@ const store = defineModule({
     }),
   }),
   describe: () => ({
-    create: (collection: string) => ({ summary: `create a ${collection} document`, reads: [], writes: ["result"] }),
-    findOne: (collection: string) => ({ summary: `read a ${collection} document`, reads: ["params.id"], writes: ["result"] }),
-    upload: { summary: "store an uploaded file", reads: ["files"], writes: ["result"] },
-    download: { summary: "serve a stored file", reads: ["params.name"], writes: ["result"] },
+    create: (collection: string) => ({ summary: `create a ${collection} document`, reads: [], writes: ["result"], output: { type: "object" } }),
+    findOne: (collection: string) => ({ summary: `read a ${collection} document`, reads: ["params.id"], writes: ["result"], output: { type: "object" } }),
+    upload: { summary: "store an uploaded file", reads: ["files"], writes: ["result"], output: { type: "object", properties: { filename: { type: "string" }, size: { type: "number" } }, required: ["filename", "size"] } },
+    download: { summary: "serve a stored file", reads: ["params.name"], writes: ["result"], binary: true },
     log: (collection: string) => ({ summary: `append to ${collection}`, reads: [], writes: [] }),
   }),
 });
@@ -503,6 +503,29 @@ describe("boot", () => {
     expect(warnings[0]?.message).toMatch(/no pipeline emits via events\.emit and no module declares in emits/);
     expect(warnings[0]?.data).toEqual({ event: "page.creted", pipeline: "onCreated" });
     expect(kestrel.warnings).toEqual([{ code: "unemitted-event", message: warnings[0]?.message, pipeline: "onCreated", event: "page.creted" }]);
+  });
+
+  it("warns once for a step that writes result without declaring output, extendsOutput, extendsItems or binary: true", async () => {
+    const bare = defineModule({
+      name: "bare/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({ create: async (ctx: Context) => ok({ ...ctx, result: { id: "x" } }) }),
+      describe: () => ({ create: { summary: "create with no declared output", reads: [], writes: ["result"] } }),
+    });
+    const bareCreate = definePipeline({ name: "bareCreate", steps: ["bare.create"] });
+    const warnings: { message: string; data: Record<string, unknown> | undefined }[] = [];
+    const logger = { ...silentLogger, warn: (message: string, data?: Record<string, unknown>) => warnings.push({ message, data }) };
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./bare", config: {} }] };
+    kestrel = await boot({ config, modules: [...modules, bare], pipelines: [...pipelines, bareCreate], logger });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toMatch(/step writes result without declaring output, extendsOutput, extendsItems or binary: true/);
+    expect(warnings[0]?.data).toEqual({ pipeline: "bareCreate", step: "bare.create" });
+    expect(kestrel.warnings).toEqual([{ code: "undeclared-output", message: warnings[0]?.message, pipeline: "bareCreate", step: "bare.create" }]);
   });
 
   it("stays quiet when a pipeline emits the event, whatever the emit step's query tail", async () => {

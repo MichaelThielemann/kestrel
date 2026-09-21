@@ -1,4 +1,4 @@
-import type { BootWarning, JsonSchema, Logger, Manifest, ModuleManifest, StepDescription, StepManifest, UnemittedEventWarning } from "../packages/core/src/index.ts";
+import type { BootWarning, JsonSchema, Logger, Manifest, ModuleManifest, StepDescription, StepManifest, UndeclaredOutputWarning, UnemittedEventWarning } from "../packages/core/src/index.ts";
 
 export const START = "<!-- kestrel-docs:start -->";
 export const END = "<!-- kestrel-docs:end -->";
@@ -63,8 +63,7 @@ export function stepTable(steps: StepManifest[]): string[] {
     const name = `\`${s.name}${s.factory ? ":<arg>" : ""}\``;
     const d = s.description;
     const paths = (list: readonly string[]) => (list.length === 0 ? "–" : list.map((p) => `\`${p}\``).join(", "));
-    const output = d.output === "untyped" ? "*(untyped)*" : brief(d.output ?? d.extendsOutput ?? d.extendsItems);
-    return `| ${name} | ${cell(d.summary)} | ${paths(d.reads)} | ${paths(d.writes)} | ${cell(inputCell(d))} | ${cell(output)} | ${cell(errors(d)) || "–"} |`;
+    return `| ${name} | ${cell(d.summary)} | ${paths(d.reads)} | ${paths(d.writes)} | ${cell(inputCell(d))} | ${cell(brief(d.output ?? d.extendsOutput ?? d.extendsItems))} | ${cell(errors(d)) || "–"} |`;
   });
   return ["| Step | Summary | Reads | Writes | Input | Output | Errors |", "|---|---|---|---|---|---|---|", ...rows, ""];
 }
@@ -112,14 +111,16 @@ export function rootTable(packages: PackageInfo[]): string {
   return [START, "| Package | Purpose |", "|---|---|", ...rows, END].join("\n");
 }
 
-export type BootWarningKey = Pick<UnemittedEventWarning, "code" | "pipeline" | "event">;
+export type BootWarningKey = Pick<UnemittedEventWarning, "code" | "pipeline" | "event"> | Pick<UndeclaredOutputWarning, "code" | "pipeline" | "step">;
 
 function bootWarningKey(warning: BootWarningKey): string {
   switch (warning.code) {
     case "unemitted-event":
       return `${warning.code}:${warning.pipeline}:${warning.event}`;
+    case "undeclared-output":
+      return `${warning.code}:${warning.pipeline}:${warning.step}`;
     default: {
-      const exhaustive: never = warning.code;
+      const exhaustive: never = warning;
       return exhaustive;
     }
   }
@@ -134,8 +135,10 @@ export function formatBootWarning(warning: BootWarning): string {
   switch (warning.code) {
     case "unemitted-event":
       return `pipeline "${warning.pipeline}", event "${warning.event}": ${warning.message}`;
+    case "undeclared-output":
+      return `pipeline "${warning.pipeline}", step "${warning.step}": ${warning.message}`;
     default: {
-      const exhaustive: never = warning.code;
+      const exhaustive: never = warning;
       return exhaustive;
     }
   }
@@ -166,8 +169,10 @@ function matchesBootWarning(entry: LogEntry, warning: BootWarning): boolean {
   switch (warning.code) {
     case "unemitted-event":
       return entry.message === warning.message && entry.data?.pipeline === warning.pipeline && entry.data?.event === warning.event;
+    case "undeclared-output":
+      return entry.message === warning.message && entry.data?.pipeline === warning.pipeline && entry.data?.step === warning.step;
     default: {
-      const exhaustive: never = warning.code;
+      const exhaustive: never = warning;
       return exhaustive;
     }
   }

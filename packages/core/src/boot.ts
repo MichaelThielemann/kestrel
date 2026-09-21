@@ -5,14 +5,14 @@ import type { ContextInput } from "./context.ts";
 import { missingMethods, type Contract } from "./defineContract.ts";
 import { checkDataflow } from "./dataflow.ts";
 import { configSchema, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
-import { stepPrefix, type Deps, type EventEntry, type Introspection, type ModuleDefinition } from "./defineModule.ts";
+import { stepPrefix, type Deps, type EventEntry, type Introspection, type ModuleDefinition, type StepDescription } from "./defineModule.ts";
 import { buildManifest, type Manifest } from "./describe.ts";
 import type { PipelineDefinition } from "./definePipeline.ts";
 import { KestrelBootError } from "./errors.ts";
 import { consoleLogger, logWarn, type Logger } from "./logger.ts";
 import { createObserverHub } from "./observer.ts";
 import { StepRegistry } from "./registry.ts";
-import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
+import { createRunTracker, runPipeline, writeRoot, type ResolvedPipeline, type RunResult } from "./runner.ts";
 import { sortModules } from "./sort.ts";
 import { createCronEntry, startCron, type CronEntry } from "./triggers/cron.ts";
 import { createAllowlist } from "./triggers/allowlist.ts";
@@ -24,6 +24,8 @@ export interface BootInput {
   pipelines: readonly PipelineDefinition[];
   logger?: Logger;
   root?: string;
+  /** Dev/test only: after every step that writes to `result`, validates it against the pipeline's `describe().output` folded up to that step; a mismatch fails the run like a `writes` mismatch does. Off by default, so production pays nothing for it. */
+  validateOutput?: boolean;
 }
 
 export interface Triggers {
@@ -43,11 +45,12 @@ export interface StopResult {
 /**
  * A condition boot detects but does not treat as fatal.
  *
- * A discriminated union on `code`; the only member today is {@link UnemittedEventWarning}. A
- * minor release may add further codes, so code reading `kestrel.warnings` must handle a `code`
- * it does not recognize instead of assuming the shape of this union's current member.
+ * A discriminated union on `code`; today's members are {@link UnemittedEventWarning} and
+ * {@link UndeclaredOutputWarning}. A minor release may add further codes, so code reading
+ * `kestrel.warnings` must handle a `code` it does not recognize instead of assuming the shape of
+ * this union's current members.
  */
-export type BootWarning = UnemittedEventWarning;
+export type BootWarning = UnemittedEventWarning | UndeclaredOutputWarning;
 
 /** An event trigger's event that no pipeline emits via `events.emit` and no module declares in `emits`. */
 export interface UnemittedEventWarning {
@@ -55,6 +58,17 @@ export interface UnemittedEventWarning {
   message: string;
   pipeline: string;
   event: string;
+}
+
+/**
+ * A pipeline step that writes to `result` without declaring `output`, `extendsOutput`,
+ * `extendsItems` or `binary: true`. Becomes a boot error in the next major.
+ */
+export interface UndeclaredOutputWarning {
+  code: "undeclared-output";
+  message: string;
+  pipeline: string;
+  step: string;
 }
 
 export interface Kestrel extends Introspection {
@@ -115,6 +129,23 @@ function warnUnemittedEvents(modules: readonly ModuleDefinition[], pipelines: Re
     const message = "event trigger listens to an event no pipeline emits via events.emit and no module declares in emits";
     logWarn(logger, message, { event: entry.event, pipeline: entry.pipeline });
     warnings.push({ code: "unemitted-event", message, pipeline: entry.pipeline, event: entry.event });
+  }
+  return warnings;
+}
+
+function declaresOutput(description: StepDescription): boolean {
+  return description.output !== undefined || description.extendsOutput !== undefined || description.extendsItems !== undefined || description.binary === true;
+}
+
+function warnUndeclaredOutput(pipelines: ReadonlyMap<string, ResolvedPipeline>, logger: Logger): UndeclaredOutputWarning[] {
+  const warnings: UndeclaredOutputWarning[] = [];
+  for (const pipeline of pipelines.values()) {
+    for (const step of pipeline.steps) {
+      if (!step.description.writes.some((path) => writeRoot(path) === "result") || declaresOutput(step.description)) continue;
+      const message = "step writes result without declaring output, extendsOutput, extendsItems or binary: true; this becomes a boot error in the next major";
+      logWarn(logger, message, { pipeline: pipeline.name, step: step.name });
+      warnings.push({ code: "undeclared-output", message, pipeline: pipeline.name, step: step.name });
+    }
   }
   return warnings;
 }
@@ -281,14 +312,15 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     if (eventHooks.length > 1) throw new KestrelBootError(CORE, `modules "${eventHooks[0]?.name ?? ""}" and "${eventHooks[1]?.name ?? ""}" both provide an event trigger hook`);
     if (events.length > 0 && eventHooks.length === 0) throw new KestrelBootError(CORE, "event triggers need a module that provides an event trigger hook");
     const eventHook = eventHooks[0];
-    const warnings = warnUnemittedEvents(ordered, pipelines, events, logger);
+    const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUndeclaredOutput(pipelines, logger)];
 
     const runs = createRunTracker();
     const hub = createObserverHub(logger);
+    const validateOutput = input.validateOutput ?? false;
     const run = (name: string, ctxInput: ContextInput): Promise<RunResult> => {
       const pipeline = pipelines.get(name);
       if (!pipeline) throw new Error(`unknown pipeline "${name}"`);
-      return runs.track(() => runPipeline(pipeline, ctxInput, logger, hub.observer));
+      return runs.track(() => runPipeline(pipeline, ctxInput, logger, hub.observer, { validateOutput }));
     };
     const triggers: Triggers = { http: routes, events, crons };
     let manifest: Manifest | undefined;

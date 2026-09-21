@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { StepDescription } from "./defineModule.ts";
-import { coerceQuery, mergeObjects, resolveOutputSchema, validateSchema } from "./schema.ts";
+import { coerceQuery, resolveOutputSchema, validateSchema } from "./schema.ts";
 
 const step = (partial: Partial<StepDescription>): StepDescription => ({ summary: "s", reads: [], writes: [], ...partial });
 
@@ -184,31 +184,18 @@ describe("resolveOutputSchema", () => {
     expect(resolveOutputSchema([step({ output }), step({})])).toEqual(output);
   });
 
-  it("output: \"untyped\" passes through without erasing an earlier output, and never becomes the output itself", () => {
-    const output = { type: "object", properties: { a: { type: "string" } } };
-    expect(resolveOutputSchema([step({ output }), step({ output: "untyped" })])).toEqual(output);
-    expect(resolveOutputSchema([step({ output: "untyped" })])).toBeUndefined();
-  });
-
   it("returns undefined when nothing declares an output", () => {
     expect(resolveOutputSchema([step({}), step({})])).toBeUndefined();
   });
-});
 
-describe("mergeObjects", () => {
-  it("passes a single schema through unchanged", () => {
-    const schema = { type: "object", properties: { a: { type: "string" } } };
-    expect(mergeObjects([schema])).toBe(schema);
-  });
-
-  it("unions properties and required, sorted, and returns undefined for an empty list", () => {
-    expect(mergeObjects([])).toBeUndefined();
-    expect(
-      mergeObjects([
-        { type: "object", properties: { b: { type: "string" } }, required: ["b"] },
-        { type: "object", properties: { a: { type: "string" } }, required: ["a"] },
-      ]),
-    ).toEqual({ type: "object", properties: { a: { type: "string" }, b: { type: "string" } }, required: ["a", "b"] });
+  it("merges extendsOutput into the properties of the preceding extendsOutput merge, without an output in between", () => {
+    const a = { type: "object", properties: { a: { type: "string" } }, required: ["a"] };
+    const b = { type: "object", properties: { b: { type: "string" } }, required: ["b"] };
+    expect(resolveOutputSchema([step({ extendsOutput: a }), step({ extendsOutput: b })])).toEqual({
+      type: "object",
+      properties: { a: { type: "string" }, b: { type: "string" } },
+      required: ["a", "b"],
+    });
   });
 });
 

@@ -23,8 +23,7 @@ export interface StepDescription {
   reads: readonly ContextPath[];
   writes: readonly ContextPath[];
   input?: JsonSchema;
-  /** The step's result shape, or the literal `"untyped"` for a step whose result is deliberately not represented as a schema (e.g. a binary body, or a caller-defined document shape). */
-  output?: JsonSchema | "untyped";
+  output?: JsonSchema;
   /** Merges into the currently active output schema (properties + required union) instead of replacing it; becomes the output if there was none yet. */
   extendsOutput?: JsonSchema;
   /** Like extendsOutput, but merges into `properties.items.items` of the active output when it is a list result; falls back to a root merge otherwise. */

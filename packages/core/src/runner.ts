@@ -84,7 +84,7 @@ function isContext(value: unknown): value is Context {
   return record(value.trigger) && record(value.payload) && record(value.params) && record(value.headers) && Array.isArray(value.files) && typeof value.fail === "function" && typeof value.done === "function";
 }
 
-function writeRoot(path: string): string {
+export function writeRoot(path: string): string {
   const dot = path.indexOf(".");
   const root = dot === -1 ? path : path.slice(0, dot);
   return root.endsWith("?") ? root.slice(0, -1) : root;
@@ -116,11 +116,15 @@ function writesResult(step: ResolvedStep): boolean {
   return step.description.writes.some((path) => writeRoot(path) === "result");
 }
 
-function checkOutput(step: ResolvedStep, descriptionsSoFar: readonly StepDescription[], result: unknown): void {
-  if (step.description.output === "untyped") return;
+function optionalResultWrite(step: ResolvedStep): boolean {
+  return step.description.writes.some((path) => writeRoot(path) === "result" && path.endsWith("?"));
+}
+
+function checkOutput(step: ResolvedStep, descriptionsSoFar: readonly StepDescription[], before: Context, after: Context): void {
+  if (optionalResultWrite(step) && Object.is(before.result, after.result)) return;
   const schema = resolveOutputSchema(descriptionsSoFar);
   if (schema === undefined) return;
-  const problems = validateSchema(schema, result);
+  const problems = validateSchema(schema, after.result);
   if (problems.length > 0) {
     throw new Error(`step "${step.name}": result does not match describe().output (${problems.map((p) => `${p.path} ${p.message}`).join("; ")})`);
   }
@@ -223,9 +227,10 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
         throw new Error(`step "${step.name}" returned ${typeof out.value} instead of a Result<Context>`);
       }
       checkWrites(step, ctx, out.value);
+      const before = ctx;
       ctx = Object.freeze(out.value);
       descriptionsSoFar.push(step.description);
-      if (options.validateOutput && writesResult(step)) checkOutput(step, descriptionsSoFar, ctx.result);
+      if (options.validateOutput && writesResult(step)) checkOutput(step, descriptionsSoFar, before, ctx);
       log("ok", 200);
       if (Reflect.get(ctx, DONE) === true) return finish(trace({ runId, status: 200, result: ctx.result }));
     } catch (caught) {
