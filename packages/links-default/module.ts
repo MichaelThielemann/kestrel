@@ -69,10 +69,10 @@ export default defineModule({
   }),
 
   describe: () => ({
-    extract: (type: string) => ({ summary: `Index external links of ${type}`, reads: ["result.id"], writes: [] }),
-    unextract: (type: string) => ({ summary: `Drop indexed links of ${type}`, reads: ["params.id"], writes: [], errors: { 400: "missing id" } }),
+    extract: (type: string) => ({ summary: `Index external links of ${type}`, reads: ["result.id"], writes: [], atomicSafe: true }),
+    unextract: (type: string) => ({ summary: `Drop indexed links of ${type}`, reads: ["params.id"], writes: [], errors: { 400: "missing id" }, atomicSafe: true }),
     check: { summary: "Check due links", reads: [], writes: ["result"], output: { type: "object", properties: { urls: { type: "number" }, checked: { type: "number" }, broken: { type: "number" }, skipped: { type: "number" } }, required: ["urls", "checked", "broken", "skipped"] } },
-    report: { summary: "Broken links", reads: [], writes: ["result"], query: { type: { type: "string" } }, output: { type: "array", items: ENTRY } },
+    report: { summary: "Broken links", reads: [], writes: ["result"], query: { type: { type: "string" } }, output: { type: "array", items: ENTRY }, atomicSafe: true },
     rebuild: { summary: "Rebuild the link index", reads: [], writes: ["result"], output: { type: "object", properties: { documents: { type: "number" }, entries: { type: "number" } }, required: ["documents", "entries"] } },
   }),
 });

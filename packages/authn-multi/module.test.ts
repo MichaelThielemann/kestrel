@@ -7,7 +7,7 @@ import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/test
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context, Step } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
-import type { Deps } from "@michaelthielemann/kestrel/defineModule";
+import type { Deps, StepDescription } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline, type PipelineDefinition } from "@michaelthielemann/kestrel/definePipeline";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { ok } from "@michaelthielemann/kestrel/result";
@@ -282,5 +282,18 @@ describe("authn/multi module steps via runPipeline", () => {
     expect(res.status).toBe(400);
     expect(res.code).toBe("VALIDATION");
     expect(problems(res.details)[0]?.path).toBe("$.extra");
+  });
+});
+
+describe("authn/multi: atomicSafe is pinned", () => {
+  it("matches the shipped table", async () => {
+    const { instance } = await boot();
+    const describeMap = boundaryCast<Record<string, StepDescription | ((arg: string) => StepDescription)>>(module.describe!(instance), "host");
+    const expected: Record<string, boolean> = { verifyUser: true, deleteUser: true, requireUser: false, loadIdentity: false, login: false, logout: false };
+    for (const [name, expect_] of Object.entries(expected)) {
+      const description = describeMap[name];
+      const resolved = typeof description === "function" ? description("x") : description;
+      expect(resolved?.atomicSafe === true, `${name}.atomicSafe`).toBe(expect_);
+    }
   });
 });

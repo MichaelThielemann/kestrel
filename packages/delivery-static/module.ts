@@ -107,7 +107,7 @@ export default defineModule({
       output: { type: "object", properties: { document: { type: "object" }, delivery: { type: "array", items: STATUS_SCHEMA } }, required: ["document", "delivery"] },
     }),
     unpublish: (type: string) => ({ summary: `Remove rendered output of a ${type}`, reads: ["params.id"], writes: [], errors: { 400: "missing id" } }),
-    readStatus: (type: string) => ({ summary: `Publish status per locale of a ${type}`, reads: ["params.id"], writes: ["result"], output: { type: "array", items: STATUS_SCHEMA }, errors: { 400: "missing id" } }),
+    readStatus: (type: string) => ({ summary: `Publish status per locale of a ${type}`, reads: ["params.id"], writes: ["result"], output: { type: "array", items: STATUS_SCHEMA }, errors: { 400: "missing id" }, atomicSafe: true }),
     publishAll: (type: string) => ({
       summary: `Re-render every ${type}`,
       reads: [],

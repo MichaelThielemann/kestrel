@@ -127,9 +127,9 @@ function describeContent(content: ContentInstance) {
   };
 
   return {
-    validate: (arg: string) => ({ summary: `Validate a ${typeOf(arg)} payload`, reads: [], writes: [], input: writeSchema(typeOf(arg), "create"), errors: { 400: "validation failed" } }),
-    create: (arg: string) => ({ summary: `Create a ${typeOf(arg)}`, reads: [], writes: ["result"], input: writeSchema(typeOf(arg), "create"), output: docSchema(typeOf(arg)), errors: { 400: "validation failed", 409: "a document with that id already exists" } }),
-    set: (arg: string) => ({ summary: `Replace the ${typeOf(arg)} document`, reads: [], writes: ["result"], input: writeSchema(typeOf(arg), "create"), output: docSchema(typeOf(arg)), errors: { 400: "validation failed" } }),
+    validate: (arg: string) => ({ summary: `Validate a ${typeOf(arg)} payload`, reads: [], writes: [], input: writeSchema(typeOf(arg), "create"), errors: { 400: "validation failed" }, atomicSafe: true }),
+    create: (arg: string) => ({ summary: `Create a ${typeOf(arg)}`, reads: [], writes: ["result"], input: writeSchema(typeOf(arg), "create"), output: docSchema(typeOf(arg)), errors: { 400: "validation failed", 409: "a document with that id already exists" }, atomicSafe: true }),
+    set: (arg: string) => ({ summary: `Replace the ${typeOf(arg)} document`, reads: [], writes: ["result"], input: writeSchema(typeOf(arg), "create"), output: docSchema(typeOf(arg)), errors: { 400: "validation failed" }, atomicSafe: true }),
     get: (arg: string) => ({
       summary: `One ${typeOf(arg)} document`,
       reads: model.types[typeOf(arg)]?.kind === "single" ? [] : ["params.id"],
@@ -137,6 +137,7 @@ function describeContent(content: ContentInstance) {
       query: localeQuery(),
       output: docSchema(typeOf(arg)),
       errors: getErrors(arg),
+      atomicSafe: true,
     }),
     list: (arg: string) => ({
       summary: `List ${typeOf(arg)}`,
@@ -145,9 +146,10 @@ function describeContent(content: ContentInstance) {
       query: { ...localeQuery(), limit: { type: "integer", minimum: 1, maximum: content.maxLimit }, offset: { type: "integer", minimum: 0 }, sort: { type: "string", description: "field name, prefix - for descending" } },
       output: pageSchema(typeOf(arg)),
       errors: { 400: "invalid limit, offset, sort or locale" },
+      atomicSafe: true,
     }),
-    update: (arg: string) => ({ summary: `Update a ${typeOf(arg)}`, reads: ["params.id"], writes: ["result"], input: writeSchema(typeOf(arg), "update"), output: docSchema(typeOf(arg)), errors: { 400: "validation failed", 404: "not found" } }),
-    remove: (arg: string) => ({ summary: `Delete a ${typeOf(arg)}`, reads: ["params.id"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 400: "missing id" } }),
+    update: (arg: string) => ({ summary: `Update a ${typeOf(arg)}`, reads: ["params.id"], writes: ["result"], input: writeSchema(typeOf(arg), "update"), output: docSchema(typeOf(arg)), errors: { 400: "validation failed", 404: "not found" }, atomicSafe: true }),
+    remove: (arg: string) => ({ summary: `Delete a ${typeOf(arg)}`, reads: ["params.id"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 400: "missing id" }, atomicSafe: true }),
     removeTranslation: (arg: string) => ({
       summary: `Remove one translation of a ${typeOf(arg)} (locale from the route or ?locale=); the document stays in its other locales`,
       reads: ["params.id"],
@@ -155,8 +157,9 @@ function describeContent(content: ContentInstance) {
       query: localeQuery(),
       output: docSchema(typeOf(arg)),
       errors: { 400: "unknown or missing locale", 404: "document or translation not found", 409: "last translation – remove the document" },
+      atomicSafe: true,
     }),
-    describeModel: { summary: "The content model: locales, default locale and every type with its fields", reads: [], writes: ["result"], output: MODEL_SCHEMA },
+    describeModel: { summary: "The content model: locales, default locale and every type with its fields", reads: [], writes: ["result"], output: MODEL_SCHEMA, atomicSafe: true },
   };
 }
 

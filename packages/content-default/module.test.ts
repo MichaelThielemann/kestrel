@@ -264,3 +264,14 @@ describe("content/default carries a custom field type as its storage type", () =
     expect(boundaryCast<ContentDocument>(cleared.result, "host").accent).toBeNull();
   });
 });
+
+describe("content/default: atomicSafe is pinned", () => {
+  it("every step is atomic-safe", async () => {
+    const { instance } = await boot();
+    const describeMap = module.describe!(instance);
+    for (const [name, description] of Object.entries(describeMap)) {
+      const resolved = typeof description === "function" ? description("x") : description;
+      expect(resolved.atomicSafe, `${name}.atomicSafe`).toBe(true);
+    }
+  });
+});

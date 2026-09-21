@@ -205,6 +205,7 @@ export default defineModule({
       writes: ["verifiedUser"],
       input: { type: "object", additionalProperties: true },
       errors: { 400: "the value is neither a user id, { id } nor null, or the user is not active", 404: "user not found" },
+      atomicSafe: true,
     }),
     createUser: {
       summary: "Create a user",
@@ -250,6 +251,7 @@ export default defineModule({
         404: "user not found, or `reassignTo` names no user",
         409: "the last active admin cannot be deleted (`LAST_ADMIN`)",
       },
+      atomicSafe: true,
     },
     setPassword: {
       summary: "Set a user's password (ends their sessions)",

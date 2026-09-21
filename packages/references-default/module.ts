@@ -107,16 +107,17 @@ export default defineModule({
   }),
 
   describe: () => ({
-    check: (type: string) => ({ summary: `Referenced ids of ${type} must exist`, reads: [], writes: [], input: { type: "object", additionalProperties: true }, errors: { 400: "a referenced document does not exist" } }),
-    index: (type: string) => ({ summary: `Index the references of a ${type} document`, reads: ["result.id"], writes: [] }),
-    unindex: (type: string) => ({ summary: `Drop indexed references of a ${type} document`, reads: ["params.id"], writes: [], errors: { 400: "missing id" } }),
-    guard: (target: string) => ({ summary: `Refuse deletion while ${target} is referenced`, reads: ["params.id"], writes: [], errors: { 400: "missing id", 409: "still referenced" } }),
+    check: (type: string) => ({ summary: `Referenced ids of ${type} must exist`, reads: [], writes: [], input: { type: "object", additionalProperties: true }, errors: { 400: "a referenced document does not exist" }, atomicSafe: true }),
+    index: (type: string) => ({ summary: `Index the references of a ${type} document`, reads: ["result.id"], writes: [], atomicSafe: true }),
+    unindex: (type: string) => ({ summary: `Drop indexed references of a ${type} document`, reads: ["params.id"], writes: [], errors: { 400: "missing id" }, atomicSafe: true }),
+    guard: (target: string) => ({ summary: `Refuse deletion while ${target} is referenced`, reads: ["params.id"], writes: [], errors: { 400: "missing id", 409: "still referenced" }, atomicSafe: true }),
     referrers: (target: string) => ({
       summary: `Documents referencing a ${target}`,
       reads: ["params.id"],
       writes: ["result"],
       errors: { 400: "missing id" },
       output: { type: "array", items: { type: "object", properties: { type: { type: "string" }, field: { type: "string" }, id: { type: "string" }, via: { type: "string", enum: ["field", "body"] } }, required: ["type", "field", "id", "via"] } },
+      atomicSafe: true,
     }),
     referrersMany: (target: string) => ({
       summary: `Documents referencing each of up to 200 ${target} ids`,
@@ -125,6 +126,7 @@ export default defineModule({
       query: { ids: { type: "string" } },
       output: { type: "object", additionalProperties: { type: "array", items: { type: "object", properties: { type: { type: "string" }, field: { type: "string" }, id: { type: "string" }, via: { type: "string", enum: ["field", "body"] } }, required: ["type", "field", "id", "via"] } } },
       errors: { 400: "missing ids or more than 200 ids" },
+      atomicSafe: true,
     }),
     guardAll: (target: string) => ({ summary: `Refuse while any of result.ids of ${target} is referenced`, reads: ["result.ids"], writes: [], errors: { 409: "still referenced" } }),
     scan: { summary: "Re-check every reference", reads: [], writes: ["result"], output: { type: "object", properties: { checked: { type: "number" }, broken: { type: "number" } }, required: ["checked", "broken"] } },
@@ -141,6 +143,7 @@ export default defineModule({
           required: ["fromType", "fromId", "field", "locale", "toTarget", "toId", "via", "broken", "checkedAt"],
         },
       },
+      atomicSafe: true,
     },
     rebuild: { summary: "Rebuild the reference index", reads: [], writes: ["result"], output: { type: "object", properties: { documents: { type: "number" }, entries: { type: "number" } }, required: ["documents", "entries"] } },
   }),

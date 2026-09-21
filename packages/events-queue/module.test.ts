@@ -295,3 +295,14 @@ describe("events/queue in a booted instance", () => {
     await kestrel.stop();
   });
 });
+
+describe("events/queue: atomicSafe is pinned", () => {
+  it("every step is atomic-safe", async () => {
+    const { instance } = await setup();
+    const describeMap = module.describe!(instance);
+    for (const [name, description] of Object.entries(describeMap)) {
+      const resolved = typeof description === "function" ? description("one") : description;
+      expect(resolved.atomicSafe, `${name}.atomicSafe`).toBe(true);
+    }
+  });
+});

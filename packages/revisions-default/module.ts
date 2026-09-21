@@ -233,6 +233,7 @@ export default defineModule({
       writes: [],
       query: LOCALE_QUERY,
       errors: { 503: "the revision could not be written" },
+      atomicSafe: true,
     }),
     list: (collection: string) => ({
       summary: `Revisions of one ${collection} document and locale, newest first and without snapshots`,
@@ -241,6 +242,7 @@ export default defineModule({
       query: { ...LOCALE_QUERY, limit: { type: "integer", minimum: 1, maximum: revisions.config.maxLimit }, offset: { type: "integer", minimum: 0 } },
       output: PAGE_SCHEMA,
       errors: { 400: "missing id" },
+      atomicSafe: true,
     }),
     read: (collection: string) => ({
       summary: `One revision of a ${collection} document including its snapshot and, where the content model is known, the dry run of its restore under \`restore\``,
@@ -248,18 +250,21 @@ export default defineModule({
       writes: ["result"],
       output: REVISION_SCHEMA,
       errors: { 400: "missing id or revisionId", 404: "no such revision" },
+      atomicSafe: true,
     }),
     restore: (collection: string) => ({
       summary: `Put a ${collection} revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out`,
       reads: ["params.id", "params.revisionId"],
       writes: ["body", "payload", "revisionParent", "restoreReport?"],
       errors: { 400: "missing id or revisionId; the restored fields fail validation", 404: "no such revision", 409: "the revision carries no snapshot" },
+      atomicSafe: true,
     }),
     reportRestore: {
       summary: "Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is",
       reads: ["restoreReport?"],
       writes: ["result.restore?"],
       extendsOutput: { type: "object", properties: { restore: RESTORE_SCHEMA }, required: [] },
+      atomicSafe: true,
     },
     label: (collection: string) => ({
       summary: `Name a ${collection} revision, or clear its name with null; a labelled revision is never pruned`,
@@ -268,6 +273,7 @@ export default defineModule({
       input: LABEL_SCHEMA,
       output: SUMMARY_SCHEMA,
       errors: { 400: "missing id or revisionId", 404: "no such revision" },
+      atomicSafe: true,
     }),
     reassignAuthor: {
       summary:
@@ -277,9 +283,10 @@ export default defineModule({
       input: REASSIGN_INPUT,
       output: REASSIGN_SCHEMA,
       errors: { 400: "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again" },
+      atomicSafe: true,
     },
     prune: { summary: "Apply the retention rules to every recorded document and locale", reads: [], writes: ["result"], output: REPORT_SCHEMA },
-    remove: (collection: string) => ({ summary: `Drop every revision of a ${collection} document, in every locale`, reads: ["params.id"], writes: [], errors: { 400: "missing id" } }),
-    removeTranslation: (collection: string) => ({ summary: `Drop the revisions of one locale of a ${collection} document`, reads: ["params.id"], writes: [], query: LOCALE_QUERY, errors: { 400: "missing id" } }),
+    remove: (collection: string) => ({ summary: `Drop every revision of a ${collection} document, in every locale`, reads: ["params.id"], writes: [], errors: { 400: "missing id" }, atomicSafe: true }),
+    removeTranslation: (collection: string) => ({ summary: `Drop the revisions of one locale of a ${collection} document`, reads: ["params.id"], writes: [], query: LOCALE_QUERY, errors: { 400: "missing id" }, atomicSafe: true }),
   }),
 });

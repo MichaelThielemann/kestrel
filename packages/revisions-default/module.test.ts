@@ -10,7 +10,7 @@ import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/test
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context, Step, StepFactory } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
-import type { Deps } from "@michaelthielemann/kestrel/defineModule";
+import type { Deps, StepDescription } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { ok } from "@michaelthielemann/kestrel/result";
@@ -361,5 +361,29 @@ describe("revisions/default restore against the real content/default", () => {
 
     const listed = page((await after(["revisions.list:pages"], { params: { id } })).result);
     expect(listed.items[0]).toMatchObject({ kind: "restore", parentId: revisionId });
+  });
+});
+
+describe("revisions/default: atomicSafe is pinned", () => {
+  it("matches the shipped table", async () => {
+    const instance = await boot();
+    const describeMap = boundaryCast<Record<string, StepDescription | ((arg: string) => StepDescription)>>(module.describe!(instance), "host");
+    const expected: Record<string, boolean> = {
+      record: true,
+      remove: true,
+      removeTranslation: true,
+      restore: true,
+      reportRestore: true,
+      list: true,
+      read: true,
+      label: true,
+      reassignAuthor: true,
+      prune: false,
+    };
+    for (const [name, expect_] of Object.entries(expected)) {
+      const description = describeMap[name];
+      const resolved = typeof description === "function" ? description("x") : description;
+      expect(resolved?.atomicSafe === true, `${name}.atomicSafe`).toBe(expect_);
+    }
   });
 });
