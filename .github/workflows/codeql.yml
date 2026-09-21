@@ -8,6 +8,7 @@ on:
     - cron: "17 4 * * 1"
 jobs:
   analyze:
+    if: github.event_name != 'pull_request' || github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       security-events: write
