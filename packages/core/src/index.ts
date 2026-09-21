@@ -19,5 +19,5 @@ export { loadConfig, loadModules, loadPipelines } from "./load.ts";
 export { consoleLogger, silentLogger, logWarn, type Logger, type StepLog } from "./logger.ts";
 export type { RunResult, Runner, RunTracker } from "./runner.ts";
 export { checkDataflow } from "./dataflow.ts";
-export { validateSchema, coerceQuery, resolveOutputSchema, findMissingRequired, type SchemaProblem } from "./schema.ts";
+export { validateSchema, coerceQuery, type SchemaProblem } from "./schema.ts";
 export type { StopOptions, StopResult } from "./boot.ts";
