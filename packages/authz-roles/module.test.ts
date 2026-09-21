@@ -104,6 +104,44 @@ describe("authz/roles module steps via runPipeline", () => {
   });
 });
 
+describe("authz/roles module: validateRoles via runPipeline", () => {
+  const rolesPipeline = definePipeline({ name: "rolesPipeline", steps: ["authz.validateRoles:roles"] });
+
+  it("passes when the payload has no roles", async () => {
+    const instance = await boot();
+    const res = await runPipeline(rolesPipeline, {}, { modules: [{ module, instance }] });
+    expect(res.status).toBe(200);
+  });
+
+  it("passes when every role is configured", async () => {
+    const instance = await boot();
+    const res = await runPipeline(rolesPipeline, { payload: { roles: ["admin", "editor"] } }, { modules: [{ module, instance }] });
+    expect(res.status).toBe(200);
+  });
+
+  it("answers 400 VALIDATION with the unknown names when a role is not configured", async () => {
+    const instance = await boot();
+    const res = await runPipeline(rolesPipeline, { payload: { roles: ["editor", "typo-role"] } }, { modules: [{ module, instance }] });
+    expect(res.status).toBe(400);
+    expect(res.code).toBe("VALIDATION");
+    expect(res.details).toEqual({ unknown: ["typo-role"] });
+  });
+
+  it("answers 400 VALIDATION, never 500, when the value is not an array of strings", async () => {
+    const instance = await boot();
+    const res = await runPipeline(rolesPipeline, { payload: { roles: "admin" } }, { modules: [{ module, instance }] });
+    expect(res.status).toBe(400);
+    expect(res.code).toBe("VALIDATION");
+  });
+
+  it("reports prototype-key role names as unknown instead of finding an inherited value", async () => {
+    const instance = await boot();
+    const res = await runPipeline(rolesPipeline, { payload: { roles: ["constructor", "__proto__", "toString"] } }, { modules: [{ module, instance }] });
+    expect(res.status).toBe(400);
+    expect(res.details).toEqual({ unknown: ["constructor", "__proto__", "toString"] });
+  });
+});
+
 function identityModule(identity: Identity) {
   return defineModule({
     name: "probe/identity",

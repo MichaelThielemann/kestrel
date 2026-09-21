@@ -18,6 +18,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function payloadPath(ctx: Context, path: string): unknown {
+  return path.split(".").reduce<unknown>((value, segment) => (isRecord(value) ? value[segment] : undefined), ctx.payload);
+}
+
 function resultBase(ctx: Context, step: string): Record<string, unknown> {
   if (ctx.result === undefined) return {};
   if (isRecord(ctx.result)) return ctx.result;
@@ -55,6 +59,18 @@ export default defineModule({
       const base = resultBase(ctx, "listRoles");
       return ok({ ...ctx, result: { ...base, roles: authz.listRoles() } });
     },
+
+    validateRoles: stepFactory((path: string) => async (ctx: Context) => {
+      const raw = payloadPath(ctx, path);
+      if (raw === null || raw === undefined) return ok(ctx);
+      if (!Array.isArray(raw) || !raw.every((role): role is string => typeof role === "string")) {
+        return ctx.fail("VALIDATION", `authz.validateRoles:${path}: expected an array of role names`);
+      }
+      const known = new Set(authz.listRoles());
+      const unknown = raw.filter((role) => !known.has(role));
+      if (unknown.length > 0) return ctx.fail("VALIDATION", `authz.validateRoles:${path}: unknown role name(s)`, { unknown });
+      return ok(ctx);
+    }),
   }),
 
   describe: () => ({
@@ -73,5 +89,12 @@ export default defineModule({
       writes: ["result.roles"],
       extendsOutput: { type: "object", properties: { roles: { type: "array", items: { type: "string" } } }, required: ["roles"] },
     },
+    validateRoles: (path: string) => ({
+      summary: `Validate the role names at payload.${path} against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept`,
+      reads: [`payload.${path}`],
+      writes: [],
+      input: { type: "object", additionalProperties: true },
+      errors: { 400: "the value is not an array of known role names" },
+    }),
   }),
 });
