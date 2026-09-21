@@ -979,7 +979,8 @@
       "steps": [
         "authz.require",
         "authz.describeAccess",
-        "authz.listRoles"
+        "authz.listRoles",
+        "authz.validateRoles"
       ],
       "eventHook": false,
       "emits": []
@@ -5389,6 +5390,25 @@
           "required": [
             "roles"
           ]
+        }
+      }
+    },
+    {
+      "name": "authz.validateRoles",
+      "module": "authz/roles",
+      "factory": true,
+      "description": {
+        "summary": "Validate the role names at payload.<arg> against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept",
+        "reads": [
+          "payload.<arg>"
+        ],
+        "writes": [],
+        "input": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "errors": {
+          "400": "the value is not an array of known role names"
         }
       }
     },
@@ -10468,6 +10488,25 @@
             "errors": {
               "401": "not authenticated",
               "403": "missing permission users.manage"
+            }
+          }
+        },
+        {
+          "spec": "authz.validateRoles:roles",
+          "name": "authz.validateRoles",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept",
+            "reads": [
+              "payload.roles"
+            ],
+            "writes": [],
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "errors": {
+              "400": "the value is not an array of known role names"
             }
           }
         },
@@ -20038,6 +20077,25 @@
             "errors": {
               "401": "not authenticated",
               "403": "missing permission users.manage"
+            }
+          }
+        },
+        {
+          "spec": "authz.validateRoles:roles",
+          "name": "authz.validateRoles",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept",
+            "reads": [
+              "payload.roles"
+            ],
+            "writes": [],
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "errors": {
+              "400": "the value is not an array of known role names"
             }
           }
         },

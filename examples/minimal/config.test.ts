@@ -382,6 +382,75 @@ async function failedPipelines(kestrel: Instance, admin: Session): Promise<strin
   return boundaryCast<{ recentFailures: { pipeline: string }[] }>(stats.result, "json").recentFailures.map((failure) => failure.pipeline);
 }
 
+describe("user pipelines validate role names", () => {
+  it("declares authz.validateRoles:roles right after authz.require:users.manage on create and update", async () => {
+    const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
+    expect(pipelines.get("createUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authz.validateRoles:roles", "authn.createUser", "events.emit:user.created"]);
+    expect(pipelines.get("updateUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authz.validateRoles:roles", "authn.updateUser", "events.emit:user.updated"]);
+  });
+
+  it("rejects an unknown role on create, creating no user", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const created = await kestrel.run("createUser", { trigger, headers: bearer(admin.token), payload: { username: "lena", password: "long-enough", roles: ["typo-role"] } });
+      expect(created.status).toBe(400);
+      const listed = await kestrel.run("listUsers", { trigger, headers: bearer(admin.token) });
+      expect(boundaryCast<{ username: string }[]>(listed.result, "json").map((u) => u.username)).not.toContain("lena");
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("accepts known roles on create", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const created = await kestrel.run("createUser", { trigger, headers: bearer(admin.token), payload: { username: "mona", password: "long-enough", roles: ["editor"] } });
+      expect(created.status).toBe(200);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("rejects an unknown role on update, leaving the user's roles unchanged", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const editor = await createEditor(kestrel, admin, "nora");
+      const updated = await kestrel.run("updateUser", { trigger, headers: bearer(admin.token), params: { id: editor.id }, payload: { roles: ["typo-role"] } });
+      expect(updated.status).toBe(400);
+      const fetched = await kestrel.run("getUser", { trigger, headers: bearer(admin.token), params: { id: editor.id } });
+      expect(boundaryCast<{ roles: string[] }>(fetched.result, "json").roles).toEqual(["editor"]);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("accepts an update without roles", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const editor = await createEditor(kestrel, admin, "opal");
+      const updated = await kestrel.run("updateUser", { trigger, headers: bearer(admin.token), params: { id: editor.id }, payload: { username: "opal2" } });
+      expect(updated.status).toBe(200);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("reports a prototype-key role name as unknown instead of throwing", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const created = await kestrel.run("createUser", { trigger, headers: bearer(admin.token), payload: { username: "petra", password: "long-enough", roles: ["constructor", "__proto__", "toString"] } });
+      expect(created.status).toBe(400);
+    } finally {
+      await dispose();
+    }
+  });
+});
+
 describe("user deletion wiring", () => {
   it("declares the event pipelines, the retry routes, the prune cron and the retention", async () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
