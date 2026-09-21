@@ -72,6 +72,7 @@ concerns), an e-mail field.
 | `authn.requireUser` | Require a valid session | – | `token`, `identity` | – | – | 401 not authenticated |
 | `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated |
 | `authn.logout` | End the current session | `token` | `result` | – | { ok: boolean, … } | 401 not authenticated |
+| `authn.verifyUser` | Look up `payload.reassignTo` (or the `reassignTo` an `authn.deleteUser` event hands over as `payload.result.reassignTo`) and write its canonical `{ id, name }` to `reassignTarget`; absent or `null` writes `null` | `payload.reassignTo`, `payload.result` | `reassignTarget` | { reassignTo?: string \| object \| null, result?: object, … } | – | 400 reassignTo is neither a user id, { id, name } nor null, or names an inactive user; 404 user not found |
 | `authn.createUser` | Create a user | – | `result` | { username: string, password: string, roles?: string[] } | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 400 invalid input; 409 username already exists |
 | `authn.listUsers` | List users | – | `result` | – | object[] | – |
 | `authn.getUser` | One user | `params.id` | `result` | – | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 404 user not found |

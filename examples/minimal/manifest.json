@@ -870,6 +870,7 @@
         "authn.requireUser",
         "authn.loadIdentity",
         "authn.logout",
+        "authn.verifyUser",
         "authn.createUser",
         "authn.listUsers",
         "authn.getUser",
@@ -5491,6 +5492,73 @@
       }
     },
     {
+      "name": "authn.verifyUser",
+      "module": "authn/multi",
+      "factory": false,
+      "description": {
+        "summary": "Look up `payload.reassignTo` (or the `reassignTo` an `authn.deleteUser` event hands over as `payload.result.reassignTo`) and write its canonical `{ id, name }` to `reassignTarget`; absent or `null` writes `null`",
+        "reads": [
+          "payload.reassignTo",
+          "payload.result"
+        ],
+        "writes": [
+          "reassignTarget"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "reassignTo": {
+              "type": [
+                "string",
+                "object",
+                "null"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ]
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "reassignTo": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ]
+                }
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "errors": {
+          "400": "reassignTo is neither a user id, { id, name } nor null, or names an inactive user",
+          "404": "user not found"
+        }
+      }
+    },
+    {
       "name": "authn.createUser",
       "module": "authn/multi",
       "factory": false,
@@ -7524,10 +7592,11 @@
       "module": "revisions/default",
       "factory": false,
       "description": {
-        "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`: with `reassignTo` that user, without it the anonymous author `{ id: null, name: null }`",
+        "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id` with the verified target `authn.verifyUser` wrote to `reassignTarget`, without one the anonymous author `{ id: null, name: null }`",
         "reads": [
           "params.id",
-          "payload"
+          "payload",
+          "reassignTarget"
         ],
         "writes": [
           "result"
@@ -7591,7 +7660,7 @@
           ]
         },
         "errors": {
-          "400": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again"
+          "400": "no user id, or the reassign target is the former author again"
         }
       }
     },
@@ -16125,14 +16194,82 @@
       "name": "reassignRevisionAuthor",
       "steps": [
         {
+          "spec": "authn.verifyUser",
+          "name": "authn.verifyUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Look up `payload.reassignTo` (or the `reassignTo` an `authn.deleteUser` event hands over as `payload.result.reassignTo`) and write its canonical `{ id, name }` to `reassignTarget`; absent or `null` writes `null`",
+            "reads": [
+              "payload.reassignTo",
+              "payload.result"
+            ],
+            "writes": [
+              "reassignTarget"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "reassignTo": {
+                  "type": [
+                    "string",
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ]
+                },
+                "result": {
+                  "type": "object",
+                  "properties": {
+                    "reassignTo": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
+                    }
+                  }
+                }
+              },
+              "additionalProperties": true
+            },
+            "errors": {
+              "400": "reassignTo is neither a user id, { id, name } nor null, or names an inactive user",
+              "404": "user not found"
+            }
+          }
+        },
+        {
           "spec": "revisions.reassignAuthor",
           "name": "revisions.reassignAuthor",
           "module": "revisions/default",
           "description": {
-            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`: with `reassignTo` that user, without it the anonymous author `{ id: null, name: null }`",
+            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id` with the verified target `authn.verifyUser` wrote to `reassignTarget`, without one the anonymous author `{ id: null, name: null }`",
             "reads": [
               "params.id",
-              "payload"
+              "payload",
+              "reassignTarget"
             ],
             "writes": [
               "result"
@@ -16196,7 +16333,7 @@
               ]
             },
             "errors": {
-              "400": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again"
+              "400": "no user id, or the reassign target is the former author again"
             }
           }
         }
@@ -18214,14 +18351,82 @@
           }
         },
         {
+          "spec": "authn.verifyUser",
+          "name": "authn.verifyUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Look up `payload.reassignTo` (or the `reassignTo` an `authn.deleteUser` event hands over as `payload.result.reassignTo`) and write its canonical `{ id, name }` to `reassignTarget`; absent or `null` writes `null`",
+            "reads": [
+              "payload.reassignTo",
+              "payload.result"
+            ],
+            "writes": [
+              "reassignTarget"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "reassignTo": {
+                  "type": [
+                    "string",
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ]
+                },
+                "result": {
+                  "type": "object",
+                  "properties": {
+                    "reassignTo": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
+                    }
+                  }
+                }
+              },
+              "additionalProperties": true
+            },
+            "errors": {
+              "400": "reassignTo is neither a user id, { id, name } nor null, or names an inactive user",
+              "404": "user not found"
+            }
+          }
+        },
+        {
           "spec": "revisions.reassignAuthor",
           "name": "revisions.reassignAuthor",
           "module": "revisions/default",
           "description": {
-            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`: with `reassignTo` that user, without it the anonymous author `{ id: null, name: null }`",
+            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id` with the verified target `authn.verifyUser` wrote to `reassignTarget`, without one the anonymous author `{ id: null, name: null }`",
             "reads": [
               "params.id",
-              "payload"
+              "payload",
+              "reassignTarget"
             ],
             "writes": [
               "result"
@@ -18285,7 +18490,7 @@
               ]
             },
             "errors": {
-              "400": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again"
+              "400": "no user id, or the reassign target is the former author again"
             }
           }
         }

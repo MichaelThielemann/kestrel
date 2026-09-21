@@ -2,7 +2,24 @@
 
 ## Unreleased
 
+### Breaking
+
+- `revisions.reassignAuthor` no longer trusts a raw `payload.reassignTo`; it reads the verified
+  `{ id, name }` (or `null`) that `authn.verifyUser` writes to the new context key
+  `reassignTarget`, declared as a mandatory `reads` entry. A pipeline that runs
+  `revisions.reassignAuthor` without a step writing `reassignTarget` now fails at boot with
+  `KestrelBootError` instead of trusting an unverified target at runtime. `examples/minimal`'s
+  `reassignRevisionAuthor` and `retryReassignRevisionAuthor` pipelines are updated to run
+  `authn.verifyUser` first; a consumer with its own pipeline using `revisions.reassignAuthor` must
+  add the same step or the pipeline no longer boots.
+
 ### Added
+
+- `authn-multi`: the step `authn.verifyUser` looks up the user id in `payload.reassignTo` (or the
+  `reassignTo` an `authn.deleteUser` event hands over as `payload.result.reassignTo`), rejects an
+  unknown or inactive one (404 `NOT_FOUND` / 400 `VALIDATION`), and writes the canonical
+  `{ id, name }` to `reassignTarget` — the given `name`, if any, is ignored. Absent or `null`
+  writes `null`, so `revisions.reassignAuthor` anonymises as before.
 
 - `boot()` now also returns non-fatal conditions as `kestrel.warnings: BootWarning[]`, in addition to
   logging them through `logger.warn`. `BootWarning` is a discriminated union on `code`; a future
