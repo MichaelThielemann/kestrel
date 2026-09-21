@@ -4,7 +4,8 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { first, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { applyPendingRestore, checkSkippedRestore, createBackupBlobstore, exists, type Backup } from "./impl.ts";
+import { applyPendingRestore, createBackupBlobstore, exists, type Backup } from "./impl.ts";
+import { checkSkippedRestore } from "./restoreFreshness.ts";
 
 export const configSchema = z
   .object({
@@ -28,8 +29,8 @@ export default defineModule({
     const applied = await applyPendingRestore(cfg.file);
     if (applied) deps.logger.info("backup/blobstore: applied pending restore", { file: cfg.file, key: applied.key, size: applied.size });
     const backup = createBackupBlobstore(cfg, blobs);
-    if (cfg.restoreOnStart) {
-      if (await exists(cfg.file)) await checkSkippedRestore(cfg, blobs, deps.logger);
+    if (cfg.restoreOnStart && !applied) {
+      if (await exists(cfg.file)) await checkSkippedRestore(cfg, blobs, deps.logger, deps.bootStartedAt ?? Date.now());
       else await backup.restoreWhenMissing();
     }
     return backup;
