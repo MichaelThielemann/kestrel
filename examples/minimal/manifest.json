@@ -2821,6 +2821,9 @@
           "type": "object",
           "additionalProperties": true
         },
+        "output": {
+          "type": "object"
+        },
         "errors": {
           "409": "a document with that id or a unique value already exists"
         }
@@ -2838,6 +2841,9 @@
         "writes": [
           "result"
         ],
+        "output": {
+          "type": "object"
+        },
         "errors": {
           "404": "no such document"
         }
@@ -2888,6 +2894,9 @@
         "input": {
           "type": "object",
           "additionalProperties": true
+        },
+        "output": {
+          "type": "object"
         },
         "errors": {
           "400": "missing id",
@@ -6460,24 +6469,6 @@
             "_locale": {
               "type": "string",
               "description": "effective locale of a site-resolved document"
-            },
-            "_links": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "object",
-                "properties": {
-                  "path": {
-                    "type": "string"
-                  },
-                  "locale": {
-                    "type": "string"
-                  },
-                  "broken": {
-                    "type": "boolean"
-                  }
-                }
-              },
-              "description": "internal references by target id after site.resolveLinks"
             }
           },
           "required": [
@@ -6506,6 +6497,29 @@
         "query": {
           "locale": {
             "type": "string"
+          }
+        },
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "_links": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "locale": {
+                    "type": "string"
+                  },
+                  "broken": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "description": "internal references by target id after site.resolveLinks"
+            }
           }
         }
       }
@@ -8053,7 +8067,30 @@
         ],
         "writes": [
           "result?"
-        ]
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "redirect": {
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "to",
+                "status"
+              ]
+            }
+          },
+          "required": [
+            "redirect"
+          ]
+        }
       }
     },
     {
@@ -16943,7 +16980,30 @@
             ],
             "writes": [
               "result?"
-            ]
+            ],
+            "output": {
+              "type": "object",
+              "properties": {
+                "redirect": {
+                  "type": "object",
+                  "properties": {
+                    "to": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "to",
+                    "status"
+                  ]
+                }
+              },
+              "required": [
+                "redirect"
+              ]
+            }
           }
         },
         {
@@ -17050,24 +17110,6 @@
                 "_locale": {
                   "type": "string",
                   "description": "effective locale of a site-resolved document"
-                },
-                "_links": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "object",
-                    "properties": {
-                      "path": {
-                        "type": "string"
-                      },
-                      "locale": {
-                        "type": "string"
-                      },
-                      "broken": {
-                        "type": "boolean"
-                      }
-                    }
-                  },
-                  "description": "internal references by target id after site.resolveLinks"
                 }
               },
               "required": [
@@ -17096,6 +17138,29 @@
             "query": {
               "locale": {
                 "type": "string"
+              }
+            },
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_links": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "locale": {
+                        "type": "string"
+                      },
+                      "broken": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "description": "internal references by target id after site.resolveLinks"
+                }
               }
             }
           }

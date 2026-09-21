@@ -52,7 +52,7 @@ on every request.
 | Step | Summary | Reads | Writes | Input | Output | Errors |
 |---|---|---|---|---|---|---|
 | `redirects.validate` | Compile the redirect rules of the payload; VALIDATION names the offending row | – | – | { rules?: object[] } | – | 400 Row N: <reason> |
-| `redirects.lookup` | Answer { redirect: { to, status } } and end the pipeline when the request path matches a rule | `params.path` | `result?` | – | – | – |
+| `redirects.lookup` | Answer { redirect: { to, status } } and end the pipeline when the request path matches a rule | `params.path` | `result?` | – | { redirect: object, … } | – |
 | `redirects.export` | Write redirects.json to the blobstore (adds `redirects: { rules, skipped }` to the result) | – | `result.redirects` | – | { redirects: object, … } | – |
 | `redirects.render` | The compiled redirect list (same content as redirects.json) | – | `result` | – | object[] | – |
 

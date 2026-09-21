@@ -10950,8 +10950,8 @@
                     }
                   },
                   "required": [
-                    "id",
                     "createdAt",
+                    "id",
                     "updatedAt"
                   ]
                 }
