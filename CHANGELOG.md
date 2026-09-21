@@ -76,6 +76,15 @@
   generated OpenAPI document is unchanged except for one route's `required` array order (the
   `resolvePage` route in `examples/minimal`, now folded through a merge instead of passed through
   unchanged — same fields, alphabetical order).
+- Every object schema in a step's `output`, `extendsOutput` or `extendsItems` now declares
+  `required`, listing exactly the properties the step always returns. Responses are unchanged — the
+  underlying data was always there — but the generated OpenAPI document now describes them
+  precisely: a consumer's generated types stop marking an always-present field as optional (media
+  item lists, folder listings, delivery, replication and link/reference reports, among others).
+  `boot()` adds a new, non-fatal `kestrel.warnings` entry, `{ code: "undeclared-required", message,
+  pipeline, step, path }`, for an object schema with `properties` but no `required` key, naming the
+  JSON path of the offending schema; like `undeclared-output`, it becomes a boot error in the next
+  major.
 
 ## 5.8.0 – 2026-09-20
 
