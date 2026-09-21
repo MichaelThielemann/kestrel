@@ -15,14 +15,7 @@ requires `users.manage`) so that only a caller who may manage users learns the r
 A role name a caller was never meant to have (`constructor`, `toString`, `valueOf`,
 `hasOwnProperty`, `__proto__`, …) never resolves to an inherited `Object.prototype` value: role
 lookups go through a `Map`, not a plain object index.
-Step: `authz.validateRoles:<path>` – reads an array of role names at `payload.<path>` and rejects it
-with 400 `VALIDATION` (the unknown names in `details.unknown`) unless every entry is a configured
-role name; an absent value passes, so an update that omits roles still works. It writes nothing
-and, unlike `describeAccess`/`listRoles`' `universe`, needs no attached instance. Put it after
-`authz.require:<perm>` and before the step that writes the roles, e.g. in front of `authn-multi`'s
-`createUser`/`updateUser` (`examples/minimal` runs `authz.validateRoles:roles`), so a role name
-typo is rejected instead of silently creating a user without the intended permissions.
-Both `describeAccess` and `listRoles` require an attached, booted instance (`kestrel.describe()` from the `attach` hook) for
+Both steps require an attached, booted instance (`kestrel.describe()` from the `attach` hook) for
 the permission universe; a `testing/runPipeline` unit test that does not boot must fake or stub
 them instead of exercising them directly – see `module.test.ts`'s "wiring error" case and its full
 `boot()` tests for the pattern.
@@ -38,12 +31,11 @@ Not included: ownership/resource checks (the `resource` argument is ignored), ro
 | `roleClaim` | string | no | `"roles"` |
 | `anonymous` | array | no | `[]` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors |
-|---|---|---|---|---|---|---|
-| `authz.require:<arg>` | Requires permission <arg> | – | – | – | – | 401 not authenticated; 403 missing permission <arg> |
-| `authz.describeAccess` | The caller's concrete permissions | `identity` | `result.permissions` | – | { permissions: string[], … } | 401 not authenticated |
-| `authz.listRoles` | The configured role names, in config order | – | `result.roles` | – | { roles: string[], … } | – |
-| `authz.validateRoles:<arg>` | Validate the role names at payload.<arg> against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept | `payload.<arg>` | – | object | – | 400 the value is not an array of known role names |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
+|---|---|---|---|---|---|---|---|
+| `authz.require:<arg>` | Requires permission <arg> | – | – | – | – | 401 not authenticated; 403 missing permission <arg> | – |
+| `authz.describeAccess` | The caller's concrete permissions | `identity` | `result.permissions` | – | { permissions: string[], … } | 401 not authenticated | – |
+| `authz.listRoles` | The configured role names, in config order | – | `result.roles` | – | { roles: string[], … } | – | – |
 
 Used by 65 of 83 pipelines in `examples/minimal`.
 

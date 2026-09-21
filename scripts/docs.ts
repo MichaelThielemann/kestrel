@@ -7,7 +7,7 @@ import { buildManifest } from "../packages/core/src/describe.ts";
 import { stepPrefix } from "../packages/core/src/defineModule.ts";
 import { StepRegistry } from "../packages/core/src/registry.ts";
 import { generateOpenApi } from "../packages/openapi/index.ts";
-import { collectingLogger, formatBootWarning, orderPackages, render, rootTable, splice, unexpectedBootWarnings, unexpectedLogEntries, type BootWarningKey, type LogEntry, type PackageInfo, type Section } from "./docs-render.ts";
+import { collectingLogger, formatBootWarning, orderPackages, portabilityOf, render, rootTable, splice, unexpectedBootWarnings, unexpectedLogEntries, type BootWarningKey, type LogEntry, type PackageInfo, type Section } from "./docs-render.ts";
 
 const ALLOWED_BOOT_WARNINGS: readonly BootWarningKey[] = [];
 
@@ -97,6 +97,22 @@ async function main(): Promise<void> {
   }
   outputs.set(join(example, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   outputs.set(join(example, "openapi.json"), `${JSON.stringify(openapi, null, 2)}\n`);
+  const portabilityRows = manifest.steps.map((s) => `| \`${s.name}\` | ${portabilityOf(s.name)} |`);
+  const portabilityDoc = [
+    "# Step portability",
+    "",
+    "Generated from the manifest of `examples/minimal`. Three states, derived from a step's name and",
+    "the declared step sets (`@michaelthielemann/kestrel-contracts/steps`): **portable** (a member of a",
+    "declared step set — every provider of that role registers it), **beside** (its prefix is governed",
+    "by a step set but it is not a member — provider-specific), **none** (no step set governs its",
+    "prefix).",
+    "",
+    "| Step | State |",
+    "|---|---|",
+    ...portabilityRows,
+    "",
+  ];
+  outputs.set(join(workspace, "docs", "step-portability.md"), portabilityDoc.join("\n"));
   const rootReadmeFile = join(workspace, "README.md");
   outputs.set(rootReadmeFile, splice(readFileSync(rootReadmeFile, "utf8"), rootTable(allPackages()), rel(rootReadmeFile)));
 

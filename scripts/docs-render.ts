@@ -1,4 +1,5 @@
 import type { BootWarning, JsonSchema, Logger, Manifest, ModuleManifest, ModuleOrderWarning, StepDescription, StepManifest, UndeclaredOutputWarning, UndeclaredRequiredWarning, UnemittedEventWarning } from "../packages/core/src/index.ts";
+import { STEP_SETS } from "../packages/contracts/src/steps.ts";
 
 export const START = "<!-- kestrel-docs:start -->";
 export const END = "<!-- kestrel-docs:end -->";
@@ -57,15 +58,27 @@ export function configTable(module: ModuleManifest): string[] {
   return ["| Config | Type | Required | Default |", "|---|---|---|---|", ...rows, ""];
 }
 
+/** Whether a step is a member of a declared {@link STEP_SETS} step set (portable), only under a governed prefix (beside), or under no governed prefix at all (none). */
+export function portabilityOf(name: string): "portable" | "beside" | "none" {
+  const dot = name.indexOf(".");
+  const prefix = dot === -1 ? name : name.slice(0, dot);
+  for (const set of STEP_SETS) {
+    if (set.prefix !== prefix) continue;
+    return set.steps.includes(name) ? "portable" : "beside";
+  }
+  return "none";
+}
+
 export function stepTable(steps: StepManifest[]): string[] {
   if (steps.length === 0) return [];
   const rows = steps.map((s) => {
     const name = `\`${s.name}${s.factory ? ":<arg>" : ""}\``;
     const d = s.description;
     const paths = (list: readonly string[]) => (list.length === 0 ? "–" : list.map((p) => `\`${p}\``).join(", "));
-    return `| ${name} | ${cell(d.summary)} | ${paths(d.reads)} | ${paths(d.writes)} | ${cell(inputCell(d))} | ${cell(brief(d.output ?? d.extendsOutput ?? d.extendsItems))} | ${cell(errors(d)) || "–"} |`;
+    const portable = portabilityOf(s.name);
+    return `| ${name} | ${cell(d.summary)} | ${paths(d.reads)} | ${paths(d.writes)} | ${cell(inputCell(d))} | ${cell(brief(d.output ?? d.extendsOutput ?? d.extendsItems))} | ${cell(errors(d)) || "–"} | ${portable === "none" ? "–" : portable} |`;
   });
-  return ["| Step | Summary | Reads | Writes | Input | Output | Errors |", "|---|---|---|---|---|---|---|", ...rows, ""];
+  return ["| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |", "|---|---|---|---|---|---|---|---|", ...rows, ""];
 }
 
 export function pipelineList(module: ModuleManifest, manifest: Manifest): string[] {

@@ -56,10 +56,10 @@ discovery of migration modules, a CLI — all a consumer concern.
 | `mode` | enum | no | `"apply"` |
 | `chunk` | integer | no | `50` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors |
-|---|---|---|---|---|---|---|
-| `migrations.list` | Applied migrations (ledger, oldest first) and still-pending migrations (config order) | – | `result` | – | { applied: object[], pending: object[], … } | – |
-| `migrations.apply` | Apply every pending migration; payload.dry === true reports the changes without writing | – | `result` | { dry?: boolean } | object \| object | 409 another apply() is already running; 500 a migration failed (message names the migration, document and locale) |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
+|---|---|---|---|---|---|---|---|
+| `migrations.list` | Applied migrations (ledger, oldest first) and still-pending migrations (config order) | – | `result` | – | { applied: object[], pending: object[], … } | – | – |
+| `migrations.apply` | Apply every pending migration; payload.dry === true reports the changes without writing | – | `result` | { dry?: boolean } | object \| object | 409 another apply() is already running; 500 a migration failed (message names the migration, document and locale) | – |
 
 Pipelines in `examples/minimal` using these steps:
 

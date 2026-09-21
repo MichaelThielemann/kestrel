@@ -87,16 +87,11 @@ they were. The method is not part of `revisions@1`: the contract is published an
 step, the same way `authn/multi` offers user administration beside `authn@1`.
 
 The step `revisions.reassignAuthor` takes the former author from `params.id` or, in a pipeline
-started by an event, from the payload's `id`. The target comes from `verifiedUser` when a preceding
-step wrote one — `authn/multi`'s `authn.verifyUser` confirms the target exists and is active before
-writing its canonical `{ id, name }` there, so the client only ever needs to send an id. Without a
-`verifiedUser`, the step falls back to the unverified `reassignTo` in the payload or in
-`payload.result.reassignTo` (the shape a `user.deleted` emitted with `?with=result` hands over) —
-a user id or `{ id, name }`, or `null`. It answers `{ from, to, revisions }`, is idempotent (a second
-run finds nothing left to move and reports `revisions: 0`) and can therefore be re-run by hand after
-a failure, through an admin route of its own. Running it behind `authn.verifyUser` is recommended;
-`authn-single`'s one fixed admin has no user store to verify a second user against, so verification
-only works with `authn-multi`.
+started by an event, from the payload's `id`, and the target from `reassignTo` — either directly in
+the payload (`{ "reassignTo": { "id", "name" } }` or `null`) or, for a `user.deleted` emitted with
+`?with=result`, from `payload.result.reassignTo`. It answers `{ from, to, revisions }`, is idempotent
+(a second run finds nothing left to move and reports `revisions: 0`) and can therefore be re-run by
+hand after a failure, through an admin route of its own.
 
 **Steps.** `revisions.record:<collection>` after `content.create`/`content.update`,
 `revisions.restore:<collection>` before the ordinary update chain (it only fills the body, the
@@ -121,18 +116,18 @@ consumer wires those;
 | `liveStatuses` | array | no | `["published"]` |
 | `maxLimit` | integer | no | `100` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors |
-|---|---|---|---|---|---|---|
-| `revisions.record:<arg>` | Record the saved <arg> document from the result as a revision; its parent is the head, or the revision a restore put on the context | `result`, `revisionParent?` | – | ?locale: string | – | 503 the revision could not be written |
-| `revisions.list:<arg>` | Revisions of one <arg> document and locale, newest first and without snapshots | `params.id` | `result` | ?locale: string, limit: integer, offset: integer | { items: object[], total: number, head: string \| null, … } | 400 missing id |
-| `revisions.read:<arg>` | One revision of a <arg> document including its snapshot and, where the content model is known, the dry run of its restore under `restore` | `params.id`, `params.revisionId` | `result` | – | { id: string, collection: string, documentId: string, locale: string, parentId: string \| null, createdAt: number, author: object, kind: "save" \| "restore", label: string \| null, status: string \| null, live: boolean, bytes: number, skipped: boolean, snapshot: object \| null, restore?: object, … } | 400 missing id or revisionId; 404 no such revision |
-| `revisions.restore:<arg>` | Put a <arg> revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out | `params.id`, `params.revisionId` | `body`, `payload`, `revisionParent`, `restoreReport?` | – | – | 400 missing id or revisionId; the restored fields fail validation; 404 no such revision; 409 the revision carries no snapshot |
-| `revisions.reportRestore` | Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is | `restoreReport?` | `result.restore?` | – | { restore?: object, … } | – |
-| `revisions.label:<arg>` | Name a <arg> revision, or clear its name with null; a labelled revision is never pruned | `params.id`, `params.revisionId` | `result` | { label: string \| null } | { id: string, collection: string, documentId: string, locale: string, parentId: string \| null, createdAt: number, author: object, kind: "save" \| "restore", label: string \| null, status: string \| null, live: boolean, bytes: number, skipped: boolean, … } | 400 missing id or revisionId; 404 no such revision |
-| `revisions.reassignAuthor` | Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }` | `params.id`, `payload`, `verifiedUser?` | `result` | { reassignTo?: string \| object \| null, … } | { from: string, to: object \| null, revisions: number, … } | 400 no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again |
-| `revisions.prune` | Apply the retention rules to every recorded document and locale | – | `result` | – | { inspected: number, removed: number, … } | – |
-| `revisions.remove:<arg>` | Drop every revision of a <arg> document, in every locale | `params.id` | – | – | – | 400 missing id |
-| `revisions.removeTranslation:<arg>` | Drop the revisions of one locale of a <arg> document | `params.id` | – | ?locale: string | – | 400 missing id |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
+|---|---|---|---|---|---|---|---|
+| `revisions.record:<arg>` | Record the saved <arg> document from the result as a revision; its parent is the head, or the revision a restore put on the context | `result` | – | ?locale: string | – | 503 the revision could not be written | – |
+| `revisions.list:<arg>` | Revisions of one <arg> document and locale, newest first and without snapshots | `params.id` | `result` | ?locale: string, limit: integer, offset: integer | { items: object[], total: number, head: string \| null, … } | 400 missing id | – |
+| `revisions.read:<arg>` | One revision of a <arg> document including its snapshot and, where the content model is known, the dry run of its restore under `restore` | `params.id`, `params.revisionId` | `result` | – | { id: string, collection: string, documentId: string, locale: string, parentId: string \| null, createdAt: number, author: object, kind: "save" \| "restore", label: string \| null, status: string \| null, live: boolean, bytes: number, skipped: boolean, snapshot: object \| null, restore?: object, … } | 400 missing id or revisionId; 404 no such revision | – |
+| `revisions.restore:<arg>` | Put a <arg> revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out | `params.id`, `params.revisionId` | `body`, `payload`, `revisionParent`, `restoreReport?` | – | – | 400 missing id or revisionId; the restored fields fail validation; 404 no such revision; 409 the revision carries no snapshot | – |
+| `revisions.reportRestore` | Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is | – | `result.restore?` | – | { restore?: object, … } | – | – |
+| `revisions.label:<arg>` | Name a <arg> revision, or clear its name with null; a labelled revision is never pruned | `params.id`, `params.revisionId` | `result` | { label: string \| null } | { id: string, collection: string, documentId: string, locale: string, parentId: string \| null, createdAt: number, author: object, kind: "save" \| "restore", label: string \| null, status: string \| null, live: boolean, bytes: number, skipped: boolean, … } | 400 missing id or revisionId; 404 no such revision | – |
+| `revisions.reassignAuthor` | Replace the author of every revision written by the user in `params.id` or the event payload's `id`: with `reassignTo` that user, without it the anonymous author `{ id: null, name: null }` | `params.id`, `payload` | `result` | { reassignTo?: object \| null, … } | { from: string, to: object \| null, revisions: number, … } | 400 no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again | – |
+| `revisions.prune` | Apply the retention rules to every recorded document and locale | – | `result` | – | { inspected: number, removed: number, … } | – | – |
+| `revisions.remove:<arg>` | Drop every revision of a <arg> document, in every locale | `params.id` | – | – | – | 400 missing id | – |
+| `revisions.removeTranslation:<arg>` | Drop the revisions of one locale of a <arg> document | `params.id` | – | ?locale: string | – | 400 missing id | – |
 
 Pipelines in `examples/minimal` using these steps:
 
@@ -143,9 +138,9 @@ Pipelines in `examples/minimal` using these steps:
 - **pageRevision** (GET /admin/pages/:id/revisions/:revisionId): `authn.requireUser` → `authz.require:pages.manage` → **`revisions.read:pages`**
 - **pageRevisions** (GET /admin/pages/:id/revisions): `authn.requireUser` → `authz.require:pages.manage` → **`revisions.list:pages`**
 - **pruneRevisions** (cron 15 3 * * *): **`revisions.prune`**
-- **reassignRevisionAuthor** (event user.deleted): `authn.verifyUser:result.reassignTo` → **`revisions.reassignAuthor`**
+- **reassignRevisionAuthor** (event user.deleted): **`revisions.reassignAuthor`**
 - **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.require:pages.write` → **`revisions.restore:pages`** → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.update:pages` → **`revisions.record:pages`** → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → **`revisions.reportRestore`** → `events.emit:page.restored`
-- **retryReassignRevisionAuthor** (POST /admin/users/:id/revisions/reassign): `authn.requireUser` → `authz.require:users.manage` → `authn.verifyUser:reassignTo` → **`revisions.reassignAuthor`**
+- **retryReassignRevisionAuthor** (POST /admin/users/:id/revisions/reassign): `authn.requireUser` → `authz.require:users.manage` → **`revisions.reassignAuthor`**
 - **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.update:pages` → **`revisions.record:pages`** → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.updated`
 
 <!-- kestrel-docs:end -->

@@ -33,12 +33,12 @@ a rejecting `emit`, which this module deliberately does not provide).
 | `lockTtlSeconds` | integer | no | `300` |
 | `retentionDays` | integer | no | `7` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors |
-|---|---|---|---|---|---|---|
-| `events.emit:<arg>` | Queue event "<arg>" for the subscribed handler pipelines; the worker delivers it after this run | – | – | – | – | 503 the event could not be persisted |
-| `events.readQueueStatus` | Queue counters per state, the oldest pending event and the worker state of this process | – | `result` | – | { pending: number, running: number, dead: number, done24h: number, oldestPendingAt: number \| null, worker: object, … } | – |
-| `events.listDead` | Dead-letter events, most recently failed first | – | `result` | ?limit: integer | { items: object[], … } | – |
-| `events.retryDead:<arg>` | Requeue every dead-letter event | – | `result` | – | { retried: number, … } | – |
-| `events.purgeDone` | Delete delivered events older than retentionDays | – | `result` | – | { removed: number, … } | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
+|---|---|---|---|---|---|---|---|
+| `events.emit:<arg>` | Queue event "<arg>" for the subscribed handler pipelines; the worker delivers it after this run | – | – | – | – | 503 the event could not be persisted | portable |
+| `events.readQueueStatus` | Queue counters per state, the oldest pending event and the worker state of this process | – | `result` | – | { pending: number, running: number, dead: number, done24h: number, oldestPendingAt: number \| null, worker: object, … } | – | beside |
+| `events.listDead` | Dead-letter events, most recently failed first | – | `result` | ?limit: integer | { items: object[], … } | – | beside |
+| `events.retryDead:<arg>` | Requeue every dead-letter event | – | `result` | – | { retried: number, … } | – | beside |
+| `events.purgeDone` | Delete delivered events older than retentionDays | – | `result` | – | { removed: number, … } | – | beside |
 
 <!-- kestrel-docs:end -->

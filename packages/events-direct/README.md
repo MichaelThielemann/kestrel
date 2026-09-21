@@ -18,9 +18,9 @@ restarts, retries, or a dead-letter list — for those, use `events/queue`.
 
 Config: `{}` – nothing to set.
 
-| Step | Summary | Reads | Writes | Input | Output | Errors |
-|---|---|---|---|---|---|---|
-| `events.emit:<arg>` | Emit event "<arg>" to every subscribed handler pipeline and wait for them | – | – | – | – | 500 a subscribed handler failed |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
+|---|---|---|---|---|---|---|---|
+| `events.emit:<arg>` | Emit event "<arg>" to every subscribed handler pipeline and wait for them | – | – | – | – | 500 a subscribed handler failed | portable |
 
 Used by 14 of 83 pipelines in `examples/minimal`.
 

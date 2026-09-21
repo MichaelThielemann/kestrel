@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, loadConfig, loadModules, loadPipelines, silentLogger, type BootWarning, type StepDescription, type StepManifest } from "../packages/core/src/index.ts";
 import { generateOpenApi } from "../packages/openapi/index.ts";
-import { brief, collectingLogger, errors, formatBootWarning, inputCell, orderPackages, rootTable, splice, stepTable, unexpectedBootWarnings, unexpectedLogEntries, ROOT_ORDER, type LogEntry, type PackageInfo } from "./docs-render.ts";
+import { STEP_SETS } from "../packages/contracts/src/steps.ts";
+import { brief, collectingLogger, errors, formatBootWarning, inputCell, orderPackages, portabilityOf, rootTable, splice, stepTable, unexpectedBootWarnings, unexpectedLogEntries, ROOT_ORDER, type LogEntry, type PackageInfo } from "./docs-render.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const example = join(root, "examples", "minimal");
@@ -91,13 +92,13 @@ describe("stepTable", () => {
   it("renders – in the Input column for a step without input or query", () => {
     const step: StepManifest = { name: "widget.ping", module: "widget/default", factory: false, description: { summary: "Ping", reads: [], writes: [] } };
     const [, , row] = stepTable([step]);
-    expect(row).toBe("| `widget.ping` | Ping | – | – | – | – | – |");
+    expect(row).toBe("| `widget.ping` | Ping | – | – | – | – | – | – |");
   });
 
   it("renders a step's declared input in the Input column", () => {
     const step: StepManifest = { name: "widget.get", module: "widget/default", factory: false, description: { summary: "Get a widget", reads: ["widgets"], writes: [], input: { type: "object", properties: { id: { type: "string" } }, required: ["id"], additionalProperties: false } } };
     const [, , row] = stepTable([step]);
-    expect(row).toBe("| `widget.get` | Get a widget | `widgets` | – | { id: string } | – | – |");
+    expect(row).toBe("| `widget.get` | Get a widget | `widgets` | – | { id: string } | – | – | – |");
   });
 });
 
@@ -221,6 +222,31 @@ describe("example config's own steps", () => {
     await kestrel.stop();
     const onDisk = JSON.parse(readFileSync(join(example, "openapi.json"), "utf8")) as unknown;
     expect(generated).toEqual(onDisk);
+  });
+});
+
+describe("portabilityOf", () => {
+  it("is total and unambiguous over every step of the example instance", async () => {
+    const config = await loadConfig(join(example, "kestrel.config.ts"));
+    const modules = await loadModules(example, config);
+    const pipelines = await loadPipelines(example, config.pipelinesDir ?? "./pipelines");
+    const kestrel = await boot({ config: { ...config, http: null }, modules, pipelines, logger: silentLogger, root: example });
+    const names = kestrel.steps.names();
+    await kestrel.stop();
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) expect(["portable", "beside", "none"]).toContain(portabilityOf(name));
+  });
+
+  it("marks authn.requireUser portable, authn.createUser beside, and content.create none", () => {
+    expect(portabilityOf("authn.requireUser")).toBe("portable");
+    expect(portabilityOf("authn.createUser")).toBe("beside");
+    expect(portabilityOf("content.create")).toBe("none");
+  });
+
+  it("marks events.emit portable, matching EVENT_DELIVERY_STEPS", () => {
+    const eventSet = STEP_SETS.find((s) => s.prefix === "events");
+    expect(eventSet?.steps).toContain("events.emit");
+    expect(portabilityOf("events.emit")).toBe("portable");
   });
 });
 

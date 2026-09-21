@@ -17,10 +17,10 @@ Not included: shared limits across processes (needs a store-backed module), per-
 |---|---|---|---|
 | `buckets` | record | yes | – |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors |
-|---|---|---|---|---|---|---|
-| `ratelimit.check:<arg>` | Rate limit bucket <arg> | – | – | – | – | 429 too many requests |
-| `ratelimit.sweep` | Drop expired rate-limit windows | – | `result` | – | { removed: number, … } | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
+|---|---|---|---|---|---|---|---|
+| `ratelimit.check:<arg>` | Rate limit bucket <arg> | – | – | – | – | 429 too many requests | – |
+| `ratelimit.sweep` | Drop expired rate-limit windows | – | `result` | – | { removed?: number, … } | – | – |
 
 Pipelines in `examples/minimal` using these steps:
 

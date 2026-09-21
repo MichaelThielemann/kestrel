@@ -26,7 +26,6 @@ username is `CONFLICT` (409), the last admin guard is `LAST_ADMIN` (409).
 | `authn.requireUser` | – | `token`, `identity` | `UNAUTHENTICATED`, `TRANSIENT` |
 | `authn.loadIdentity` | `identity` | `result` | `UNAUTHENTICATED` |
 | `authn.logout` | `token` | `result` | `UNAUTHENTICATED`, `TRANSIENT` |
-| `authn.verifyUser:<path>` | `payload.<path>` | `verifiedUser` | `VALIDATION`, `NOT_FOUND`, `TRANSIENT` |
 | `authn.createUser` | – | `result` | `VALIDATION`, `CONFLICT`, `TRANSIENT` |
 | `authn.listUsers` | – | `result` | `TRANSIENT` |
 | `authn.getUser` | `params.id` | `result` | `NOT_FOUND`, `TRANSIENT` |
@@ -48,15 +47,6 @@ what the user wrote: `revisions.reassignAuthor` moves or anonymises their revisi
 `audit.anonymize` strips them from the audit log. The module itself deletes only the user row and
 their sessions; it knows nothing about revisions or audit entries.
 
-**Verifying a user reference.** `authn.verifyUser:<path>` looks up the user id at `payload.<path>`,
-answers by whether that user exists and is active (404 or 400), and writes the canonical
-`{ id, name }` to `verifiedUser` — `null` when `<path>` is absent or `null`. It does not check who is
-calling: an HTTP pipeline needs `authn.requireUser` and an `authz.require` step of its own in front
-of it, the same as any other admin-only step. `<path>` is a literal dotted path under `payload`, so
-the same step covers both a client-supplied reference (`authn.verifyUser:reassignTo` reads
-`payload.reassignTo`) and one an event hands over (`authn.verifyUser:result.reassignTo` reads
-`payload.result.reassignTo`), with no fallback between the two.
-
 Not included: self-service registration, password reset by mail, login rate limiting (pipeline
 concerns), an e-mail field.
 
@@ -75,25 +65,24 @@ concerns), an e-mail field.
 | `bootstrap.passwordHash` | string | no | *(secret)* |
 | `bootstrap.roles` | array | no | `[]` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors |
-|---|---|---|---|---|---|---|
-| `authn.login` | Log in with credentials | – | `token`, `identity`, `result` | { username?: string, email?: string, password: string } | { token: string, identity: object, … } | 401 invalid credentials |
-| `authn.identifyUser` | Identify the caller if a valid token is present | – | `token?`, `identity?` | – | – | – |
-| `authn.requireUser` | Require a valid session | – | `token`, `identity` | – | – | 401 not authenticated |
-| `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated |
-| `authn.logout` | End the current session | `token` | `result` | – | { ok: boolean, … } | 401 not authenticated |
-| `authn.verifyUser:<arg>` | Verify the user reference at payload.<arg>: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over | `payload.<arg>` | `verifiedUser` | object | – | 400 the value is neither a user id, { id } nor null, or the user is not active; 404 user not found |
-| `authn.createUser` | Create a user | – | `result` | { username: string, password: string, roles?: string[] } | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 400 invalid input; 409 username already exists |
-| `authn.listUsers` | List users | – | `result` | – | object[] | – |
-| `authn.getUser` | One user | `params.id` | `result` | – | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 404 user not found |
-| `authn.updateUser` | Rename a user or set their roles (a role change ends their sessions) | `params.id` | `result` | { username?: string, roles?: string[] } | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 400 neither username nor roles given, or an empty one; 404 user not found; 409 username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`) |
-| `authn.deleteUser` | Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised | `identity`, `params.id`, `payload.reassignTo` | `result` | { reassignTo?: string \| null } | { ok: boolean, reassignTo: object \| null, … } | 400 cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id; 404 user not found, or `reassignTo` names no user; 409 the last active admin cannot be deleted (`LAST_ADMIN`) |
-| `authn.setPassword` | Set a user's password (ends their sessions) | `params.id` | `result` | { password: string } | { ok: boolean, … } | 400 password missing or too short; 404 user not found |
-| `authn.changePassword` | Change own password | `identity` | `result` | { currentPassword: string, newPassword: string } | { ok: boolean, … } | 400 wrong current password, missing fields, or new one too short; 401 not authenticated |
-| `authn.deactivateUser` | Deactivate a user (ends their sessions) | `params.id` | `result` | – | { ok: boolean, … } | 400 cannot deactivate yourself; 404 user not found; 409 the last active admin cannot be deactivated (`LAST_ADMIN`) |
-| `authn.activateUser` | Activate a user | `params.id` | `result` | – | { ok: boolean, … } | 404 user not found |
-| `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed: number, … } | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
+|---|---|---|---|---|---|---|---|
+| `authn.login` | Log in with credentials | – | `token`, `identity`, `result` | { username?: string, email?: string, password: string } | { token: string, identity: object, … } | 401 invalid credentials | portable |
+| `authn.identifyUser` | Identify the caller if a valid token is present | – | `token?`, `identity?` | – | – | – | portable |
+| `authn.requireUser` | Require a valid session | – | `token`, `identity` | – | – | 401 not authenticated | portable |
+| `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated | portable |
+| `authn.logout` | End the current session | `token` | `result` | – | { ok: boolean, … } | 401 not authenticated | portable |
+| `authn.createUser` | Create a user | – | `result` | { username: string, password: string, roles?: string[] } | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 400 invalid input; 409 username already exists | beside |
+| `authn.listUsers` | List users | – | `result` | – | object[] | – | beside |
+| `authn.getUser` | One user | `params.id` | `result` | – | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 404 user not found | beside |
+| `authn.updateUser` | Rename a user or set their roles (a role change ends their sessions) | `params.id` | `result` | { username?: string, roles?: string[] } | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 400 neither username nor roles given, or an empty one; 404 user not found; 409 username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`) | beside |
+| `authn.deleteUser` | Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised | `identity`, `params.id`, `payload.reassignTo` | `result` | { reassignTo?: string \| null } | { ok: boolean, reassignTo: object \| null, … } | 400 cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id; 404 user not found, or `reassignTo` names no user; 409 the last active admin cannot be deleted (`LAST_ADMIN`) | beside |
+| `authn.setPassword` | Set a user's password (ends their sessions) | `params.id` | `result` | { password: string } | { ok: boolean, … } | 400 password missing or too short; 404 user not found | beside |
+| `authn.changePassword` | Change own password | `identity` | `result` | { currentPassword: string, newPassword: string } | { ok: boolean, … } | 400 wrong current password, missing fields, or new one too short; 401 not authenticated | beside |
+| `authn.deactivateUser` | Deactivate a user (ends their sessions) | `params.id` | `result` | – | { ok: boolean, … } | 400 cannot deactivate yourself; 404 user not found; 409 the last active admin cannot be deactivated (`LAST_ADMIN`) | beside |
+| `authn.activateUser` | Activate a user | `params.id` | `result` | – | { ok: boolean, … } | 404 user not found | beside |
+| `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed?: number, … } | – | beside |
 
-Used by 71 of 83 pipelines in `examples/minimal`.
+Used by 70 of 83 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

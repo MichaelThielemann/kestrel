@@ -42,18 +42,18 @@ Not included: cascading deletes, automatic clearing of dangling references, expa
 |---|---|---|---|
 | `targets` | record | yes | – |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors |
-|---|---|---|---|---|---|---|
-| `references.check:<arg>` | Referenced ids of <arg> must exist | – | – | object | – | 400 a referenced document does not exist |
-| `references.index:<arg>` | Index the references of a <arg> document | `result.id` | – | – | – | – |
-| `references.unindex:<arg>` | Drop indexed references of a <arg> document | `params.id` | – | – | – | 400 missing id |
-| `references.guard:<arg>` | Refuse deletion while <arg> is referenced | `params.id` | – | – | – | 400 missing id; 409 still referenced |
-| `references.referrers:<arg>` | Documents referencing a <arg> | `params.id` | `result` | – | object[] | 400 missing id |
-| `references.referrersMany:<arg>` | Documents referencing each of up to 200 <arg> ids | – | `result` | ?ids: string | object | 400 missing ids or more than 200 ids |
-| `references.guardAll:<arg>` | Refuse while any of result.ids of <arg> is referenced | `result.ids` | – | – | – | 409 still referenced |
-| `references.scan` | Re-check every reference | – | `result` | – | { checked: number, broken: number, … } | – |
-| `references.report` | Broken references | – | `result` | ?target: string | object[] | – |
-| `references.rebuild` | Rebuild the reference index | – | `result` | – | { documents: number, entries: number, … } | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
+|---|---|---|---|---|---|---|---|
+| `references.check:<arg>` | Referenced ids of <arg> must exist | – | – | object | – | 400 a referenced document does not exist | – |
+| `references.index:<arg>` | Index the references of a <arg> document | `result.id` | – | – | – | – | – |
+| `references.unindex:<arg>` | Drop indexed references of a <arg> document | `params.id` | – | – | – | 400 missing id | – |
+| `references.guard:<arg>` | Refuse deletion while <arg> is referenced | `params.id` | – | – | – | 400 missing id; 409 still referenced | – |
+| `references.referrers:<arg>` | Documents referencing a <arg> | `params.id` | `result` | – | object[] | 400 missing id | – |
+| `references.referrersMany:<arg>` | Documents referencing each of up to 200 <arg> ids | – | `result` | ?ids: string | object | 400 missing ids or more than 200 ids | – |
+| `references.guardAll:<arg>` | Refuse while any of result.ids of <arg> is referenced | `result.ids` | – | – | – | 409 still referenced | – |
+| `references.scan` | Re-check every reference | – | `result` | – | { checked?: number, broken?: number, … } | – | – |
+| `references.report` | Broken references | – | `result` | ?target: string | object[] | – | – |
+| `references.rebuild` | Rebuild the reference index | – | `result` | – | { documents?: number, entries?: number, … } | – | – |
 
 Used by 14 of 83 pipelines in `examples/minimal`.
 

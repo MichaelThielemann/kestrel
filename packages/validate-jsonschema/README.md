@@ -39,11 +39,11 @@ the sanitizer selects its branch by `type` instead. Not included: `$ref` to remo
 | `maxNodes` | integer | no | `20000` |
 | `watch` | boolean | no | `false` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors |
-|---|---|---|---|---|---|---|
-| `validate.sanitize:<arg>` | Sanitize HTML at format:"html" positions of payload field <arg> | – | `payload.<arg>?` | object | – | – |
-| `validate.sanitizeHtml:<arg>` | Sanitize the HTML payload field <arg> | – | `payload.<arg>?` | object | – | – |
-| `validate.check:<arg>` | Validate payload field <arg> against its JSON Schema | – | – | object | – | 400 schema violation (path and message per problem) |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
+|---|---|---|---|---|---|---|---|
+| `validate.sanitize:<arg>` | Sanitize HTML at format:"html" positions of payload field <arg> | – | `payload.<arg>?` | object | – | – | – |
+| `validate.sanitizeHtml:<arg>` | Sanitize the HTML payload field <arg> | – | `payload.<arg>?` | object | – | – | – |
+| `validate.check:<arg>` | Validate payload field <arg> against its JSON Schema | – | – | object | – | 400 schema violation (path and message per problem) | – |
 
 Pipelines in `examples/minimal` using these steps:
 
