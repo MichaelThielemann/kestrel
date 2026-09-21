@@ -9,6 +9,12 @@
   minor release may add further codes, so code reading `kestrel.warnings` must handle one it does
   not recognize. Currently emitted: `unemitted-event`, for an event trigger whose event no pipeline
   emits via `events.emit` and no module declares in `emits`.
+- `authn-single` and `authn-multi` share one behavioural test suite for the five steps both
+  register (`login`, `identifyUser`, `requireUser`, `loadIdentity`, `logout`), also run against a
+  new in-memory `authn@1` fake, so the three stay in lockstep.
+- `revisions.read`/`restore`/`label` are now pinned to reject a revision id that belongs to another
+  document or collection, and `images.serve`/`images.read` to never return another media item's
+  variant for a matching size name.
 
 ## 5.8.0 – 2026-09-20
 
