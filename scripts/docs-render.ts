@@ -1,4 +1,4 @@
-import type { BootWarning, JsonSchema, Manifest, ModuleManifest, StepDescription, StepManifest } from "../packages/core/src/index.ts";
+import type { BootWarning, JsonSchema, Logger, Manifest, ModuleManifest, StepDescription, StepManifest, UnemittedEventWarning } from "../packages/core/src/index.ts";
 
 export const START = "<!-- kestrel-docs:start -->";
 export const END = "<!-- kestrel-docs:end -->";
@@ -111,10 +111,17 @@ export function rootTable(packages: PackageInfo[]): string {
   return [START, "| Package | Purpose |", "|---|---|", ...rows, END].join("\n");
 }
 
-export type BootWarningKey = Pick<BootWarning, "code" | "pipeline" | "event">;
+export type BootWarningKey = Pick<UnemittedEventWarning, "code" | "pipeline" | "event">;
 
 function bootWarningKey(warning: BootWarningKey): string {
-  return `${warning.code}:${warning.pipeline}:${warning.event}`;
+  switch (warning.code) {
+    case "unemitted-event":
+      return `${warning.code}:${warning.pipeline}:${warning.event}`;
+    default: {
+      const exhaustive: never = warning.code;
+      return exhaustive;
+    }
+  }
 }
 
 export function unexpectedBootWarnings(warnings: readonly BootWarning[], allowlist: readonly BootWarningKey[]): BootWarning[] {

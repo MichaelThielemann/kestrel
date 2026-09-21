@@ -43,10 +43,14 @@ export interface StopResult {
 /**
  * A condition boot detects but does not treat as fatal.
  *
- * `code` identifies the check that produced it; `pipeline` and `event` are set for
- * the "unemitted-event" warning and name the trigger's pipeline and event.
+ * A discriminated union on `code`; the only member today is {@link UnemittedEventWarning}. A
+ * minor release may add further codes, so code reading `kestrel.warnings` must handle a `code`
+ * it does not recognize instead of assuming the shape of this union's current member.
  */
-export interface BootWarning {
+export type BootWarning = UnemittedEventWarning;
+
+/** An event trigger's event that no pipeline emits via `events.emit` and no module declares in `emits`. */
+export interface UnemittedEventWarning {
   code: "unemitted-event";
   message: string;
   pipeline: string;
@@ -96,7 +100,7 @@ function emittedEvent(spec: string): string | undefined {
   return query === -1 ? arg : arg.slice(0, query);
 }
 
-function warnUnemittedEvents(modules: readonly ModuleDefinition[], pipelines: ReadonlyMap<string, ResolvedPipeline>, events: readonly EventEntry[], logger: Logger): BootWarning[] {
+function warnUnemittedEvents(modules: readonly ModuleDefinition[], pipelines: ReadonlyMap<string, ResolvedPipeline>, events: readonly EventEntry[], logger: Logger): UnemittedEventWarning[] {
   const emitted = new Set<string>();
   for (const pipeline of pipelines.values()) {
     for (const step of pipeline.steps) {
@@ -105,7 +109,7 @@ function warnUnemittedEvents(modules: readonly ModuleDefinition[], pipelines: Re
     }
   }
   for (const mod of modules) for (const event of mod.emits ?? []) emitted.add(event);
-  const warnings: BootWarning[] = [];
+  const warnings: UnemittedEventWarning[] = [];
   for (const entry of events) {
     if (emitted.has(entry.event)) continue;
     const message = "event trigger listens to an event no pipeline emits via events.emit and no module declares in emits";

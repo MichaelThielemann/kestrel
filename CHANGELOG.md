@@ -5,8 +5,10 @@
 ### Added
 
 - `boot()` now also returns non-fatal conditions as `kestrel.warnings: BootWarning[]`, in addition to
-  logging them through `logger.warn`. Currently emitted: `unemitted-event`, for an event trigger
-  whose event no pipeline emits via `events.emit` and no module declares in `emits`.
+  logging them through `logger.warn`. `BootWarning` is a discriminated union on `code`; a future
+  minor release may add further codes, so code reading `kestrel.warnings` must handle one it does
+  not recognize. Currently emitted: `unemitted-event`, for an event trigger whose event no pipeline
+  emits via `events.emit` and no module declares in `emits`.
 
 ## 5.8.0 – 2026-09-20
 
