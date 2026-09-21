@@ -46,7 +46,9 @@ Setup order follows these rules, applied in order:
 3. and, if it declares `before`, that is checked but does not reorder: a module that ends up after
    the provider of a contract it names in `before` produces a `module-order` boot warning
    (`kestrel.warnings`) and becomes a boot error in the next major version;
-4. otherwise, the listed order is kept.
+4. and, if it declares `emits`, after the module providing the event trigger hook, unless that
+   module depends on it, so an event raised during setup can already be delivered;
+5. otherwise, the listed order is kept.
 
 ## `triggers`
 
