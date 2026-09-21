@@ -2453,6 +2453,27 @@
         },
         "variables": []
       },
+      "steps": [],
+      "eventHook": false,
+      "emits": []
+    },
+    {
+      "name": "events/direct",
+      "use": "@michaelthielemann/kestrel-events-direct",
+      "version": "5.8.0",
+      "provides": [],
+      "requires": [
+        "events@1"
+      ],
+      "optional": [],
+      "config": {
+        "schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "variables": []
+      },
       "steps": [
         "events.emit"
       ],
@@ -7861,12 +7882,15 @@
     },
     {
       "name": "events.emit",
-      "module": "events/inmemory",
+      "module": "events/direct",
       "factory": true,
       "description": {
-        "summary": "Emit event \"<arg>\" to every subscribed handler pipeline",
+        "summary": "Emit event \"<arg>\" to every subscribed handler pipeline and wait for them",
         "reads": [],
-        "writes": []
+        "writes": [],
+        "errors": {
+          "500": "a subscribed handler failed"
+        }
       }
     },
     {
@@ -10452,11 +10476,14 @@
         {
           "spec": "events.emit:page.created",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"page.created\" to every subscribed handler pipeline",
+            "summary": "Emit event \"page.created\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -10586,11 +10613,14 @@
         {
           "spec": "events.emit:user.created",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"user.created\" to every subscribed handler pipeline",
+            "summary": "Emit event \"user.created\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -10663,11 +10693,14 @@
         {
           "spec": "events.emit:user.deactivated",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"user.deactivated\" to every subscribed handler pipeline",
+            "summary": "Emit event \"user.deactivated\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -10769,11 +10802,14 @@
         {
           "spec": "events.emit:media.deleted",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"media.deleted\" to every subscribed handler pipeline",
+            "summary": "Emit event \"media.deleted\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -11095,11 +11131,14 @@
         {
           "spec": "events.emit:page.deleted",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"page.deleted\" to every subscribed handler pipeline",
+            "summary": "Emit event \"page.deleted\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -11424,11 +11463,14 @@
         {
           "spec": "events.emit:page.translationRemoved",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"page.translationRemoved\" to every subscribed handler pipeline",
+            "summary": "Emit event \"page.translationRemoved\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -11534,11 +11576,14 @@
         {
           "spec": "events.emit:user.deleted?with=result",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"user.deleted?with=result\" to every subscribed handler pipeline",
+            "summary": "Emit event \"user.deleted?with=result\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -14801,11 +14846,14 @@
         {
           "spec": "events.emit:auth.loggedIn",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"auth.loggedIn\" to every subscribed handler pipeline",
+            "summary": "Emit event \"auth.loggedIn\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -14861,11 +14909,14 @@
         {
           "spec": "events.emit:auth.loggedOut",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"auth.loggedOut\" to every subscribed handler pipeline",
+            "summary": "Emit event \"auth.loggedOut\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -18187,11 +18238,14 @@
         {
           "spec": "events.emit:page.restored",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"page.restored\" to every subscribed handler pipeline",
+            "summary": "Emit event \"page.restored\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -19584,11 +19638,14 @@
         {
           "spec": "events.emit:media.updated",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"media.updated\" to every subscribed handler pipeline",
+            "summary": "Emit event \"media.updated\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -20047,11 +20104,14 @@
         {
           "spec": "events.emit:page.updated",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"page.updated\" to every subscribed handler pipeline",
+            "summary": "Emit event \"page.updated\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -20177,11 +20237,14 @@
         {
           "spec": "events.emit:user.updated",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"user.updated\" to every subscribed handler pipeline",
+            "summary": "Emit event \"user.updated\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]
@@ -20566,11 +20629,14 @@
         {
           "spec": "events.emit:media.uploaded",
           "name": "events.emit",
-          "module": "events/inmemory",
+          "module": "events/direct",
           "description": {
-            "summary": "Emit event \"media.uploaded\" to every subscribed handler pipeline",
+            "summary": "Emit event \"media.uploaded\" to every subscribed handler pipeline and wait for them",
             "reads": [],
-            "writes": []
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         }
       ]

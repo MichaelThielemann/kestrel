@@ -10,6 +10,7 @@
     "@michaelthielemann/kestrel": "workspace:*",
     "@michaelthielemann/kestrel-contracts": "workspace:*",
     "@michaelthielemann/kestrel-events-inmemory": "workspace:*",
+    "@michaelthielemann/kestrel-events-direct": "workspace:*",
     "@michaelthielemann/kestrel-persistence-sqlite": "workspace:*",
     "@michaelthielemann/kestrel-audit-persistence": "workspace:*",
     "@michaelthielemann/kestrel-content-default": "workspace:*",

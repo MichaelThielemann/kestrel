@@ -7,6 +7,7 @@
     "@michaelthielemann/kestrel": "workspace:*",
     "@michaelthielemann/kestrel-h3": "workspace:*",
     "@michaelthielemann/kestrel-events-inmemory": "workspace:*",
+    "@michaelthielemann/kestrel-events-direct": "workspace:*",
     "@michaelthielemann/kestrel-persistence-sqlite": "workspace:*",
     "@michaelthielemann/kestrel-authn-single": "workspace:*",
     "@michaelthielemann/kestrel-authz-roles": "workspace:*",

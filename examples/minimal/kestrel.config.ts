@@ -53,6 +53,7 @@ export default defineConfig({
     { use: "@michaelthielemann/kestrel-redirects-default", config: { prefix: "site/" } },
     { use: "@michaelthielemann/kestrel-audit-persistence", config: { retentionDays: 365 } },
     { use: "@michaelthielemann/kestrel-events-inmemory", config: {} },
+    { use: "@michaelthielemann/kestrel-events-direct", config: {} },
     { use: "@michaelthielemann/kestrel-ratelimit-memory", config: { buckets: { login: { limit: 5, windowSeconds: 60 } } } },
     { use: "@michaelthielemann/kestrel-insights", config: {} },
   ],

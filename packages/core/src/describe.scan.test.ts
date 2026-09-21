@@ -158,7 +158,7 @@ describe("every step that reads the payload declares its schema", () => {
   }
 
   it("skips exactly the modules whose definition declares no steps", () => {
-    expect(scans.filter(({ scan: result }) => result.scanned && !result.hasSteps).map(({ dir }) => dir)).toEqual(["blobstore-filesystem", "blobstore-s3", "renderer-plain"]);
+    expect(scans.filter(({ scan: result }) => result.scanned && !result.hasSteps).map(({ dir }) => dir)).toEqual(["blobstore-filesystem", "blobstore-s3", "events-inmemory", "renderer-plain"]);
   });
 });
 

@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Breaking
+
+- Event delivery is a separate module from the `events@1` bus. `events-inmemory` now provides
+  `events@1` and nothing else — no `events.emit` step, no event trigger hook. Configure exactly one
+  delivery module next to it: `events-direct` (new, inline — subscribes event-trigger pipelines to
+  the bus and runs them within the emitting request) or `events-queue` (outbox — see below). An
+  instance without a delivery module fails to boot as soon as a pipeline has an event trigger
+  (`event triggers need a module that provides an event trigger hook`) or uses `events.emit`
+  (`unknown step "events.emit"`); two delivery modules fail to boot with `step "events.emit" is
+  already registered by <module>`.
+- `events-direct`'s `events.emit` no longer swallows a subscribed handler's rejection: it answers
+  500 `INTERNAL` with the aggregated failure as `cause` instead of logging and ignoring it. This
+  only affects a programmatic `events.on` handler that throws; a pipeline handler never throws.
+- `events-queue` no longer provides `events@1` and now requires it (`persistence@1` + `events@1`);
+  it keeps its own `events.emit` (writes one row per subscribed pipeline, never touches the bus),
+  the worker and the admin steps. It subscribes on the bus, at `setup()`, to every event name a
+  configured pipeline trigger names, so an event raised through `events@1` by a module (for example
+  `migrations.applied`) is still queued and a failed insert still rejects that `emit`.
+- `events-queue`'s dead-letter and retry are per pipeline: one row per `(event, pipeline)`, so a
+  failing pipeline's retries no longer re-run the other pipelines subscribed to the same event.
+  `events.listDead` items gain a required `pipeline` field (`""` for a row stored before this
+  change); queue counters grow accordingly, since they now count `(event, pipeline)` rows. **No
+  ordering is guaranteed between the pipelines subscribed to one event.** Rows stored before this
+  change (or written while the delivery table did not exist yet) carry no pipeline; the worker fans
+  them out to every currently subscribed pipeline at the start of its first tick after upgrading.
+- Every event a pipeline receives now carries `eventId` (a fresh UUID unless the emitter supplied
+  one), `event` and `at`, including events raised through `events@1` by a module — additive to the
+  payload, not a contract change. `eventId` is the documented dedup key for at-least-once delivery.
+- `core`: `Deps` (the argument to a module's `setup()`) gains a required `eventTriggers` property,
+  the configured event triggers in configuration order. `Kestrel["contracts"]` is now typed
+  `ContractLookup & { names(): string[] }` instead of `Deps & { names(): string[] }`; a reader of
+  `kestrel.contracts` is unaffected, a consumer constructing a `Deps` by hand must add the field.
+- `core`: `sortModules` adds a soft ordering edge from a module declaring `emits` to the module
+  providing the event trigger hook, unless that module already depends on it, so an event a module
+  raises during its own `setup()` can already be delivered once the instance starts. This changes
+  the setup order only for such a module; every other module keeps the order the config lists.
+
 ### Added
 
 - `defineModule`: a module may declare `before: readonly Contract<unknown>[]`, naming contracts it

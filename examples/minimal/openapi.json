@@ -2191,18 +2191,7 @@
                           "null"
                         ]
                       }
-                    },
-                    "required": [
-                      "url",
-                      "fromType",
-                      "fromId",
-                      "field",
-                      "locale",
-                      "ok",
-                      "status",
-                      "error",
-                      "checkedAt"
-                    ]
+                    }
                   }
                 }
               }
@@ -2292,11 +2281,7 @@
                     "entries": {
                       "type": "number"
                     }
-                  },
-                  "required": [
-                    "documents",
-                    "entries"
-                  ]
+                  }
                 }
               }
             }
@@ -2419,11 +2404,7 @@
                     }
                   },
                   "required": [
-                    "conflicts",
-                    "missing",
-                    "skipped",
-                    "variants",
-                    "written"
+                    "variants"
                   ]
                 }
               }
@@ -3965,7 +3946,7 @@
     "/admin/pages/{id}/revisions/{revisionId}/restore": {
       "post": {
         "operationId": "restorePageRevision",
-        "summary": "Require a valid session → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is → Emit event \"page.restored\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is → Emit event \"page.restored\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "admin"
         ],
@@ -4119,8 +4100,6 @@
                     }
                   },
                   "required": [
-                    "delivery",
-                    "document",
                     "llms"
                   ]
                 }
@@ -4178,7 +4157,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -4364,9 +4343,6 @@
                     }
                   },
                   "required": [
-                    "documents",
-                    "errors",
-                    "live",
                     "llms",
                     "redirects"
                   ]
@@ -4657,18 +4633,7 @@
                           "null"
                         ]
                       }
-                    },
-                    "required": [
-                      "fromType",
-                      "fromId",
-                      "field",
-                      "locale",
-                      "toTarget",
-                      "toId",
-                      "via",
-                      "broken",
-                      "checkedAt"
-                    ]
+                    }
                   }
                 }
               }
@@ -4758,11 +4723,7 @@
                     "entries": {
                       "type": "number"
                     }
-                  },
-                  "required": [
-                    "documents",
-                    "entries"
-                  ]
+                  }
                 }
               }
             }
@@ -5630,11 +5591,7 @@
                     "bytes": {
                       "type": "number"
                     }
-                  },
-                  "required": [
-                    "generation",
-                    "bytes"
-                  ]
+                  }
                 }
               }
             }
@@ -5766,17 +5723,7 @@
                         "null"
                       ]
                     }
-                  },
-                  "required": [
-                    "generation",
-                    "lineage",
-                    "shippedFrames",
-                    "lastSyncAt",
-                    "lastSnapshotAt",
-                    "lastCheckpointAt",
-                    "walBytes",
-                    "pendingRestore"
-                  ]
+                  }
                 }
               }
             }
@@ -5959,7 +5906,7 @@
     "/admin/users/{id}/revisions/reassign": {
       "post": {
         "operationId": "retryReassignRevisionAuthor",
-        "summary": "Require a valid session → Requires permission users.manage → Verify the user reference at payload.reassignTo: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over → Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
+        "summary": "Require a valid session → Requires permission users.manage → Replace the author of every revision written by the user in `params.id` or the event payload's `id`: with `reassignTo` that user, without it the anonymous author `{ id: null, name: null }`",
         "tags": [
           "admin"
         ],
@@ -5967,7 +5914,6 @@
         "x-kestrel-steps": [
           "authn.requireUser",
           "authz.require:users.manage",
-          "authn.verifyUser:reassignTo",
           "revisions.reassignAuthor"
         ],
         "parameters": [
@@ -6023,7 +5969,7 @@
             }
           },
           "400": {
-            "description": "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again",
+            "description": "no user id, or a `reassignTo` that is neither null nor `{ id, name }`, or the former author again",
             "content": {
               "application/json": {
                 "schema": {
@@ -6044,16 +5990,6 @@
           },
           "403": {
             "description": "missing permission users.manage",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "user not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -6100,7 +6036,6 @@
                 "properties": {
                   "reassignTo": {
                     "type": [
-                      "string",
                       "object",
                       "null"
                     ],
@@ -6113,10 +6048,12 @@
                       }
                     },
                     "required": [
-                      "id"
+                      "id",
+                      "name"
                     ]
                   }
-                }
+                },
+                "additionalProperties": true
               }
             }
           }
@@ -6131,7 +6068,7 @@
     "/login": {
       "post": {
         "operationId": "login",
-        "summary": "Rate limit bucket login → Log in with credentials → Emit event \"auth.loggedIn\" to every subscribed handler pipeline",
+        "summary": "Rate limit bucket login → Log in with credentials → Emit event \"auth.loggedIn\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "login"
         ],
@@ -6217,7 +6154,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -6275,7 +6212,7 @@
     "/logout": {
       "post": {
         "operationId": "logout",
-        "summary": "Require a valid session → End the current session → Emit event \"auth.loggedOut\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → End the current session → Emit event \"auth.loggedOut\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "logout"
         ],
@@ -6326,7 +6263,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -6799,34 +6736,25 @@
                           }
                         },
                         "required": [
-                          "alt",
                           "checksum",
                           "contentType",
                           "createdAt",
-                          "description",
                           "filename",
                           "folder",
-                          "height",
                           "id",
                           "key",
                           "provenance",
                           "size",
                           "status",
-                          "title",
                           "updatedAt",
-                          "variants",
-                          "width"
+                          "variants"
                         ]
                       }
                     },
                     "total": {
                       "type": "number"
                     }
-                  },
-                  "required": [
-                    "items",
-                    "total"
-                  ]
+                  }
                 }
               }
             }
@@ -6898,7 +6826,7 @@
       },
       "post": {
         "operationId": "uploadMedia",
-        "summary": "Require a valid session → Requires permission media.write → Sanitize uploaded SVG files (scripts, handlers, external references removed) → Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing → Emit event \"media.uploaded\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission media.write → Sanitize uploaded SVG files (scripts, handlers, external references removed) → Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing → Emit event \"media.uploaded\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "media"
         ],
@@ -7030,12 +6958,7 @@
                         "status",
                         "createdAt",
                         "updatedAt",
-                        "provenance",
-                        "width",
-                        "height",
-                        "alt",
-                        "title",
-                        "description"
+                        "provenance"
                       ]
                     },
                     {
@@ -7155,12 +7078,7 @@
                               "status",
                               "createdAt",
                               "updatedAt",
-                              "provenance",
-                              "width",
-                              "height",
-                              "alt",
-                              "title",
-                              "description"
+                              "provenance"
                             ]
                           }
                         },
@@ -7270,7 +7188,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -7334,7 +7252,7 @@
     "/media/{id}": {
       "delete": {
         "operationId": "deleteMedia",
-        "summary": "Require a valid session → Requires permission media.delete → Refuse deletion while media is referenced → Delete one media item's variants (blob + rows) → Delete file and metadata → Emit event \"media.deleted\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission media.delete → Refuse deletion while media is referenced → Delete one media item's variants (blob + rows) → Delete file and metadata → Emit event \"media.deleted\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "media"
         ],
@@ -7417,7 +7335,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -7633,23 +7551,18 @@
                     }
                   },
                   "required": [
-                    "alt",
                     "checksum",
                     "contentType",
                     "createdAt",
-                    "description",
                     "filename",
                     "folder",
-                    "height",
                     "id",
                     "key",
                     "provenance",
                     "size",
                     "status",
-                    "title",
                     "updatedAt",
-                    "variants",
-                    "width"
+                    "variants"
                   ]
                 }
               }
@@ -7732,7 +7645,7 @@
       },
       "patch": {
         "operationId": "updateMedia",
-        "summary": "Require a valid session → Requires permission media.write → Rename, move, set provenance or texts (alt/title/description per locale) → Emit event \"media.updated\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission media.write → Rename, move, set provenance or texts (alt/title/description per locale) → Emit event \"media.updated\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "media"
         ],
@@ -7878,12 +7791,7 @@
                     "status",
                     "createdAt",
                     "updatedAt",
-                    "provenance",
-                    "width",
-                    "height",
-                    "alt",
-                    "title",
-                    "description"
+                    "provenance"
                   ]
                 }
               }
@@ -7940,7 +7848,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -9013,7 +8921,7 @@
       },
       "post": {
         "operationId": "createPage",
-        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Create a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.created\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Create a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.created\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "pages"
         ],
@@ -9124,8 +9032,6 @@
                     }
                   },
                   "required": [
-                    "delivery",
-                    "document",
                     "llms"
                   ]
                 }
@@ -9173,7 +9079,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -9278,7 +9184,7 @@
     "/pages/{id}": {
       "delete": {
         "operationId": "deletePage",
-        "summary": "Require a valid session → Requires permission pages.delete → Refuse deletion while pages is referenced → Delete a pages → Drop every revision of a pages document, in every locale → Drop indexed references of a pages document → Drop indexed links of pages → Remove rendered output of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.deleted\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission pages.delete → Refuse deletion while pages is referenced → Delete a pages → Drop every revision of a pages document, in every locale → Drop indexed references of a pages document → Drop indexed links of pages → Remove rendered output of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.deleted\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "pages"
         ],
@@ -9333,8 +9239,7 @@
                     }
                   },
                   "required": [
-                    "llms",
-                    "ok"
+                    "llms"
                   ]
                 }
               }
@@ -9381,7 +9286,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -9630,7 +9535,7 @@
       },
       "patch": {
         "operationId": "updatePage",
-        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.updated\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.updated\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "pages"
         ],
@@ -9749,8 +9654,6 @@
                     }
                   },
                   "required": [
-                    "delivery",
-                    "document",
                     "llms"
                   ]
                 }
@@ -9798,7 +9701,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -9919,7 +9822,7 @@
     "/pages/{id}/translations/{locale}": {
       "delete": {
         "operationId": "deletePageTranslation",
-        "summary": "Require a valid session → Requires permission pages.write → Remove one translation of a pages (locale from the route or ?locale=); the document stays in its other locales → Drop the revisions of one locale of a pages document → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.translationRemoved\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission pages.write → Remove one translation of a pages (locale from the route or ?locale=); the document stays in its other locales → Drop the revisions of one locale of a pages document → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.translationRemoved\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "pages"
         ],
@@ -10042,8 +9945,6 @@
                     }
                   },
                   "required": [
-                    "delivery",
-                    "document",
                     "llms"
                   ]
                 }
@@ -10101,7 +10002,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -11143,10 +11044,9 @@
                           "broken": {
                             "type": "boolean"
                           }
-                        },
-                        "required": []
+                        }
                       },
-                      "description": "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve"
+                      "description": "internal references by target id after site.resolveLinks"
                     }
                   },
                   "required": [
@@ -11336,7 +11236,7 @@
       },
       "post": {
         "operationId": "createUser",
-        "summary": "Require a valid session → Requires permission users.manage → Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept → Create a user → Emit event \"user.created\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission users.manage → Create a user → Emit event \"user.created\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "users"
         ],
@@ -11344,7 +11244,6 @@
         "x-kestrel-steps": [
           "authn.requireUser",
           "authz.require:users.manage",
-          "authz.validateRoles:roles",
           "authn.createUser",
           "events.emit:user.created"
         ],
@@ -11428,7 +11327,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -11477,8 +11376,8 @@
                   }
                 },
                 "required": [
-                  "password",
-                  "username"
+                  "username",
+                  "password"
                 ],
                 "additionalProperties": false
               }
@@ -11495,7 +11394,7 @@
     "/users/{id}": {
       "delete": {
         "operationId": "deleteUser",
-        "summary": "Require a valid session → Requires permission users.manage → Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised → Emit event \"user.deleted?with=result\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission users.manage → Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised → Emit event \"user.deleted?with=result\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "users"
         ],
@@ -11605,7 +11504,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -11785,7 +11684,7 @@
       },
       "patch": {
         "operationId": "updateUser",
-        "summary": "Require a valid session → Requires permission users.manage → Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept → Rename a user or set their roles (a role change ends their sessions) → Emit event \"user.updated\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission users.manage → Rename a user or set their roles (a role change ends their sessions) → Emit event \"user.updated\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "users"
         ],
@@ -11793,7 +11692,6 @@
         "x-kestrel-steps": [
           "authn.requireUser",
           "authz.require:users.manage",
-          "authz.validateRoles:roles",
           "authn.updateUser",
           "events.emit:user.updated"
         ],
@@ -11896,7 +11794,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -12074,7 +11972,7 @@
     "/users/{id}/deactivate": {
       "post": {
         "operationId": "deactivateUser",
-        "summary": "Require a valid session → Requires permission users.manage → Deactivate a user (ends their sessions) → Emit event \"user.deactivated\" to every subscribed handler pipeline",
+        "summary": "Require a valid session → Requires permission users.manage → Deactivate a user (ends their sessions) → Emit event \"user.deactivated\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "users"
         ],
@@ -12165,7 +12063,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {

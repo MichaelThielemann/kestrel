@@ -35,6 +35,9 @@
       "path": "./packages/delivery-static"
     },
     {
+      "path": "./packages/events-direct"
+    },
+    {
       "path": "./packages/events-inmemory"
     },
     {

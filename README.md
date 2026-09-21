@@ -36,6 +36,7 @@ running instance with a login, a content type and a step of your own.
 | `@michaelthielemann/kestrel-blobstore-s3` | blobstore@1 on Amazon S3 or any S3-compatible store. |
 | `@michaelthielemann/kestrel-content-default` | content@1: typed documents from a config-declared model, on top of persistence@1. |
 | `@michaelthielemann/kestrel-delivery-static` | Steps delivery.publish/unpublish/readStatus/publishAll: renders published documents per locale via renderer@1, stores them in blobstore@1 and tracks a publish status. |
+| `@michaelthielemann/kestrel-events-direct` | Inline event delivery: subscribes event-trigger pipelines to events@1 and runs them within the emitting request. |
 | `@michaelthielemann/kestrel-events-inmemory` | events@1 in process; enables event triggers. |
 | `@michaelthielemann/kestrel-events-queue` | events@1 with a persistent queue: emit returns after the write, an in-process worker runs the listener pipelines with retry, backoff and dead-letter. |
 | `@michaelthielemann/kestrel-images-default` | Steps images.register/generate/sync/resume/prune: image variant size registry, generation on upload, resumable sync. |

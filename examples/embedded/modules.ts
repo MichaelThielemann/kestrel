@@ -3,11 +3,12 @@ import authnSingle from "@michaelthielemann/kestrel-authn-single";
 import authzRoles from "@michaelthielemann/kestrel-authz-roles";
 import contentDefault from "@michaelthielemann/kestrel-content-default";
 import eventsInmemory from "@michaelthielemann/kestrel-events-inmemory";
+import eventsDirect from "@michaelthielemann/kestrel-events-direct";
 import migrationsDefault from "@michaelthielemann/kestrel-migrations-default";
 import persistenceSqlite from "@michaelthielemann/kestrel-persistence-sqlite";
 import siteDefault from "@michaelthielemann/kestrel-site-default";
 
-const modules = [eventsInmemory, persistenceSqlite, authnSingle, authzRoles, contentDefault, siteDefault, migrationsDefault] as const;
+const modules = [eventsInmemory, eventsDirect, persistenceSqlite, authnSingle, authzRoles, contentDefault, siteDefault, migrationsDefault] as const;
 
 export default modules;
 export type KnownStep = StepCatalogue<typeof modules>;

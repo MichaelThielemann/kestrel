@@ -1,0 +1,53 @@
+{
+  "name": "@michaelthielemann/kestrel-events-direct",
+  "version": "5.8.0",
+  "description": "Inline event delivery: subscribes event-trigger pipelines to events@1 and runs them within the emitting request.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "exports": {
+    ".": "./module.ts",
+    "./impl": "./impl.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/module.d.ts",
+        "default": "./dist/module.js"
+      },
+      "./impl": {
+        "types": "./dist/impl.d.ts",
+        "default": "./dist/impl.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json"
+  },
+  "peerDependencies": {
+    "@michaelthielemann/kestrel": "workspace:^",
+    "@michaelthielemann/kestrel-contracts": "workspace:^"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@michaelthielemann/kestrel": "workspace:*",
+    "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-events-inmemory": "workspace:*",
+    "vitest": "^3.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
+    "directory": "packages/events-direct"
+  },
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues"
+}

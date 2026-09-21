@@ -151,7 +151,7 @@ describe("root package table", () => {
 
   it("has 30 rows in the fixed-then-alphabetical order, against the real packages directory", () => {
     const ordered = orderPackages(realPackages());
-    expect(ordered).toHaveLength(30);
+    expect(ordered).toHaveLength(31);
     expect(ordered.slice(0, 4).map((p) => p.name)).toEqual(ROOT_ORDER);
     const rest = ordered.slice(4).map((p) => p.name);
     expect(rest).toEqual([...rest].sort((a, b) => a.localeCompare(b)));

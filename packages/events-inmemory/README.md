@@ -1,30 +1,17 @@
 # events/inmemory
 `events@1` inside one process: handlers run in registration order, `emit` resolves after the
 last one; a throwing handler does not stop the rest, but `emit` then rejects with an
-`AggregateError` collecting all of them. Step `events.emit:<name>` throws
-`{ eventId, event, at, runId, identity, params, id }` of the running pipeline — `eventId` is a fresh
-UUID per emit (a dedup key for consumers), `runId` the id of the emitting run; a listener failure is
-logged and does not fail the step. Required for event triggers in `kestrel.config.ts`.
-Provides the core's `triggers.event` hook: it subscribes the configured `{ event, pipeline }` entries
-to its own bus and returns the unsubscribe the core calls on `stop()`. The envelope's `runId` is
-passed to the handler pipeline as `parentRunId`, so its step log lines point back at the run that
-emitted the event.
-Not included: delivery across processes or restarts (use a broker-backed events module).
-
-The step argument follows the `name:arg` shape every other step uses, query string included:
-`events.emit:page.created?with=result` parses the same way `authz.require:x` parses its own
-colon-delimited argument.
+`AggregateError` collecting all of them. This module is the bus only — it registers no step and no
+event trigger hook. Delivering event-trigger pipelines is the job of exactly one delivery module,
+`@michaelthielemann/kestrel-events-direct` (inline) or `@michaelthielemann/kestrel-events-queue`
+(outbox); configure one of them next to this module whenever a pipeline has an event trigger.
+Not included: delivery across processes or restarts (use `events/queue`, or a broker-backed bus
+module).
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
-`@michaelthielemann/kestrel-events-inmemory` – module `events/inmemory`: provides `events@1`; provides the event trigger hook.
+`@michaelthielemann/kestrel-events-inmemory` – module `events/inmemory`: provides `events@1`.
 
 Config: `{}` – nothing to set.
-
-| Step | Summary | Reads | Writes | Input | Output | Errors |
-|---|---|---|---|---|---|---|
-| `events.emit:<arg>` | Emit event "<arg>" to every subscribed handler pipeline | – | – | – | – | – |
-
-Used by 14 of 83 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

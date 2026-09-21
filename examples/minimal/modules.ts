@@ -19,6 +19,7 @@ import deliveryStatic from "@michaelthielemann/kestrel-delivery-static";
 import redirectsDefault from "@michaelthielemann/kestrel-redirects-default";
 import auditPersistence from "@michaelthielemann/kestrel-audit-persistence";
 import eventsInmemory from "@michaelthielemann/kestrel-events-inmemory";
+import eventsDirect from "@michaelthielemann/kestrel-events-direct";
 import ratelimitMemory from "@michaelthielemann/kestrel-ratelimit-memory";
 import insightsDefault from "@michaelthielemann/kestrel-insights";
 
@@ -43,6 +44,7 @@ const modules = [
   redirectsDefault,
   auditPersistence,
   eventsInmemory,
+  eventsDirect,
   ratelimitMemory,
   insightsDefault,
 ] as const;

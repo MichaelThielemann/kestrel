@@ -15,6 +15,7 @@ const trimTitle = defineMigration({
 export default defineConfig({
   modules: [
     { use: "@michaelthielemann/kestrel-events-inmemory", config: {} },
+    { use: "@michaelthielemann/kestrel-events-direct", config: {} },
     { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: ":memory:" } },
     {
       use: "@michaelthielemann/kestrel-authn-single",
