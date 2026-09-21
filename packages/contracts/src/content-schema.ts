@@ -21,17 +21,14 @@ export function fieldSchema(raw: FieldType | FieldDefinition, nullable: boolean)
   return nullable ? { anyOf: [base, { type: "null" }] } : base;
 }
 
-/** `siteFields` adds `_locale` and `_links`, which only `site@1` steps produce. */
+/** `siteFields` adds `_locale`, which only `site@1`'s `resolve` step produces; `_links` is `site.resolveLinks`'s own addition, documented on that step. */
 export function documentSchema(model: ContentModel, type: string, options: { siteFields?: boolean } = {}): JsonSchema {
   const properties: Record<string, JsonSchema> = { id: { type: "string" }, createdAt: { type: "number" }, updatedAt: { type: "number" } };
   for (const [name, raw] of Object.entries(model.types[type]?.fields ?? {})) properties[name] = fieldSchema(raw, true);
   if (model.locales) {
     properties._locales = { type: "object", additionalProperties: { type: "string" }, description: "origin locale per field, only with fallback" };
     properties._translations = { type: "object", additionalProperties: { type: "boolean" }, description: "per locale: required localized fields present" };
-    if (options.siteFields) {
-      properties._locale = { type: "string", description: "effective locale of a site-resolved document" };
-      properties._links = { type: "object", additionalProperties: { type: "object", properties: { path: { type: "string" }, locale: { type: "string" }, broken: { type: "boolean" } } }, description: "internal references by target id after site.resolveLinks" };
-    }
+    if (options.siteFields) properties._locale = { type: "string", description: "effective locale of a site-resolved document" };
   }
   return { type: "object", properties, required: ["id", "createdAt", "updatedAt"] };
 }

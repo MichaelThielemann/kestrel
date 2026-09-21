@@ -72,7 +72,12 @@ export default defineModule({
       input: { type: "object", properties: { [redirects.field]: { type: "array", items: ROW_SCHEMA } }, additionalProperties: false },
       errors: { 400: "Row N: <reason>" },
     },
-    lookup: { summary: "Answer { redirect: { to, status } } and end the pipeline when the request path matches a rule", reads: ["params.path"], writes: ["result?"], output: "untyped" as const },
+    lookup: {
+      summary: "Answer { redirect: { to, status } } and end the pipeline when the request path matches a rule",
+      reads: ["params.path"],
+      writes: ["result?"],
+      output: { type: "object", properties: { redirect: { type: "object", properties: { to: { type: "string" }, status: { type: "integer" } }, required: ["to", "status"] } }, required: ["redirect"] },
+    },
     export: {
       summary: "Write redirects.json to the blobstore (adds `redirects: { rules, skipped }` to the result)",
       reads: [],

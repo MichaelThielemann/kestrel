@@ -77,14 +77,14 @@ export default defineModule({
       reads: [],
       writes: ["result"],
       input: { type: "object", additionalProperties: true },
-      output: "untyped" as const,
+      output: { type: "object" },
       errors: { 409: "a document with that id or a unique value already exists" },
     }),
     findOne: (collection: string) => ({
       summary: `Read the ${collection} document named by params.id`,
       reads: ["params.id"],
       writes: ["result"],
-      output: "untyped" as const,
+      output: { type: "object" },
       errors: { 404: "no such document" },
     }),
     findMany: (collection: string) => ({
@@ -98,7 +98,7 @@ export default defineModule({
       reads: ["params.id"],
       writes: ["result"],
       input: { type: "object", additionalProperties: true },
-      output: "untyped" as const,
+      output: { type: "object" },
       errors: { 400: "missing id", 404: "no such document", 409: "a unique value already exists" },
     }),
     deleteOne: (collection: string) => ({
