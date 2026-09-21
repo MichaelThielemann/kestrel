@@ -38,6 +38,17 @@
   providing the event trigger hook, unless that module already depends on it, so an event a module
   raises during its own `setup()` can already be delivered once the instance starts. This changes
   the setup order only for such a module; every other module keeps the order the config lists.
+  **`emits` is load-bearing for this edge**: a module that raises an event through `events@1` during
+  its own `setup()` and does not declare that event in `emits` may be set up before the delivery
+  module exists, and with `events-queue` that event is then lost — there is nobody subscribed yet to
+  catch it.
+- Every contract-level event a pipeline receives now also carries `eventId`, `event` and `at`. A
+  consumer step that validates the event payload against a schema with `additionalProperties: false`
+  must allow these three fields, or validation now rejects an event it accepted before.
+- Rolling back to the previous major with `events-queue` configured requires a drained queue first
+  (`pending` and `running` at zero, visible through `events.readQueueStatus`): a fanned-out row is
+  one row per pipeline where the previous major expects one row per event, and its worker would
+  otherwise run every registered handler for each row it claims.
 
 ### Added
 

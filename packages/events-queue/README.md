@@ -8,7 +8,9 @@ each row's own pipeline with a frozen copy of the payload, then marks the row `d
 run counts an attempt for that row alone and requeues it after `backoffSeconds[attempt - 1]` (the
 last entry repeats); at `maxAttempts` the row is `dead` with its own error. **There is no ordering
 between the pipelines subscribed to one event** — each is its own row, claimed and retried
-independently, so a failing pipeline never re-runs the others. A row stuck in `running` longer
+independently, so a failing pipeline never re-runs the others. The pipelines subscribed to one
+event are independent of each other; work that must happen in sequence belongs in one pipeline. A
+row stuck in `running` longer
 than `lockTtlSeconds` (a crashed process) is picked up again. Delivery is therefore at least once
 per pipeline; a listener pipeline must be idempotent (`payload.eventId` is the dedup key). The
 triggering pipeline does not wait for delivery; `emit` rejects only when the row cannot be

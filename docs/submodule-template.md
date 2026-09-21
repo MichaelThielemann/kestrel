@@ -107,6 +107,12 @@ A module that emits an event from a contract method instead of an `events.emit` 
 plus every module's `emits`; an event trigger on a name in neither set is logged as a warning
 (`pipelines.md` § Triggers). The declaration shows up in the manifest as `ModuleManifest.emits`.
 
+`emits` also decides setup order: `sortModules` sets up a module that declares `emits` after the
+module providing the event trigger hook (unless it already depends on it), so the hook is already
+subscribed once the module's own `setup()` raises its event. Skipping the declaration is not just a
+missed warning — with `events-queue` as the delivery module, an event raised during a `setup()`
+that runs before the queue exists is lost, since nothing is subscribed yet to store it.
+
 ## Contributing triggers
 
 Modules can contribute triggers as well as steps: `triggers.event(instance, entries, run, logger)`

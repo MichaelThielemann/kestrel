@@ -650,6 +650,11 @@ via the admin steps `events.readQueueStatus`, `events.listDead`, `events.retryDe
 its process crashed is picked up again after `lockTtlSeconds`. **No ordering is guaranteed between
 the pipelines subscribed to one event:** each is its own row, claimed and retried independently.
 
+**With either delivery module, the pipelines subscribed to one event are independent of each
+other; work that must happen in sequence belongs in one pipeline.** `events-direct` happens to run
+them one at a time, in registration order, and isolates a throwing one from the rest — that is an
+implementation property of today's inline delivery, not a guarantee to build on.
+
 Guarantees: at-least-once delivery, no ordering across events — so a listener pipeline must be
 idempotent (the envelope's `eventId` is the dedup key, guaranteed present on every delivered event
 including one raised through `events@1` directly). If persistence itself fails on write, the

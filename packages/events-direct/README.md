@@ -1,7 +1,11 @@
 # events/direct
 Inline delivery for event-trigger pipelines: subscribes the configured `{ event, pipeline }` entries
-to the `events@1` bus and runs each matching pipeline within the emitting request, in registration
-order, one at a time. `events.emit:<name>` builds the shared envelope
+to the `events@1` bus and runs each matching pipeline within the emitting request. Today's
+implementation runs the pipelines subscribed to one event one at a time, in registration order,
+and isolates them from each other — a throwing pipeline is logged like a failed one and does not
+stop the rest — but this is not a guarantee: **the pipelines subscribed to one event are
+independent of each other; work that must happen in sequence belongs in one pipeline.**
+`events.emit:<name>` builds the shared envelope
 (`{ eventId, event, at, runId, identity, params, id }`, plus `ids`/`result` where they apply) and
 waits for every subscribed handler. A failing handler is not swallowed: the step answers 500
 `INTERNAL` with the aggregated failure as `cause`, so it shows up in the run's log line and in
