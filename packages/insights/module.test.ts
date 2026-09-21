@@ -60,6 +60,7 @@ describe("insights/default module steps via runPipeline", () => {
       modules: [probe, module],
       pipelines: [definePipeline({ name: "pass", steps: ["probe.pass"] }), manifestPipeline, statsPipeline],
       logger: silentLogger,
+      validateOutput: true,
     });
     const trigger = { kind: "http" as const, name: "GET /x" };
     await kestrel.run("pass", { trigger });

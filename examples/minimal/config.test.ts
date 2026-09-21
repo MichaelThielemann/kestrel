@@ -314,7 +314,7 @@ async function bootIsolated(): Promise<{ kestrel: Awaited<ReturnType<typeof boot
   };
   const modules = await loadModules(root, isolated);
   const pipelines = await loadPipelines(root, "pipelines");
-  const kestrel = await boot({ config: isolated, modules, pipelines, root });
+  const kestrel = await boot({ config: isolated, modules, pipelines, root, validateOutput: true });
   await kestrel.start();
   return {
     kestrel,

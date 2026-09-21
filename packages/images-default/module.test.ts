@@ -391,6 +391,24 @@ describe("images/default steps via runPipeline", () => {
     expect(res.code).toBe("VALIDATION");
   });
 
+  it("prune: deletes an orphaned size's variants and reports the counts", async () => {
+    const { images, db, blobs } = await makeInstance();
+    expectOk(await images.register([{ name: "card", width: 480 }]));
+    await addImage(db, blobs, "a", await jpeg(600, 400));
+    expectOk(await images.generate("a"));
+    expectOk(await images.register([{ name: "other", width: 100 }]));
+    const res = await runPipeline(pipeline("images.prune"), { body: { sizes: ["card"] } }, { modules: [{ module, instance: images }] });
+    expect(res.status).toBe(200);
+    expect(res.result).toEqual({ sizes: 1, variants: 1 });
+  });
+
+  it("retryFailed: reports variant, media and job counts through the runner", async () => {
+    const { images } = await makeInstance();
+    const res = await runPipeline(pipeline("images.retryFailed"), {}, { modules: [{ module, instance: images }] });
+    expect(res.status).toBe(200);
+    expect(res.result).toMatchObject({ variants: 0, media: 0, job: null });
+  });
+
   it("readStatus: reports sizes, job and orphans", async () => {
     const { images } = await makeInstance();
     const res = await runPipeline(pipeline("images.readStatus"), {}, { modules: [{ module, instance: images }] });
