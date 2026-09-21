@@ -98,6 +98,28 @@ describe("fileBirthMs", () => {
   });
 });
 
+describe("freshnessOf", () => {
+  it("is fresh when the birth time is after the start of this boot", () => {
+    expect(freshnessOf(1000, 900)).toBe("fresh");
+  });
+
+  it("is fresh at the exact boundary, birth time equal to the start of this boot — deliberate: coarse timestamp granularity can only truncate a birth time downward, so treating equality as fresh is the direction that never masks a real loss", () => {
+    expect(freshnessOf(1000, 1000)).toBe("fresh");
+  });
+
+  it("is old when the birth time is before the start of this boot", () => {
+    expect(freshnessOf(900, 1000)).toBe("old");
+  });
+
+  it("is unknown when the birth time is zero", () => {
+    expect(freshnessOf(0, 1000)).toBe("unknown");
+  });
+
+  it("is unknown when the birth time is nonsensically in the future", () => {
+    expect(freshnessOf(Date.now() + 60_000, Date.now())).toBe("unknown");
+  });
+});
+
 describe("replication/sqlite module setup: restore-on-start skip check", () => {
   it("rejects when the file already holds tables and was created during this boot, even though the table-count design would stay quiet", async () => {
     const bootStartedAt = Date.now();

@@ -3,17 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, it, expect } from "vitest";
-import backupBlobstore, { configSchema as backupConfigSchema } from "@michaelthielemann/kestrel-backup-blobstore";
-import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
-import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import type { Contract } from "@michaelthielemann/kestrel/defineContract";
-import type { Deps } from "@michaelthielemann/kestrel/defineModule";
-import { failure } from "@michaelthielemann/kestrel/errors";
-import { silentLogger } from "@michaelthielemann/kestrel/logger";
-import { err, ok } from "@michaelthielemann/kestrel/result";
-import type { Replication } from "./impl.ts";
-import replicationSqlite, { configSchema as replicationConfigSchema } from "./module.ts";
-import { fileBirthMs, freshnessOf } from "./restoreFreshness.ts";
+import { BLOBSTORE, type Blobstore } from "../packages/contracts/src/blobstore.ts";
+import { boundaryCast } from "../packages/core/src/cast.ts";
+import type { Contract } from "../packages/core/src/defineContract.ts";
+import type { Deps } from "../packages/core/src/defineModule.ts";
+import { failure } from "../packages/core/src/errors.ts";
+import { silentLogger } from "../packages/core/src/logger.ts";
+import { err, ok } from "../packages/core/src/result.ts";
+import backupBlobstore, { configSchema as backupConfigSchema } from "../packages/backup-blobstore/module.ts";
+import type { Backup } from "../packages/backup-blobstore/impl.ts";
+import replicationSqlite, { configSchema as replicationConfigSchema } from "../packages/replication-sqlite/module.ts";
+import type { Replication } from "../packages/replication-sqlite/impl.ts";
+import { fileBirthMs, freshnessOf } from "../packages/replication-sqlite/restoreFreshness.ts";
 
 function fakeBlobs(): Blobstore & { blobs: Map<string, Uint8Array>; calls: string[] } {
   const blobs = new Map<string, Uint8Array>();
@@ -90,13 +91,13 @@ describe("replication-sqlite and backup-blobstore configured on the same file", 
       const replicationConfig = replicationConfigSchema.parse({ file, prefix: "replica/" });
       const backupConfig = backupConfigSchema.parse({ file, key: "backups/db" });
 
-      const run = async (): Promise<unknown[]> => {
+      const run = async (): Promise<[Replication | Backup, Replication | Backup]> => {
         if (order === "replication-first") {
           const r = boundaryCast<Replication>(await replicationSqlite.setup(replicationConfig, deps(blobs, dir, bootStartedAt)), "host");
-          const b = await backupBlobstore.setup(backupConfig, deps(blobs, dir, bootStartedAt));
+          const b = boundaryCast<Backup>(await backupBlobstore.setup(backupConfig, deps(blobs, dir, bootStartedAt)), "host");
           return [r, b];
         }
-        const b = await backupBlobstore.setup(backupConfig, deps(blobs, dir, bootStartedAt));
+        const b = boundaryCast<Backup>(await backupBlobstore.setup(backupConfig, deps(blobs, dir, bootStartedAt)), "host");
         const r = boundaryCast<Replication>(await replicationSqlite.setup(replicationConfig, deps(blobs, dir, bootStartedAt)), "host");
         return [b, r];
       };
@@ -104,7 +105,7 @@ describe("replication-sqlite and backup-blobstore configured on the same file", 
       const [first] = await run();
       expect(existsSync(file)).toBe(true);
       expect(blobs.calls.filter((c) => c.startsWith("get:"))).toHaveLength(1);
-      boundaryCast<{ close?(): void }>(first, "host").close?.();
+      if ("close" in first) first.close();
     });
   }
 
