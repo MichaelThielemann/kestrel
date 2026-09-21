@@ -1,5 +1,7 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
+import type { AtomicOutcome, AtomicScopeInfo, AtomicVerdict } from "@michaelthielemann/kestrel/atomic";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { err, failure, ok, type Result } from "../errors.ts";
 import { fieldDefinition, type Document, type FieldDefinition, type FieldType, type Filter, type FindOptions, type NewDocument, type Page, type Persistence, type PersistenceError, type Schema } from "../persistence.ts";
@@ -119,11 +121,27 @@ export function matchesFilter(doc: Row, filter: Filter, schema?: Schema): boolea
 export interface FakePersistence extends Persistence {
   /** Makes the next contract call answer `Err(code)` without touching the store. */
   failNext(code: "TRANSIENT" | "CONFLICT"): void;
+  /** Runs `body` with rollback: on "rollback" or a rejection, every write `body` made is undone. */
+  scope(info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
+  /** Makes the next scope fail in that phase, so a caller can test the commit and rollback paths. */
+  failScope(phase: "begin" | "commit" | "rollback"): void;
+  /** How long a fake scope may hold the store; the fake's equivalent of `scopeTimeoutMs`. Default 5000. */
+  scopeTimeoutMs: number;
 }
 
 export function createFakePersistence(): FakePersistence {
   const collections = new Map<string, { schema: Record<string, FieldDefinition>; rows: Map<string, Row> }>();
   let pending: "TRANSIENT" | "CONFLICT" | null = null;
+  let pendingScopeFailure: "begin" | "commit" | "rollback" | null = null;
+  let scopeChain: Promise<void> = Promise.resolve();
+  const als = new AsyncLocalStorage<true>();
+  const inScope = () => als.getStore() === true;
+  const state = { scopeTimeoutMs: 5000 };
+  const snapshotCollections = () => new Map([...collections].map(([name, c]) => [name, { schema: c.schema, rows: new Map(c.rows) }]));
+  const restoreCollections = (snapshot: Map<string, { schema: Record<string, FieldDefinition>; rows: Map<string, Row> }>) => {
+    collections.clear();
+    for (const [name, c] of snapshot) collections.set(name, c);
+  };
   const clone = <T>(v: T): T => structuredClone(v);
   const cloneAs = <T>(row: Row): T => boundaryCast<T>(clone(row), "host");
   const injected = (): PersistenceError | null => {
@@ -182,13 +200,77 @@ export function createFakePersistence(): FakePersistence {
     return ok(cloneAs<T>(row));
   };
 
+  const scope = async (_info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
+    if (inScope()) {
+      return { kind: "failed", phase: "begin", error: failure("INTERNAL", "fakePersistence: an atomic scope is already open in this call chain") };
+    }
+    const waitForTurn = scopeChain;
+    let releaseTurn: () => void = () => {};
+    scopeChain = new Promise((resolve) => {
+      releaseTurn = resolve;
+    });
+    await waitForTurn;
+    try {
+      const failedPhase = pendingScopeFailure;
+      pendingScopeFailure = null;
+      if (failedPhase === "begin") return { kind: "failed", phase: "begin", error: failure("TRANSIENT", "fakePersistence: injected begin failure") };
+      const snapshot = snapshotCollections();
+      let timedOut = false;
+      const timer = new Promise<"rollback">((resolve) => {
+        const t = setTimeout(() => {
+          timedOut = true;
+          resolve("rollback");
+        }, state.scopeTimeoutMs);
+        t.unref?.();
+      });
+      let verdict: AtomicVerdict;
+      let thrown: unknown;
+      let didThrow = false;
+      try {
+        verdict = await Promise.race([als.run(true, body), timer]);
+      } catch (caught) {
+        didThrow = true;
+        thrown = caught;
+        verdict = "rollback";
+      }
+      if (timedOut) {
+        restoreCollections(snapshot);
+        return { kind: "failed", phase: "timeout", error: failure("TRANSIENT", "fakePersistence: atomic scope timed out") };
+      }
+      if (verdict === "rollback") {
+        restoreCollections(snapshot);
+        if (failedPhase === "rollback") return { kind: "failed", phase: "rollback", error: failure("INTERNAL", "fakePersistence: injected rollback failure") };
+        if (didThrow) throw thrown;
+        return { kind: "settled", verdict: "rollback" };
+      }
+      if (failedPhase === "commit") {
+        restoreCollections(snapshot);
+        return { kind: "failed", phase: "commit", error: failure("INTERNAL", "fakePersistence: injected commit failure") };
+      }
+      return { kind: "settled", verdict: "commit" };
+    } finally {
+      releaseTurn();
+    }
+  };
+
   return {
     failNext(code) {
       pending = code;
     },
+    failScope(phase) {
+      pendingScopeFailure = phase;
+    },
+    get scopeTimeoutMs() {
+      return state.scopeTimeoutMs;
+    },
+    set scopeTimeoutMs(ms: number) {
+      state.scopeTimeoutMs = ms;
+    },
+    scope,
     async ensureCollection(name, schema) {
       const injectedError = injected();
       if (injectedError) return err(injectedError);
+      if (inScope()) throw new Error("fakePersistence: ensureCollection must not run inside an atomic scope");
       if ("id" in schema) throw new Error(`fakePersistence: "id" is implicit and must not be declared in the schema of "${name}"`);
       const definitions = Object.fromEntries(Object.entries(schema).map(([field, raw]) => [field, clone(fieldDefinition(raw))]));
       const existing = collections.get(name);
