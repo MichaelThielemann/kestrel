@@ -631,7 +631,10 @@ With `events-direct`, `emit` is synchronous: the step calls the bus, the trigger
 for every listener pipeline, and the HTTP response only goes out afterward. A listener pipeline
 that ends with a failure status, or a programmatic `events.on` handler that throws, makes the
 `events.emit` step itself answer 500 `INTERNAL` with the failure as `cause`; long-running work
-belongs in a job the listener starts (like `images.sync`).
+belongs in a job the listener starts (like `images.sync`). The event trigger hook subscribes
+listener pipelines to the bus only once `start()` runs, so an event raised through `events@1`
+during another module's own `setup()` (for example `migrations.applied`) reaches a programmatic
+bus subscriber but runs no pipeline — the same as with the bus alone.
 
 With `events-queue` instead (same steps and envelope), `emit` writes one row per pipeline
 subscribed to the event directly to the `events_queue` collection of `persistence@1` and returns
