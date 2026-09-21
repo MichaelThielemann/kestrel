@@ -72,14 +72,13 @@ export default defineModule({
     event: (instance, entries, run) => {
       instance.setDelivery(entries, run);
       instance.startWorker();
-      return () => {
-        void instance.stopWorker();
-      };
+      return () => {};
     },
   },
 
-  teardown: (instance) => {
+  teardown: async (instance) => {
     for (const off of instance.offs) off();
+    await instance.stopWorker();
   },
 
   steps: (queue) => ({

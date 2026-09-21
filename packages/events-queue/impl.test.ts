@@ -98,6 +98,21 @@ describe("events/queue worker", () => {
     expect(goodRuns).toBe(1);
   });
 
+  it("a redelivered row carries the same eventId on every attempt", async () => {
+    const { queue, clock } = await make();
+    const seenIds: unknown[] = [];
+    const run: Runner = async (_pipeline, input) => {
+      seenIds.push(input.payload?.eventId);
+      return seenIds.length === 1 ? { runId: "r", status: 500, error: "fail", code: "INTERNAL", retryable: false } : OK;
+    };
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], run);
+    await queue.enqueue("x", { eventId: "fixed-id" });
+    await queue.tick();
+    clock.t += 10_000;
+    await queue.tick();
+    expect(seenIds).toEqual(["fixed-id", "fixed-id"]);
+  });
+
   it("retries with backoff and ends done after a pipeline fails twice", async () => {
     const { queue, clock, rows } = await make();
     let calls = 0;

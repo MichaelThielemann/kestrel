@@ -50,7 +50,7 @@ function eventDeliveryFixture(): EventDeliveryFixture {
     delivered.push(jsonCopy(input.payload));
     return { runId: "r", status: 200 };
   };
-  startEventTriggers(bus, [{ event: "x.happened", pipeline: "onX" }], run, silentLogger);
+  startEventTriggers(bus, [{ event: "x.happened", pipeline: "onX1" }, { event: "x.happened", pipeline: "onX2" }], run, silentLogger);
   return {
     steps: module.steps!(spyBus),
     describe: module.describe!(spyBus),

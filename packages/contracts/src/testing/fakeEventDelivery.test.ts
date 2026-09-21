@@ -19,7 +19,8 @@ function fakeDeliveryFixture(): EventDeliveryFixture {
       emit: (spec: string) => ({ summary: `Emit event "${spec}" to every subscribed handler pipeline`, reads: [], writes: [], errors: { 500: "a subscribed handler failed" } }),
     },
     async raise(event, data) {
-      delivered.push(withEventIdentity(event, data));
+      const identified = withEventIdentity(event, data);
+      delivered.push(identified, { ...identified });
     },
     async delivered() {
       return delivered.map((entry) => boundaryCast<EventData>(JSON.parse(JSON.stringify(entry)), "json"));

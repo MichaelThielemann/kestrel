@@ -131,27 +131,31 @@ export function eventDeliveryStepTests(make: () => Promise<EventDeliveryFixture>
       expect((await emitAndCapture(fixture, "x?with=other", fakeCtx({ result: { a: 1 } }))).result).toBeUndefined();
     });
 
-    it("delivers exactly once to a subscribed pipeline per emit", async () => {
+    it("delivers exactly once to each of the two pipelines subscribed to one event, per emit", async () => {
       const fixture = await make();
       await fixture.raise("x.happened", { a: 1 });
       const delivered = await fixture.delivered();
-      expect(delivered).toHaveLength(1);
+      expect(delivered).toHaveLength(2);
+      for (const entry of delivered) expect(entry.a).toBe(1);
     });
 
     it("every delivered event carries eventId, event and at; an emitter-supplied eventId is kept; no field is moved or dropped", async () => {
       const fixture = await make();
       await fixture.raise("x.happened", { a: 1 });
-      const [first] = await fixture.delivered();
-      expect(typeof first?.eventId).toBe("string");
-      expect(first?.event).toBe("x.happened");
-      expect(typeof first?.at).toBe("number");
-      expect(first?.a).toBe(1);
+      const [first, second] = await fixture.delivered();
+      for (const entry of [first, second]) {
+        expect(typeof entry?.eventId).toBe("string");
+        expect(entry?.event).toBe("x.happened");
+        expect(typeof entry?.at).toBe("number");
+        expect(entry?.a).toBe(1);
+      }
 
       const other = await make();
       await other.raise("x.happened", { eventId: "given", a: 1 });
-      const [second] = await other.delivered();
-      expect(second?.eventId).toBe("given");
-      expect(second?.a).toBe(1);
+      for (const entry of await other.delivered()) {
+        expect(entry.eventId).toBe("given");
+        expect(entry.a).toBe(1);
+      }
     });
   });
 }

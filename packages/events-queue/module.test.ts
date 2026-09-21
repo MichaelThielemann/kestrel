@@ -25,12 +25,15 @@ function jsonCopy(value: unknown): EventData {
 async function eventDeliveryFixture(): Promise<EventDeliveryFixture> {
   const db = createFakePersistence();
   const queue = await createEventsQueue({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5], lockTtlSeconds: 300, retentionDays: 7 }, { db, logger: silentLogger });
-  queue.setDelivery([{ event: "x.happened", pipeline: "onX" }], async () => ({ runId: "r", status: 200 }));
+  const deliveryEntries = [{ event: "x.happened", pipeline: "onX1" }, { event: "x.happened", pipeline: "onX2" }];
+  queue.setDelivery(deliveryEntries, async () => ({ runId: "r", status: 200 }));
+  const pipelineCountOf = (name: string) => deliveryEntries.filter((entry) => entry.event === name).length;
   const delivered: EventData[] = [];
   const spied: EventsQueue = {
     ...queue,
     async enqueue(name, data) {
-      delivered.push(jsonCopy(data));
+      const copies = Math.max(1, pipelineCountOf(name));
+      for (let i = 0; i < copies; i++) delivered.push(jsonCopy(data));
       await queue.enqueue(name, data);
     },
   };
@@ -71,6 +74,21 @@ async function setup(overrides: Record<string, unknown> = {}) {
 function run(steps: string[], input: Record<string, unknown>, instance: unknown): Promise<RunResult> {
   return runPipeline(definePipeline({ name: "test", steps }), input, { modules: [{ module, instance }] });
 }
+
+describe("events/queue module shape", () => {
+  it("does not provide events@1 and requires persistence@1 and events@1", () => {
+    expect(module.provides).toEqual([]);
+    expect(module.requires.map((c) => c.name).sort()).toEqual(["events@1", "persistence@1"]);
+  });
+
+  it("teardown stops the worker the hook started", async () => {
+    const { instance } = await setup();
+    module.triggers!.event!(instance, [{ event: "x", pipeline: "p1" }], async () => ({ runId: "r", status: 200 }), silentLogger);
+    expect(instance.workerRunning()).toBe(true);
+    await module.teardown!(instance);
+    expect(instance.workerRunning()).toBe(false);
+  });
+});
 
 describe("events/queue module steps via runPipeline", () => {
   it("parses an empty config with defaults and rejects unknown keys", () => {
