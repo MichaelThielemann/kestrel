@@ -9,7 +9,13 @@ the same Node process, checkpoints (`wal_checkpoint(TRUNCATE)`) run between two 
 and can never lose frames. Config: `file`, `prefix`, `checkpointBytes`/`checkpointSeconds`,
 `snapshotSeconds` (24 h), `retentionSeconds` (48 h; the newest generation is always kept),
 `restoreOnStart` (rebuild the file from the replica when missing). List this module **before**
-`persistence-sqlite`. Run `replication.sync` from a cron trigger (`* * * * *` → RPO ≤ 60 s).
+`persistence-sqlite`, and it also declares `before: [persistence@1]` so a misordered list produces
+a `module-order` boot warning instead of a silent empty start. If the file already exists and holds
+a restore point when `setup()` runs, and the file was created during this very start-up, `setup()`
+fails: that proves another module opened the database first. Delete the named file (and its `-wal`
+and `-shm` siblings) before the next start — a restart clears them on an ephemeral disk by itself,
+but not on a persistent volume, where they have to be removed by hand. Run `replication.sync` from
+a cron trigger (`* * * * *` → RPO ≤ 60 s).
 Every step returns a `Result`. A blobstore `Err` (`Err(TRANSIENT)`, 503, `retryable`) passes
 through unchanged; `replication.prepareRestore` for a point with no snapshot before it, or an
 unknown `generation`, is `Err(NOT_FOUND)`; an unparsable `at` in the payload is `Err(VALIDATION)`.

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -10,9 +10,9 @@ import { createContext } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { failure } from "@michaelthielemann/kestrel/errors";
-import { silentLogger } from "@michaelthielemann/kestrel/logger";
+import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
-import { applyPendingRestore, createReplicationSqlite, restoreFromBlobs, restoreMarker, type Replication } from "./impl.ts";
+import { applyPendingRestore, checkSkippedRestore, createReplicationSqlite, fileBirthMs, restoreFromBlobs, restoreMarker, type Replication } from "./impl.ts";
 import module from "./module.ts";
 
 function fakeBlobs(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }>; failNext(code: "TRANSIENT"): void } {
@@ -309,5 +309,117 @@ describe("replication/sqlite", () => {
     const error = expectErr(await prepareRestore(createContext({ trigger: { kind: "http", name: "t" }, payload: {} })), "NOT_FOUND");
     expect(error.message).toMatch(/no snapshot/);
     await module.teardown!(instance);
+  });
+});
+
+function putSnapshot(blobs: ReturnType<typeof fakeBlobs>): void {
+  blobs.blobs.set("replica/gen/20260101T000000Z/snapshot.db", { data: new Uint8Array([1]), contentType: "application/vnd.sqlite3" });
+}
+
+function skippedConfig(file: string) {
+  return { file, prefix: "replica/", checkpointBytes: 4 * 1024 * 1024, checkpointSeconds: 300, snapshotSeconds: 24 * 3600, retentionSeconds: 48 * 3600, restoreOnStart: true };
+}
+
+function infoLogger(): { infos: { message: string; data?: Record<string, unknown> }[]; logger: Logger } {
+  const infos: { message: string; data?: Record<string, unknown> }[] = [];
+  return { infos, logger: { ...silentLogger, info: (message, data) => infos.push(data === undefined ? { message } : { message, data }) } };
+}
+
+describe("replication/sqlite module setup: restore-on-start skip check", () => {
+  it("rejects when the file already holds tables and was created during this start-up, even though the table-count design would stay quiet", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-fresh-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    const app = new DatabaseSync(file);
+    app.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+    app.prepare("INSERT INTO t (v) VALUES ('x')").run();
+    app.close();
+    if (fileBirthMs(file) <= 0) return;
+    const blobs = fakeBlobs();
+    putSnapshot(blobs);
+    let thrown: unknown;
+    try {
+      await module.setup(module.configSchema.parse(skippedConfig(file)), moduleDeps(blobs, dir));
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const message = (thrown as Error).message;
+    expect(message).toContain(file);
+    expect(message).toMatch(/was created during this start-up while the replica holds a restore point/);
+    expect(message).toMatch(/list replication-sqlite before the persistence module/);
+    expect(message).toContain(`${file}-wal`);
+    expect(message).toContain(`${file}-shm`);
+  });
+});
+
+describe("checkSkippedRestore", () => {
+  it("rejects when the stubbed birth time is at or after the process origin", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    writeFileSync(file, "x");
+    const blobs = fakeBlobs();
+    putSnapshot(blobs);
+    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger, () => performance.timeOrigin + 1000)).rejects.toThrow(/was created during this start-up/);
+  });
+
+  it("logs and stays clean when the stubbed birth time is before the process origin", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    writeFileSync(file, "x");
+    const blobs = fakeBlobs();
+    putSnapshot(blobs);
+    const { infos, logger } = infoLogger();
+    await checkSkippedRestore(skippedConfig(file), blobs, logger, () => performance.timeOrigin - 1000);
+    expect(infos).toEqual([{ message: "replication/sqlite: restore-on-start skipped", data: { file, reason: "file present, older than this process" } }]);
+  });
+
+  it("falls back to the table count when the birth time is unavailable, and rejects an empty database", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    const app = new DatabaseSync(file);
+    app.close();
+    const blobs = fakeBlobs();
+    putSnapshot(blobs);
+    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger, () => 0)).rejects.toThrow(/birth time unavailable on this file system; judged by table count/);
+  });
+
+  it("falls back to the table count and stays clean when tables already exist", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    const app = new DatabaseSync(file);
+    app.exec("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    app.close();
+    const blobs = fakeBlobs();
+    putSnapshot(blobs);
+    const { infos, logger } = infoLogger();
+    await checkSkippedRestore(skippedConfig(file), blobs, logger, () => 0);
+    expect(infos).toEqual([{ message: "replication/sqlite: restore-on-start skipped", data: { file, reason: "file present, birth time unavailable on this file system; judged by table count" } }]);
+  });
+
+  it("stays quiet when no restore point exists, whatever the birth time", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    writeFileSync(file, "x");
+    const blobs = fakeBlobs();
+    const { infos, logger } = infoLogger();
+    await checkSkippedRestore(skippedConfig(file), blobs, logger, () => performance.timeOrigin + 1000);
+    expect(infos).toEqual([{ message: "replication/sqlite: restore-on-start skipped", data: { file, reason: "file present, no restore point" } }]);
+  });
+
+  it("uses the real fileBirthMs by default; nothing to assert where the file system reports none", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    writeFileSync(file, "x");
+    if (fileBirthMs(file) <= 0) return;
+    const blobs = fakeBlobs();
+    putSnapshot(blobs);
+    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger)).rejects.toThrow(/was created during this start-up/);
   });
 });

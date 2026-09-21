@@ -1,11 +1,12 @@
 import { existsSync } from "node:fs";
 import { z } from "zod";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { first, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { applyPendingRestore, createReplicationSqlite, restoreFromBlobs, type Replication } from "./impl.ts";
+import { applyPendingRestore, checkSkippedRestore, createReplicationSqlite, restoreFromBlobs, type Replication } from "./impl.ts";
 
 export const configSchema = z
   .object({
@@ -27,14 +28,19 @@ export default defineModule({
   name: "replication/sqlite",
   provides: [],
   requires: [BLOBSTORE],
+  before: [PERSISTENCE],
   configSchema,
 
   async setup(config, deps): Promise<ReplicationInstance> {
     const blobs = deps.get(BLOBSTORE);
     applyPendingRestore(config.file);
-    if (config.restoreOnStart && !existsSync(config.file)) {
-      const restored = await restoreFromBlobs(blobs, config.prefix, {}, config.file);
-      if (isErr(restored) && !restored.error.message.includes("no snapshot")) throw new Error(restored.error.message, { cause: restored.error });
+    if (config.restoreOnStart) {
+      if (!existsSync(config.file)) {
+        const restored = await restoreFromBlobs(blobs, config.prefix, {}, config.file);
+        if (isErr(restored) && !restored.error.message.includes("no snapshot")) throw new Error(restored.error.message, { cause: restored.error });
+      } else {
+        await checkSkippedRestore(config, blobs, deps.logger);
+      }
     }
     return { ...createReplicationSqlite(config, blobs), logger: deps.logger };
   },

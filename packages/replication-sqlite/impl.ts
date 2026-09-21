@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
+import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import { applySegment, FRAME_HEADER_SIZE, frameSize, parseFrameHeader, parseWalHeader, WAL_HEADER_SIZE, type WalHeader } from "./wal.ts";
 
@@ -97,6 +98,60 @@ async function listPoints(blobs: Blobstore, prefix: string): Promise<Result<Poin
     else out.push({ generation, at: unstamp(m[5] ?? ""), kind: "wal", key: info.key });
   }
   return ok(out.sort((a, b) => a.generation.localeCompare(b.generation) || (a.kind === "snapshot" ? -1 : b.kind === "snapshot" ? 1 : a.key.localeCompare(b.key))));
+}
+
+export async function hasRestorePoint(blobs: Blobstore, prefix: string): Promise<boolean> {
+  const points = await listPoints(blobs, prefix);
+  if (isErr(points)) throw new Error(points.error.message, { cause: points.error });
+  return points.value.some((p) => p.kind === "snapshot");
+}
+
+/** The file's birth time in epoch ms (`CLOCK_REALTIME`), or `0` when the file system does not report one. */
+export function fileBirthMs(file: string): number {
+  return statSync(file).birthtimeMs;
+}
+
+export type Freshness = "fresh" | "old" | "unknown";
+
+/** Compares a birth time against the process origin, both epoch ms. A birth time that is missing (`<= 0`) or later than now is `"unknown"`, never mistaken for fresh. */
+export function freshnessOf(birthMs: number, processStartMs: number = performance.timeOrigin): Freshness {
+  if (birthMs <= 0 || birthMs > Date.now()) return "unknown";
+  return birthMs >= processStartMs ? "fresh" : "old";
+}
+
+function tableCountIsZero(file: string): boolean {
+  const db = new DatabaseSync(file);
+  try {
+    const row = boundaryCast<{ n: number }>(db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get(), "host");
+    return row.n === 0;
+  } finally {
+    db.close();
+  }
+}
+
+function freshRestoreError(file: string, note?: string): string {
+  const clause = note ? ` (${note})` : "";
+  return `the database file ${file} was created during this start-up${clause} while the replica holds a restore point, so restore-on-start was about to be skipped over an intact replica. Another module opened the database before this one: list replication-sqlite before the persistence module in kestrel.config.modules. Delete ${file} (and ${file}-wal, ${file}-shm) before the next start — on an ephemeral disk the restart does that for you, on a persistent volume it does not. Set restoreOnStart: false to start from the local file instead.`;
+}
+
+/**
+ * Called from `setup()` when `restoreOnStart` is set and the file already exists, so the restore
+ * that would otherwise run is about to be skipped. Fails when the file was created during this
+ * start-up while a restore point exists in the blobstore; otherwise logs why the skip is safe.
+ */
+export async function checkSkippedRestore(config: Config, blobs: Blobstore, logger: Logger, readBirth: (file: string) => number = fileBirthMs): Promise<void> {
+  if (!(await hasRestorePoint(blobs, config.prefix))) {
+    logger.info("replication/sqlite: restore-on-start skipped", { file: config.file, reason: "file present, no restore point" });
+    return;
+  }
+  const freshness = freshnessOf(readBirth(config.file));
+  if (freshness === "fresh") throw new Error(freshRestoreError(config.file));
+  if (freshness === "old") {
+    logger.info("replication/sqlite: restore-on-start skipped", { file: config.file, reason: "file present, older than this process" });
+    return;
+  }
+  if (tableCountIsZero(config.file)) throw new Error(freshRestoreError(config.file, "birth time unavailable on this file system; judged by table count"));
+  logger.info("replication/sqlite: restore-on-start skipped", { file: config.file, reason: "file present, birth time unavailable on this file system; judged by table count" });
 }
 
 export function createReplicationSqlite(config: Config, blobs: Blobstore, now: () => number = Date.now): Replication {

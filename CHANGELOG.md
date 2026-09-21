@@ -4,6 +4,12 @@
 
 ### Added
 
+- `replication-sqlite`: `setup()` now fails when `restoreOnStart` is set, the database file already
+  exists, a restore point exists in the blobstore, and the file was created during this start-up —
+  the shape of a misordered module list that would otherwise start from an empty database. The
+  error names the file and its `-wal`/`-shm` siblings and says to delete them before the next
+  start. A skip that is safe is now always logged with its reason. The module also declares
+  `before: [persistence@1]` (see the `defineModule` entry below).
 - `defineModule`: a module may declare `before: readonly Contract<unknown>[]`, naming contracts it
   must be set up before the provider of. On this release the declaration is only checked: a module
   that ends up after the provider of a contract it named in `before` produces a new `BootWarning`
