@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { authnStepsContractTests } from "@michaelthielemann/kestrel-contracts/authn.steps.contract.test";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
@@ -7,6 +8,8 @@ import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { hashPassword } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
+
+authnStepsContractTests(async () => ({ modules: [{ module, instance: await boot() }], credentials: { username: "admin", password: "secret" } }));
 
 const deps: Deps = {
   get<T>(contract: Contract<T>): T {

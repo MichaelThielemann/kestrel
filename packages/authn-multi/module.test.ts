@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { authnStepsContractTests } from "@michaelthielemann/kestrel-contracts/authn.steps.contract.test";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -9,6 +10,13 @@ import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import type { AuthnMulti } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
+
+authnStepsContractTests(async () => {
+  const { instance } = await boot();
+  const credentials = { username: "alice", password: "long-enough" };
+  await runPipeline(definePipeline({ name: "createUser", steps: ["authn.createUser"] }), { body: credentials }, { modules: [{ module, instance }] });
+  return { modules: [{ module, instance }], credentials };
+});
 
 function makeDeps(db: ReturnType<typeof createFakePersistence>): Deps {
   const providers = new Map<string, unknown>([[PERSISTENCE.name, db]]);
