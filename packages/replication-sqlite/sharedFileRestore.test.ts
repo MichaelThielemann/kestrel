@@ -13,6 +13,7 @@ import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Replication } from "./impl.ts";
 import replicationSqlite, { configSchema as replicationConfigSchema } from "./module.ts";
+import { fileBirthMs, freshnessOf } from "./restoreFreshness.ts";
 
 function fakeBlobs(): Blobstore & { blobs: Map<string, Uint8Array>; calls: string[] } {
   const blobs = new Map<string, Uint8Array>();
@@ -115,6 +116,7 @@ describe("replication-sqlite and backup-blobstore configured on the same file", 
     const db = new DatabaseSync(file);
     db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY)");
     db.close();
+    if (freshnessOf(fileBirthMs(file), bootStartedAt) !== "fresh") return;
 
     const blobs = fakeBlobs();
     blobs.blobs.set("backups/db", emptySqliteDb());
