@@ -258,16 +258,22 @@ describe("events/queue in a booted instance", () => {
     };
     const kestrel = await boot(bootConfig);
     expect(expectOk(await db.count("events_queue", { name: "migrations.applied" }))).toBe(1);
-    await kestrel.stop();
 
+    const liveBus = kestrel.contracts.get(EVENTS);
     db.failNext("TRANSIENT");
     let caught: unknown;
     try {
-      await boot(bootConfig);
+      await liveBus.emit("migrations.applied", { migrations: ["2"] });
     } catch (error) {
       caught = error;
     }
-    expect(caught).toBeInstanceOf(Error);
-    if (caught instanceof Error) expect(caught.message).toMatch(/setup\(\) threw/);
+    expect(caught).toBeInstanceOf(AggregateError);
+    if (caught instanceof AggregateError) {
+      expect(caught.errors).toHaveLength(1);
+      expect(String(caught.errors[0])).toMatch(/events\/queue: cannot persist event/);
+    }
+    expect(expectOk(await db.count("events_queue", { name: "migrations.applied" }))).toBe(1);
+
+    await kestrel.stop();
   });
 });
