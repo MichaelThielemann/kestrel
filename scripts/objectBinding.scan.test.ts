@@ -38,7 +38,7 @@ export function upstreamViolations(candidates: readonly ObjectBindingCandidate[]
 describe("object binding candidate scan", () => {
   it("scans the expected number of module files and steps", () => {
     expect(scan.moduleFileCount).toBe(26);
-    expect(scan.stepCount).toBe(128);
+    expect(scan.stepCount).toBe(129);
   });
 
   it("finds the expected number of candidates", () => {
