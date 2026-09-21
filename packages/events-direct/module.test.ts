@@ -139,4 +139,41 @@ describe("events/direct event trigger hook", () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatchObject({ message: 'event "page.created" pipeline "invalidateCache" ended with 503', meta: { runId: "r2", error: "boom", code: "TRANSIENT", retryable: true } });
   });
+
+  it("isolates a throwing pipeline from the other pipeline subscribed to the same event", async () => {
+    const errors: unknown[] = [];
+    const logger: Logger = { step() {}, info() {}, error(message, meta) { errors.push({ message, meta }); } };
+    const events = createEventsInmemory();
+    const ran: string[] = [];
+    const run: Runner = async (pipeline) => {
+      ran.push(pipeline);
+      if (pipeline === "first") throw new Error("boom");
+      return ok;
+    };
+
+    const stop = startEventTriggers(events, [{ event: "page.created", pipeline: "first" }, { event: "page.created", pipeline: "second" }], run, logger);
+    await expect(events.emit("page.created", {})).rejects.toThrow();
+    stop();
+
+    expect(ran).toEqual(["first", "second"]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ message: 'event "page.created" pipeline "first" threw' });
+  });
+
+  it("runs the pipelines subscribed to one event one at a time, in registration order", async () => {
+    const events = createEventsInmemory();
+    const order: string[] = [];
+    const run: Runner = async (pipeline) => {
+      order.push(`${pipeline}:start`);
+      if (pipeline === "first") await new Promise((resolve) => setTimeout(resolve, 5));
+      order.push(`${pipeline}:end`);
+      return ok;
+    };
+
+    const stop = startEventTriggers(events, [{ event: "page.created", pipeline: "first" }, { event: "page.created", pipeline: "second" }], run, noLogger);
+    await events.emit("page.created", {});
+    stop();
+
+    expect(order).toEqual(["first:start", "first:end", "second:start", "second:end"]);
+  });
 });

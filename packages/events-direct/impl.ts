@@ -23,10 +23,17 @@ export function startEventTriggers(events: Events, entries: readonly EventEntry[
       const payload = withEventIdentity(name, data);
       const input: ContextInput = { trigger: { kind: "event", name }, payload };
       if (typeof payload.runId === "string") input.parentRunId = payload.runId;
+      const thrown: unknown[] = [];
       for (const pipeline of pipelines) {
-        const res = await run(pipeline, input);
-        if (res.status >= 400) logger.error(`event "${name}" pipeline "${pipeline}" ended with ${res.status}`, { runId: res.runId, parentRunId: input.parentRunId ?? null, error: res.error, code: res.code, retryable: res.retryable });
+        try {
+          const res = await run(pipeline, input);
+          if (res.status >= 400) logger.error(`event "${name}" pipeline "${pipeline}" ended with ${res.status}`, { runId: res.runId, parentRunId: input.parentRunId ?? null, error: res.error, code: res.code, retryable: res.retryable });
+        } catch (error) {
+          logger.error(`event "${name}" pipeline "${pipeline}" threw`, { error });
+          thrown.push(error);
+        }
       }
+      if (thrown.length > 0) throw thrown.length === 1 ? thrown[0] : new AggregateError(thrown, `events/direct: ${thrown.length} pipeline(s) threw for "${name}"`);
     }),
   );
   return () => {
