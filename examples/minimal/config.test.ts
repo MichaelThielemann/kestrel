@@ -400,9 +400,9 @@ describe("user deletion wiring", () => {
 
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, p.steps]));
     expect(pipelines.get("deleteUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authn.deleteUser", "events.emit:user.deleted?with=result"]);
-    expect(pipelines.get("reassignRevisionAuthor")).toEqual(["revisions.reassignAuthor"]);
+    expect(pipelines.get("reassignRevisionAuthor")).toEqual(["authn.verifyUser", "revisions.reassignAuthor"]);
     expect(pipelines.get("anonymizeAuditUser")).toEqual(["audit.anonymize"]);
-    expect(pipelines.get("retryReassignRevisionAuthor")).toEqual(["authn.requireUser", "authz.require:users.manage", "revisions.reassignAuthor"]);
+    expect(pipelines.get("retryReassignRevisionAuthor")).toEqual(["authn.requireUser", "authz.require:users.manage", "authn.verifyUser", "revisions.reassignAuthor"]);
     expect(pipelines.get("retryAnonymizeAuditUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "audit.anonymize"]);
     expect(pipelines.get("pruneAudit")).toEqual(["audit.prune"]);
   });
@@ -452,6 +452,66 @@ describe("user deletion wiring", () => {
       expect(retry.status).toBe(200);
       expect(retry.result).toEqual({ entries: 0 });
       expect(await failedPipelines(kestrel, admin)).toEqual(["deleteUser"]);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("retryReassignRevisionAuthor rejects an unknown or inactive target and leaves revisions unchanged", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const editor = await createEditor(kestrel, admin, "erin");
+      const editorSession = await login(kestrel, "erin", "long-enough");
+      const pageId = await createPage(kestrel, editorSession, "erin-page");
+      const inactive = await createEditor(kestrel, admin, "fay");
+      await kestrel.run("deactivateUser", { trigger, headers: bearer(admin.token), params: { id: inactive.id } });
+
+      const unknown = await kestrel.run("retryReassignRevisionAuthor", {
+        trigger,
+        headers: bearer(admin.token),
+        params: { id: editor.id },
+        payload: { reassignTo: { id: "nobody", name: "ghost" } },
+        body: { reassignTo: { id: "nobody", name: "ghost" } },
+      });
+      expect(unknown.status).toBe(404);
+
+      const deactivated = await kestrel.run("retryReassignRevisionAuthor", {
+        trigger,
+        headers: bearer(admin.token),
+        params: { id: editor.id },
+        payload: { reassignTo: { id: inactive.id, name: "fay" } },
+        body: { reassignTo: { id: inactive.id, name: "fay" } },
+      });
+      expect(deactivated.status).toBe(400);
+
+      const revisions = await revisionsOf(kestrel, admin, pageId);
+      expect(revisions.items[0]?.author).toEqual({ id: editor.id, name: "erin" });
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("retryReassignRevisionAuthor writes the canonical name even when the payload names a different one", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const editor = await createEditor(kestrel, admin, "gus");
+      const editorSession = await login(kestrel, "gus", "long-enough");
+      const pageId = await createPage(kestrel, editorSession, "gus-page");
+      const target = await createEditor(kestrel, admin, "hana");
+
+      const reassigned = await kestrel.run("retryReassignRevisionAuthor", {
+        trigger,
+        headers: bearer(admin.token),
+        params: { id: editor.id },
+        payload: { reassignTo: { id: target.id, name: "someone-else" } },
+        body: { reassignTo: { id: target.id, name: "someone-else" } },
+      });
+      expect(reassigned.status).toBe(200);
+
+      const revisions = await revisionsOf(kestrel, admin, pageId);
+      expect(revisions.items[0]?.author).toEqual({ id: target.id, name: "hana" });
     } finally {
       await dispose();
     }

@@ -2,10 +2,21 @@ import { z } from "zod";
 import { AUTHN } from "@michaelthielemann/kestrel-contracts/authn";
 import { AUTHZ } from "@michaelthielemann/kestrel-contracts/authz";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
+import "@michaelthielemann/kestrel-contracts/reassignTarget";
 import type { Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { createAuthnMulti, tokenFromHeaders, type AuthnMulti } from "./impl.ts";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function reassignRaw(ctx: Context): unknown {
+  if (ctx.payload.reassignTo !== undefined) return ctx.payload.reassignTo;
+  const result = ctx.payload.result;
+  return isRecord(result) ? result.reassignTo : null;
+}
 
 export const configSchema = z
   .object({
@@ -69,6 +80,17 @@ export default defineModule({
       return ok({ ...ctx, result: { ok: true } });
     },
 
+    verifyUser: async (ctx: Context) => {
+      const raw = reassignRaw(ctx);
+      if (raw === null || raw === undefined) return ok({ ...ctx, reassignTarget: null });
+      const id = typeof raw === "string" ? raw : isRecord(raw) && typeof raw.id === "string" ? raw.id : undefined;
+      if (id === undefined) return ctx.fail("VALIDATION", "authn.verifyUser: reassignTo must be a user id, { id, name } or null");
+      const user = await authn.getUser(id);
+      if (isErr(user)) return ctx.fail(user.error);
+      if (!user.value) return ctx.fail("NOT_FOUND", `user ${id} not found`);
+      if (!user.value.active) return ctx.fail("VALIDATION", "authn.verifyUser: reassignTo must be an active user");
+      return ok({ ...ctx, reassignTarget: { id: user.value.id, name: user.value.username } });
+    },
     createUser: async (ctx: Context) => {
       const username = str(ctx.payload.username);
       const password = str(ctx.payload.password);
@@ -179,6 +201,20 @@ export default defineModule({
       errors: { 401: "not authenticated" },
     },
     logout: { summary: "End the current session", reads: ["token"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 401: "not authenticated" } },
+    verifyUser: {
+      summary: "Look up `payload.reassignTo` (or the `reassignTo` an `authn.deleteUser` event hands over as `payload.result.reassignTo`) and write its canonical `{ id, name }` to `reassignTarget`; absent or `null` writes `null`",
+      reads: ["payload.reassignTo", "payload.result"],
+      writes: ["reassignTarget"],
+      input: {
+        type: "object",
+        properties: {
+          reassignTo: { type: ["string", "object", "null"], properties: { id: { type: "string" }, name: { type: "string" } }, required: ["id", "name"] },
+          result: { type: "object", properties: { reassignTo: { type: ["object", "null"], properties: { id: { type: "string" }, name: { type: "string" } }, required: ["id", "name"] } } },
+        },
+        additionalProperties: true,
+      },
+      errors: { 400: "reassignTo is neither a user id, { id, name } nor null, or names an inactive user", 404: "user not found" },
+    },
     createUser: {
       summary: "Create a user",
       reads: [],

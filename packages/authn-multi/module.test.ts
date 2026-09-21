@@ -64,6 +64,7 @@ const setPasswordPipeline = definePipeline({ name: "setPassword", steps: ["authn
 const changePasswordPipeline = definePipeline({ name: "changePassword", steps: ["authn.requireUser", "authn.changePassword"] });
 const updateUserPipeline = definePipeline({ name: "updateUser", steps: ["authn.updateUser"] });
 const deleteUserPipeline = definePipeline({ name: "deleteUser", steps: ["authn.requireUser", "authn.deleteUser"] });
+const verifyUserPipeline = definePipeline({ name: "verifyUser", steps: ["authn.verifyUser"] });
 const deleteUserAsAdminPipeline = definePipeline({ name: "deleteUserAsAdmin", steps: ["authn.deleteUser"] });
 const deactivateUserPipeline = definePipeline({ name: "deactivateUser", steps: ["authn.deactivateUser"] });
 const activateUserPipeline = definePipeline({ name: "activateUser", steps: ["authn.activateUser"] });
@@ -206,6 +207,43 @@ describe("authn/multi module steps via runPipeline", () => {
 
     expect((await runPipeline(getUserPipeline, { params: { id: carolId } }, { modules: [{ module, instance }] })).status).toBe(200);
     provesObjectBinding("authn/multi", "deleteUser");
+  });
+
+  it("verifyUser writes the canonical name even when the payload names a different one, and null without a target", async () => {
+    const { instance } = await boot();
+    const created = await runPipeline(createUserPipeline, { body: { username: "carol", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const id = boundaryCast<{ id: string }>(created.result, "json").id;
+
+    const named = await runPipeline(verifyUserPipeline, { body: { reassignTo: { id, name: "someone-else" } } }, { modules: [{ module, instance }] });
+    expect(named.status).toBe(200);
+
+    const noTarget = await runPipeline(verifyUserPipeline, { body: {} }, { modules: [{ module, instance }] });
+    expect(noTarget.status).toBe(200);
+  });
+
+  it("verifyUser rejects an unknown or inactive target, and a malformed reassignTo", async () => {
+    const { instance } = await boot();
+    const created = await runPipeline(createUserPipeline, { body: { username: "carol", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const id = boundaryCast<{ id: string }>(created.result, "json").id;
+    await runPipeline(deactivateUserPipeline, { params: { id } }, { modules: [{ module, instance }] });
+
+    const unknown = await runPipeline(verifyUserPipeline, { body: { reassignTo: "nobody" } }, { modules: [{ module, instance }] });
+    expect(unknown).toMatchObject({ status: 404, code: "NOT_FOUND" });
+
+    const inactive = await runPipeline(verifyUserPipeline, { body: { reassignTo: id } }, { modules: [{ module, instance }] });
+    expect(inactive).toMatchObject({ status: 400, code: "VALIDATION" });
+
+    const malformed = await runPipeline(verifyUserPipeline, { body: { reassignTo: 7 } }, { modules: [{ module, instance }] });
+    expect(malformed).toMatchObject({ status: 400, code: "VALIDATION" });
+  });
+
+  it("verifyUser reads the reassignTo an authn.deleteUser event hands over as payload.result.reassignTo", async () => {
+    const { instance } = await boot();
+    const created = await runPipeline(createUserPipeline, { body: { username: "carol", password: "long-enough" } }, { modules: [{ module, instance }] });
+    const id = boundaryCast<{ id: string }>(created.result, "json").id;
+
+    const handedOver = await runPipeline(verifyUserPipeline, { body: { result: { ok: true, reassignTo: { id, name: "carol" } } } }, { modules: [{ module, instance }] });
+    expect(handedOver.status).toBe(200);
   });
 
   it("login answers 400 VALIDATION when a field has the wrong type", async () => {
