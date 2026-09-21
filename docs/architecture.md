@@ -113,7 +113,9 @@ In both cases: only pipelines with a trigger are reachable from outside.
 5. Load pipelines, resolve every step string against the step registry, then check each
    pipeline's data flow (`checkDataflow`): every `reads` path of a step must be covered by the
    `writes` of an earlier step or by the context's baseline (`payload`, `headers`, `files`, `ip`,
-   `params.<p>` bound by any HTTP route of the pipeline), otherwise boot aborts.
+   `params.<p>` bound by any HTTP route of the pipeline), otherwise boot aborts. Boot also
+   rejects a pipeline whose atomic group has no scope provider (or more than one), and a step
+   inside a group whose `describe()` does not declare `atomicSafe` (see `pipelines.md`).
 6. Check and register triggers (HTTP server, event bus, cron). Event triggers need a module with
    `triggers.event` — the core ships none and therefore knows no contract name for it. An event
    trigger whose event no pipeline emits (`events.emit:<name>`) and no module declares in

@@ -4,6 +4,36 @@
 
 ### Breaking
 
+- The pipeline grammar gains an atomic group: `steps` accepts `{ atomic: [...] }` next to a plain
+  step name, and the runner wraps such a group in one all-or-nothing scope it obtains from a
+  module hook. `PipelineDefinition["steps"]` is now `readonly PipelineEntry[]`, not
+  `readonly string[]`; code that reads, filters or maps a pipeline's steps as plain strings must
+  flatten first with the exported `pipelineSteps()`. `ResolvedStep` and `PipelineStepManifest`
+  gain an optional `atomic` ordinal; `ModuleManifest` gains a required `atomicScope` boolean, so a
+  hand-built manifest must add it.
+  - `ModuleDefinition` (and `ModuleInput`) gain an optional `atomicScope(instance, info, body)`
+    hook, published as `AtomicScope` from the new `@michaelthielemann/kestrel/atomic` export path.
+    At most one loaded module may declare it; a pipeline with a group and no provider, or two
+    providers, fails to boot naming the pipeline or the two modules.
+  - `StepDescription` gains an optional `atomicSafe` boolean, default `false`. A step inside a
+    group whose `describe()` does not declare `atomicSafe: true` fails boot, naming the pipeline
+    and the step.
+  - `persistence/sqlite` implements the scope: one `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK` per
+    group, serialized by a FIFO mutex so a concurrent read never observes an uncommitted row.
+    `createMany` now uses `BEGIN IMMEDIATE` and joins an outer scope instead of opening its own.
+    Two new config keys, `acquireTimeoutMs` and `scopeTimeoutMs` (default 5000 each), are rejected
+    at setup unless `acquireTimeoutMs` exceeds `busyTimeoutMs`, so an instance that sets neither
+    fails to boot naming the key. A persistence call made after its own atomic scope rolled back
+    or timed out **throws** instead of writing (only reachable from work a step did not await); a
+    call made after the scope committed writes normally, with a warning logged.
+  - Every DB-only, single-document, request-bounded step of `content-default`, `revisions-default`,
+    `references-default`, `links-default`, `events-queue`, `delivery-static` (`readStatus` only)
+    and `authn-multi` (`verifyUser`, `deleteUser`) now declares `atomicSafe: true`; every other
+    shipped step keeps the default `false`.
+  - `fakePersistence` (the contracts package's testing fake) gains the same `scope`/`failScope`/
+    `scopeTimeoutMs` surface, so a module test can exercise a grouped pipeline without SQLite. The
+    core's `testing/runPipeline.ts` test helper gains a typed `atomicScope` option with no default.
+  - `insights.readManifest`'s output schema follows the two new manifest fields.
 - Event delivery is a separate module from the `events@1` bus. `events-inmemory` now provides
   `events@1` and nothing else — no `events.emit` step, no event trigger hook. Configure exactly one
   delivery module next to it: `events-direct` (new, inline — subscribes event-trigger pipelines to

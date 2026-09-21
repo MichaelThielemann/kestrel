@@ -80,6 +80,47 @@ step registry at boot. An unknown step aborts boot. A step may appear more than 
 `validate.check` comes before `validate.sanitize` (sanitizing needs a schema-conformant
 structure) and once more after it, so the stored body is guaranteed schema-conformant.
 
+### Atomic Groups
+
+An entry of `steps` may also be `{ atomic: [...] }`, a run of steps the runner executes inside
+one all-or-nothing scope: either every write inside it commits, or none does.
+
+```ts
+steps: [
+  "authn.requireUser",
+  "authz.require:pages.write",
+  { atomic: ["references.check:pages", "content.create:pages", "references.index:pages", "links.extract:pages"] },
+  "delivery.publish:pages",
+  "events.emit:page.created",
+],
+```
+
+Rules:
+
+- A group must not be empty and must not nest another group; `definePipeline` rejects both at
+  the point the pipeline arrives (JSON or code).
+- A pipeline may have several groups; each is a separate transaction, run in list order.
+- Every step inside a group must declare `atomicSafe: true` in its `describe()` (default
+  `false`). It means: the step reaches nothing but `persistence@1`, issues those calls from its
+  own async flow (not a queue, timer or worker pool of its own), starts no work it does not
+  await, never runs another pipeline, and its work is bounded by the request rather than by the
+  size of a collection. Boot rejects a step inside a group that does not declare it, naming the
+  pipeline and the step.
+- A group needs a module that provides the scope (the `atomicScope` hook on `ModuleDefinition`,
+  next to `attach` and `triggers.event`) — in practice the module providing `persistence@1`. Boot
+  rejects a grouped pipeline with no such module, and rejects two modules that both provide one.
+- `ctx.done()` inside a group **commits**: the work up to that point is intentional, and treating
+  an early, successful exit as a rollback would make `done()` mean two different things depending
+  on where it is called.
+- An `Err` or a `throw` inside a group rolls the group back and reports the same outcome the
+  client would see outside a group — same status, code, retryable and step. The database is
+  simply unchanged in addition.
+- A contended or timed-out group answers 503 `TRANSIENT`, which is retryable; the runner never
+  retries a group itself, because steps before it (validation, sanitizing) already ran and would
+  re-run against a context they already mutated.
+- Nothing inside a group can tell it is inside one: no step function, no logging line, no
+  observer event and no validation rule changes because of grouping.
+
 ### Step Arguments
 
 `name:arg` passes a fixed argument. `authz.require:pages.write` calls the step
@@ -351,6 +392,25 @@ event — the thrown text and the stack stay in the log.
 unknown contract type, a step running without a precondition the boot dataflow check was
 supposed to guarantee, a step returning something other than a `Result<Context>`. Both
 become status 500 with code `INTERNAL`.
+
+## Errors and Side Effects
+
+An atomic group (see [Atomic Groups](#atomic-groups)) changes what "the request failed" means
+for the steps inside it, and is deliberately narrow about what it does not cover:
+
+- It guarantees one database: `persistence@1`'s writes inside the group either all commit or
+  all roll back. It says nothing about a second system — a blob store, a rendered static
+  artefact, an outbound webhook, another process. `delivery.*` steps are never atomic-safe for
+  exactly this reason: a render plus blob I/O under the process's only write lock is the failure
+  the design exists to prevent, not a case it should also cover. A failed publish after a
+  committed write leaves the database consistent and the published artefact stale; the existing
+  repair path (`delivery.publishAll` / a status read) fixes that independently.
+- No step inside a group can call the runner again (start a nested pipeline run). On
+  `persistence/sqlite` a nested run's writes would join the same transaction through the ambient
+  store, which is almost never intended and is why the rule is enforced structurally: no step
+  that may call the runner is `atomicSafe`, so boot rejects it in a group.
+- A group is not retried. A contended or timed-out group answers 503 `TRANSIENT`; retrying is
+  the client's decision, not the runner's, because steps before the group already ran.
 
 ## Step Catalogue
 
