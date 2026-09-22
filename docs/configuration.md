@@ -100,6 +100,13 @@ event and cron triggers still run.
 address nor a CIDR range aborts the boot. `image/svg+xml` in `inlineTypes` requires a module that
 registers the step `sanitize.svg`, otherwise the boot aborts.
 
+`healthPath` answers unconditionally: it is a liveness check for the HTTP server, not a readiness
+check for the modules behind it. A host that needs the latter reads `kestrel.health()` itself
+(see [`architecture.md`](architecture.md) § Module hooks and `kestrel.health()`) — for example
+from a custom pipeline step, or from code that holds the booted `Kestrel` instance directly — and
+answers its own probe route from that: `ok: false` for readiness, `restartRequired: true` for
+liveness.
+
 Request and response behaviour — headers, the `http` log line, client-address resolution, binary
 results — is described in [`pipelines.md`](pipelines.md) § HTTP Operation.
 

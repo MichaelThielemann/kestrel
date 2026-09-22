@@ -76,6 +76,11 @@ answers `Err(TRANSIENT)` to every subsequent call, naming the reason and that th
 restart; the connection's state can no longer be proven, and continuing to serve writes from it
 would turn one incident into silent corruption.
 
+That unusable state is also readable without provoking a call: the module declares `health()`,
+synchronous and with no I/O, so a host's readiness probe learns it needs to stop routing traffic
+here, and a liveness probe learns the process needs a restart, before the next request would have
+hit `TRANSIENT` anyway. See `kestrel.health()` in the core's `architecture.md`.
+
 Not included: migrations beyond adding columns, savepoints or nested groups, full-text search.
 
 <!-- kestrel-docs:start -->

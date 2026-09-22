@@ -120,12 +120,35 @@ In both cases: only pipelines with a trigger are reachable from outside.
    `triggers.event` — the core ships none and therefore knows no contract name for it. An event
    trigger whose event no pipeline emits (`events.emit:<name>`) and no module declares in
    `emits` is logged as a warning, not a boot error.
-7. Call every module's `attach(instance, { describe, observe })` with the read-only view of the
-   booted instance: `describe()` is the static manifest (`kestrel.describe()`), `observe()`
-   registers a run observer that sees every run and step start and end (`kestrel.observe()`);
-   a returned function runs on `stop()`. `insights/default` is the module that uses it.
+7. Call every module's `attach(instance, { describe, observe, health })` with the read-only view of
+   the booted instance: `describe()` is the static manifest (`kestrel.describe()`), `observe()`
+   registers a run observer that sees every run and step start and end (`kestrel.observe()`),
+   `health()` is the aggregate instance health (`kestrel.health()`, see below); a returned function
+   runs on `stop()`. `insights/default` is the module that uses `describe`/`observe`.
 
 If any step fails: abort with `KestrelBootError { module, reason }`.
+
+## Module hooks and `kestrel.health()`
+
+A module registers with `defineModule`, which accepts a fixed set of lifecycle hooks next to
+`setup`: `steps`/`describe` for pipeline steps, `triggers.event` for the event bus,
+`atomicScope` for the transaction boundary, `attach`/`teardown` around the instance's lifetime,
+and `health` for its own state.
+
+`health(instance)` is synchronous and does no I/O: it reads state the module already tracks (a
+flag, a counter), never the result of a call it would have to make. It returns a `ModuleHealth`:
+`{ ok: true, note? }` when the module can serve, or `{ ok: false, reason, restartRequired }` when
+it cannot. A module never reports transient contention (a busy lock, a retryable timeout) through
+this hook — that is what the pipeline's own error path is for; `health()` reports a standing
+condition, not the outcome of one attempt.
+
+`kestrel.health()` aggregates every module that declares the hook into one `InstanceHealth`:
+`{ ok, restartRequired, modules }`, where `modules` lists `{ module, ...ModuleHealth }` for each
+declaring module; a module without the hook is left out. `ok` is false if any listed module is
+not ok; `restartRequired` is true if any listed module reports it. A readiness probe reads `ok` —
+false means route no traffic here — and this never depends on lock contention, since no module
+hook may report the outcome of a call. A liveness probe reads `restartRequired` — true means the
+process cannot recover on its own and needs a restart, not a retry.
 
 ## Errors loud and cheap – four levels
 

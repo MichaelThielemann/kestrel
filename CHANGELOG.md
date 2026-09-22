@@ -83,6 +83,9 @@
   (`pending` and `running` at zero, visible through `events.readQueueStatus`): a fanned-out row is
   one row per pipeline where the previous major expects one row per event, and its worker would
   otherwise run every registered handler for each row it claims.
+- `core`: `Introspection` (the read-only view a module's `attach(instance, kestrel)` receives)
+  gains a required `health()` method next to `describe()` and `observe()`. A hand-built
+  `Introspection` value, such as a test double, must add it.
 
 ### Added
 
@@ -206,6 +209,14 @@
   declare `output: { type: "object" }`; `redirects.lookup` declares its real
   `{ redirect: { to, status } }`; `site.resolveLinks` restates the `_links` field as its own
   `extendsOutput`, alongside `site.resolve`'s existing `output`.
+- `core`: a module can declare a synchronous `health(instance)` hook, with no I/O, that reads its
+  own state instead of the outcome of a call: `{ ok: true, note? }` or
+  `{ ok: false, reason, restartRequired }`. `kestrel.health()` aggregates every declaring module
+  into `{ ok, restartRequired, modules }`, reachable on the booted `Kestrel` and through
+  `Introspection` in `attach()`. `persistence-sqlite` reports the store unusable, with
+  `restartRequired: true`, once a rollback has failed; contention is never reported.
+  `replication-sqlite` reports a prepared restore as `{ ok: true, note }`, since the instance
+  keeps serving until a host restarts it to apply the restore.
 
 ### Changed
 
