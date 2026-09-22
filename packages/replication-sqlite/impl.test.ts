@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -126,6 +126,35 @@ describe("replication/sqlite", () => {
 
     clock.advance(30_000);
     expect(expectOk(await repl.sync()).frames).toBe(0);
+  });
+
+  it("restores a snapshot of a fragmented database with later frames layered on top", async () => {
+    const { app, repl, count, restoredCount, clock } = setup();
+    const wide = app.prepare("INSERT INTO t (v) VALUES (?)");
+    for (let i = 0; i < 500; i++) wide.run("x".repeat(300) + i);
+    app.exec("DELETE FROM t WHERE id % 3 <> 0; PRAGMA wal_checkpoint(TRUNCATE)");
+    expectOk(await repl.sync());
+    const snapshotOnly = await restoredCount({});
+    expect(snapshotOnly).toMatchObject({ n: count(), ok: "ok" });
+
+    clock.advance(30_000);
+    for (let i = 0; i < 40; i++) wide.run("z".repeat(300) + i);
+    expect(expectOk(await repl.sync()).frames).toBeGreaterThan(0);
+    expect(await restoredCount({})).toMatchObject({ n: count(), ok: "ok" });
+  });
+
+  it("a restore whose rebuilt image fails quick_check is refused and leaves no file behind", async () => {
+    const { repl, blobs, insert, restoreResult, dir } = setup();
+    insert(3);
+    const gen = expectOk(await repl.sync()).generation;
+    const key = `replica/gen/${gen}/snapshot.db`;
+    const snapshot = blobs.blobs.get(key);
+    if (!snapshot) throw new Error("snapshot missing");
+    snapshot.data.fill(0xff, 100);
+    const error = expectErr(await restoreResult({}), "TRANSIENT");
+    expect(error.message).toContain(gen);
+    expect(error.message).toContain("quick_check");
+    expect(readdirSync(dir).filter((f) => f.startsWith("restore-"))).toEqual([]);
   });
 
   it("a snapshot or restore before the first sync never ships segments into a null generation", async () => {
