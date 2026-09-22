@@ -1,6 +1,6 @@
 # delivery/static
 Static delivery with a publish status per document and locale. Requires `content@1`, `site@1`,
-`renderer@1` (the site's own renderer, e.g. the Nuxt layer), `blobstore@1` (filesystem or S3) and
+`renderer@1` (the site's own renderer), `blobstore@1` (filesystem or S3) and
 `persistence@1`. `delivery.publish:<type>` after `content.create/update`: for every locale whose
 own `statusField` equals `publishedValue` the document (fields with fallback, internal links
 resolved to public paths via `site.resolveLinks`, `_links` attached) is rendered in each

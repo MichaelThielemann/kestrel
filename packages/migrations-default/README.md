@@ -44,7 +44,7 @@ inside `setup()`, and event triggers subscribe in `start()`, after every module 
 `apply()` triggered through a pipeline reaches event triggers; after a partial failure the event still fires, covering only the migrations that were
 applied before the failing one.
 Not included: `down` migrations (point-in-time recovery is the way back), transactions, file
-discovery of migration modules, a CLI — all a consumer concern (see kestrel-web `#kestrel/migrations`).
+discovery of migration modules, a CLI — all a consumer concern.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest

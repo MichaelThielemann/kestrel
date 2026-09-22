@@ -598,11 +598,10 @@ last because only there is the response shape settled.
   no control characters — and escaped on output, since sanitizing would corrupt legitimate
   text like `5 < 6`. The frontend also escapes; the backend never relies on that alone.
 
-## Presets in kestrel-web
+## Presets
 
-In the kestrel-web layer (separate repository), a preset supplies the default pipelines,
-triggers and schemas for a typical setup, grouped by feature and wired to the configured
-Kestrel modules. Pipelines remain exactly the model described above — strings plus
-`definePipeline`; the preset only composes existing pipelines (base → feature patches →
-overrides/exclude/schedules) and introduces no new concept. See the kestrel-web
-documentation for details.
+A consumer may ship a preset that supplies the default pipelines, triggers and schemas for a
+typical setup, grouped by feature and wired to the configured Kestrel modules. Pipelines remain
+exactly the model described above — strings plus `definePipeline`; the preset only composes
+existing pipelines (base → feature patches → overrides/exclude/schedules) and introduces no new
+concept.

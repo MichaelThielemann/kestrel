@@ -203,8 +203,7 @@ pages (multi):      slug (slug, required, unique, localized), title (text, requi
 redirects (single): rules (json, list of {from, to, status}, order = priority)
 ```
 
-`body` is checked against the JSON Schema of the block library (exported by the kestrel-web layer,
-separate repository; copied into
+`body` is checked against the JSON Schema of the block library (the example instance's is
 [`../examples/minimal/schemas/blocks.json`](../examples/minimal/schemas/blocks.json); body = an
 array of blocks `{ id, type, props, slots? }`): a violation → `400 pages.body: /0 must have
 required property 'type'` (path + message per problem); depth > 32 or > 20,000 nodes → 400. If
@@ -475,8 +474,7 @@ so it's reachable only via `kestrel.run`.
 ## Static delivery (the second traffic light)
 
 When a page is created or changed, `delivery-static` renders every language whose own `status` is
-`published` through the site's renderer (`renderer@1` — implemented by the kestrel-web layer,
-separate repository) and stores the result in the blob store: `site/<slug>/index.html` (primary
+`published` through the site's renderer (`renderer@1`, a module the site brings) and stores the result in the blob store: `site/<slug>/index.html` (primary
 language), `site/en/<slug>/index.html`, home page (`slug = home`) → `site/index.html` and
 `site/en/index.html` respectively. Assets delivered by the renderer (`_nuxt/…`) land under
 `site/_nuxt/…`. Languages that are no longer published are removed.
@@ -489,7 +487,7 @@ language), `site/en/<slug>/index.html`, home page (`slug = home`) → `site/inde
 `state`: `live` = delivered, `draft` = not published in that language, `error` = rendering or saving
 failed (`error` names the cause; the last `live` output stays in place). The example instance uses
 `renderer-plain` (an HTML skeleton) and the filesystem blob store (`data/blobs/site/`); in
-production: the Nuxt renderer from the kestrel-web layer + `blobstore-s3`.
+production: the site's own renderer + `blobstore-s3`.
 
 With `media` configured (`publicPath`, `collection`, `variants`, `target`), `delivery-static` scans
 every rendered text output for `<publicPath>/<id>/file` and
@@ -698,7 +696,7 @@ to change answers `revisions: 0` or `entries: 0`.
   field name; client-side validation is UX only.
 - Refresh the token — there is no refresh; log in again after a 401.
 
-## What the kestrel-web layer provides for delivery
+## What a site provides for delivery
 
 A Kestrel module (step-only or a contract module) that fulfills `renderer@1`:
 
@@ -714,7 +712,7 @@ interface Renderer {
 
 `path` is the page's eventual path (`/en/kontakt`), `document` the resolved document (with
 fallback). The contract test `@michaelthielemann/kestrel-contracts/renderer.contract.test` must
-pass. How rendering happens (Nitro `localFetch`, `renderToString`) is up to the kestrel-web layer.
+pass. How rendering happens (Nitro `localFetch`, `renderToString`) is up to that module.
 
 ## Not in this instance
 
