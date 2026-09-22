@@ -1,7 +1,8 @@
 import type { ContextInput, Step, StepFactory } from "../context.ts";
 import type { AtomicScope } from "../atomic.ts";
 import { stepPrefix, type ModuleDefinition } from "../defineModule.ts";
-import { resolveEntries, type PipelineDefinition } from "../definePipeline.ts";
+import type { PipelineDefinition } from "../definePipeline.ts";
+import { resolveEntries } from "../resolveEntries.ts";
 import { silentLogger, type Logger } from "../logger.ts";
 import { StepRegistry } from "../registry.ts";
 import { runPipeline as execute, type RunResult } from "../runner.ts";

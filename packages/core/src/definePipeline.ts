@@ -19,20 +19,6 @@ export function pipelineSteps<S extends string>(entries: readonly PipelineEntry<
   return entries.flatMap((entry) => (isAtomicGroup(entry) ? [...entry.atomic] : [entry]));
 }
 
-/** Flattens a pipeline's entries, resolving each step with `resolve` and stamping the 1-based ordinal of the atomic group it came from, if any. */
-export function resolveEntries<S extends string, R extends { atomic?: number }>(
-  entries: readonly PipelineEntry<S>[],
-  resolve: (step: S) => R,
-): R[] {
-  let ordinal = 0;
-  return entries.flatMap((entry): R[] => {
-    if (!isAtomicGroup(entry)) return [resolve(entry)];
-    ordinal += 1;
-    const group = ordinal;
-    return entry.atomic.map((step) => ({ ...resolve(step), atomic: group }));
-  });
-}
-
 export function definePipeline<S extends string = string>(def: PipelineDefinition<S>): PipelineDefinition<S> {
   if (def.name.trim() === "") throw new Error("definePipeline: name must not be empty");
   def.steps.forEach((entry, i) => {
