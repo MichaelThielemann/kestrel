@@ -9,8 +9,7 @@ export default definePipeline({
     "validate.sanitize:pages.body",
     "validate.check:pages.body",
     { atomic: ["references.check:pages", "content.create:pages", "revisions.record:pages", "references.index:pages", "links.extract:pages"] },
-    "delivery.publish:pages",
-    "delivery.exportLlms",
     "events.emit:page.created",
+    "events.relay",
   ],
 });

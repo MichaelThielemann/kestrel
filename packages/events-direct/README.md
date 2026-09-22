@@ -16,6 +16,15 @@ provides the core's `triggers.event` hook, so exactly one of `events/direct` or 
 be configured whenever a pipeline has an event trigger. Not included: delivery across processes or
 restarts, retries, or a dead-letter list — for those, use `events/queue`.
 
+`events.relay`, placed after a pipeline's last `events.emit:`, reports what that run's own emits
+already delivered — the subscribed pipelines have run by the time it executes, inline, during
+`events.emit`. It adds `_events: { status, pipelines: [{ event, pipeline, status, attempts, dead,
+error }] }` to the result: `status` is `"done"` when a subscribed pipeline answered under 400,
+`"error"` when it answered ≥ 400 or threw (`attempts` is always `1`, `dead` is always `true`,
+because nothing here retries). A run whose emits had no subscriber, or whose relay never ran,
+reports `{ status: "done", pipelines: [] }`. Recorded outcomes older than 60 seconds are dropped on
+the next emit with one `warn` naming the count, so the map cannot leak past a stuck relay.
+
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
 `@michaelthielemann/kestrel-events-direct` – module `events/direct`: provides no contract; requires `events@1`; provides the event trigger hook.
@@ -25,7 +34,8 @@ Config: `{}` – nothing to set.
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
 | `events.emit:<arg>` | Emit event "<arg>" to every subscribed handler pipeline and wait for them | – | – | – | – | 500 a subscribed handler failed | portable | no |
+| `events.relay` | Report how the events this run raised were delivered (adds `_events` to the result) | – | `result._events` | – | { _events: object, … } | – | portable | no |
 
-Used by 14 of 83 pipelines in `examples/minimal`.
+Used by 14 of 85 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

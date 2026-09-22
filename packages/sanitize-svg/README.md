@@ -23,6 +23,6 @@ without this module (or another one registering `sanitize.svg`) fails the boot.
 
 Pipelines in `examples/minimal` using these steps:
 
-- **uploadMedia** (POST /media): `authn.requireUser` → `authz.require:media.write` → **`sanitize.svg`** → `media.upload` → `events.emit:media.uploaded`
+- **uploadMedia** (POST /media): `authn.requireUser` → `authz.require:media.write` → **`sanitize.svg`** → `media.upload` → `events.emit:media.uploaded` → `events.relay`
 
 <!-- kestrel-docs:end -->

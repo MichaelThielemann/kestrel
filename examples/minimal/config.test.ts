@@ -66,7 +66,7 @@ describe("examples/minimal single translation removal", () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
     expect(config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline])).toContainEqual(["DELETE /pages/:id/translations/:locale", "deletePageTranslation"]);
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("deletePageTranslation")).toEqual(["authn.requireUser", "authz.require:pages.write", "content.removeTranslation:pages", "revisions.removeTranslation:pages", "references.index:pages", "links.extract:pages", "delivery.publish:pages", "delivery.exportLlms", "events.emit:page.translationRemoved"]);
+    expect(pipelines.get("deletePageTranslation")).toEqual(["authn.requireUser", "authz.require:pages.write", "content.removeTranslation:pages", "revisions.removeTranslation:pages", "references.index:pages", "links.extract:pages", "events.emit:page.translationRemoved", "events.relay"]);
   });
 });
 
@@ -101,7 +101,8 @@ describe("examples/minimal revisions wiring", () => {
     const restore = pipelines.get("restorePageRevision")!;
     const update = pipelines.get("updatePage")!;
     expect(restore.indexOf("revisions.restore:pages")).toBe(2);
-    expect(restore.slice(3)).toEqual([...update.slice(2, -1), "revisions.reportRestore", "events.emit:page.restored"]);
+    expect(restore.slice(3, -3)).toEqual(update.slice(2, -2));
+    expect(restore.slice(-3)).toEqual(["revisions.reportRestore", "events.emit:page.restored", "events.relay"]);
     expect(pipelines.get("pageRevisions")).toEqual(["authn.requireUser", "authz.require:pages.manage", "revisions.list:pages"]);
     expect(pipelines.get("pageRevision")).toEqual(["authn.requireUser", "authz.require:pages.manage", "revisions.read:pages"]);
     expect(pipelines.get("labelPageRevision")).toEqual(["authn.requireUser", "authz.require:pages.write", "revisions.label:pages"]);
@@ -145,10 +146,39 @@ describe("examples/minimal llms.txt wiring", () => {
   });
   it("re-exports llms.txt after every publish, unpublish, settings change and publish-all", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    for (const [name, after] of [["createPage", "delivery.publish:pages"], ["updatePage", "delivery.publish:pages"], ["deletePage", "delivery.unpublish:pages"], ["setSettings", "content.set:settings"], ["publishAllPages", "redirects.export"]] as const) {
+    for (const [name, after] of [["publishPage", "delivery.publish:pages"], ["unpublishPage", "delivery.unpublish:pages"], ["setSettings", "content.set:settings"], ["publishAllPages", "redirects.export"]] as const) {
       const steps = pipelines.get(name)!;
       expect(steps.indexOf("delivery.exportLlms"), name).toBe(steps.indexOf(after) + 1);
     }
+  });
+});
+
+describe("examples/minimal delivery event pipelines", () => {
+  it("moves publish and unpublish out of the write pipelines and into two event pipelines", async () => {
+    const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
+    expect(pipelines.get("publishPage")).toEqual(["delivery.publish:pages", "delivery.exportLlms"]);
+    expect(pipelines.get("unpublishPage")).toEqual(["delivery.unpublish:pages", "delivery.exportLlms"]);
+    for (const name of ["createPage", "updatePage", "deletePage", "deletePageTranslation", "restorePageRevision"]) {
+      const steps = pipelines.get(name)!;
+      expect(steps, name).not.toContain("delivery.publish:pages");
+      expect(steps, name).not.toContain("delivery.unpublish:pages");
+      expect(steps, name).not.toContain("delivery.exportLlms");
+      expect(steps[steps.length - 1], name).toBe("events.relay");
+    }
+  });
+
+  it("triggers publishPage on every page write event and unpublishPage on delete", async () => {
+    const config = await loadConfig(join(root, "kestrel.config.ts"));
+    const events = config.triggers.filter((t) => "event" in t).map((t) => [(t as { event: string }).event, t.pipeline]);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        ["page.created", "publishPage"],
+        ["page.updated", "publishPage"],
+        ["page.restored", "publishPage"],
+        ["page.translationRemoved", "publishPage"],
+        ["page.deleted", "unpublishPage"],
+      ]),
+    );
   });
 });
 
@@ -172,7 +202,7 @@ describe("write pipelines validate their payload", () => {
 
   it("leaves the media texts to the plain-text check in media.update", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("updateMedia")).toEqual(["authn.requireUser", "authz.require:media.write", "media.update", "events.emit:media.updated"]);
+    expect(pipelines.get("updateMedia")).toEqual(["authn.requireUser", "authz.require:media.write", "media.update", "events.emit:media.updated", "events.relay"]);
   });
 });
 
@@ -257,7 +287,7 @@ describe("image variants wiring", () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
     expect(pipelines.get("getMedia")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.get", "images.attach"]);
     expect(pipelines.get("listMedia")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.list", "images.attach"]);
-    expect(pipelines.get("deleteMedia")).toEqual(["authn.requireUser", "authz.require:media.delete", "references.guard:media", "images.remove", "media.remove", "events.emit:media.deleted"]);
+    expect(pipelines.get("deleteMedia")).toEqual(["authn.requireUser", "authz.require:media.delete", "references.guard:media", "images.remove", "media.remove", "events.emit:media.deleted", "events.relay"]);
     expect(pipelines.get("exportMedia")).toEqual(["authn.requireUser", "authz.require:media.manage", "media.export:./data/export", "images.export:./data/export"]);
   });
   it("leaves resolvePage untouched", async () => {
@@ -412,8 +442,8 @@ async function failedPipelines(kestrel: Instance, admin: Session): Promise<strin
 describe("user pipelines validate role names", () => {
   it("declares authz.validateRoles:roles right after authz.require:users.manage on create and update", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("createUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authz.validateRoles:roles", "authn.createUser", "events.emit:user.created"]);
-    expect(pipelines.get("updateUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authz.validateRoles:roles", "authn.updateUser", "events.emit:user.updated"]);
+    expect(pipelines.get("createUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authz.validateRoles:roles", "authn.createUser", "events.emit:user.created", "events.relay"]);
+    expect(pipelines.get("updateUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authz.validateRoles:roles", "authn.updateUser", "events.emit:user.updated", "events.relay"]);
   });
 
   it("rejects an unknown role on create, creating no user", async () => {
@@ -495,7 +525,7 @@ describe("user deletion wiring", () => {
     expect(config.triggers.filter((t) => "cron" in t).map((t) => t.pipeline)).toContain("pruneAudit");
 
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("deleteUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authn.deleteUser", "events.emit:user.deleted?with=result"]);
+    expect(pipelines.get("deleteUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authn.deleteUser", "events.emit:user.deleted?with=result", "events.relay"]);
     expect(pipelines.get("reassignRevisionAuthor")).toEqual(["authn.verifyUser:result.reassignTo", "revisions.reassignAuthor"]);
     expect(pipelines.get("anonymizeAuditUser")).toEqual(["audit.anonymize"]);
     expect(pipelines.get("retryReassignRevisionAuthor")).toEqual(["authn.requireUser", "authz.require:users.manage", "authn.verifyUser:reassignTo", "revisions.reassignAuthor"]);

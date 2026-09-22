@@ -24,7 +24,7 @@ Not included: shared limits across processes (needs a store-backed module), per-
 
 Pipelines in `examples/minimal` using these steps:
 
-- **login** (POST /login): **`ratelimit.check:login`** → `authn.login` → `events.emit:auth.loggedIn`
+- **login** (POST /login): **`ratelimit.check:login`** → `authn.login` → `events.emit:auth.loggedIn` → `events.relay`
 - **sweepRateLimits** (cron */5 * * * *): **`ratelimit.sweep`**
 
 <!-- kestrel-docs:end -->

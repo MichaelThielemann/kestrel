@@ -32,13 +32,27 @@ Requires exactly one delivery module per instance — this one or
 an event trigger. The worker starts with the event triggers in `start()` and stops on `stop()`;
 without any event trigger nothing consumes the queue.
 Config (all optional): `pollMs` 500, `batch` 20, `maxAttempts` 5, `backoffSeconds`
-`[5, 30, 120, 600]`, `lockTtlSeconds` 300, `retentionDays` 7.
+`[5, 30, 120, 600]`, `lockTtlSeconds` 300, `retentionDays` 7, `relayMs` 5000.
 Steps: `events.emit:<name>`, `events.readQueueStatus`, `events.listDead` (`?limit`, max 500;
-each item names its `pipeline`), `events.retryDead:all` / `events.retryDead:one` (`params.id`,
-retries one pipeline's copy), `events.purgeDone` (cron).
+each item names its `pipeline` and `runId`), `events.retryDead:all` / `events.retryDead:one`
+(`params.id`, retries one pipeline's copy), `events.purgeDone` (cron), `events.relay`.
 Not included: delivery across processes or a shared worker pool (the lock only prevents double
 work), ordering between pipelines of one event, exactly-once, the `events@1` contract test (this
 module does not provide `events@1`).
+
+Every row carries the `runId` of the run whose `events.emit` wrote it (`null` for a row raised
+through `events@1` outside a pipeline). A row belonging to a run is written with `availableAt =
+createdAt + relayMs` instead of being immediately due, so `events.relay` — placed after a
+pipeline's last `events.emit:` — gets a head start: it claims its own run's rows by id regardless
+of `availableAt`, runs each one through the same attempt/backoff/dead-letter machinery as the
+worker, and reports the outcome as `_events: { status, pipelines: [{ event, pipeline, status,
+attempts, dead, error }] }` on the result. A row the relay does not reach within `relayMs` — the
+budget is checked before every claim, including the first, and is never enforced mid-pipeline —
+stays `pending` and is reported the same way; the worker delivers it once its `availableAt` comes
+due, exactly like any other leftover. `relayMs: 0` disables the relay: every row is immediately
+the worker's, and the relay claims nothing. A run that enqueued nothing costs the relay zero
+queries — the ids it would claim are tracked in memory, keyed by `runId`, and discarded once
+relayed or once `lockTtlSeconds` pass with no relay.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
@@ -52,6 +66,7 @@ module does not provide `events@1`).
 | `backoffSeconds` | array | no | `[5,30,120,600]` |
 | `lockTtlSeconds` | integer | no | `300` |
 | `retentionDays` | integer | no | `7` |
+| `relayMs` | integer | no | `5000` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
@@ -60,5 +75,6 @@ module does not provide `events@1`).
 | `events.listDead` | Dead-letter events, most recently failed first | – | `result` | ?limit: integer | { items: object[], … } | – | beside | yes |
 | `events.retryDead:<arg>` | Requeue every dead-letter event | – | `result` | – | { retried: number, … } | – | beside | yes |
 | `events.purgeDone` | Delete delivered events older than retentionDays | – | `result` | – | { removed: number, … } | – | beside | yes |
+| `events.relay` | Deliver the events this run queued, before the response; whatever is left over stays for the worker (adds `_events` to the result) | – | `result._events` | – | { _events: object, … } | – | portable | no |
 
 <!-- kestrel-docs:end -->

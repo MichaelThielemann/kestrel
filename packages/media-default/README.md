@@ -138,7 +138,7 @@ Not included: image resizing, tags, linking media to content documents.
 Pipelines in `examples/minimal` using these steps:
 
 - **createMediaFolder** (POST /media/folders): `authn.requireUser` → `authz.require:media.write` → **`media.createFolder`**
-- **deleteMedia** (DELETE /media/:id): `authn.requireUser` → `authz.require:media.delete` → `references.guard:media` → `images.remove` → **`media.remove`** → `events.emit:media.deleted`
+- **deleteMedia** (DELETE /media/:id): `authn.requireUser` → `authz.require:media.delete` → `references.guard:media` → `images.remove` → **`media.remove`** → `events.emit:media.deleted` → `events.relay`
 - **deleteMediaFolder** (DELETE /media/folders/*path): `authn.requireUser` → `authz.require:media.delete` → **`media.listFolderItems`** → `references.guardAll:media` → `images.removeMany` → **`media.removeFolder`**
 - **downloadMedia** (GET /media/:id/file): `authn.identifyUser` → `authz.require:media.read` → **`media.download`**
 - **exportMedia** (POST /admin/media/export): `authn.requireUser` → `authz.require:media.manage` → **`media.export:./data/export`** → `images.export:./data/export`
@@ -146,7 +146,7 @@ Pipelines in `examples/minimal` using these steps:
 - **listMedia** (GET /media): `authn.identifyUser` → `authz.require:media.read` → **`media.list`** → `images.attach`
 - **listMediaFolders** (GET /media/folders): `authn.identifyUser` → `authz.require:media.read` → **`media.listFolders`**
 - **renameMediaFolder** (PATCH /media/folders/*path): `authn.requireUser` → `authz.require:media.write` → **`media.renameFolder`**
-- **updateMedia** (PATCH /media/:id): `authn.requireUser` → `authz.require:media.write` → **`media.update`** → `events.emit:media.updated`
-- **uploadMedia** (POST /media): `authn.requireUser` → `authz.require:media.write` → `sanitize.svg` → **`media.upload`** → `events.emit:media.uploaded`
+- **updateMedia** (PATCH /media/:id): `authn.requireUser` → `authz.require:media.write` → **`media.update`** → `events.emit:media.updated` → `events.relay`
+- **uploadMedia** (POST /media): `authn.requireUser` → `authz.require:media.write` → `sanitize.svg` → **`media.upload`** → `events.emit:media.uploaded` → `events.relay`
 
 <!-- kestrel-docs:end -->

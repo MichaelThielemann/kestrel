@@ -3972,7 +3972,7 @@
     "/admin/pages/{id}/revisions/{revisionId}/restore": {
       "post": {
         "operationId": "restorePageRevision",
-        "summary": "Require a valid session → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages (adds `_delivery` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) → Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is → Emit event \"page.restored\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is → Emit event \"page.restored\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "admin"
         ],
@@ -3989,10 +3989,9 @@
           "revisions.record:pages",
           "references.index:pages",
           "links.extract:pages",
-          "delivery.publish:pages",
-          "delivery.exportLlms",
           "revisions.reportRestore",
-          "events.emit:page.restored"
+          "events.emit:page.restored",
+          "events.relay"
         ],
         "parameters": [
           {
@@ -4114,74 +4113,6 @@
                       },
                       "description": "per locale: required localized fields present"
                     },
-                    "_delivery": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string"
-                          },
-                          "docId": {
-                            "type": "string"
-                          },
-                          "locale": {
-                            "type": "string"
-                          },
-                          "state": {
-                            "type": "string",
-                            "enum": [
-                              "live",
-                              "error",
-                              "draft"
-                            ]
-                          },
-                          "path": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "error": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "publishedAt": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
-                          },
-                          "updatedAt": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "type",
-                          "docId",
-                          "locale",
-                          "state",
-                          "updatedAt"
-                        ]
-                      }
-                    },
-                    "_llms": {
-                      "type": "object",
-                      "properties": {
-                        "entries": {
-                          "type": "integer"
-                        },
-                        "full": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": [
-                        "entries",
-                        "full"
-                      ]
-                    },
                     "restore": {
                       "type": "object",
                       "properties": {
@@ -4206,11 +4137,69 @@
                         "dropped",
                         "missing"
                       ]
+                    },
+                    "_events": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
+                        },
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "pipelines"
+                      ]
                     }
                   },
                   "required": [
-                    "_delivery",
-                    "_llms",
+                    "_events",
                     "createdAt",
                     "id",
                     "updatedAt"
@@ -4220,7 +4209,7 @@
             }
           },
           "400": {
-            "description": "no document id in the result or the event payload",
+            "description": "validation failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -4374,9 +4363,6 @@
                       "de",
                       "en"
                     ]
-                  },
-                  "id": {
-                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -6226,7 +6212,7 @@
     "/login": {
       "post": {
         "operationId": "login",
-        "summary": "Rate limit bucket login → Log in with credentials → Emit event \"auth.loggedIn\" to every subscribed handler pipeline and wait for them",
+        "summary": "Rate limit bucket login → Log in with credentials → Emit event \"auth.loggedIn\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "login"
         ],
@@ -6234,7 +6220,8 @@
         "x-kestrel-steps": [
           "ratelimit.check:login",
           "authn.login",
-          "events.emit:auth.loggedIn"
+          "events.emit:auth.loggedIn",
+          "events.relay"
         ],
         "parameters": [],
         "responses": {
@@ -6263,11 +6250,71 @@
                         "id",
                         "claims"
                       ]
+                    },
+                    "_events": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
+                        },
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "pipelines"
+                      ]
                     }
                   },
                   "required": [
-                    "token",
-                    "identity"
+                    "_events",
+                    "identity",
+                    "token"
                   ]
                 }
               }
@@ -6370,7 +6417,7 @@
     "/logout": {
       "post": {
         "operationId": "logout",
-        "summary": "Require a valid session → End the current session → Emit event \"auth.loggedOut\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → End the current session → Emit event \"auth.loggedOut\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "logout"
         ],
@@ -6378,7 +6425,8 @@
         "x-kestrel-steps": [
           "authn.requireUser",
           "authn.logout",
-          "events.emit:auth.loggedOut"
+          "events.emit:auth.loggedOut",
+          "events.relay"
         ],
         "parameters": [],
         "responses": {
@@ -6391,9 +6439,69 @@
                   "properties": {
                     "ok": {
                       "type": "boolean"
+                    },
+                    "_events": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
+                        },
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "pipelines"
+                      ]
                     }
                   },
                   "required": [
+                    "_events",
                     "ok"
                   ]
                 }
@@ -6993,7 +7101,7 @@
       },
       "post": {
         "operationId": "uploadMedia",
-        "summary": "Require a valid session → Requires permission media.write → Sanitize uploaded SVG files (scripts, handlers, external references removed) → Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing → Emit event \"media.uploaded\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission media.write → Sanitize uploaded SVG files (scripts, handlers, external references removed) → Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing → Emit event \"media.uploaded\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "media"
         ],
@@ -7003,7 +7111,8 @@
           "authz.require:media.write",
           "sanitize.svg",
           "media.upload",
-          "events.emit:media.uploaded"
+          "events.emit:media.uploaded",
+          "events.relay"
         ],
         "parameters": [],
         "responses": {
@@ -7012,227 +7121,45 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
-                    {
+                  "type": "object",
+                  "properties": {
+                    "_events": {
                       "type": "object",
                       "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "filename": {
-                          "type": "string"
-                        },
-                        "folder": {
-                          "type": "string"
-                        },
-                        "contentType": {
-                          "type": "string"
-                        },
-                        "size": {
-                          "type": "number"
-                        },
-                        "key": {
-                          "type": "string"
-                        },
-                        "checksum": {
-                          "type": [
-                            "string",
-                            "null"
-                          ],
-                          "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                        },
                         "status": {
                           "type": "string",
                           "enum": [
-                            "uploading",
-                            "ready",
-                            "failed"
-                          ],
-                          "description": "only ready items are listed, readable and downloadable"
-                        },
-                        "createdAt": {
-                          "type": "number"
-                        },
-                        "updatedAt": {
-                          "type": "number"
-                        },
-                        "provenance": {
-                          "type": "object",
-                          "properties": {
-                            "origin": {
-                              "type": "string",
-                              "enum": [
-                                "human",
-                                "ai",
-                                "mixed",
-                                "unknown"
-                              ]
-                            },
-                            "tool": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "at": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "origin"
-                          ],
-                          "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
-                        },
-                        "width": {
-                          "type": [
-                            "number",
-                            "null"
+                            "done",
+                            "error",
+                            "pending"
                           ]
                         },
-                        "height": {
-                          "type": [
-                            "number",
-                            "null"
-                          ]
-                        },
-                        "alt": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "title": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "description": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "filename",
-                        "folder",
-                        "contentType",
-                        "size",
-                        "key",
-                        "checksum",
-                        "status",
-                        "createdAt",
-                        "updatedAt",
-                        "provenance",
-                        "width",
-                        "height",
-                        "alt",
-                        "title",
-                        "description"
-                      ]
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "items": {
+                        "pipelines": {
                           "type": "array",
                           "items": {
                             "type": "object",
                             "properties": {
-                              "id": {
+                              "event": {
                                 "type": "string"
                               },
-                              "filename": {
+                              "pipeline": {
                                 "type": "string"
-                              },
-                              "folder": {
-                                "type": "string"
-                              },
-                              "contentType": {
-                                "type": "string"
-                              },
-                              "size": {
-                                "type": "number"
-                              },
-                              "key": {
-                                "type": "string"
-                              },
-                              "checksum": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ],
-                                "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
                               },
                               "status": {
                                 "type": "string",
                                 "enum": [
-                                  "uploading",
-                                  "ready",
-                                  "failed"
-                                ],
-                                "description": "only ready items are listed, readable and downloadable"
-                              },
-                              "createdAt": {
-                                "type": "number"
-                              },
-                              "updatedAt": {
-                                "type": "number"
-                              },
-                              "provenance": {
-                                "type": "object",
-                                "properties": {
-                                  "origin": {
-                                    "type": "string",
-                                    "enum": [
-                                      "human",
-                                      "ai",
-                                      "mixed",
-                                      "unknown"
-                                    ]
-                                  },
-                                  "tool": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  },
-                                  "at": {
-                                    "type": "number"
-                                  }
-                                },
-                                "required": [
-                                  "origin"
-                                ],
-                                "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
-                              },
-                              "width": {
-                                "type": [
-                                  "number",
-                                  "null"
+                                  "done",
+                                  "error",
+                                  "pending"
                                 ]
                               },
-                              "height": {
-                                "type": [
-                                  "number",
-                                  "null"
-                                ]
+                              "attempts": {
+                                "type": "integer"
                               },
-                              "alt": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
+                              "dead": {
+                                "type": "boolean"
                               },
-                              "title": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
-                              },
-                              "description": {
+                              "error": {
                                 "type": [
                                   "string",
                                   "null"
@@ -7240,65 +7167,24 @@
                               }
                             },
                             "required": [
-                              "id",
-                              "filename",
-                              "folder",
-                              "contentType",
-                              "size",
-                              "key",
-                              "checksum",
+                              "event",
+                              "pipeline",
                               "status",
-                              "createdAt",
-                              "updatedAt",
-                              "provenance",
-                              "width",
-                              "height",
-                              "alt",
-                              "title",
-                              "description"
+                              "attempts",
+                              "dead",
+                              "error"
                             ]
                           }
-                        },
-                        "errors": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "filename": {
-                                "type": "string"
-                              },
-                              "status": {
-                                "type": "number"
-                              },
-                              "code": {
-                                "type": "string"
-                              },
-                              "message": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "filename",
-                              "status",
-                              "code",
-                              "message"
-                            ]
-                          }
-                        },
-                        "ids": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "the newly stored items only; an unchanged re-upload is in `items` but not here, and is not announced as an event"
                         }
                       },
                       "required": [
-                        "items",
-                        "errors",
-                        "ids"
+                        "status",
+                        "pipelines"
                       ]
                     }
+                  },
+                  "required": [
+                    "_events"
                   ]
                 }
               }
@@ -7429,7 +7315,7 @@
     "/media/{id}": {
       "delete": {
         "operationId": "deleteMedia",
-        "summary": "Require a valid session → Requires permission media.delete → Refuse deletion while media is referenced → Delete one media item's variants (blob + rows) → Delete file and metadata → Emit event \"media.deleted\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission media.delete → Refuse deletion while media is referenced → Delete one media item's variants (blob + rows) → Delete file and metadata → Emit event \"media.deleted\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "media"
         ],
@@ -7440,7 +7326,8 @@
           "references.guard:media",
           "images.remove",
           "media.remove",
-          "events.emit:media.deleted"
+          "events.emit:media.deleted",
+          "events.relay"
         ],
         "parameters": [
           {
@@ -7462,9 +7349,69 @@
                   "properties": {
                     "ok": {
                       "type": "boolean"
+                    },
+                    "_events": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
+                        },
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "pipelines"
+                      ]
                     }
                   },
                   "required": [
+                    "_events",
                     "ok"
                   ]
                 }
@@ -7827,7 +7774,7 @@
       },
       "patch": {
         "operationId": "updateMedia",
-        "summary": "Require a valid session → Requires permission media.write → Rename, move, set provenance or texts (alt/title/description per locale) → Emit event \"media.updated\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission media.write → Rename, move, set provenance or texts (alt/title/description per locale) → Emit event \"media.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "media"
         ],
@@ -7836,7 +7783,8 @@
           "authn.requireUser",
           "authz.require:media.write",
           "media.update",
-          "events.emit:media.updated"
+          "events.emit:media.updated",
+          "events.relay"
         ],
         "parameters": [
           {
@@ -7960,25 +7908,85 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "_events": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
+                        },
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "pipelines"
+                      ]
                     }
                   },
                   "required": [
-                    "id",
+                    "_events",
+                    "alt",
+                    "checksum",
+                    "contentType",
+                    "createdAt",
+                    "description",
                     "filename",
                     "folder",
-                    "contentType",
-                    "size",
-                    "key",
-                    "checksum",
-                    "status",
-                    "createdAt",
-                    "updatedAt",
-                    "provenance",
-                    "width",
                     "height",
-                    "alt",
+                    "id",
+                    "key",
+                    "provenance",
+                    "size",
+                    "status",
                     "title",
-                    "description"
+                    "updatedAt",
+                    "width"
                   ]
                 }
               }
@@ -9108,7 +9116,7 @@
       },
       "post": {
         "operationId": "createPage",
-        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Create a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages (adds `_delivery` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) → Emit event \"page.created\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Create a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Emit event \"page.created\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "pages"
         ],
@@ -9124,9 +9132,8 @@
           "revisions.record:pages",
           "references.index:pages",
           "links.extract:pages",
-          "delivery.publish:pages",
-          "delivery.exportLlms",
-          "events.emit:page.created"
+          "events.emit:page.created",
+          "events.relay"
         ],
         "parameters": [
           {
@@ -9232,78 +9239,68 @@
                       },
                       "description": "per locale: required localized fields present"
                     },
-                    "_delivery": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string"
-                          },
-                          "docId": {
-                            "type": "string"
-                          },
-                          "locale": {
-                            "type": "string"
-                          },
-                          "state": {
-                            "type": "string",
-                            "enum": [
-                              "live",
-                              "error",
-                              "draft"
-                            ]
-                          },
-                          "path": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "error": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "publishedAt": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
-                          },
-                          "updatedAt": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "type",
-                          "docId",
-                          "locale",
-                          "state",
-                          "updatedAt"
-                        ]
-                      }
-                    },
-                    "_llms": {
+                    "_events": {
                       "type": "object",
                       "properties": {
-                        "entries": {
-                          "type": "integer"
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
                         },
-                        "full": {
-                          "type": "boolean"
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
                         }
                       },
                       "required": [
-                        "entries",
-                        "full"
+                        "status",
+                        "pipelines"
                       ]
                     }
                   },
                   "required": [
-                    "_delivery",
-                    "_llms",
+                    "_events",
                     "createdAt",
                     "id",
                     "updatedAt"
@@ -9313,7 +9310,7 @@
             }
           },
           "400": {
-            "description": "no document id in the result or the event payload",
+            "description": "validation failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -9436,9 +9433,6 @@
                       "de",
                       "en"
                     ]
-                  },
-                  "id": {
-                    "type": "string"
                   }
                 },
                 "required": [
@@ -9461,7 +9455,7 @@
     "/pages/{id}": {
       "delete": {
         "operationId": "deletePage",
-        "summary": "Require a valid session → Requires permission pages.delete → Refuse deletion while pages is referenced → Delete a pages → Drop every revision of a pages document, in every locale → Drop indexed references of a pages document → Drop indexed links of pages → Remove rendered output of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) → Emit event \"page.deleted\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission pages.delete → Refuse deletion while pages is referenced → Delete a pages → Drop every revision of a pages document, in every locale → Drop indexed references of a pages document → Drop indexed links of pages → Emit event \"page.deleted\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "pages"
         ],
@@ -9474,9 +9468,8 @@
           "revisions.remove:pages",
           "references.unindex:pages",
           "links.unextract:pages",
-          "delivery.unpublish:pages",
-          "delivery.exportLlms",
-          "events.emit:page.deleted"
+          "events.emit:page.deleted",
+          "events.relay"
         ],
         "parameters": [
           {
@@ -9499,24 +9492,68 @@
                     "ok": {
                       "type": "boolean"
                     },
-                    "_llms": {
+                    "_events": {
                       "type": "object",
                       "properties": {
-                        "entries": {
-                          "type": "integer"
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
                         },
-                        "full": {
-                          "type": "boolean"
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
                         }
                       },
                       "required": [
-                        "entries",
-                        "full"
+                        "status",
+                        "pipelines"
                       ]
                     }
                   },
                   "required": [
-                    "_llms",
+                    "_events",
                     "ok"
                   ]
                 }
@@ -9524,7 +9561,7 @@
             }
           },
           "400": {
-            "description": "no document id in params or the event payload",
+            "description": "missing id",
             "content": {
               "application/json": {
                 "schema": {
@@ -9588,22 +9625,6 @@
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  }
-                },
-                "additionalProperties": true
               }
             }
           }
@@ -9829,7 +9850,7 @@
       },
       "patch": {
         "operationId": "updatePage",
-        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages (adds `_delivery` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) → Emit event \"page.updated\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Emit event \"page.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "pages"
         ],
@@ -9845,9 +9866,8 @@
           "revisions.record:pages",
           "references.index:pages",
           "links.extract:pages",
-          "delivery.publish:pages",
-          "delivery.exportLlms",
-          "events.emit:page.updated"
+          "events.emit:page.updated",
+          "events.relay"
         ],
         "parameters": [
           {
@@ -9961,78 +9981,68 @@
                       },
                       "description": "per locale: required localized fields present"
                     },
-                    "_delivery": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string"
-                          },
-                          "docId": {
-                            "type": "string"
-                          },
-                          "locale": {
-                            "type": "string"
-                          },
-                          "state": {
-                            "type": "string",
-                            "enum": [
-                              "live",
-                              "error",
-                              "draft"
-                            ]
-                          },
-                          "path": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "error": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "publishedAt": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
-                          },
-                          "updatedAt": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "type",
-                          "docId",
-                          "locale",
-                          "state",
-                          "updatedAt"
-                        ]
-                      }
-                    },
-                    "_llms": {
+                    "_events": {
                       "type": "object",
                       "properties": {
-                        "entries": {
-                          "type": "integer"
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
                         },
-                        "full": {
-                          "type": "boolean"
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
                         }
                       },
                       "required": [
-                        "entries",
-                        "full"
+                        "status",
+                        "pipelines"
                       ]
                     }
                   },
                   "required": [
-                    "_delivery",
-                    "_llms",
+                    "_events",
                     "createdAt",
                     "id",
                     "updatedAt"
@@ -10042,7 +10052,7 @@
             }
           },
           "400": {
-            "description": "no document id in the result or the event payload",
+            "description": "validation failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -10186,9 +10196,6 @@
                       "de",
                       "en"
                     ]
-                  },
-                  "id": {
-                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -10206,7 +10213,7 @@
     "/pages/{id}/translations/{locale}": {
       "delete": {
         "operationId": "deletePageTranslation",
-        "summary": "Require a valid session → Requires permission pages.write → Remove one translation of a pages (locale from the route or ?locale=); the document stays in its other locales → Drop the revisions of one locale of a pages document → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages (adds `_delivery` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) → Emit event \"page.translationRemoved\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission pages.write → Remove one translation of a pages (locale from the route or ?locale=); the document stays in its other locales → Drop the revisions of one locale of a pages document → Index the references of a pages document → Index external links of pages → Emit event \"page.translationRemoved\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "pages"
         ],
@@ -10218,9 +10225,8 @@
           "revisions.removeTranslation:pages",
           "references.index:pages",
           "links.extract:pages",
-          "delivery.publish:pages",
-          "delivery.exportLlms",
-          "events.emit:page.translationRemoved"
+          "events.emit:page.translationRemoved",
+          "events.relay"
         ],
         "parameters": [
           {
@@ -10342,78 +10348,68 @@
                       },
                       "description": "per locale: required localized fields present"
                     },
-                    "_delivery": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string"
-                          },
-                          "docId": {
-                            "type": "string"
-                          },
-                          "locale": {
-                            "type": "string"
-                          },
-                          "state": {
-                            "type": "string",
-                            "enum": [
-                              "live",
-                              "error",
-                              "draft"
-                            ]
-                          },
-                          "path": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "error": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "publishedAt": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
-                          },
-                          "updatedAt": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "type",
-                          "docId",
-                          "locale",
-                          "state",
-                          "updatedAt"
-                        ]
-                      }
-                    },
-                    "_llms": {
+                    "_events": {
                       "type": "object",
                       "properties": {
-                        "entries": {
-                          "type": "integer"
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
                         },
-                        "full": {
-                          "type": "boolean"
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
                         }
                       },
                       "required": [
-                        "entries",
-                        "full"
+                        "status",
+                        "pipelines"
                       ]
                     }
                   },
                   "required": [
-                    "_delivery",
-                    "_llms",
+                    "_events",
                     "createdAt",
                     "id",
                     "updatedAt"
@@ -10423,7 +10419,7 @@
             }
           },
           "400": {
-            "description": "no document id in the result or the event payload",
+            "description": "missing id",
             "content": {
               "application/json": {
                 "schema": {
@@ -10497,22 +10493,6 @@
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  }
-                },
-                "additionalProperties": true
               }
             }
           }
@@ -11724,7 +11704,7 @@
       },
       "post": {
         "operationId": "createUser",
-        "summary": "Require a valid session → Requires permission users.manage → Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept → Create a user → Emit event \"user.created\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission users.manage → Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept → Create a user → Emit event \"user.created\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "users"
         ],
@@ -11734,7 +11714,8 @@
           "authz.require:users.manage",
           "authz.validateRoles:roles",
           "authn.createUser",
-          "events.emit:user.created"
+          "events.emit:user.created",
+          "events.relay"
         ],
         "parameters": [],
         "responses": {
@@ -11762,14 +11743,74 @@
                     },
                     "createdAt": {
                       "type": "number"
+                    },
+                    "_events": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
+                        },
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "pipelines"
+                      ]
                     }
                   },
                   "required": [
-                    "id",
-                    "username",
-                    "roles",
+                    "_events",
                     "active",
-                    "createdAt"
+                    "createdAt",
+                    "id",
+                    "roles",
+                    "username"
                   ]
                 }
               }
@@ -11883,7 +11924,7 @@
     "/users/{id}": {
       "delete": {
         "operationId": "deleteUser",
-        "summary": "Require a valid session → Requires permission users.manage → Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised → Emit event \"user.deleted?with=result\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission users.manage → Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised → Emit event \"user.deleted?with=result\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "users"
         ],
@@ -11892,7 +11933,8 @@
           "authn.requireUser",
           "authz.require:users.manage",
           "authn.deleteUser",
-          "events.emit:user.deleted?with=result"
+          "events.emit:user.deleted?with=result",
+          "events.relay"
         ],
         "parameters": [
           {
@@ -11932,9 +11974,69 @@
                         "id",
                         "name"
                       ]
+                    },
+                    "_events": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
+                        },
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "pipelines"
+                      ]
                     }
                   },
                   "required": [
+                    "_events",
                     "ok",
                     "reassignTo"
                   ]
@@ -12173,7 +12275,7 @@
       },
       "patch": {
         "operationId": "updateUser",
-        "summary": "Require a valid session → Requires permission users.manage → Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept → Rename a user or set their roles (a role change ends their sessions) → Emit event \"user.updated\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission users.manage → Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept → Rename a user or set their roles (a role change ends their sessions) → Emit event \"user.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "users"
         ],
@@ -12183,7 +12285,8 @@
           "authz.require:users.manage",
           "authz.validateRoles:roles",
           "authn.updateUser",
-          "events.emit:user.updated"
+          "events.emit:user.updated",
+          "events.relay"
         ],
         "parameters": [
           {
@@ -12220,14 +12323,74 @@
                     },
                     "createdAt": {
                       "type": "number"
+                    },
+                    "_events": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
+                        },
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "pipelines"
+                      ]
                     }
                   },
                   "required": [
-                    "id",
-                    "username",
-                    "roles",
+                    "_events",
                     "active",
-                    "createdAt"
+                    "createdAt",
+                    "id",
+                    "roles",
+                    "username"
                   ]
                 }
               }
@@ -12462,7 +12625,7 @@
     "/users/{id}/deactivate": {
       "post": {
         "operationId": "deactivateUser",
-        "summary": "Require a valid session → Requires permission users.manage → Deactivate a user (ends their sessions) → Emit event \"user.deactivated\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission users.manage → Deactivate a user (ends their sessions) → Emit event \"user.deactivated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "users"
         ],
@@ -12471,7 +12634,8 @@
           "authn.requireUser",
           "authz.require:users.manage",
           "authn.deactivateUser",
-          "events.emit:user.deactivated"
+          "events.emit:user.deactivated",
+          "events.relay"
         ],
         "parameters": [
           {
@@ -12493,9 +12657,69 @@
                   "properties": {
                     "ok": {
                       "type": "boolean"
+                    },
+                    "_events": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending"
+                          ]
+                        },
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "pipelines"
+                      ]
                     }
                   },
                   "required": [
+                    "_events",
                     "ok"
                   ]
                 }

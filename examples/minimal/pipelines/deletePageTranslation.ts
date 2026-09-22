@@ -6,8 +6,7 @@ export default definePipeline({
     "authn.requireUser",
     "authz.require:pages.write",
     { atomic: ["content.removeTranslation:pages", "revisions.removeTranslation:pages", "references.index:pages", "links.extract:pages"] },
-    "delivery.publish:pages",
-    "delivery.exportLlms",
     "events.emit:page.translationRemoved",
+    "events.relay",
   ],
 });

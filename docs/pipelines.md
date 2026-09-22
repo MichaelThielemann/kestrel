@@ -111,7 +111,8 @@ Rules:
   rejects a grouped pipeline with no such module, and rejects two modules that both provide one.
 - `ctx.done()` inside a group **commits**: the work up to that point is intentional, and treating
   an early, successful exit as a rollback would make `done()` mean two different things depending
-  on where it is called.
+  on where it is called. It also ends the run right there, so `events.relay` (placed after the
+  group) does not run — see "`events.relay`" below for what that means with each delivery module.
 - An `Err` or a `throw` inside a group rolls the group back and reports the same outcome the
   client would see outside a group — same status, code, retryable and step. The database is
   simply unchanged in addition.
@@ -679,9 +680,8 @@ an event this way says so in its `describe().summary`, because the pipeline file
 `events.emit:<name>?with=result` additionally adds `result: ctx.result` unchanged (a
 deliberate opt-in, not the default). **Careful:** the shape of `result` then depends on the
 steps that ran before `events.emit` in the triggering pipeline (e.g. `delivery.publish`
-replaces `ctx.result` with `{ document, delivery }`) — an event pipeline that consumes
-`with=result` is coupled to that pipeline's step order and can vary per consumer
-configuration.
+merges `_delivery` into it) — an event pipeline that consumes `with=result` is coupled to
+that pipeline's step order and can vary per consumer configuration.
 
 `events-inmemory` is the `events@1` bus and nothing else: it registers no step and delivers
 nothing. Every instance additionally configures exactly one **delivery** module, `events-direct`
@@ -714,6 +714,39 @@ the pipelines subscribed to one event:** each is its own row, claimed and retrie
 other; work that must happen in sequence belongs in one pipeline.** `events-direct` happens to run
 them one at a time, in registration order, and isolates a throwing one from the rest — that is an
 implementation property of today's inline delivery, not a guarantee to build on.
+
+### `events.relay`
+
+Both delivery modules also register `events.relay`, placed as its own entry immediately after a
+pipeline's last `events.emit:` — after the `COMMIT` when that emit sits inside an atomic group,
+since the step is not `atomicSafe` and boot rejects it inside one. It adds `_events: { status:
+"done" | "error" | "pending", pipelines: [{ event, pipeline, status, attempts, dead, error }] }` to
+the result, one entry per pipeline the run's own emits raised; a run whose emits had no subscriber
+reports `{ status: "done", pipelines: [] }`. The summary status is `"error"` if any entry is
+`"error"`, else `"pending"` if any entry is `"pending"`, else `"done"`. `events.relay` always
+answers `ok`: a failed delivery is reported in `_events`, never turned into a failure of the run
+that raised it. When `ctx.result` is `undefined` the relay creates an object for it; a defined
+non-object result (an array, for example) is left untouched, with one `warn` logged, since there is
+nothing to merge into.
+
+With `events-direct`, the subscribed pipelines have already run inline, during `events.emit`; the
+relay only reports what the wrapper saw (`status`/`attempts`/`dead` are always `1`/`true` on an
+error, since nothing here retries). With `events-queue`, the relay **delivers**: it claims this
+run's own rows by id — the ones `events.emit` just wrote — and runs each one through the exact
+`attempts`/backoff/dead-letter machinery the worker uses, before the response goes out. Whatever it
+does not reach within the config key `relayMs` (default 5000 ms, checked before every claim
+including the first, never enforced mid-pipeline) is reported `"pending"` and stays for the worker,
+which takes it once its row's `availableAt` (`createdAt + relayMs` for a row belonging to a run)
+comes due — the head start that keeps a live worker from racing the relay for the same row.
+`relayMs: 0` disables the relay entirely: every row is immediately the worker's. A run that
+enqueued nothing costs the relay no persistence query.
+
+A relayed delivery is an ordinary run: it carries `parentRunId`, so it appears in the logs and in
+insights' recent failures linked to the request that raised it, and a delivery pipeline that hangs
+hangs the request — exactly as an inline `delivery.publish` does today. `ctx.done()` before the
+relay (see below) skips it: with `events-queue` the rows stay `pending` for the worker and the
+response has no `_events` member; with `events-direct` the pipelines have already run and only the
+report is lost.
 
 Guarantees: at-least-once delivery, no ordering across events — so a listener pipeline must be
 idempotent (the envelope's `eventId` is the dedup key, guaranteed present on every delivered event

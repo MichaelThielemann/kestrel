@@ -2527,7 +2527,8 @@
         "variables": []
       },
       "steps": [
-        "events.emit"
+        "events.emit",
+        "events.relay"
       ],
       "eventHook": true,
       "atomicScope": false,
@@ -7979,6 +7980,85 @@
       }
     },
     {
+      "name": "events.relay",
+      "module": "events/direct",
+      "factory": false,
+      "description": {
+        "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+        "reads": [],
+        "writes": [
+          "result._events"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "_events": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "done",
+                    "error",
+                    "pending"
+                  ]
+                },
+                "pipelines": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "event": {
+                        "type": "string"
+                      },
+                      "pipeline": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "done",
+                          "error",
+                          "pending"
+                        ]
+                      },
+                      "attempts": {
+                        "type": "integer"
+                      },
+                      "dead": {
+                        "type": "boolean"
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "event",
+                      "pipeline",
+                      "status",
+                      "attempts",
+                      "dead",
+                      "error"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "pipelines"
+              ]
+            }
+          },
+          "required": [
+            "_events"
+          ]
+        }
+      }
+    },
+    {
       "name": "migrations.list",
       "module": "migrations/default",
       "factory": false,
@@ -10485,129 +10565,6 @@
           "atomic": 1
         },
         {
-          "spec": "delivery.publish:pages",
-          "name": "delivery.publish",
-          "module": "delivery/static",
-          "description": {
-            "summary": "Render and store published locales of a pages (adds `_delivery` to the result)",
-            "reads": [
-              "result.id?",
-              "payload"
-            ],
-            "writes": [
-              "result._delivery"
-            ],
-            "input": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": true
-            },
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "_delivery": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string"
-                      },
-                      "docId": {
-                        "type": "string"
-                      },
-                      "locale": {
-                        "type": "string"
-                      },
-                      "state": {
-                        "type": "string",
-                        "enum": [
-                          "live",
-                          "error",
-                          "draft"
-                        ]
-                      },
-                      "path": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "error": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "publishedAt": {
-                        "type": [
-                          "number",
-                          "null"
-                        ]
-                      },
-                      "updatedAt": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "docId",
-                      "locale",
-                      "state",
-                      "updatedAt"
-                    ]
-                  }
-                }
-              },
-              "required": [
-                "_delivery"
-              ]
-            },
-            "errors": {
-              "400": "no document id in the result or the event payload"
-            }
-          }
-        },
-        {
-          "spec": "delivery.exportLlms",
-          "name": "delivery.exportLlms",
-          "module": "delivery/static",
-          "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
-            "reads": [],
-            "writes": [
-              "result._llms"
-            ],
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "_llms": {
-                  "type": "object",
-                  "properties": {
-                    "entries": {
-                      "type": "integer"
-                    },
-                    "full": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "entries",
-                    "full"
-                  ]
-                }
-              },
-              "required": [
-                "_llms"
-              ]
-            }
-          }
-        },
-        {
           "spec": "events.emit:page.created",
           "name": "events.emit",
           "module": "events/direct",
@@ -10617,6 +10574,85 @@
             "writes": [],
             "errors": {
               "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -10756,6 +10792,85 @@
               "500": "a subscribed handler failed"
             }
           }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
+            }
+          }
         }
       ]
     },
@@ -10834,6 +10949,85 @@
             "writes": [],
             "errors": {
               "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -10944,6 +11138,85 @@
             "writes": [],
             "errors": {
               "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -11224,66 +11497,6 @@
           "atomic": 1
         },
         {
-          "spec": "delivery.unpublish:pages",
-          "name": "delivery.unpublish",
-          "module": "delivery/static",
-          "description": {
-            "summary": "Remove rendered output of a pages",
-            "reads": [
-              "params.id",
-              "payload"
-            ],
-            "writes": [],
-            "input": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": true
-            },
-            "errors": {
-              "400": "no document id in params or the event payload"
-            }
-          }
-        },
-        {
-          "spec": "delivery.exportLlms",
-          "name": "delivery.exportLlms",
-          "module": "delivery/static",
-          "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
-            "reads": [],
-            "writes": [
-              "result._llms"
-            ],
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "_llms": {
-                  "type": "object",
-                  "properties": {
-                    "entries": {
-                      "type": "integer"
-                    },
-                    "full": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "entries",
-                    "full"
-                  ]
-                }
-              },
-              "required": [
-                "_llms"
-              ]
-            }
-          }
-        },
-        {
           "spec": "events.emit:page.deleted",
           "name": "events.emit",
           "module": "events/direct",
@@ -11293,6 +11506,85 @@
             "writes": [],
             "errors": {
               "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -11510,129 +11802,6 @@
           "atomic": 1
         },
         {
-          "spec": "delivery.publish:pages",
-          "name": "delivery.publish",
-          "module": "delivery/static",
-          "description": {
-            "summary": "Render and store published locales of a pages (adds `_delivery` to the result)",
-            "reads": [
-              "result.id?",
-              "payload"
-            ],
-            "writes": [
-              "result._delivery"
-            ],
-            "input": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": true
-            },
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "_delivery": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string"
-                      },
-                      "docId": {
-                        "type": "string"
-                      },
-                      "locale": {
-                        "type": "string"
-                      },
-                      "state": {
-                        "type": "string",
-                        "enum": [
-                          "live",
-                          "error",
-                          "draft"
-                        ]
-                      },
-                      "path": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "error": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "publishedAt": {
-                        "type": [
-                          "number",
-                          "null"
-                        ]
-                      },
-                      "updatedAt": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "docId",
-                      "locale",
-                      "state",
-                      "updatedAt"
-                    ]
-                  }
-                }
-              },
-              "required": [
-                "_delivery"
-              ]
-            },
-            "errors": {
-              "400": "no document id in the result or the event payload"
-            }
-          }
-        },
-        {
-          "spec": "delivery.exportLlms",
-          "name": "delivery.exportLlms",
-          "module": "delivery/static",
-          "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
-            "reads": [],
-            "writes": [
-              "result._llms"
-            ],
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "_llms": {
-                  "type": "object",
-                  "properties": {
-                    "entries": {
-                      "type": "integer"
-                    },
-                    "full": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "entries",
-                    "full"
-                  ]
-                }
-              },
-              "required": [
-                "_llms"
-              ]
-            }
-          }
-        },
-        {
           "spec": "events.emit:page.translationRemoved",
           "name": "events.emit",
           "module": "events/direct",
@@ -11642,6 +11811,85 @@
             "writes": [],
             "errors": {
               "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -11756,6 +12004,85 @@
             "writes": [],
             "errors": {
               "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -15040,6 +15367,85 @@
               "500": "a subscribed handler failed"
             }
           }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
+            }
+          }
         }
       ]
     },
@@ -15101,6 +15507,85 @@
             "writes": [],
             "errors": {
               "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -16259,6 +16744,134 @@
               "required": [
                 "redirects"
               ]
+            }
+          }
+        },
+        {
+          "spec": "delivery.exportLlms",
+          "name": "delivery.exportLlms",
+          "module": "delivery/static",
+          "description": {
+            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
+            "reads": [],
+            "writes": [
+              "result._llms"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_llms": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "integer"
+                    },
+                    "full": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "entries",
+                    "full"
+                  ]
+                }
+              },
+              "required": [
+                "_llms"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "publishPage",
+      "steps": [
+        {
+          "spec": "delivery.publish:pages",
+          "name": "delivery.publish",
+          "module": "delivery/static",
+          "description": {
+            "summary": "Render and store published locales of a pages (adds `_delivery` to the result)",
+            "reads": [
+              "result.id?",
+              "payload"
+            ],
+            "writes": [
+              "result._delivery"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_delivery": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string"
+                      },
+                      "docId": {
+                        "type": "string"
+                      },
+                      "locale": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "live",
+                          "error",
+                          "draft"
+                        ]
+                      },
+                      "path": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "publishedAt": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "updatedAt": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "docId",
+                      "locale",
+                      "state",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "_delivery"
+              ]
+            },
+            "errors": {
+              "400": "no document id in the result or the event payload"
             }
           }
         },
@@ -18284,129 +18897,6 @@
           "atomic": 1
         },
         {
-          "spec": "delivery.publish:pages",
-          "name": "delivery.publish",
-          "module": "delivery/static",
-          "description": {
-            "summary": "Render and store published locales of a pages (adds `_delivery` to the result)",
-            "reads": [
-              "result.id?",
-              "payload"
-            ],
-            "writes": [
-              "result._delivery"
-            ],
-            "input": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": true
-            },
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "_delivery": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string"
-                      },
-                      "docId": {
-                        "type": "string"
-                      },
-                      "locale": {
-                        "type": "string"
-                      },
-                      "state": {
-                        "type": "string",
-                        "enum": [
-                          "live",
-                          "error",
-                          "draft"
-                        ]
-                      },
-                      "path": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "error": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "publishedAt": {
-                        "type": [
-                          "number",
-                          "null"
-                        ]
-                      },
-                      "updatedAt": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "docId",
-                      "locale",
-                      "state",
-                      "updatedAt"
-                    ]
-                  }
-                }
-              },
-              "required": [
-                "_delivery"
-              ]
-            },
-            "errors": {
-              "400": "no document id in the result or the event payload"
-            }
-          }
-        },
-        {
-          "spec": "delivery.exportLlms",
-          "name": "delivery.exportLlms",
-          "module": "delivery/static",
-          "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
-            "reads": [],
-            "writes": [
-              "result._llms"
-            ],
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "_llms": {
-                  "type": "object",
-                  "properties": {
-                    "entries": {
-                      "type": "integer"
-                    },
-                    "full": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "entries",
-                    "full"
-                  ]
-                }
-              },
-              "required": [
-                "_llms"
-              ]
-            }
-          }
-        },
-        {
           "spec": "revisions.reportRestore",
           "name": "revisions.reportRestore",
           "module": "revisions/default",
@@ -18462,6 +18952,85 @@
             "writes": [],
             "errors": {
               "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -19618,6 +20187,71 @@
       ]
     },
     {
+      "name": "unpublishPage",
+      "steps": [
+        {
+          "spec": "delivery.unpublish:pages",
+          "name": "delivery.unpublish",
+          "module": "delivery/static",
+          "description": {
+            "summary": "Remove rendered output of a pages",
+            "reads": [
+              "params.id",
+              "payload"
+            ],
+            "writes": [],
+            "input": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
+            "errors": {
+              "400": "no document id in params or the event payload"
+            }
+          }
+        },
+        {
+          "spec": "delivery.exportLlms",
+          "name": "delivery.exportLlms",
+          "module": "delivery/static",
+          "description": {
+            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
+            "reads": [],
+            "writes": [
+              "result._llms"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_llms": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "integer"
+                    },
+                    "full": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "entries",
+                    "full"
+                  ]
+                }
+              },
+              "required": [
+                "_llms"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "updateMedia",
       "steps": [
         {
@@ -19866,6 +20500,85 @@
             "writes": [],
             "errors": {
               "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -20219,129 +20932,6 @@
           "atomic": 1
         },
         {
-          "spec": "delivery.publish:pages",
-          "name": "delivery.publish",
-          "module": "delivery/static",
-          "description": {
-            "summary": "Render and store published locales of a pages (adds `_delivery` to the result)",
-            "reads": [
-              "result.id?",
-              "payload"
-            ],
-            "writes": [
-              "result._delivery"
-            ],
-            "input": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": true
-            },
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "_delivery": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string"
-                      },
-                      "docId": {
-                        "type": "string"
-                      },
-                      "locale": {
-                        "type": "string"
-                      },
-                      "state": {
-                        "type": "string",
-                        "enum": [
-                          "live",
-                          "error",
-                          "draft"
-                        ]
-                      },
-                      "path": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "error": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "publishedAt": {
-                        "type": [
-                          "number",
-                          "null"
-                        ]
-                      },
-                      "updatedAt": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "docId",
-                      "locale",
-                      "state",
-                      "updatedAt"
-                    ]
-                  }
-                }
-              },
-              "required": [
-                "_delivery"
-              ]
-            },
-            "errors": {
-              "400": "no document id in the result or the event payload"
-            }
-          }
-        },
-        {
-          "spec": "delivery.exportLlms",
-          "name": "delivery.exportLlms",
-          "module": "delivery/static",
-          "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
-            "reads": [],
-            "writes": [
-              "result._llms"
-            ],
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "_llms": {
-                  "type": "object",
-                  "properties": {
-                    "entries": {
-                      "type": "integer"
-                    },
-                    "full": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "entries",
-                    "full"
-                  ]
-                }
-              },
-              "required": [
-                "_llms"
-              ]
-            }
-          }
-        },
-        {
           "spec": "events.emit:page.updated",
           "name": "events.emit",
           "module": "events/direct",
@@ -20351,6 +20941,85 @@
             "writes": [],
             "errors": {
               "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -20484,6 +21153,85 @@
             "writes": [],
             "errors": {
               "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -20878,6 +21626,85 @@
               "500": "a subscribed handler failed"
             }
           }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
+            }
+          }
         }
       ]
     }
@@ -21236,6 +22063,26 @@
       }
     ],
     "events": [
+      {
+        "event": "page.created",
+        "pipeline": "publishPage"
+      },
+      {
+        "event": "page.updated",
+        "pipeline": "publishPage"
+      },
+      {
+        "event": "page.restored",
+        "pipeline": "publishPage"
+      },
+      {
+        "event": "page.translationRemoved",
+        "pipeline": "publishPage"
+      },
+      {
+        "event": "page.deleted",
+        "pipeline": "unpublishPage"
+      },
       {
         "event": "media.uploaded",
         "pipeline": "generateImageVariants"

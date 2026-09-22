@@ -38,6 +38,6 @@ Not included: ownership/resource checks (the `resource` argument is ignored), ro
 | `authz.listRoles` | The configured role names, in config order | – | `result.roles` | – | { roles: string[], … } | – | – | no |
 | `authz.validateRoles:<arg>` | Validate the role names at payload.<arg> against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept | `payload.<arg>` | – | object | – | 400 the value is not an array of known role names | – | no |
 
-Used by 65 of 83 pipelines in `examples/minimal`.
+Used by 65 of 85 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->
