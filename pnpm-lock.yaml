@@ -128,6 +128,9 @@ importers:
       '@michaelthielemann/kestrel-events-inmemory':
         specifier: workspace:*
         version: link:../../packages/events-inmemory
+      '@michaelthielemann/kestrel-events-queue':
+        specifier: workspace:*
+        version: link:../../packages/events-queue
       '@michaelthielemann/kestrel-images-default':
         specifier: workspace:*
         version: link:../../packages/images-default

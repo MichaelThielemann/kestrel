@@ -3,12 +3,15 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { boot, KestrelBootError } from "@michaelthielemann/kestrel";
+import { boot, defineModule, definePipeline, err, failure, KestrelBootError } from "@michaelthielemann/kestrel";
 import { loadConfig, loadModules, loadPipelines } from "@michaelthielemann/kestrel/load";
 import type { RevisionPage } from "@michaelthielemann/kestrel-contracts/revisions";
+import type { PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
+import { STATUS as DELIVERY_STATUS_COLLECTION } from "@michaelthielemann/kestrel-delivery-static/impl";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { KestrelConfigInput } from "@michaelthielemann/kestrel/defineConfig";
 import { pipelineSteps, type PipelineDefinition } from "@michaelthielemann/kestrel/definePipeline";
+import type { Result } from "@michaelthielemann/kestrel/result";
 
 const root = dirname(fileURLToPath(import.meta.url));
 
@@ -382,6 +385,81 @@ async function bootIsolated(withPipelines?: (pipelines: PipelineDefinition[]) =>
   };
 }
 
+interface PersistenceCall {
+  method: string;
+  collection: string;
+}
+
+const PERSISTENCE_METHODS = ["ensureCollection", "createOne", "createMany", "findOne", "findMany", "count", "updateOne", "updateMany", "deleteOne", "deleteMany"] as const;
+
+function spyOnPersistence(base: unknown, calls: PersistenceCall[], targetCollection: string, armed: { value: boolean }): unknown {
+  const record = boundaryCast<Record<string, unknown>>(base, "host");
+  const wrapped: Record<string, unknown> = { ...record };
+  for (const name of PERSISTENCE_METHODS) {
+    const original = boundaryCast<(...args: unknown[]) => Promise<unknown>>(record[name], "host");
+    wrapped[name] = (...args: unknown[]): Promise<unknown> => {
+      const collection = typeof args[0] === "string" ? args[0] : "";
+      if (name === "findOne" && armed.value && collection === targetCollection) {
+        armed.value = false;
+        calls.push({ method: "findOne (forced failure)", collection });
+        const forced: Result<never, PersistenceError> = err(failure("TRANSIENT", "forced failure for the test"));
+        return Promise.resolve(forced);
+      }
+      calls.push({ method: name, collection });
+      return original(...args);
+    };
+  }
+  return wrapped;
+}
+
+async function bootWithQueue(): Promise<{
+  kestrel: Awaited<ReturnType<typeof boot>>;
+  dispose: () => Promise<void>;
+  calls: PersistenceCall[];
+  armStatusFailureOnce: () => void;
+}> {
+  const configInput = await loadConfig(join(root, "kestrel.config.ts"));
+  const dataDir = mkdtempSync(join(tmpdir(), "kestrel-minimal-queue-"));
+  const isolated: KestrelConfigInput = {
+    ...configInput,
+    http: null,
+    modules: configInput.modules.map((m) => {
+      if (m.use === "@michaelthielemann/kestrel-persistence-sqlite") return { ...m, config: { ...(m.config as object), file: ":memory:" } };
+      if (m.use === "@michaelthielemann/kestrel-replication-sqlite") return { ...m, config: { ...(m.config as object), file: join(dataDir, "replication.db") } };
+      if (m.use === "@michaelthielemann/kestrel-blobstore-filesystem") return { ...m, config: { ...(m.config as object), root: join(dataDir, "blobs") } };
+      if (m.use === "@michaelthielemann/kestrel-events-direct") return { use: "@michaelthielemann/kestrel-events-queue", config: { maxAttempts: 1, relayMs: 5000 } };
+      return m;
+    }),
+  };
+  const loadedModules = await loadModules(root, isolated);
+  const calls: PersistenceCall[] = [];
+  const armed = { value: false };
+  const modules = loadedModules.map((mod) => {
+    if (mod.name !== "persistence/sqlite") return mod;
+    return defineModule({
+      ...mod,
+      async setup(config, deps) {
+        const real = await mod.setup(config, deps);
+        return spyOnPersistence(real, calls, DELIVERY_STATUS_COLLECTION, armed);
+      },
+    });
+  });
+  const pipelines = [...(await loadPipelines(root, "pipelines")), definePipeline({ name: "listDeadEvents", steps: ["events.listDead"] }), definePipeline({ name: "retryDeadEvent", steps: ["events.retryDead:one"] })];
+  const kestrel = await boot({ config: isolated, modules, pipelines, root, validateOutput: true });
+  await kestrel.start();
+  return {
+    kestrel,
+    calls,
+    armStatusFailureOnce: () => {
+      armed.value = true;
+    },
+    dispose: async () => {
+      await kestrel.stop();
+      rmSync(dataDir, { recursive: true, force: true });
+    },
+  };
+}
+
 describe("demo bootstrap credentials", () => {
   it("logs the demo admin in with the documented password", async () => {
     const { kestrel, dispose } = await bootIsolated();
@@ -679,6 +757,50 @@ describe("user deletion wiring", () => {
 
       const noId = await kestrel.run("retryReassignRevisionAuthor", { trigger, headers: bearer(admin.token), params: { id: editor.id }, payload: { reassignTo: { name: "no-id" } }, body: { reassignTo: { name: "no-id" } } });
       expect(noId.status).toBe(400);
+    } finally {
+      await dispose();
+    }
+  });
+});
+
+describe("events/queue relay: a forced delivery.publish failure through POST /pages", () => {
+  it("answers 200 with _events.status \"error\"; the run is visible in the dead letter and retriable; the retry does not re-run revisions or references; the write is not rolled back", async () => {
+    const { kestrel, dispose, calls, armStatusFailureOnce } = await bootWithQueue();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+
+      armStatusFailureOnce();
+      const created = await kestrel.run("createPage", {
+        trigger,
+        headers: bearer(admin.token),
+        payload: { slug: "queue-relay", title: "A", status: "draft" },
+        body: { slug: "queue-relay", title: "A", status: "draft" },
+      });
+      expect(created.status).toBe(200);
+      const body = boundaryCast<{ id: string; _events?: { status: string; pipelines: { pipeline: string; status: string; dead: boolean }[] } }>(created.result, "json");
+      const pageId = body.id;
+      expect(body._events?.status).toBe("error");
+      expect(body._events?.pipelines).toContainEqual(expect.objectContaining({ pipeline: "publishPage", status: "error", dead: true }));
+
+      const read = await kestrel.run("readAnyPage", { trigger, headers: bearer(admin.token), params: { id: pageId } });
+      expect(read.status).toBe(200);
+      const revisions = await revisionsOf(kestrel, admin, pageId);
+      expect(revisions.total).toBe(1);
+
+      const derivedTouches = (log: PersistenceCall[]): number => log.filter((c) => c.collection === "revisions_entries" || c.collection === "revisions_heads" || c.collection === "references_index").length;
+      const touchesBeforeRetry = derivedTouches(calls);
+
+      const dead = await kestrel.run("listDeadEvents", { trigger, headers: bearer(admin.token) });
+      expect(dead.status).toBe(200);
+      const deadItems = boundaryCast<{ items: { id: string; pipeline: string }[] }>(dead.result, "json").items;
+      const deadRow = deadItems.find((d) => d.pipeline === "publishPage");
+      expect(deadRow).toBeDefined();
+
+      const retried = await kestrel.run("retryDeadEvent", { trigger, headers: bearer(admin.token), params: { id: deadRow!.id } });
+      expect(retried.status).toBe(200);
+      expect(retried.result).toEqual({ retried: 1 });
+
+      expect(derivedTouches(calls)).toBe(touchesBeforeRetry);
     } finally {
       await dispose();
     }

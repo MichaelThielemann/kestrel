@@ -7987,7 +7987,7 @@
         "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
         "reads": [],
         "writes": [
-          "result._events"
+          "result?"
         ],
         "extendsOutput": {
           "type": "object",
@@ -10585,7 +10585,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -10801,7 +10801,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -10960,7 +10960,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -11149,7 +11149,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -11517,7 +11517,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -11822,7 +11822,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -12015,7 +12015,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -15376,7 +15376,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -15518,7 +15518,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -18963,7 +18963,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -20511,7 +20511,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -20952,7 +20952,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -21164,7 +21164,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
@@ -21635,7 +21635,7 @@
             "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._events"
+              "result?"
             ],
             "extendsOutput": {
               "type": "object",
