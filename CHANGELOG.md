@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 5.8.1 – 2026-09-22
+
+### Fixed
+
+- `replication-sqlite`: every restore of a generation with at least one WAL segment produced a
+  database that failed with `database disk image is malformed`. The snapshot was written with
+  `VACUUM INTO`, which renumbers pages, while the segments carry WAL frames addressed by the live
+  file's page numbers. The snapshot is now the main database file with the committed WAL frames
+  applied on top, so it shares the page layout of the frames shipped after it. A restore now opens
+  the rebuilt file and runs `PRAGMA quick_check` before handing it over; a failure is
+  `Err(TRANSIENT)` naming the generation and the point restored, and leaves no file behind.
+  Replicas written by earlier versions cannot be restored: purge the prefix so the next
+  `replication.sync` starts a fresh generation.
+
 ## 5.8.0 – 2026-09-20
 
 ### Added
