@@ -1,5 +1,5 @@
 import { Server } from "node:http";
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { z } from "zod";
 import { boot, type Kestrel } from "./boot.ts";
 import { boundaryCast } from "./cast.ts";
@@ -1194,8 +1194,10 @@ describe("boot", () => {
     expect(res.details).toEqual({ problems: [{ path: "$.nope", message: "is not allowed by additionalProperties: false" }] });
   });
 
-  describe("module-order warning", () => {
+  describe("before reorders setup", () => {
     const DB = defineContract<{ open(): void }>()("db@1", ["open"]);
+
+    const setupOrder: string[] = [];
 
     const dbModule = defineModule({
       name: "db/store",
@@ -1203,6 +1205,7 @@ describe("boot", () => {
       requires: [],
       configSchema: z.object({}).strict(),
       async setup(): Promise<{ open(): void }> {
+        setupOrder.push("db/store");
         return { open() {} };
       },
     });
@@ -1212,6 +1215,7 @@ describe("boot", () => {
       requires: [DB],
       configSchema: z.object({}).strict(),
       async setup(): Promise<null> {
+        setupOrder.push("feature/x");
         return null;
       },
     });
@@ -1222,39 +1226,54 @@ describe("boot", () => {
       before: [DB],
       configSchema: z.object({}).strict(),
       async setup(): Promise<null> {
+        setupOrder.push("restore/r");
         return null;
       },
     });
 
-    function warningLogger(): { warnings: { message: string; data: Record<string, unknown> | undefined }[]; logger: typeof silentLogger } {
-      const warnings: { message: string; data: Record<string, unknown> | undefined }[] = [];
-      return { warnings, logger: { ...silentLogger, warn: (message: string, data?: Record<string, unknown>) => warnings.push({ message, data }) } };
-    }
+    beforeEach(() => {
+      setupOrder.length = 0;
+    });
 
-    it("reports a module declaring before that was set up after the provider it names", async () => {
-      const { warnings, logger } = warningLogger();
+    it("sets up a module declaring before ahead of the module providing the contract it names, listed order notwithstanding", async () => {
       const config = { modules: [{ use: "./db" }, { use: "./r" }], triggers: [], http: null };
-      kestrel = await boot({ config, modules: [dbModule, restoreModule], pipelines: [], logger });
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]?.message).toBe('module "restore/r" declares before "db@1" but was set up after "db/store"; move it earlier in kestrel.config.modules');
-      expect(warnings[0]?.data).toEqual({ module: "restore/r", contract: "db@1", provider: "db/store" });
-      expect(kestrel.warnings).toEqual([{ code: "module-order", message: warnings[0]?.message, module: "restore/r", contract: "db@1", provider: "db/store" }]);
-    });
-
-    it("fires when a consumer listed between the restore module and its provider pulls the provider forward", async () => {
-      const { warnings, logger } = warningLogger();
-      const config = { modules: [{ use: "./x" }, { use: "./r" }, { use: "./db" }], triggers: [], http: null };
-      kestrel = await boot({ config, modules: [consumerModule, restoreModule, dbModule], pipelines: [], logger });
-      expect(warnings).toHaveLength(1);
-      expect(kestrel.warnings).toEqual([{ code: "module-order", message: warnings[0]?.message, module: "restore/r", contract: "db@1", provider: "db/store" }]);
-    });
-
-    it("stays quiet when the restore module is listed before anything that depends on its target", async () => {
-      const { warnings, logger } = warningLogger();
-      const config = { modules: [{ use: "./r" }, { use: "./x" }, { use: "./db" }], triggers: [], http: null };
-      kestrel = await boot({ config, modules: [restoreModule, consumerModule, dbModule], pipelines: [], logger });
-      expect(warnings).toEqual([]);
+      kestrel = await boot({ config, modules: [dbModule, restoreModule], pipelines: [], logger: silentLogger });
+      expect(setupOrder).toEqual(["restore/r", "db/store"]);
       expect(kestrel.warnings).toEqual([]);
+    });
+
+    it("still reorders when a consumer listed between the restore module and its provider would otherwise pull the provider forward", async () => {
+      const config = { modules: [{ use: "./x" }, { use: "./r" }, { use: "./db" }], triggers: [], http: null };
+      kestrel = await boot({ config, modules: [consumerModule, restoreModule, dbModule], pipelines: [], logger: silentLogger });
+      expect(setupOrder.indexOf("restore/r")).toBeLessThan(setupOrder.indexOf("db/store"));
+      expect(kestrel.warnings).toEqual([]);
+    });
+
+    it("fails boot with the cycle path when the provider of the named contract depends on the declaring module transitively", async () => {
+      const BLOBSTORE = defineContract<{ read(): void }>()("blobstore@1", ["read"]);
+      const blobstoreModule = defineModule({
+        name: "blobstore/consumer",
+        provides: [BLOBSTORE],
+        requires: [DB],
+        configSchema: z.object({}).strict(),
+        async setup(): Promise<{ read(): void }> {
+          return { read() {} };
+        },
+      });
+      const dependentRestoreModule = defineModule({
+        name: "restore/dependent",
+        provides: [],
+        requires: [BLOBSTORE],
+        before: [DB],
+        configSchema: z.object({}).strict(),
+        async setup(): Promise<null> {
+          return null;
+        },
+      });
+      const config = { modules: [{ use: "./db" }, { use: "./blobstore" }, { use: "./restore" }], triggers: [], http: null };
+      await expect(boot({ config, modules: [dbModule, blobstoreModule, dependentRestoreModule], pipelines: [], logger: silentLogger })).rejects.toThrow(
+        new KestrelBootError("db/store", "dependency cycle: db/store -> restore/dependent -> blobstore/consumer -> db/store"),
+      );
     });
   });
 });

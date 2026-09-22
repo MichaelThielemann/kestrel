@@ -35,6 +35,14 @@ export function sortModules(modules: readonly ModuleDefinition[]): ModuleDefinit
     dependsOn.set(m, deps);
   }
 
+  for (const m of modules) {
+    for (const contract of m.before ?? []) {
+      const provider = providerOf.get(contract.name);
+      if (!provider || provider === m) continue;
+      dependsOn.get(provider)?.push(m);
+    }
+  }
+
   const hook = modules.find((m) => m.triggers?.event !== undefined);
   if (hook) {
     const needed = new Set<ModuleDefinition>();
@@ -64,27 +72,4 @@ export function sortModules(modules: readonly ModuleDefinition[]): ModuleDefinit
   };
   for (const m of modules) visit(m, []);
   return sorted;
-}
-
-export interface ModuleOrderViolation {
-  module: string;
-  contract: string;
-  provider: string;
-}
-
-/** For each module declaring `before: [C]` that ended up after the provider of `C` in `sorted`, one violation. `before` is not applied here; it is checked only. */
-export function findModuleOrderViolations(sorted: readonly ModuleDefinition[]): ModuleOrderViolation[] {
-  const indexOf = new Map<ModuleDefinition, number>(sorted.map((m, i) => [m, i]));
-  const providerOf = new Map<string, ModuleDefinition>();
-  for (const m of sorted) for (const contract of m.provides) providerOf.set(contract.name, m);
-
-  const violations: ModuleOrderViolation[] = [];
-  for (const m of sorted) {
-    for (const contract of m.before ?? []) {
-      const provider = providerOf.get(contract.name);
-      if (!provider || provider === m) continue;
-      if ((indexOf.get(provider) ?? -1) < (indexOf.get(m) ?? -1)) violations.push({ module: m.name, contract: contract.name, provider: provider.name });
-    }
-  }
-  return violations;
 }

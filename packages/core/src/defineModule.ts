@@ -120,7 +120,7 @@ export interface ModuleDefinition<N extends string = string, T extends StepMap =
   provides: readonly Contract<unknown>[];
   requires: readonly Contract<unknown>[];
   optional?: readonly Contract<unknown>[];
-  /** Contracts whose provider must be set up after this module. Checked and reported as a `module-order` boot warning; becomes a real ordering edge in the next major. */
+  /** Contracts whose provider is set up after this module. A declarer whose target's provider depends on it, directly or transitively, fails boot as a dependency cycle. */
   before?: readonly Contract<unknown>[];
   configSchema: ZodTypeAny;
   setup(config: unknown, deps: Deps): Promise<unknown>;

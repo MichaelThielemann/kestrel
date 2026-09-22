@@ -1,4 +1,4 @@
-export { boot, type Kestrel, type BootInput, type BootWarning, type UnemittedEventWarning, type UndeclaredOutputWarning, type UndeclaredRequiredWarning, type ModuleOrderWarning, type Triggers } from "./boot.ts";
+export { boot, type Kestrel, type BootInput, type BootWarning, type UnemittedEventWarning, type UndeclaredOutputWarning, type UndeclaredRequiredWarning, type Triggers } from "./boot.ts";
 export { matchRoute, routePattern, parseRequestBody, parseQuery, buildResponse, responseForRun, errorResponse, clientIp, BodyTooLarge, type Route, type ParsedBody, type HttpResponse, type HttpTimeouts, type ClientIpOptions, type ResponseMeta } from "./triggers/http.ts";
 export { defineConfig, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
 export { defineContract, type Contract } from "./defineContract.ts";

@@ -1,4 +1,4 @@
-import type { BootWarning, JsonSchema, Logger, Manifest, ModuleManifest, ModuleOrderWarning, StepDescription, StepManifest, UndeclaredOutputWarning, UndeclaredRequiredWarning, UnemittedEventWarning } from "../packages/core/src/index.ts";
+import type { BootWarning, JsonSchema, Logger, Manifest, ModuleManifest, StepDescription, StepManifest, UndeclaredOutputWarning, UndeclaredRequiredWarning, UnemittedEventWarning } from "../packages/core/src/index.ts";
 import { STEP_SETS } from "../packages/contracts/src/steps.ts";
 
 export const START = "<!-- kestrel-docs:start -->";
@@ -148,7 +148,7 @@ export function rootTable(packages: PackageInfo[]): string {
   return [START, "| Package | Purpose |", "|---|---|", ...rows, END].join("\n");
 }
 
-export type BootWarningKey = Pick<UnemittedEventWarning, "code" | "pipeline" | "event"> | Pick<UndeclaredOutputWarning, "code" | "pipeline" | "step"> | Pick<UndeclaredRequiredWarning, "code" | "pipeline" | "step" | "path"> | Pick<ModuleOrderWarning, "code" | "module" | "contract">;
+export type BootWarningKey = Pick<UnemittedEventWarning, "code" | "pipeline" | "event"> | Pick<UndeclaredOutputWarning, "code" | "pipeline" | "step"> | Pick<UndeclaredRequiredWarning, "code" | "pipeline" | "step" | "path">;
 
 function bootWarningKey(warning: BootWarningKey): string {
   switch (warning.code) {
@@ -158,8 +158,6 @@ function bootWarningKey(warning: BootWarningKey): string {
       return `${warning.code}:${warning.pipeline}:${warning.step}`;
     case "undeclared-required":
       return `${warning.code}:${warning.pipeline}:${warning.step}:${warning.path}`;
-    case "module-order":
-      return `${warning.code}:${warning.module}:${warning.contract}`;
     default: {
       const exhaustive: never = warning;
       return exhaustive;
@@ -180,8 +178,6 @@ export function formatBootWarning(warning: BootWarning): string {
       return `pipeline "${warning.pipeline}", step "${warning.step}": ${warning.message}`;
     case "undeclared-required":
       return `pipeline "${warning.pipeline}", step "${warning.step}", ${warning.path}: ${warning.message}`;
-    case "module-order":
-      return `module "${warning.module}": ${warning.message}`;
     default: {
       const exhaustive: never = warning;
       return exhaustive;
@@ -218,8 +214,6 @@ function matchesBootWarning(entry: LogEntry, warning: BootWarning): boolean {
       return entry.message === warning.message && entry.data?.pipeline === warning.pipeline && entry.data?.step === warning.step;
     case "undeclared-required":
       return entry.message === warning.message && entry.data?.pipeline === warning.pipeline && entry.data?.step === warning.step && entry.data?.path === warning.path;
-    case "module-order":
-      return entry.message === warning.message && entry.data?.module === warning.module && entry.data?.contract === warning.contract && entry.data?.provider === warning.provider;
     default: {
       const exhaustive: never = warning;
       return exhaustive;
