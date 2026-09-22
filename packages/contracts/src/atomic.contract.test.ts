@@ -137,9 +137,32 @@ export function atomicScopeTests(make: () => Promise<AtomicScopeFixture>): void 
       expect(expectOk(await db.findOne<Row>("rows", { id: "late" }))?.name).toBe("late");
       await close();
     });
+
+    it("a read issued concurrently from outside the scope never observes an uncommitted row", async () => {
+      const { db, scope, close } = await make();
+      expectOk(await db.ensureCollection("rows", { name: "string" }));
+      let releaseScope: () => void = () => {};
+      const scopeEntered = new Promise<void>((resolve) => {
+        releaseScope = resolve;
+      });
+      const scopeDone = scope({ pipeline: "p", group: 1 }, async () => {
+        await db.createOne<Row>("rows", { id: "a", name: "alpha" });
+        releaseScope();
+        await new Promise((r) => setTimeout(r, 30));
+        return "commit";
+      });
+      await scopeEntered;
+      const startedAt = Date.now();
+      const read = expectOk(await db.findMany<Row>("rows", {}));
+      const waited = Date.now() - startedAt;
+      if (waited < 20) expect(read.items).toEqual([]);
+      else expect(read.items.map((r) => r.id)).toEqual(["a"]);
+      await scopeDone;
+      await close();
+    });
   });
 
-  describe("atomic scope timeout (fixture pre-configures a short budget)", () => {
+  describe("atomic scope timeout (fixture pre-configures a short scopeTimeoutMs)", () => {
     it("a body that outlives the scope's own budget times out, and none of its writes are stored", async () => {
       const { db, scope, close } = await make();
       expectOk(await db.ensureCollection("rows", { name: "string" }));
@@ -152,6 +175,64 @@ export function atomicScopeTests(make: () => Promise<AtomicScopeFixture>): void 
       if (outcome.kind === "failed") expect(outcome.phase).toBe("timeout");
       const rows = expectOk(await db.findMany<Row>("rows", {}));
       expect(rows.items).toEqual([]);
+      await close();
+    });
+
+    it("a write scheduled from inside a timed-out scope's context, but not yet run when it settled, writes nothing", async () => {
+      const { db, scope, close } = await make();
+      expectOk(await db.ensureCollection("rows", { name: "string" }));
+      let late: Promise<unknown> = Promise.resolve();
+      let settled = false;
+      const pollUntilSettled = () => {
+        setTimeout(() => {
+          if (!settled) {
+            pollUntilSettled();
+            return;
+          }
+          late = db.createOne<Row>("rows", { id: "late", name: "late" }).catch((e: unknown) => e);
+        }, 5);
+      };
+      const outcome = await scope({ pipeline: "p", group: 1 }, async () => {
+        pollUntilSettled();
+        await new Promise((r) => setTimeout(r, 1000));
+        return "commit";
+      });
+      settled = true;
+      expect(outcome.kind).toBe("failed");
+      if (outcome.kind === "failed") expect(outcome.phase).toBe("timeout");
+      await new Promise((r) => setTimeout(r, 20));
+      expect(await late).toBeInstanceOf(Error);
+      const rows = expectOk(await db.findMany<Row>("rows", {}));
+      expect(rows.items).toEqual([]);
+      await close();
+    });
+  });
+
+  describe("atomic scope acquire budget (fixture pre-configures a short acquireTimeoutMs)", () => {
+    it("a waiter whose acquire budget expires while queued never begins a transaction; the holder's own writes still land", async () => {
+      const { db, scope, close } = await make();
+      expectOk(await db.ensureCollection("rows", { name: "string" }));
+      let releaseHolder: () => void = () => {};
+      const holderEntered = new Promise<void>((resolve) => {
+        releaseHolder = resolve;
+      });
+      const holder = scope({ pipeline: "p", group: 1 }, async () => {
+        releaseHolder();
+        await new Promise((r) => setTimeout(r, 300));
+        await db.createOne<Row>("rows", { id: "holder", name: "holder" });
+        return "commit";
+      });
+      await holderEntered;
+      let waiterRan = false;
+      const waiter = await scope({ pipeline: "p", group: 2 }, async () => {
+        waiterRan = true;
+        return "commit";
+      });
+      expect(waiter.kind).toBe("failed");
+      if (waiter.kind === "failed") expect(waiter.phase).toBe("begin");
+      expect(waiterRan).toBe(false);
+      await holder;
+      expect(expectOk(await db.findOne<Row>("rows", { id: "holder" }))?.name).toBe("holder");
       await close();
     });
   });

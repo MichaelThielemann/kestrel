@@ -127,16 +127,58 @@ export interface FakePersistence extends Persistence {
   failScope(phase: "begin" | "commit" | "rollback"): void;
   /** How long a fake scope may hold the store; the fake's equivalent of `scopeTimeoutMs`. Default 5000. */
   scopeTimeoutMs: number;
+  /** How long a call may wait its turn behind an open scope; the fake's equivalent of `acquireTimeoutMs`. Default 5000. */
+  acquireTimeoutMs: number;
+}
+
+class AcquireTimeout extends Error {}
+
+interface FakeScopeStore {
+  state: "open" | "committed" | "rolled-back";
 }
 
 export function createFakePersistence(): FakePersistence {
   const collections = new Map<string, { schema: Record<string, FieldDefinition>; rows: Map<string, Row> }>();
   let pending: "TRANSIENT" | "CONFLICT" | null = null;
   let pendingScopeFailure: "begin" | "commit" | "rollback" | null = null;
-  let scopeChain: Promise<void> = Promise.resolve();
-  const als = new AsyncLocalStorage<true>();
-  const inScope = () => als.getStore() === true;
-  const state = { scopeTimeoutMs: 5000 };
+  const als = new AsyncLocalStorage<FakeScopeStore>();
+  const inScope = () => als.getStore()?.state === "open";
+  const state = { scopeTimeoutMs: 5000, acquireTimeoutMs: 5000 };
+
+  let tail: Promise<void> = Promise.resolve();
+  const enqueue = <T>(fn: () => Promise<T> | T, deadline?: number, onStart?: () => void): Promise<T> => {
+    const handOff = (): Promise<T> | T => {
+      if (deadline !== undefined && Date.now() > deadline) return Promise.reject(new AcquireTimeout());
+      onStart?.();
+      return fn();
+    };
+    const run = tail.then(handOff, handOff);
+    tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
+  const checkScopeState = (collection: string): void => {
+    const store = als.getStore();
+    if (store?.state === "rolled-back") {
+      throw new Error(`fakePersistence: the atomic scope was rolled back; this call was not executed (collection "${collection}")`);
+    }
+    if (store?.state === "committed") console.warn("fakePersistence: call after the atomic scope committed");
+  };
+  const routed = <T>(collection: string, fn: () => T): Promise<T> => {
+    try {
+      checkScopeState(collection);
+      if (inScope()) return Promise.resolve(fn());
+      return enqueue(fn).catch((cause: unknown) => {
+        if (cause instanceof AcquireTimeout) throw new Error(`fakePersistence: timed out waiting for the store (collection "${collection}")`);
+        throw cause;
+      });
+    } catch (cause) {
+      return Promise.reject(cause instanceof Error ? cause : new Error(String(cause)));
+    }
+  };
   const snapshotCollections = () => new Map([...collections].map(([name, c]) => [name, { schema: c.schema, rows: new Map(c.rows) }]));
   const restoreCollections = (snapshot: Map<string, { schema: Record<string, FieldDefinition>; rows: Map<string, Row> }>) => {
     collections.clear();
@@ -187,70 +229,82 @@ export function createFakePersistence(): FakePersistence {
     return out;
   };
 
-  const createOne = async <T extends Document>(collection: string, data: NewDocument<T>): Promise<Result<T, PersistenceError>> => {
-    const injectedError = injected();
-    if (injectedError) return err(injectedError);
-    const { schema, rows } = table(collection);
-    const id = data.id ?? randomUUID();
-    if (rows.has(id)) return err(failure("CONFLICT", `fakePersistence: "${collection}/${id}" already exists`));
-    const row: Row = { ...Object.fromEntries(Object.keys(schema).map((f) => [f, null])), ...normalize(schema, data), id };
-    const violation = uniqueViolation(collection, row, undefined);
-    if (violation) return err(violation);
-    rows.set(id, row);
-    return ok(cloneAs<T>(row));
+  const createOne = <T extends Document>(collection: string, data: NewDocument<T>): Promise<Result<T, PersistenceError>> =>
+    routed(collection, () => {
+      const injectedError = injected();
+      if (injectedError) return err(injectedError);
+      const { schema, rows } = table(collection);
+      const id = data.id ?? randomUUID();
+      if (rows.has(id)) return err(failure("CONFLICT", `fakePersistence: "${collection}/${id}" already exists`));
+      const row: Row = { ...Object.fromEntries(Object.keys(schema).map((f) => [f, null])), ...normalize(schema, data), id };
+      const violation = uniqueViolation(collection, row, undefined);
+      if (violation) return err(violation);
+      rows.set(id, row);
+      return ok(cloneAs<T>(row));
+    });
+
+  const runFakeScope = async (body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
+    const failedPhase = pendingScopeFailure;
+    pendingScopeFailure = null;
+    if (failedPhase === "begin") return { kind: "failed", phase: "begin", error: failure("TRANSIENT", "fakePersistence: injected begin failure") };
+    const snapshot = snapshotCollections();
+    const store: FakeScopeStore = { state: "open" };
+    let timedOut = false;
+    const timer = new Promise<"rollback">((resolve) => {
+      const t = setTimeout(() => {
+        timedOut = true;
+        resolve("rollback");
+      }, state.scopeTimeoutMs);
+      t.unref?.();
+    });
+    let verdict: AtomicVerdict;
+    let thrown: unknown;
+    let didThrow = false;
+    try {
+      verdict = await Promise.race([als.run(store, body), timer]);
+    } catch (caught) {
+      didThrow = true;
+      thrown = caught;
+      verdict = "rollback";
+    }
+    if (timedOut) {
+      restoreCollections(snapshot);
+      store.state = "rolled-back";
+      return { kind: "failed", phase: "timeout", error: failure("TRANSIENT", "fakePersistence: atomic scope timed out") };
+    }
+    if (verdict === "rollback") {
+      restoreCollections(snapshot);
+      store.state = "rolled-back";
+      if (failedPhase === "rollback") return { kind: "failed", phase: "rollback", error: failure("INTERNAL", "fakePersistence: injected rollback failure") };
+      if (didThrow) throw thrown;
+      return { kind: "settled", verdict: "rollback" };
+    }
+    if (failedPhase === "commit") {
+      restoreCollections(snapshot);
+      store.state = "rolled-back";
+      return { kind: "failed", phase: "commit", error: failure("INTERNAL", "fakePersistence: injected commit failure") };
+    }
+    store.state = "committed";
+    return { kind: "settled", verdict: "commit" };
   };
 
   const scope = async (_info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
     if (inScope()) {
       return { kind: "failed", phase: "begin", error: failure("INTERNAL", "fakePersistence: an atomic scope is already open in this call chain") };
     }
-    const waitForTurn = scopeChain;
-    let releaseTurn: () => void = () => {};
-    scopeChain = new Promise((resolve) => {
-      releaseTurn = resolve;
+    const deadline = Date.now() + state.acquireTimeoutMs;
+    let acquireTimer: ReturnType<typeof setTimeout> | undefined;
+    const queued: Promise<AtomicOutcome> = enqueue(() => runFakeScope(body), deadline, () => {
+      if (acquireTimer !== undefined) clearTimeout(acquireTimer);
+    }).catch((cause: unknown) => {
+      if (cause instanceof AcquireTimeout) return { kind: "failed", phase: "begin", error: failure("TRANSIENT", "fakePersistence: timed out waiting for the store") };
+      throw cause;
     });
-    await waitForTurn;
-    try {
-      const failedPhase = pendingScopeFailure;
-      pendingScopeFailure = null;
-      if (failedPhase === "begin") return { kind: "failed", phase: "begin", error: failure("TRANSIENT", "fakePersistence: injected begin failure") };
-      const snapshot = snapshotCollections();
-      let timedOut = false;
-      const timer = new Promise<"rollback">((resolve) => {
-        const t = setTimeout(() => {
-          timedOut = true;
-          resolve("rollback");
-        }, state.scopeTimeoutMs);
-        t.unref?.();
-      });
-      let verdict: AtomicVerdict;
-      let thrown: unknown;
-      let didThrow = false;
-      try {
-        verdict = await Promise.race([als.run(true, body), timer]);
-      } catch (caught) {
-        didThrow = true;
-        thrown = caught;
-        verdict = "rollback";
-      }
-      if (timedOut) {
-        restoreCollections(snapshot);
-        return { kind: "failed", phase: "timeout", error: failure("TRANSIENT", "fakePersistence: atomic scope timed out") };
-      }
-      if (verdict === "rollback") {
-        restoreCollections(snapshot);
-        if (failedPhase === "rollback") return { kind: "failed", phase: "rollback", error: failure("INTERNAL", "fakePersistence: injected rollback failure") };
-        if (didThrow) throw thrown;
-        return { kind: "settled", verdict: "rollback" };
-      }
-      if (failedPhase === "commit") {
-        restoreCollections(snapshot);
-        return { kind: "failed", phase: "commit", error: failure("INTERNAL", "fakePersistence: injected commit failure") };
-      }
-      return { kind: "settled", verdict: "commit" };
-    } finally {
-      releaseTurn();
-    }
+    const acquireTimeout = new Promise<AtomicOutcome>((resolve) => {
+      acquireTimer = setTimeout(() => resolve({ kind: "failed", phase: "begin", error: failure("TRANSIENT", "fakePersistence: timed out waiting for the store") }), state.acquireTimeoutMs);
+      acquireTimer.unref?.();
+    });
+    return Promise.race([queued, acquireTimeout]);
   };
 
   return {
@@ -266,27 +320,35 @@ export function createFakePersistence(): FakePersistence {
     set scopeTimeoutMs(ms: number) {
       state.scopeTimeoutMs = ms;
     },
+    get acquireTimeoutMs() {
+      return state.acquireTimeoutMs;
+    },
+    set acquireTimeoutMs(ms: number) {
+      state.acquireTimeoutMs = ms;
+    },
     scope,
-    async ensureCollection(name, schema) {
-      const injectedError = injected();
-      if (injectedError) return err(injectedError);
+    ensureCollection(name, schema) {
       if (inScope()) throw new Error("fakePersistence: ensureCollection must not run inside an atomic scope");
-      if ("id" in schema) throw new Error(`fakePersistence: "id" is implicit and must not be declared in the schema of "${name}"`);
-      const definitions = Object.fromEntries(Object.entries(schema).map(([field, raw]) => [field, clone(fieldDefinition(raw))]));
-      const existing = collections.get(name);
-      for (const [field, { type, unique }] of Object.entries(definitions)) {
-        if (!unique || !existing) continue;
-        const seen = new Map<SqlValue, number>();
-        for (const row of existing.rows.values()) {
-          const value = encode(type, row[field]);
-          if (value !== null) seen.set(value, (seen.get(value) ?? 0) + 1);
+      return routed(name, () => {
+        const injectedError = injected();
+        if (injectedError) return err(injectedError);
+        if ("id" in schema) throw new Error(`fakePersistence: "id" is implicit and must not be declared in the schema of "${name}"`);
+        const definitions = Object.fromEntries(Object.entries(schema).map(([field, raw]) => [field, clone(fieldDefinition(raw))]));
+        const existing = collections.get(name);
+        for (const [field, { type, unique }] of Object.entries(definitions)) {
+          if (!unique || !existing) continue;
+          const seen = new Map<SqlValue, number>();
+          for (const row of existing.rows.values()) {
+            const value = encode(type, row[field]);
+            if (value !== null) seen.set(value, (seen.get(value) ?? 0) + 1);
+          }
+          const duplicate = [...seen].find(([, n]) => n > 1);
+          if (duplicate) throw new Error(`fakePersistence: cannot make "${name}.${field}" unique: value ${JSON.stringify(duplicate[0])} is stored ${duplicate[1]} times`);
         }
-        const duplicate = [...seen].find(([, n]) => n > 1);
-        if (duplicate) throw new Error(`fakePersistence: cannot make "${name}.${field}" unique: value ${JSON.stringify(duplicate[0])} is stored ${duplicate[1]} times`);
-      }
-      if (existing) existing.schema = definitions;
-      else collections.set(name, { schema: definitions, rows: new Map() });
-      return ok();
+        if (existing) existing.schema = definitions;
+        else collections.set(name, { schema: definitions, rows: new Map() });
+        return ok();
+      });
     },
     createOne,
     async createMany(collection, data) {
@@ -301,68 +363,82 @@ export function createFakePersistence(): FakePersistence {
       }
       return ok(out);
     },
-    async findOne<T extends Document>(collection: string, filter: Filter): Promise<Result<T | null, PersistenceError>> {
-      const injectedError = injected();
-      if (injectedError) return err(injectedError);
-      const [row] = select(collection, filter);
-      return ok(row ? cloneAs<T>(row) : null);
+    findOne<T extends Document>(collection: string, filter: Filter): Promise<Result<T | null, PersistenceError>> {
+      return routed(collection, () => {
+        const injectedError = injected();
+        if (injectedError) return err(injectedError);
+        const [row] = select(collection, filter);
+        return ok(row ? cloneAs<T>(row) : null);
+      });
     },
-    async findMany<T extends Document>(collection: string, filter: Filter, options: FindOptions = {}): Promise<Result<Page<T>, PersistenceError>> {
-      const injectedError = injected();
-      if (injectedError) return err(injectedError);
-      const { schema } = table(collection);
-      let rows = select(collection, filter);
-      const total = rows.length;
-      for (const [field, dir] of Object.entries(options.sort ?? {}).reverse()) {
-        rows = [...rows].sort((a, b) => (dir === "asc" ? 1 : -1) * compareNullable(sortKey(schema, field, a), sortKey(schema, field, b)));
-      }
-      const offset = options.offset ?? 0;
-      rows = rows.slice(offset, options.limit === undefined ? undefined : offset + options.limit);
-      return ok({ items: rows.map((r) => cloneAs<T>(r)), total });
+    findMany<T extends Document>(collection: string, filter: Filter, options: FindOptions = {}): Promise<Result<Page<T>, PersistenceError>> {
+      return routed(collection, () => {
+        const injectedError = injected();
+        if (injectedError) return err(injectedError);
+        const { schema } = table(collection);
+        let rows = select(collection, filter);
+        const total = rows.length;
+        for (const [field, dir] of Object.entries(options.sort ?? {}).reverse()) {
+          rows = [...rows].sort((a, b) => (dir === "asc" ? 1 : -1) * compareNullable(sortKey(schema, field, a), sortKey(schema, field, b)));
+        }
+        const offset = options.offset ?? 0;
+        rows = rows.slice(offset, options.limit === undefined ? undefined : offset + options.limit);
+        return ok({ items: rows.map((r) => cloneAs<T>(r)), total });
+      });
     },
-    async count(collection, filter) {
-      const injectedError = injected();
-      if (injectedError) return err(injectedError);
-      return ok(select(collection, filter).length);
+    count(collection, filter) {
+      return routed(collection, () => {
+        const injectedError = injected();
+        if (injectedError) return err(injectedError);
+        return ok(select(collection, filter).length);
+      });
     },
-    async updateOne<T extends Document>(collection: string, id: string, patch: Partial<Omit<T, "id">>): Promise<Result<T, PersistenceError>> {
-      const injectedError = injected();
-      if (injectedError) return err(injectedError);
-      const { rows } = table(collection);
-      const row = rows.get(id);
-      if (!row) return err(failure("NOT_FOUND", `fakePersistence: "${collection}/${id}" does not exist`));
-      const next: Row = { ...row, ...normalize(table(collection).schema, patch), id };
-      const violation = uniqueViolation(collection, next, id);
-      if (violation) return err(violation);
-      rows.set(id, next);
-      return ok(cloneAs<T>(next));
-    },
-    async updateMany(collection, filter, patch) {
-      const injectedError = injected();
-      if (injectedError) return err(injectedError);
-      const { rows } = table(collection);
-      const hits = selectEntries(collection, filter);
-      const normalized = normalize(table(collection).schema, patch);
-      for (const [id, row] of hits) {
-        const violation = uniqueViolation(collection, { ...row, ...normalized }, id);
+    updateOne<T extends Document>(collection: string, id: string, patch: Partial<Omit<T, "id">>): Promise<Result<T, PersistenceError>> {
+      return routed(collection, () => {
+        const injectedError = injected();
+        if (injectedError) return err(injectedError);
+        const { rows } = table(collection);
+        const row = rows.get(id);
+        if (!row) return err(failure("NOT_FOUND", `fakePersistence: "${collection}/${id}" does not exist`));
+        const next: Row = { ...row, ...normalize(table(collection).schema, patch), id };
+        const violation = uniqueViolation(collection, next, id);
         if (violation) return err(violation);
-      }
-      for (const [id, row] of hits) rows.set(id, { ...row, ...normalized, id: row.id });
-      return ok(hits.length);
+        rows.set(id, next);
+        return ok(cloneAs<T>(next));
+      });
     },
-    async deleteOne(collection, id) {
-      const injectedError = injected();
-      if (injectedError) return err(injectedError);
-      table(collection).rows.delete(id);
-      return ok();
+    updateMany(collection, filter, patch) {
+      return routed(collection, () => {
+        const injectedError = injected();
+        if (injectedError) return err(injectedError);
+        const { rows } = table(collection);
+        const hits = selectEntries(collection, filter);
+        const normalized = normalize(table(collection).schema, patch);
+        for (const [id, row] of hits) {
+          const violation = uniqueViolation(collection, { ...row, ...normalized }, id);
+          if (violation) return err(violation);
+        }
+        for (const [id, row] of hits) rows.set(id, { ...row, ...normalized, id: row.id });
+        return ok(hits.length);
+      });
     },
-    async deleteMany(collection, filter) {
-      const injectedError = injected();
-      if (injectedError) return err(injectedError);
-      const { rows } = table(collection);
-      const hits = selectEntries(collection, filter);
-      for (const [id] of hits) rows.delete(id);
-      return ok(hits.length);
+    deleteOne(collection, id) {
+      return routed(collection, () => {
+        const injectedError = injected();
+        if (injectedError) return err(injectedError);
+        table(collection).rows.delete(id);
+        return ok();
+      });
+    },
+    deleteMany(collection, filter) {
+      return routed(collection, () => {
+        const injectedError = injected();
+        if (injectedError) return err(injectedError);
+        const { rows } = table(collection);
+        const hits = selectEntries(collection, filter);
+        for (const [id] of hits) rows.delete(id);
+        return ok(hits.length);
+      });
     },
   };
 }

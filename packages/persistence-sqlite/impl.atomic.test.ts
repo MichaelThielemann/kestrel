@@ -37,7 +37,7 @@ async function withPatchedExec<T>(matches: readonly { sql: string; error: () => 
 }
 
 atomicScopeTests(async () => {
-  const db = createPersistenceSqlite({ file: ":memory:", scopeTimeoutMs: 100 });
+  const db = createPersistenceSqlite({ file: ":memory:", scopeTimeoutMs: 500, acquireTimeoutMs: 50 });
   return { db, scope: (info, body) => db.scope(info, body), close: async () => db.close() };
 });
 
