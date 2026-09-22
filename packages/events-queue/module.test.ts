@@ -15,7 +15,7 @@ import { ok } from "@michaelthielemann/kestrel/result";
 import type { RunResult, Runner } from "@michaelthielemann/kestrel/runner";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { createEventsInmemory } from "@michaelthielemann/kestrel-events-inmemory/impl";
-import { createEventsQueue, type EventsQueue } from "./impl.ts";
+import { createEventsQueue, type EventsQueue, type QueueRow } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
 
 function jsonCopy(value: unknown): EventData {
@@ -53,7 +53,7 @@ eventDeliveryStepTests(eventDeliveryFixture);
 
 const FAIL_RUN: Runner = async () => ({ runId: "r", status: 500, error: "no", code: "INTERNAL", retryable: false });
 
-async function setup(overrides: Record<string, unknown> = {}) {
+async function setup(overrides: Record<string, unknown> = {}, logger: Deps["logger"] = silentLogger) {
   const db = createFakePersistence();
   const bus = createEventsInmemory();
   const deps: Deps = {
@@ -63,7 +63,7 @@ async function setup(overrides: Record<string, unknown> = {}) {
       throw new Error(`no provider for "${contract.name}"`);
     },
     find: () => undefined,
-    logger: silentLogger,
+    logger,
     root: process.cwd(),
     eventTriggers: [],
   };
@@ -159,6 +159,17 @@ describe("events/queue module steps via runPipeline", () => {
   it("rejects an unknown retryDead argument at boot", () => {
     expect(() => run(["events.retryDead:some"], {}, undefined)).toThrow('"all" or "one"');
   });
+
+  it("leaves a non-object result untouched and logs one warn instead of adding _events", async () => {
+    const warnings: string[] = [];
+    const logger: Deps["logger"] = { step: () => {}, info: () => {}, error: () => {}, warn: (message) => warnings.push(message) };
+    const { instance } = await setup({}, logger);
+    const pipeline = definePipeline({ name: "arrayResult", steps: ["seed.array", "events.relay"] });
+    const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }], steps: { "seed.array": async (ctx: Context) => ok({ ...ctx, result: [1, 2, 3] }) } });
+    expect(result.status).toBe(200);
+    expect(result.result).toEqual([1, 2, 3]);
+    expect(warnings).toEqual(["events/queue: cannot add _events to a non-object result"]);
+  });
 });
 
 describe("events/queue in a booted instance", () => {
@@ -170,6 +181,7 @@ describe("events/queue in a booted instance", () => {
     async setup() {
       return createFakePersistence();
     },
+    atomicScope: (db, info, body) => boundaryCast<ReturnType<typeof createFakePersistence>>(db, "host").scope(info, body),
   });
   const bus = defineModule({
     name: "events/fake",
@@ -291,6 +303,79 @@ describe("events/queue in a booted instance", () => {
       expect(String(caught.errors[0])).toMatch(/events\/queue: cannot persist event/);
     }
     expect(expectOk(await db.count("events_queue", { name: "migrations.applied" }))).toBe(1);
+
+    await kestrel.stop();
+  });
+
+  it("ctx.done() before the relay skips it; the row stays pending for the worker until relayMs passes", async () => {
+    const db = createFakePersistence();
+    const persistenceCapturing = defineModule({
+      name: "persistence/fake",
+      provides: [PERSISTENCE],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return db;
+      },
+      atomicScope: (instance, info, body) => boundaryCast<typeof db>(instance, "host").scope(info, body),
+    });
+    let onCreatedRuns = 0;
+    const probe = defineModule({
+      name: "probe/test",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({
+        create: async (ctx: Context) => ok({ ...ctx, result: { id: "doc-1" } }),
+        stop: async (ctx: Context) => ctx.done(ctx.result),
+        listen: async (ctx: Context) => {
+          onCreatedRuns++;
+          return ok(ctx);
+        },
+      }),
+      describe: () => ({
+        create: { summary: "c", reads: [], writes: ["result"], atomicSafe: true },
+        stop: { summary: "s", reads: ["result"], writes: [], atomicSafe: true },
+        listen: { summary: "l", reads: [], writes: [] },
+      }),
+    });
+    const kestrel = await boot({
+      config: {
+        modules: [
+          { use: "./persistence.ts", config: {} },
+          { use: "./events.ts", config: {} },
+          { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: 5, relayMs: 20 } },
+          { use: "./probe.ts", config: {} },
+        ],
+        triggers: [{ http: "POST /docs", pipeline: "createDoc" }, { event: "doc.created", pipeline: "onCreated" }],
+        http: null,
+      },
+      modules: [persistenceCapturing, bus, module, probe],
+      pipelines: [
+        definePipeline({ name: "createDoc", steps: [{ atomic: ["probe.create", "events.emit:doc.created", "probe.stop"] }, "events.relay"] }),
+        definePipeline({ name: "onCreated", steps: ["probe.listen"] }),
+      ],
+      logger: silentLogger,
+    });
+    await kestrel.start();
+    const res = await kestrel.run("createDoc", { trigger: { kind: "http", name: "POST /docs" } });
+    expect(res.status).toBe(200);
+    expect(res.result).toEqual({ id: "doc-1" });
+    expect(onCreatedRuns).toBe(0);
+
+    const rowsRightAfter = expectOk(await db.findMany<QueueRow>("events_queue", { name: "doc.created" }));
+    expect(rowsRightAfter.items).toMatchObject([{ state: "pending" }]);
+
+    await new Promise((r) => setTimeout(r, 5));
+    expect(onCreatedRuns).toBe(0);
+
+    await new Promise((r) => setTimeout(r, 40));
+    expect(onCreatedRuns).toBe(1);
+    const rowsAfterWorker = expectOk(await db.findMany<QueueRow>("events_queue", { name: "doc.created" }));
+    expect(rowsAfterWorker.items).toMatchObject([{ state: "done" }]);
 
     await kestrel.stop();
   });

@@ -34,7 +34,7 @@ Config: `{}` – nothing to set.
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
 | `events.emit:<arg>` | Emit event "<arg>" to every subscribed handler pipeline and wait for them | – | – | – | – | 500 a subscribed handler failed | portable | no |
-| `events.relay` | Report how the events this run raised were delivered (adds `_events` to the result) | – | `result._events` | – | { _events: object, … } | – | portable | no |
+| `events.relay` | Report how the events this run raised were delivered (adds `_events` to the result) | – | `result?` | – | { _events: object, … } | – | portable | no |
 
 Used by 14 of 85 pipelines in `examples/minimal`.
 

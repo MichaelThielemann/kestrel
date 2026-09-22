@@ -66,6 +66,20 @@ function eventDeliveryFixture(): EventDeliveryFixture {
 
 eventDeliveryStepTests(async () => eventDeliveryFixture());
 
+describe("events/direct relay step", () => {
+  it("leaves a non-object result untouched and logs one warn instead of adding _events", async () => {
+    const warnings: string[] = [];
+    const logger: Logger = { step() {}, info() {}, error() {}, warn: (message) => warnings.push(message) };
+    const reports = createRelayReports();
+    const instance = { bus: createEventsInmemory(), reports, logger };
+    const relay = boundaryCast<(ctx: Context) => Promise<StepResult>>(module.steps!(instance).relay, "host");
+    const result = await relay(fakeCtx({ runId: "run-1", result: [1, 2, 3] }));
+    if (!result.ok) throw new Error(`relay failed: ${result.error.code}`);
+    expect(result.value.result).toEqual([1, 2, 3]);
+    expect(warnings).toEqual(["events/direct: cannot add _events to a non-object result"]);
+  });
+});
+
 describe("events/direct emit step", () => {
   it("answers fail(INTERNAL) with cause when a subscribed handler throws", async () => {
     const bus = createEventsInmemory();

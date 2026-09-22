@@ -372,3 +372,162 @@ describe("events/queue admin", () => {
     expect(() => retryTarget("x")).toThrow('"all" or "one"');
   });
 });
+
+describe("events/queue relay: head start", () => {
+  it("a row belonging to a run is not claimable by a tick before createdAt + relayMs, but the run's own relay claims it at once", async () => {
+    const { queue, clock, rows } = await make({ relayMs: 1000 });
+    let calls = 0;
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      calls++;
+      return OK;
+    });
+    await queue.enqueue("x", { runId: "run-1" });
+    expect((await rows())[0]).toMatchObject({ availableAt: clock.t + 1000, runId: "run-1" });
+
+    await queue.tick();
+    expect(calls).toBe(0);
+    expect((await rows())[0]?.state).toBe("pending");
+
+    const report = await queue.relay("run-1");
+    expect(calls).toBe(1);
+    expect(report).toEqual({ status: "done", pipelines: [{ event: "x", pipeline: "p1", status: "done", attempts: 0, dead: false, error: null }] });
+    expect((await rows())[0]?.state).toBe("done");
+  });
+
+  it("a row raised through events@1 (no runId) is immediately available to a tick", async () => {
+    const { queue, rows, clock } = await make({ relayMs: 1000 });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await queue.enqueue("x", {});
+    expect((await rows())[0]).toMatchObject({ availableAt: clock.t, runId: null });
+    expect(await queue.tick()).toBe(1);
+    expect((await rows())[0]?.state).toBe("done");
+  });
+});
+
+describe("events/queue relay: no double delivery with the worker", () => {
+  it("a row a tick already claimed is skipped by the relay, which reports it pending", async () => {
+    const { queue, db, rows } = await make({ relayMs: 1000 });
+    let calls = 0;
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      calls++;
+      return OK;
+    });
+    await queue.enqueue("x", { runId: "run-1" });
+    const [row] = await rows();
+    const won = await db.updateMany(QUEUE, { id: row!.id, state: "pending" }, { state: "running", lockedAt: 1, lockedBy: "another-worker" });
+    expect(expectOk(won)).toBe(1);
+
+    const report = await queue.relay("run-1");
+    expect(calls).toBe(0);
+    expect(report).toEqual({ status: "pending", pipelines: [{ event: "x", pipeline: "p1", status: "pending", attempts: 0, dead: false, error: null }] });
+  });
+});
+
+describe("events/queue relay: the budget", () => {
+  it("relayMs bounds how many rows the relay delivers; the rest is reported pending and left for the worker", async () => {
+    const { queue, clock, rows } = await make({ relayMs: 5 });
+    const order: string[] = [];
+    queue.setDelivery([{ event: "x", pipeline: "slow" }, { event: "x", pipeline: "fast" }], async (pipeline) => {
+      order.push(pipeline);
+      if (pipeline === "slow") clock.t += 10;
+      return OK;
+    });
+    await queue.enqueue("x", { runId: "run-1" });
+    const report = await queue.relay("run-1");
+    expect(order).toEqual(["slow"]);
+    expect(report.status).toBe("pending");
+    expect(report.pipelines).toContainEqual({ event: "x", pipeline: "slow", status: "done", attempts: 0, dead: false, error: null });
+    expect(report.pipelines).toContainEqual({ event: "x", pipeline: "fast", status: "pending", attempts: 0, dead: false, error: null });
+    expect((await rows()).find((r) => r.pipeline === "fast")?.state).toBe("pending");
+
+    expect(await queue.tick()).toBe(1);
+    expect((await rows()).every((r) => r.state === "done")).toBe(true);
+  });
+
+  it("relayMs: 0 disables the relay: nothing is claimed and everything stays for the worker", async () => {
+    const { queue, rows } = await make({ relayMs: 0 });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await queue.enqueue("x", { runId: "run-1" });
+    const report = await queue.relay("run-1");
+    expect(report).toEqual({ status: "pending", pipelines: [{ event: "x", pipeline: "p1", status: "pending", attempts: 0, dead: false, error: null }] });
+    expect((await rows())[0]?.state).toBe("pending");
+    expect(await queue.tick()).toBe(1);
+    expect((await rows())[0]?.state).toBe("done");
+  });
+});
+
+describe("events/queue relay: the map does not leak", () => {
+  it("a run whose relay never came is swept off the map after lockTtlSeconds, on the next tick", async () => {
+    const { queue, clock, rows } = await make({ relayMs: 1000, lockTtlSeconds: 30 });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await queue.enqueue("x", { runId: "run-1" });
+
+    clock.t += 30_000 + 1;
+    await queue.tick();
+    expect(await queue.relay("run-1")).toEqual({ status: "done", pipelines: [] });
+    expect((await rows())[0]?.state).toBe("done");
+  });
+
+  it("a run whose relay came leaves nothing behind to sweep", async () => {
+    const { queue } = await make({ relayMs: 1000 });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await queue.enqueue("x", { runId: "run-1" });
+    await queue.relay("run-1");
+    expect(await queue.relay("run-1")).toEqual({ status: "done", pipelines: [] });
+  });
+});
+
+describe("events/queue relay: zero cost for a run that enqueued nothing", () => {
+  it("issues no persistence call when the run's map entry does not exist", async () => {
+    const db = createFakePersistence();
+    const calls: string[] = [];
+    const spied = new Proxy<typeof db>(db, {
+      get(target, prop, receiver): unknown {
+        const value: unknown = Reflect.get(target, prop, receiver);
+        if (typeof prop === "string" && typeof value === "function") calls.push(prop);
+        return value;
+      },
+    });
+    const queue = await createEventsQueue(CONFIG, { db: spied, logger: silentLogger, instanceId: "test@host" });
+    calls.length = 0;
+    expect(await queue.relay("nothing-enqueued")).toEqual({ status: "done", pipelines: [] });
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("events/queue relay: the store is unreachable", () => {
+  it("reports pending and never throws or rejects when findMany fails", async () => {
+    const { queue, db } = await make({ relayMs: 1000 });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await queue.enqueue("x", { runId: "run-1" });
+    db.failNext("TRANSIENT");
+    await expect(queue.relay("run-1")).resolves.toEqual({ status: "pending", pipelines: [{ event: "", pipeline: "", status: "pending", attempts: 0, dead: false, error: null }] });
+  });
+});
+
+describe("events/queue relay: a relay that never runs (process death after commit)", () => {
+  it("a second instance's worker delivers the row once relayMs has passed, never before", async () => {
+    const db = createFakePersistence();
+    const clock = { t: 1_000_000 };
+    const queueA = await createEventsQueue({ ...CONFIG, relayMs: 1000 }, { db, logger: silentLogger, now: () => clock.t, instanceId: "a@host" });
+    const queueB = await createEventsQueue({ ...CONFIG, relayMs: 1000 }, { db, logger: silentLogger, now: () => clock.t, instanceId: "b@host" });
+    let delivered = 0;
+    queueA.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      delivered++;
+      return OK;
+    });
+    queueB.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      delivered++;
+      return OK;
+    });
+
+    await queueA.enqueue("x", { runId: "run-a" });
+
+    expect(await queueB.tick()).toBe(0);
+    expect(delivered).toBe(0);
+
+    clock.t += 1000;
+    expect(await queueB.tick()).toBe(1);
+    expect(delivered).toBe(1);
+  });
+});
