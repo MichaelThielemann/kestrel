@@ -85,9 +85,8 @@ function freshRestoreError(file: string): string {
  * `bootStartedAt` (the start of this boot, not of the process): an old file never needs a
  * blobstore call at all. Only a file that looks fresh asks the blobstore whether a restore point
  * exists — there is no table-count fallback here, since the backed-up file is not necessarily
- * SQLite, so an unavailable birth time is logged and left to the `module-order` warning instead. A
- * blobstore failure for a fresh file fails the boot, since the file is already a plausible loss and
- * the check could not rule it out.
+ * SQLite, so an unavailable birth time is only logged. A blobstore failure for a fresh file fails
+ * the boot, since the file is already a plausible loss and the check could not rule it out.
  */
 export async function checkSkippedRestore(config: Config, blobs: Blobstore, logger: Logger, bootStartedAt: number, readBirth: (file: string) => number = fileBirthMs): Promise<void> {
   if (restoredThisBoot(config.file, bootStartedAt)) {

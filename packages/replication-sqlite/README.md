@@ -12,9 +12,9 @@ opened and passes `PRAGMA quick_check` before it is handed over, otherwise the r
 checkpoints (`wal_checkpoint(TRUNCATE)`) run between two synchronous steps and can never lose
 frames. Config: `file`, `prefix`, `checkpointBytes`/`checkpointSeconds`,
 `snapshotSeconds` (24 h), `retentionSeconds` (48 h; the newest generation is always kept),
-`restoreOnStart` (rebuild the file from the replica when missing). List this module **before**
-`persistence-sqlite`, and it also declares `before: [persistence@1]` so a misordered list produces
-a `module-order` boot warning instead of a silent empty start. If the file already exists and holds
+`restoreOnStart` (rebuild the file from the replica when missing). This module declares
+`before: [persistence@1]`, so it is set up before `persistence-sqlite` by declaration, regardless
+of where either module sits in `kestrel.config.modules`. If the file already exists and holds
 a restore point when `setup()` runs, was not itself just restored, and was created during this very
 boot (judged by birth time against the start of this boot, falling back to a table count where the
 file system reports none), `setup()` fails: that proves another module opened the database first.

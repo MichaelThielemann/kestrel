@@ -3,13 +3,12 @@ Copies one local file (typically a SQLite snapshot) to `blobstore@1` and restore
 `source` (default: `file`) is what gets uploaded – point it at the snapshot written by
 `persistence.snapshot:<source>` so the backup is transactionally consistent. With
 `restoreOnStart` (default) the file is restored during setup when it is missing – for hosts with
-ephemeral disks such as Cloud Foundry. List this module **before** `persistence-sqlite` in
-`kestrel.config.ts` so setup runs before the database is opened; it also declares
-`before: [persistence@1]` so a misordered list produces a `module-order` boot warning instead of a
-silent empty start. If the file already exists and holds a restore point when `setup()` runs, was
+ephemeral disks such as Cloud Foundry. This module declares `before: [persistence@1]`, so it is set
+up before `persistence-sqlite` by declaration, regardless of where either module sits in
+`kestrel.config.ts`. If the file already exists and holds a restore point when `setup()` runs, was
 not itself just restored, and was created during this very boot (judged by birth time against the
-start of this boot; where the file system reports none, the order is left to the `module-order`
-warning instead), `setup()` fails: that proves another module opened the file first. Move the named
+start of this boot; where the file system reports none, the order is not checked here), `setup()`
+fails: that proves another module opened the file first. Move the named
 file aside and start again – an ephemeral disk clears it for you on the next restart, a persistent
 volume does not, so move it by hand there: a stale file left over from an earlier, unrelated
 failure predates this boot, so this check stays quiet about it and the file still has to be moved

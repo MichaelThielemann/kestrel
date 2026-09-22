@@ -86,16 +86,17 @@
 - `core`: `Introspection` (the read-only view a module's `attach(instance, kestrel)` receives)
   gains a required `health()` method next to `describe()` and `observe()`. A hand-built
   `Introspection` value, such as a test double, must add it.
+- `sortModules` applies `defineModule`'s `before: readonly Contract<unknown>[]` as a real ordering
+  edge: a module declaring `before: [C]` is now set up before the provider of `C`, regardless of
+  where either module sits in `kestrel.config.modules`. A module whose target's provider depends on
+  it, directly or transitively — including a module that both `requires` and declares `before` on
+  the same contract — fails the boot as a dependency cycle naming the path, since "set up before
+  the thing I need" cannot be satisfied. The `BootWarning` member `module-order` is removed: a
+  hand-written `modules` list that this reordering silently fixed no longer produces a warning,
+  since there is no longer anything to warn about.
 
 ### Added
 
-- `defineModule`: a module may declare `before: readonly Contract<unknown>[]`, naming contracts it
-  must be set up before the provider of. On this release the declaration is only checked: a module
-  that ends up after the provider of a contract it named in `before` produces a new `BootWarning`
-  with `code: "module-order"`, logged at `warn`; the setup order itself is unchanged. This becomes
-  a real ordering edge, and the violation a boot error, in the next major. A module that both
-  `requires` and declares `before` on the same contract is a contradiction and fails the boot
-  naming the module and the contract.
 - `Deps` gains `bootStartedAt?: number`, the epoch ms `boot()` captured at its very start, before
   any module's `setup()` ran, and shared by every module's `setup()` call in this boot. Optional,
   so a `Deps` built outside `boot()` still type-checks. `replication-sqlite` and `backup-blobstore`
@@ -160,8 +161,7 @@
   reason, where previously it was silent.
 - `backup-blobstore`: `setup()` gets the same check as `replication-sqlite` — including the shared
   `<file>.restored-at` sidecar and the "move aside" wording — minus the table-count fallback, since
-  the backed-up file is not necessarily SQLite; an unavailable birth time is logged and left to the
-  `module-order` warning instead of failing the boot.
+  the backed-up file is not necessarily SQLite; an unavailable birth time is only logged, not failed.
 
 - `revisions.reassignAuthor` prefers a preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s
   verified target) when one is present, ignoring the payload's own `reassignTo`. Without a

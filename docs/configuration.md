@@ -43,12 +43,15 @@ Setup order follows these rules, applied in order:
 
 1. a module is set up after the provider of every contract in its `requires`;
 2. and after the provider of every contract in its `optional` that is active;
-3. and, if it declares `before`, that is checked but does not reorder: a module that ends up after
-   the provider of a contract it names in `before` produces a `module-order` boot warning
-   (`kestrel.warnings`) and becomes a boot error in the next major version;
+3. and before the provider of every contract in its `before`;
 4. and, if it declares `emits`, after the module providing the event trigger hook, unless that
    module depends on it, so an event raised during setup can already be delivered;
 5. otherwise, the listed order is kept.
+
+A module that declares `before: [C]` is set up before the provider of `C`, regardless of where
+either module sits in `modules`. Naming a contract whose provider depends on the declarer, directly
+or transitively — including a module that both `requires` and declares `before` on the same
+contract — is a contradiction and fails the boot as a dependency cycle, naming the path.
 
 ## `triggers`
 
