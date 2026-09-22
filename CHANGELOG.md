@@ -96,7 +96,7 @@
   since there is no longer anything to warn about.
 - `content-default`: a content field name may no longer start with `_`, on every path and under no
   feature condition. Boot fails naming the type and the field. That namespace is reserved for
-  members the system adds to a document (`_locales`, `_translations`, and any future one), and
+  members the system adds to a document (`_locale`, `_links`, `_translations`, and any future one), and
   closes a collision that nothing previously guarded.
 - `delivery-static`: `delivery.publish` merges its result into `_delivery` instead of replacing it
   with `{ document, delivery }`, and `delivery.exportLlms` writes `_llms` instead of `llms` — both
