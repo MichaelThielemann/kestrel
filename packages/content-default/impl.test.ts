@@ -21,6 +21,13 @@ describe("content/default", () => {
     expect(() => validateModel({ types: { "Bad Name": { kind: "multi", fields: {} } } })).toThrow(/invalid type name/);
   });
 
+  it("rejects a field name starting with an underscore, which belongs to the system", () => {
+    expect(() => validateModel({ types: { pages: { kind: "multi", fields: { _events: "text" } } } })).toThrow(
+      'content/default: field name "_events" of "pages" is reserved – names starting with "_" belong to the system',
+    );
+    expect(() => validateModel({ types: { pages: { kind: "multi", fields: { _locale: "text" } } } })).toThrow(/reserved/);
+  });
+
   it("rejects enums without options and localized fields without locales", () => {
     expect(() => validateModel({ types: { pages: { kind: "multi", fields: { status: { type: "enum" } } } } })).toThrow(/needs options/);
     expect(() => validateModel({ types: { pages: { kind: "multi", fields: { title: { type: "text", localized: true } } } } })).toThrow(/locales/);

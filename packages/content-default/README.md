@@ -12,7 +12,9 @@ whether the required localized fields are present. `completeWhen: { field: "stat
 a locale whose required localized fields are missing (`VALIDATION` naming them).
 Validates every write (unknown fields, types, required, unique, reserved names — persistence backs
 `unique` with an index, so a race that slips past the pre-check still answers the same field-shaped
-error), sets
+error). A field name may not start with `_`: that namespace is reserved for members the system adds
+to a document, such as `_locales`, `_translations`, `_delivery` and `_events`. Boot fails naming the
+type and the field. Sets
 `createdAt`/`updatedAt`, stores dates as milliseconds. One persistence collection per type.
 Every `content@1` method returns a `Result`: a failure is an `Err(KestrelError)`, never an
 exception. Only wiring bugs throw (unknown type, `get` of a multi type without id, `create` on a

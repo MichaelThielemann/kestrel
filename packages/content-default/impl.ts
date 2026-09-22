@@ -53,7 +53,7 @@ export function validateModel(model: ContentModel): void {
     if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new Error(`content/default: invalid type name "${name}"`);
     for (const [field, raw] of Object.entries(type.fields)) {
       const def = definition(raw);
-      if (RESERVED.has(field) || field.includes("__")) throw new Error(`content/default: field name "${field}" of "${name}" is reserved`);
+      if (RESERVED.has(field) || field.startsWith("_") || field.includes("__")) throw new Error(`content/default: field name "${field}" of "${name}" is reserved – names starting with "_" belong to the system`);
       if (!(def.type in STORAGE)) throw new Error(`content/default: unknown field type "${String(def.type)}" in "${name}.${field}"`);
       if (def.type === "enum" && (def.options === undefined || def.options.length === 0)) throw new Error(`content/default: enum "${name}.${field}" needs options`);
       if (def.type === "ref" && (def.to === undefined || def.to === "")) throw new Error(`content/default: ref "${name}.${field}" needs a target (to)`);

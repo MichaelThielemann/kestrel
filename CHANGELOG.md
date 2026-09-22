@@ -94,6 +94,10 @@
   the thing I need" cannot be satisfied. The `BootWarning` member `module-order` is removed: a
   hand-written `modules` list that this reordering silently fixed no longer produces a warning,
   since there is no longer anything to warn about.
+- `content-default`: a content field name may no longer start with `_`, on every path and under no
+  feature condition. Boot fails naming the type and the field. That namespace is reserved for
+  members the system adds to a document (`_locales`, `_translations`, and any future one), and
+  closes a collision that nothing previously guarded.
 
 ### Added
 
