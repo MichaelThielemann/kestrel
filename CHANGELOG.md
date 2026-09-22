@@ -105,6 +105,23 @@
   envelope's `payload.id`, so both can run as the first step of a pipeline an event triggers.
   `delivery.publish` answers `VALIDATION` (400) when no id is available; it used to throw, which
   surfaced as `INTERNAL` (500).
+- Both event delivery modules gain the step `events.relay`, and `EVENT_DELIVERY_STEPS` lists it
+  next to `events.emit`. Placed after a pipeline's last `events.emit:`, it reports how that run's
+  own events were delivered and adds `_events: { status, pipelines: [{ event, pipeline, status,
+  attempts, dead, error }] }` to the result — so a pipeline ending in an emit now has that member
+  in its response and its OpenAPI schema. The step is not `atomicSafe`; boot rejects it inside an
+  atomic group.
+  - `events-direct`: the subscribed pipelines already ran, inline, during `events.emit`; the relay
+    only reports the outcome (`attempts` is always `1`, `dead` is always `true` on an error, since
+    nothing here retries). Recorded outcomes older than 60 seconds are dropped on the next emit,
+    with one `warn` naming the count.
+  - `events-queue`: the relay **delivers** the run's own rows inside the request, through the same
+    `attempts`/backoff/dead-letter machinery the worker uses. A new config key `relayMs` (default
+    5000, `0` disables the relay) bounds how long it may spend; a row it does not reach stays
+    `pending` for the worker. `events_queue` rows gain a `runId` column, filled from the event
+    envelope, and a row belonging to a run is written with `availableAt = createdAt + relayMs`
+    instead of being immediately due, so the worker takes it only once no relay claimed it in time.
+    `events.listDead` items gain a required `runId` field (`""` for a row that names none).
 
 ### Added
 

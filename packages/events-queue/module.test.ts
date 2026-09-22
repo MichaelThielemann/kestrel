@@ -24,7 +24,7 @@ function jsonCopy(value: unknown): EventData {
 
 async function eventDeliveryFixture(): Promise<EventDeliveryFixture> {
   const db = createFakePersistence();
-  const queue = await createEventsQueue({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5], lockTtlSeconds: 300, retentionDays: 7 }, { db, logger: silentLogger });
+  const queue = await createEventsQueue({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000 }, { db, logger: silentLogger });
   const deliveryEntries = [{ event: "x.happened", pipeline: "onX1" }, { event: "x.happened", pipeline: "onX2" }];
   queue.setDelivery(deliveryEntries, async () => ({ runId: "r", status: 200 }));
   const pipelineCountOf = (name: string) => deliveryEntries.filter((entry) => entry.event === name).length;
@@ -67,7 +67,7 @@ async function setup(overrides: Record<string, unknown> = {}) {
     root: process.cwd(),
     eventTriggers: [],
   };
-  const instance = boundaryCast<EventsQueue>(await module.setup(configSchema.parse({ maxAttempts: 1, ...overrides }), deps), "host");
+  const instance = boundaryCast<EventsQueue>(await module.setup(configSchema.parse({ maxAttempts: 1, relayMs: 0, ...overrides }), deps), "host");
   return { db, bus, instance };
 }
 
@@ -92,7 +92,7 @@ describe("events/queue module shape", () => {
 
 describe("events/queue module steps via runPipeline", () => {
   it("parses an empty config with defaults and rejects unknown keys", () => {
-    expect(configSchema.parse({})).toEqual({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5, 30, 120, 600], lockTtlSeconds: 300, retentionDays: 7 });
+    expect(configSchema.parse({})).toEqual({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5, 30, 120, 600], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000 });
     expect(configSchema.safeParse({ extra: 1 }).success).toBe(false);
   });
 
@@ -210,7 +210,7 @@ describe("events/queue in a booted instance", () => {
         modules: [
           { use: "./persistence.ts", config: {} },
           { use: "./events.ts", config: {} },
-          { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: 2 } },
+          { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: 2, relayMs: 0 } },
           { use: "./probe.ts", config: {} },
         ],
         triggers: [
@@ -297,12 +297,12 @@ describe("events/queue in a booted instance", () => {
 });
 
 describe("events/queue: atomicSafe is pinned", () => {
-  it("every step is atomic-safe", async () => {
+  it("every step is atomic-safe, except relay, which runs whole pipelines and cannot be", async () => {
     const { instance } = await setup();
     const describeMap = module.describe!(instance);
     for (const [name, description] of Object.entries(describeMap)) {
       const resolved = typeof description === "function" ? description("one") : description;
-      expect(resolved.atomicSafe, `${name}.atomicSafe`).toBe(true);
+      expect(resolved.atomicSafe, `${name}.atomicSafe`).toBe(name === "relay" ? undefined : true);
     }
   });
 });

@@ -1,5 +1,6 @@
 import { hostname } from "node:os";
 import type { EventData } from "@michaelthielemann/kestrel-contracts/events";
+import { relaySummary, type RelayEntry, type RelayReport } from "@michaelthielemann/kestrel-contracts/events.steps";
 import type { Document, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { EventEntry } from "@michaelthielemann/kestrel/defineModule";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
@@ -23,6 +24,8 @@ export interface QueueRow extends Document {
   lockedBy: string | null;
   finishedAt: number | null;
   error: string | null;
+  /** The run whose `events.emit` wrote this row; `null` for a row raised through `events@1` outside a pipeline. */
+  runId: string | null;
 }
 
 export interface Config {
@@ -32,6 +35,8 @@ export interface Config {
   backoffSeconds: number[];
   lockTtlSeconds: number;
   retentionDays: number;
+  /** How long `events.relay` may spend delivering this run's rows before it is the worker's turn. */
+  relayMs: number;
 }
 
 export interface QueueStatus {
@@ -52,6 +57,8 @@ export interface DeadEntry {
   error: string;
   createdAt: number;
   availableAt: number;
+  /** The run this row's event came from; `""` when the row names none. */
+  runId: string;
 }
 
 export interface EventsQueue {
@@ -70,6 +77,8 @@ export interface EventsQueue {
   startWorker(): void;
   stopWorker(): Promise<void>;
   workerRunning(): boolean;
+  /** Delivers the rows this run enqueued, in place of the worker, within `relayMs`. Never throws. */
+  relay(runId: string): Promise<RelayReport>;
 }
 
 /** `enqueue` rejects with this when a row could not be written; the emit step turns it into the persistence error. */
@@ -111,6 +120,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     lockedBy: "string",
     finishedAt: "number",
     error: "string",
+    runId: "string",
   });
   if (isErr(ensured)) throw new Error(`events/queue: cannot create the queue collection: ${ensured.error.message}`);
 
@@ -118,6 +128,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
   let running = false;
   let ticking: Promise<number> | undefined;
   let lastTickAt: number | null = null;
+  const pendingRelays = new Map<string, { ids: string[]; at: number }>();
 
   async function runRow(row: QueueRow): Promise<string | undefined> {
     if (!delivery) return "events/queue: no delivery installed yet";
@@ -169,7 +180,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       }
       let allPresent = true;
       for (const pipeline of pipelines) {
-        const created = await db.createOne<QueueRow>(QUEUE, { id: `${row.id}:${pipeline}`, name: row.name, payload: row.payload, pipeline, state: "pending", attempts: 0, createdAt: row.createdAt, availableAt: now(), lockedAt: null, lockedBy: null, finishedAt: null, error: null });
+        const created = await db.createOne<QueueRow>(QUEUE, { id: `${row.id}:${pipeline}`, name: row.name, payload: row.payload, pipeline, state: "pending", attempts: 0, createdAt: row.createdAt, availableAt: now(), lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: row.runId });
         if (isErr(created) && created.error.code !== "CONFLICT") {
           allPresent = false;
           logger.error("events/queue: cannot fan out a stored event, leaving the original for the next tick", { id: row.id, event: row.name, pipeline, error: created.error.message });
@@ -206,12 +217,67 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     return claimed;
   }
 
+  function sweepPendingRelays(): void {
+    const at = now();
+    for (const [runId, entry] of pendingRelays) if (at - entry.at > config.lockTtlSeconds * 1000) pendingRelays.delete(runId);
+  }
+
   async function tickOnce(): Promise<number> {
     lastTickAt = now();
+    sweepPendingRelays();
     await fanOutUnfanned();
     const rows = await claim();
     for (const row of rows) await settle(row, await runRow(row));
     return rows.length;
+  }
+
+  async function claimForRelay(row: QueueRow, at: number): Promise<boolean> {
+    const won = await db.updateMany<QueueRow>(QUEUE, { id: row.id, state: "pending" }, { state: "running", lockedAt: at, lockedBy: instanceId });
+    return !isErr(won) && won.value === 1;
+  }
+
+  function relayEntryOf(row: QueueRow, error: string | undefined): RelayEntry {
+    if (error === undefined) return { event: row.name, pipeline: row.pipeline ?? "", status: "done", attempts: row.attempts, dead: false, error: null };
+    const attempts = row.attempts + 1;
+    return { event: row.name, pipeline: row.pipeline ?? "", status: "error", attempts, dead: attempts >= config.maxAttempts, error };
+  }
+
+  function pendingEntryOf(row: QueueRow): RelayEntry {
+    return { event: row.name, pipeline: row.pipeline ?? "", status: "pending", attempts: row.attempts, dead: false, error: null };
+  }
+
+  async function relay(runId: string): Promise<RelayReport> {
+    const entry = pendingRelays.get(runId);
+    pendingRelays.delete(runId);
+    if (!entry) return { status: "done", pipelines: [] };
+    const relayStartedAt = now();
+    const found = await db.findMany<QueueRow>(QUEUE, { id: { in: entry.ids } });
+    if (isErr(found)) {
+      logger.error("events/queue: relay could not load its rows", { error: found.error.message });
+      return { status: "pending", pipelines: entry.ids.map(() => ({ event: "", pipeline: "", status: "pending", attempts: 0, dead: false, error: null })) };
+    }
+    const pipelines: RelayEntry[] = [];
+    for (const row of found.value.items) {
+      if (now() - relayStartedAt >= config.relayMs) {
+        pipelines.push(pendingEntryOf(row));
+        continue;
+      }
+      try {
+        const at = now();
+        if (!(await claimForRelay(row, at))) {
+          pipelines.push(pendingEntryOf(row));
+          continue;
+        }
+        const claimed: QueueRow = { ...row, state: "running", lockedAt: at, lockedBy: instanceId };
+        const error = await runRow(claimed);
+        await settle(claimed, error);
+        pipelines.push(relayEntryOf(row, error));
+      } catch (error) {
+        logger.error("events/queue: relay could not deliver a row", { id: row.id, error: errorText(error) });
+        pipelines.push(pendingEntryOf(row));
+      }
+    }
+    return { status: relaySummary(pipelines), pipelines };
   }
 
   function tick(): Promise<number> {
@@ -239,13 +305,18 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
   return {
     async enqueue(name, data) {
       const at = now();
+      const runId = typeof data.runId === "string" ? data.runId : null;
+      const availableAt = runId === null ? at : at + config.relayMs;
       const pipelines = delivery?.table.get(name);
       if (delivery && (!pipelines || pipelines.length === 0)) return;
       const targets = pipelines ?? [null];
+      const ids: string[] = [];
       for (const pipeline of targets) {
-        const created = await db.createOne<QueueRow>(QUEUE, { name, payload: { ...data }, pipeline, state: "pending", attempts: 0, createdAt: at, availableAt: at, lockedAt: null, lockedBy: null, finishedAt: null, error: null });
+        const created = await db.createOne<QueueRow>(QUEUE, { name, payload: { ...data }, pipeline, state: "pending", attempts: 0, createdAt: at, availableAt, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId });
         if (isErr(created)) throw new QueueWriteError(created.error);
+        ids.push(created.value.id);
       }
+      if (runId !== null && ids.length > 0) pendingRelays.set(runId, { ids, at });
     },
     setDelivery(entries, run) {
       const table = new Map<string, string[]>();
@@ -273,7 +344,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     async listDead(limit) {
       const page = await db.findMany<QueueRow>(QUEUE, { state: "dead" }, { sort: { finishedAt: "desc" }, limit });
       if (isErr(page)) return page;
-      return ok({ items: page.value.items.map((r) => ({ id: r.id, name: r.name, pipeline: r.pipeline ?? "", attempts: r.attempts, error: r.error ?? "", createdAt: r.createdAt, availableAt: r.availableAt })) });
+      return ok({ items: page.value.items.map((r) => ({ id: r.id, name: r.name, pipeline: r.pipeline ?? "", attempts: r.attempts, error: r.error ?? "", createdAt: r.createdAt, availableAt: r.availableAt, runId: r.runId ?? "" })) });
     },
     async retryDead(id) {
       const patch: Partial<Omit<QueueRow, "id">> = { state: "pending", attempts: 0, availableAt: now(), finishedAt: null, error: null };
@@ -307,6 +378,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       if (ticking) await ticking;
     },
     workerRunning: () => running,
+    relay,
   };
 }
 

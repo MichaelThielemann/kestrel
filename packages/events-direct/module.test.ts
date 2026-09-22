@@ -9,7 +9,7 @@ import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err } from "@michaelthielemann/kestrel/result";
 import { createEventsInmemory } from "@michaelthielemann/kestrel-events-inmemory/impl";
 import module from "./module.ts";
-import { startEventTriggers } from "./impl.ts";
+import { createRelayReports, startEventTriggers } from "./impl.ts";
 
 function fakeCtx(overrides: Partial<Context> = {}): Context {
   return {
@@ -50,10 +50,11 @@ function eventDeliveryFixture(): EventDeliveryFixture {
     delivered.push(jsonCopy(input.payload));
     return { runId: "r", status: 200 };
   };
-  startEventTriggers(bus, [{ event: "x.happened", pipeline: "onX1" }, { event: "x.happened", pipeline: "onX2" }], run, silentLogger);
+  const instance = { bus: spyBus, reports: createRelayReports(), logger: silentLogger };
+  startEventTriggers(bus, [{ event: "x.happened", pipeline: "onX1" }, { event: "x.happened", pipeline: "onX2" }], run, silentLogger, instance.reports);
   return {
-    steps: module.steps!(spyBus),
-    describe: module.describe!(spyBus),
+    steps: module.steps!(instance),
+    describe: module.describe!(instance),
     async raise(event, data) {
       await bus.emit(event, data);
     },
@@ -72,7 +73,7 @@ describe("events/direct emit step", () => {
       throw new Error("handler failed");
     });
 
-    const steps = module.steps!(bus);
+    const steps = module.steps!({ bus, reports: createRelayReports(), logger: silentLogger });
     const emit = boundaryCast<(name: string) => (ctx: Context) => Promise<StepResult>>(steps.emit, "host")("boom");
     const result = await emit(fakeCtx());
 

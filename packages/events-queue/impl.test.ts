@@ -8,7 +8,7 @@ import { err } from "@michaelthielemann/kestrel/result";
 import type { RunResult, Runner } from "@michaelthielemann/kestrel/runner";
 import { createEventsQueue, QUEUE, QueueWriteError, retryTarget, type Config, type QueueRow } from "./impl.ts";
 
-const CONFIG: Config = { pollMs: 5, batch: 2, maxAttempts: 3, backoffSeconds: [10, 100], lockTtlSeconds: 60, retentionDays: 1 };
+const CONFIG: Config = { pollMs: 5, batch: 2, maxAttempts: 3, backoffSeconds: [10, 100], lockTtlSeconds: 60, retentionDays: 1, relayMs: 5000 };
 
 async function make(overrides: Partial<Config> = {}) {
   const db = createFakePersistence();

@@ -3,10 +3,11 @@ import "@michaelthielemann/kestrel-contracts/authn";
 import { EVENTS } from "@michaelthielemann/kestrel-contracts/events";
 import { eventEnvelope } from "@michaelthielemann/kestrel-contracts/events.envelope";
 import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/events.envelope";
+import { mergeRelayReport, RELAY_SCHEMA } from "@michaelthielemann/kestrel-contracts/events.steps";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";
-import type { Logger } from "@michaelthielemann/kestrel/logger";
+import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import type { Unsubscribe } from "@michaelthielemann/kestrel-contracts/events";
 import { createEventsQueue, persistenceFailure, retryTarget, type EventsQueue } from "./impl.ts";
@@ -19,6 +20,7 @@ export const configSchema = z
     backoffSeconds: z.array(z.number().int().nonnegative()).min(1).default([5, 30, 120, 600]),
     lockTtlSeconds: z.number().int().positive().default(300),
     retentionDays: z.number().int().positive().default(7),
+    relayMs: z.number().int().nonnegative().default(5000),
   })
   .strict();
 
@@ -40,7 +42,7 @@ export const DEAD_SCHEMA: JsonSchema = {
   properties: {
     items: {
       type: "array",
-      items: { type: "object", properties: { id: { type: "string" }, name: { type: "string" }, pipeline: { type: "string" }, attempts: { type: "number" }, error: { type: "string" }, createdAt: { type: "number" }, availableAt: { type: "number" } }, required: ["id", "name", "pipeline", "attempts", "error", "createdAt", "availableAt"] },
+      items: { type: "object", properties: { id: { type: "string" }, name: { type: "string" }, pipeline: { type: "string" }, attempts: { type: "number" }, error: { type: "string" }, createdAt: { type: "number" }, availableAt: { type: "number" }, runId: { type: "string" } }, required: ["id", "name", "pipeline", "attempts", "error", "createdAt", "availableAt", "runId"] },
     },
   },
   required: ["items"],
@@ -125,6 +127,10 @@ export default defineModule({
       if (isErr(removed)) return ctx.fail(removed.error);
       return ok({ ...ctx, result: removed.value });
     },
+    relay: async (ctx: Context) => {
+      const report = await queue.relay(ctx.runId);
+      return ok({ ...ctx, result: mergeRelayReport(ctx.result, report, (message) => logWarn(queue.logger, message), "events/queue") });
+    },
   }),
 
   describe: () => ({
@@ -136,5 +142,11 @@ export default defineModule({
         ? { summary: "Requeue the dead-letter event named by params.id", reads: ["params.id"], writes: ["result"], output: COUNT("retried"), errors: { 400: "missing id", 404: "no dead event with that id" }, atomicSafe: true }
         : { summary: "Requeue every dead-letter event", reads: [], writes: ["result"], output: COUNT("retried"), atomicSafe: true },
     purgeDone: { summary: "Delete delivered events older than retentionDays", reads: [], writes: ["result"], output: COUNT("removed"), atomicSafe: true },
+    relay: {
+      summary: "Deliver the events this run queued, before the response; whatever is left over stays for the worker (adds `_events` to the result)",
+      reads: [],
+      writes: ["result._events"],
+      extendsOutput: RELAY_SCHEMA,
+    },
   }),
 });

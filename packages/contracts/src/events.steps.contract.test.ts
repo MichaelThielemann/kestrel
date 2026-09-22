@@ -4,7 +4,7 @@ import type { Context, Step, StepFactory, StepResult } from "@michaelthielemann/
 import type { StepDescription } from "@michaelthielemann/kestrel/defineModule";
 import type { CoreCode, KestrelError } from "@michaelthielemann/kestrel/errors";
 import { stepPrefix } from "@michaelthielemann/kestrel/defineModule";
-import { EVENT_DELIVERY_STEPS } from "./events.steps.ts";
+import { EVENT_DELIVERY_STEPS, RELAY_SCHEMA } from "./events.steps.ts";
 import type { EventData } from "./events.ts";
 
 export interface EventDeliveryFixture {
@@ -18,6 +18,7 @@ export interface EventDeliveryFixture {
 
 const PREFIX = stepPrefix(EVENT_DELIVERY_STEPS.prefix);
 const EMIT_KEY = EVENT_DELIVERY_STEPS.steps[0]!.slice(PREFIX.length + 1);
+const RELAY_KEY = EVENT_DELIVERY_STEPS.steps[1]!.slice(PREFIX.length + 1);
 
 function fakeCtx(overrides: Partial<Context> = {}): Context {
   return {
@@ -47,6 +48,14 @@ function describeEmitOf(fixture: EventDeliveryFixture): (spec: string) => StepDe
   return boundaryCast<(spec: string) => StepDescription>(fixture.describe[EMIT_KEY], "host");
 }
 
+function relayStepOf(fixture: EventDeliveryFixture): Step {
+  return boundaryCast<Step>(fixture.steps[RELAY_KEY], "host");
+}
+
+function describeRelayOf(fixture: EventDeliveryFixture): StepDescription {
+  return boundaryCast<StepDescription>(fixture.describe[RELAY_KEY], "host");
+}
+
 async function emitAndCapture(fixture: EventDeliveryFixture, spec: string, ctx: Context): Promise<Record<string, unknown>> {
   const emit = emitStepOf(fixture)(spec);
   const result: StepResult = await emit(ctx);
@@ -74,6 +83,21 @@ export function eventDeliveryStepTests(make: () => Promise<EventDeliveryFixture>
       const description = describeEmitOf(fixture)("x");
       expect(description.summary).toContain("x");
       expect(description.errors).toBeDefined();
+    });
+
+    it("events.relay declares the shared RELAY_SCHEMA as its extendsOutput, not a copy", async () => {
+      const fixture = await make();
+      const description = describeRelayOf(fixture);
+      expect(description.extendsOutput).toEqual(RELAY_SCHEMA);
+    });
+
+    it("events.relay reports {status: 'done', pipelines: []} for a run that raised nothing, at zero cost", async () => {
+      const fixture = await make();
+      const relay = relayStepOf(fixture);
+      const result: StepResult = await relay(fakeCtx({ runId: "no-such-run" }));
+      if (!result.ok) throw new Error(`relay failed: ${result.error.code} ${result.error.message}`);
+      const body = boundaryCast<{ _events?: { status: string; pipelines: unknown[] } }>(result.value.result, "host");
+      expect(body._events).toEqual({ status: "done", pipelines: [] });
     });
 
     it("a plain emit's envelope has exactly {eventId, event, at, runId, identity, params, id}", async () => {
