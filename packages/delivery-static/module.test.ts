@@ -133,13 +133,32 @@ async function boot(renderer: Renderer = fakeRenderer()): Promise<{ instance: De
 const seedId: Step = async (ctx) => okStep({ ...ctx, result: { id: ctx.params.id } });
 
 describe("delivery/static module via runPipeline", () => {
-  it("publish renders and stores the published locales of the document named by result.id", async () => {
+  it("publish renders and stores the published locales of the document named by result.id, merging `_delivery` into the result", async () => {
     const { instance, put } = await boot();
     put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published" });
     const pipeline = definePipeline({ name: "publish", steps: ["seed.id", "delivery.publish:pages"] });
     const result = await runPipeline(pipeline, { params: { id: "p1" } }, { modules: [{ module, instance }], steps: { "seed.id": seedId } });
     expect(result.status).toBe(200);
-    expect(boundaryCast<{ delivery: Array<{ locale: string; state: string }> }>(result.result, "host").delivery).toContainEqual(expect.objectContaining({ locale: "de", state: "live" }));
+    const body = boundaryCast<{ id: string; _delivery: Array<{ locale: string; state: string }> }>(result.result, "host");
+    expect(body.id).toBe("p1");
+    expect(body._delivery).toContainEqual(expect.objectContaining({ locale: "de", state: "live" }));
+  });
+
+  it("publish falls back to the event payload's id when the result has none", async () => {
+    const { instance, put } = await boot();
+    put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published" });
+    const pipeline = definePipeline({ name: "publish", steps: ["delivery.publish:pages"] });
+    const result = await runPipeline(pipeline, { payload: { id: "p1" } }, { modules: [{ module, instance }] });
+    expect(result.status).toBe(200);
+    expect(boundaryCast<{ _delivery: Array<{ locale: string; state: string }> }>(result.result, "host")._delivery).toContainEqual(expect.objectContaining({ locale: "de", state: "live" }));
+  });
+
+  it("publish answers 400 VALIDATION when neither the result nor the payload names a document", async () => {
+    const { instance } = await boot();
+    const pipeline = definePipeline({ name: "publish", steps: ["delivery.publish:pages"] });
+    const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }] });
+    expect(result.status).toBe(400);
+    expect(result.code).toBe("VALIDATION");
   });
 
   it("readStatus reports publish status per locale", async () => {
@@ -166,6 +185,26 @@ describe("delivery/static module via runPipeline", () => {
     for (const key of publishedKeys) expect(blobs.blobs.has(key)).toBe(false);
   });
 
+  it("unpublish falls back to the event payload's id when params carries none", async () => {
+    const { instance, put, blobs } = await boot();
+    put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published" });
+    const publish = definePipeline({ name: "publish", steps: ["seed.id", "delivery.publish:pages"] });
+    await runPipeline(publish, { params: { id: "p1" } }, { modules: [{ module, instance }], steps: { "seed.id": seedId } });
+    const publishedKeys = [...blobs.blobs.keys()];
+    const pipeline = definePipeline({ name: "unpublish", steps: ["delivery.unpublish:pages"] });
+    const result = await runPipeline(pipeline, { payload: { id: "p1" } }, { modules: [{ module, instance }] });
+    expect(result.status).toBe(200);
+    for (const key of publishedKeys) expect(blobs.blobs.has(key)).toBe(false);
+  });
+
+  it("unpublish answers 400 VALIDATION when neither params nor the payload names a document", async () => {
+    const { instance } = await boot();
+    const pipeline = definePipeline({ name: "unpublish", steps: ["delivery.unpublish:pages"] });
+    const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }] });
+    expect(result.status).toBe(400);
+    expect(result.code).toBe("VALIDATION");
+  });
+
   it("publishAll re-renders every document of the type", async () => {
     const { instance, put } = await boot();
     put("p1", { slug__de: "p1", title__de: "1", status__de: "published" });
@@ -183,7 +222,7 @@ describe("delivery/static module via runPipeline", () => {
     const pipeline = definePipeline({ name: "exportLlms", steps: ["delivery.exportLlms"] });
     const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }] });
     expect(result.status).toBe(200);
-    expect(result.result).toMatchObject({ llms: { entries: 1, full: false } });
+    expect(result.result).toMatchObject({ _llms: { entries: 1, full: false } });
   });
 
   it("readStatus answers VALIDATION without params.id (no step in this package declares a payload schema)", async () => {

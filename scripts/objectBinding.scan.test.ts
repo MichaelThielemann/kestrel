@@ -46,7 +46,7 @@ describe("object binding candidate scan", () => {
   });
 
   it("finds the expected number of candidates", () => {
-    expect(scan.candidates).toHaveLength(20);
+    expect(scan.candidates).toHaveLength(21);
   });
 
   for (const candidate of scan.candidates) {

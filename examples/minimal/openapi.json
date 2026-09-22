@@ -3972,7 +3972,7 @@
     "/admin/pages/{id}/revisions/{revisionId}/restore": {
       "post": {
         "operationId": "restorePageRevision",
-        "summary": "Require a valid session → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is → Emit event \"page.restored\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages (adds `_delivery` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) → Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is → Emit event \"page.restored\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "admin"
         ],
@@ -4028,10 +4028,93 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "document": {
-                      "type": "object"
+                    "id": {
+                      "type": "string"
                     },
-                    "delivery": {
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "updatedAt": {
+                      "type": "number"
+                    },
+                    "slug": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "title": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "body": {
+                      "anyOf": [
+                        {},
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "finished",
+                            "published"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "hero": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "description": "id of a media"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "seo": {
+                      "anyOf": [
+                        {},
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "_locales": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "origin locale per field, only with fallback"
+                    },
+                    "_translations": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "boolean"
+                      },
+                      "description": "per locale: required localized fields present"
+                    },
+                    "_delivery": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -4084,7 +4167,7 @@
                         ]
                       }
                     },
-                    "llms": {
+                    "_llms": {
                       "type": "object",
                       "properties": {
                         "entries": {
@@ -4126,16 +4209,18 @@
                     }
                   },
                   "required": [
-                    "delivery",
-                    "document",
-                    "llms"
+                    "_delivery",
+                    "_llms",
+                    "createdAt",
+                    "id",
+                    "updatedAt"
                   ]
                 }
               }
             }
           },
           "400": {
-            "description": "validation failed",
+            "description": "no document id in the result or the event payload",
             "content": {
               "application/json": {
                 "schema": {
@@ -4289,6 +4374,9 @@
                       "de",
                       "en"
                     ]
+                  },
+                  "id": {
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -4306,7 +4394,7 @@
     "/admin/publish-all/pages": {
       "post": {
         "operationId": "publishAllPages",
-        "summary": "Require a valid session → Requires permission pages.manage → Re-render every pages → Write redirects.json to the blobstore (adds `redirects: { rules, skipped }` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",
+        "summary": "Require a valid session → Requires permission pages.manage → Re-render every pages → Write redirects.json to the blobstore (adds `redirects: { rules, skipped }` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
         "tags": [
           "admin"
         ],
@@ -4354,7 +4442,7 @@
                         "skipped"
                       ]
                     },
-                    "llms": {
+                    "_llms": {
                       "type": "object",
                       "properties": {
                         "entries": {
@@ -4371,10 +4459,10 @@
                     }
                   },
                   "required": [
+                    "_llms",
                     "documents",
                     "errors",
                     "live",
-                    "llms",
                     "redirects"
                   ]
                 }
@@ -9020,7 +9108,7 @@
       },
       "post": {
         "operationId": "createPage",
-        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Create a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.created\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Create a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages (adds `_delivery` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) → Emit event \"page.created\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "pages"
         ],
@@ -9058,10 +9146,93 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "document": {
-                      "type": "object"
+                    "id": {
+                      "type": "string"
                     },
-                    "delivery": {
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "updatedAt": {
+                      "type": "number"
+                    },
+                    "slug": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "title": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "body": {
+                      "anyOf": [
+                        {},
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "finished",
+                            "published"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "hero": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "description": "id of a media"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "seo": {
+                      "anyOf": [
+                        {},
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "_locales": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "origin locale per field, only with fallback"
+                    },
+                    "_translations": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "boolean"
+                      },
+                      "description": "per locale: required localized fields present"
+                    },
+                    "_delivery": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -9114,7 +9285,7 @@
                         ]
                       }
                     },
-                    "llms": {
+                    "_llms": {
                       "type": "object",
                       "properties": {
                         "entries": {
@@ -9131,16 +9302,18 @@
                     }
                   },
                   "required": [
-                    "delivery",
-                    "document",
-                    "llms"
+                    "_delivery",
+                    "_llms",
+                    "createdAt",
+                    "id",
+                    "updatedAt"
                   ]
                 }
               }
             }
           },
           "400": {
-            "description": "validation failed",
+            "description": "no document id in the result or the event payload",
             "content": {
               "application/json": {
                 "schema": {
@@ -9263,6 +9436,9 @@
                       "de",
                       "en"
                     ]
+                  },
+                  "id": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -9285,7 +9461,7 @@
     "/pages/{id}": {
       "delete": {
         "operationId": "deletePage",
-        "summary": "Require a valid session → Requires permission pages.delete → Refuse deletion while pages is referenced → Delete a pages → Drop every revision of a pages document, in every locale → Drop indexed references of a pages document → Drop indexed links of pages → Remove rendered output of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.deleted\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission pages.delete → Refuse deletion while pages is referenced → Delete a pages → Drop every revision of a pages document, in every locale → Drop indexed references of a pages document → Drop indexed links of pages → Remove rendered output of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) → Emit event \"page.deleted\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "pages"
         ],
@@ -9323,7 +9499,7 @@
                     "ok": {
                       "type": "boolean"
                     },
-                    "llms": {
+                    "_llms": {
                       "type": "object",
                       "properties": {
                         "entries": {
@@ -9340,7 +9516,7 @@
                     }
                   },
                   "required": [
-                    "llms",
+                    "_llms",
                     "ok"
                   ]
                 }
@@ -9348,7 +9524,7 @@
             }
           },
           "400": {
-            "description": "missing id",
+            "description": "no document id in params or the event payload",
             "content": {
               "application/json": {
                 "schema": {
@@ -9412,6 +9588,22 @@
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": true
               }
             }
           }
@@ -9637,7 +9829,7 @@
       },
       "patch": {
         "operationId": "updatePage",
-        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.updated\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages (adds `_delivery` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) → Emit event \"page.updated\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "pages"
         ],
@@ -9683,10 +9875,93 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "document": {
-                      "type": "object"
+                    "id": {
+                      "type": "string"
                     },
-                    "delivery": {
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "updatedAt": {
+                      "type": "number"
+                    },
+                    "slug": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "title": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "body": {
+                      "anyOf": [
+                        {},
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "finished",
+                            "published"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "hero": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "description": "id of a media"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "seo": {
+                      "anyOf": [
+                        {},
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "_locales": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "origin locale per field, only with fallback"
+                    },
+                    "_translations": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "boolean"
+                      },
+                      "description": "per locale: required localized fields present"
+                    },
+                    "_delivery": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -9739,7 +10014,7 @@
                         ]
                       }
                     },
-                    "llms": {
+                    "_llms": {
                       "type": "object",
                       "properties": {
                         "entries": {
@@ -9756,16 +10031,18 @@
                     }
                   },
                   "required": [
-                    "delivery",
-                    "document",
-                    "llms"
+                    "_delivery",
+                    "_llms",
+                    "createdAt",
+                    "id",
+                    "updatedAt"
                   ]
                 }
               }
             }
           },
           "400": {
-            "description": "validation failed",
+            "description": "no document id in the result or the event payload",
             "content": {
               "application/json": {
                 "schema": {
@@ -9909,6 +10186,9 @@
                       "de",
                       "en"
                     ]
+                  },
+                  "id": {
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -9926,7 +10206,7 @@
     "/pages/{id}/translations/{locale}": {
       "delete": {
         "operationId": "deletePageTranslation",
-        "summary": "Require a valid session → Requires permission pages.write → Remove one translation of a pages (locale from the route or ?locale=); the document stays in its other locales → Drop the revisions of one locale of a pages document → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) → Emit event \"page.translationRemoved\" to every subscribed handler pipeline and wait for them",
+        "summary": "Require a valid session → Requires permission pages.write → Remove one translation of a pages (locale from the route or ?locale=); the document stays in its other locales → Drop the revisions of one locale of a pages document → Index the references of a pages document → Index external links of pages → Render and store published locales of a pages (adds `_delivery` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) → Emit event \"page.translationRemoved\" to every subscribed handler pipeline and wait for them",
         "tags": [
           "pages"
         ],
@@ -9976,10 +10256,93 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "document": {
-                      "type": "object"
+                    "id": {
+                      "type": "string"
                     },
-                    "delivery": {
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "updatedAt": {
+                      "type": "number"
+                    },
+                    "slug": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "title": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "body": {
+                      "anyOf": [
+                        {},
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "finished",
+                            "published"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "hero": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "description": "id of a media"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "seo": {
+                      "anyOf": [
+                        {},
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "_locales": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "origin locale per field, only with fallback"
+                    },
+                    "_translations": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "boolean"
+                      },
+                      "description": "per locale: required localized fields present"
+                    },
+                    "_delivery": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -10032,7 +10395,7 @@
                         ]
                       }
                     },
-                    "llms": {
+                    "_llms": {
                       "type": "object",
                       "properties": {
                         "entries": {
@@ -10049,16 +10412,18 @@
                     }
                   },
                   "required": [
-                    "delivery",
-                    "document",
-                    "llms"
+                    "_delivery",
+                    "_llms",
+                    "createdAt",
+                    "id",
+                    "updatedAt"
                   ]
                 }
               }
             }
           },
           "400": {
-            "description": "missing id",
+            "description": "no document id in the result or the event payload",
             "content": {
               "application/json": {
                 "schema": {
@@ -10132,6 +10497,22 @@
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": true
               }
             }
           }
@@ -10796,7 +11177,7 @@
       },
       "put": {
         "operationId": "setSettings",
-        "summary": "Require a valid session → Requires permission settings.write → Validate payload field settings.navigation against its JSON Schema → Replace the settings document → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",
+        "summary": "Require a valid session → Requires permission settings.write → Validate payload field settings.navigation against its JSON Schema → Replace the settings document → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
         "tags": [
           "settings"
         ],
@@ -10868,7 +11249,7 @@
                       },
                       "description": "per locale: required localized fields present"
                     },
-                    "llms": {
+                    "_llms": {
                       "type": "object",
                       "properties": {
                         "entries": {
@@ -10885,9 +11266,9 @@
                     }
                   },
                   "required": [
+                    "_llms",
                     "createdAt",
                     "id",
-                    "llms",
                     "updatedAt"
                   ]
                 }

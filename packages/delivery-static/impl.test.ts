@@ -202,9 +202,9 @@ describe("delivery/static steps", () => {
     expect(expectErr(await map.readStatus("pages")(ctx()), "VALIDATION").status).toBe(400);
   });
 
-  it("publish is a bug path when result carries no document id", async () => {
+  it("publish answers VALIDATION when neither the result nor the payload names a document", async () => {
     const map = await steps();
-    await expect(map.publish("pages")(ctx({ id: "p1" }))).rejects.toThrow(/without a document id in result/);
+    expect(expectErr(await map.publish("pages")(ctx({ id: "p1" })), "VALIDATION").status).toBe(400);
   });
 
   it("passes a persistence TRANSIENT failure through as a retryable 503", async () => {

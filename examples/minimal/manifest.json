@@ -8141,20 +8141,27 @@
       "module": "delivery/static",
       "factory": true,
       "description": {
-        "summary": "Render and store published locales of a <arg>",
+        "summary": "Render and store published locales of a <arg> (adds `_delivery` to the result)",
         "reads": [
-          "result.id"
+          "result.id?",
+          "payload"
         ],
         "writes": [
-          "result"
+          "result._delivery"
         ],
-        "output": {
+        "input": {
           "type": "object",
           "properties": {
-            "document": {
-              "type": "object"
-            },
-            "delivery": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "_delivery": {
               "type": "array",
               "items": {
                 "type": "object",
@@ -8209,9 +8216,11 @@
             }
           },
           "required": [
-            "document",
-            "delivery"
+            "_delivery"
           ]
+        },
+        "errors": {
+          "400": "no document id in the result or the event payload"
         }
       }
     },
@@ -8222,11 +8231,21 @@
       "description": {
         "summary": "Remove rendered output of a <arg>",
         "reads": [
-          "params.id"
+          "params.id",
+          "payload"
         ],
         "writes": [],
+        "input": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
         "errors": {
-          "400": "missing id"
+          "400": "no document id in params or the event payload"
         }
       }
     },
@@ -8337,15 +8356,15 @@
       "module": "delivery/static",
       "factory": false,
       "description": {
-        "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",
+        "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
         "reads": [],
         "writes": [
-          "result.llms"
+          "result._llms"
         ],
         "extendsOutput": {
           "type": "object",
           "properties": {
-            "llms": {
+            "_llms": {
               "type": "object",
               "properties": {
                 "entries": {
@@ -8362,7 +8381,7 @@
             }
           },
           "required": [
-            "llms"
+            "_llms"
           ]
         }
       }
@@ -10470,20 +10489,27 @@
           "name": "delivery.publish",
           "module": "delivery/static",
           "description": {
-            "summary": "Render and store published locales of a pages",
+            "summary": "Render and store published locales of a pages (adds `_delivery` to the result)",
             "reads": [
-              "result.id"
+              "result.id?",
+              "payload"
             ],
             "writes": [
-              "result"
+              "result._delivery"
             ],
-            "output": {
+            "input": {
               "type": "object",
               "properties": {
-                "document": {
-                  "type": "object"
-                },
-                "delivery": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_delivery": {
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -10538,9 +10564,11 @@
                 }
               },
               "required": [
-                "document",
-                "delivery"
+                "_delivery"
               ]
+            },
+            "errors": {
+              "400": "no document id in the result or the event payload"
             }
           }
         },
@@ -10549,15 +10577,15 @@
           "name": "delivery.exportLlms",
           "module": "delivery/static",
           "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",
+            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
             "reads": [],
             "writes": [
-              "result.llms"
+              "result._llms"
             ],
             "extendsOutput": {
               "type": "object",
               "properties": {
-                "llms": {
+                "_llms": {
                   "type": "object",
                   "properties": {
                     "entries": {
@@ -10574,7 +10602,7 @@
                 }
               },
               "required": [
-                "llms"
+                "_llms"
               ]
             }
           }
@@ -11202,11 +11230,21 @@
           "description": {
             "summary": "Remove rendered output of a pages",
             "reads": [
-              "params.id"
+              "params.id",
+              "payload"
             ],
             "writes": [],
+            "input": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
             "errors": {
-              "400": "missing id"
+              "400": "no document id in params or the event payload"
             }
           }
         },
@@ -11215,15 +11253,15 @@
           "name": "delivery.exportLlms",
           "module": "delivery/static",
           "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",
+            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
             "reads": [],
             "writes": [
-              "result.llms"
+              "result._llms"
             ],
             "extendsOutput": {
               "type": "object",
               "properties": {
-                "llms": {
+                "_llms": {
                   "type": "object",
                   "properties": {
                     "entries": {
@@ -11240,7 +11278,7 @@
                 }
               },
               "required": [
-                "llms"
+                "_llms"
               ]
             }
           }
@@ -11476,20 +11514,27 @@
           "name": "delivery.publish",
           "module": "delivery/static",
           "description": {
-            "summary": "Render and store published locales of a pages",
+            "summary": "Render and store published locales of a pages (adds `_delivery` to the result)",
             "reads": [
-              "result.id"
+              "result.id?",
+              "payload"
             ],
             "writes": [
-              "result"
+              "result._delivery"
             ],
-            "output": {
+            "input": {
               "type": "object",
               "properties": {
-                "document": {
-                  "type": "object"
-                },
-                "delivery": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_delivery": {
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -11544,9 +11589,11 @@
                 }
               },
               "required": [
-                "document",
-                "delivery"
+                "_delivery"
               ]
+            },
+            "errors": {
+              "400": "no document id in the result or the event payload"
             }
           }
         },
@@ -11555,15 +11602,15 @@
           "name": "delivery.exportLlms",
           "module": "delivery/static",
           "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",
+            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
             "reads": [],
             "writes": [
-              "result.llms"
+              "result._llms"
             ],
             "extendsOutput": {
               "type": "object",
               "properties": {
-                "llms": {
+                "_llms": {
                   "type": "object",
                   "properties": {
                     "entries": {
@@ -11580,7 +11627,7 @@
                 }
               },
               "required": [
-                "llms"
+                "_llms"
               ]
             }
           }
@@ -16220,15 +16267,15 @@
           "name": "delivery.exportLlms",
           "module": "delivery/static",
           "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",
+            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
             "reads": [],
             "writes": [
-              "result.llms"
+              "result._llms"
             ],
             "extendsOutput": {
               "type": "object",
               "properties": {
-                "llms": {
+                "_llms": {
                   "type": "object",
                   "properties": {
                     "entries": {
@@ -16245,7 +16292,7 @@
                 }
               },
               "required": [
-                "llms"
+                "_llms"
               ]
             }
           }
@@ -18241,20 +18288,27 @@
           "name": "delivery.publish",
           "module": "delivery/static",
           "description": {
-            "summary": "Render and store published locales of a pages",
+            "summary": "Render and store published locales of a pages (adds `_delivery` to the result)",
             "reads": [
-              "result.id"
+              "result.id?",
+              "payload"
             ],
             "writes": [
-              "result"
+              "result._delivery"
             ],
-            "output": {
+            "input": {
               "type": "object",
               "properties": {
-                "document": {
-                  "type": "object"
-                },
-                "delivery": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_delivery": {
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -18309,9 +18363,11 @@
                 }
               },
               "required": [
-                "document",
-                "delivery"
+                "_delivery"
               ]
+            },
+            "errors": {
+              "400": "no document id in the result or the event payload"
             }
           }
         },
@@ -18320,15 +18376,15 @@
           "name": "delivery.exportLlms",
           "module": "delivery/static",
           "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",
+            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
             "reads": [],
             "writes": [
-              "result.llms"
+              "result._llms"
             ],
             "extendsOutput": {
               "type": "object",
               "properties": {
-                "llms": {
+                "_llms": {
                   "type": "object",
                   "properties": {
                     "entries": {
@@ -18345,7 +18401,7 @@
                 }
               },
               "required": [
-                "llms"
+                "_llms"
               ]
             }
           }
@@ -19390,15 +19446,15 @@
           "name": "delivery.exportLlms",
           "module": "delivery/static",
           "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",
+            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
             "reads": [],
             "writes": [
-              "result.llms"
+              "result._llms"
             ],
             "extendsOutput": {
               "type": "object",
               "properties": {
-                "llms": {
+                "_llms": {
                   "type": "object",
                   "properties": {
                     "entries": {
@@ -19415,7 +19471,7 @@
                 }
               },
               "required": [
-                "llms"
+                "_llms"
               ]
             }
           }
@@ -20167,20 +20223,27 @@
           "name": "delivery.publish",
           "module": "delivery/static",
           "description": {
-            "summary": "Render and store published locales of a pages",
+            "summary": "Render and store published locales of a pages (adds `_delivery` to the result)",
             "reads": [
-              "result.id"
+              "result.id?",
+              "payload"
             ],
             "writes": [
-              "result"
+              "result._delivery"
             ],
-            "output": {
+            "input": {
               "type": "object",
               "properties": {
-                "document": {
-                  "type": "object"
-                },
-                "delivery": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_delivery": {
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -20235,9 +20298,11 @@
                 }
               },
               "required": [
-                "document",
-                "delivery"
+                "_delivery"
               ]
+            },
+            "errors": {
+              "400": "no document id in the result or the event payload"
             }
           }
         },
@@ -20246,15 +20311,15 @@
           "name": "delivery.exportLlms",
           "module": "delivery/static",
           "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",
+            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
             "reads": [],
             "writes": [
-              "result.llms"
+              "result._llms"
             ],
             "extendsOutput": {
               "type": "object",
               "properties": {
-                "llms": {
+                "_llms": {
                   "type": "object",
                   "properties": {
                     "entries": {
@@ -20271,7 +20336,7 @@
                 }
               },
               "required": [
-                "llms"
+                "_llms"
               ]
             }
           }

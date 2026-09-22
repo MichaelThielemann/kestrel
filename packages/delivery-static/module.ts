@@ -46,11 +46,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function documentId(ctx: Context, step: string): string {
+function documentId(ctx: Context): string | null {
   const result = boundaryCast<{ id?: unknown } | undefined>(ctx.result, "host");
-  if (typeof result?.id !== "string") throw new Error(`delivery/static: ${step} ran without a document id in result`);
-  return result.id;
+  if (typeof result?.id === "string") return result.id;
+  return typeof ctx.payload.id === "string" ? ctx.payload.id : null;
 }
+
+const EVENT_ID_INPUT = { type: "object", properties: { id: { type: "string" } }, additionalProperties: true };
 
 const STATUS_SCHEMA = {
   type: "object",
@@ -70,13 +72,17 @@ export default defineModule({
 
   steps: (delivery) => ({
     publish: stepFactory((type: string) => async (ctx: Context) => {
-      const published = await delivery.publish(type, documentId(ctx, `delivery.publish:${type}`));
+      const id = documentId(ctx);
+      if (id === null) return ctx.fail("VALIDATION", "delivery.publish: no document id in the result or the event payload");
+      const published = await delivery.publish(type, id);
       if (isErr(published)) return ctx.fail(published.error);
-      return ok({ ...ctx, result: { document: ctx.result, delivery: published.value } });
+      const previous = isRecord(ctx.result) ? ctx.result : {};
+      return ok({ ...ctx, result: { ...previous, _delivery: published.value } });
     }),
     unpublish: stepFactory((type: string) => async (ctx: Context) => {
-      if (!ctx.params.id) return ctx.fail("VALIDATION", "missing id");
-      const removed = await delivery.unpublish(type, ctx.params.id);
+      const id = ctx.params.id ?? (typeof ctx.payload.id === "string" ? ctx.payload.id : undefined);
+      if (!id) return ctx.fail("VALIDATION", "delivery.unpublish: no document id in params or the event payload");
+      const removed = await delivery.unpublish(type, id);
       if (isErr(removed)) return ctx.fail(removed.error);
       return ok(ctx);
     }),
@@ -95,18 +101,26 @@ export default defineModule({
       const previous = isRecord(ctx.result) ? ctx.result : {};
       const exported = await delivery.exportLlms();
       if (isErr(exported)) return ctx.fail("TRANSIENT", `delivery.exportLlms: llms.txt was not written – try again (${exported.error.message})`);
-      return ok({ ...ctx, result: { ...previous, llms: exported.value } });
+      return ok({ ...ctx, result: { ...previous, _llms: exported.value } });
     },
   }),
 
   describe: () => ({
     publish: (type: string) => ({
-      summary: `Render and store published locales of a ${type}`,
-      reads: ["result.id"],
-      writes: ["result"],
-      output: { type: "object", properties: { document: { type: "object" }, delivery: { type: "array", items: STATUS_SCHEMA } }, required: ["document", "delivery"] },
+      summary: `Render and store published locales of a ${type} (adds \`_delivery\` to the result)`,
+      reads: ["result.id?", "payload"],
+      writes: ["result._delivery"],
+      input: EVENT_ID_INPUT,
+      extendsOutput: { type: "object", properties: { _delivery: { type: "array", items: STATUS_SCHEMA } }, required: ["_delivery"] },
+      errors: { 400: "no document id in the result or the event payload" },
     }),
-    unpublish: (type: string) => ({ summary: `Remove rendered output of a ${type}`, reads: ["params.id"], writes: [], errors: { 400: "missing id" } }),
+    unpublish: (type: string) => ({
+      summary: `Remove rendered output of a ${type}`,
+      reads: ["params.id", "payload"],
+      writes: [],
+      input: EVENT_ID_INPUT,
+      errors: { 400: "no document id in params or the event payload" },
+    }),
     readStatus: (type: string) => ({ summary: `Publish status per locale of a ${type}`, reads: ["params.id"], writes: ["result"], output: { type: "array", items: STATUS_SCHEMA }, errors: { 400: "missing id" }, atomicSafe: true }),
     publishAll: (type: string) => ({
       summary: `Re-render every ${type}`,
@@ -115,10 +129,10 @@ export default defineModule({
       output: { type: "object", properties: { documents: { type: "number" }, live: { type: "number" }, errors: { type: "number" } }, required: ["documents", "live", "errors"] },
     }),
     exportLlms: {
-      summary: "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result)",
+      summary: "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
       reads: [],
-      writes: ["result.llms"],
-      extendsOutput: { type: "object", properties: { llms: { type: "object", properties: { entries: { type: "integer" }, full: { type: "boolean" } }, required: ["entries", "full"] } }, required: ["llms"] },
+      writes: ["result._llms"],
+      extendsOutput: { type: "object", properties: { _llms: { type: "object", properties: { entries: { type: "integer" }, full: { type: "boolean" } }, required: ["entries", "full"] } }, required: ["_llms"] },
     },
   }),
 });

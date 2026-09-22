@@ -98,6 +98,13 @@
   feature condition. Boot fails naming the type and the field. That namespace is reserved for
   members the system adds to a document (`_locales`, `_translations`, and any future one), and
   closes a collision that nothing previously guarded.
+- `delivery-static`: `delivery.publish` merges its result into `_delivery` instead of replacing it
+  with `{ document, delivery }`, and `delivery.exportLlms` writes `_llms` instead of `llms` — both
+  now members of the reserved underscore namespace. `delivery.publish` and `delivery.unpublish`
+  take the document id from `result.id`/`params.id` or, when neither is present, from an event
+  envelope's `payload.id`, so both can run as the first step of a pipeline an event triggers.
+  `delivery.publish` answers `VALIDATION` (400) when no id is available; it used to throw, which
+  surfaced as `INTERNAL` (500).
 
 ### Added
 

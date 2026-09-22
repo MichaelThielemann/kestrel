@@ -9,6 +9,11 @@ unprefixed unless `prefixPrimary`, `home` slug → `/`); other locales are remov
 locale in `delivery_publish_status` (`live` | `error` | `draft`, `path`, `error`, `publishedAt`); a failed
 render keeps the previous live output. `delivery.unpublish:<type>` after remove, `delivery.readStatus:<type>`
 for the editor's second lamp, `delivery.publishAll:<type>` to re-render everything.
+`delivery.publish` takes the document id from `result.id` when present, else from the event
+payload's `id`, so it also runs as the first step of a pipeline an event triggers; it merges
+`_delivery` into the result instead of replacing it. `delivery.unpublish` does the same with
+`params.id` and the payload's `id`. Both answer `VALIDATION` (400) when neither source names a
+document, instead of throwing.
 Formats come from the renderer (`html`, `pdf`, …) – `formats: ["html", "pdf"]` writes both.
 Assets the renderer returns (`assets: [{ path: "/_assets/app.js", … }]` – hydration bundles, CSS)
 are stored under `<prefix><path>` once per process; they are never removed on unpublish.
@@ -26,7 +31,7 @@ greedily up to the last `</main>` tag, so a nested `<main>` does not cut it shor
 heading and `##` section heading; root-relative links and images made absolute with `siteUrl`) – and
 needs `"html"` in `formats`; `full: false` removes a stale `llms-full.txt`. Titles and descriptions are
 escaped so that editor-authored text cannot introduce a stray line break or start with a heading marker
-in the generated file. The result gains `llms: { entries, full }`.
+in the generated file. The result gains `_llms: { entries, full }`.
 Every `Delivery` method returns a `Result`; a failure is an `Err(KestrelError)`, never an exception.
 A render failure (`RENDER_FAILED` or `TRANSIENT` from `renderer@1`) is not a step failure: it is
 recorded on the status row as `state: "error"` with the message and the remaining locales are still
@@ -73,11 +78,11 @@ Not included: sitemap, CDN invalidation.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `delivery.publish:<arg>` | Render and store published locales of a <arg> | `result.id` | `result` | – | { document: object, delivery: object[], … } | – | – | no |
-| `delivery.unpublish:<arg>` | Remove rendered output of a <arg> | `params.id` | – | – | – | 400 missing id | – | no |
+| `delivery.publish:<arg>` | Render and store published locales of a <arg> (adds `_delivery` to the result) | `result.id?`, `payload` | `result._delivery` | { id?: string, … } | { _delivery: object[], … } | 400 no document id in the result or the event payload | – | no |
+| `delivery.unpublish:<arg>` | Remove rendered output of a <arg> | `params.id`, `payload` | – | { id?: string, … } | – | 400 no document id in params or the event payload | – | no |
 | `delivery.readStatus:<arg>` | Publish status per locale of a <arg> | `params.id` | `result` | – | object[] | 400 missing id | – | yes |
 | `delivery.publishAll:<arg>` | Re-render every <arg> | – | `result` | – | { documents: number, live: number, errors: number, … } | – | – | no |
-| `delivery.exportLlms` | Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) | – | `result.llms` | – | { llms: object, … } | – | – | no |
+| `delivery.exportLlms` | Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) | – | `result._llms` | – | { _llms: object, … } | – | – | no |
 
 Pipelines in `examples/minimal` using these steps:
 

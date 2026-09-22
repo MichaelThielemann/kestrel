@@ -27,6 +27,8 @@ export const OBJECT_BINDING_REGISTRY: Record<string, ObjectBindingDisposition> =
   [key("content/default", "update")]: { kind: "waiver", reason: "the input schema is the document's own fields; a reference to another document is validated by references-default, not by content itself." },
   [key("content/default", "removeTranslation")]: { kind: "waiver", reason: "the only request-controlled value beside params.id is the query locale, not an object id." },
 
+  [key("delivery/static", "unpublish")]: { kind: "waiver", reason: "payload.id is only a fallback used when params.id is absent, in an event-triggered run with no HTTP caller; params.id remains the resource itself, not a second object to bind to." },
+
   [key("images/default", "serve")]: { kind: "test", file: "images-default/module.test.ts", title: "serve: does not return another media item's variant for the same size name" },
 
   [key("media/default", "update")]: { kind: "waiver", reason: "the only request-controlled value beside params.id is the query locale, not an object id." },
