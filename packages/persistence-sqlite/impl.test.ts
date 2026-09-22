@@ -52,7 +52,7 @@ describe("persistence/sqlite", () => {
     expectOk(await db.ensureCollection("t", { a: "string" }));
     for (let i = 0; i < 50; i++) expectOk(await db.createOne("t", { a: "x".repeat(500) }));
     const before = statSync(file).size;
-    db.checkpoint();
+    await db.checkpoint();
     expect(statSync(file).size).toBeGreaterThan(before);
     expect(statSync(`${file}-wal`).size).toBe(0);
     rmSync(dir, { recursive: true, force: true });
@@ -63,11 +63,11 @@ describe("persistence/sqlite", () => {
     const db = createPersistenceSqlite({ file: join(dir, "live.db") });
     expectOk(await db.ensureCollection("t", { a: "string" }));
     expectOk(await db.createOne("t", { id: "1", a: "x" }));
-    db.snapshot(join(dir, "snap", "copy.db"));
+    await db.snapshot(join(dir, "snap", "copy.db"));
     const copy = createPersistenceSqlite({ file: join(dir, "snap", "copy.db") });
     expectOk(await copy.ensureCollection("t", { a: "string" }));
     expect(expectOk(await copy.findOne("t", { id: "1" }))).toEqual({ id: "1", a: "x" });
-    db.snapshot(join(dir, "snap", "copy.db"));
+    await db.snapshot(join(dir, "snap", "copy.db"));
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -118,7 +118,7 @@ const ctx = (params: Record<string, string> = {}, payload: Record<string, unknow
 const stepsOf = (db: PersistenceSqlite) => module.steps!(db);
 
 function fakeDb(): PersistenceSqlite & { failNext(code: "TRANSIENT" | "CONFLICT"): void } {
-  return Object.assign(createFakePersistence(), { checkpoint: () => {}, snapshot: () => {}, close: () => {} });
+  return Object.assign(createFakePersistence(), { checkpoint: async () => {}, snapshot: async () => {}, close: () => {} });
 }
 
 describe("persistence/sqlite steps", () => {

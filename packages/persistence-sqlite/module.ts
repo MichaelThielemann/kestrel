@@ -27,9 +27,9 @@ export const configSchema = z
     }
   });
 
-function guard(ctx: Context, fn: () => void): Err<KestrelError> | null {
+async function guard(ctx: Context, fn: () => Promise<void>): Promise<Err<KestrelError> | null> {
   try {
-    fn();
+    await fn();
     return null;
   } catch (cause) {
     const error = persistenceFailure(cause);
@@ -53,8 +53,8 @@ export default defineModule({
   atomicScope: (db, info, body) => db.scope(info, body),
 
   steps: (db) => ({
-    checkpoint: async (ctx: Context) => guard(ctx, () => db.checkpoint()) ?? ok(ctx),
-    snapshot: stepFactory((file: string) => async (ctx: Context) => guard(ctx, () => db.snapshot(file)) ?? ok({ ...ctx, result: { file } })),
+    checkpoint: async (ctx: Context) => (await guard(ctx, () => db.checkpoint())) ?? ok(ctx),
+    snapshot: stepFactory((file: string) => async (ctx: Context) => (await guard(ctx, () => db.snapshot(file))) ?? ok({ ...ctx, result: { file } })),
     createOne: stepFactory((collection: string) => async (ctx: Context) => {
       const created = await db.createOne(collection, ctx.payload);
       if (isErr(created)) return ctx.fail(created.error);

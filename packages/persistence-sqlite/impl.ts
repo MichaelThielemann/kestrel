@@ -64,9 +64,23 @@ function run<T>(fn: () => T): Result<T, PersistenceError> {
   }
 }
 
+function scopeFailure(cause: unknown, phase: string): PersistenceError {
+  return persistenceFailure(cause) ?? boundaryCast<PersistenceError>(failure("INTERNAL", `persistence/sqlite: ${phase} failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause }), "host");
+}
+
+function execOrFail(db: DatabaseSync, sql: string, phase: string): PersistenceError | null {
+  try {
+    db.exec(sql);
+    return null;
+  } catch (cause) {
+    return scopeFailure(cause, phase);
+  }
+}
+
 export interface PersistenceSqlite extends Persistence {
-  checkpoint(): void;
-  snapshot(file: string): void;
+  /** Routed through the same mutex as every other call: it waits for an open scope and holds the connection while it runs. */
+  checkpoint(): Promise<void>;
+  snapshot(file: string): Promise<void>;
   close(): void;
   /** Runs `body` inside `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK`, holding the single connection for its duration. */
   scope(info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
@@ -86,11 +100,13 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
   let unusable = false;
 
   let tail: Promise<void> = Promise.resolve();
-  const enqueue = <T>(fn: () => Promise<T> | T, deadline?: number): Promise<T> => {
-    const run = tail.then(
-      () => (deadline !== undefined && Date.now() > deadline ? Promise.reject(new AcquireTimeout()) : fn()),
-      () => (deadline !== undefined && Date.now() > deadline ? Promise.reject(new AcquireTimeout()) : fn()),
-    );
+  const enqueue = <T>(fn: () => Promise<T> | T, deadline?: number, onStart?: () => void): Promise<T> => {
+    const handOff = (): Promise<T> | T => {
+      if (deadline !== undefined && Date.now() > deadline) return Promise.reject(new AcquireTimeout());
+      onStart?.();
+      return fn();
+    };
+    const run = tail.then(handOff, handOff);
     tail = run.then(
       () => undefined,
       () => undefined,
@@ -224,8 +240,8 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
   };
 
   const runScope = async (body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
-    const begun = run(() => db.exec("BEGIN IMMEDIATE"));
-    if (isErr(begun)) return { kind: "failed", phase: "begin", error: begun.error };
+    const beginError = execOrFail(db, "BEGIN IMMEDIATE", "begin");
+    if (beginError) return { kind: "failed", phase: "begin", error: beginError };
 
     const store: ScopeStore = { state: "open" };
     let timedOut = false;
@@ -248,25 +264,25 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
     }
 
     if (verdict === "commit") {
-      const committed = run(() => db.exec("COMMIT"));
-      if (!isErr(committed)) {
+      const commitError = execOrFail(db, "COMMIT", "commit");
+      if (commitError === null) {
         store.state = "committed";
         return { kind: "settled", verdict: "commit" };
       }
-      const rolledBack = run(() => db.exec("ROLLBACK"));
+      const rollbackError = execOrFail(db, "ROLLBACK", "rollback");
       store.state = "rolled-back";
-      if (isErr(rolledBack)) {
+      if (rollbackError) {
         unusable = true;
-        return { kind: "failed", phase: "rollback", error: failure("INTERNAL", "persistence/sqlite: rollback after a failed commit also failed"), original: committed.error };
+        return { kind: "failed", phase: "rollback", error: failure("INTERNAL", "persistence/sqlite: rollback after a failed commit also failed", { cause: rollbackError }), original: commitError };
       }
-      return { kind: "failed", phase: "commit", error: committed.error };
+      return { kind: "failed", phase: "commit", error: commitError };
     }
 
-    const rolledBack = run(() => db.exec("ROLLBACK"));
+    const rollbackError = execOrFail(db, "ROLLBACK", "rollback");
     store.state = "rolled-back";
-    if (isErr(rolledBack)) {
+    if (rollbackError) {
       unusable = true;
-      return { kind: "failed", phase: "rollback", error: failure("INTERNAL", "persistence/sqlite: rollback failed") };
+      return { kind: "failed", phase: "rollback", error: failure("INTERNAL", "persistence/sqlite: rollback failed", { cause: rollbackError }) };
     }
     if (timedOut) return { kind: "failed", phase: "timeout", error: failure("TRANSIENT", "persistence/sqlite: atomic scope timed out") };
     if (didThrow) throw thrown;
@@ -274,26 +290,48 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
   };
 
   const scope = async (_info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
+    if (unusable) return { kind: "failed", phase: "begin", error: unusableError() };
     if (als.getStore() !== undefined) {
       return { kind: "failed", phase: "begin", error: failure("INTERNAL", "persistence/sqlite: an atomic scope is already open in this call chain") };
     }
     const deadline = Date.now() + acquireTimeoutMs;
-    try {
-      return await enqueue(() => runScope(body), deadline);
-    } catch (cause) {
+    let acquireTimer: ReturnType<typeof setTimeout> | undefined;
+    const queued: Promise<AtomicOutcome> = enqueue(() => runScope(body), deadline, () => {
+      if (acquireTimer !== undefined) clearTimeout(acquireTimer);
+    }).catch((cause: unknown) => {
       if (cause instanceof AcquireTimeout) return { kind: "failed", phase: "begin", error: failure("TRANSIENT", "persistence/sqlite: timed out waiting for the connection") };
       throw cause;
-    }
+    });
+    const acquireTimeout = new Promise<AtomicOutcome>((resolve) => {
+      acquireTimer = setTimeout(() => resolve({ kind: "failed", phase: "begin", error: failure("TRANSIENT", "persistence/sqlite: timed out waiting for the connection") }), acquireTimeoutMs);
+      acquireTimer.unref?.();
+    });
+    return Promise.race([queued, acquireTimeout]);
   };
 
   return {
     checkpoint() {
-      db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      const store = als.getStore();
+      if (store?.state === "open") {
+        db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+        return Promise.resolve();
+      }
+      return enqueue(() => {
+        db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      });
     },
     snapshot(file) {
-      mkdirSync(dirname(file), { recursive: true });
-      rmSync(file, { force: true });
-      db.prepare("VACUUM INTO ?").run(file);
+      const run = () => {
+        mkdirSync(dirname(file), { recursive: true });
+        rmSync(file, { force: true });
+        db.prepare("VACUUM INTO ?").run(file);
+      };
+      const store = als.getStore();
+      if (store?.state === "open") {
+        run();
+        return Promise.resolve();
+      }
+      return enqueue(run);
     },
     close() {
       db.close();

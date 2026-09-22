@@ -1,15 +1,39 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { atomicScopeTests } from "@michaelthielemann/kestrel-contracts/atomic.contract.test";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import type { Context } from "@michaelthielemann/kestrel/context";
+import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
+import { silentLogger } from "@michaelthielemann/kestrel/logger";
+import { ok } from "@michaelthielemann/kestrel/result";
+import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { createPersistenceSqlite } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
 
 function tempFile(): { file: string; cleanup: () => void } {
   const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-sqlite-atomic-"));
   return { file: join(dir, "t.db"), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+async function withPatchedExec<T>(matches: readonly { sql: string; error: () => Error }[], fn: () => Promise<T>): Promise<T> {
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- captured to be re-invoked with an explicit `this` via `.call()` below
+  const original = DatabaseSync.prototype.exec;
+  const queue = [...matches];
+  DatabaseSync.prototype.exec = function patchedExec(this: DatabaseSync, sql: string) {
+    if (queue[0]?.sql === sql) {
+      const { error } = queue.shift()!;
+      throw error();
+    }
+    return original.call(this, sql);
+  };
+  try {
+    return await fn();
+  } finally {
+    DatabaseSync.prototype.exec = original;
+  }
 }
 
 atomicScopeTests(async () => {
@@ -167,5 +191,170 @@ describe("persistence/sqlite atomic scope", () => {
 
   it("module.ts declares atomicScope next to teardown", () => {
     expect(typeof module.atomicScope).toBe("function");
+  });
+});
+
+describe("every BEGIN/COMMIT/ROLLBACK failure inside the scope becomes a value", () => {
+  it("a closed database: scope() resolves to a failed outcome instead of rejecting", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    db.close();
+    const outcome = await db.scope({ pipeline: "p", group: 1 }, async () => "commit");
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind === "failed") expect(outcome.phase).toBe("begin");
+  });
+
+  it("a closed database: runPipeline returns a RunResult, it does not reject", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    db.close();
+    const pipeline = definePipeline({ name: "p", steps: [{ atomic: ["test.noop"] }] });
+    const result = await runPipeline(
+      pipeline,
+      { trigger: { kind: "http", name: "test" }, payload: {} },
+      { logger: silentLogger, atomicScope: (info, body) => db.scope(info, body), steps: { "test.noop": async (ctx: Context) => ok(ctx) } },
+    );
+    expect(result.status).toBeGreaterThanOrEqual(500);
+  });
+
+  it("a COMMIT failure compensates with a real ROLLBACK: the write is undone, a late write is rejected, and the connection keeps serving later requests", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    let late: Promise<unknown> = Promise.resolve();
+    const outcome = await withPatchedExec([{ sql: "COMMIT", error: () => new Error("simulated commit failure") }], () =>
+      db.scope({ pipeline: "p", group: 1 }, async () => {
+        await db.createOne("rows", { id: "a", name: "alpha" });
+        setTimeout(() => {
+          late = db.createOne("rows", { id: "late", name: "late" }).catch((e: unknown) => e);
+        }, 10);
+        return "commit";
+      }),
+    );
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind === "failed") expect(outcome.phase).toBe("commit");
+    expect((expectOk(await db.findMany("rows", {}))).total).toBe(0);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(await late).toBeInstanceOf(Error);
+    expectOk(await db.createOne("rows", { id: "b", name: "beta" }));
+    db.close();
+  });
+
+  it("a ROLLBACK failure following a failed COMMIT marks the store unusable, never leaving it silently inside a transaction", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    const outcome = await withPatchedExec(
+      [
+        { sql: "COMMIT", error: () => new Error("simulated commit failure") },
+        { sql: "ROLLBACK", error: () => new Error("simulated rollback failure") },
+      ],
+      () =>
+        db.scope({ pipeline: "p", group: 1 }, async () => {
+          await db.createOne("rows", { id: "a", name: "alpha" });
+          return "commit";
+        }),
+    );
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind === "failed") expect(outcome.phase).toBe("rollback");
+    const after = await db.createOne("rows", { id: "c", name: "gamma" });
+    expect(after.ok).toBe(false);
+    if (!after.ok) expect(after.error.code).toBe("INTERNAL");
+    db.close();
+  });
+
+  it("a ROLLBACK failure on its own (no prior commit attempt) also marks the store unusable", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    const outcome = await withPatchedExec([{ sql: "ROLLBACK", error: () => new Error("simulated rollback failure") }], () =>
+      db.scope({ pipeline: "p", group: 1 }, async () => "rollback"),
+    );
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind === "failed") expect(outcome.phase).toBe("rollback");
+    const after = await db.createOne("rows", { id: "d", name: "delta" });
+    expect(after.ok).toBe(false);
+    if (!after.ok) expect(after.error.code).toBe("INTERNAL");
+    db.close();
+  });
+});
+
+describe("scope() arms its own acquire timer", () => {
+  it("answers within acquireTimeoutMs even while a slow holder is still running", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:", acquireTimeoutMs: 100, scopeTimeoutMs: 5000 });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    const holder = db.scope({ pipeline: "p", group: 1 }, async () => {
+      await new Promise((r) => setTimeout(r, 600));
+      return "commit";
+    });
+    const started = Date.now();
+    const waiter = await db.scope({ pipeline: "p", group: 2 }, async () => "commit");
+    const elapsed = Date.now() - started;
+    expect(waiter.kind).toBe("failed");
+    if (waiter.kind === "failed") {
+      expect(waiter.phase).toBe("begin");
+      expect(waiter.error.retryable).toBe(true);
+    }
+    expect(elapsed).toBeLessThan(400);
+    await holder;
+    db.close();
+  });
+});
+
+describe("checkpoint and snapshot route through the mutex", () => {
+  it("checkpoint waits for an open scope to settle", async () => {
+    const { file, cleanup } = tempFile();
+    const db = createPersistenceSqlite({ file, acquireTimeoutMs: 15000 });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    const order: string[] = [];
+    const scopeDone = db.scope({ pipeline: "p", group: 1 }, async () => {
+      order.push("scope-start");
+      await new Promise((r) => setTimeout(r, 60));
+      order.push("scope-end");
+      return "commit";
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    await db.checkpoint();
+    order.push("checkpoint-done");
+    expect(order.indexOf("scope-end")).toBeLessThan(order.indexOf("checkpoint-done"));
+    await scopeDone;
+    db.close();
+    cleanup();
+  });
+
+  it("snapshot waits for an open scope to settle", async () => {
+    const { file, cleanup } = tempFile();
+    const db = createPersistenceSqlite({ file, acquireTimeoutMs: 15000 });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    const order: string[] = [];
+    const scopeDone = db.scope({ pipeline: "p", group: 1 }, async () => {
+      order.push("scope-start");
+      await new Promise((r) => setTimeout(r, 60));
+      order.push("scope-end");
+      return "commit";
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    await db.snapshot(join(file, "..", "copy.db"));
+    order.push("snapshot-done");
+    expect(order.indexOf("scope-end")).toBeLessThan(order.indexOf("snapshot-done"));
+    await scopeDone;
+    db.close();
+    cleanup();
+  });
+});
+
+describe("scope() fails at once while the store is unusable", () => {
+  it("does not wait for the mutex and does not touch the database", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    await withPatchedExec([{ sql: "ROLLBACK", error: () => new Error("simulated rollback failure") }], () =>
+      db.scope({ pipeline: "p", group: 1 }, async () => "rollback"),
+    );
+    const started = Date.now();
+    const outcome = await db.scope({ pipeline: "p", group: 2 }, async () => "commit");
+    expect(Date.now() - started).toBeLessThan(200);
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind === "failed") {
+      expect(outcome.phase).toBe("begin");
+      expect(outcome.error.code).toBe("INTERNAL");
+    }
+    db.close();
   });
 });
