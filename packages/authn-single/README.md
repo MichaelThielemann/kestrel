@@ -29,12 +29,12 @@ Not included: multiple users, persistence of sessions across restarts, password 
 | `sessionTtlSeconds` | integer | no | `86400` |
 | `roles` | array | no | `[]` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
-|---|---|---|---|---|---|---|---|
-| `authn.login` | Log in with credentials | – | `token`, `identity`, `result` | { username: string, password: string } | { token: string, identity: object, … } | 401 invalid credentials | portable |
-| `authn.identifyUser` | Identify the caller if a valid token is present | – | `token?`, `identity?` | – | – | – | portable |
-| `authn.requireUser` | Require a valid session | – | `token`, `identity` | – | – | 401 not authenticated | portable |
-| `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated | portable |
-| `authn.logout` | End the current session | `token` | `result` | – | { ok: boolean, … } | 401 not authenticated | portable |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
+|---|---|---|---|---|---|---|---|---|
+| `authn.login` | Log in with credentials | – | `token`, `identity`, `result` | { username: string, password: string } | { token: string, identity: object, … } | 401 invalid credentials | portable | no |
+| `authn.identifyUser` | Identify the caller if a valid token is present | – | `token?`, `identity?` | – | – | – | portable | no |
+| `authn.requireUser` | Require a valid session | – | `token`, `identity` | – | – | 401 not authenticated | portable | no |
+| `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated | portable | no |
+| `authn.logout` | End the current session | `token` | `result` | – | { ok: boolean, … } | 401 not authenticated | portable | no |
 
 <!-- kestrel-docs:end -->

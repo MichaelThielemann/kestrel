@@ -71,23 +71,23 @@ Not included: sitemap, CDN invalidation.
 | `llms.seoField` | string | no | `"seo"` |
 | `llms.headings` | record | no | `{}` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
-|---|---|---|---|---|---|---|---|
-| `delivery.publish:<arg>` | Render and store published locales of a <arg> | `result.id` | `result` | – | { document: object, delivery: object[], … } | – | – |
-| `delivery.unpublish:<arg>` | Remove rendered output of a <arg> | `params.id` | – | – | – | 400 missing id | – |
-| `delivery.readStatus:<arg>` | Publish status per locale of a <arg> | `params.id` | `result` | – | object[] | 400 missing id | – |
-| `delivery.publishAll:<arg>` | Re-render every <arg> | – | `result` | – | { documents: number, live: number, errors: number, … } | – | – |
-| `delivery.exportLlms` | Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) | – | `result.llms` | – | { llms: object, … } | – | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
+|---|---|---|---|---|---|---|---|---|
+| `delivery.publish:<arg>` | Render and store published locales of a <arg> | `result.id` | `result` | – | { document: object, delivery: object[], … } | – | – | no |
+| `delivery.unpublish:<arg>` | Remove rendered output of a <arg> | `params.id` | – | – | – | 400 missing id | – | no |
+| `delivery.readStatus:<arg>` | Publish status per locale of a <arg> | `params.id` | `result` | – | object[] | 400 missing id | – | yes |
+| `delivery.publishAll:<arg>` | Re-render every <arg> | – | `result` | – | { documents: number, live: number, errors: number, … } | – | – | no |
+| `delivery.exportLlms` | Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `llms: { entries, full }` to the result) | – | `result.llms` | – | { llms: object, … } | – | – | no |
 
 Pipelines in `examples/minimal` using these steps:
 
-- **createPage** (POST /pages): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.create:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` → **`delivery.publish:pages`** → **`delivery.exportLlms`** → `events.emit:page.created`
-- **deletePage** (DELETE /pages/:id): `authn.requireUser` → `authz.require:pages.delete` → `references.guard:pages` → `content.remove:pages` → `revisions.remove:pages` → `references.unindex:pages` → `links.unextract:pages` → **`delivery.unpublish:pages`** → **`delivery.exportLlms`** → `events.emit:page.deleted`
-- **deletePageTranslation** (DELETE /pages/:id/translations/:locale): `authn.requireUser` → `authz.require:pages.write` → `content.removeTranslation:pages` → `revisions.removeTranslation:pages` → `references.index:pages` → `links.extract:pages` → **`delivery.publish:pages`** → **`delivery.exportLlms`** → `events.emit:page.translationRemoved`
+- **createPage** (POST /pages): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.create:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` ] → **`delivery.publish:pages`** → **`delivery.exportLlms`** → `events.emit:page.created`
+- **deletePage** (DELETE /pages/:id): `authn.requireUser` → `authz.require:pages.delete` → [ `references.guard:pages` → `content.remove:pages` → `revisions.remove:pages` → `references.unindex:pages` → `links.unextract:pages` ] → **`delivery.unpublish:pages`** → **`delivery.exportLlms`** → `events.emit:page.deleted`
+- **deletePageTranslation** (DELETE /pages/:id/translations/:locale): `authn.requireUser` → `authz.require:pages.write` → [ `content.removeTranslation:pages` → `revisions.removeTranslation:pages` → `references.index:pages` → `links.extract:pages` ] → **`delivery.publish:pages`** → **`delivery.exportLlms`** → `events.emit:page.translationRemoved`
 - **pagePublishStatus** (GET /admin/publish-status/pages/:id): `authn.requireUser` → `authz.require:pages.manage` → **`delivery.readStatus:pages`**
 - **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.require:pages.manage` → **`delivery.publishAll:pages`** → `redirects.export` → **`delivery.exportLlms`**
-- **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.require:pages.write` → `revisions.restore:pages` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` → **`delivery.publish:pages`** → **`delivery.exportLlms`** → `revisions.reportRestore` → `events.emit:page.restored`
+- **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.require:pages.write` → `revisions.restore:pages` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` ] → **`delivery.publish:pages`** → **`delivery.exportLlms`** → `revisions.reportRestore` → `events.emit:page.restored`
 - **setSettings** (PUT /settings): `authn.requireUser` → `authz.require:settings.write` → `validate.check:settings.navigation` → `content.set:settings` → **`delivery.exportLlms`**
-- **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` → **`delivery.publish:pages`** → **`delivery.exportLlms`** → `events.emit:page.updated`
+- **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` ] → **`delivery.publish:pages`** → **`delivery.exportLlms`** → `events.emit:page.updated`
 
 <!-- kestrel-docs:end -->

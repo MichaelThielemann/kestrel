@@ -6,7 +6,7 @@ import { z } from "zod";
 import { boot, defineModule, loadConfig, loadModules, loadPipelines, silentLogger, type BootWarning, type StepDescription, type StepManifest } from "../packages/core/src/index.ts";
 import { generateOpenApi } from "../packages/openapi/index.ts";
 import { STEP_SETS } from "../packages/contracts/src/steps.ts";
-import { brief, collectingLogger, errors, formatBootWarning, inputCell, orderPackages, portabilityOf, rootTable, splice, stepTable, unexpectedBootWarnings, unexpectedLogEntries, ROOT_ORDER, type LogEntry, type PackageInfo } from "./docs-render.ts";
+import { brief, collectingLogger, errors, formatBootWarning, groupedArrowChain, inputCell, orderPackages, portabilityOf, rootTable, splice, stepTable, unexpectedBootWarnings, unexpectedLogEntries, ROOT_ORDER, type LogEntry, type PackageInfo } from "./docs-render.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const example = join(root, "examples", "minimal");
@@ -92,13 +92,47 @@ describe("stepTable", () => {
   it("renders – in the Input column for a step without input or query", () => {
     const step: StepManifest = { name: "widget.ping", module: "widget/default", factory: false, description: { summary: "Ping", reads: [], writes: [] } };
     const [, , row] = stepTable([step]);
-    expect(row).toBe("| `widget.ping` | Ping | – | – | – | – | – | – |");
+    expect(row).toBe("| `widget.ping` | Ping | – | – | – | – | – | – | no |");
   });
 
   it("renders a step's declared input in the Input column", () => {
     const step: StepManifest = { name: "widget.get", module: "widget/default", factory: false, description: { summary: "Get a widget", reads: ["widgets"], writes: [], input: { type: "object", properties: { id: { type: "string" } }, required: ["id"], additionalProperties: false } } };
     const [, , row] = stepTable([step]);
-    expect(row).toBe("| `widget.get` | Get a widget | `widgets` | – | { id: string } | – | – | – |");
+    expect(row).toBe("| `widget.get` | Get a widget | `widgets` | – | { id: string } | – | – | – | no |");
+  });
+
+  it("marks a step declaring atomicSafe: true as yes in the Atomic-safe column", () => {
+    const step: StepManifest = { name: "widget.create", module: "widget/default", factory: false, description: { summary: "Create a widget", reads: [], writes: ["result"], atomicSafe: true } };
+    const [, , row] = stepTable([step]);
+    expect(row).toBe("| `widget.create` | Create a widget | – | `result` | – | – | – | – | yes |");
+  });
+});
+
+describe("groupedArrowChain", () => {
+  interface Step {
+    spec: string;
+    atomic?: number;
+  }
+  const step = (spec: string, atomic?: number): Step => (atomic === undefined ? { spec } : { spec, atomic });
+
+  it("renders a flat list unchanged", () => {
+    const steps = [step("x"), step("x")];
+    expect(groupedArrowChain(steps, (s) => s.spec)).toBe("x → x");
+  });
+
+  it("brackets consecutive steps sharing the same atomic ordinal", () => {
+    const steps = [step("a"), step("b", 1), step("c", 1), step("d")];
+    expect(groupedArrowChain(steps, (s) => s.spec)).toBe("a → [ b → c ] → d");
+  });
+
+  it("brackets a single-step group too", () => {
+    const steps = [step("a", 1), step("b")];
+    expect(groupedArrowChain(steps, (s) => s.spec)).toBe("[ a ] → b");
+  });
+
+  it("renders two separate groups as two brackets", () => {
+    const steps = [step("a", 1), step("b", 1), step("c", 2)];
+    expect(groupedArrowChain(steps, (s) => s.spec)).toBe("[ a → b ] → [ c ]");
   });
 });
 

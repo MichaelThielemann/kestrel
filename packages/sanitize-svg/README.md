@@ -17,9 +17,9 @@ without this module (or another one registering `sanitize.svg`) fails the boot.
 |---|---|---|---|
 | `maxBytes` | integer | no | `2097152` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
-|---|---|---|---|---|---|---|---|
-| `sanitize.svg` | Sanitize uploaded SVG files (scripts, handlers, external references removed) | `files` | `files` | – | – | 400 invalid svg; 413 svg too large | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
+|---|---|---|---|---|---|---|---|---|
+| `sanitize.svg` | Sanitize uploaded SVG files (scripts, handlers, external references removed) | `files` | `files` | – | – | 400 invalid svg; 413 svg too large | – | no |
 
 Pipelines in `examples/minimal` using these steps:
 

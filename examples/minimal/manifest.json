@@ -10237,7 +10237,8 @@
               "400": "a referenced document does not exist"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "content.create:pages",
@@ -10410,7 +10411,8 @@
               "409": "a document with that id already exists"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "revisions.record:pages",
@@ -10432,7 +10434,8 @@
               "503": "the revision could not be written"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "references.index:pages",
@@ -10445,7 +10448,8 @@
             ],
             "writes": [],
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "links.extract:pages",
@@ -10458,7 +10462,8 @@
             ],
             "writes": [],
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "delivery.publish:pages",
@@ -11106,7 +11111,8 @@
               "409": "still referenced"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "content.remove:pages",
@@ -11135,7 +11141,8 @@
               "400": "missing id"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "revisions.remove:pages",
@@ -11151,7 +11158,8 @@
               "400": "missing id"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "references.unindex:pages",
@@ -11167,7 +11175,8 @@
               "400": "missing id"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "links.unextract:pages",
@@ -11183,7 +11192,8 @@
               "400": "missing id"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "delivery.unpublish:pages",
@@ -11408,7 +11418,8 @@
               "409": "last translation – remove the document"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "revisions.removeTranslation:pages",
@@ -11429,7 +11440,8 @@
               "400": "missing id"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "references.index:pages",
@@ -11442,7 +11454,8 @@
             ],
             "writes": [],
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "links.extract:pages",
@@ -11455,7 +11468,8 @@
             ],
             "writes": [],
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "delivery.publish:pages",
@@ -17976,7 +17990,8 @@
               "400": "a referenced document does not exist"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "content.update:pages",
@@ -18167,7 +18182,8 @@
               "404": "not found"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "revisions.record:pages",
@@ -18189,7 +18205,8 @@
               "503": "the revision could not be written"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "references.index:pages",
@@ -18202,7 +18219,8 @@
             ],
             "writes": [],
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "links.extract:pages",
@@ -18215,7 +18233,8 @@
             ],
             "writes": [],
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "delivery.publish:pages",
@@ -19897,7 +19916,8 @@
               "400": "a referenced document does not exist"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "content.update:pages",
@@ -20088,7 +20108,8 @@
               "404": "not found"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "revisions.record:pages",
@@ -20110,7 +20131,8 @@
               "503": "the revision could not be written"
             },
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "references.index:pages",
@@ -20123,7 +20145,8 @@
             ],
             "writes": [],
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "links.extract:pages",
@@ -20136,7 +20159,8 @@
             ],
             "writes": [],
             "atomicSafe": true
-          }
+          },
+          "atomic": 1
         },
         {
           "spec": "delivery.publish:pages",

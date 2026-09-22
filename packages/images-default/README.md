@@ -93,21 +93,21 @@ cursor.
 | `maxAttempts` | integer | no | `5` |
 | `renderTimeoutMs` | integer | no | `30000` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
-|---|---|---|---|---|---|---|---|
-| `images.register` | Replace the sizes registered by this instance – code-declared sizes are held in memory, never stored | – | `result` | { sizes: object[] } | object[] | 400 empty list or invalid size definition; 409 a size collides with a config size | – |
-| `images.listSizes` | Effective sizes (defaults/config merged with the sizes registered in this process) | – | `result` | – | object[] | – | – |
-| `images.generate` | Generate variants for one media item (id from params.id or payload.id), or for each id in payload.ids (unknown ids are skipped) | – | `result` | { id?: string, ids?: string[], … } | object \| object | 400 missing media id; 404 media item not found | – |
-| `images.sync` | Start a sync job, or resume a paused/error/stale one | – | `result` | – | { id: string, state: "running" \| "paused" \| "done" \| "error", total: number, done: number, failed: number, cursor: string, startedAt: number, updatedAt: number, finishedAt: number \| null, error: string \| null, … } | 409 a fresh job is already running | – |
-| `images.resume` | Resume a paused/error/stale job, or no-op (for cron) | – | `result` | – | object \| null | – | – |
-| `images.retryFailed` | Put every variant that gave up after maxAttempts back to pending with a fresh attempt budget – all of them, or one media item's (id from params.id or payload.id) – and start the work that regenerates them | – | `result` | { id?: string } | { variants: number, media: number, job: object \| null, … } | 404 media item not found; 409 images are shutting down | – |
-| `images.prune` | Delete the variants of sizes that are no longer declared | – | `result` | { sizes: string[] } | { sizes: number, variants: number, … } | 400 missing sizes, or a name is still declared or has no variants | – |
-| `images.readStatus` | Sizes with usage/variant counts, current job, the variants that gave up with their last error, and sizes whose variants are left over from a size the code no longer declares | – | `result` | – | { sizes: object[], job: object \| null, orphaned: object, registrySeen: boolean, failed: object, … } | – | – |
-| `images.remove` | Delete one media item's variants (blob + rows) | `params.id` | – | – | – | 400 missing id | – |
-| `images.removeMany` | Delete variants for every id in result.ids (from media.folderItems) | `result.ids` | – | – | – | – | – |
-| `images.attach` | Add variants[] to a media item or list (result.id or result.items) | `result` | `result.variants?` | – | { variants: object[], … } | – | – |
-| `images.serve` | Binary variant, or the original with x-kestrel-variant: pending while it isn't ready yet | `params.id`, `params.file` | `result` | – | – | 400 missing id or file; 404 media item or size not found, or the variant gave up after maxAttempts | – |
-| `images.export:<arg>` | Copy every done variant to <arg>/<folder>/<filename>.<size>.<ext> | – | `result.variants` | – | { variants: object, … } | – | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
+|---|---|---|---|---|---|---|---|---|
+| `images.register` | Replace the sizes registered by this instance – code-declared sizes are held in memory, never stored | – | `result` | { sizes: object[] } | object[] | 400 empty list or invalid size definition; 409 a size collides with a config size | – | no |
+| `images.listSizes` | Effective sizes (defaults/config merged with the sizes registered in this process) | – | `result` | – | object[] | – | – | no |
+| `images.generate` | Generate variants for one media item (id from params.id or payload.id), or for each id in payload.ids (unknown ids are skipped) | – | `result` | { id?: string, ids?: string[], … } | object \| object | 400 missing media id; 404 media item not found | – | no |
+| `images.sync` | Start a sync job, or resume a paused/error/stale one | – | `result` | – | { id: string, state: "running" \| "paused" \| "done" \| "error", total: number, done: number, failed: number, cursor: string, startedAt: number, updatedAt: number, finishedAt: number \| null, error: string \| null, … } | 409 a fresh job is already running | – | no |
+| `images.resume` | Resume a paused/error/stale job, or no-op (for cron) | – | `result` | – | object \| null | – | – | no |
+| `images.retryFailed` | Put every variant that gave up after maxAttempts back to pending with a fresh attempt budget – all of them, or one media item's (id from params.id or payload.id) – and start the work that regenerates them | – | `result` | { id?: string } | { variants: number, media: number, job: object \| null, … } | 404 media item not found; 409 images are shutting down | – | no |
+| `images.prune` | Delete the variants of sizes that are no longer declared | – | `result` | { sizes: string[] } | { sizes: number, variants: number, … } | 400 missing sizes, or a name is still declared or has no variants | – | no |
+| `images.readStatus` | Sizes with usage/variant counts, current job, the variants that gave up with their last error, and sizes whose variants are left over from a size the code no longer declares | – | `result` | – | { sizes: object[], job: object \| null, orphaned: object, registrySeen: boolean, failed: object, … } | – | – | no |
+| `images.remove` | Delete one media item's variants (blob + rows) | `params.id` | – | – | – | 400 missing id | – | no |
+| `images.removeMany` | Delete variants for every id in result.ids (from media.folderItems) | `result.ids` | – | – | – | – | – | no |
+| `images.attach` | Add variants[] to a media item or list (result.id or result.items) | `result` | `result.variants?` | – | { variants: object[], … } | – | – | no |
+| `images.serve` | Binary variant, or the original with x-kestrel-variant: pending while it isn't ready yet | `params.id`, `params.file` | `result` | – | – | 400 missing id or file; 404 media item or size not found, or the variant gave up after maxAttempts | – | no |
+| `images.export:<arg>` | Copy every done variant to <arg>/<folder>/<filename>.<size>.<ext> | – | `result.variants` | – | { variants: object, … } | – | – | no |
 
 Used by 15 of 83 pipelines in `examples/minimal`.
 

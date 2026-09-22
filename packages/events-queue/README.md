@@ -53,12 +53,12 @@ module does not provide `events@1`).
 | `lockTtlSeconds` | integer | no | `300` |
 | `retentionDays` | integer | no | `7` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
-|---|---|---|---|---|---|---|---|
-| `events.emit:<arg>` | Queue event "<arg>" for the subscribed handler pipelines; the worker delivers it after this run | – | – | – | – | 503 the event could not be persisted | portable |
-| `events.readQueueStatus` | Queue counters per state, the oldest pending event and the worker state of this process | – | `result` | – | { pending: number, running: number, dead: number, done24h: number, oldestPendingAt: number \| null, worker: object, … } | – | beside |
-| `events.listDead` | Dead-letter events, most recently failed first | – | `result` | ?limit: integer | { items: object[], … } | – | beside |
-| `events.retryDead:<arg>` | Requeue every dead-letter event | – | `result` | – | { retried: number, … } | – | beside |
-| `events.purgeDone` | Delete delivered events older than retentionDays | – | `result` | – | { removed: number, … } | – | beside |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
+|---|---|---|---|---|---|---|---|---|
+| `events.emit:<arg>` | Queue event "<arg>" for the subscribed handler pipelines; the worker delivers it after this run | – | – | – | – | 503 the event could not be persisted | portable | yes |
+| `events.readQueueStatus` | Queue counters per state, the oldest pending event and the worker state of this process | – | `result` | – | { pending: number, running: number, dead: number, done24h: number, oldestPendingAt: number \| null, worker: object, … } | – | beside | yes |
+| `events.listDead` | Dead-letter events, most recently failed first | – | `result` | ?limit: integer | { items: object[], … } | – | beside | yes |
+| `events.retryDead:<arg>` | Requeue every dead-letter event | – | `result` | – | { retried: number, … } | – | beside | yes |
+| `events.purgeDone` | Delete delivered events older than retentionDays | – | `result` | – | { removed: number, … } | – | beside | yes |
 
 <!-- kestrel-docs:end -->

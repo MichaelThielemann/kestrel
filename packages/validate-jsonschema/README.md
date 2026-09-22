@@ -39,18 +39,18 @@ the sanitizer selects its branch by `type` instead. Not included: `$ref` to remo
 | `maxNodes` | integer | no | `20000` |
 | `watch` | boolean | no | `false` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
-|---|---|---|---|---|---|---|---|
-| `validate.sanitize:<arg>` | Sanitize HTML at format:"html" positions of payload field <arg> | – | `payload.<arg>?` | object | – | – | – |
-| `validate.sanitizeHtml:<arg>` | Sanitize the HTML payload field <arg> | – | `payload.<arg>?` | object | – | – | – |
-| `validate.check:<arg>` | Validate payload field <arg> against its JSON Schema | – | – | object | – | 400 schema violation (path and message per problem) | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
+|---|---|---|---|---|---|---|---|---|
+| `validate.sanitize:<arg>` | Sanitize HTML at format:"html" positions of payload field <arg> | – | `payload.<arg>?` | object | – | – | – | no |
+| `validate.sanitizeHtml:<arg>` | Sanitize the HTML payload field <arg> | – | `payload.<arg>?` | object | – | – | – | no |
+| `validate.check:<arg>` | Validate payload field <arg> against its JSON Schema | – | – | object | – | 400 schema violation (path and message per problem) | – | no |
 
 Pipelines in `examples/minimal` using these steps:
 
-- **createPage** (POST /pages): `authn.requireUser` → `authz.require:pages.write` → **`validate.check:pages.body`** → **`validate.sanitize:pages.body`** → **`validate.check:pages.body`** → `references.check:pages` → `content.create:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.created`
-- **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.require:pages.write` → `revisions.restore:pages` → **`validate.check:pages.body`** → **`validate.sanitize:pages.body`** → **`validate.check:pages.body`** → `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → `revisions.reportRestore` → `events.emit:page.restored`
+- **createPage** (POST /pages): `authn.requireUser` → `authz.require:pages.write` → **`validate.check:pages.body`** → **`validate.sanitize:pages.body`** → **`validate.check:pages.body`** → [ `references.check:pages` → `content.create:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` ] → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.created`
+- **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.require:pages.write` → `revisions.restore:pages` → **`validate.check:pages.body`** → **`validate.sanitize:pages.body`** → **`validate.check:pages.body`** → [ `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` ] → `delivery.publish:pages` → `delivery.exportLlms` → `revisions.reportRestore` → `events.emit:page.restored`
 - **setRedirects** (PUT /redirects): `authn.requireUser` → `authz.require:redirects.write` → **`validate.check:redirects.rules`** → `redirects.validate` → `content.set:redirects` → `redirects.export`
 - **setSettings** (PUT /settings): `authn.requireUser` → `authz.require:settings.write` → **`validate.check:settings.navigation`** → `content.set:settings` → `delivery.exportLlms`
-- **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → **`validate.check:pages.body`** → **`validate.sanitize:pages.body`** → **`validate.check:pages.body`** → `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.updated`
+- **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → **`validate.check:pages.body`** → **`validate.sanitize:pages.body`** → **`validate.check:pages.body`** → [ `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` ] → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.updated`
 
 <!-- kestrel-docs:end -->

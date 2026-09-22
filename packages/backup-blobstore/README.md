@@ -59,10 +59,10 @@ Not included: continuous replication (see `replication-sqlite`), restore without
 | `restoreOnStart` | boolean | no | `true` |
 | `versions` | integer | no | `24` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
-|---|---|---|---|---|---|---|---|
-| `backup.run` | Back up the file | – | `result` | – | { key: string, size: number, versions: string[], … } | – | – |
-| `backup.restore` | Stage the latest or a chosen version next to the file; applied on the next start | – | `result` | { key?: string } | { key: string, size: number, file: string, pending: true, appliedOnRestart: true, … } | 400 unknown version; 404 no backup | – |
-| `backup.listVersions` | List backup versions | – | `result` | – | { versions: string[], … } | – | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
+|---|---|---|---|---|---|---|---|---|
+| `backup.run` | Back up the file | – | `result` | – | { key: string, size: number, versions: string[], … } | – | – | no |
+| `backup.restore` | Stage the latest or a chosen version next to the file; applied on the next start | – | `result` | { key?: string } | { key: string, size: number, file: string, pending: true, appliedOnRestart: true, … } | 400 unknown version; 404 no backup | – | no |
+| `backup.listVersions` | List backup versions | – | `result` | – | { versions: string[], … } | – | – | no |
 
 <!-- kestrel-docs:end -->

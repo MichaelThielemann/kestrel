@@ -29,11 +29,11 @@ unavailable; it never fails otherwise.
 |---|---|---|---|
 | `retentionDays` | integer | no | – |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
-|---|---|---|---|---|---|---|---|
-| `audit.record` | Persist an audit log entry for an emitted event | `payload` | – | object | – | – | – |
-| `audit.anonymize` | Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay | `params.id`, `payload` | `result` | object | { entries: number, … } | 400 no user id | – |
-| `audit.prune` | Remove every audit entry older than the configured `retentionDays` | – | `result` | – | { removed: number, … } | 400 no `retentionDays` configured | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
+|---|---|---|---|---|---|---|---|---|
+| `audit.record` | Persist an audit log entry for an emitted event | `payload` | – | object | – | – | – | no |
+| `audit.anonymize` | Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay | `params.id`, `payload` | `result` | object | { entries: number, … } | 400 no user id | – | no |
+| `audit.prune` | Remove every audit entry older than the configured `retentionDays` | – | `result` | – | { removed: number, … } | 400 no `retentionDays` configured | – | no |
 
 Pipelines in `examples/minimal` using these steps:
 

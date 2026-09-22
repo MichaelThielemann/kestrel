@@ -76,9 +76,33 @@ export function stepTable(steps: StepManifest[]): string[] {
     const d = s.description;
     const paths = (list: readonly string[]) => (list.length === 0 ? "–" : list.map((p) => `\`${p}\``).join(", "));
     const portable = portabilityOf(s.name);
-    return `| ${name} | ${cell(d.summary)} | ${paths(d.reads)} | ${paths(d.writes)} | ${cell(inputCell(d))} | ${cell(brief(d.output ?? d.extendsOutput ?? d.extendsItems))} | ${cell(errors(d)) || "–"} | ${portable === "none" ? "–" : portable} |`;
+    return `| ${name} | ${cell(d.summary)} | ${paths(d.reads)} | ${paths(d.writes)} | ${cell(inputCell(d))} | ${cell(brief(d.output ?? d.extendsOutput ?? d.extendsItems))} | ${cell(errors(d)) || "–"} | ${portable === "none" ? "–" : portable} | ${d.atomicSafe === true ? "yes" : "no"} |`;
   });
-  return ["| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |", "|---|---|---|---|---|---|---|---|", ...rows, ""];
+  return ["| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |", "|---|---|---|---|---|---|---|---|---|", ...rows, ""];
+}
+
+/** Folds a flat, ordered step list into an arrow chain: consecutive steps sharing the same `atomic` ordinal render as one `[ a → b → c ]` segment. */
+export function groupedArrowChain<S extends { atomic?: number }>(steps: readonly S[], render: (step: S) => string): string {
+  const parts: string[] = [];
+  let group: string[] | null = null;
+  let ordinal: number | undefined;
+  for (const step of steps) {
+    if (step.atomic !== undefined && step.atomic === ordinal) {
+      group!.push(render(step));
+      continue;
+    }
+    if (group) parts.push(`[ ${group.join(" → ")} ]`);
+    if (step.atomic === undefined) {
+      group = null;
+      ordinal = undefined;
+      parts.push(render(step));
+    } else {
+      group = [render(step)];
+      ordinal = step.atomic;
+    }
+  }
+  if (group) parts.push(`[ ${group.join(" → ")} ]`);
+  return parts.join(" → ");
 }
 
 export function pipelineList(module: ModuleManifest, manifest: Manifest): string[] {
@@ -90,7 +114,7 @@ export function pipelineList(module: ModuleManifest, manifest: Manifest): string
   const using = manifest.pipelines.filter((p) => p.steps.some((s) => owned.has(s.name)));
   if (using.length === 0) return [];
   if (using.length > MAX_LISTED_PIPELINES) return [`Used by ${using.length} of ${manifest.pipelines.length} pipelines in \`examples/minimal\`.`, ""];
-  const lines = using.map((p) => `- **${p.name}** (${(routes.get(p.name) ?? ["no trigger"]).join(", ")}): ${p.steps.map((s) => (owned.has(s.name) ? `**\`${s.spec}\`**` : `\`${s.spec}\``)).join(" → ")}`);
+  const lines = using.map((p) => `- **${p.name}** (${(routes.get(p.name) ?? ["no trigger"]).join(", ")}): ${groupedArrowChain(p.steps, (s) => (owned.has(s.name) ? `**\`${s.spec}\`**` : `\`${s.spec}\``))}`);
   return ["Pipelines in `examples/minimal` using these steps:", "", ...lines, ""];
 }
 

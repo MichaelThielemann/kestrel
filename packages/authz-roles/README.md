@@ -31,12 +31,12 @@ Not included: ownership/resource checks (the `resource` argument is ignored), ro
 | `roleClaim` | string | no | `"roles"` |
 | `anonymous` | array | no | `[]` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
-|---|---|---|---|---|---|---|---|
-| `authz.require:<arg>` | Requires permission <arg> | – | – | – | – | 401 not authenticated; 403 missing permission <arg> | – |
-| `authz.describeAccess` | The caller's concrete permissions | `identity` | `result.permissions` | – | { permissions: string[], … } | 401 not authenticated | – |
-| `authz.listRoles` | The configured role names, in config order | – | `result.roles` | – | { roles: string[], … } | – | – |
-| `authz.validateRoles:<arg>` | Validate the role names at payload.<arg> against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept | `payload.<arg>` | – | object | – | 400 the value is not an array of known role names | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
+|---|---|---|---|---|---|---|---|---|
+| `authz.require:<arg>` | Requires permission <arg> | – | – | – | – | 401 not authenticated; 403 missing permission <arg> | – | no |
+| `authz.describeAccess` | The caller's concrete permissions | `identity` | `result.permissions` | – | { permissions: string[], … } | 401 not authenticated | – | no |
+| `authz.listRoles` | The configured role names, in config order | – | `result.roles` | – | { roles: string[], … } | – | – | no |
+| `authz.validateRoles:<arg>` | Validate the role names at payload.<arg> against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept | `payload.<arg>` | – | object | – | 400 the value is not an array of known role names | – | no |
 
 Used by 65 of 83 pipelines in `examples/minimal`.
 

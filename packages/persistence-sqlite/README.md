@@ -35,9 +35,10 @@ code: 5 `SQLITE_BUSY`, 6 `SQLITE_LOCKED`, 19 `SQLITE_CONSTRAINT`.
 
 `persistence.snapshot:<file>` writes a transactionally consistent copy via
 `VACUUM INTO` (safe while writes are in flight) – back that file up, not the live database.
-`persistence.checkpoint` folds the WAL into the main file. Both are maintenance calls outside
-`persistence@1`, so they signal a locked database by throwing; the steps turn that into the same
-`TRANSIENT` the contract methods return.
+`persistence.checkpoint` folds the WAL into the main file. Both are `Promise<void>`, routed through
+the same mutex as every other call – they wait for an open scope and hold the connection while they
+run – and signal a locked database by throwing; the steps turn that into the same `TRANSIENT` the
+contract methods return.
 
 | Step | reads | writes | errors |
 |---|---|---|---|
@@ -49,7 +50,33 @@ code: 5 `SQLITE_BUSY`, 6 `SQLITE_LOCKED`, 19 `SQLITE_CONSTRAINT`.
 | `persistence.updateOne:<c>` | `params.id` | `result` | `VALIDATION`, `NOT_FOUND`, `CONFLICT`, `TRANSIENT` |
 | `persistence.deleteOne:<c>` | `params.id` | `result` | `VALIDATION`, `TRANSIENT` |
 
-Not included: migrations beyond adding columns, transactions across calls, full-text search.
+**Transactions across calls.** A pipeline's atomic group (`{ atomic: [...] }`, see the core's
+`pipelines.md`) runs as one `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK` on the module's single
+connection. `IMMEDIATE` takes the write lock at `BEGIN` rather than on the first write, so a group
+that reads before it writes (`references.check` before `content.create`, for example) cannot lose a
+snapshot to a writer that committed in between. `createMany` joins an outer scope instead of opening
+a nested transaction.
+
+One FIFO queue makes every public method – inside a group or not – wait for the connection in call
+order; a step's own calls made from inside the group's own async flow run directly, without
+queueing behind themselves. Everything waits, including a concurrent read: the module has one
+connection, so a read outside the group must not observe the group's uncommitted rows. Two
+independent budgets bound the wait: `acquireTimeoutMs` bounds how long a call may wait for its turn,
+`scopeTimeoutMs` bounds how long a group may hold the connection once it has it, timed from
+`BEGIN IMMEDIATE`. Setup rejects a config where `acquireTimeoutMs` does not exceed `busyTimeoutMs`,
+naming the key – `BEGIN IMMEDIATE` blocks the event loop for up to `busyTimeoutMs`, so an equal
+budget would expire exactly when the wait succeeded.
+
+A scope that closes leaves the store in one of two terminal states, and a call a step started
+without awaiting behaves differently depending on which: after a **commit**, a late call takes the
+normal queued path and writes for real (with a warning logged); after a **rollback or a timeout**, a
+late call throws – it is not executed – because the group's writes are gone and the call would store
+a fragment of a transaction that never happened. After a rollback that itself fails, the store
+answers `Err(TRANSIENT)` to every subsequent call, naming the reason and that the process needs a
+restart; the connection's state can no longer be proven, and continuing to serve writes from it
+would turn one incident into silent corruption.
+
+Not included: migrations beyond adding columns, savepoints or nested groups, full-text search.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
@@ -62,14 +89,14 @@ Not included: migrations beyond adding columns, transactions across calls, full-
 | `acquireTimeoutMs` | integer | no | `5000` |
 | `scopeTimeoutMs` | integer | no | `5000` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
-|---|---|---|---|---|---|---|---|
-| `persistence.checkpoint` | Fold the write-ahead log into the main database file | – | – | – | – | – | – |
-| `persistence.snapshot:<arg>` | Write a transactionally consistent copy of the database to <arg> | – | `result` | – | { file: string, … } | – | – |
-| `persistence.createOne:<arg>` | Create one <arg> document from the payload | – | `result` | object | object | 409 a document with that id or a unique value already exists | – |
-| `persistence.findOne:<arg>` | Read the <arg> document named by params.id | `params.id` | `result` | – | object | 404 no such document | – |
-| `persistence.findMany:<arg>` | List every <arg> document | – | `result` | – | { items: object[], total: number, … } | – | – |
-| `persistence.updateOne:<arg>` | Patch the <arg> document named by params.id from the payload | `params.id` | `result` | object | object | 400 missing id; 404 no such document; 409 a unique value already exists | – |
-| `persistence.deleteOne:<arg>` | Delete the <arg> document named by params.id | `params.id` | `result` | – | { ok: true, … } | 400 missing id | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
+|---|---|---|---|---|---|---|---|---|
+| `persistence.checkpoint` | Fold the write-ahead log into the main database file | – | – | – | – | – | – | no |
+| `persistence.snapshot:<arg>` | Write a transactionally consistent copy of the database to <arg> | – | `result` | – | { file: string, … } | – | – | no |
+| `persistence.createOne:<arg>` | Create one <arg> document from the payload | – | `result` | object | object | 409 a document with that id or a unique value already exists | – | no |
+| `persistence.findOne:<arg>` | Read the <arg> document named by params.id | `params.id` | `result` | – | object | 404 no such document | – | no |
+| `persistence.findMany:<arg>` | List every <arg> document | – | `result` | – | { items: object[], total: number, … } | – | – | no |
+| `persistence.updateOne:<arg>` | Patch the <arg> document named by params.id from the payload | `params.id` | `result` | object | object | 400 missing id; 404 no such document; 409 a unique value already exists | – | no |
+| `persistence.deleteOne:<arg>` | Delete the <arg> document named by params.id | `params.id` | `result` | – | { ok: true, … } | 400 missing id | – | no |
 
 <!-- kestrel-docs:end -->

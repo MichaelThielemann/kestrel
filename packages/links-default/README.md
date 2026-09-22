@@ -34,23 +34,23 @@ Not included: link rewriting, retries before reporting, robots.txt.
 | `userAgent` | string | no | `"kestrel-links/0.1 (+link check)"` |
 | `allowPrivate` | boolean | no | `false` |
 
-| Step | Summary | Reads | Writes | Input | Output | Errors | Portable |
-|---|---|---|---|---|---|---|---|
-| `links.extract:<arg>` | Index external links of <arg> | `result.id` | – | – | – | – | – |
-| `links.unextract:<arg>` | Drop indexed links of <arg> | `params.id` | – | – | – | 400 missing id | – |
-| `links.check` | Check due links | – | `result` | – | { urls: number, checked: number, broken: number, skipped: number, … } | – | – |
-| `links.report` | Broken links | – | `result` | ?type: string | object[] | – | – |
-| `links.rebuild` | Rebuild the link index | – | `result` | – | { documents: number, entries: number, … } | – | – |
+| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
+|---|---|---|---|---|---|---|---|---|
+| `links.extract:<arg>` | Index external links of <arg> | `result.id` | – | – | – | – | – | yes |
+| `links.unextract:<arg>` | Drop indexed links of <arg> | `params.id` | – | – | – | 400 missing id | – | yes |
+| `links.check` | Check due links | – | `result` | – | { urls: number, checked: number, broken: number, skipped: number, … } | – | – | no |
+| `links.report` | Broken links | – | `result` | ?type: string | object[] | – | – | yes |
+| `links.rebuild` | Rebuild the link index | – | `result` | – | { documents: number, entries: number, … } | – | – | no |
 
 Pipelines in `examples/minimal` using these steps:
 
 - **brokenLinks** (GET /admin/links/broken): `authn.requireUser` → `authz.require:pages.manage` → **`links.report`**
 - **checkLinks** (cron 0 3 * * *): **`links.check`**
-- **createPage** (POST /pages): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.create:pages` → `revisions.record:pages` → `references.index:pages` → **`links.extract:pages`** → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.created`
-- **deletePage** (DELETE /pages/:id): `authn.requireUser` → `authz.require:pages.delete` → `references.guard:pages` → `content.remove:pages` → `revisions.remove:pages` → `references.unindex:pages` → **`links.unextract:pages`** → `delivery.unpublish:pages` → `delivery.exportLlms` → `events.emit:page.deleted`
-- **deletePageTranslation** (DELETE /pages/:id/translations/:locale): `authn.requireUser` → `authz.require:pages.write` → `content.removeTranslation:pages` → `revisions.removeTranslation:pages` → `references.index:pages` → **`links.extract:pages`** → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.translationRemoved`
+- **createPage** (POST /pages): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.create:pages` → `revisions.record:pages` → `references.index:pages` → **`links.extract:pages`** ] → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.created`
+- **deletePage** (DELETE /pages/:id): `authn.requireUser` → `authz.require:pages.delete` → [ `references.guard:pages` → `content.remove:pages` → `revisions.remove:pages` → `references.unindex:pages` → **`links.unextract:pages`** ] → `delivery.unpublish:pages` → `delivery.exportLlms` → `events.emit:page.deleted`
+- **deletePageTranslation** (DELETE /pages/:id/translations/:locale): `authn.requireUser` → `authz.require:pages.write` → [ `content.removeTranslation:pages` → `revisions.removeTranslation:pages` → `references.index:pages` → **`links.extract:pages`** ] → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.translationRemoved`
 - **rebuildLinks** (POST /admin/links/rebuild): `authn.requireUser` → `authz.require:pages.manage` → **`links.rebuild`**
-- **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.require:pages.write` → `revisions.restore:pages` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → **`links.extract:pages`** → `delivery.publish:pages` → `delivery.exportLlms` → `revisions.reportRestore` → `events.emit:page.restored`
-- **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → **`links.extract:pages`** → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.updated`
+- **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.require:pages.write` → `revisions.restore:pages` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → **`links.extract:pages`** ] → `delivery.publish:pages` → `delivery.exportLlms` → `revisions.reportRestore` → `events.emit:page.restored`
+- **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → **`links.extract:pages`** ] → `delivery.publish:pages` → `delivery.exportLlms` → `events.emit:page.updated`
 
 <!-- kestrel-docs:end -->
