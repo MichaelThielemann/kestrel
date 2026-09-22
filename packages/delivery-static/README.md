@@ -78,8 +78,8 @@ Not included: sitemap, CDN invalidation.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `delivery.publish:<arg>` | Render and store published locales of a <arg> (adds `_delivery` to the result) | `result.id?`, `payload` | `result._delivery` | { id?: string, … } | { _delivery: object[], … } | 400 no document id in the result or the event payload | – | no |
-| `delivery.unpublish:<arg>` | Remove rendered output of a <arg> | `params.id`, `payload` | – | { id?: string, … } | – | 400 no document id in params or the event payload | – | no |
+| `delivery.publish:<arg>` | Render and store published locales of a <arg> (adds `_delivery` to the result) | `result.id?`, `payload` | `result._delivery` | object | { _delivery: object[], … } | 400 no document id in the result or the event payload | – | no |
+| `delivery.unpublish:<arg>` | Remove rendered output of a <arg> | `params.id`, `payload` | – | object | – | 400 no document id in params or the event payload | – | no |
 | `delivery.readStatus:<arg>` | Publish status per locale of a <arg> | `params.id` | `result` | – | object[] | 400 missing id | – | yes |
 | `delivery.publishAll:<arg>` | Re-render every <arg> | – | `result` | – | { documents: number, live: number, errors: number, … } | – | – | no |
 | `delivery.exportLlms` | Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) | – | `result._llms` | – | { _llms: object, … } | – | – | no |

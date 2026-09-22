@@ -52,7 +52,7 @@ function documentId(ctx: Context): string | null {
   return typeof ctx.payload.id === "string" ? ctx.payload.id : null;
 }
 
-const EVENT_ID_INPUT = { type: "object", properties: { id: { type: "string" } }, additionalProperties: true };
+const ENVELOPE_INPUT = { type: "object", additionalProperties: true };
 
 const STATUS_SCHEMA = {
   type: "object",
@@ -110,7 +110,7 @@ export default defineModule({
       summary: `Render and store published locales of a ${type} (adds \`_delivery\` to the result)`,
       reads: ["result.id?", "payload"],
       writes: ["result._delivery"],
-      input: EVENT_ID_INPUT,
+      input: ENVELOPE_INPUT,
       extendsOutput: { type: "object", properties: { _delivery: { type: "array", items: STATUS_SCHEMA } }, required: ["_delivery"] },
       errors: { 400: "no document id in the result or the event payload" },
     }),
@@ -118,7 +118,7 @@ export default defineModule({
       summary: `Remove rendered output of a ${type}`,
       reads: ["params.id", "payload"],
       writes: [],
-      input: EVENT_ID_INPUT,
+      input: ENVELOPE_INPUT,
       errors: { 400: "no document id in params or the event payload" },
     }),
     readStatus: (type: string) => ({ summary: `Publish status per locale of a ${type}`, reads: ["params.id"], writes: ["result"], output: { type: "array", items: STATUS_SCHEMA }, errors: { 400: "missing id" }, atomicSafe: true }),
