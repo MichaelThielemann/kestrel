@@ -14,7 +14,7 @@ import { KestrelBootError } from "./errors.ts";
 import { consoleLogger, logWarn, type Logger } from "./logger.ts";
 import { createObserverHub } from "./observer.ts";
 import { StepRegistry } from "./registry.ts";
-import { findMissingRequired } from "./schema.ts";
+import { findMissingRequired, resolveOutputSchema } from "./schema.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
 import { writeRoot } from "./writes.ts";
 import { sortModules } from "./sort.ts";
@@ -54,7 +54,7 @@ export interface StopResult {
  * further codes, so code reading `kestrel.warnings` must handle a `code` it does not recognize
  * instead of assuming the shape of this union's current members.
  */
-export type BootWarning = UnemittedEventWarning | UndeclaredOutputWarning | UndeclaredRequiredWarning;
+export type BootWarning = UnemittedEventWarning | UndeclaredOutputWarning | UndeclaredRequiredWarning | OutputFoldContradictionWarning;
 
 /** An event trigger's event that no pipeline emits via `events.emit` and no module declares in `emits`. */
 export interface UnemittedEventWarning {
@@ -86,6 +86,18 @@ export interface UndeclaredRequiredWarning {
   pipeline: string;
   step: string;
   path: string;
+}
+
+/**
+ * A step's `extendsOutput` merged onto an active output schema (from an earlier `output`) whose
+ * declared `type` is not `object` — the fold coerces it to `object` silently, discarding the
+ * mismatch. Becomes a boot error in the next major.
+ */
+export interface OutputFoldContradictionWarning {
+  code: "output-fold-contradiction";
+  message: string;
+  pipeline: string;
+  step: string;
 }
 
 export interface Kestrel extends Introspection {
@@ -187,6 +199,22 @@ function warnUndeclaredRequired(pipelines: ReadonlyMap<string, ResolvedPipeline>
         }
       }
     }
+  }
+  return warnings;
+}
+
+function warnOutputFoldContradiction(pipelines: ReadonlyMap<string, ResolvedPipeline>, logger: Logger): OutputFoldContradictionWarning[] {
+  const warnings: OutputFoldContradictionWarning[] = [];
+  for (const pipeline of pipelines.values()) {
+    resolveOutputSchema(
+      pipeline.steps.map((s) => s.description),
+      (index, activeType) => {
+        const step = pipeline.steps[index]!;
+        const message = `step's extendsOutput merges onto an active output schema of type "${activeType}", not "object"; this becomes a boot error in the next major`;
+        logWarn(logger, message, { pipeline: pipeline.name, step: step.name });
+        warnings.push({ code: "output-fold-contradiction", message, pipeline: pipeline.name, step: step.name });
+      },
+    );
   }
   return warnings;
 }
@@ -376,7 +404,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
       ? (info, body) => scopeHook.atomicScope!(instances.get(scopeHook), info, body)
       : undefined;
 
-    const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUndeclaredOutput(pipelines, logger), ...warnUndeclaredRequired(pipelines, logger)];
+    const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUndeclaredOutput(pipelines, logger), ...warnUndeclaredRequired(pipelines, logger), ...warnOutputFoldContradiction(pipelines, logger)];
 
     const runs = createRunTracker();
     const hub = createObserverHub(logger);

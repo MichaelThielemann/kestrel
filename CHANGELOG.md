@@ -122,6 +122,13 @@
     envelope, and a row belonging to a run is written with `availableAt = createdAt + relayMs`
     instead of being immediately due, so the worker takes it only once no relay claimed it in time.
     `events.listDead` items gain a required `runId` field (`""` for a row that names none).
+  - Both relays require `ctx.result` to be an object or `undefined`: a result that is already some
+    other value (an array, a string, …) is a wiring error and throws, the same way
+    `authz.describeAccess` treats it.
+- `core`: `boot()` gains a fourth `BootWarning`, `output-fold-contradiction` — a step's
+  `extendsOutput` merging onto an active output schema (from an earlier `output`) whose declared
+  `type` is not `object`, which the fold otherwise coerces to `object` silently, discarding the
+  mismatch. Becomes a boot error in the next major, like the other three warnings.
 
 ### Added
 

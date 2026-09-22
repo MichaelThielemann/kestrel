@@ -197,6 +197,24 @@ describe("resolveOutputSchema", () => {
       required: ["a", "b"],
     });
   });
+
+  it("reports (without changing) the fold when extendsOutput merges onto an active schema that is not type object", () => {
+    const list = { type: "array", items: { type: "string" } };
+    const extension = { type: "object", properties: { _events: { type: "object" } }, required: ["_events"] };
+    const hits: Array<{ index: number; activeType: string }> = [];
+    const result = resolveOutputSchema([step({ output: list }), step({ extendsOutput: extension })], (index, activeType) => hits.push({ index, activeType }));
+    expect(hits).toEqual([{ index: 1, activeType: "array" }]);
+    expect(result).toEqual({ type: "object", properties: { _events: { type: "object" } }, required: ["_events"] });
+  });
+
+  it("does not report the fold when the active schema is already type object, or absent", () => {
+    const hits: unknown[] = [];
+    const output = { type: "object", properties: { a: { type: "string" } }, required: ["a"] };
+    const extension = { type: "object", properties: { b: { type: "string" } }, required: ["b"] };
+    resolveOutputSchema([step({ output }), step({ extendsOutput: extension })], (i, t) => hits.push({ i, t }));
+    resolveOutputSchema([step({ extendsOutput: extension })], (i, t) => hits.push({ i, t }));
+    expect(hits).toEqual([]);
+  });
 });
 
 describe("findMissingRequired", () => {

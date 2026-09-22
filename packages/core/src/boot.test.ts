@@ -615,6 +615,35 @@ describe("boot", () => {
     expect(kestrel.warnings).toEqual([{ code: "undeclared-required", message: warnings[0]?.message, pipeline: "looseCreate", step: "loose.create", path: "$.output" }]);
   });
 
+  it("warns once when a step's extendsOutput merges onto an active output schema that is not type object", async () => {
+    const listy = defineModule({
+      name: "listy/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({
+        list: async (ctx: Context) => ok({ ...ctx, result: ["a", "b"] }),
+        tag: async (ctx: Context) => ok(ctx),
+      }),
+      describe: () => ({
+        list: { summary: "a list result", reads: [], writes: ["result"], output: { type: "array", items: { type: "string" } } },
+        tag: { summary: "extends the (list) result with an object field", reads: [], writes: ["result.tag?"], extendsOutput: { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] } },
+      }),
+    });
+    const listThenTag = definePipeline({ name: "listThenTag", steps: ["listy.list", "listy.tag"] });
+    const warnings: { message: string; data: Record<string, unknown> | undefined }[] = [];
+    const logger = { ...silentLogger, warn: (message: string, data?: Record<string, unknown>) => warnings.push({ message, data }) };
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./listy", config: {} }] };
+    kestrel = await boot({ config, modules: [...modules, listy], pipelines: [...pipelines, listThenTag], logger });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toMatch(/extendsOutput merges onto an active output schema of type "array", not "object"/);
+    expect(warnings[0]?.data).toEqual({ pipeline: "listThenTag", step: "listy.tag" });
+    expect(kestrel.warnings).toEqual([{ code: "output-fold-contradiction", message: warnings[0]?.message, pipeline: "listThenTag", step: "listy.tag" }]);
+  });
+
   it("stays quiet when a pipeline emits the event, whatever the emit step's query tail", async () => {
     const warnings: string[] = [];
     const logger = { ...silentLogger, warn: (message: string) => warnings.push(message) };

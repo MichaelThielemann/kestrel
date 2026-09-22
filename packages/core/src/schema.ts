@@ -215,13 +215,23 @@ export function findMissingRequired(schema: JsonSchema, path = ROOT): string[] {
   return hits;
 }
 
-/** Folds a pipeline's step descriptions, in order, into the schema its result ends up matching: `output` replaces the active schema, `extendsOutput` merges into it (or becomes the output if there was none yet), and `extendsItems` merges into a list output's `items[]`. */
-export function resolveOutputSchema(descriptions: readonly StepDescription[]): JsonSchema | undefined {
+/**
+ * Folds a pipeline's step descriptions, in order, into the schema its result ends up matching: `output`
+ * replaces the active schema, `extendsOutput` merges into it (or becomes the output if there was none
+ * yet), and `extendsItems` merges into a list output's `items[]`. `onFoldContradiction`, when given, is
+ * called with the index of a step whose `extendsOutput` merges onto an active schema whose declared
+ * `type` is not `object` — the merge below coerces it to `object` silently, discarding the mismatch.
+ */
+export function resolveOutputSchema(descriptions: readonly StepDescription[], onFoldContradiction?: (index: number, activeType: string) => void): JsonSchema | undefined {
   let current: JsonSchema | undefined;
-  for (const d of descriptions) {
+  descriptions.forEach((d, index) => {
     if (d.output !== undefined) current = d.output;
-    else if (d.extendsOutput !== undefined) current = current === undefined ? d.extendsOutput : mergeObjects([current, d.extendsOutput]);
+    else if (d.extendsOutput !== undefined) {
+      const activeType = current?.type;
+      if (onFoldContradiction && typeof activeType === "string" && activeType !== "object") onFoldContradiction(index, activeType);
+      current = current === undefined ? d.extendsOutput : mergeObjects([current, d.extendsOutput]);
+    }
     if (d.extendsItems !== undefined) current = mergeIntoItems(current, d.extendsItems);
-  }
+  });
   return current;
 }
