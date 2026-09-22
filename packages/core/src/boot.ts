@@ -342,6 +342,13 @@ export async function boot(input: BootInput): Promise<Kestrel> {
       pipelines.set(def.name, { name: def.name, steps: resolved });
     }
 
+    for (const [name, pipeline] of pipelines) {
+      for (const step of pipeline.steps) {
+        if (step.atomic === undefined || step.description.atomicSafe === true) continue;
+        throw new KestrelBootError(`pipelines/${name}`, `step "${step.name}" is in an atomic group but does not declare atomicSafe`);
+      }
+    }
+
     const routes: Route[] = [];
     const events = eventTriggers;
     const crons: CronEntry[] = [];
@@ -387,13 +394,6 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     const atomicScope: AtomicScope | undefined = scopeHook
       ? (info, body) => scopeHook.atomicScope!(instances.get(scopeHook), info, body)
       : undefined;
-
-    for (const [name, pipeline] of pipelines) {
-      for (const step of pipeline.steps) {
-        if (step.atomic === undefined || step.description.atomicSafe === true) continue;
-        throw new KestrelBootError(`pipelines/${name}`, `step "${step.name}" is in an atomic group but does not declare atomicSafe`);
-      }
-    }
 
     const warnings = [...moduleOrderWarnings, ...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUndeclaredOutput(pipelines, logger), ...warnUndeclaredRequired(pipelines, logger)];
 

@@ -77,12 +77,24 @@ function execOrFail(db: DatabaseSync, sql: string, phase: string): PersistenceEr
   }
 }
 
+/**
+ * After a scope's own compensating rollback fails, every subsequent call on this instance answers
+ * `Err` with code `INTERNAL` and touches nothing. `INTERNAL` lies outside `PersistenceError`'s frozen
+ * union (`CONFLICT | NOT_FOUND | TRANSIENT`), so the value is built with `boundaryCast` at that one
+ * source: the store has entered a state the frozen contract has no code for, and the contract stays
+ * unchanged rather than being widened for it.
+ */
 export interface PersistenceSqlite extends Persistence {
   /** Routed through the same mutex as every other call: it waits for an open scope and holds the connection while it runs. */
   checkpoint(): Promise<void>;
   snapshot(file: string): Promise<void>;
   close(): void;
-  /** Runs `body` inside `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK`, holding the single connection for its duration. */
+  /**
+   * Runs `body` inside `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK`, holding the single connection for its
+   * duration. A failure of the scope itself (not of `body`) answers with code `INTERNAL`, which lies
+   * outside `PersistenceError`'s frozen union (`CONFLICT | NOT_FOUND | TRANSIENT`): legitimate here
+   * because `AtomicOutcome.error` is a plain `KestrelError`, not a `PersistenceError`.
+   */
   scope(info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
 }
 

@@ -8,9 +8,10 @@
   step name, and the runner wraps such a group in one all-or-nothing scope it obtains from a
   module hook. `PipelineDefinition["steps"]` is now `readonly PipelineEntry[]`, not
   `readonly string[]`; code that reads, filters or maps a pipeline's steps as plain strings must
-  flatten first with the exported `pipelineSteps()`. `ResolvedStep` and `PipelineStepManifest`
-  gain an optional `atomic` ordinal; `ModuleManifest` gains a required `atomicScope` boolean, so a
-  hand-built manifest must add it.
+  flatten first with the exported `pipelineSteps()` (or `resolveEntries()`, which additionally
+  stamps the group ordinal, for a reader that resolves each step itself). `ResolvedStep` and
+  `PipelineStepManifest` gain an optional `atomic` ordinal; `ModuleManifest` gains a required
+  `atomicScope` boolean, so a hand-built manifest must add it.
   - `ModuleDefinition` (and `ModuleInput`) gain an optional `atomicScope(instance, info, body)`
     hook, published as `AtomicScope` from the new `@michaelthielemann/kestrel/atomic` export path.
     At most one loaded module may declare it; a pipeline with a group and no provider, or two
@@ -31,8 +32,12 @@
     and `authn-multi` (`verifyUser`, `deleteUser`) now declares `atomicSafe: true`; every other
     shipped step keeps the default `false`.
   - `fakePersistence` (the contracts package's testing fake) gains the same `scope`/`failScope`/
-    `scopeTimeoutMs` surface, so a module test can exercise a grouped pipeline without SQLite. The
-    core's `testing/runPipeline.ts` test helper gains a typed `atomicScope` option with no default.
+    `scopeTimeoutMs`/`acquireTimeoutMs` surface, so a module test can exercise a grouped pipeline
+    without SQLite, including its own FIFO queue, an acquire budget and the two terminal states of
+    a closed scope. **`FakePersistence` gains four new required members**: anyone who built a
+    hand-written implementation of that interface's type (rather than using `createFakePersistence`)
+    must add them. The core's `testing/runPipeline.ts` test helper gains a typed `atomicScope`
+    option with no default.
   - `insights.readManifest`'s output schema follows the two new manifest fields.
 - Event delivery is a separate module from the `events@1` bus. `events-inmemory` now provides
   `events@1` and nothing else — no `events.emit` step, no event trigger hook. Configure exactly one

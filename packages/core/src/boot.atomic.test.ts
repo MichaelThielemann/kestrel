@@ -82,6 +82,18 @@ describe("boot: atomic groups", () => {
     await kestrel.stop();
   });
 
+  it("Nit: an atomicSafe violation is reported before a trigger error", async () => {
+    const pipelines = [definePipeline({ name: "p", steps: [{ atomic: ["store.safe", "store.unsafe"] }] })];
+    await expect(
+      boot({
+        config: { modules: [{ use: "store" }], triggers: [{ http: "GET /x", pipeline: "unknown-pipeline" }] },
+        modules: [store],
+        pipelines,
+        logger: silentLogger,
+      }),
+    ).rejects.toThrow(new KestrelBootError("pipelines/p", 'step "store.unsafe" is in an atomic group but does not declare atomicSafe'));
+  });
+
   it("the normal case: one provider, a grouped pipeline runs through the scope", async () => {
     const pipelines = [definePipeline({ name: "p", steps: [{ atomic: ["store.safe"] }] })];
     const kestrel = await boot({ config: { modules: [{ use: "store" }], triggers: [] }, modules: [store], pipelines, logger: silentLogger });
