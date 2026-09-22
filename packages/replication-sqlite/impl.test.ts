@@ -273,7 +273,7 @@ describe("replication/sqlite", () => {
     expectOk(await repl.sync());
     expect(repl.health()).toEqual({ ok: true });
     expectOk(await repl.prepareRestore({}));
-    expect(repl.health()).toEqual({ ok: true, note: expect.stringContaining("restart") });
+    expect(repl.health()).toEqual({ ok: true, note: expect.stringContaining("restart") as unknown });
   });
 
   it("two boots keep their own logger; teardown on the first instance never touches a later boot's logger", async () => {
