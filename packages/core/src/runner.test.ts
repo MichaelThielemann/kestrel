@@ -365,9 +365,20 @@ describe("runPipeline output validation", () => {
     expect(res.status).toBe(200);
   });
 
-  it("does not skip a step whose optional write is a sub-path (result.x?), even when ctx.result is unchanged", async () => {
+  it("skips a step whose optional write is a sub-path (result.x?) when ctx.result is unchanged", async () => {
     const seed: ResolvedStep = { name: "seed", description: { summary: "test", reads: [], writes: ["result"], output: A_SCHEMA }, fn: boundaryCast<Step>(async (ctx: Context) => ok({ ...ctx, result: { a: "x" } }), "host") };
     const extend: ResolvedStep = { name: "extend", description: { summary: "test", reads: ["result"], writes: ["result.x?"], extendsOutput: B_SCHEMA }, fn: boundaryCast<Step>(async (ctx: Context) => ok(ctx), "host") };
+    const res = await runPipeline({ name: "p", steps: [seed, extend] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    expect(res.status).toBe(200);
+  });
+
+  it("still validates a step's optional sub-path write when the result did change", async () => {
+    const seed: ResolvedStep = { name: "seed", description: { summary: "test", reads: [], writes: ["result"], output: A_SCHEMA }, fn: boundaryCast<Step>(async (ctx: Context) => ok({ ...ctx, result: { a: "x" } }), "host") };
+    const extend: ResolvedStep = {
+      name: "extend",
+      description: { summary: "test", reads: ["result"], writes: ["result.x?"], extendsOutput: B_SCHEMA },
+      fn: boundaryCast<Step>(async (ctx: Context) => ok({ ...ctx, result: { ...boundaryCast<Record<string, unknown>>(ctx.result, "host"), x: "changed" } }), "host"),
+    };
     const res = await runPipeline({ name: "p", steps: [seed, extend] }, input, collectingLogger().logger, {}, { validateOutput: true });
     expect(res.status).toBe(500);
     expect(res.error).toContain('step "extend": result does not match describe().output');

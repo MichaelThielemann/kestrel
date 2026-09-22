@@ -116,7 +116,7 @@ function writesResult(step: ResolvedStep): boolean {
 }
 
 function optionalResultWrite(step: ResolvedStep): boolean {
-  return step.description.writes.includes("result?");
+  return step.description.writes.some((path) => path.endsWith("?") && writeRoot(path) === "result");
 }
 
 function checkOutput(step: ResolvedStep, descriptionsSoFar: readonly StepDescription[], before: Context, after: Context): void {

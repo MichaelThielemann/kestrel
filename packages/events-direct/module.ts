@@ -53,7 +53,7 @@ export default defineModule({
     relay: {
       summary: "Report how the events this run raised were delivered (adds `_events` to the result)",
       reads: [],
-      writes: ["result?"],
+      writes: ["result._events?"],
       extendsOutput: RELAY_SCHEMA,
     },
   }),

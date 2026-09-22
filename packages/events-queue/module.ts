@@ -145,7 +145,7 @@ export default defineModule({
     relay: {
       summary: "Deliver the events this run queued, before the response; whatever is left over stays for the worker (adds `_events` to the result)",
       reads: [],
-      writes: ["result?"],
+      writes: ["result._events?"],
       extendsOutput: RELAY_SCHEMA,
     },
   }),
