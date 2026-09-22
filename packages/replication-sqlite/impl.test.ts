@@ -267,6 +267,15 @@ describe("replication/sqlite", () => {
     expect(applyPendingRestore(file)).toBe(false);
   });
 
+  it("health() reports a prepared restore informationally: the instance still serves", async () => {
+    const { repl, insert } = setup();
+    insert(4);
+    expectOk(await repl.sync());
+    expect(repl.health()).toEqual({ ok: true });
+    expectOk(await repl.prepareRestore({}));
+    expect(repl.health()).toEqual({ ok: true, note: expect.stringContaining("restart") });
+  });
+
   it("two boots keep their own logger; teardown on the first instance never touches a later boot's logger", async () => {
     const dir1 = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-mod-"));
     const dir2 = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-mod-"));

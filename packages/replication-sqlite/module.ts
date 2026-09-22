@@ -49,6 +49,8 @@ export default defineModule({
     return { ...createReplicationSqlite(config, blobs), logger: deps.logger };
   },
 
+  health: (r) => r.health(),
+
   async teardown(r) {
     try {
       const result = await r.sync();

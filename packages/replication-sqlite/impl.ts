@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import type { ModuleHealth } from "@michaelthielemann/kestrel/defineModule";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import { applySegment, FRAME_HEADER_SIZE, frameSize, parseFrameHeader, parseWalHeader, WAL_HEADER_SIZE, type WalHeader } from "./wal.ts";
@@ -42,6 +43,8 @@ export interface Replication {
   prepareRestore(target: { generation?: string; at?: number }): Promise<Result<{ generation: string; at: number; file: string; restartRequired: true }, KestrelError<"NOT_FOUND" | "TRANSIENT">>>;
   status(): Promise<Status>;
   close(): void;
+  /** Synchronous, no I/O: reports a prepared restore informationally, since the instance keeps serving until a host restarts it to apply it. */
+  health(): ModuleHealth;
 }
 
 const pad = (n: number, w: number): string => String(n).padStart(w, "0");
@@ -151,6 +154,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let lastSyncAt: number | null = null;
   let lastSnapshotAt: number | null = null;
   let lastCheckpointAt: number | null = null;
+  let restorePrepared = false;
 
   const walBytes = (): number => (existsSync(walFile) ? statSync(walFile).size : 0);
   const segmentKey = (currentGeneration: string, at: number): string => `${config.prefix}gen/${currentGeneration}/wal/${pad(lineage, 6)}-${pad(seq, 6)}-${stamp(at)}.wal`;
@@ -274,10 +278,15 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       const out = restoreMarker(file);
       const result = await restoreFromBlobs(blobs, config.prefix, target, out);
       if (isErr(result)) return result;
+      restorePrepared = true;
       return ok({ ...result.value, file: out, restartRequired: true as const });
     },
     async status() {
       return { generation, lineage, shippedFrames, lastSyncAt, lastSnapshotAt, lastCheckpointAt, walBytes: walBytes(), pendingRestore: existsSync(restoreMarker(file)) ? restoreMarker(file) : null };
+    },
+    health(): ModuleHealth {
+      if (!restorePrepared) return { ok: true };
+      return { ok: true, note: "replication/sqlite: a restore is prepared; restart the process to apply it" };
     },
     close() {
       try {
