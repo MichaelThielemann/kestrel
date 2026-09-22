@@ -76,10 +76,41 @@ export interface ModuleTriggers<P> {
   event?(instance: P, entries: readonly EventEntry[], run: Runner, logger: Logger): () => void;
 }
 
-/** The read-only view of the booted instance a module's `attach` hook receives: the static manifest and the run observer registration. */
+/**
+ * A module's own read of its instance state, synchronous and with no I/O: never the outcome of a
+ * call, since a readiness probe must never depend on lock contention or an in-flight request.
+ *
+ * `ok: true` may carry an informational `note` (e.g. a pending action that does not affect
+ * service). `ok: false` names the `reason` and whether the process needs a restart before the
+ * module can serve again; a module never reports transient contention (a busy lock, a retryable
+ * timeout) through this hook.
+ */
+export type ModuleHealth = { ok: true; note?: string } | { ok: false; reason: string; restartRequired: boolean };
+
+/**
+ * The aggregate health of a booted instance, over every module that declares `health()`; a module
+ * without the hook is left out. `ok` is false if any listed module is not ok. `restartRequired` is
+ * true if any listed module reports it.
+ */
+export interface InstanceHealth {
+  ok: boolean;
+  restartRequired: boolean;
+  modules: Array<{ module: string } & ModuleHealth>;
+}
+
+/** The read-only view of the booted instance a module's `attach` hook receives: the static manifest, the run observer registration and the aggregate health. */
 export interface Introspection {
   describe: () => Manifest;
   observe: (observer: RunObserver) => Unobserve;
+  /**
+   * Aggregates every module's {@link ModuleHealth}, synchronously and with no I/O.
+   *
+   * A readiness probe should read `ok`: false means route no traffic here; this never depends on
+   * lock contention or an in-flight call, because no module hook may report the outcome of one. A
+   * liveness probe should read `restartRequired`: true means the process cannot recover on its own
+   * and needs a restart, not a retry.
+   */
+  health: () => InstanceHealth;
 }
 
 export type Detach = () => void;
@@ -102,6 +133,8 @@ export interface ModuleDefinition<N extends string = string, T extends StepMap =
   teardown?(instance: unknown): void | Promise<void>;
   /** Wraps an atomic group of a pipeline in one all-or-nothing scope of this module's store. At most one loaded module may declare it. */
   atomicScope?(instance: unknown, info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
+  /** Reads the instance's own state, synchronously and with no I/O, for {@link Kestrel.health}. A module without this hook is left out of the aggregate. */
+  health?(instance: unknown): ModuleHealth;
 }
 
 type WithSteps<P, T extends StepMap> = { steps(instance: P): T; describe(instance: P): StepDescriptions<T> };
@@ -120,6 +153,7 @@ export type ModuleInput<N extends string, S extends ZodTypeAny, P, T extends Ste
   attach?(instance: P, kestrel: Introspection): Detach | void;
   teardown?(instance: P): void | Promise<void>;
   atomicScope?(instance: P, info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
+  health?(instance: P): ModuleHealth;
 } & (WithSteps<P, T> | WithoutSteps);
 
 export function defineModule<const N extends string, S extends ZodTypeAny, P, T extends StepMap = Record<never, never>>(def: ModuleInput<N, S, P, T>): ModuleDefinition<N, T> {

@@ -6,7 +6,7 @@ import type { ContextInput } from "./context.ts";
 import { missingMethods, type Contract } from "./defineContract.ts";
 import { checkDataflow } from "./dataflow.ts";
 import { configSchema, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
-import { stepPrefix, type ContractLookup, type Deps, type EventEntry, type Introspection, type ModuleDefinition, type StepDescription } from "./defineModule.ts";
+import { stepPrefix, type ContractLookup, type Deps, type EventEntry, type InstanceHealth, type Introspection, type ModuleDefinition, type StepDescription } from "./defineModule.ts";
 import { buildManifest, type Manifest } from "./describe.ts";
 import { pipelineSteps, type PipelineDefinition } from "./definePipeline.ts";
 import { resolveEntries } from "./resolveEntries.ts";
@@ -412,6 +412,10 @@ export async function boot(input: BootInput): Promise<Kestrel> {
       manifest ??= buildManifest({ root, modules: input.modules, uses: config.modules.map((m) => m.use), rawConfigs: configByModule, parsedConfigs: parsedByModule, contracts: contracts.names(), steps, pipelines, triggers });
       return manifest;
     };
+    const health = (): InstanceHealth => {
+      const modules = ordered.flatMap((mod) => (mod.health ? [{ module: mod.name, ...mod.health(instances.get(mod)) }] : []));
+      return { ok: modules.every((m) => m.ok), restartRequired: modules.some((m) => m.ok === false && m.restartRequired), modules };
+    };
 
     let server: Server | undefined;
     const stoppers: Array<() => void> = [];
@@ -426,6 +430,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
       warnings,
       describe,
       observe: hub.observe,
+      health,
       run,
       async start() {
         const started: { http?: AddressInfo } = {};
@@ -480,7 +485,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
       if (!mod.attach) continue;
       let detach: ReturnType<NonNullable<ModuleDefinition["attach"]>>;
       try {
-        detach = mod.attach(instances.get(mod), { describe, observe: hub.observe });
+        detach = mod.attach(instances.get(mod), { describe, observe: hub.observe, health });
       } catch (err) {
         throw new KestrelBootError(mod.name, `attach() threw: ${err instanceof Error ? err.message : String(err)}`);
       }
