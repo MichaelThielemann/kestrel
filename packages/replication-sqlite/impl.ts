@@ -82,7 +82,24 @@ export async function restoreFromBlobs(blobs: Blobstore, prefix: string, target:
   }
   mkdirSync(dirname(outFile), { recursive: true });
   writeFileSync(outFile, image);
+  const verdict = checkImage(outFile);
+  if (verdict !== "ok") {
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(outFile + suffix, { force: true });
+    return err(failure("TRANSIENT", `replication/sqlite: restored image of generation ${generation} (up to ${stamp(at)}) failed quick_check: ${verdict}`));
+  }
   return ok({ generation, at });
+}
+
+function checkImage(file: string): string {
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    return boundaryCast<{ quick_check: string }>(db.prepare("PRAGMA quick_check").get(), "host").quick_check;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  } finally {
+    db.close();
+    for (const suffix of ["-wal", "-shm"]) rmSync(file + suffix, { force: true });
+  }
 }
 
 async function listPoints(blobs: Blobstore, prefix: string): Promise<Result<Point[], BlobstoreError>> {
@@ -97,6 +114,18 @@ async function listPoints(blobs: Blobstore, prefix: string): Promise<Result<Poin
     else out.push({ generation, at: unstamp(m[5] ?? ""), kind: "wal", key: info.key });
   }
   return ok(out.sort((a, b) => a.generation.localeCompare(b.generation) || (a.kind === "snapshot" ? -1 : b.kind === "snapshot" ? 1 : a.key.localeCompare(b.key))));
+}
+
+function lastCommittedFrame(wal: Uint8Array, header: WalHeader, from: number): number {
+  const size = frameSize(header.pageSize);
+  const total = Math.floor((wal.byteLength - WAL_HEADER_SIZE) / size);
+  let lastCommit = -1;
+  for (let i = from; i < total; i++) {
+    const frame = parseFrameHeader(wal, WAL_HEADER_SIZE + i * size);
+    if (frame.salt1 !== header.salt1 || frame.salt2 !== header.salt2) break;
+    if (frame.commitSize > 0) lastCommit = i;
+  }
+  return lastCommit;
 }
 
 export function createReplicationSqlite(config: Config, blobs: Blobstore, now: () => number = Date.now): Replication {
@@ -128,24 +157,18 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
 
   const takeSnapshot = async (): Promise<Result<{ generation: string; bytes: number }, BlobstoreError>> => {
     const at = now();
-    const tmp = `${file}.snapshot-${process.pid}`;
-    release();
-    try {
-      rmSync(tmp, { force: true });
-      conn.prepare("VACUUM INTO ?").run(tmp);
-    } finally {
-      holdRead();
-    }
-    const data = new Uint8Array(readFileSync(tmp));
-    rmSync(tmp, { force: true });
+    let data: Uint8Array = new Uint8Array(readFileSync(file));
+    const wal = existsSync(walFile) ? new Uint8Array(readFileSync(walFile)) : null;
+    const current = wal ? parseWalHeader(wal) : null;
+    const included = wal && current ? lastCommittedFrame(wal, current, 0) + 1 : 0;
+    if (wal && current && included > 0) data = applySegment(data, wal.subarray(0, WAL_HEADER_SIZE + included * frameSize(current.pageSize)));
     const gen = stamp(at);
     const put = await blobs.put(`${config.prefix}gen/${gen}/snapshot.db`, data, { contentType: "application/vnd.sqlite3" });
     if (isErr(put)) return put;
     generation = gen;
     seq = 0;
-    const current = existsSync(walFile) ? parseWalHeader(new Uint8Array(readFileSync(walFile))) : null;
     header = current;
-    shippedFrames = current ? Math.floor((walBytes() - WAL_HEADER_SIZE) / frameSize(current.pageSize)) : 0;
+    shippedFrames = included;
     lastSnapshotAt = at;
     return ok({ generation: gen, bytes: data.byteLength });
   };
@@ -162,13 +185,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       shippedFrames = 0;
     }
     const size = frameSize(current.pageSize);
-    const total = Math.floor((wal.byteLength - WAL_HEADER_SIZE) / size);
-    let lastCommit = -1;
-    for (let i = shippedFrames; i < total; i++) {
-      const frame = parseFrameHeader(wal, WAL_HEADER_SIZE + i * size);
-      if (frame.salt1 !== current.salt1 || frame.salt2 !== current.salt2) break;
-      if (frame.commitSize > 0) lastCommit = i;
-    }
+    const lastCommit = lastCommittedFrame(wal, current, shippedFrames);
     if (lastCommit < shippedFrames) return ok({ bytes: 0, frames: 0 });
     const frames = wal.subarray(WAL_HEADER_SIZE + shippedFrames * size, WAL_HEADER_SIZE + (lastCommit + 1) * size);
     const segment = new Uint8Array(WAL_HEADER_SIZE + frames.byteLength);
