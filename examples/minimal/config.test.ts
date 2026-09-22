@@ -412,7 +412,16 @@ function spyOnPersistence(base: unknown, calls: PersistenceCall[], targetCollect
   return wrapped;
 }
 
-async function bootWithQueue(): Promise<{
+async function pollUntil(check: () => Promise<boolean>, timeoutMs = 2000, intervalMs = 20): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("pollUntil: timed out waiting for the condition");
+}
+
+async function bootWithQueue(mode: "queue" | "direct" = "queue"): Promise<{
   kestrel: Awaited<ReturnType<typeof boot>>;
   dispose: () => Promise<void>;
   calls: PersistenceCall[];
@@ -427,7 +436,7 @@ async function bootWithQueue(): Promise<{
       if (m.use === "@michaelthielemann/kestrel-persistence-sqlite") return { ...m, config: { ...(m.config as object), file: ":memory:" } };
       if (m.use === "@michaelthielemann/kestrel-replication-sqlite") return { ...m, config: { ...(m.config as object), file: join(dataDir, "replication.db") } };
       if (m.use === "@michaelthielemann/kestrel-blobstore-filesystem") return { ...m, config: { ...(m.config as object), root: join(dataDir, "blobs") } };
-      if (m.use === "@michaelthielemann/kestrel-events-direct") return { use: "@michaelthielemann/kestrel-events-queue", config: { maxAttempts: 1, relayMs: 5000 } };
+      if (mode === "queue" && m.use === "@michaelthielemann/kestrel-events-direct") return { use: "@michaelthielemann/kestrel-events-queue", config: { maxAttempts: 1, relayMs: 5000 } };
       return m;
     }),
   };
@@ -444,7 +453,16 @@ async function bootWithQueue(): Promise<{
       },
     });
   });
-  const pipelines = [...(await loadPipelines(root, "pipelines")), definePipeline({ name: "listDeadEvents", steps: ["events.listDead"] }), definePipeline({ name: "retryDeadEvent", steps: ["events.retryDead:one"] })];
+  const pipelines = [
+    ...(await loadPipelines(root, "pipelines")),
+    ...(mode === "queue"
+      ? [
+          definePipeline({ name: "listDeadEvents", steps: ["events.listDead"] }),
+          definePipeline({ name: "retryDeadEvent", steps: ["events.retryDead:one"] }),
+          definePipeline({ name: "queueStatus", steps: ["events.readQueueStatus"] }),
+        ]
+      : []),
+  ];
   const kestrel = await boot({ config: isolated, modules, pipelines, root, validateOutput: true });
   await kestrel.start();
   return {
@@ -800,7 +818,43 @@ describe("events/queue relay: a forced delivery.publish failure through POST /pa
       expect(retried.status).toBe(200);
       expect(retried.result).toEqual({ retried: 1 });
 
+      await pollUntil(async () => {
+        const dead2 = await kestrel.run("listDeadEvents", { trigger, headers: bearer(admin.token) });
+        const stillDead = boundaryCast<{ items: { id: string }[] }>(dead2.result, "json").items.some((d) => d.id === deadRow!.id);
+        const status = await kestrel.run("queueStatus", { trigger, headers: bearer(admin.token) });
+        const counts = boundaryCast<{ pending: number; running: number }>(status.result, "json");
+        return !stillDead && counts.pending === 0 && counts.running === 0;
+      });
+
       expect(derivedTouches(calls)).toBe(touchesBeforeRetry);
+    } finally {
+      await dispose();
+    }
+  });
+});
+
+describe("events/direct relay: a forced delivery.publish failure through POST /pages", () => {
+  it("answers 200 (not 500) with _events.status \"error\"; the write is not rolled back", async () => {
+    const { kestrel, dispose, armStatusFailureOnce } = await bootWithQueue("direct");
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+
+      armStatusFailureOnce();
+      const created = await kestrel.run("createPage", {
+        trigger,
+        headers: bearer(admin.token),
+        payload: { slug: "direct-relay", title: "A", status: "draft" },
+        body: { slug: "direct-relay", title: "A", status: "draft" },
+      });
+      expect(created.status).toBe(200);
+      const body = boundaryCast<{ id: string; _events?: { status: string; pipelines: { pipeline: string; status: string; dead: boolean }[] } }>(created.result, "json");
+      expect(body._events?.status).toBe("error");
+      expect(body._events?.pipelines).toContainEqual(expect.objectContaining({ pipeline: "publishPage", status: "error", dead: true }));
+
+      const read = await kestrel.run("readAnyPage", { trigger, headers: bearer(admin.token), params: { id: body.id } });
+      expect(read.status).toBe(200);
+      const revisions = await revisionsOf(kestrel, admin, body.id);
+      expect(revisions.total).toBe(1);
     } finally {
       await dispose();
     }
