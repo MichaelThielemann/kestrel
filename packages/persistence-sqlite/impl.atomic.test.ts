@@ -192,6 +192,10 @@ describe("persistence/sqlite atomic scope", () => {
   it("module.ts declares atomicScope next to teardown", () => {
     expect(typeof module.atomicScope).toBe("function");
   });
+
+  it("module.ts declares health next to atomicScope", () => {
+    expect(typeof module.health).toBe("function");
+  });
 });
 
 describe("every BEGIN/COMMIT/ROLLBACK failure inside the scope becomes a value", () => {
@@ -281,6 +285,23 @@ describe("every BEGIN/COMMIT/ROLLBACK failure inside the scope becomes a value",
       expect(after.error.code).toBe("TRANSIENT");
       expect(after.error.retryable).toBe(true);
       expect(after.error.details?.retryAfterSeconds).toBeGreaterThan(1);
+    }
+    db.close();
+  });
+
+  it("health() reports the unusable state after a failed rollback, and ok before it", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    expect(db.health()).toEqual({ ok: true });
+    const outcome = await withPatchedExec([{ sql: "ROLLBACK", error: () => new Error("simulated rollback failure") }], () =>
+      db.scope({ pipeline: "p", group: 1 }, async () => "rollback"),
+    );
+    expect(outcome.kind).toBe("failed");
+    const health = db.health();
+    expect(health.ok).toBe(false);
+    if (!health.ok) {
+      expect(health.reason).toEqual(expect.stringContaining("failed rollback"));
+      expect(health.restartRequired).toBe(true);
     }
     db.close();
   });

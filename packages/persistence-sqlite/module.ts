@@ -52,6 +52,8 @@ export default defineModule({
 
   atomicScope: (db, info, body) => db.scope(info, body),
 
+  health: (db) => db.health(),
+
   steps: (db) => ({
     checkpoint: async (ctx: Context) => (await guard(ctx, () => db.checkpoint())) ?? ok(ctx),
     snapshot: stepFactory((file: string) => async (ctx: Context) => (await guard(ctx, () => db.snapshot(file))) ?? ok({ ...ctx, result: { file } })),

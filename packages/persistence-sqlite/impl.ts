@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { AtomicOutcome, AtomicScopeInfo, AtomicVerdict } from "@michaelthielemann/kestrel/atomic";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import type { ModuleHealth } from "@michaelthielemann/kestrel/defineModule";
 import { logWarn, silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { fieldDefinition, type Document, type FieldDefinition, type FieldType, type Filter, type FindOptions, type NewDocument, type Page, type Persistence, type PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
@@ -85,6 +86,8 @@ export interface PersistenceSqlite extends Persistence {
   close(): void;
   /** Runs `body` inside `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK`, holding the single connection for its duration. */
   scope(info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
+  /** Synchronous, no I/O: `ok: false` only once a rollback has failed and left the connection's state unprovable; never reports lock contention. */
+  health(): ModuleHealth;
 }
 
 export interface PersistenceSqliteDeps {
@@ -347,6 +350,10 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
       db.close();
     },
     scope,
+    health(): ModuleHealth {
+      if (!unusable) return { ok: true };
+      return { ok: false, reason: "persistence/sqlite: the store is unusable after a failed rollback", restartRequired: true };
+    },
 
     async ensureCollection(name, schema) {
       if (als.getStore()?.state === "open") throw new Error("persistence/sqlite: ensureCollection must not run inside an atomic scope");

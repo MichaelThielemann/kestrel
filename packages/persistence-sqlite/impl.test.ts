@@ -118,7 +118,7 @@ const ctx = (params: Record<string, string> = {}, payload: Record<string, unknow
 const stepsOf = (db: PersistenceSqlite) => module.steps!(db);
 
 function fakeDb(): PersistenceSqlite & { failNext(code: "TRANSIENT" | "CONFLICT"): void } {
-  return Object.assign(createFakePersistence(), { checkpoint: async () => {}, snapshot: async () => {}, close: () => {} });
+  return Object.assign(createFakePersistence(), { checkpoint: async () => {}, snapshot: async () => {}, close: () => {}, health: () => ({ ok: true as const }) });
 }
 
 describe("persistence/sqlite steps", () => {
@@ -168,6 +168,7 @@ describe("persistence/sqlite steps", () => {
           throw new Error("boom");
         },
         close: () => {},
+        health: () => ({ ok: true as const }),
       }),
     );
     expectErr(await steps.checkpoint(ctx()), "TRANSIENT");

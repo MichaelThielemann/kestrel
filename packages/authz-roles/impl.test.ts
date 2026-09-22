@@ -67,7 +67,7 @@ describe("authz/roles: permission universe", () => {
   it("describeAccess throws before attach and answers the expanded permissions after", async () => {
     const authz = createAuthzRoles({ roles: { admin: ["*"], editor: ["pages.*"] }, roleClaim: "roles", anonymous: [] });
     expect(() => authz.describeAccess({ id: "a", claims: { roles: ["admin"] } })).toThrow();
-    const detach = authz.attach({ describe: () => manifestOf(["authz.require:pages.read", "authz.require:pages.write", "authz.require:users.manage"]), observe: () => () => {} });
+    const detach = authz.attach({ describe: () => manifestOf(["authz.require:pages.read", "authz.require:pages.write", "authz.require:users.manage"]), observe: () => () => {}, health: () => ({ ok: true, restartRequired: false, modules: [] }) });
     expect(authz.describeAccess({ id: "e", claims: { roles: ["editor"] } })).toEqual({ permissions: ["pages.read", "pages.write"] });
     expect(authz.describeAccess({ id: "v", claims: { roles: ["ghost"] } })).toEqual({ permissions: [] });
     detach();
@@ -92,7 +92,7 @@ describe("authz/roles: a role name shaped like an Object.prototype key never yie
 
   it.each(DANGEROUS_ROLE_NAMES)("describeAccess answers no permissions, never throws, for role %s", (role) => {
     const authz = createAuthzRoles(dangerousConfig);
-    authz.attach({ describe: () => manifestOf(["authz.require:pages.read", "authz.require:pages.write"]), observe: () => () => {} });
+    authz.attach({ describe: () => manifestOf(["authz.require:pages.read", "authz.require:pages.write"]), observe: () => () => {}, health: () => ({ ok: true, restartRequired: false, modules: [] }) });
     expect(authz.describeAccess({ id: "x", claims: { roles: [role] } })).toEqual({ permissions: [] });
   });
 
