@@ -115,4 +115,38 @@ describe("persistence/sqlite module via runPipeline", () => {
     expect(result.result).toEqual({ file });
     instance.close();
   });
+
+  it("the checkpoint step awaits an async checkpoint() before the run ends", async () => {
+    const real = await boot();
+    let resolved = false;
+    const instance: PersistenceSqlite = {
+      ...real,
+      checkpoint: async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        resolved = true;
+      },
+    };
+    const pipeline = definePipeline({ name: "checkpoint", steps: ["persistence.checkpoint"] });
+    const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }] });
+    expect(result.status).toBe(200);
+    expect(resolved).toBe(true);
+    real.close();
+  });
+
+  it("the snapshot step awaits an async snapshot() before the run ends", async () => {
+    const real = await boot();
+    let resolved = false;
+    const instance: PersistenceSqlite = {
+      ...real,
+      snapshot: async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        resolved = true;
+      },
+    };
+    const pipeline = definePipeline({ name: "snapshot", steps: ["persistence.snapshot:copy.db"] });
+    const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }] });
+    expect(result.status).toBe(200);
+    expect(resolved).toBe(true);
+    real.close();
+  });
 });

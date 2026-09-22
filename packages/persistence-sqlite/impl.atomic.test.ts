@@ -7,7 +7,7 @@ import { atomicScopeTests } from "@michaelthielemann/kestrel-contracts/atomic.co
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import type { Context } from "@michaelthielemann/kestrel/context";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
-import { silentLogger } from "@michaelthielemann/kestrel/logger";
+import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { ok } from "@michaelthielemann/kestrel/result";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { createPersistenceSqlite } from "./impl.ts";
@@ -257,7 +257,13 @@ describe("every BEGIN/COMMIT/ROLLBACK failure inside the scope becomes a value",
     if (outcome.kind === "failed") expect(outcome.phase).toBe("rollback");
     const after = await db.createOne("rows", { id: "c", name: "gamma" });
     expect(after.ok).toBe(false);
-    if (!after.ok) expect(after.error.code).toBe("INTERNAL");
+    if (!after.ok) {
+      expect(after.error.code).toBe("TRANSIENT");
+      expect(after.error.status).toBe(503);
+      expect(after.error.retryable).toBe(true);
+      expect(after.error.details?.retryAfterSeconds).toBeGreaterThan(1);
+      expect(after.error.details?.reason).toEqual(expect.stringContaining("restart"));
+    }
     db.close();
   });
 
@@ -271,7 +277,11 @@ describe("every BEGIN/COMMIT/ROLLBACK failure inside the scope becomes a value",
     if (outcome.kind === "failed") expect(outcome.phase).toBe("rollback");
     const after = await db.createOne("rows", { id: "d", name: "delta" });
     expect(after.ok).toBe(false);
-    if (!after.ok) expect(after.error.code).toBe("INTERNAL");
+    if (!after.ok) {
+      expect(after.error.code).toBe("TRANSIENT");
+      expect(after.error.retryable).toBe(true);
+      expect(after.error.details?.retryAfterSeconds).toBeGreaterThan(1);
+    }
     db.close();
   });
 });
@@ -353,8 +363,63 @@ describe("scope() fails at once while the store is unusable", () => {
     expect(outcome.kind).toBe("failed");
     if (outcome.kind === "failed") {
       expect(outcome.phase).toBe("begin");
-      expect(outcome.error.code).toBe("INTERNAL");
+      expect(outcome.error.code).toBe("TRANSIENT");
+      expect(outcome.error.retryable).toBe(true);
+      expect(outcome.error.details?.retryAfterSeconds).toBeGreaterThan(1);
     }
+    db.close();
+  });
+});
+
+function spyLogger(): { logger: Logger; warnings: Array<{ message: string; data?: Record<string, unknown> }>; errors: Array<{ message: string; data?: Record<string, unknown> }> } {
+  const warnings: Array<{ message: string; data?: Record<string, unknown> }> = [];
+  const errors: Array<{ message: string; data?: Record<string, unknown> }> = [];
+  return {
+    warnings,
+    errors,
+    logger: {
+      step() {},
+      info() {},
+      warn: (message, data) => warnings.push(data === undefined ? { message } : { message, data }),
+      error: (message, data) => errors.push(data === undefined ? { message } : { message, data }),
+    },
+  };
+}
+
+describe("Item 2: the late-call warning and the rollback-failure error go through the given logger", () => {
+  it("warns through the logger, not console, when a call lands after the scope committed", async () => {
+    const { logger, warnings } = spyLogger();
+    const db = createPersistenceSqlite({ file: ":memory:" }, { logger });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    let late: Promise<unknown> = Promise.resolve();
+    await db.scope({ pipeline: "p", group: 1 }, async () => {
+      setTimeout(() => {
+        late = db.createOne("rows", { id: "a", name: "alpha" });
+      }, 10);
+      return "commit";
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    await late;
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toMatch(/call after the atomic scope committed/);
+    db.close();
+  });
+
+  it("errors through the logger, not console, when a rollback fails", async () => {
+    const { logger, errors } = spyLogger();
+    const db = createPersistenceSqlite({ file: ":memory:" }, { logger });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    await withPatchedExec([{ sql: "ROLLBACK", error: () => new Error("simulated rollback failure") }], () => db.scope({ pipeline: "p", group: 1 }, async () => "rollback"));
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors[0]?.message).toMatch(/rollback failed; the store is now unusable/);
+    db.close();
+  });
+
+  it("defaults to a silent logger when none is given", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    await db.scope({ pipeline: "p", group: 1 }, async () => "commit");
+    await expect(db.createOne("rows", { id: "a", name: "alpha" })).resolves.toMatchObject({ ok: true });
     db.close();
   });
 });

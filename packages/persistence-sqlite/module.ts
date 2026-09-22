@@ -44,8 +44,8 @@ export default defineModule({
   requires: [],
   configSchema,
 
-  async setup(config): Promise<PersistenceSqlite> {
-    return createPersistenceSqlite(config);
+  async setup(config, deps): Promise<PersistenceSqlite> {
+    return createPersistenceSqlite(config, { logger: deps.logger });
   },
 
   teardown: (db) => db.close(),

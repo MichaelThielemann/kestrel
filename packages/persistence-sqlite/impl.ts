@@ -5,7 +5,8 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { AtomicOutcome, AtomicScopeInfo, AtomicVerdict } from "@michaelthielemann/kestrel/atomic";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { err, failure, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
+import { logWarn, silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
+import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { fieldDefinition, type Document, type FieldDefinition, type FieldType, type Filter, type FindOptions, type NewDocument, type Page, type Persistence, type PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 
 export interface Config {
@@ -64,11 +65,11 @@ function run<T>(fn: () => T): Result<T, PersistenceError> {
   }
 }
 
-function scopeFailure(cause: unknown, phase: string): PersistenceError {
-  return persistenceFailure(cause) ?? boundaryCast<PersistenceError>(failure("INTERNAL", `persistence/sqlite: ${phase} failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause }), "host");
+function scopeFailure(cause: unknown, phase: string): KestrelError {
+  return persistenceFailure(cause) ?? failure("INTERNAL", `persistence/sqlite: ${phase} failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
 }
 
-function execOrFail(db: DatabaseSync, sql: string, phase: string): PersistenceError | null {
+function execOrFail(db: DatabaseSync, sql: string, phase: string): KestrelError | null {
   try {
     db.exec(sql);
     return null;
@@ -77,28 +78,21 @@ function execOrFail(db: DatabaseSync, sql: string, phase: string): PersistenceEr
   }
 }
 
-/**
- * After a scope's own compensating rollback fails, every subsequent call on this instance answers
- * `Err` with code `INTERNAL` and touches nothing. `INTERNAL` lies outside `PersistenceError`'s frozen
- * union (`CONFLICT | NOT_FOUND | TRANSIENT`), so the value is built with `boundaryCast` at that one
- * source: the store has entered a state the frozen contract has no code for, and the contract stays
- * unchanged rather than being widened for it.
- */
 export interface PersistenceSqlite extends Persistence {
   /** Routed through the same mutex as every other call: it waits for an open scope and holds the connection while it runs. */
   checkpoint(): Promise<void>;
   snapshot(file: string): Promise<void>;
   close(): void;
-  /**
-   * Runs `body` inside `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK`, holding the single connection for its
-   * duration. A failure of the scope itself (not of `body`) answers with code `INTERNAL`, which lies
-   * outside `PersistenceError`'s frozen union (`CONFLICT | NOT_FOUND | TRANSIENT`): legitimate here
-   * because `AtomicOutcome.error` is a plain `KestrelError`, not a `PersistenceError`.
-   */
+  /** Runs `body` inside `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK`, holding the single connection for its duration. */
   scope(info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
 }
 
-export function createPersistenceSqlite(config: Config): PersistenceSqlite {
+export interface PersistenceSqliteDeps {
+  logger?: Logger;
+}
+
+export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteDeps = {}): PersistenceSqlite {
+  const logger = deps.logger ?? silentLogger;
   if (config.file !== ":memory:") mkdirSync(dirname(config.file), { recursive: true });
   const db = new DatabaseSync(config.file);
   db.exec("PRAGMA journal_mode = WAL");
@@ -127,7 +121,9 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
   };
 
   const unusableError = (): PersistenceError =>
-    boundaryCast<PersistenceError>(failure("INTERNAL", "persistence/sqlite: the store is unusable after a failed rollback"), "host");
+    failure("TRANSIENT", "persistence/sqlite: the store is unusable after a failed rollback; restart the process", {
+      details: { reason: "a rollback failed and the connection's state can no longer be proven; the process must be restarted", retryAfterSeconds: 30 },
+    });
   const routed = <T>(collection: string, fn: () => Result<T, PersistenceError> | Promise<Result<T, PersistenceError>>): Promise<Result<T, PersistenceError>> => {
     const store = als.getStore();
     if (store?.state === "rolled-back") {
@@ -135,7 +131,7 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
     }
     if (store?.state === "open") return Promise.resolve(fn());
     if (unusable) return Promise.resolve(err(unusableError()));
-    if (store?.state === "committed") console.warn("persistence/sqlite: call after the atomic scope committed");
+    if (store?.state === "committed") logWarn(logger, "persistence/sqlite: call after the atomic scope committed", { collection });
     return enqueue(fn, undefined).catch((cause: unknown) => {
       if (cause instanceof AcquireTimeout) return err(failure("TRANSIENT", "persistence/sqlite: timed out waiting for the connection"));
       throw cause;
@@ -285,6 +281,7 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
       store.state = "rolled-back";
       if (rollbackError) {
         unusable = true;
+        logger.error("persistence/sqlite: rollback after a failed commit also failed; the store is now unusable", { cause: rollbackError, original: commitError });
         return { kind: "failed", phase: "rollback", error: failure("INTERNAL", "persistence/sqlite: rollback after a failed commit also failed", { cause: rollbackError }), original: commitError };
       }
       return { kind: "failed", phase: "commit", error: commitError };
@@ -294,6 +291,7 @@ export function createPersistenceSqlite(config: Config): PersistenceSqlite {
     store.state = "rolled-back";
     if (rollbackError) {
       unusable = true;
+      logger.error("persistence/sqlite: rollback failed; the store is now unusable", { cause: rollbackError });
       return { kind: "failed", phase: "rollback", error: failure("INTERNAL", "persistence/sqlite: rollback failed", { cause: rollbackError }) };
     }
     if (timedOut) return { kind: "failed", phase: "timeout", error: failure("TRANSIENT", "persistence/sqlite: atomic scope timed out") };
