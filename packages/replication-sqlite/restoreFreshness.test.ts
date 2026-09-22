@@ -63,6 +63,7 @@ function moduleDeps(blobs: Blobstore, root: string, bootStartedAt: number = Date
     logger: silentLogger,
     root,
     bootStartedAt,
+    eventTriggers: [],
   };
 }
 

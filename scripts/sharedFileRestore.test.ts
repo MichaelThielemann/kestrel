@@ -58,6 +58,7 @@ function deps(blobs: Blobstore, root: string, bootStartedAt: number): Deps {
     logger: silentLogger,
     root,
     bootStartedAt,
+    eventTriggers: [],
   };
 }
 
