@@ -250,34 +250,39 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     const entry = pendingRelays.get(runId);
     pendingRelays.delete(runId);
     if (!entry) return { status: "done", pipelines: [] };
-    const relayStartedAt = now();
-    const found = await db.findMany<QueueRow>(QUEUE, { id: { in: entry.ids } });
-    if (isErr(found)) {
-      logger.error("events/queue: relay could not load its rows", { error: found.error.message });
-      return { status: "pending", pipelines: entry.ids.map(() => ({ event: "", pipeline: "", status: "pending", attempts: 0, dead: false, error: null })) };
-    }
-    const pipelines: RelayEntry[] = [];
-    for (const row of found.value.items) {
-      if (now() - relayStartedAt >= config.relayMs) {
-        pipelines.push(pendingEntryOf(row));
-        continue;
+    try {
+      const relayStartedAt = now();
+      const found = await db.findMany<QueueRow>(QUEUE, { id: { in: entry.ids } });
+      if (isErr(found)) {
+        logger.error("events/queue: relay could not load its rows", { error: found.error.message });
+        return { status: "pending", pipelines: entry.ids.map(() => ({ event: "", pipeline: "", status: "pending", attempts: 0, dead: false, error: null })) };
       }
-      try {
-        const at = now();
-        if (!(await claimForRelay(row, at))) {
+      const pipelines: RelayEntry[] = [];
+      for (const row of found.value.items) {
+        if (now() - relayStartedAt >= config.relayMs) {
           pipelines.push(pendingEntryOf(row));
           continue;
         }
-        const claimed: QueueRow = { ...row, state: "running", lockedAt: at, lockedBy: instanceId };
-        const error = await runRow(claimed);
-        await settle(claimed, error);
-        pipelines.push(relayEntryOf(row, error));
-      } catch (error) {
-        logger.error("events/queue: relay could not deliver a row", { id: row.id, error: errorText(error) });
-        pipelines.push(pendingEntryOf(row));
+        try {
+          const at = now();
+          if (!(await claimForRelay(row, at))) {
+            pipelines.push(pendingEntryOf(row));
+            continue;
+          }
+          const claimed: QueueRow = { ...row, state: "running", lockedAt: at, lockedBy: instanceId };
+          const error = await runRow(claimed);
+          await settle(claimed, error);
+          pipelines.push(relayEntryOf(row, error));
+        } catch (error) {
+          logger.error("events/queue: relay could not deliver a row", { id: row.id, error: errorText(error) });
+          pipelines.push(pendingEntryOf(row));
+        }
       }
+      return { status: relaySummary(pipelines), pipelines };
+    } catch (error) {
+      logger.error("events/queue: relay could not load its rows", { error: errorText(error) });
+      return { status: "pending", pipelines: entry.ids.map(() => ({ event: "", pipeline: "", status: "pending", attempts: 0, dead: false, error: null })) };
     }
-    return { status: relaySummary(pipelines), pipelines };
   }
 
   function tick(): Promise<number> {
@@ -316,7 +321,11 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
         if (isErr(created)) throw new QueueWriteError(created.error);
         ids.push(created.value.id);
       }
-      if (runId !== null && ids.length > 0) pendingRelays.set(runId, { ids, at });
+      if (runId !== null && ids.length > 0) {
+        const entry = pendingRelays.get(runId) ?? { ids: [], at };
+        entry.ids.push(...ids);
+        pendingRelays.set(runId, entry);
+      }
     },
     setDelivery(entries, run) {
       const table = new Map<string, string[]>();

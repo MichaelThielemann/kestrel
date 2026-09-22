@@ -503,6 +503,21 @@ describe("events/queue relay: the store is unreachable", () => {
     db.failNext("TRANSIENT");
     await expect(queue.relay("run-1")).resolves.toEqual({ status: "pending", pipelines: [{ event: "", pipeline: "", status: "pending", attempts: 0, dead: false, error: null }] });
   });
+
+  it("reports pending and never rejects when the persistence adapter itself throws", async () => {
+    const realDb = createFakePersistence();
+    const db: typeof realDb = {
+      ...realDb,
+      findMany: boundaryCast<typeof realDb.findMany>(async () => {
+        throw new Error("adapter exploded");
+      }, "host"),
+    };
+    const clock = { t: 1_000_000 };
+    const queue = await createEventsQueue({ ...CONFIG, relayMs: 1000 }, { db, logger: silentLogger, now: () => clock.t, instanceId: "test@host" });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await queue.enqueue("x", { runId: "run-1" });
+    await expect(queue.relay("run-1")).resolves.toEqual({ status: "pending", pipelines: [{ event: "", pipeline: "", status: "pending", attempts: 0, dead: false, error: null }] });
+  });
 });
 
 describe("events/queue relay: a relay that never runs (process death after commit)", () => {
@@ -529,5 +544,26 @@ describe("events/queue relay: a relay that never runs (process death after commi
     clock.t += 1000;
     expect(await queueB.tick()).toBe(1);
     expect(delivered).toBe(1);
+  });
+});
+
+describe("events/queue relay: a run with two emits relays both", () => {
+  it("does not let a second emit's enqueue replace the first's map entry", async () => {
+    const { queue, rows } = await make({ relayMs: 1000 });
+    let calls = 0;
+    queue.setDelivery([{ event: "x", pipeline: "p1" }, { event: "y", pipeline: "p2" }], async () => {
+      calls++;
+      return OK;
+    });
+    await queue.enqueue("x", { runId: "run-1" });
+    await queue.enqueue("y", { runId: "run-1" });
+    expect(await rows()).toHaveLength(2);
+
+    const report = await queue.relay("run-1");
+    expect(calls).toBe(2);
+    expect(report.status).toBe("done");
+    expect(report.pipelines).toContainEqual({ event: "x", pipeline: "p1", status: "done", attempts: 0, dead: false, error: null });
+    expect(report.pipelines).toContainEqual({ event: "y", pipeline: "p2", status: "done", attempts: 0, dead: false, error: null });
+    expect((await rows()).every((r) => r.state === "done")).toBe(true);
   });
 });
