@@ -7,7 +7,7 @@ import { mergeRelayReport, RELAY_SCHEMA } from "@michaelthielemann/kestrel-contr
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";
-import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
+import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import type { Unsubscribe } from "@michaelthielemann/kestrel-contracts/events";
 import { createEventsQueue, persistenceFailure, retryTarget, type EventsQueue } from "./impl.ts";
@@ -129,7 +129,7 @@ export default defineModule({
     },
     relay: async (ctx: Context) => {
       const report = await queue.relay(ctx.runId);
-      return ok({ ...ctx, result: mergeRelayReport(ctx.result, report, (message) => logWarn(queue.logger, message), "events/queue") });
+      return ok({ ...ctx, result: mergeRelayReport(ctx.result, report, "events/queue") });
     },
   }),
 
@@ -145,7 +145,7 @@ export default defineModule({
     relay: {
       summary: "Deliver the events this run queued, before the response; whatever is left over stays for the worker (adds `_events` to the result)",
       reads: [],
-      writes: ["result._events?"],
+      writes: ["result._events"],
       extendsOutput: RELAY_SCHEMA,
     },
   }),

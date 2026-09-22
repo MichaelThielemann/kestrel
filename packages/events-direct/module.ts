@@ -44,7 +44,7 @@ export default defineModule({
     relay: async (ctx: Context) => {
       const entries = instance.reports.take(ctx.runId) ?? [];
       const report = { status: relaySummary(entries), pipelines: entries };
-      return ok({ ...ctx, result: mergeRelayReport(ctx.result, report, (message) => logWarn(instance.logger, message), "events/direct") });
+      return ok({ ...ctx, result: mergeRelayReport(ctx.result, report, "events/direct") });
     },
   }),
 
@@ -53,7 +53,7 @@ export default defineModule({
     relay: {
       summary: "Report how the events this run raised were delivered (adds `_events` to the result)",
       reads: [],
-      writes: ["result._events?"],
+      writes: ["result._events"],
       extendsOutput: RELAY_SCHEMA,
     },
   }),

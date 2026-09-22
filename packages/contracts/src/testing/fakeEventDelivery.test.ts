@@ -15,7 +15,7 @@ function fakeDeliveryFixture(): EventDeliveryFixture {
         delivered.push({ ...envelope });
         return ok({ ...ctx, result: envelope });
       }),
-      relay: async (ctx: Context) => ok({ ...ctx, result: mergeRelayReport(ctx.result, { status: "done", pipelines: [] }, () => {}, "fake/delivery") }),
+      relay: async (ctx: Context) => ok({ ...ctx, result: mergeRelayReport(ctx.result, { status: "done", pipelines: [] }, "fake/delivery") }),
     },
     describe: {
       emit: (spec: string) => ({ summary: `Emit event "${spec}" to every subscribed handler pipeline`, reads: [], writes: [], errors: { 500: "a subscribed handler failed" } }),

@@ -75,6 +75,6 @@ relayed or once `lockTtlSeconds` pass with no relay.
 | `events.listDead` | Dead-letter events, most recently failed first | – | `result` | ?limit: integer | { items: object[], … } | – | beside | yes |
 | `events.retryDead:<arg>` | Requeue every dead-letter event | – | `result` | – | { retried: number, … } | – | beside | yes |
 | `events.purgeDone` | Delete delivered events older than retentionDays | – | `result` | – | { removed: number, … } | – | beside | yes |
-| `events.relay` | Deliver the events this run queued, before the response; whatever is left over stays for the worker (adds `_events` to the result) | – | `result._events?` | – | { _events: object, … } | – | portable | no |
+| `events.relay` | Deliver the events this run queued, before the response; whatever is left over stays for the worker (adds `_events` to the result) | – | `result._events` | – | { _events: object, … } | – | portable | no |
 
 <!-- kestrel-docs:end -->

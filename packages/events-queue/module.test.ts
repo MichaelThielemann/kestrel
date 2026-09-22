@@ -160,15 +160,13 @@ describe("events/queue module steps via runPipeline", () => {
     expect(() => run(["events.retryDead:some"], {}, undefined)).toThrow('"all" or "one"');
   });
 
-  it("leaves a non-object result untouched and logs one warn instead of adding _events", async () => {
-    const warnings: string[] = [];
-    const logger: Deps["logger"] = { step: () => {}, info: () => {}, error: () => {}, warn: (message) => warnings.push(message) };
-    const { instance } = await setup({}, logger);
+  it("is a wiring error when the result is neither an object nor undefined", async () => {
+    const { instance } = await setup();
     const pipeline = definePipeline({ name: "arrayResult", steps: ["seed.array", "events.relay"] });
     const result = await runPipeline(pipeline, {}, { modules: [{ module, instance }], steps: { "seed.array": async (ctx: Context) => ok({ ...ctx, result: [1, 2, 3] }) } });
-    expect(result.status).toBe(200);
-    expect(result.result).toEqual([1, 2, 3]);
-    expect(warnings).toEqual(["events/queue: cannot add _events to a non-object result"]);
+    expect(result.status).toBe(500);
+    expect(result.code).toBe("INTERNAL");
+    expect(result.error).toContain("events/queue: cannot add _events to a non-object result");
   });
 });
 

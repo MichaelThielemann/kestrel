@@ -63,11 +63,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Merges `_events` into a result: creates an object when `result` is `undefined`, merges into an
- * existing record, and leaves a defined non-object result untouched (logging `warn` instead).
+ * existing record. A defined non-object result is a wiring error, the same way `authz.describeAccess`
+ * treats it.
  */
-export function mergeRelayReport(result: unknown, report: RelayReport, warn: (message: string) => void, moduleName: string): unknown {
+export function mergeRelayReport(result: unknown, report: RelayReport, moduleName: string): unknown {
   if (result === undefined) return { _events: report };
   if (isRecord(result)) return { ...result, _events: report };
-  warn(`${moduleName}: cannot add _events to a non-object result`);
-  return result;
+  throw new Error(`${moduleName}: cannot add _events to a non-object result`);
 }
