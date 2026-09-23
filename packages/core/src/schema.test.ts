@@ -198,29 +198,109 @@ describe("resolveOutputSchema", () => {
     });
   });
 
-  it("reports (without changing) the fold when extendsOutput merges onto an active schema that is not type object", () => {
-    const list = { type: "array", items: { type: "string" } };
-    const extension = { type: "object", properties: { _events: { type: "object" } }, required: ["_events"] };
-    const hits: Array<{ index: number; activeType: string; sourceIndex: number }> = [];
-    const result = resolveOutputSchema([step({ output: list }), step({ extendsOutput: extension })], (index, activeType, sourceIndex) => hits.push({ index, activeType, sourceIndex }));
-    expect(hits).toEqual([{ index: 1, activeType: "array", sourceIndex: 0 }]);
-    expect(result).toEqual({ type: "object", properties: { _events: { type: "object" } }, required: ["_events"] });
+  it("extendsOutput onto a union merges into every branch and keeps oneOf/anyOf", () => {
+    const a = { type: "object", properties: { a: { type: "string" } }, required: ["a"] };
+    const b = { type: "object", properties: { b: { type: "string" } }, required: ["b"] };
+    const extra = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    expect(resolveOutputSchema([step({ output: { oneOf: [a, b] } }), step({ extendsOutput: extra })])).toEqual({
+      oneOf: [
+        { type: "object", properties: { a: { type: "string" }, tag: { type: "string" } }, required: ["a", "tag"] },
+        { type: "object", properties: { b: { type: "string" }, tag: { type: "string" } }, required: ["b", "tag"] },
+      ],
+    });
+    expect(resolveOutputSchema([step({ output: { anyOf: [a, b] } }), step({ extendsOutput: extra })])).toEqual({
+      anyOf: [
+        { type: "object", properties: { a: { type: "string" }, tag: { type: "string" } }, required: ["a", "tag"] },
+        { type: "object", properties: { b: { type: "string" }, tag: { type: "string" } }, required: ["b", "tag"] },
+      ],
+    });
   });
 
-  it("reports the step that set the active type, not just the immediately preceding one", () => {
+  it("extendsItems onto a union merges into the items of list-shaped branches and at the root of the others", () => {
+    const listBranch = { type: "object", properties: { items: { type: "array", items: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } }, total: { type: "integer" } }, required: ["items", "total"] };
+    const singleBranch = { type: "object", properties: { id: { type: "string" } }, required: ["id"] };
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    const result = resolveOutputSchema([step({ output: { oneOf: [listBranch, singleBranch] } }), step({ extendsItems: extension })]);
+    expect(result).toEqual({
+      oneOf: [
+        { type: "object", properties: { items: { type: "array", items: { type: "object", properties: { id: { type: "string" }, tag: { type: "string" } }, required: ["id", "tag"] } }, total: { type: "integer" } }, required: ["items", "total"] },
+        { type: "object", properties: { id: { type: "string" }, tag: { type: "string" } }, required: ["id", "tag"] },
+      ],
+    });
+  });
+});
+
+describe("resolveOutputSchema fold contradictions", () => {
+  it("reports extendsOutput onto a non-object, non-union schema without changing the fold", () => {
     const list = { type: "array", items: { type: "string" } };
     const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
-    const hits: Array<{ index: number; sourceIndex: number }> = [];
-    resolveOutputSchema([step({ output: list }), step({}), step({}), step({ extendsOutput: extension })], (index, activeType, sourceIndex) => hits.push({ index, sourceIndex }));
-    expect(hits).toEqual([{ index: 3, sourceIndex: 0 }]);
+    const hits: Array<{ index: number; keyword: string; reason: string; sourceIndex: number | undefined }> = [];
+    const result = resolveOutputSchema([step({ output: list }), step({ extendsOutput: extension })], (index, keyword, reason, sourceIndex) => hits.push({ index, keyword, reason, sourceIndex }));
+    expect(hits).toEqual([{ index: 1, keyword: "extendsOutput", reason: 'type "array", not "object"', sourceIndex: 0 }]);
+    expect(result).toEqual(list);
   });
 
-  it("does not report the fold when the active schema is already type object, or absent", () => {
+  it("reports the step that set the active schema, not just the immediately preceding one", () => {
+    const list = { type: "array", items: { type: "string" } };
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    const hits: Array<number | undefined> = [];
+    resolveOutputSchema([step({ output: list }), step({}), step({}), step({ extendsOutput: extension })], (_index, _keyword, _reason, sourceIndex) => hits.push(sourceIndex));
+    expect(hits).toEqual([0]);
+  });
+
+  it("reports a type array and an allOf schema as a contradiction, each naming the shape", () => {
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    const hitsA: string[] = [];
+    resolveOutputSchema([step({ output: { type: ["object", "null"] } }), step({ extendsOutput: extension })], (_i, _k, reason) => hitsA.push(reason));
+    expect(hitsA).toEqual(['a type array ("object", "null")']);
+    const hitsB: string[] = [];
+    resolveOutputSchema([step({ output: { allOf: [{ type: "object" }] } }), step({ extendsOutput: extension })], (_i, _k, reason) => hitsB.push(reason));
+    expect(hitsB).toEqual(["an allOf schema"]);
+    const hitsC: string[] = [];
+    resolveOutputSchema([step({ output: {} }), step({ extendsOutput: extension })], (_i, _k, reason) => hitsC.push(reason));
+    expect(hitsC).toEqual(["a schema without a declared type"]);
+  });
+
+  it("reports extendsOutput onto a union with a non-object branch", () => {
+    const union = { oneOf: [{ type: "object", properties: { a: { type: "string" } }, required: ["a"] }, { type: "string" }] };
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    const hits: string[] = [];
+    resolveOutputSchema([step({ output: union }), step({ extendsOutput: extension })], (_i, keyword, reason) => hits.push(`${keyword}: ${reason}`));
+    expect(hits).toEqual(["extendsOutput: a union with a non-object branch"]);
+  });
+
+  it("reports a non-object extension for both extendsOutput and extendsItems", () => {
+    const hitsA: string[] = [];
+    resolveOutputSchema([step({ extendsOutput: { type: "array" } })], (_i, keyword, reason) => hitsA.push(`${keyword}: ${reason}`));
+    expect(hitsA).toEqual(["extendsOutput: the extension is not an object schema"]);
+    const hitsB: string[] = [];
+    resolveOutputSchema([step({ output: { type: "object", properties: {}, required: [] } }), step({ extendsItems: { type: "array" } })], (_i, keyword, reason) => hitsB.push(`${keyword}: ${reason}`));
+    expect(hitsB).toEqual(["extendsItems: the extension is not an object schema"]);
+  });
+
+  it("reports extendsItems onto a union with no list-shaped branch", () => {
+    const union = { oneOf: [{ type: "object", properties: { a: { type: "string" } }, required: ["a"] }, { type: "object", properties: { b: { type: "string" } }, required: ["b"] }] };
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    const hits: string[] = [];
+    resolveOutputSchema([step({ output: union }), step({ extendsItems: extension })], (_i, keyword, reason) => hits.push(`${keyword}: ${reason}`));
+    expect(hits).toEqual(["extendsItems: a union with no list-shaped branch"]);
+  });
+
+  it("reports extendsItems root fallback onto a non-object schema", () => {
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    const hits: string[] = [];
+    resolveOutputSchema([step({ output: { type: "array", items: { type: "string" } } }), step({ extendsItems: extension })], (_i, keyword, reason) => hits.push(`${keyword}: ${reason}`));
+    expect(hits).toEqual(['extendsItems: type "array", not "object"']);
+  });
+
+  it("does not report a contradiction for an object-only union, or extendsItems onto a single non-list object", () => {
     const hits: unknown[] = [];
-    const output = { type: "object", properties: { a: { type: "string" } }, required: ["a"] };
-    const extension = { type: "object", properties: { b: { type: "string" } }, required: ["b"] };
-    resolveOutputSchema([step({ output }), step({ extendsOutput: extension })], (i, t) => hits.push({ i, t }));
-    resolveOutputSchema([step({ extendsOutput: extension })], (i, t) => hits.push({ i, t }));
+    const collect = () => hits.push(1);
+    const a = { type: "object", properties: { a: { type: "string" } }, required: ["a"] };
+    const b = { type: "object", properties: { b: { type: "string" } }, required: ["b"] };
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    resolveOutputSchema([step({ output: { oneOf: [a, b] } }), step({ extendsOutput: extension })], collect);
+    resolveOutputSchema([step({ output: a }), step({ extendsItems: extension })], collect);
     expect(hits).toEqual([]);
   });
 });

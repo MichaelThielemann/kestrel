@@ -139,11 +139,16 @@ Net changes since 5.8.1.
     pipeline the booted manifest does not know fails boot at `attach()`, naming the module and the
     unknown pipeline(s). `events-direct` has no equivalent key: its delivery is inline by nature.
 - `core`: `boot()` fails outright, with a `KestrelBootError` naming the pipeline and the step, for
-  three shapes it previously let through: a step that writes `result` without declaring `output`,
+  shapes it previously let through: a step that writes `result` without declaring `output`,
   `extendsOutput`, `extendsItems` or `binary: true`; an object schema inside one of those that
   declares `properties` without a `required` key (the error also names the JSON path); and a
-  step's `extendsOutput` merging onto an active output schema — from an earlier `output` — whose
-  declared type is not `object` (the error names that earlier step and its type).
+  step's `extendsOutput` or `extendsItems` that cannot fold onto the active output schema.
+  `extendsOutput` now merges into every branch of a `oneOf`/`anyOf` instead of silently collapsing
+  it to the extension alone, and `extendsItems` merges into the list-shaped branches of a union and
+  falls back to a root merge on the others; the error names the step, which of the two keywords it
+  used, the reason (another type, a type array, an `allOf` schema, a union with a non-object or,
+  for `extendsItems`, no list-shaped branch, or an extension that is itself not an object schema)
+  and, where relevant, the earlier step that set the active schema.
 - `media-default`: the step `media.folderItems`, deprecated since 5.4.0 in favour of
   `media.listFolderItems`, is removed; call `media.listFolderItems` instead.
 - `revisions-default`: `revisions.reassignAuthor` no longer reads `reassignTo` from the payload or

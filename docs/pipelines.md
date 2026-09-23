@@ -575,12 +575,15 @@ the step and the JSON path of the offending schema (`"output schema at $.output�
 properties without declaring required"`). `required: []` is a schema's explicit statement that
 none of its properties are guaranteed; it satisfies the check like any other `required` array.
 
-A step's `extendsOutput` merging onto an active output schema — set by an earlier `output` in the
-same pipeline — whose declared `type` is not `object` fails `boot()`, naming the pipeline, the
-step, the earlier step that set the type and that type (`"step "<s>"'s extendsOutput merges onto
-the output of "<earlier>" of type "<t>", not "object""`): the fold would otherwise coerce it to
-`object` silently, discarding the mismatch. Use `extendsItems` for a list's items instead, or
-`output` to replace the result outright.
+`extendsOutput` merges into an active object schema, or into every branch of a `oneOf`/`anyOf` (the
+keyword itself is kept); `extendsItems` merges into `properties.items.items` of a list-shaped
+schema, or at the root of a non-list object schema, and onto a union applies whichever of the two
+to each branch. Anything else — another `type`, a type array, an `allOf` schema, a schema without a
+declared `type`, a union with a non-object branch, a union with no list-shaped branch for
+`extendsItems`, or an extension that is not itself an object schema — fails `boot()`, naming the
+pipeline, the step, which keyword it used, the reason, and the earlier step that set the active
+schema when there was one (`"step "<s>"'s extendsOutput cannot fold onto the active output schema:
+type "<t>", not "object" (set by step "<earlier>")"`).
 
 `@michaelthielemann/kestrel/schema` folds a pipeline's step descriptions, in order, into the
 schema its result ends up matching (`resolveOutputSchema`, from the `schema` subpath) — this is

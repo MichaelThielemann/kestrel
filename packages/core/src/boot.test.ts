@@ -608,7 +608,7 @@ describe("boot", () => {
     );
   });
 
-  it("fails to boot when a step's extendsOutput merges onto an active output schema that is not type object", async () => {
+  it("fails to boot when a step's extendsOutput cannot fold onto the active output schema", async () => {
     const listy = defineModule({
       name: "listy/fake",
       provides: [],
@@ -629,8 +629,150 @@ describe("boot", () => {
     const listThenTag = definePipeline({ name: "listThenTag", steps: ["listy.list", "listy.tag"] });
     const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./listy", config: {} }] };
     await expect(boot({ config, modules: [...modules, listy], pipelines: [...pipelines, listThenTag], logger: silentLogger })).rejects.toThrow(
-      /\[pipelines\/listThenTag\] step "listy\.tag"'s extendsOutput merges onto the output of "listy\.list" of type "array", not "object"/,
+      /\[pipelines\/listThenTag\] step "listy\.tag"'s extendsOutput cannot fold onto the active output schema: type "array", not "object" \(set by step "listy\.list"\)/,
     );
+  });
+
+  it("fails to boot when extendsOutput merges onto a union with a non-object branch", async () => {
+    const mixed = defineModule({
+      name: "mixed/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({
+        pick: async (ctx: Context) => ok({ ...ctx, result: "x" }),
+        tag: async (ctx: Context) => ok(ctx),
+      }),
+      describe: () => ({
+        pick: { summary: "a union result", reads: [], writes: ["result"], output: { oneOf: [{ type: "object", properties: { a: { type: "string" } }, required: ["a"] }, { type: "string" }] } },
+        tag: { summary: "extends every branch with a tag", reads: [], writes: ["result.tag?"], extendsOutput: { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] } },
+      }),
+    });
+    const pickThenTag = definePipeline({ name: "pickThenTag", steps: ["mixed.pick", "mixed.tag"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./mixed", config: {} }] };
+    await expect(boot({ config, modules: [...modules, mixed], pipelines: [...pipelines, pickThenTag], logger: silentLogger })).rejects.toThrow(
+      /\[pipelines\/pickThenTag\] step "mixed\.tag"'s extendsOutput cannot fold onto the active output schema: a union with a non-object branch/,
+    );
+  });
+
+  it("fails to boot when extendsOutput's own extension is not an object schema", async () => {
+    const arrayTag = defineModule({
+      name: "arraytag/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({ tag: async (ctx: Context) => ok({ ...ctx, result: ["a"] }) }),
+      describe: () => ({ tag: { summary: "extends with a non-object extension", reads: [], writes: ["result"], extendsOutput: { type: "array", items: { type: "string" } } } }),
+    });
+    const tagOnly = definePipeline({ name: "tagOnly", steps: ["arraytag.tag"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./arraytag", config: {} }] };
+    await expect(boot({ config, modules: [...modules, arrayTag], pipelines: [...pipelines, tagOnly], logger: silentLogger })).rejects.toThrow(
+      /\[pipelines\/tagOnly\] step "arraytag\.tag"'s extendsOutput cannot fold onto the active output schema: the extension is not an object schema/,
+    );
+  });
+
+  it("boots an extendsOutput that merges into every branch of an object-only union", async () => {
+    const okUnion = defineModule({
+      name: "okunion/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({
+        pick: async (ctx: Context) => ok({ ...ctx, result: { a: "x" } }),
+        tag: async (ctx: Context) => ok(ctx),
+      }),
+      describe: () => ({
+        pick: { summary: "an object-only union result", reads: [], writes: ["result"], output: { oneOf: [{ type: "object", properties: { a: { type: "string" } }, required: ["a"] }, { type: "object", properties: { b: { type: "string" } }, required: ["b"] }] } },
+        tag: { summary: "extends every branch with a tag", reads: [], writes: ["result.tag?"], extendsOutput: { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] } },
+      }),
+    });
+    const pickThenTag = definePipeline({ name: "pickThenTag", steps: ["okunion.pick", "okunion.tag"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./okunion", config: {} }] };
+    kestrel = await boot({ config, modules: [...modules, okUnion], pipelines: [...pipelines, pickThenTag], logger: silentLogger });
+    expect([...kestrel.pipelines.keys()]).toContain("pickThenTag");
+  });
+
+  it("fails to boot when extendsItems merges onto a union with no list-shaped branch", async () => {
+    const noList = defineModule({
+      name: "nolist/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({
+        pick: async (ctx: Context) => ok({ ...ctx, result: { a: "x" } }),
+        tag: async (ctx: Context) => ok(ctx),
+      }),
+      describe: () => ({
+        pick: { summary: "a union of plain objects", reads: [], writes: ["result"], output: { oneOf: [{ type: "object", properties: { a: { type: "string" } }, required: ["a"] }, { type: "object", properties: { b: { type: "string" } }, required: ["b"] }] } },
+        tag: { summary: "extendsItems onto a union with no list branch", reads: [], writes: ["result.tag?"], extendsItems: { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] } },
+      }),
+    });
+    const pickThenTag = definePipeline({ name: "pickThenTag", steps: ["nolist.pick", "nolist.tag"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./nolist", config: {} }] };
+    await expect(boot({ config, modules: [...modules, noList], pipelines: [...pipelines, pickThenTag], logger: silentLogger })).rejects.toThrow(
+      /\[pipelines\/pickThenTag\] step "nolist\.tag"'s extendsItems cannot fold onto the active output schema: a union with no list-shaped branch/,
+    );
+  });
+
+  it("fails to boot when extendsItems' root fallback lands on a non-object schema", async () => {
+    const nonObject = defineModule({
+      name: "nonobject/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({
+        list: async (ctx: Context) => ok({ ...ctx, result: ["a", "b"] }),
+        tag: async (ctx: Context) => ok(ctx),
+      }),
+      describe: () => ({
+        list: { summary: "a plain list result", reads: [], writes: ["result"], output: { type: "array", items: { type: "string" } } },
+        tag: { summary: "extendsItems root fallback onto a non-object", reads: [], writes: ["result.tag?"], extendsItems: { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] } },
+      }),
+    });
+    const listThenTag = definePipeline({ name: "listThenTag2", steps: ["nonobject.list", "nonobject.tag"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./nonobject", config: {} }] };
+    await expect(boot({ config, modules: [...modules, nonObject], pipelines: [...pipelines, listThenTag], logger: silentLogger })).rejects.toThrow(
+      /\[pipelines\/listThenTag2\] step "nonobject\.tag"'s extendsItems cannot fold onto the active output schema: type "array", not "object" \(set by step "nonobject\.list"\)/,
+    );
+  });
+
+  it("boots an extendsItems root fallback onto a single non-list object", async () => {
+    const single = defineModule({
+      name: "single/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({
+        get: async (ctx: Context) => ok({ ...ctx, result: { id: "x" } }),
+        attach: async (ctx: Context) => ok(ctx),
+      }),
+      describe: () => ({
+        get: { summary: "a single item", reads: [], writes: ["result"], output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
+        attach: { summary: "extendsItems root fallback onto a single object", reads: [], writes: ["result.tag?"], extendsItems: { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] } },
+      }),
+    });
+    const getThenAttach = definePipeline({ name: "getThenAttach", steps: ["single.get", "single.attach"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./single", config: {} }] };
+    kestrel = await boot({ config, modules: [...modules, single], pipelines: [...pipelines, getThenAttach], logger: silentLogger });
+    expect([...kestrel.pipelines.keys()]).toContain("getThenAttach");
   });
 
   it("warns once for an optional read whose key no step of any pipeline writes and no trigger provides", async () => {

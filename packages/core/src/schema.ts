@@ -181,14 +181,41 @@ function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
   return merged;
 }
 
-function mergeIntoItems(current: JsonSchema | undefined, extension: JsonSchema): JsonSchema {
-  const properties = boundaryCast<Record<string, JsonSchema> | undefined>(current?.properties, "json");
-  const list = properties?.items;
-  const item = boundaryCast<JsonSchema | undefined>(list?.items, "json");
-  if (current === undefined || item === undefined || typeof item !== "object" || Array.isArray(item)) {
-    return current === undefined ? extension : mergeObjects([current, extension])!;
-  }
-  return { ...current, properties: { ...properties, items: { ...list, items: mergeObjects([item, extension])! } } };
+function isObjectSchema(schema: JsonSchema): boolean {
+  return schema.type === "object";
+}
+
+interface Union {
+  keyword: "oneOf" | "anyOf";
+  branches: JsonSchema[];
+}
+
+function unionOf(schema: JsonSchema): Union | undefined {
+  if (schema.type !== undefined) return undefined;
+  if (Array.isArray(schema.oneOf)) return { keyword: "oneOf", branches: schema.oneOf.filter(isRecord) };
+  if (Array.isArray(schema.anyOf)) return { keyword: "anyOf", branches: schema.anyOf.filter(isRecord) };
+  return undefined;
+}
+
+function typeReason(schema: JsonSchema): string {
+  if (Array.isArray(schema.type)) return `a type array (${schema.type.map((t) => JSON.stringify(t)).join(", ")})`;
+  if (typeof schema.type === "string") return `type "${schema.type}", not "object"`;
+  if (Array.isArray(schema.allOf)) return "an allOf schema";
+  return "a schema without a declared type";
+}
+
+function isListShaped(schema: JsonSchema): boolean {
+  if (!isObjectSchema(schema)) return false;
+  const properties = isRecord(schema.properties) ? schema.properties : undefined;
+  const list = subSchema(properties?.items);
+  return list !== undefined && list.type === "array" && isRecord(list.items);
+}
+
+function mergeIntoListBranch(branch: JsonSchema, extension: JsonSchema): JsonSchema {
+  const properties = isRecord(branch.properties) ? branch.properties : {};
+  const list = subSchema(properties.items)!;
+  const item = subSchema(list.items)!;
+  return { ...branch, properties: { ...properties, items: { ...list, items: mergeObjects([item, extension])! } } };
 }
 
 function walkForMissingRequired(schema: unknown, path: string, hits: string[]): void {
@@ -217,30 +244,65 @@ export function findMissingRequired(schema: JsonSchema, path = ROOT): string[] {
 
 /**
  * Folds a pipeline's step descriptions, in order, into the schema its result ends up matching: `output`
- * replaces the active schema, `extendsOutput` merges into it (or becomes the output if there was none
- * yet), and `extendsItems` merges into a list output's `items[]`. `onFoldContradiction`, when given, is
- * called with the index of a step whose `extendsOutput` merges onto an active schema whose declared
- * `type` is not `object`, that type, and the index of the earlier step that set it — the merge below
- * coerces it to `object` silently, discarding the mismatch.
+ * replaces the active schema; `extendsOutput` merges into it, becomes the output if there was none yet,
+ * or merges into every branch of a `oneOf`/`anyOf`; `extendsItems` merges into a list output's
+ * `items[]` — the list-shaped branches of a union, or the root of a non-list object schema. Every
+ * schema an `extendsOutput`/`extendsItems` merges is itself required to be an object schema.
+ *
+ * `onFoldContradiction`, when given, is called instead of applying a merge that cannot be expressed this
+ * way: the index of the step, which of the two keywords it used, a plain-text reason, and the index of
+ * the earlier step that set the active schema it tried to fold onto (absent when there was none). The
+ * active schema is left unchanged when this fires.
  */
-export function resolveOutputSchema(descriptions: readonly StepDescription[], onFoldContradiction?: (index: number, activeType: string, sourceIndex: number) => void): JsonSchema | undefined {
+export function resolveOutputSchema(
+  descriptions: readonly StepDescription[],
+  onFoldContradiction?: (index: number, keyword: "extendsOutput" | "extendsItems", reason: string, sourceIndex?: number) => void,
+): JsonSchema | undefined {
   let current: JsonSchema | undefined;
   let sourceIndex = -1;
+  const fail = (index: number, keyword: "extendsOutput" | "extendsItems", reason: string): void => {
+    onFoldContradiction?.(index, keyword, reason, sourceIndex === -1 ? undefined : sourceIndex);
+  };
+
   descriptions.forEach((d, index) => {
     if (d.output !== undefined) {
       current = d.output;
       sourceIndex = index;
     } else if (d.extendsOutput !== undefined) {
-      const activeType = current?.type;
-      if (onFoldContradiction && typeof activeType === "string" && activeType !== "object") onFoldContradiction(index, activeType, sourceIndex);
-      if (current === undefined) {
-        current = d.extendsOutput;
+      const extension = d.extendsOutput;
+      if (!isObjectSchema(extension)) {
+        fail(index, "extendsOutput", "the extension is not an object schema");
+      } else if (current === undefined) {
+        current = extension;
         sourceIndex = index;
+      } else if (isObjectSchema(current)) {
+        current = mergeObjects([current, extension]);
       } else {
-        current = mergeObjects([current, d.extendsOutput]);
+        const union = unionOf(current);
+        if (union === undefined) fail(index, "extendsOutput", typeReason(current));
+        else if (!union.branches.every(isObjectSchema)) fail(index, "extendsOutput", "a union with a non-object branch");
+        else current = { ...current, [union.keyword]: union.branches.map((b) => mergeObjects([b, extension])) };
       }
     }
-    if (d.extendsItems !== undefined) current = mergeIntoItems(current, d.extendsItems);
+    if (d.extendsItems !== undefined) {
+      const extension = d.extendsItems;
+      if (!isObjectSchema(extension)) {
+        fail(index, "extendsItems", "the extension is not an object schema");
+      } else if (current === undefined) {
+        current = extension;
+        sourceIndex = index;
+      } else if (isListShaped(current)) {
+        current = mergeIntoListBranch(current, extension);
+      } else if (isObjectSchema(current)) {
+        current = mergeObjects([current, extension]);
+      } else {
+        const union = unionOf(current);
+        if (union === undefined) fail(index, "extendsItems", typeReason(current));
+        else if (!union.branches.every(isObjectSchema)) fail(index, "extendsItems", "a union with a non-object branch");
+        else if (!union.branches.some(isListShaped)) fail(index, "extendsItems", "a union with no list-shaped branch");
+        else current = { ...current, [union.keyword]: union.branches.map((b) => (isListShaped(b) ? mergeIntoListBranch(b, extension) : mergeObjects([b, extension]))) };
+      }
+    }
   });
   return current;
 }

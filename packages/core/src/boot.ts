@@ -171,14 +171,15 @@ function checkUndeclaredRequired(pipelines: ReadonlyMap<string, ResolvedPipeline
   }
 }
 
-function checkOutputFoldContradiction(pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
+function checkOutputFold(pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
   for (const pipeline of pipelines.values()) {
     resolveOutputSchema(
       pipeline.steps.map((s) => s.description),
-      (index, activeType, sourceIndex) => {
+      (index, keyword, reason, sourceIndex) => {
         const step = pipeline.steps[index]!;
-        const earlier = pipeline.steps[sourceIndex]!;
-        throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}"'s extendsOutput merges onto the output of "${earlier.name}" of type "${activeType}", not "object"`);
+        const earlier = sourceIndex === undefined ? undefined : pipeline.steps[sourceIndex];
+        const detail = earlier === undefined ? reason : `${reason} (set by step "${earlier.name}")`;
+        throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}"'s ${keyword} cannot fold onto the active output schema: ${detail}`);
       },
     );
   }
@@ -399,7 +400,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
 
     checkUndeclaredOutput(pipelines);
     checkUndeclaredRequired(pipelines);
-    checkOutputFoldContradiction(pipelines);
+    checkOutputFold(pipelines);
     const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUnwrittenOptionalReads(pipelines, steps, logger)];
 
     const runs = createRunTracker();
