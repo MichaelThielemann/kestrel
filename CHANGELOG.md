@@ -127,6 +127,17 @@ Net changes since 5.8.1.
   - Both relays require `ctx.result` to be an object or `undefined`: a result that is already some
     other value (an array, a string, …) is a wiring error and throws, the same way
     `authz.describeAccess` treats it.
+  - `events-queue` gains a config key, `relayPipelines`: an array of pipeline names, or `"all"`
+    (the default, the behaviour above unchanged for every subscribed pipeline). A row whose
+    pipeline is left out of the list gets no head start (`availableAt = createdAt`, same as a row
+    with no `runId`) and the relay never claims it by id, so it is the worker's from the moment
+    the response goes out; `events.relay`'s `_events` report still names it, with a new fourth
+    status, `"queued"` (`RelayEntry["status"]` in `@michaelthielemann/kestrel-contracts`), so a
+    client can tell delivery is still pending. This is the setting for a pipeline whose delivery
+    work must not run inside the emitting request (rendering image variants on upload, writing a
+    login audit) while another subscriber of the same event keeps its head start. Naming a
+    pipeline the booted manifest does not know fails boot at `attach()`, naming the module and the
+    unknown pipeline(s). `events-direct` has no equivalent key: its delivery is inline by nature.
 - `core`: `boot()` fails outright, with a `KestrelBootError` naming the pipeline and the step, for
   three shapes it previously let through: a step that writes `result` without declaring `output`,
   `extendsOutput`, `extendsItems` or `binary: true`; an object schema inside one of those that

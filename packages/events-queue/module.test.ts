@@ -24,7 +24,7 @@ function jsonCopy(value: unknown): EventData {
 
 async function eventDeliveryFixture(): Promise<EventDeliveryFixture> {
   const db = createFakePersistence();
-  const queue = await createEventsQueue({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000 }, { db, logger: silentLogger });
+  const queue = await createEventsQueue({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000, relayPipelines: "all" }, { db, logger: silentLogger });
   const deliveryEntries = [{ event: "x.happened", pipeline: "onX1" }, { event: "x.happened", pipeline: "onX2" }];
   queue.setDelivery(deliveryEntries, async () => ({ runId: "r", status: 200 }));
   const pipelineCountOf = (name: string) => deliveryEntries.filter((entry) => entry.event === name).length;
@@ -92,7 +92,7 @@ describe("events/queue module shape", () => {
 
 describe("events/queue module steps via runPipeline", () => {
   it("parses an empty config with defaults and rejects unknown keys", () => {
-    expect(configSchema.parse({})).toEqual({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5, 30, 120, 600], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000 });
+    expect(configSchema.parse({})).toEqual({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5, 30, 120, 600], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000, relayPipelines: "all" });
     expect(configSchema.safeParse({ extra: 1 }).success).toBe(false);
   });
 
@@ -376,6 +376,129 @@ describe("events/queue in a booted instance", () => {
     expect(rowsAfterWorker.items).toMatchObject([{ state: "done" }]);
 
     await kestrel.stop();
+  });
+
+  it("relayPipelines delivers the named pipeline in-request and leaves the other queued for the worker", async () => {
+    const db = createFakePersistence();
+    const persistenceCapturing = defineModule({
+      name: "persistence/fake",
+      provides: [PERSISTENCE],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return db;
+      },
+    });
+    let aRuns = 0;
+    let bRuns = 0;
+    const probe = defineModule({
+      name: "probe/test",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({
+        create: async (ctx: Context) => ok({ ...ctx, result: { id: "doc-1" } }),
+        listenA: async (ctx: Context) => {
+          aRuns++;
+          return ok(ctx);
+        },
+        listenB: async (ctx: Context) => {
+          bRuns++;
+          return ok(ctx);
+        },
+      }),
+      describe: () => ({
+        create: { summary: "c", reads: [], writes: ["result"] },
+        listenA: { summary: "a", reads: [], writes: [] },
+        listenB: { summary: "b", reads: [], writes: [] },
+      }),
+    });
+    const kestrel = await boot({
+      config: {
+        modules: [
+          { use: "./persistence.ts", config: {} },
+          { use: "./events.ts", config: {} },
+          { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: 5, relayMs: 1000, relayPipelines: ["onCreatedA"] } },
+          { use: "./probe.ts", config: {} },
+        ],
+        triggers: [
+          { http: "POST /docs", pipeline: "createDoc" },
+          { event: "doc.created", pipeline: "onCreatedA" },
+          { event: "doc.created", pipeline: "onCreatedB" },
+        ],
+        http: null,
+      },
+      modules: [persistenceCapturing, bus, module, probe],
+      pipelines: [
+        definePipeline({ name: "createDoc", steps: ["probe.create", "events.emit:doc.created", "events.relay"] }),
+        definePipeline({ name: "onCreatedA", steps: ["probe.listenA"] }),
+        definePipeline({ name: "onCreatedB", steps: ["probe.listenB"] }),
+      ],
+      logger: silentLogger,
+    });
+    await kestrel.start();
+    const res = await kestrel.run("createDoc", { trigger: { kind: "http", name: "POST /docs" } });
+    expect(res.status).toBe(200);
+    expect(aRuns).toBe(1);
+    expect(bRuns).toBe(0);
+    const body = boundaryCast<{ _events: { status: string; pipelines: unknown[] } }>(res.result, "json");
+    expect(body._events.status).toBe("pending");
+    expect(body._events.pipelines).toContainEqual({ event: "doc.created", pipeline: "onCreatedA", status: "done", attempts: 0, dead: false, error: null });
+    expect(body._events.pipelines).toContainEqual({ event: "doc.created", pipeline: "onCreatedB", status: "queued", attempts: 0, dead: false, error: null });
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(bRuns).toBe(1);
+
+    await kestrel.stop();
+  });
+
+  it("relayPipelines naming an unknown pipeline fails boot with a clear message", async () => {
+    const persistenceFake = defineModule({
+      name: "persistence/fake",
+      provides: [PERSISTENCE],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return createFakePersistence();
+      },
+    });
+    const probe = defineModule({
+      name: "probe/test",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ create: async (ctx: Context) => ok({ ...ctx, result: { id: "doc-1" } }) }),
+      describe: () => ({ create: { summary: "c", reads: [], writes: ["result"] } }),
+    });
+    const bootConfig = {
+      config: {
+        modules: [
+          { use: "./persistence.ts", config: {} },
+          { use: "./events.ts", config: {} },
+          { use: "@michaelthielemann/kestrel-events-queue", config: { relayPipelines: ["notAPipeline"] } },
+          { use: "./probe.ts", config: {} },
+        ],
+        triggers: [{ http: "POST /docs", pipeline: "createDoc" }, { event: "doc.created", pipeline: "onCreated" }],
+        http: null,
+      },
+      modules: [persistenceFake, bus, module, probe],
+      pipelines: [definePipeline({ name: "createDoc", steps: ["probe.create"] }), definePipeline({ name: "onCreated", steps: ["probe.create"] })],
+      logger: silentLogger,
+    };
+    let caught: unknown;
+    try {
+      await boot(bootConfig);
+    } catch (error) {
+      caught = error;
+    }
+    expect(String(caught)).toContain("relayPipelines");
+    expect(String(caught)).toContain("notAPipeline");
   });
 });
 

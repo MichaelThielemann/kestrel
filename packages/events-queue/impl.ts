@@ -37,6 +37,8 @@ export interface Config {
   retentionDays: number;
   /** How long `events.relay` may spend delivering this run's rows before it is the worker's turn. */
   relayMs: number;
+  /** Pipelines whose rows the relay claims and delivers in the request; `"all"` (the default) means every subscribed pipeline. A row of a pipeline left out gets no head start and is reported `queued`. */
+  relayPipelines: string[] | "all";
 }
 
 export interface QueueStatus {
@@ -128,7 +130,12 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
   let running = false;
   let ticking: Promise<number> | undefined;
   let lastTickAt: number | null = null;
-  const pendingRelays = new Map<string, { ids: string[]; at: number }>();
+  const pendingRelays = new Map<string, { ids: string[]; queued: RelayEntry[]; at: number }>();
+
+  function relayEligible(pipeline: string | null): boolean {
+    if (config.relayPipelines === "all") return true;
+    return pipeline !== null && config.relayPipelines.includes(pipeline);
+  }
 
   async function runRow(row: QueueRow): Promise<string | undefined> {
     if (!delivery) return "events/queue: no delivery installed yet";
@@ -250,14 +257,16 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     const entry = pendingRelays.get(runId);
     pendingRelays.delete(runId);
     if (!entry) return { status: "done", pipelines: [] };
+    if (entry.ids.length === 0) return { status: relaySummary(entry.queued), pipelines: entry.queued };
     try {
       const relayStartedAt = now();
       const found = await db.findMany<QueueRow>(QUEUE, { id: { in: entry.ids } });
       if (isErr(found)) {
         logger.error("events/queue: relay could not load its rows", { error: found.error.message });
-        return { status: "pending", pipelines: entry.ids.map(() => ({ event: "", pipeline: "", status: "pending", attempts: 0, dead: false, error: null })) };
+        const pipelines = [...entry.queued, ...entry.ids.map(() => ({ event: "", pipeline: "", status: "pending" as const, attempts: 0, dead: false, error: null }))];
+        return { status: relaySummary(pipelines), pipelines };
       }
-      const pipelines: RelayEntry[] = [];
+      const pipelines: RelayEntry[] = [...entry.queued];
       for (const row of found.value.items) {
         if (now() - relayStartedAt >= config.relayMs) {
           pipelines.push(pendingEntryOf(row));
@@ -281,7 +290,8 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       return { status: relaySummary(pipelines), pipelines };
     } catch (error) {
       logger.error("events/queue: relay could not load its rows", { error: errorText(error) });
-      return { status: "pending", pipelines: entry.ids.map(() => ({ event: "", pipeline: "", status: "pending", attempts: 0, dead: false, error: null })) };
+      const pipelines = [...entry.queued, ...entry.ids.map(() => ({ event: "", pipeline: "", status: "pending" as const, attempts: 0, dead: false, error: null }))];
+      return { status: relaySummary(pipelines), pipelines };
     }
   }
 
@@ -311,19 +321,23 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     async enqueue(name, data) {
       const at = now();
       const runId = typeof data.runId === "string" ? data.runId : null;
-      const availableAt = runId === null ? at : at + config.relayMs;
       const pipelines = delivery?.table.get(name);
       if (delivery && (!pipelines || pipelines.length === 0)) return;
       const targets = pipelines ?? [null];
       const ids: string[] = [];
+      const queued: RelayEntry[] = [];
       for (const pipeline of targets) {
+        const eligible = runId !== null && relayEligible(pipeline);
+        const availableAt = eligible ? at + config.relayMs : at;
         const created = await db.createOne<QueueRow>(QUEUE, { name, payload: { ...data }, pipeline, state: "pending", attempts: 0, createdAt: at, availableAt, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId });
         if (isErr(created)) throw new QueueWriteError(created.error);
-        ids.push(created.value.id);
+        if (eligible) ids.push(created.value.id);
+        else if (runId !== null && pipeline !== null) queued.push({ event: name, pipeline, status: "queued", attempts: 0, dead: false, error: null });
       }
-      if (runId !== null && ids.length > 0) {
-        const entry = pendingRelays.get(runId) ?? { ids: [], at };
+      if (runId !== null && (ids.length > 0 || queued.length > 0)) {
+        const entry = pendingRelays.get(runId) ?? { ids: [], queued: [], at };
         entry.ids.push(...ids);
+        entry.queued.push(...queued);
         pendingRelays.set(runId, entry);
       }
     },

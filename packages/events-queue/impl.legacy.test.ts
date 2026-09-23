@@ -24,7 +24,7 @@ describe("events/queue upgrade from a 5.x queue table", () => {
     ]);
 
     const db = createPersistenceSqlite({ file });
-    const queue = await createEventsQueue({ pollMs: 500, batch: 20, maxAttempts: 3, backoffSeconds: [5], lockTtlSeconds: 60, retentionDays: 7, relayMs: 5000 }, { db, logger: silentLogger });
+    const queue = await createEventsQueue({ pollMs: 500, batch: 20, maxAttempts: 3, backoffSeconds: [5], lockTtlSeconds: 60, retentionDays: 7, relayMs: 5000, relayPipelines: "all" }, { db, logger: silentLogger });
     const delivered: string[] = [];
     queue.setDelivery(
       [

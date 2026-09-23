@@ -32,7 +32,8 @@ Requires exactly one delivery module per instance — this one or
 an event trigger. The worker starts with the event triggers in `start()` and stops on `stop()`;
 without any event trigger nothing consumes the queue.
 Config (all optional): `pollMs` 500, `batch` 20, `maxAttempts` 5, `backoffSeconds`
-`[5, 30, 120, 600]`, `lockTtlSeconds` 300, `retentionDays` 7, `relayMs` 5000.
+`[5, 30, 120, 600]`, `lockTtlSeconds` 300, `retentionDays` 7, `relayMs` 5000, `relayPipelines`
+`"all"`.
 Steps: `events.emit:<name>`, `events.readQueueStatus`, `events.listDead` (`?limit`, max 500;
 each item names its `pipeline` and `runId`), `events.retryDead:all` / `events.retryDead:one`
 (`params.id`, retries one pipeline's copy), `events.purgeDone` (cron), `events.relay`.
@@ -54,6 +55,16 @@ the worker's, and the relay claims nothing. A run that enqueued nothing costs th
 queries — the ids it would claim are tracked in memory, keyed by `runId`, and discarded once
 relayed or once `lockTtlSeconds` pass with no relay.
 
+`relayPipelines` narrows which subscribed pipelines the relay may claim: an array of pipeline
+names, or `"all"` (the default), which keeps the behaviour above for every subscribed pipeline. A
+row of a pipeline left out of the list is written with `availableAt = createdAt` — no head start —
+and the relay never claims it by id, so it is the worker's from the moment the request that raised
+it returns; `_events.pipelines` still names it, with `status: "queued"`. This is how a heavy
+subscriber (rendering image variants on upload, writing a login audit) stays off the request while
+a subscriber that must show up in the response (publishing a page) keeps its head start. Naming a
+pipeline that is not in the booted manifest fails at `attach()`, once every pipeline is resolved,
+with an error naming the module and the unknown pipeline(s).
+
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
 `@michaelthielemann/kestrel-events-queue` – module `events/queue`: provides no contract; requires `persistence@1`, `events@1`; provides the event trigger hook.
@@ -67,6 +78,7 @@ relayed or once `lockTtlSeconds` pass with no relay.
 | `lockTtlSeconds` | integer | no | `300` |
 | `retentionDays` | integer | no | `7` |
 | `relayMs` | integer | no | `5000` |
+| `relayPipelines` | union | no | `"all"` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|

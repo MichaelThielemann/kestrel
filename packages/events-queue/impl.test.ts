@@ -8,7 +8,7 @@ import { err } from "@michaelthielemann/kestrel/result";
 import type { RunResult, Runner } from "@michaelthielemann/kestrel/runner";
 import { createEventsQueue, QUEUE, QueueWriteError, retryTarget, type Config, type QueueRow } from "./impl.ts";
 
-const CONFIG: Config = { pollMs: 5, batch: 2, maxAttempts: 3, backoffSeconds: [10, 100], lockTtlSeconds: 60, retentionDays: 1, relayMs: 5000 };
+const CONFIG: Config = { pollMs: 5, batch: 2, maxAttempts: 3, backoffSeconds: [10, 100], lockTtlSeconds: 60, retentionDays: 1, relayMs: 5000, relayPipelines: "all" };
 
 async function make(overrides: Partial<Config> = {}) {
   const db = createFakePersistence();
@@ -544,6 +544,57 @@ describe("events/queue relay: a relay that never runs (process death after commi
     clock.t += 1000;
     expect(await queueB.tick()).toBe(1);
     expect(delivered).toBe(1);
+  });
+});
+
+describe("events/queue relay: relayPipelines narrows the head start", () => {
+  it("gives a head start only to a row whose pipeline is named; the other is available at once", async () => {
+    const { queue, rows, clock } = await make({ relayMs: 1000, relayPipelines: ["p1"] });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }, { event: "x", pipeline: "p2" }], async () => OK);
+    await queue.enqueue("x", { runId: "run-1" });
+    const stored = await rows();
+    expect(stored.find((r) => r.pipeline === "p1")).toMatchObject({ availableAt: clock.t + 1000 });
+    expect(stored.find((r) => r.pipeline === "p2")).toMatchObject({ availableAt: clock.t });
+  });
+
+  it("relays the named pipeline and reports the other queued, without claiming it", async () => {
+    const { queue, rows } = await make({ relayMs: 1000, relayPipelines: ["p1"] });
+    const order: string[] = [];
+    queue.setDelivery([{ event: "x", pipeline: "p1" }, { event: "x", pipeline: "p2" }], async (pipeline) => {
+      order.push(pipeline);
+      return OK;
+    });
+    await queue.enqueue("x", { runId: "run-1" });
+
+    const report = await queue.relay("run-1");
+    expect(order).toEqual(["p1"]);
+    expect(report.status).toBe("pending");
+    expect(report.pipelines).toContainEqual({ event: "x", pipeline: "p1", status: "done", attempts: 0, dead: false, error: null });
+    expect(report.pipelines).toContainEqual({ event: "x", pipeline: "p2", status: "queued", attempts: 0, dead: false, error: null });
+    expect((await rows()).find((r) => r.pipeline === "p2")).toMatchObject({ state: "pending" });
+
+    expect(await queue.tick()).toBe(1);
+    expect(order).toEqual(["p1", "p2"]);
+    expect((await rows()).every((r) => r.state === "done")).toBe(true);
+  });
+
+  it("an empty relayPipelines list relays nothing and reports every row queued", async () => {
+    const { queue, rows } = await make({ relayMs: 1000, relayPipelines: [] });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await queue.enqueue("x", { runId: "run-1" });
+    const report = await queue.relay("run-1");
+    expect(report).toEqual({ status: "pending", pipelines: [{ event: "x", pipeline: "p1", status: "queued", attempts: 0, dead: false, error: null }] });
+    expect((await rows())[0]).toMatchObject({ state: "pending" });
+  });
+
+  it("the default \"all\" still relays every subscribed pipeline", async () => {
+    const { queue, rows } = await make({ relayMs: 1000 });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }, { event: "x", pipeline: "p2" }], async () => OK);
+    await queue.enqueue("x", { runId: "run-1" });
+    const report = await queue.relay("run-1");
+    expect(report.status).toBe("done");
+    expect(report.pipelines.map((p) => p.pipeline).sort()).toEqual(["p1", "p2"]);
+    expect((await rows()).every((r) => r.state === "done")).toBe(true);
   });
 });
 

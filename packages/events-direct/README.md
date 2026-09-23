@@ -25,6 +25,10 @@ because nothing here retries). A run whose emits had no subscriber, or whose rel
 reports `{ status: "done", pipelines: [] }`. Recorded outcomes older than 60 seconds are dropped on
 the next emit with one `warn` naming the count, so the map cannot leak past a stuck relay.
 
+This module has no `relayPipelines` config and needs none: delivery is inline by nature, every
+subscribed pipeline has already run by the time `events.relay` reports on it, so there is nothing
+to keep in the request versus hand to a worker.
+
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
 `@michaelthielemann/kestrel-events-direct` – module `events/direct`: provides no contract; requires `events@1`; provides the event trigger hook.

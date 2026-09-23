@@ -4,7 +4,7 @@ import { defineStepSet } from "./stepSet.ts";
 /** Every event delivery module registers these steps; the bus module `events/inmemory` registers none. */
 export const EVENT_DELIVERY_STEPS = defineStepSet({ id: "events.delivery", prefix: "events", steps: ["events.emit", "events.relay"] });
 
-const RELAY_STATUS: JsonSchema = { type: "string", enum: ["done", "error", "pending"] };
+const RELAY_STATUS: JsonSchema = { type: "string", enum: ["done", "error", "pending", "queued"] };
 
 /** The `_events` member `events.relay` adds to a result: the outcome of every pipeline the emitting run raised. */
 export const RELAY_SCHEMA: JsonSchema = {
@@ -39,7 +39,8 @@ export const RELAY_SCHEMA: JsonSchema = {
 export interface RelayEntry {
   event: string;
   pipeline: string;
-  status: "done" | "error" | "pending";
+  /** `queued` names a pipeline the relay never attempted, left to the worker from the start. */
+  status: "done" | "error" | "pending" | "queued";
   attempts: number;
   dead: boolean;
   error: string | null;
@@ -50,10 +51,10 @@ export interface RelayReport {
   pipelines: RelayEntry[];
 }
 
-/** Folds per-pipeline statuses into the summary: `error` beats `pending` beats `done`. */
+/** Folds per-pipeline statuses into the summary: `error` beats `pending`/`queued` beats `done`. */
 export function relaySummary(pipelines: readonly RelayEntry[]): RelayReport["status"] {
   if (pipelines.some((p) => p.status === "error")) return "error";
-  if (pipelines.some((p) => p.status === "pending")) return "pending";
+  if (pipelines.some((p) => p.status === "pending" || p.status === "queued")) return "pending";
   return "done";
 }
 

@@ -730,13 +730,14 @@ Both delivery modules also register `events.relay`, placed as its own entry imme
 pipeline's last `events.emit:` — after the `COMMIT` when that emit sits inside an atomic group,
 since the step is not `atomicSafe` and boot rejects it inside one. It adds `_events: { status:
 "done" | "error" | "pending", pipelines: [{ event, pipeline, status, attempts, dead, error }] }` to
-the result, one entry per pipeline the run's own emits raised; a run whose emits had no subscriber
-reports `{ status: "done", pipelines: [] }`. The summary status is `"error"` if any entry is
-`"error"`, else `"pending"` if any entry is `"pending"`, else `"done"`. `events.relay` always
-answers `ok`: a failed delivery is reported in `_events`, never turned into a failure of the run
-that raised it. When `ctx.result` is `undefined` the relay creates an object for it; a defined
-non-object result (an array, for example) is left untouched, with one `warn` logged, since there is
-nothing to merge into.
+the result, one entry per pipeline the run's own emits raised (an entry's own `status` also takes
+`"queued"` with `events-queue`, see below); a run whose emits had no subscriber reports `{ status:
+"done", pipelines: [] }`. The summary status is `"error"` if any entry is `"error"`, else
+`"pending"` if any entry is `"pending"` or `"queued"`, else `"done"`. `events.relay` always answers
+`ok`: a failed delivery is reported in `_events`, never turned into a failure of the run that raised
+it. When `ctx.result` is `undefined` the relay creates an object for it; a defined non-object result
+(an array, for example) is left untouched, with one `warn` logged, since there is nothing to merge
+into.
 
 With `events-direct`, the subscribed pipelines have already run inline, during `events.emit`; the
 relay only reports what the wrapper saw (`status`/`attempts`/`dead` are always `1`/`true` on an
@@ -749,6 +750,18 @@ which takes it once its row's `availableAt` (`createdAt + relayMs` for a row bel
 comes due — the head start that keeps a live worker from racing the relay for the same row.
 `relayMs: 0` disables the relay entirely: every row is immediately the worker's. A run that
 enqueued nothing costs the relay no persistence query.
+
+`events-queue`'s config key `relayPipelines` narrows which subscribed pipelines the relay is
+allowed to claim: an array of pipeline names, or `"all"` (the default, the behaviour described
+above for every subscribed pipeline). A row of a pipeline left out of the list is written with
+`availableAt = createdAt` instead of getting the head start, and the relay never claims it by id —
+it is the worker's from the moment the response goes out, immediately available rather than waiting
+`relayMs`. `_events.pipelines` still names it, with `status: "queued"`, so a client can see that
+delivery is still pending without the relay having attempted it. This is the setting for a
+subscriber whose work is too heavy for the request (rendering image variants on upload, writing a
+login audit) while another subscriber of the same event still gets its head start (publishing the
+page). Naming a pipeline unknown to the booted manifest fails boot at `attach()`, once every
+pipeline is resolved, naming the module and the unknown pipeline(s).
 
 A relayed delivery is an ordinary run: it carries `parentRunId`, so it appears in the logs and in
 insights' recent failures linked to the request that raised it, and a delivery pipeline that hangs

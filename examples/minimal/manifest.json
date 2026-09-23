@@ -7957,7 +7957,8 @@
                   "enum": [
                     "done",
                     "error",
-                    "pending"
+                    "pending",
+                    "queued"
                   ]
                 },
                 "pipelines": {
@@ -7976,7 +7977,8 @@
                         "enum": [
                           "done",
                           "error",
-                          "pending"
+                          "pending",
+                          "queued"
                         ]
                       },
                       "attempts": {
@@ -10545,7 +10547,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -10564,7 +10567,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -10761,7 +10765,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -10780,7 +10785,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -10920,7 +10926,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -10939,7 +10946,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -11109,7 +11117,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -11128,7 +11137,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -11477,7 +11487,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -11496,7 +11507,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -11782,7 +11794,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -11801,7 +11814,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -11975,7 +11989,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -11994,7 +12009,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -15336,7 +15352,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -15355,7 +15372,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -15478,7 +15496,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -15497,7 +15516,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -18924,7 +18944,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -18943,7 +18964,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -20467,7 +20489,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -20486,7 +20509,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -20908,7 +20932,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -20927,7 +20952,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -21120,7 +21146,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -21139,7 +21166,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {
@@ -21591,7 +21619,8 @@
                       "enum": [
                         "done",
                         "error",
-                        "pending"
+                        "pending",
+                        "queued"
                       ]
                     },
                     "pipelines": {
@@ -21610,7 +21639,8 @@
                             "enum": [
                               "done",
                               "error",
-                              "pending"
+                              "pending",
+                              "queued"
                             ]
                           },
                           "attempts": {

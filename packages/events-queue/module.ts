@@ -21,6 +21,7 @@ export const configSchema = z
     lockTtlSeconds: z.number().int().positive().default(300),
     retentionDays: z.number().int().positive().default(7),
     relayMs: z.number().int().nonnegative().default(5000),
+    relayPipelines: z.union([z.literal("all"), z.array(z.string())]).default("all"),
   })
   .strict();
 
@@ -51,7 +52,7 @@ const COUNT = (key: string): JsonSchema => ({ type: "object", properties: { [key
 const DEFAULT_DEAD_LIMIT = 50;
 const MAX_DEAD_LIMIT = 500;
 
-type Instance = EventsQueue & { offs: Unsubscribe[]; logger: Logger };
+type Instance = EventsQueue & { offs: Unsubscribe[]; logger: Logger; relayPipelines: string[] | "all" };
 
 export default defineModule({
   name: "events/queue",
@@ -67,7 +68,7 @@ export default defineModule({
         await queue.enqueue(event, withEventIdentity(event, data));
       }),
     );
-    return { ...queue, offs, logger: deps.logger };
+    return { ...queue, offs, logger: deps.logger, relayPipelines: config.relayPipelines };
   },
 
   triggers: {
@@ -76,6 +77,13 @@ export default defineModule({
       instance.startWorker();
       return () => {};
     },
+  },
+
+  attach: (instance, kestrel) => {
+    if (instance.relayPipelines === "all") return;
+    const known = new Set(kestrel.describe().pipelines.map((p) => p.name));
+    const unknown = instance.relayPipelines.filter((name) => !known.has(name));
+    if (unknown.length > 0) throw new Error(`events/queue: relayPipelines names unknown pipeline(s): ${unknown.join(", ")}`);
   },
 
   teardown: async (instance) => {
