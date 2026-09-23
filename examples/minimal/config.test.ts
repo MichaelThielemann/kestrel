@@ -113,21 +113,19 @@ describe("examples/minimal revisions wiring", () => {
   });
 
   it("rejects reassignRevisionAuthor with the verify step moved after the reassign step", async () => {
-    const config = await loadConfig(join(root, "kestrel.config.ts"));
-    const modules = await loadModules(root, config);
-    const pipelines = await loadPipelines(root, "pipelines");
-    const swapped = pipelines.map((p) => {
-      if (p.name !== "reassignRevisionAuthor") return p;
-      const verify = p.steps.indexOf("authn.verifyUser:result.reassignTo");
-      const reassign = p.steps.indexOf("revisions.reassignAuthor");
-      const steps = [...p.steps];
-      [steps[verify], steps[reassign]] = [steps[reassign]!, steps[verify]!];
-      return { ...p, steps };
-    });
-    await expect(boot({ config: { ...config, http: null }, modules, pipelines: swapped, root })).rejects.toThrow(
+    const swapVerifyAfterReassign = (pipelines: PipelineDefinition[]) =>
+      pipelines.map((p) => {
+        if (p.name !== "reassignRevisionAuthor") return p;
+        const verify = p.steps.indexOf("authn.verifyUser:result.reassignTo");
+        const reassign = p.steps.indexOf("revisions.reassignAuthor");
+        const steps = [...p.steps];
+        [steps[verify], steps[reassign]] = [steps[reassign]!, steps[verify]!];
+        return { ...p, steps };
+      });
+    await expect(bootIsolated(swapVerifyAfterReassign)).rejects.toThrow(
       /\[pipelines\/reassignRevisionAuthor\] step "revisions\.reassignAuthor" reads "verifiedUser" but no earlier step writes it \(earlier writes: none\)/,
     );
-    await expect(boot({ config: { ...config, http: null }, modules, pipelines: swapped, root })).rejects.toThrow(KestrelBootError);
+    await expect(bootIsolated(swapVerifyAfterReassign)).rejects.toThrow(KestrelBootError);
   });
 
   it("boots when the verified target is written both before and after the reassign step", async () => {
