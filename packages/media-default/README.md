@@ -72,7 +72,7 @@ unavailable):
 | `media.remove` | `VALIDATION` (missing id) |
 | `media.createFolder` | `VALIDATION` |
 | `media.renameFolder` | `VALIDATION`, `NOT_FOUND`, `CONFLICT` (target exists or is inside the source) |
-| `media.folderItems` | `VALIDATION`, `NOT_FOUND`, `CONFLICT` (folder not empty and no `recursive`) |
+| `media.listFolderItems` | `VALIDATION`, `NOT_FOUND`, `CONFLICT` (folder not empty and no `recursive`) |
 | `media.removeFolder` | `VALIDATION`, `NOT_FOUND` |
 | `media.listFolders`, `media.reconcile`, `media.reconcileDelete`, `media.export:<dir>` | – |
 
@@ -127,7 +127,6 @@ Not included: image resizing, tags, linking media to content documents.
 | `media.createFolder` | Create a folder (idempotent: an existing folder is returned unchanged) | – | `result` | { path: string } | { folder: string, count: number, … } | 400 missing or invalid path | – | no |
 | `media.renameFolder` | Rename or move a folder, moving its blobs | `params.path` | `result` | { path: string } | { folder: string, moved: number, … } | 400 missing or invalid path; 404 folder not found; 409 target folder already exists | – | no |
 | `media.listFolderItems` | Item ids in a folder, for use with references.guardAll:media before removeFolder | `params.path` | `result` | ?recursive: boolean | { path: string, ids: string[], … } | 400 missing or invalid path; 404 folder not found; 409 folder not empty (without `recursive`) | – | no |
-| `media.folderItems` | Deprecated, use media.listFolderItems: Item ids in a folder, for use with references.guardAll:media before removeFolder | `params.path` | `result` | ?recursive: boolean | { path: string, ids: string[], … } | 400 missing or invalid path; 404 folder not found; 409 folder not empty (without `recursive`) | – | no |
 | `media.removeFolder` | Delete a folder and everything in it | `params.path` | `result` | – | { ok: boolean, removed: number, … } | 400 invalid path; 404 folder not found; 409 folder not empty or still referenced | – | no |
 | `media.download` | The file itself | `params.id` | `result` | – | – | 404 not found | – | no |
 | `media.remove` | Delete file and metadata | `params.id` | `result` | – | { ok: boolean, … } | 400 missing id | – | no |

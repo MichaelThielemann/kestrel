@@ -21,7 +21,7 @@ collision), `images.listSizes`, `images.generate` (id from params/payload/event;
 without an id, `NOT_FOUND` for an unknown one), `images.sync` (`CONFLICT` while a fresh job runs),
 `images.resume` (cron), `images.retryFailed` (`NOT_FOUND` for an unknown id), `images.prune`
 (`VALIDATION` for a name that is still declared or has no variants), `images.readStatus`,
-`images.remove` (`VALIDATION` without an id), `images.removeMany` (after `media.folderItems`, reads
+`images.remove` (`VALIDATION` without an id), `images.removeMany` (after `media.listFolderItems`, reads
 `result.ids`), `images.attach` (adds `variants[]` to `result`), `images.serve` (binary;
 `VALIDATION` without id/file, `NOT_FOUND` otherwise), `images.export:<dir>` (nests its counts under
 their own key in `result`, so running it after `media.export` in one pipeline keeps that step's counts).
@@ -104,7 +104,7 @@ cursor.
 | `images.prune` | Delete the variants of sizes that are no longer declared | – | `result` | { sizes: string[] } | { sizes: number, variants: number, … } | 400 missing sizes, or a name is still declared or has no variants | – | no |
 | `images.readStatus` | Sizes with usage/variant counts, current job, the variants that gave up with their last error, and sizes whose variants are left over from a size the code no longer declares | – | `result` | – | { sizes: object[], job: object \| null, orphaned: object, registrySeen: boolean, failed: object, … } | – | – | no |
 | `images.remove` | Delete one media item's variants (blob + rows) | `params.id` | – | – | – | 400 missing id | – | no |
-| `images.removeMany` | Delete variants for every id in result.ids (from media.folderItems) | `result.ids` | – | – | – | – | – | no |
+| `images.removeMany` | Delete variants for every id in result.ids (from media.listFolderItems) | `result.ids` | – | – | – | – | – | no |
 | `images.attach` | Add variants[] to a media item or list (result.id or result.items) | `result` | `result.variants?` | – | { variants: object[], … } | – | – | no |
 | `images.serve` | Binary variant, or the original with x-kestrel-variant: pending while it isn't ready yet | `params.id`, `params.file` | `result` | – | – | 400 missing id or file; 404 media item or size not found, or the variant gave up after maxAttempts | – | no |
 | `images.export:<arg>` | Copy every done variant to <arg>/<folder>/<filename>.<size>.<ext> | – | `result.variants` | – | { variants: object, … } | – | – | no |

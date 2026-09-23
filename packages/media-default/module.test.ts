@@ -187,8 +187,8 @@ describe("media/default folder steps", () => {
     expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "x/y"));
     expect(expectErr(await steps.renameFolder(fakeCtx([], { path: "z" }, { path: "nope" })), "NOT_FOUND").status).toBe(404);
     expect(expectErr(await steps.removeFolder(fakeCtx([], {}, { path: "nope" })), "NOT_FOUND").status).toBe(404);
-    expect(expectErr(await steps.folderItems(fakeCtx([], {}, { path: "x" })), "CONFLICT").status).toBe(409);
-    expect(expectOk(await steps.folderItems(fakeCtx([], { recursive: true }, { path: "x" }))).result).toMatchObject({ path: "x" });
+    expect(expectErr(await steps.listFolderItems(fakeCtx([], {}, { path: "x" })), "CONFLICT").status).toBe(409);
+    expect(expectOk(await steps.listFolderItems(fakeCtx([], { recursive: true }, { path: "x" }))).result).toMatchObject({ path: "x" });
   });
 
   it("an invalid path is VALIDATION and a missing payload path too", async () => {
@@ -424,14 +424,6 @@ describe("media/default steps via runPipeline", () => {
     const { media } = await makeInstance();
     await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "x/y");
     const res = await runPipeline(pipeline("media.listFolderItems"), { params: { path: "x" }, query: { recursive: "true" } }, { modules: [{ module, instance: media }] });
-    expect(res.status).toBe(200);
-    expect(boundaryCast<{ ids: string[] }>(res.result, "host").ids).toHaveLength(1);
-  });
-
-  it("folderItems: deprecated alias behaves exactly like listFolderItems", async () => {
-    const { media } = await makeInstance();
-    await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "x/y");
-    const res = await runPipeline(pipeline("media.folderItems"), { params: { path: "x" }, query: { recursive: "true" } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
     expect(boundaryCast<{ ids: string[] }>(res.result, "host").ids).toHaveLength(1);
   });
