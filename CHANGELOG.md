@@ -126,7 +126,7 @@ Net changes since 5.8.1.
     `events.listDead` items gain a required `runId` field (`""` for a row that names none).
   - Both relays require `ctx.result` to be an object or `undefined`: a result that is already some
     other value (an array, a string, …) is a wiring error and throws, the same way
-    `authz.describeAccess` treats it.
+    `authz.listRoles` treats it.
   - `events-queue` gains a config key, `relayPipelines`: an array of pipeline names, or `"all"`
     (the default, the behaviour above unchanged for every subscribed pipeline). A row whose
     pipeline is left out of the list gets no head start (`availableAt = createdAt`, same as a row
@@ -207,15 +207,16 @@ Net changes since 5.8.1.
   subpath-only), failing with the step name and the JSON path on a mismatch. A step whose write is
   declared optional (`result?`) and left `ctx.result` unchanged is skipped. `validateOutput`
   defaults to off, so production pays nothing for it unless a deployment opts in.
-- `authz-roles`: two new steps. `authz.describeAccess`, meant to run after `authn.loadIdentity`,
-  writes `result.permissions` — the caller's roles' patterns expanded against every permission a
-  booted pipeline requires via an `authz.require:<perm>` argument — so a client can learn its
-  concrete permissions without a copy of the pattern matcher. `authz.listRoles` writes
+- `authz-roles`: two new steps. `authz.describePipelineAccess` writes `result.pipelineAccess`, one
+  entry per booted pipeline: `granted` when the caller passes every `authz.require:<perm>` step of
+  that pipeline, `denied` when it fails one, `unknown` when the pipeline has none. The decision is
+  the one `authz.require` makes, including the `anonymous` grants when the context has no identity,
+  so a client can hide what it may not run without a copy of the role table; the answer lists every
+  booted pipeline, so the step belongs behind `authn.requireUser`. `authz.listRoles` writes
   `result.roles`, the configured role names in config order; it performs no check of its own and is
   meant to sit behind an `authz.require:<perm>` step, so only callers who may already manage the
-  instance (not every authenticated caller) learn the role table. `examples/minimal`'s `me`
-  pipeline runs `describeAccess`; a new `listRoles` pipeline (`GET /roles`, behind
-  `authz.require:users.manage`) runs `listRoles`.
+  instance learn the role table. `examples/minimal` has a `listRoles` pipeline (`GET /roles`, behind
+  `authz.require:users.manage`). `./impl` also exports `requiredPermissions` and `PipelineVerdict`.
 - `core`: a module can declare a synchronous `health(instance)` hook, with no I/O, that reads its
   own state instead of the outcome of a call: `{ ok: true, note? }` or
   `{ ok: false, reason, restartRequired }`. `kestrel.health()` aggregates every declaring module
@@ -274,7 +275,7 @@ Net changes since 5.8.1.
 - `authz-roles`: a caller whose role claim is `constructor`, `toString`, `valueOf`,
   `hasOwnProperty`, `__proto__` or another `Object.prototype` key no longer trips an inherited,
   non-array value and a 500; role lookups go through a `Map`, not a plain object index, in both
-  `authz.can`/`authz.require` and the new `describeAccess`.
+  `authz.can`/`authz.require` and `authz.describePipelineAccess`.
 
 ## 5.8.1 – 2026-09-22
 

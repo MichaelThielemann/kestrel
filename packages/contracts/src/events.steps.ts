@@ -64,7 +64,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Merges `_events` into a result: creates an object when `result` is `undefined`, merges into an
- * existing record. A defined non-object result is a wiring error, the same way `authz.describeAccess`
+ * existing record. A defined non-object result is a wiring error, the same way `authz.listRoles`
  * treats it.
  */
 export function mergeRelayReport(result: unknown, report: RelayReport, moduleName: string): unknown {

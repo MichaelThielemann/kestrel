@@ -1016,7 +1016,7 @@
       },
       "steps": [
         "authz.require",
-        "authz.describeAccess",
+        "authz.describePipelineAccess",
         "authz.listRoles",
         "authz.validateRoles"
       ],
@@ -5370,34 +5370,35 @@
       }
     },
     {
-      "name": "authz.describeAccess",
+      "name": "authz.describePipelineAccess",
       "module": "authz/roles",
       "factory": false,
       "description": {
-        "summary": "The caller's concrete permissions",
+        "summary": "Per booted pipeline, whether the caller passes its authz.require steps",
         "reads": [
-          "identity"
+          "identity?"
         ],
         "writes": [
-          "result.permissions"
+          "result.pipelineAccess"
         ],
         "extendsOutput": {
           "type": "object",
           "properties": {
-            "permissions": {
-              "type": "array",
-              "items": {
-                "type": "string"
+            "pipelineAccess": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "enum": [
+                  "granted",
+                  "denied",
+                  "unknown"
+                ]
               }
             }
           },
           "required": [
-            "permissions"
+            "pipelineAccess"
           ]
-        },
-        "security": "required",
-        "errors": {
-          "401": "not authenticated"
         }
       }
     },
@@ -15606,38 +15607,6 @@
                 "claims"
               ]
             },
-            "errors": {
-              "401": "not authenticated"
-            }
-          }
-        },
-        {
-          "spec": "authz.describeAccess",
-          "name": "authz.describeAccess",
-          "module": "authz/roles",
-          "description": {
-            "summary": "The caller's concrete permissions",
-            "reads": [
-              "identity"
-            ],
-            "writes": [
-              "result.permissions"
-            ],
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "permissions": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              },
-              "required": [
-                "permissions"
-              ]
-            },
-            "security": "required",
             "errors": {
               "401": "not authenticated"
             }

@@ -160,7 +160,7 @@ never relies on that.
 |---|---|---|---|
 | POST | `/login` | `{ username, password }` | `{ token, identity: { id, claims: { username, roles } } }`; 401 on wrong credentials; 429 after 5 failed attempts/minute per IP |
 | POST | `/logout` | – | `{ ok: true }` |
-| GET | `/me` | – | `{ id, claims: { username, roles }, permissions }`; `permissions` are the caller's concrete, granted permissions from the server, so a client needs no copy of the pattern matcher |
+| GET | `/me` | – | `{ id, claims: { username, roles } }` |
 | POST | `/me/password` | `{ currentPassword, newPassword }` | `{ ok: true }`; ends every other session |
 
 ## Users (permission `users.manage`, i.e. admin)

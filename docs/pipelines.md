@@ -161,17 +161,16 @@ steps: ["authn.identifyUser", "authz.require:pages.read", "content.list:pages?st
 
 ### What a Client Can Rely On
 
-A client never gets the pattern matcher. `authz.describeAccess`, placed after `authn.loadIdentity`
-in a pipeline, writes `result.permissions` — the caller's roles' patterns expanded into the
-concrete permissions any booted pipeline actually requires (`authz.require:<perm>` arguments), so a
-permission nothing checks never appears. Rendering a role-gated control means checking
-`permissions.includes(...)`, not hardcoding role names or expanding patterns client-side.
+A client never gets the pattern matcher. `authz.describePipelineAccess`, behind
+`authn.requireUser`, answers per booted pipeline whether the caller passes its
+`authz.require:<perm>` steps: `granted`, `denied`, or `unknown` when the pipeline has no such step.
+Rendering a control means checking the pipeline it calls, not hardcoding role names or expanding
+patterns client-side.
 
 The instance's configured role names are a separate, narrower fact: `authz.listRoles` writes
-`result.roles` (config order). Every authenticated caller may learn its own `permissions`, but the
-role table itself is gated like any other admin data — put `authz.listRoles` behind whatever
-permission a deployment already uses for user management (`examples/minimal` uses
-`authz.require:users.manage`), not behind bare `authn.requireUser`.
+`result.roles` (config order). The role table itself is gated like any other admin data — put
+`authz.listRoles` behind whatever permission a deployment already uses for user management
+(`examples/minimal` uses `authz.require:users.manage`), not behind bare `authn.requireUser`.
 
 Whether a route is public is therefore decided by the authz config, not by a second
 pipeline.
