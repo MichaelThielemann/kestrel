@@ -4,7 +4,7 @@ import type { AtomicScope } from "./atomic.ts";
 import { boundaryCast } from "./cast.ts";
 import type { ContextInput } from "./context.ts";
 import { missingMethods, type Contract } from "./defineContract.ts";
-import { checkDataflow, CONTEXT_KEYS, satisfied } from "./dataflow.ts";
+import { checkDataflow } from "./dataflow.ts";
 import { configSchema, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
 import { stepPrefix, type ContractLookup, type Deps, type EventEntry, type InstanceHealth, type Introspection, type ModuleDefinition, type StepDescription } from "./defineModule.ts";
 import { buildManifest, type Manifest } from "./describe.ts";
@@ -13,10 +13,10 @@ import { resolveEntries } from "./resolveEntries.ts";
 import { KestrelBootError } from "./errors.ts";
 import { consoleLogger, logWarn, type Logger } from "./logger.ts";
 import { createObserverHub } from "./observer.ts";
-import { StepRegistry } from "./registry.ts";
+import { PLACEHOLDER_ARG, StepRegistry } from "./registry.ts";
 import { findMissingRequired, resolveOutputSchema } from "./schema.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
-import { stripOptional, writeRoot } from "./writes.ts";
+import { CONTEXT_KEYS, satisfied, stripOptional, writeRoot } from "./writes.ts";
 import { sortModules } from "./sort.ts";
 import { createCronEntry, startCron, type CronEntry } from "./triggers/cron.ts";
 import { createAllowlist } from "./triggers/allowlist.ts";
@@ -65,8 +65,8 @@ export interface UnemittedEventWarning {
 }
 
 /**
- * An optional read (`"key?"`) whose key no step of any booted pipeline writes, optional or not,
- * and no trigger provides — almost always a typo in the key rather than a genuinely absent value.
+ * An optional read (`"key?"`) whose key no registered step writes, optional or not, and no
+ * trigger provides — almost always a typo in the key rather than a genuinely absent value.
  */
 export interface UnwrittenOptionalReadWarning {
   code: "unwritten-optional-read";
@@ -175,26 +175,26 @@ function checkOutputFoldContradiction(pipelines: ReadonlyMap<string, ResolvedPip
   for (const pipeline of pipelines.values()) {
     resolveOutputSchema(
       pipeline.steps.map((s) => s.description),
-      (index, activeType) => {
+      (index, activeType, sourceIndex) => {
         const step = pipeline.steps[index]!;
-        throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}"'s extendsOutput merges onto an active output schema of type "${activeType}", not "object"`);
+        const earlier = pipeline.steps[sourceIndex]!;
+        throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}"'s extendsOutput merges onto the output of "${earlier.name}" of type "${activeType}", not "object"`);
       },
     );
   }
 }
 
-function allWrittenKeys(pipelines: ReadonlyMap<string, ResolvedPipeline>): Set<string> {
+function allDeclaredWrites(steps: StepRegistry): Set<string> {
   const keys = new Set<string>();
-  for (const pipeline of pipelines.values()) {
-    for (const step of pipeline.steps) {
-      for (const write of step.description.writes) keys.add(stripOptional(write));
-    }
+  for (const step of steps.list()) {
+    const description = typeof step.describe === "function" ? step.describe(PLACEHOLDER_ARG) : step.describe;
+    for (const write of description.writes) keys.add(stripOptional(write));
   }
   return keys;
 }
 
-function warnUnwrittenOptionalReads(pipelines: ReadonlyMap<string, ResolvedPipeline>, logger: Logger): UnwrittenOptionalReadWarning[] {
-  const written = allWrittenKeys(pipelines);
+function warnUnwrittenOptionalReads(pipelines: ReadonlyMap<string, ResolvedPipeline>, steps: StepRegistry, logger: Logger): UnwrittenOptionalReadWarning[] {
+  const written = allDeclaredWrites(steps);
   const triggerProvided = new Set<string>(CONTEXT_KEYS);
   const warnings: UnwrittenOptionalReadWarning[] = [];
   for (const pipeline of pipelines.values()) {
@@ -203,7 +203,7 @@ function warnUnwrittenOptionalReads(pipelines: ReadonlyMap<string, ResolvedPipel
         if (!read.endsWith("?")) continue;
         const key = stripOptional(read);
         if (satisfied(key, triggerProvided) || satisfied(key, written)) continue;
-        const message = `step optionally reads "${key}" but no step of any pipeline writes it and no trigger provides it`;
+        const message = `step optionally reads "${key}" but no registered step writes it and no trigger provides it`;
         logWarn(logger, message, { pipeline: pipeline.name, step: step.name, key });
         warnings.push({ code: "unwritten-optional-read", message, pipeline: pipeline.name, step: step.name, key });
       }
@@ -400,7 +400,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     checkUndeclaredOutput(pipelines);
     checkUndeclaredRequired(pipelines);
     checkOutputFoldContradiction(pipelines);
-    const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUnwrittenOptionalReads(pipelines, logger)];
+    const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUnwrittenOptionalReads(pipelines, steps, logger)];
 
     const runs = createRunTracker();
     const hub = createObserverHub(logger);

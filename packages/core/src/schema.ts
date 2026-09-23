@@ -220,16 +220,25 @@ export function findMissingRequired(schema: JsonSchema, path = ROOT): string[] {
  * replaces the active schema, `extendsOutput` merges into it (or becomes the output if there was none
  * yet), and `extendsItems` merges into a list output's `items[]`. `onFoldContradiction`, when given, is
  * called with the index of a step whose `extendsOutput` merges onto an active schema whose declared
- * `type` is not `object` — the merge below coerces it to `object` silently, discarding the mismatch.
+ * `type` is not `object`, that type, and the index of the earlier step that set it — the merge below
+ * coerces it to `object` silently, discarding the mismatch.
  */
-export function resolveOutputSchema(descriptions: readonly StepDescription[], onFoldContradiction?: (index: number, activeType: string) => void): JsonSchema | undefined {
+export function resolveOutputSchema(descriptions: readonly StepDescription[], onFoldContradiction?: (index: number, activeType: string, sourceIndex: number) => void): JsonSchema | undefined {
   let current: JsonSchema | undefined;
+  let sourceIndex = -1;
   descriptions.forEach((d, index) => {
-    if (d.output !== undefined) current = d.output;
-    else if (d.extendsOutput !== undefined) {
+    if (d.output !== undefined) {
+      current = d.output;
+      sourceIndex = index;
+    } else if (d.extendsOutput !== undefined) {
       const activeType = current?.type;
-      if (onFoldContradiction && typeof activeType === "string" && activeType !== "object") onFoldContradiction(index, activeType);
-      current = current === undefined ? d.extendsOutput : mergeObjects([current, d.extendsOutput]);
+      if (onFoldContradiction && typeof activeType === "string" && activeType !== "object") onFoldContradiction(index, activeType, sourceIndex);
+      if (current === undefined) {
+        current = d.extendsOutput;
+        sourceIndex = index;
+      } else {
+        current = mergeObjects([current, d.extendsOutput]);
+      }
     }
     if (d.extendsItems !== undefined) current = mergeIntoItems(current, d.extendsItems);
   });

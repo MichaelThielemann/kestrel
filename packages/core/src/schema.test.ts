@@ -201,10 +201,18 @@ describe("resolveOutputSchema", () => {
   it("reports (without changing) the fold when extendsOutput merges onto an active schema that is not type object", () => {
     const list = { type: "array", items: { type: "string" } };
     const extension = { type: "object", properties: { _events: { type: "object" } }, required: ["_events"] };
-    const hits: Array<{ index: number; activeType: string }> = [];
-    const result = resolveOutputSchema([step({ output: list }), step({ extendsOutput: extension })], (index, activeType) => hits.push({ index, activeType }));
-    expect(hits).toEqual([{ index: 1, activeType: "array" }]);
+    const hits: Array<{ index: number; activeType: string; sourceIndex: number }> = [];
+    const result = resolveOutputSchema([step({ output: list }), step({ extendsOutput: extension })], (index, activeType, sourceIndex) => hits.push({ index, activeType, sourceIndex }));
+    expect(hits).toEqual([{ index: 1, activeType: "array", sourceIndex: 0 }]);
     expect(result).toEqual({ type: "object", properties: { _events: { type: "object" } }, required: ["_events"] });
+  });
+
+  it("reports the step that set the active type, not just the immediately preceding one", () => {
+    const list = { type: "array", items: { type: "string" } };
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    const hits: Array<{ index: number; sourceIndex: number }> = [];
+    resolveOutputSchema([step({ output: list }), step({}), step({}), step({ extendsOutput: extension })], (index, activeType, sourceIndex) => hits.push({ index, sourceIndex }));
+    expect(hits).toEqual([{ index: 3, sourceIndex: 0 }]);
   });
 
   it("does not report the fold when the active schema is already type object, or absent", () => {

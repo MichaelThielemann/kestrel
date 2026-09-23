@@ -1,10 +1,7 @@
 import { KestrelBootError } from "./errors.ts";
 import type { ResolvedPipeline } from "./runner.ts";
 import type { Route } from "./triggers/http.ts";
-import { stripOptional } from "./writes.ts";
-
-/** The context keys every trigger supplies, whatever the pipeline; a step may read them, or a dotted child of them, with no earlier writer. */
-export const CONTEXT_KEYS = ["payload", "headers", "files", "ip", "params"] as const;
+import { CONTEXT_KEYS, overlaps, satisfied, stripOptional } from "./writes.ts";
 
 function routeParams(route: Route): Set<string> {
   const names = new Set<string>();
@@ -18,17 +15,6 @@ function commonParams(routes: readonly Route[]): string[] {
   const [first, ...rest] = routes;
   if (first === undefined) return [];
   return [...routeParams(first)].filter((name) => rest.every((route) => routeParams(route).has(name)));
-}
-
-function overlaps(a: string, b: string): boolean {
-  return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
-}
-
-export function satisfied(read: string, available: ReadonlySet<string>): boolean {
-  for (const written of available) {
-    if (overlaps(read, written)) return true;
-  }
-  return false;
 }
 
 function apply(write: string, sets: readonly Set<string>[]): void {

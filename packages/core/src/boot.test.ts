@@ -629,7 +629,7 @@ describe("boot", () => {
     const listThenTag = definePipeline({ name: "listThenTag", steps: ["listy.list", "listy.tag"] });
     const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./listy", config: {} }] };
     await expect(boot({ config, modules: [...modules, listy], pipelines: [...pipelines, listThenTag], logger: silentLogger })).rejects.toThrow(
-      /\[pipelines\/listThenTag\] step "listy\.tag"'s extendsOutput merges onto an active output schema of type "array", not "object"/,
+      /\[pipelines\/listThenTag\] step "listy\.tag"'s extendsOutput merges onto the output of "listy\.list" of type "array", not "object"/,
     );
   });
 
@@ -651,9 +651,64 @@ describe("boot", () => {
     const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./guesser", config: {} }] };
     kestrel = await boot({ config, modules: [...modules, guesser], pipelines: [...pipelines, guesserCreate], logger });
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]?.message).toMatch(/step optionally reads "verifiedUsr" but no step of any pipeline writes it and no trigger provides it/);
+    expect(warnings[0]?.message).toMatch(/step optionally reads "verifiedUsr" but no registered step writes it and no trigger provides it/);
     expect(warnings[0]?.data).toEqual({ pipeline: "guesserCreate", step: "guesser.create", key: "verifiedUsr" });
     expect(kestrel.warnings).toEqual([{ code: "unwritten-optional-read", message: warnings[0]?.message, pipeline: "guesserCreate", step: "guesser.create", key: "verifiedUsr" }]);
+  });
+
+  it("stays quiet for an optional read whose key a registered step writes, even when that step is not used by any booted pipeline", async () => {
+    const feature = defineModule({
+      name: "feature/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({
+        write: async (ctx: Context) => ok({ ...ctx, result: "sidecar-value" }),
+        read: async (ctx: Context) => ok({ ...ctx, result: typeof ctx.result === "string" ? ctx.result : null }),
+      }),
+      describe: () => ({
+        write: { summary: "writes the sidecar result; no pipeline below uses this step", reads: [], writes: ["result"], output: { type: "string" } },
+        read: { summary: "reads the sidecar result if an earlier feature pipeline set it", reads: ["result?"], writes: ["result"], output: { type: ["string", "null"] } },
+      }),
+    });
+    const featureRead = definePipeline({ name: "featureRead", steps: ["feature.read"] });
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warn: (message: string) => warnings.push(message) };
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./feature", config: {} }] };
+    kestrel = await boot({ config, modules: [...modules, feature], pipelines: [...pipelines, featureRead], logger });
+    expect(warnings).toEqual([]);
+    expect(kestrel.warnings).toEqual([]);
+  });
+
+  it("stays quiet for an optional read of a key the runner always provides (body, query, requestId, runId, trigger)", async () => {
+    const runnerKeys = defineModule({
+      name: "runnerkeys/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({ create: async (ctx: Context) => ok({ ...ctx, result: { id: "x" } }) }),
+      describe: () => ({
+        create: {
+          summary: "reads several runner-provided keys optionally",
+          reads: ["body?", "query?", "requestId?", "runId?", "trigger?"],
+          writes: ["result"],
+          output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        },
+      }),
+    });
+    const runnerKeysCreate = definePipeline({ name: "runnerKeysCreate", steps: ["runnerkeys.create"] });
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warn: (message: string) => warnings.push(message) };
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./runnerkeys", config: {} }] };
+    kestrel = await boot({ config, modules: [...modules, runnerKeys], pipelines: [...pipelines, runnerKeysCreate], logger });
+    expect(warnings).toEqual([]);
+    expect(kestrel.warnings).toEqual([]);
   });
 
   it("stays quiet when a pipeline emits the event, whatever the emit step's query tail", async () => {

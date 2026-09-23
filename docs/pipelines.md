@@ -576,6 +576,13 @@ the step and the JSON path of the offending schema (`"output schema at $.output�
 properties without declaring required"`). `required: []` is a schema's explicit statement that
 none of its properties are guaranteed; it satisfies the check like any other `required` array.
 
+A step's `extendsOutput` merging onto an active output schema — set by an earlier `output` in the
+same pipeline — whose declared `type` is not `object` fails `boot()`, naming the pipeline, the
+step, the earlier step that set the type and that type (`"step "<s>"'s extendsOutput merges onto
+the output of "<earlier>" of type "<t>", not "object""`): the fold would otherwise coerce it to
+`object` silently, discarding the mismatch. Use `extendsItems` for a list's items instead, or
+`output` to replace the result outright.
+
 `@michaelthielemann/kestrel/schema` folds a pipeline's step descriptions, in order, into the
 schema its result ends up matching (`resolveOutputSchema`, from the `schema` subpath) — this is
 what `kestrel-openapi` uses for a route's response schema. Passing `validateOutput: true` to
@@ -585,6 +592,10 @@ it validates the result against the schema folded up to that point and fails the
 step and the JSON path, the way a `writes` mismatch already does. `testing/runPipeline` always
 validates this way, so a module's own tests catch a mismatch before it ships; turn the same check
 on in a running deployment by passing `validateOutput: true` to `boot()`.
+
+These three checks, like the dataflow check above, run after every module's `setup()` has already
+run, so a boot that fails on one of them can still leave behind what `setup()` created — a database
+file, a migration, a seeded user.
 
 ## Pipeline Test
 
