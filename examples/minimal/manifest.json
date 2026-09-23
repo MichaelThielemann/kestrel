@@ -489,7 +489,6 @@
         "media.createFolder",
         "media.renameFolder",
         "media.listFolderItems",
-        "media.folderItems",
         "media.removeFolder",
         "media.download",
         "media.remove",
@@ -4064,48 +4063,6 @@
       }
     },
     {
-      "name": "media.folderItems",
-      "module": "media/default",
-      "factory": false,
-      "description": {
-        "summary": "Deprecated, use media.listFolderItems: Item ids in a folder, for use with references.guardAll:media before removeFolder",
-        "reads": [
-          "params.path"
-        ],
-        "writes": [
-          "result"
-        ],
-        "query": {
-          "recursive": {
-            "type": "boolean"
-          }
-        },
-        "output": {
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "ids": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "required": [
-            "path",
-            "ids"
-          ]
-        },
-        "errors": {
-          "400": "missing or invalid path",
-          "404": "folder not found",
-          "409": "folder not empty (without `recursive`)"
-        }
-      }
-    },
-    {
       "name": "media.removeFolder",
       "module": "media/default",
       "factory": false,
@@ -5269,7 +5226,7 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Delete variants for every id in result.ids (from media.folderItems)",
+        "summary": "Delete variants for every id in result.ids (from media.listFolderItems)",
         "reads": [
           "result.ids"
         ],
@@ -7780,11 +7737,11 @@
       "module": "revisions/default",
       "factory": false,
       "description": {
-        "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
+        "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`, with the canonical `{ id, name }` a preceding step's `verifiedUser` (e.g. `authn.verifyUser`) verified. Without a target, the anonymous author `{ id: null, name: null }`",
         "reads": [
           "params.id",
           "payload",
-          "verifiedUser?"
+          "verifiedUser"
         ],
         "writes": [
           "result"
@@ -7848,7 +7805,7 @@
           ]
         },
         "errors": {
-          "400": "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again"
+          "400": "no user id, or the former author again"
         },
         "atomicSafe": true
       }
@@ -11309,7 +11266,7 @@
           "name": "images.removeMany",
           "module": "images/default",
           "description": {
-            "summary": "Delete variants for every id in result.ids (from media.folderItems)",
+            "summary": "Delete variants for every id in result.ids (from media.listFolderItems)",
             "reads": [
               "result.ids"
             ],
@@ -17247,11 +17204,11 @@
           "name": "revisions.reassignAuthor",
           "module": "revisions/default",
           "description": {
-            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
+            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`, with the canonical `{ id, name }` a preceding step's `verifiedUser` (e.g. `authn.verifyUser`) verified. Without a target, the anonymous author `{ id: null, name: null }`",
             "reads": [
               "params.id",
               "payload",
-              "verifiedUser?"
+              "verifiedUser"
             ],
             "writes": [
               "result"
@@ -17315,7 +17272,7 @@
               ]
             },
             "errors": {
-              "400": "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again"
+              "400": "no user id, or the former author again"
             },
             "atomicSafe": true
           }
@@ -19381,11 +19338,11 @@
           "name": "revisions.reassignAuthor",
           "module": "revisions/default",
           "description": {
-            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
+            "summary": "Replace the author of every revision written by the user in `params.id` or the event payload's `id`, with the canonical `{ id, name }` a preceding step's `verifiedUser` (e.g. `authn.verifyUser`) verified. Without a target, the anonymous author `{ id: null, name: null }`",
             "reads": [
               "params.id",
               "payload",
-              "verifiedUser?"
+              "verifiedUser"
             ],
             "writes": [
               "result"
@@ -19449,7 +19406,7 @@
               ]
             },
             "errors": {
-              "400": "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again"
+              "400": "no user id, or the former author again"
             },
             "atomicSafe": true
           }

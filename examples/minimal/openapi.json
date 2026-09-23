@@ -6040,7 +6040,7 @@
     "/admin/users/{id}/revisions/reassign": {
       "post": {
         "operationId": "retryReassignRevisionAuthor",
-        "summary": "Require a valid session → Requires permission users.manage → Verify the user reference at payload.reassignTo: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over → Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
+        "summary": "Require a valid session → Requires permission users.manage → Verify the user reference at payload.reassignTo: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over → Replace the author of every revision written by the user in `params.id` or the event payload's `id`, with the canonical `{ id, name }` a preceding step's `verifiedUser` (e.g. `authn.verifyUser`) verified. Without a target, the anonymous author `{ id: null, name: null }`",
         "tags": [
           "admin"
         ],
@@ -6104,7 +6104,7 @@
             }
           },
           "400": {
-            "description": "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again",
+            "description": "no user id, or the former author again",
             "content": {
               "application/json": {
                 "schema": {
@@ -8584,7 +8584,7 @@
     "/media/folders/{path}": {
       "delete": {
         "operationId": "deleteMediaFolder",
-        "summary": "Require a valid session → Requires permission media.delete → Item ids in a folder, for use with references.guardAll:media before removeFolder → Refuse while any of result.ids of media is referenced → Delete variants for every id in result.ids (from media.folderItems) → Delete a folder and everything in it",
+        "summary": "Require a valid session → Requires permission media.delete → Item ids in a folder, for use with references.guardAll:media before removeFolder → Refuse while any of result.ids of media is referenced → Delete variants for every id in result.ids (from media.listFolderItems) → Delete a folder and everything in it",
         "tags": [
           "media"
         ],

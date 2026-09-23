@@ -29,7 +29,6 @@ prefix).
 | `media.createFolder` | none |
 | `media.renameFolder` | none |
 | `media.listFolderItems` | none |
-| `media.folderItems` | none |
 | `media.removeFolder` | none |
 | `media.download` | none |
 | `media.remove` | none |
