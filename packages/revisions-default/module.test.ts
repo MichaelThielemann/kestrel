@@ -258,41 +258,7 @@ describe("revisions/default module steps", () => {
     expect(page((await run(["revisions.list:pages"], { params: { id: "p1" } }, instance)).result).total).toBe(0);
   });
 
-  it("reassignAuthor moves a history to the user the event payload names, with no preceding step", async () => {
-    const instance = await boot();
-    await run(["test.identify", "test.seed", "revisions.record:pages"], {}, instance);
-    const reassigned = await run(["revisions.reassignAuthor"], { payload: { id: "u1", result: { ok: true, reassignTo: { id: "u2", name: "bob" } } } }, instance);
-    expect(reassigned.status).toBe(200);
-    expect(reassigned.result).toEqual({ from: "u1", to: { id: "u2", name: "bob" }, revisions: 1 });
-    const listed = page((await run(["revisions.list:pages"], { params: { id: "p1" } }, instance)).result);
-    expect(listed.total).toBe(1);
-    expect(listed.items[0]?.author).toEqual({ id: "u2", name: "bob" });
-  });
-
-  it("reassignAuthor anonymises when the payload names no target, and repeats without effect, with no preceding step", async () => {
-    const instance = await boot();
-    await run(["test.identify", "test.seed", "revisions.record:pages"], {}, instance);
-    const first = await run(["revisions.reassignAuthor"], { params: { id: "u1" }, payload: {} }, instance);
-    expect(first.result).toEqual({ from: "u1", to: null, revisions: 1 });
-    const again = await run(["revisions.reassignAuthor"], { params: { id: "u1" }, payload: {} }, instance);
-    expect(again.status).toBe(200);
-    expect(again.result).toEqual({ from: "u1", to: null, revisions: 0 });
-    expect(page((await run(["revisions.list:pages"], { params: { id: "p1" } }, instance)).result).items[0]?.author).toEqual({ id: null, name: null });
-  });
-
-  it("reassignAuthor rejects a target that is not { id, name }, the former author again, and a missing id, with no preceding step", async () => {
-    const instance = await boot();
-    await run(["test.identify", "test.seed", "revisions.record:pages"], {}, instance);
-    const wrongShape = await run(["revisions.reassignAuthor"], { params: { id: "u1" }, payload: { reassignTo: "u2" } }, instance);
-    expect(wrongShape).toMatchObject({ status: 400, code: "VALIDATION" });
-    const itself = await run(["revisions.reassignAuthor"], { params: { id: "u1" }, payload: { reassignTo: { id: "u1", name: "alice" } } }, instance);
-    expect(itself).toMatchObject({ status: 400, code: "VALIDATION" });
-    const noId = await run(["revisions.reassignAuthor"], { payload: {} }, instance);
-    expect(noId).toMatchObject({ status: 400, code: "VALIDATION" });
-    expect(page((await run(["revisions.list:pages"], { params: { id: "p1" } }, instance)).result).items[0]?.author).toEqual({ id: "u1", name: "alice" });
-  });
-
-  it("reassignAuthor prefers a preceding step's verifiedUser over the raw payload", async () => {
+  it("reassignAuthor moves a history to the user a preceding step verified, ignoring payload.reassignTo", async () => {
     const instance = await boot();
     await run(["test.identify", "test.seed", "revisions.record:pages"], {}, instance);
     const reassigned = await run(
@@ -302,17 +268,37 @@ describe("revisions/default module steps", () => {
     );
     expect(reassigned.status).toBe(200);
     expect(reassigned.result).toEqual({ from: "u1", to: { id: "u2", name: "bob" }, revisions: 1 });
+    const listed = page((await run(["revisions.list:pages"], { params: { id: "p1" } }, instance)).result);
+    expect(listed.total).toBe(1);
+    expect(listed.items[0]?.author).toEqual({ id: "u2", name: "bob" });
   });
 
-  it("reassignAuthor anonymises when a preceding step's verifiedUser is null, ignoring a raw payload target", async () => {
+  it("reassignAuthor anonymises when the preceding step verifies no target, and repeats without effect", async () => {
     const instance = await boot();
     await run(["test.identify", "test.seed", "revisions.record:pages"], {}, instance);
-    const reassigned = await run(
-      ["test.verifiedUser", "revisions.reassignAuthor"],
-      { params: { id: "u1" }, payload: { reassignTo: { id: "u3", name: "ignored" }, verifiedReassignTo: null } },
-      instance,
-    );
-    expect(reassigned.result).toEqual({ from: "u1", to: null, revisions: 1 });
+    const first = await run(["test.verifiedUser", "revisions.reassignAuthor"], { params: { id: "u1" }, payload: { verifiedReassignTo: null } }, instance);
+    expect(first.result).toEqual({ from: "u1", to: null, revisions: 1 });
+    const again = await run(["test.verifiedUser", "revisions.reassignAuthor"], { params: { id: "u1" }, payload: { verifiedReassignTo: null } }, instance);
+    expect(again.status).toBe(200);
+    expect(again.result).toEqual({ from: "u1", to: null, revisions: 0 });
+    expect(page((await run(["revisions.list:pages"], { params: { id: "p1" } }, instance)).result).items[0]?.author).toEqual({ id: null, name: null });
+  });
+
+  it("reassignAuthor rejects the former author again, and a missing id", async () => {
+    const instance = await boot();
+    await run(["test.identify", "test.seed", "revisions.record:pages"], {}, instance);
+    const itself = await run(["test.verifiedUser", "revisions.reassignAuthor"], { params: { id: "u1" }, payload: { verifiedReassignTo: { id: "u1", name: "alice" } } }, instance);
+    expect(itself).toMatchObject({ status: 400, code: "VALIDATION" });
+    const noId = await run(["test.verifiedUser", "revisions.reassignAuthor"], { payload: { verifiedReassignTo: null } }, instance);
+    expect(noId).toMatchObject({ status: 400, code: "VALIDATION" });
+    expect(page((await run(["revisions.list:pages"], { params: { id: "p1" } }, instance)).result).items[0]?.author).toEqual({ id: "u1", name: "alice" });
+  });
+
+  it("reassignAuthor is a wiring error without a preceding step providing verifiedUser", async () => {
+    const instance = await boot();
+    await run(["test.identify", "test.seed", "revisions.record:pages"], {}, instance);
+    const result = await run(["revisions.reassignAuthor"], { params: { id: "u1" }, payload: {} }, instance);
+    expect(result.status).toBe(500);
   });
 
   it("rejects a limit above the declared maximum", async () => {

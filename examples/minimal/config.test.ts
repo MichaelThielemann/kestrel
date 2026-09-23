@@ -125,7 +125,7 @@ describe("examples/minimal revisions wiring", () => {
       return { ...p, steps };
     });
     await expect(boot({ config: { ...config, http: null }, modules, pipelines: swapped, root })).rejects.toThrow(
-      /\[pipelines\/reassignRevisionAuthor\] step "revisions\.reassignAuthor" optionally reads "verifiedUser" but step "authn\.verifyUser:result\.reassignTo" writes it later/,
+      /\[pipelines\/reassignRevisionAuthor\] step "revisions\.reassignAuthor" reads "verifiedUser" but no earlier step writes it \(earlier writes: none\)/,
     );
     await expect(boot({ config: { ...config, http: null }, modules, pipelines: swapped, root })).rejects.toThrow(KestrelBootError);
   });

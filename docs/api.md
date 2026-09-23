@@ -751,13 +751,12 @@ never reassigned: a login belongs to nobody else.
 manual retry route's request body), `authn.verifyUser:result.reassignTo` reads
 `payload.result.reassignTo` (the event above). Neither falls back to the other. Either one confirms
 the target exists and is active, then writes the canonical `{ id, name }` to `verifiedUser`, which
-`revisions.reassignAuthor` prefers over any `reassignTo` in the request — an unknown or inactive id
-is rejected before any revision changes. `authn.verifyUser` does not check who is calling, so the
-manual route also runs `authn.requireUser` and `authz.require:users.manage` first. This is the
-recommended shape: a pipeline that skips `authn.verifyUser` still works, it just reassigns to
-whatever `reassignTo` the request or event names, unverified. Verifying a user reference this way
-needs a real user store, so it only works with `authn-multi`; `authn-single`'s one fixed admin has
-no second user to reassign to.
+`revisions.reassignAuthor` requires: it declares `reads: ["verifiedUser"]`, not optional, so a
+pipeline that runs it without a preceding `authn.verifyUser` fails to boot — an unknown or inactive
+id can never reach a revision unverified. `authn.verifyUser` does not check who is calling, so the
+manual route also runs `authn.requireUser` and `authz.require:users.manage` first. Verifying a user
+reference this way needs a real user store, so it only works with `authn-multi`; `authn-single`'s
+one fixed admin has no second user to reassign to.
 
 **When one of them fails.** Each listener is a run of its own, so a failure shows up in
 `GET /admin/insights/stats` under `recentFailures` with the pipeline, step and message. Both steps

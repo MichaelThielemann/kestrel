@@ -87,11 +87,13 @@ they were. The method is not part of `revisions@1`: the contract is published an
 step, the same way `authn/multi` offers user administration beside `authn@1`.
 
 The step `revisions.reassignAuthor` takes the former author from `params.id` or, in a pipeline
-started by an event, from the payload's `id`, and the target from `reassignTo` — either directly in
-the payload (`{ "reassignTo": { "id", "name" } }` or `null`) or, for a `user.deleted` emitted with
-`?with=result`, from `payload.result.reassignTo`. It answers `{ from, to, revisions }`, is idempotent
-(a second run finds nothing left to move and reports `revisions: 0`) and can therefore be re-run by
-hand after a failure, through an admin route of its own.
+started by an event, from the payload's `id`, and the target from `verifiedUser`, which a preceding
+`authn.verifyUser` step writes after verifying the `reassignTo` the payload names — either directly
+(`{ "reassignTo": { "id", "name" } }` or `null`) or, for a `user.deleted` emitted with `?with=result`,
+from `payload.result.reassignTo`. A pipeline that runs `revisions.reassignAuthor` without such a
+preceding step fails to boot. It answers `{ from, to, revisions }`, is idempotent (a second run
+finds nothing left to move and reports `revisions: 0`) and can therefore be re-run by hand after a
+failure, through an admin route of its own.
 
 **Steps.** `revisions.record:<collection>` after `content.create`/`content.update`,
 `revisions.restore:<collection>` before the ordinary update chain (it only fills the body, the
@@ -124,7 +126,7 @@ consumer wires those;
 | `revisions.restore:<arg>` | Put a <arg> revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out | `params.id`, `params.revisionId` | `body`, `payload`, `revisionParent`, `restoreReport?` | – | – | 400 missing id or revisionId; the restored fields fail validation; 404 no such revision; 409 the revision carries no snapshot | – | yes |
 | `revisions.reportRestore` | Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is | `restoreReport?` | `result.restore?` | – | { restore?: object, … } | – | – | yes |
 | `revisions.label:<arg>` | Name a <arg> revision, or clear its name with null; a labelled revision is never pruned | `params.id`, `params.revisionId` | `result` | { label: string \| null } | { id: string, collection: string, documentId: string, locale: string, parentId: string \| null, createdAt: number, author: object, kind: "save" \| "restore", label: string \| null, status: string \| null, live: boolean, bytes: number, skipped: boolean, … } | 400 missing id or revisionId; 404 no such revision | – | yes |
-| `revisions.reassignAuthor` | Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }` | `params.id`, `payload`, `verifiedUser?` | `result` | { reassignTo?: string \| object \| null, … } | { from: string, to: object \| null, revisions: number, … } | 400 no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again | – | yes |
+| `revisions.reassignAuthor` | Replace the author of every revision written by the user in `params.id` or the event payload's `id`, with the canonical `{ id, name }` a preceding step's `verifiedUser` (e.g. `authn.verifyUser`) verified. Without a target, the anonymous author `{ id: null, name: null }` | `params.id`, `payload`, `verifiedUser` | `result` | { reassignTo?: string \| object \| null, … } | { from: string, to: object \| null, revisions: number, … } | 400 no user id, or the former author again | – | yes |
 | `revisions.prune` | Apply the retention rules to every recorded document and locale | – | `result` | – | { inspected: number, removed: number, … } | – | – | no |
 | `revisions.remove:<arg>` | Drop every revision of a <arg> document, in every locale | `params.id` | – | – | – | 400 missing id | – | yes |
 | `revisions.removeTranslation:<arg>` | Drop the revisions of one locale of a <arg> document | `params.id` | – | ?locale: string | – | 400 missing id | – | yes |

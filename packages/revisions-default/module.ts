@@ -88,19 +88,6 @@ function formerAuthorOf(ctx: Context): string | null {
   return typeof ctx.payload.id === "string" ? ctx.payload.id : null;
 }
 
-function rawTarget(ctx: Context): unknown {
-  if (ctx.payload.reassignTo !== undefined) return ctx.payload.reassignTo;
-  const result = ctx.payload.result;
-  return isRecord(result) ? result.reassignTo : null;
-}
-
-function targetAuthor(raw: unknown): RevisionAuthor | null | undefined {
-  if (raw === null || raw === undefined) return null;
-  if (!isRecord(raw)) return undefined;
-  const { id, name } = raw;
-  return typeof id === "string" && typeof name === "string" ? { id, name } : undefined;
-}
-
 function modelFieldsOf(content: Content | undefined, collection: string): string[] | null {
   const type = content?.model().types[collection];
   return type === undefined ? null : Object.keys(type.fields);
@@ -197,8 +184,8 @@ export default defineModule({
     reassignAuthor: async (ctx: Context) => {
       const fromId = formerAuthorOf(ctx);
       if (fromId === null) return ctx.fail("VALIDATION", "revisions.reassignAuthor: no user id in params.id or the event payload");
-      const to = ctx.verifiedUser !== undefined ? ctx.verifiedUser : targetAuthor(rawTarget(ctx));
-      if (to === undefined) return ctx.fail("VALIDATION", "revisions.reassignAuthor: reassignTo must be null or { id, name }");
+      const to = ctx.verifiedUser;
+      if (to === undefined) throw new Error("revisions.reassignAuthor: no verifiedUser (boot's dataflow check already proved a preceding step provides it)");
       if (to !== null && to.id === fromId) return ctx.fail("VALIDATION", "revisions.reassignAuthor: reassignTo must not be the former author");
       const changed = await revisions.reassignAuthor(fromId, to);
       if (isErr(changed)) return ctx.fail(changed.error);
@@ -277,12 +264,12 @@ export default defineModule({
     }),
     reassignAuthor: {
       summary:
-        "Replace the author of every revision written by the user in `params.id` or the event payload's `id`. A preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s verified target) is used when present; without one, falls back to the unverified `reassignTo` from the payload or the event hand-over, a user id or `{ id }`. Without any target, the anonymous author `{ id: null, name: null }`",
-      reads: ["params.id", "payload", "verifiedUser?"],
+        "Replace the author of every revision written by the user in `params.id` or the event payload's `id`, with the canonical `{ id, name }` a preceding step's `verifiedUser` (e.g. `authn.verifyUser`) verified. Without a target, the anonymous author `{ id: null, name: null }`",
+      reads: ["params.id", "payload", "verifiedUser"],
       writes: ["result"],
       input: REASSIGN_INPUT,
       output: REASSIGN_SCHEMA,
-      errors: { 400: "no user id, or an invalid `reassignTo` (the unverified fallback requires `{ id, name }` or null), or the former author again" },
+      errors: { 400: "no user id, or the former author again" },
       atomicSafe: true,
     },
     prune: { summary: "Apply the retention rules to every recorded document and locale", reads: [], writes: ["result"], output: REPORT_SCHEMA },
