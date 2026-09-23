@@ -58,6 +58,14 @@ export interface FailedVariant {
   updatedAt: number;
 }
 
+/** Effective sizes tallied by state for one media item; a size with no row, or a `done` row whose spec is outdated, counts as `pending`. All zero for a non-eligible item. */
+export interface VariantCounts {
+  done: number;
+  pending: number;
+  error: number;
+  failed: number;
+}
+
 export interface ImagesStatus {
   sizes: Array<SizeRow & { used: boolean; variants: { done: number; pending: number; error: number; failed: number } }>;
   job: Job | null;
@@ -97,6 +105,7 @@ export interface Images {
   status(): Promise<Result<ImagesStatus, KestrelError>>;
   remove(mediaId: string): Promise<Result<number, KestrelError>>;
   variantsOf(mediaIds: string[]): Promise<Result<Map<string, Variant[]>, KestrelError>>;
+  variantCounts(mediaIds: string[]): Promise<Result<Map<string, VariantCounts>, KestrelError>>;
   read(mediaId: string, file: string): Promise<Result<VariantBlob | null, KestrelError>>;
   failure(mediaId: string, file: string): Promise<Result<VariantFailure | null, KestrelError>>;
   exportTo(dir: string): Promise<Result<{ written: number; skipped: number }, KestrelError>>;
@@ -395,6 +404,53 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return promise;
   }
 
+  async function variantsOf(mediaIds: string[]): Promise<Result<Map<string, Variant[]>, KestrelError>> {
+    const map = new Map<string, Variant[]>();
+    for (const id of mediaIds) map.set(id, []);
+    for (let i = 0; i < mediaIds.length; i += 200) {
+      const chunk = mediaIds.slice(i, i + 200);
+      for (let offset = 0; ; offset += 500) {
+        const page = await db.findMany<Variant>(VARIANTS, { mediaId: { in: chunk } }, { limit: 500, offset });
+        if (isErr(page)) return page;
+        for (const row of page.value.items) map.get(row.mediaId)?.push(row);
+        if (page.value.items.length < 500) break;
+      }
+    }
+    return ok(map);
+  }
+
+  async function variantCounts(mediaIds: string[]): Promise<Result<Map<string, VariantCounts>, KestrelError>> {
+    const counts = new Map<string, VariantCounts>();
+    for (const id of mediaIds) counts.set(id, { done: 0, pending: 0, error: 0, failed: 0 });
+    if (mediaIds.length === 0) return ok(counts);
+
+    const eligibleIds: string[] = [];
+    for (let i = 0; i < mediaIds.length; i += 200) {
+      const chunk = mediaIds.slice(i, i + 200);
+      const rows = await db.findMany<MediaRow>(config.media.collection, { id: { in: chunk } }, { limit: chunk.length });
+      if (isErr(rows)) return rows;
+      for (const row of rows.value.items) if (eligible(row.contentType)) eligibleIds.push(row.id);
+    }
+    if (eligibleIds.length === 0) return ok(counts);
+
+    const byMedia = await variantsOf(eligibleIds);
+    if (isErr(byMedia)) return byMedia;
+
+    for (const id of eligibleIds) {
+      const byName = new Map((byMedia.value.get(id) ?? []).map((row) => [row.size, row]));
+      const tally: VariantCounts = { done: 0, pending: 0, error: 0, failed: 0 };
+      for (const size of effective) {
+        const row = byName.get(size.name);
+        if (row !== undefined && row.state === "done" && row.spec === spec(size)) tally.done += 1;
+        else if (row !== undefined && row.state === "error") tally.error += 1;
+        else if (row !== undefined && row.state === "failed") tally.failed += 1;
+        else tally.pending += 1;
+      }
+      counts.set(id, tally);
+    }
+    return ok(counts);
+  }
+
   const api: Images = {
     async register(input) {
       if (!Array.isArray(input) || input.length === 0) return err(failure("VALIDATION", "images: registry must not be empty"));
@@ -547,20 +603,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       return ok(removed);
     },
 
-    async variantsOf(mediaIds) {
-      const map = new Map<string, Variant[]>();
-      for (const id of mediaIds) map.set(id, []);
-      for (let i = 0; i < mediaIds.length; i += 200) {
-        const chunk = mediaIds.slice(i, i + 200);
-        for (let offset = 0; ; offset += 500) {
-          const page = await db.findMany<Variant>(VARIANTS, { mediaId: { in: chunk } }, { limit: 500, offset });
-          if (isErr(page)) return page;
-          for (const row of page.value.items) map.get(row.mediaId)?.push(row);
-          if (page.value.items.length < 500) break;
-        }
-      }
-      return ok(map);
-    },
+    variantsOf,
+    variantCounts,
 
     async read(mediaId, file) {
       const dot = file.lastIndexOf(".");

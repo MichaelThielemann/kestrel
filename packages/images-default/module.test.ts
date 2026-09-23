@@ -75,10 +75,10 @@ async function make(config: Partial<Config> = {}) {
   return { images, blobs, db, steps };
 }
 
-async function addImage(db: ReturnType<typeof createFakePersistence>, blobs: ReturnType<typeof fakeBlobstore>, id: string, data: Uint8Array): Promise<void> {
+async function addImage(db: ReturnType<typeof createFakePersistence>, blobs: ReturnType<typeof fakeBlobstore>, id: string, data: Uint8Array, contentType = "image/jpeg"): Promise<void> {
   const key = `orig/${id}.jpg`;
-  await db.createOne(MEDIA, { id, key, contentType: "image/jpeg", folder: "", filename: `${id}.jpg` });
-  await blobs.put(key, data, { contentType: "image/jpeg" });
+  await db.createOne(MEDIA, { id, key, contentType, folder: "", filename: `${id}.jpg` });
+  await blobs.put(key, data, { contentType });
 }
 
 describe("images/default configSchema", () => {
@@ -248,27 +248,38 @@ describe("serve step", () => {
 });
 
 describe("attach step", () => {
-  it("adds variants[] to a single media item", async () => {
+  it("adds variants[] and variantCounts to a single media item", async () => {
     const { images, db, blobs, steps } = await make();
     await addImage(db, blobs, "a", await jpeg(400, 300));
     expectOk(await images.generate("a"));
     const ctx = expectOk(await steps.attach(fakeCtx({ result: { id: "a", filename: "a.jpg" } })));
-    const result = boundaryCast<{ variants: Array<{ size: string; path: string }> }>(ctx.result, "host");
+    const result = boundaryCast<{ variants: Array<{ size: string; path: string }>; variantCounts: { done: number; pending: number; error: number; failed: number } }>(ctx.result, "host");
     expect(result.variants).toHaveLength(5);
     expect(result.variants.find((v) => v.size === "thumb")).toMatchObject({ path: "/media/a/variants/thumb.webp" });
+    expect(result.variantCounts).toEqual({ done: 5, pending: 0, error: 0, failed: 0 });
   });
 
-  it("adds variants[] to every item in a list", async () => {
+  it("adds variants[] and variantCounts to every item in a list", async () => {
     const { images, db, blobs, steps } = await make();
     await addImage(db, blobs, "a", await jpeg(400, 300));
     await addImage(db, blobs, "b", await jpeg(400, 300));
     expectOk(await images.generate("a"));
-    expectOk(await images.generate("b"));
     const ctx = expectOk(await steps.attach(fakeCtx({ result: { items: [{ id: "a" }, { id: "b" }], total: 2 } })));
-    const result = boundaryCast<{ items: Array<{ id: string; variants: unknown[] }>; total: number }>(ctx.result, "host");
+    const result = boundaryCast<{ items: Array<{ id: string; variants: unknown[]; variantCounts: { done: number; pending: number; error: number; failed: number } }>; total: number }>(ctx.result, "host");
     expect(result.total).toBe(2);
     expect(result.items[0]?.variants).toHaveLength(5);
-    expect(result.items[1]?.variants).toHaveLength(5);
+    expect(result.items[0]?.variantCounts).toEqual({ done: 5, pending: 0, error: 0, failed: 0 });
+    expect(result.items[1]?.variants).toHaveLength(0);
+    expect(result.items[1]?.variantCounts).toEqual({ done: 0, pending: 5, error: 0, failed: 0 });
+  });
+
+  it("reports variantCounts as all zero for an item that is not an eligible image", async () => {
+    const { db, blobs, steps } = await make();
+    await addImage(db, blobs, "a", new Uint8Array([1]), "application/pdf");
+    const ctx = expectOk(await steps.attach(fakeCtx({ result: { id: "a", filename: "a.pdf" } })));
+    const result = boundaryCast<{ variants: unknown[]; variantCounts: { done: number; pending: number; error: number; failed: number } }>(ctx.result, "host");
+    expect(result.variants).toHaveLength(0);
+    expect(result.variantCounts).toEqual({ done: 0, pending: 0, error: 0, failed: 0 });
   });
 
   it("throws when the pipeline put no media item in result", async () => {
@@ -447,13 +458,15 @@ describe("images/default steps via runPipeline", () => {
     for (const key of keys) expect(blobs.blobs.has(key)).toBe(false);
   });
 
-  it("attach: adds variants[] to result", async () => {
+  it("attach: adds variants[] and variantCounts to result", async () => {
     const { images, db, blobs } = await makeInstance();
     await addImage(db, blobs, "a", await jpeg(400, 300));
     expectOk(await images.generate("a"));
     const res = await runPipeline(pipeline("seed.single", "images.attach"), {}, { modules: [{ module, instance: images }], steps: seedSteps });
     expect(res.status).toBe(200);
-    expect(boundaryCast<{ variants: unknown[] }>(res.result, "host").variants).toHaveLength(5);
+    const result = boundaryCast<{ variants: unknown[]; variantCounts: { done: number; pending: number; error: number; failed: number } }>(res.result, "host");
+    expect(result.variants).toHaveLength(5);
+    expect(result.variantCounts).toEqual({ done: 5, pending: 0, error: 0, failed: 0 });
   });
 
   it("serve: serves a done variant", async () => {

@@ -495,6 +495,55 @@ describe("variantsOf batching", () => {
   });
 });
 
+describe("variantCounts", () => {
+  it("reports every effective size as pending for an eligible item with no rows yet", async () => {
+    const { images, db, blobs } = await make();
+    await addImage(db, blobs, "a", await jpeg(400, 300));
+    const counts = expectOk(await images.variantCounts(["a"]));
+    expect(counts.get("a")).toEqual({ done: 0, pending: 5, error: 0, failed: 0 });
+  });
+
+  it("counts done, error, failed and a missing row, ignoring a row whose size is no longer declared", async () => {
+    const { images, db, blobs } = await make();
+    await addImage(db, blobs, "a", await jpeg(400, 300));
+    expectOk(await images.generate("a"));
+    const rows = expectOk(await db.findMany<Variant>(VARIANTS, { mediaId: "a" }, { limit: 50 })).items;
+    const byName = new Map(rows.map((row) => [row.size, row]));
+    await db.updateOne(VARIANTS, byName.get("small")!.id, { state: "error" });
+    await db.updateOne(VARIANTS, byName.get("medium")!.id, { state: "failed" });
+    await db.deleteOne(VARIANTS, byName.get("large")!.id);
+    await db.createOne(VARIANTS, { mediaId: "a", size: "legacy", spec: "s", width: 1, height: 1, format: "webp", key: "k", bytes: 1, state: "done", error: null, attempts: 1, updatedAt: 1 });
+
+    const counts = expectOk(await images.variantCounts(["a"]));
+    expect(counts.get("a")).toEqual({ done: 2, pending: 1, error: 1, failed: 1 });
+  });
+
+  it("reports zero for every state when the item is not an eligible image", async () => {
+    const { images, db, blobs } = await make();
+    await addImage(db, blobs, "svg", new Uint8Array([1]), "image/svg+xml");
+    await addImage(db, blobs, "gif", new Uint8Array([1]), "image/gif");
+    await addImage(db, blobs, "pdf", new Uint8Array([1]), "application/pdf");
+    const counts = expectOk(await images.variantCounts(["svg", "gif", "pdf"]));
+    for (const id of ["svg", "gif", "pdf"]) expect(counts.get(id)).toEqual({ done: 0, pending: 0, error: 0, failed: 0 });
+  });
+
+  it("counts a done row against an outdated size definition as pending", async () => {
+    const { images, db, blobs } = await make();
+    await addImage(db, blobs, "a", await jpeg(1200, 800));
+    expectOk(await images.generate("a"));
+    expectOk(await images.register([{ name: "thumb", width: 111 }]));
+
+    const counts = expectOk(await images.variantCounts(["a"]));
+    expect(counts.get("a")).toEqual({ done: 4, pending: 1, error: 0, failed: 0 });
+  });
+
+  it("defaults an unknown media id to zero", async () => {
+    const { images } = await make();
+    const counts = expectOk(await images.variantCounts(["nope"]));
+    expect(counts.get("nope")).toEqual({ done: 0, pending: 0, error: 0, failed: 0 });
+  });
+});
+
 describe("remove pagination", () => {
   it("removes more than 500 variant rows for one id", async () => {
     const { images, db, blobs } = await make();

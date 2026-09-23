@@ -5,7 +5,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { binaryResult, first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, createImages, type Images, type Variant } from "./impl.ts";
+import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, createImages, type Images, type Variant, type VariantCounts } from "./impl.ts";
 import { sizeSchema } from "./sizes.ts";
 
 export const configSchema = z
@@ -34,6 +34,8 @@ function attachedVariant(images: Images, variant: Variant): { size: string; widt
   return { size: variant.size, width: variant.width, height: variant.height, format: variant.format, bytes: variant.bytes, state: variant.state, path: images.publicPath(variant.mediaId, variant) };
 }
 
+const ZERO_VARIANT_COUNTS: VariantCounts = { done: 0, pending: 0, error: 0, failed: 0 };
+
 const SIZE_SCHEMA = { type: "object", properties: { name: { type: "string" }, width: { type: "number" }, height: { type: ["number", "null"] }, fit: { type: "string", enum: ["inside", "cover"] }, format: { type: "string", enum: ["webp", "original"] }, quality: { type: "number" }, source: { type: "string", enum: ["default", "config", "registered"] }, updatedAt: { type: "number" } }, required: ["name", "width", "fit", "format", "quality", "source", "updatedAt"] };
 const SIZE_INPUT_SCHEMA = { type: "object", properties: { name: { type: "string" }, width: { type: "integer", minimum: 16, maximum: 8192 }, height: { type: "integer", minimum: 16, maximum: 8192 }, fit: { type: "string", enum: ["inside", "cover"] }, format: { type: "string", enum: ["webp", "original"] }, quality: { type: "integer", minimum: 1, maximum: 100 } }, required: ["name", "width"], additionalProperties: false };
 const GENERATE_INPUT_SCHEMA = { type: "object", properties: { id: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, additionalProperties: true, description: "reached either directly (id/ids) or as the media.uploaded event envelope, which carries further fields this step ignores" };
@@ -41,6 +43,7 @@ const VARIANT_SCHEMA = { type: "object", properties: { id: { type: "string" }, m
 const JOB_SCHEMA = { type: "object", properties: { id: { type: "string" }, state: { type: "string", enum: ["running", "paused", "done", "error"] }, total: { type: "number" }, done: { type: "number" }, failed: { type: "number" }, cursor: { type: "string" }, startedAt: { type: "number" }, updatedAt: { type: "number" }, finishedAt: { type: ["number", "null"] }, error: { type: ["string", "null"] } }, required: ["id", "state", "total", "done", "failed", "cursor", "startedAt", "updatedAt", "finishedAt", "error"] };
 const FAILED_VARIANT_SCHEMA = { type: "object", properties: { mediaId: { type: "string" }, size: { type: "string" }, attempts: { type: "number" }, error: { type: ["string", "null"] }, updatedAt: { type: "number" } }, required: ["mediaId", "size", "attempts", "error", "updatedAt"] };
 const ATTACHED_VARIANT_SCHEMA = { type: "object", properties: { size: { type: "string" }, width: { type: "number" }, height: { type: "number" }, format: { type: "string" }, bytes: { type: "number" }, state: { type: "string", enum: ["pending", "done", "error", "failed"] }, path: { type: "string" } }, required: ["size", "width", "height", "format", "bytes", "state", "path"] };
+const VARIANT_COUNTS_SCHEMA = { type: "object", properties: { done: { type: "number" }, pending: { type: "number" }, error: { type: "number" }, failed: { type: "number" } }, required: ["done", "pending", "error", "failed"] };
 
 export default defineModule({
   name: "images/default",
@@ -145,17 +148,22 @@ export default defineModule({
       if (typeof result?.id === "string") {
         const byMedia = await images.variantsOf([result.id]);
         if (isErr(byMedia)) return ctx.fail(byMedia.error);
+        const counts = await images.variantCounts([result.id]);
+        if (isErr(counts)) return ctx.fail(counts.error);
         const variants = byMedia.value.get(result.id) ?? [];
-        return ok({ ...ctx, result: { ...result, variants: variants.map((v) => attachedVariant(images, v)) } });
+        return ok({ ...ctx, result: { ...result, variants: variants.map((v) => attachedVariant(images, v)), variantCounts: counts.value.get(result.id) ?? ZERO_VARIANT_COUNTS } });
       }
       if (Array.isArray(result?.items)) {
         const items = boundaryCast<Array<Record<string, unknown>>>(result.items, "host");
         const ids = items.map((item) => item.id).filter((id): id is string => typeof id === "string");
         const byMedia = await images.variantsOf(ids);
         if (isErr(byMedia)) return ctx.fail(byMedia.error);
+        const counts = await images.variantCounts(ids);
+        if (isErr(counts)) return ctx.fail(counts.error);
         const withVariants = items.map((item) => {
           const variants = typeof item.id === "string" ? (byMedia.value.get(item.id) ?? []) : [];
-          return { ...item, variants: variants.map((v) => attachedVariant(images, v)) };
+          const itemCounts = typeof item.id === "string" ? (counts.value.get(item.id) ?? ZERO_VARIANT_COUNTS) : ZERO_VARIANT_COUNTS;
+          return { ...item, variants: variants.map((v) => attachedVariant(images, v)), variantCounts: itemCounts };
         });
         return ok({ ...ctx, result: { ...result, items: withVariants } });
       }
@@ -222,7 +230,12 @@ export default defineModule({
     },
     remove: { summary: "Delete one media item's variants (blob + rows)", reads: ["params.id"], writes: [], errors: { 400: "missing id" } },
     removeMany: { summary: "Delete variants for every id in result.ids (from media.listFolderItems)", reads: ["result.ids"], writes: [] },
-    attach: { summary: "Add variants[] to a media item or list (result.id or result.items)", reads: ["result"], writes: ["result.variants?"], extendsItems: { type: "object", properties: { variants: { type: "array", items: ATTACHED_VARIANT_SCHEMA } }, required: ["variants"] } },
+    attach: {
+      summary: "Add variants[] and variantCounts (done/pending/error/failed over the effective sizes) to a media item or list (result.id or result.items)",
+      reads: ["result"],
+      writes: ["result.variants?", "result.variantCounts?"],
+      extendsItems: { type: "object", properties: { variants: { type: "array", items: ATTACHED_VARIANT_SCHEMA }, variantCounts: VARIANT_COUNTS_SCHEMA }, required: ["variants", "variantCounts"] },
+    },
     serve: { summary: "Binary variant, or the original with x-kestrel-variant: pending while it isn't ready yet", reads: ["params.id", "params.file"], writes: ["result"], binary: true, errors: { 400: "missing id or file", 404: "media item or size not found, or the variant gave up after maxAttempts" } },
     export: (dir: string) => ({ summary: `Copy every done variant to ${dir}/<folder>/<filename>.<size>.<ext>`, reads: [], writes: ["result.variants"], extendsOutput: { type: "object", properties: { variants: { type: "object", properties: { written: { type: "number" }, skipped: { type: "number" } }, required: ["written", "skipped"] } }, required: ["variants"] } }),
   }),
