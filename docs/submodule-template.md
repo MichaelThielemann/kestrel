@@ -196,14 +196,13 @@ steps like `images.attach` that extend each list item.
 
 A step whose `writes` touches `result` must declare `output`, `extendsOutput`, `extendsItems`, or
 `binary: true` for a step whose result is a binary body rather than JSON (`media.download`,
-`images.serve`). Boot checks this against every pipeline's resolved steps and adds an
-`undeclared-output` entry to `kestrel.warnings` for one with none of the four — logged, not fatal
-today, a boot error in a future major. Every object schema inside `output`, `extendsOutput` or
-`extendsItems` — nested properties, array items and object-valued `additionalProperties` included —
-must declare `required`, listing exactly the properties the step always returns (`required: []`
-when none are guaranteed); boot adds an `undeclared-required` entry, naming the JSON path of the
-offending schema, for one that has `properties` but no `required` — also logged, not fatal today, a
-boot error in a future major. `boot({ validateOutput: true })` and `testing/runPipeline`
+`images.serve`). Boot checks this against every pipeline's resolved steps and fails, naming the
+pipeline and the step, for one with none of the four. Every object schema inside `output`,
+`extendsOutput` or `extendsItems` — nested properties, array items and object-valued
+`additionalProperties` included — must declare `required`, listing exactly the properties the step
+always returns (`required: []` when none are guaranteed); boot fails, naming the pipeline, the step
+and the JSON path of the offending schema, for one that has `properties` but no `required`.
+`boot({ validateOutput: true })` and `testing/runPipeline`
 (always on) additionally validate `ctx.result` after every step that writes it (skipped when the
 write is declared optional, `result?`, and `ctx.result` is unchanged) against the schema its
 `output`/`extendsOutput`/`extendsItems` fold to at that point, failing with the step name and the

@@ -123,7 +123,7 @@ const auth = defineModule({
   describe: () => ({
     identifyUser: { summary: "resolve the caller if a token is present", reads: [], writes: ["identity?"] },
     requireUser: { summary: "resolve the caller or fail", reads: [], writes: ["identity"] },
-    loadIdentity: { summary: "return the resolved identity", reads: ["identity"], writes: ["result"] },
+    loadIdentity: { summary: "return the resolved identity", reads: ["identity"], writes: ["result"], output: { type: ["object", "null"] } },
   }),
 });
 
@@ -198,7 +198,7 @@ const circular = defineModule({
       return ok({ ...ctx, result: self });
     },
   }),
-  describe: () => ({ loop: { summary: "produce a circular result", reads: [], writes: ["result"] } }),
+  describe: () => ({ loop: { summary: "produce a circular result", reads: [], writes: ["result"], output: { type: "object" } } }),
 });
 
 const sanitize = defineModule({
@@ -229,6 +229,7 @@ const typed = defineModule({
       writes: ["result"],
       input: { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false },
       query: { limit: { type: "integer" } },
+      output: { type: "string" },
     },
   }),
 });
@@ -399,7 +400,7 @@ describe("boot", () => {
       configSchema: z.object({}),
       async setup() { return {}; },
       steps: () => ({ record: async (ctx: Context) => { seen.push(ctx.ip); return ok({ ...ctx, result: ctx.ip ?? null }); } }),
-      describe: () => ({ record: { summary: "record the client ip", reads: ["ip"], writes: ["result"] } }),
+      describe: () => ({ record: { summary: "record the client ip", reads: ["ip"], writes: ["result"], output: { type: ["string", "null"] } } }),
     });
     const ipPipeline = definePipeline({ name: "ip", steps: ["spy.record"] });
     const config = (http: Record<string, unknown>) => ({ modules: [{ use: "./spy", config: {} }], triggers: [{ http: "GET /ip", pipeline: "ip" }], http: { port: 0, ...http } });
@@ -562,7 +563,7 @@ describe("boot", () => {
     expect(kestrel.warnings).toEqual([{ code: "unemitted-event", message: warnings[0]?.message, pipeline: "onCreated", event: "page.creted" }]);
   });
 
-  it("warns once for a step that writes result without declaring output, extendsOutput, extendsItems or binary: true", async () => {
+  it("fails to boot for a step that writes result without declaring output, extendsOutput, extendsItems or binary: true", async () => {
     const bare = defineModule({
       name: "bare/fake",
       provides: [],
@@ -575,17 +576,13 @@ describe("boot", () => {
       describe: () => ({ create: { summary: "create with no declared output", reads: [], writes: ["result"] } }),
     });
     const bareCreate = definePipeline({ name: "bareCreate", steps: ["bare.create"] });
-    const warnings: { message: string; data: Record<string, unknown> | undefined }[] = [];
-    const logger = { ...silentLogger, warn: (message: string, data?: Record<string, unknown>) => warnings.push({ message, data }) };
     const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./bare", config: {} }] };
-    kestrel = await boot({ config, modules: [...modules, bare], pipelines: [...pipelines, bareCreate], logger });
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]?.message).toMatch(/step writes result without declaring output, extendsOutput, extendsItems or binary: true/);
-    expect(warnings[0]?.data).toEqual({ pipeline: "bareCreate", step: "bare.create" });
-    expect(kestrel.warnings).toEqual([{ code: "undeclared-output", message: warnings[0]?.message, pipeline: "bareCreate", step: "bare.create" }]);
+    await expect(boot({ config, modules: [...modules, bare], pipelines: [...pipelines, bareCreate], logger: silentLogger })).rejects.toThrow(
+      /\[pipelines\/bareCreate\] step "bare\.create" writes result without declaring output, extendsOutput, extendsItems or binary: true/,
+    );
   });
 
-  it("warns once per object schema that declares properties without required in a step's output", async () => {
+  it("fails to boot for an object schema that declares properties without required in a step's output", async () => {
     const loose = defineModule({
       name: "loose/fake",
       provides: [],
@@ -605,17 +602,13 @@ describe("boot", () => {
       }),
     });
     const looseCreate = definePipeline({ name: "looseCreate", steps: ["loose.create"] });
-    const warnings: { message: string; data: Record<string, unknown> | undefined }[] = [];
-    const logger = { ...silentLogger, warn: (message: string, data?: Record<string, unknown>) => warnings.push({ message, data }) };
     const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./loose", config: {} }] };
-    kestrel = await boot({ config, modules: [...modules, loose], pipelines: [...pipelines, looseCreate], logger });
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]?.message).toMatch(/declares properties without declaring required/);
-    expect(warnings[0]?.data).toEqual({ pipeline: "looseCreate", step: "loose.create", path: "$.output" });
-    expect(kestrel.warnings).toEqual([{ code: "undeclared-required", message: warnings[0]?.message, pipeline: "looseCreate", step: "loose.create", path: "$.output" }]);
+    await expect(boot({ config, modules: [...modules, loose], pipelines: [...pipelines, looseCreate], logger: silentLogger })).rejects.toThrow(
+      /\[pipelines\/looseCreate\] step "loose\.create"'s output schema at \$\.output declares properties without declaring required/,
+    );
   });
 
-  it("warns once when a step's extendsOutput merges onto an active output schema that is not type object", async () => {
+  it("fails to boot when a step's extendsOutput merges onto an active output schema that is not type object", async () => {
     const listy = defineModule({
       name: "listy/fake",
       provides: [],
@@ -634,14 +627,33 @@ describe("boot", () => {
       }),
     });
     const listThenTag = definePipeline({ name: "listThenTag", steps: ["listy.list", "listy.tag"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./listy", config: {} }] };
+    await expect(boot({ config, modules: [...modules, listy], pipelines: [...pipelines, listThenTag], logger: silentLogger })).rejects.toThrow(
+      /\[pipelines\/listThenTag\] step "listy\.tag"'s extendsOutput merges onto an active output schema of type "array", not "object"/,
+    );
+  });
+
+  it("warns once for an optional read whose key no step of any pipeline writes and no trigger provides", async () => {
+    const guesser = defineModule({
+      name: "guesser/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({ create: async (ctx: Context) => ok({ ...ctx, result: { id: "x" } }) }),
+      describe: () => ({ create: { summary: "reads a key nothing writes", reads: ["verifiedUsr?"], writes: ["result"], output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } } }),
+    });
+    const guesserCreate = definePipeline({ name: "guesserCreate", steps: ["guesser.create"] });
     const warnings: { message: string; data: Record<string, unknown> | undefined }[] = [];
     const logger = { ...silentLogger, warn: (message: string, data?: Record<string, unknown>) => warnings.push({ message, data }) };
-    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./listy", config: {} }] };
-    kestrel = await boot({ config, modules: [...modules, listy], pipelines: [...pipelines, listThenTag], logger });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./guesser", config: {} }] };
+    kestrel = await boot({ config, modules: [...modules, guesser], pipelines: [...pipelines, guesserCreate], logger });
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]?.message).toMatch(/extendsOutput merges onto an active output schema of type "array", not "object"/);
-    expect(warnings[0]?.data).toEqual({ pipeline: "listThenTag", step: "listy.tag" });
-    expect(kestrel.warnings).toEqual([{ code: "output-fold-contradiction", message: warnings[0]?.message, pipeline: "listThenTag", step: "listy.tag" }]);
+    expect(warnings[0]?.message).toMatch(/step optionally reads "verifiedUsr" but no step of any pipeline writes it and no trigger provides it/);
+    expect(warnings[0]?.data).toEqual({ pipeline: "guesserCreate", step: "guesser.create", key: "verifiedUsr" });
+    expect(kestrel.warnings).toEqual([{ code: "unwritten-optional-read", message: warnings[0]?.message, pipeline: "guesserCreate", step: "guesser.create", key: "verifiedUsr" }]);
   });
 
   it("stays quiet when a pipeline emits the event, whatever the emit step's query tail", async () => {
@@ -992,7 +1004,7 @@ describe("boot", () => {
         return {};
       },
       steps: () => ({ ping: async (ctx: Context) => ok({ ...ctx, result: "pong" }) }),
-      describe: () => ({ ping: { summary: "answer with pong", reads: [], writes: ["result"] } }),
+      describe: () => ({ ping: { summary: "answer with pong", reads: [], writes: ["result"], output: { type: "string" } } }),
       teardown() {
         order.push("teardown/http");
       },
@@ -1059,7 +1071,7 @@ describe("boot", () => {
         return {};
       },
       steps: () => ({ ping: async (ctx: Context) => ok({ ...ctx, result: "pong" }) }),
-      describe: () => ({ ping: { summary: "answer with pong", reads: [], writes: ["result"] } }),
+      describe: () => ({ ping: { summary: "answer with pong", reads: [], writes: ["result"], output: { type: "string" } } }),
       teardown() {
         order.push("teardown/trigger");
       },
@@ -1188,7 +1200,7 @@ describe("boot", () => {
         return {};
       },
       steps: () => ({ wait: async (ctx: Context) => { await gate; return ok({ ...ctx, result: { ok: true } }); } }),
-      describe: () => ({ wait: { summary: "wait for the gate", reads: [], writes: ["result"] } }),
+      describe: () => ({ wait: { summary: "wait for the gate", reads: [], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] } } }),
     });
     kestrel = await boot({
       config: { modules: [{ use: "./draining", config: {} }], triggers: [{ http: "GET /slow", pipeline: "draining" }], http: { port: 0 } },

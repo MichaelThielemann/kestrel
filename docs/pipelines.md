@@ -471,7 +471,7 @@ A `ContextPath` is a context key, optionally followed by dotted sub-keys
 (`^[a-zA-Z][A-Za-z0-9]*(\.[A-Za-z0-9_-]+)*\??$`); a trailing `?` is allowed in both `reads` and
 `writes`. In `writes` it means "may write" (`authn.identifyUser` writes `identity?`) — an optional
 write never satisfies a read. In `reads` it means "may be absent"
-(`revisions.reassignAuthor` reads `verifiedUser?`) — an optional read does not need an earlier step,
+(`revisions.reportRestore` reads `restoreReport?`) — an optional read does not need an earlier step,
 or the trigger, to supply the key. A read on `a.b` is satisfied if an earlier step wrote `a.b` or
 `a`; a read on `a` is satisfied if an earlier step wrote `a` or any `a.x`. A `result` write with no
 sub-key replaces the whole object, and with it every previously written `result.<key>`.
@@ -486,8 +486,11 @@ ordering: if no earlier step supplies the key but a *later* step in the same pip
 (with or without `?`), boot aborts, naming the pipeline, the reading step, the writing step and the
 key — the read would silently see nothing on every run, which is what an unordered pair of steps
 almost always means, not what "optional" is for. A key nothing in the pipeline ever writes is fine;
-the step is expected to run stand-alone as often as chained. Once a step passes the check, its
-`writes` are applied.
+the step is expected to run stand-alone as often as chained. If no step of *any* booted pipeline
+ever writes the key and no trigger provides it either, `boot()` adds an `unwritten-optional-read`
+entry to `kestrel.warnings` naming the pipeline, the step and the key — almost always a typo, since
+a step genuinely meant to run stand-alone still names a key some other pipeline populates. Once a
+step passes the check, its `writes` are applied.
 
 What's available from the start: `payload`, `headers`, `files`, `ip`, `params`, plus `params.<p>`
 for every route parameter that all of the pipeline's HTTP routes bind. Under an event trigger, any
@@ -563,20 +566,15 @@ Schema, replacing whatever the pipeline's result schema was so far), `extendsOut
 it — becomes the output if there was none yet), `extendsItems` (merges into
 `properties.items.items` of a list output, or at the root otherwise), or `binary: true` for a step
 whose result is a binary body rather than JSON (`media.download`, `images.serve`). A step that
-writes `result` with none of the four makes `boot()` log a warning naming the pipeline and the
-step (`"step writes result without declaring output, extendsOutput, extendsItems or binary: true"`)
-and add it to `kestrel.warnings` as `{ code: "undeclared-output", message, pipeline, step }` — not
-fatal today, but a boot error starting with the next major, so treat it as one now.
+writes `result` with none of the four fails `boot()`, naming the pipeline and the step
+(`"step writes result without declaring output, extendsOutput, extendsItems or binary: true"`).
 
 An object schema inside `output`, `extendsOutput` or `extendsItems` — the schema itself, a nested
 property, an array's `items`, an object-valued `additionalProperties` or a `oneOf`/`anyOf`/`allOf`
-branch — that declares `properties` without a `required` key makes `boot()` log a warning naming
-the pipeline, the step and the JSON path of the offending schema (`"output schema at $.output…
-declares properties without declaring required; this becomes a boot error in the next major"`) and
-add it to `kestrel.warnings` as `{ code: "undeclared-required", message, pipeline, step, path }` —
-not fatal today, but a boot error starting with the next major. `required: []` is a schema's
-explicit statement that none of its properties are guaranteed; it silences the warning like any
-other `required` array.
+branch — that declares `properties` without a `required` key fails `boot()`, naming the pipeline,
+the step and the JSON path of the offending schema (`"output schema at $.output… declares
+properties without declaring required"`). `required: []` is a schema's explicit statement that
+none of its properties are guaranteed; it satisfies the check like any other `required` array.
 
 `@michaelthielemann/kestrel/schema` folds a pipeline's step descriptions, in order, into the
 schema its result ends up matching (`resolveOutputSchema`, from the `schema` subpath) — this is

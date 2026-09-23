@@ -1,4 +1,4 @@
-import type { BootWarning, JsonSchema, Logger, Manifest, ModuleManifest, OutputFoldContradictionWarning, StepDescription, StepManifest, UndeclaredOutputWarning, UndeclaredRequiredWarning, UnemittedEventWarning } from "../packages/core/src/index.ts";
+import type { BootWarning, JsonSchema, Logger, Manifest, ModuleManifest, StepDescription, StepManifest, UnemittedEventWarning, UnwrittenOptionalReadWarning } from "../packages/core/src/index.ts";
 import { STEP_SETS } from "../packages/contracts/src/steps.ts";
 
 export const START = "<!-- kestrel-docs:start -->";
@@ -148,22 +148,14 @@ export function rootTable(packages: PackageInfo[]): string {
   return [START, "| Package | Purpose |", "|---|---|", ...rows, END].join("\n");
 }
 
-export type BootWarningKey =
-  | Pick<UnemittedEventWarning, "code" | "pipeline" | "event">
-  | Pick<UndeclaredOutputWarning, "code" | "pipeline" | "step">
-  | Pick<UndeclaredRequiredWarning, "code" | "pipeline" | "step" | "path">
-  | Pick<OutputFoldContradictionWarning, "code" | "pipeline" | "step">;
+export type BootWarningKey = Pick<UnemittedEventWarning, "code" | "pipeline" | "event"> | Pick<UnwrittenOptionalReadWarning, "code" | "pipeline" | "step" | "key">;
 
 function bootWarningKey(warning: BootWarningKey): string {
   switch (warning.code) {
     case "unemitted-event":
       return `${warning.code}:${warning.pipeline}:${warning.event}`;
-    case "undeclared-output":
-      return `${warning.code}:${warning.pipeline}:${warning.step}`;
-    case "undeclared-required":
-      return `${warning.code}:${warning.pipeline}:${warning.step}:${warning.path}`;
-    case "output-fold-contradiction":
-      return `${warning.code}:${warning.pipeline}:${warning.step}`;
+    case "unwritten-optional-read":
+      return `${warning.code}:${warning.pipeline}:${warning.step}:${warning.key}`;
     default: {
       const exhaustive: never = warning;
       return exhaustive;
@@ -180,12 +172,8 @@ export function formatBootWarning(warning: BootWarning): string {
   switch (warning.code) {
     case "unemitted-event":
       return `pipeline "${warning.pipeline}", event "${warning.event}": ${warning.message}`;
-    case "undeclared-output":
-      return `pipeline "${warning.pipeline}", step "${warning.step}": ${warning.message}`;
-    case "undeclared-required":
-      return `pipeline "${warning.pipeline}", step "${warning.step}", ${warning.path}: ${warning.message}`;
-    case "output-fold-contradiction":
-      return `pipeline "${warning.pipeline}", step "${warning.step}": ${warning.message}`;
+    case "unwritten-optional-read":
+      return `pipeline "${warning.pipeline}", step "${warning.step}", key "${warning.key}": ${warning.message}`;
     default: {
       const exhaustive: never = warning;
       return exhaustive;
@@ -218,12 +206,8 @@ function matchesBootWarning(entry: LogEntry, warning: BootWarning): boolean {
   switch (warning.code) {
     case "unemitted-event":
       return entry.message === warning.message && entry.data?.pipeline === warning.pipeline && entry.data?.event === warning.event;
-    case "undeclared-output":
-      return entry.message === warning.message && entry.data?.pipeline === warning.pipeline && entry.data?.step === warning.step;
-    case "undeclared-required":
-      return entry.message === warning.message && entry.data?.pipeline === warning.pipeline && entry.data?.step === warning.step && entry.data?.path === warning.path;
-    case "output-fold-contradiction":
-      return entry.message === warning.message && entry.data?.pipeline === warning.pipeline && entry.data?.step === warning.step;
+    case "unwritten-optional-read":
+      return entry.message === warning.message && entry.data?.pipeline === warning.pipeline && entry.data?.step === warning.step && entry.data?.key === warning.key;
     default: {
       const exhaustive: never = warning;
       return exhaustive;

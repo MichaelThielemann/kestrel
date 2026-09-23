@@ -48,7 +48,7 @@ const demo = defineModule({
   describe: () => ({
     requireUser: { summary: "Require a valid session", reads: [], writes: [], security: "required", errors: { 401: "not authenticated" } },
     identifyUser: { summary: "Identify the caller if a session exists", reads: [], writes: [], security: "optional" },
-    create: (type) => ({ summary: `Create ${type}`, reads: [], writes: ["result"], input: { type: "object", properties: { title: { type: "string" } }, required: ["title"] }, output: { type: "object", properties: { id: { type: "string" } } }, errors: { 400: "validation failed" } }),
+    create: (type) => ({ summary: `Create ${type}`, reads: [], writes: ["result"], input: { type: "object", properties: { title: { type: "string" } }, required: ["title"] }, output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] }, errors: { 400: "validation failed" } }),
     get: (type) => ({ summary: `Get ${type}`, reads: [], writes: ["result"], query: { locale: { type: "string" } }, output: { type: "object" }, errors: { 404: "not found" } }),
     upload: { summary: "Upload a file", reads: ["files"], writes: ["result"], multipart: true, input: { type: "object", properties: { folder: { type: "string" } } }, output: { type: "object" } },
     download: { summary: "Download a file", reads: ["params.id"], writes: ["result"], binary: true, errors: { 404: "not found" } },

@@ -4,7 +4,7 @@ import type { AtomicScope } from "./atomic.ts";
 import { boundaryCast } from "./cast.ts";
 import type { ContextInput } from "./context.ts";
 import { missingMethods, type Contract } from "./defineContract.ts";
-import { checkDataflow } from "./dataflow.ts";
+import { checkDataflow, CONTEXT_KEYS, satisfied } from "./dataflow.ts";
 import { configSchema, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
 import { stepPrefix, type ContractLookup, type Deps, type EventEntry, type InstanceHealth, type Introspection, type ModuleDefinition, type StepDescription } from "./defineModule.ts";
 import { buildManifest, type Manifest } from "./describe.ts";
@@ -16,7 +16,7 @@ import { createObserverHub } from "./observer.ts";
 import { StepRegistry } from "./registry.ts";
 import { findMissingRequired, resolveOutputSchema } from "./schema.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
-import { writeRoot } from "./writes.ts";
+import { stripOptional, writeRoot } from "./writes.ts";
 import { sortModules } from "./sort.ts";
 import { createCronEntry, startCron, type CronEntry } from "./triggers/cron.ts";
 import { createAllowlist } from "./triggers/allowlist.ts";
@@ -49,12 +49,12 @@ export interface StopResult {
 /**
  * A condition boot detects but does not treat as fatal.
  *
- * A discriminated union on `code`; today's members are {@link UnemittedEventWarning},
- * {@link UndeclaredOutputWarning} and {@link UndeclaredRequiredWarning}. A minor release may add
- * further codes, so code reading `kestrel.warnings` must handle a `code` it does not recognize
- * instead of assuming the shape of this union's current members.
+ * A discriminated union on `code`; today's members are {@link UnemittedEventWarning} and
+ * {@link UnwrittenOptionalReadWarning}. A minor release may add further codes, so code reading
+ * `kestrel.warnings` must handle a `code` it does not recognize instead of assuming the shape of
+ * this union's current members.
  */
-export type BootWarning = UnemittedEventWarning | UndeclaredOutputWarning | UndeclaredRequiredWarning | OutputFoldContradictionWarning;
+export type BootWarning = UnemittedEventWarning | UnwrittenOptionalReadWarning;
 
 /** An event trigger's event that no pipeline emits via `events.emit` and no module declares in `emits`. */
 export interface UnemittedEventWarning {
@@ -65,39 +65,15 @@ export interface UnemittedEventWarning {
 }
 
 /**
- * A pipeline step that writes to `result` without declaring `output`, `extendsOutput`,
- * `extendsItems` or `binary: true`. Becomes a boot error in the next major.
+ * An optional read (`"key?"`) whose key no step of any booted pipeline writes, optional or not,
+ * and no trigger provides — almost always a typo in the key rather than a genuinely absent value.
  */
-export interface UndeclaredOutputWarning {
-  code: "undeclared-output";
+export interface UnwrittenOptionalReadWarning {
+  code: "unwritten-optional-read";
   message: string;
   pipeline: string;
   step: string;
-}
-
-/**
- * An object schema inside a step's `output`, `extendsOutput` or `extendsItems` that declares
- * `properties` without a `required` key, at the JSON path `path` (`$`-rooted, e.g.
- * `$.output.properties.items.items`). Becomes a boot error in the next major.
- */
-export interface UndeclaredRequiredWarning {
-  code: "undeclared-required";
-  message: string;
-  pipeline: string;
-  step: string;
-  path: string;
-}
-
-/**
- * A step's `extendsOutput` merged onto an active output schema (from an earlier `output`) whose
- * declared `type` is not `object` — the fold coerces it to `object` silently, discarding the
- * mismatch. Becomes a boot error in the next major.
- */
-export interface OutputFoldContradictionWarning {
-  code: "output-fold-contradiction";
-  message: string;
-  pipeline: string;
-  step: string;
+  key: string;
 }
 
 export interface Kestrel extends Introspection {
@@ -166,17 +142,13 @@ function declaresOutput(description: StepDescription): boolean {
   return description.output !== undefined || description.extendsOutput !== undefined || description.extendsItems !== undefined || description.binary === true;
 }
 
-function warnUndeclaredOutput(pipelines: ReadonlyMap<string, ResolvedPipeline>, logger: Logger): UndeclaredOutputWarning[] {
-  const warnings: UndeclaredOutputWarning[] = [];
+function checkUndeclaredOutput(pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
   for (const pipeline of pipelines.values()) {
     for (const step of pipeline.steps) {
       if (!step.description.writes.some((path) => writeRoot(path) === "result") || declaresOutput(step.description)) continue;
-      const message = "step writes result without declaring output, extendsOutput, extendsItems or binary: true; this becomes a boot error in the next major";
-      logWarn(logger, message, { pipeline: pipeline.name, step: step.name });
-      warnings.push({ code: "undeclared-output", message, pipeline: pipeline.name, step: step.name });
+      throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" writes result without declaring output, extendsOutput, extendsItems or binary: true`);
     }
   }
-  return warnings;
 }
 
 function declaredOutputSchemas(description: StepDescription): Array<{ key: string; schema: NonNullable<StepDescription["output"]> }> {
@@ -187,34 +159,55 @@ function declaredOutputSchemas(description: StepDescription): Array<{ key: strin
   return schemas;
 }
 
-function warnUndeclaredRequired(pipelines: ReadonlyMap<string, ResolvedPipeline>, logger: Logger): UndeclaredRequiredWarning[] {
-  const warnings: UndeclaredRequiredWarning[] = [];
+function checkUndeclaredRequired(pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
   for (const pipeline of pipelines.values()) {
     for (const step of pipeline.steps) {
       for (const { key, schema } of declaredOutputSchemas(step.description)) {
         for (const path of findMissingRequired(schema, `$.${key}`)) {
-          const message = `output schema at ${path} declares properties without declaring required; this becomes a boot error in the next major`;
-          logWarn(logger, message, { pipeline: pipeline.name, step: step.name, path });
-          warnings.push({ code: "undeclared-required", message, pipeline: pipeline.name, step: step.name, path });
+          throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}"'s output schema at ${path} declares properties without declaring required`);
         }
       }
     }
   }
-  return warnings;
 }
 
-function warnOutputFoldContradiction(pipelines: ReadonlyMap<string, ResolvedPipeline>, logger: Logger): OutputFoldContradictionWarning[] {
-  const warnings: OutputFoldContradictionWarning[] = [];
+function checkOutputFoldContradiction(pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
   for (const pipeline of pipelines.values()) {
     resolveOutputSchema(
       pipeline.steps.map((s) => s.description),
       (index, activeType) => {
         const step = pipeline.steps[index]!;
-        const message = `step's extendsOutput merges onto an active output schema of type "${activeType}", not "object"; this becomes a boot error in the next major`;
-        logWarn(logger, message, { pipeline: pipeline.name, step: step.name });
-        warnings.push({ code: "output-fold-contradiction", message, pipeline: pipeline.name, step: step.name });
+        throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}"'s extendsOutput merges onto an active output schema of type "${activeType}", not "object"`);
       },
     );
+  }
+}
+
+function allWrittenKeys(pipelines: ReadonlyMap<string, ResolvedPipeline>): Set<string> {
+  const keys = new Set<string>();
+  for (const pipeline of pipelines.values()) {
+    for (const step of pipeline.steps) {
+      for (const write of step.description.writes) keys.add(stripOptional(write));
+    }
+  }
+  return keys;
+}
+
+function warnUnwrittenOptionalReads(pipelines: ReadonlyMap<string, ResolvedPipeline>, logger: Logger): UnwrittenOptionalReadWarning[] {
+  const written = allWrittenKeys(pipelines);
+  const triggerProvided = new Set<string>(CONTEXT_KEYS);
+  const warnings: UnwrittenOptionalReadWarning[] = [];
+  for (const pipeline of pipelines.values()) {
+    for (const step of pipeline.steps) {
+      for (const read of step.description.reads) {
+        if (!read.endsWith("?")) continue;
+        const key = stripOptional(read);
+        if (satisfied(key, triggerProvided) || satisfied(key, written)) continue;
+        const message = `step optionally reads "${key}" but no step of any pipeline writes it and no trigger provides it`;
+        logWarn(logger, message, { pipeline: pipeline.name, step: step.name, key });
+        warnings.push({ code: "unwritten-optional-read", message, pipeline: pipeline.name, step: step.name, key });
+      }
+    }
   }
   return warnings;
 }
@@ -404,7 +397,10 @@ export async function boot(input: BootInput): Promise<Kestrel> {
       ? (info, body) => scopeHook.atomicScope!(instances.get(scopeHook), info, body)
       : undefined;
 
-    const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUndeclaredOutput(pipelines, logger), ...warnUndeclaredRequired(pipelines, logger), ...warnOutputFoldContradiction(pipelines, logger)];
+    checkUndeclaredOutput(pipelines);
+    checkUndeclaredRequired(pipelines);
+    checkOutputFoldContradiction(pipelines);
+    const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUnwrittenOptionalReads(pipelines, logger)];
 
     const runs = createRunTracker();
     const hub = createObserverHub(logger);

@@ -32,7 +32,7 @@ const store = defineModule({
   }),
   describe: () => ({
     find: (collection: string) => ({ summary: `Find in ${collection}`, reads: [], writes: ["result"], output: { type: "object" } }),
-    ping: { summary: "Ping", reads: [], writes: ["result"] },
+    ping: { summary: "Ping", reads: [], writes: ["result"], output: { type: "string" } },
   }),
 });
 
@@ -96,7 +96,7 @@ describe("kestrel.describe()", () => {
     const steps = kestrel.describe().steps;
     expect(steps).toEqual([
       { name: "store.find", module: "store/memory", factory: true, description: { summary: `Find in ${PLACEHOLDER_ARG}`, reads: [], writes: ["result"], output: { type: "object" } } },
-      { name: "store.ping", module: "store/memory", factory: false, description: { summary: "Ping", reads: [], writes: ["result"] } },
+      { name: "store.ping", module: "store/memory", factory: false, description: { summary: "Ping", reads: [], writes: ["result"], output: { type: "string" } } },
     ]);
     await kestrel.stop();
   });
@@ -126,7 +126,7 @@ describe("kestrel.describe()", () => {
     const manifest = kestrel.describe();
     expect(manifest.pipelines).toEqual([
       { name: "read", steps: [{ spec: "store.find:things", name: "store.find", module: "store/memory", description: { summary: "Find in things", reads: [], writes: ["result"], output: { type: "object" } } }] },
-      { name: "ping", steps: [{ spec: "store.ping", name: "store.ping", module: "store/memory", description: { summary: "Ping", reads: [], writes: ["result"] } }] },
+      { name: "ping", steps: [{ spec: "store.ping", name: "store.ping", module: "store/memory", description: { summary: "Ping", reads: [], writes: ["result"], output: { type: "string" } } }] },
     ]);
     expect(manifest.triggers).toEqual({
       http: [{ method: "GET", path: "/things/:id", pipeline: "read" }],

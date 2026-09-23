@@ -236,16 +236,6 @@ describe("example config with an event trigger no pipeline emits", () => {
 });
 
 describe("example config's own steps", () => {
-  it("every result-writing step folds under the output rule: no undeclared-output warning (exemption: binary)", async () => {
-    const config = await loadConfig(join(example, "kestrel.config.ts"));
-    const modules = await loadModules(example, config);
-    const pipelines = await loadPipelines(example, config.pipelinesDir ?? "./pipelines");
-    const kestrel = await boot({ config: { ...config, http: null }, modules, pipelines, logger: silentLogger, root: example });
-    const undeclared = kestrel.warnings.filter((w) => w.code === "undeclared-output");
-    await kestrel.stop();
-    expect(undeclared).toEqual([]);
-  });
-
   it("generates the same OpenAPI document as the checked-in examples/minimal/openapi.json", async () => {
     const config = await loadConfig(join(example, "kestrel.config.ts"));
     const modules = await loadModules(example, config);

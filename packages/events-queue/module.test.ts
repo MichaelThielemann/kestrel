@@ -213,7 +213,7 @@ describe("events/queue in a booted instance", () => {
           return ok(ctx);
         },
       }),
-      describe: () => ({ create: { summary: "c", reads: [], writes: ["result"] }, listen: { summary: "l", reads: [], writes: [] } }),
+      describe: () => ({ create: { summary: "c", reads: [], writes: ["result"], output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } }, listen: { summary: "l", reads: [], writes: [] } }),
     });
     const kestrel = await boot({
       config: {
@@ -335,7 +335,7 @@ describe("events/queue in a booted instance", () => {
         },
       }),
       describe: () => ({
-        create: { summary: "c", reads: [], writes: ["result"], atomicSafe: true },
+        create: { summary: "c", reads: [], writes: ["result"], atomicSafe: true, output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
         stop: { summary: "s", reads: ["result"], writes: [], atomicSafe: true },
         listen: { summary: "l", reads: [], writes: [] },
       }),

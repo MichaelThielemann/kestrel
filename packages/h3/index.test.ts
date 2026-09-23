@@ -41,10 +41,10 @@ const store = defineModule({
     },
   }),
   describe: () => ({
-    echo: { summary: "Echoes payload, params, ip and the authorization header.", reads: ["payload", "params", "ip", "headers.authorization"], writes: ["result"] },
+    echo: { summary: "Echoes payload, params, ip and the authorization header.", reads: ["payload", "params", "ip", "headers.authorization"], writes: ["result"], output: { type: "object" } },
     fail: { summary: "Always fails with a teapot error.", reads: [], writes: [] },
-    upload: { summary: "Stores an uploaded file.", reads: ["files", "payload.note"], writes: ["result"] },
-    download: { summary: "Serves a stored file as a binary result.", reads: ["params.name"], writes: ["result"] },
+    upload: { summary: "Stores an uploaded file.", reads: ["files", "payload.note"], writes: ["result"], output: { type: "object", properties: { filename: { type: "string" }, size: { type: "number" } }, required: ["filename", "size"] } },
+    download: { summary: "Serves a stored file as a binary result.", reads: ["params.name"], writes: ["result"], binary: true },
   }),
 });
 

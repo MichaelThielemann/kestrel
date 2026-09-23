@@ -24,7 +24,7 @@ const probe = defineModule({
     },
   }),
   describe: () => ({
-    pass: { summary: "pass", reads: [], writes: ["result"] },
+    pass: { summary: "pass", reads: [], writes: ["result"], output: { type: "string" } },
     deny: { summary: "deny", reads: [], writes: [] },
     boom: { summary: "boom", reads: [], writes: [] },
   }),
