@@ -411,7 +411,7 @@ describe("events/queue in a booted instance", () => {
         },
       }),
       describe: () => ({
-        create: { summary: "c", reads: [], writes: ["result"] },
+        create: { summary: "c", reads: [], writes: ["result"], output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
         listenA: { summary: "a", reads: [], writes: [] },
         listenB: { summary: "b", reads: [], writes: [] },
       }),
@@ -474,7 +474,7 @@ describe("events/queue in a booted instance", () => {
         return {};
       },
       steps: () => ({ create: async (ctx: Context) => ok({ ...ctx, result: { id: "doc-1" } }) }),
-      describe: () => ({ create: { summary: "c", reads: [], writes: ["result"] } }),
+      describe: () => ({ create: { summary: "c", reads: [], writes: ["result"], output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } } }),
     });
     const bootConfig = {
       config: {
