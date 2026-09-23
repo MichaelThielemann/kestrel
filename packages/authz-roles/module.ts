@@ -49,10 +49,9 @@ export default defineModule({
       return ok(ctx);
     }),
 
-    describeAccess: async (ctx: Context) => {
-      if (!ctx.identity) return ctx.fail("UNAUTHENTICATED", "not authenticated");
-      const base = resultBase(ctx, "describeAccess");
-      return ok({ ...ctx, result: { ...base, ...authz.describeAccess(ctx.identity) } });
+    describePipelineAccess: async (ctx: Context) => {
+      const base = resultBase(ctx, "describePipelineAccess");
+      return ok({ ...ctx, result: { ...base, pipelineAccess: authz.describePipelineAccess(ctx.identity) } });
     },
 
     listRoles: async (ctx: Context) => {
@@ -75,13 +74,15 @@ export default defineModule({
 
   describe: () => ({
     require: (permission: string) => ({ summary: `Requires permission ${permission}`, reads: [], writes: [], security: "required" as const, errors: { 401: "not authenticated", 403: `missing permission ${permission}` } }),
-    describeAccess: {
-      summary: "The caller's concrete permissions",
-      reads: ["identity"],
-      writes: ["result.permissions"],
-      extendsOutput: { type: "object", properties: { permissions: { type: "array", items: { type: "string" } } }, required: ["permissions"] },
-      security: "required" as const,
-      errors: { 401: "not authenticated" },
+    describePipelineAccess: {
+      summary: "Per booted pipeline, whether the caller passes its authz.require steps",
+      reads: ["identity?"],
+      writes: ["result.pipelineAccess"],
+      extendsOutput: {
+        type: "object",
+        properties: { pipelineAccess: { type: "object", additionalProperties: { type: "string", enum: ["granted", "denied", "unknown"] } } },
+        required: ["pipelineAccess"],
+      },
     },
     listRoles: {
       summary: "The configured role names, in config order",

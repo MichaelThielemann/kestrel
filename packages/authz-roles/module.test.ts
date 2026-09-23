@@ -62,15 +62,9 @@ describe("authz/roles module steps via runPipeline", () => {
     expect(res.status).toBe(200);
   });
 
-  it("describeAccess answers 401 without identity", async () => {
+  it("is a wiring error outside a booted instance", async () => {
     const instance = await boot();
-    const res = await runPipeline(definePipeline({ name: "describeAccess", steps: ["authz.describeAccess"] }), {}, { modules: [{ module, instance }] });
-    expect(res.status).toBe(401);
-  });
-
-  it("describeAccess outside a booted instance is a wiring error", async () => {
-    const instance = await boot();
-    const pipeline = definePipeline({ name: "describeAccess", steps: ["identity.set", "authz.describeAccess"] });
+    const pipeline = definePipeline({ name: "describePipelineAccess", steps: ["identity.set", "authz.describePipelineAccess"] });
     const res = await runPipeline(pipeline, {}, { modules: [{ module, instance }], steps: { "identity.set": withIdentity({ id: "e", claims: { roles: ["editor"] } }) }, writes: setsIdentity });
     expect(res).toMatchObject({ status: 500, code: "INTERNAL" });
   });
@@ -82,9 +76,9 @@ describe("authz/roles module steps via runPipeline", () => {
     expect(res.result).toEqual({ roles: ["chef", "autor"] });
   });
 
-  it("describeAccess fails with a wiring error when a prior step replaced ctx.result with a non-object", async () => {
+  it("is a wiring error after a step replaced ctx.result with a non-object", async () => {
     const instance = await boot();
-    const pipeline = definePipeline({ name: "badResult", steps: ["identity.set", "authz.describeAccess"] });
+    const pipeline = definePipeline({ name: "badResult", steps: ["identity.set", "authz.describePipelineAccess"] });
     const res = await runPipeline(pipeline, {}, {
       modules: [{ module, instance }],
       steps: { "identity.set": async (ctx: Context) => ok({ ...ctx, identity: { id: "e", claims: { roles: ["editor"] } }, result: "not an object" }) },
@@ -157,62 +151,133 @@ function identityModule(identity: Identity) {
   });
 }
 
-describe("authz/roles: permissions from a booted instance", () => {
-  const roles = { chef: ["pages.*"], autor: ["media.read"] };
+const customGateModule = defineModule({
+  name: "custom/gate",
+  provides: [],
+  requires: [],
+  configSchema: z.object({}).strict(),
+  async setup() {
+    return {};
+  },
+  steps: () => ({ gate: async (ctx: Context) => ok(ctx) }),
+  describe: () => ({ gate: { summary: "a gate authz/roles knows nothing about", reads: [], writes: [] } }),
+});
 
-  async function bootWithUniverse(identity: Identity) {
-    const probe = identityModule(identity);
-    return bootKestrel({
+const ROLES = { chef: ["*"], autor: ["pages.*"] };
+const trigger = { kind: "http" as const, name: "test" };
+
+async function bootWithGatedPipelines(identity: Identity) {
+  const probe = identityModule(identity);
+  return bootKestrel({
+    config: {
+      modules: [
+        { use: "./probe.ts", config: {} },
+        { use: "./custom.ts", config: {} },
+        { use: "@michaelthielemann/kestrel-authz-roles", config: { roles: ROLES, anonymous: [] } },
+      ],
+      triggers: [],
+      http: null,
+    },
+    modules: [probe, customGateModule, module],
+    pipelines: [
+      definePipeline({ name: "gated", steps: ["probe.set", "authz.require:pages.manage"] }),
+      definePipeline({ name: "mixed", steps: ["probe.set", "authz.require:pages.write", "authz.require:users.manage"] }),
+      definePipeline({ name: "open", steps: ["probe.set", "custom.gate"] }),
+      definePipeline({ name: "access", steps: ["probe.set", "authz.describePipelineAccess"] }),
+    ],
+    logger: silentLogger,
+  });
+}
+
+describe("authz/roles: describePipelineAccess against a booted instance", () => {
+  it("answers granted exactly for the pipelines the same caller can run past their authz.require steps", async () => {
+    for (const role of Object.keys(ROLES)) {
+      const kestrel = await bootWithGatedPipelines({ id: role, claims: { roles: [role] } });
+      const access = await kestrel.run("access", { trigger });
+      const pipelineAccess = boundaryCast<{ pipelineAccess: Record<string, string> }>(access.result, "json").pipelineAccess;
+      for (const name of ["gated", "mixed"]) {
+        const res = await kestrel.run(name, { trigger });
+        expect(pipelineAccess[name] === "granted").toBe(res.status === 200);
+        expect(pipelineAccess[name] === "denied").toBe(res.status === 403);
+      }
+      await kestrel.stop();
+    }
+  });
+
+  it("denies a pipeline when one of its authz.require steps fails", async () => {
+    const kestrel = await bootWithGatedPipelines({ id: "a", claims: { roles: ["autor"] } });
+    const access = await kestrel.run("access", { trigger });
+    const pipelineAccess = boundaryCast<{ pipelineAccess: Record<string, string> }>(access.result, "json").pipelineAccess;
+    expect(pipelineAccess.mixed).toBe("denied");
+    await kestrel.stop();
+  });
+
+  it("answers unknown for a pipeline without an authz.require step", async () => {
+    const kestrel = await bootWithGatedPipelines({ id: "c", claims: { roles: ["chef"] } });
+    const access = await kestrel.run("access", { trigger });
+    const pipelineAccess = boundaryCast<{ pipelineAccess: Record<string, string> }>(access.result, "json").pipelineAccess;
+    expect(pipelineAccess.open).toBe("unknown");
+    await kestrel.stop();
+  });
+});
+
+describe("authz/roles: describePipelineAccess without an identity", () => {
+  it("answers the anonymous view when the context has no identity", async () => {
+    const kestrel = await bootKestrel({
       config: {
-        modules: [
-          { use: "./probe.ts", config: {} },
-          { use: "@michaelthielemann/kestrel-authz-roles", config: { roles, anonymous: [] } },
-        ],
+        modules: [{ use: "@michaelthielemann/kestrel-authz-roles", config: { roles: {}, anonymous: ["pages.read"] } }],
         triggers: [],
         http: null,
       },
-      modules: [probe, module],
+      modules: [module],
       pipelines: [
         definePipeline({ name: "readPages", steps: ["authz.require:pages.read"] }),
         definePipeline({ name: "writePages", steps: ["authz.require:pages.write"] }),
-        definePipeline({ name: "manageUsers", steps: ["authz.require:users.manage"] }),
-        definePipeline({ name: "readMedia", steps: ["authz.require:media.read"] }),
-        definePipeline({ name: "me", steps: ["probe.set", "authz.describeAccess"] }),
+        definePipeline({ name: "access", steps: ["authz.describePipelineAccess"] }),
       ],
       logger: silentLogger,
     });
-  }
+    const access = await kestrel.run("access", { trigger });
+    const pipelineAccess = boundaryCast<{ pipelineAccess: Record<string, string> }>(access.result, "json").pipelineAccess;
+    const readRes = await kestrel.run("readPages", { trigger });
+    const writeRes = await kestrel.run("writePages", { trigger });
+    expect(pipelineAccess.readPages).toBe("granted");
+    expect(readRes.status).toBe(200);
+    expect(pipelineAccess.writePages).toBe("denied");
+    expect(writeRes.status).toBe(401);
+    await kestrel.stop();
+  });
+});
 
-  it("expands a wildcard role pattern to exactly the matching concrete permissions", async () => {
-    const kestrel = await bootWithUniverse({ id: "c", claims: { roles: ["chef"] } });
-    const trigger = { kind: "http" as const, name: "test" };
-    const res = await kestrel.run("me", { trigger });
-    expect(res.result).toMatchObject({ permissions: ["pages.read", "pages.write"] });
+describe("authz/roles: dataflow and step registration", () => {
+  it("boots in a pipeline without an authn step", async () => {
+    const kestrel = await bootKestrel({
+      config: {
+        modules: [{ use: "@michaelthielemann/kestrel-authz-roles", config: { roles: {}, anonymous: [] } }],
+        triggers: [],
+        http: null,
+      },
+      modules: [module],
+      pipelines: [definePipeline({ name: "access", steps: ["authz.describePipelineAccess"] })],
+      logger: silentLogger,
+    });
+    const res = await kestrel.run("access", { trigger });
+    expect(res.status).toBe(200);
     await kestrel.stop();
   });
 
-  it("never surfaces a permission no booted pipeline requires, even under a matching pattern", async () => {
-    const kestrel = await bootWithUniverse({ id: "c", claims: { roles: ["chef"] } });
-    const trigger = { kind: "http" as const, name: "test" };
-    const res = await kestrel.run("me", { trigger });
-    const permissions = boundaryCast<{ permissions: string[] }>(res.result, "json").permissions;
-    expect(permissions).not.toContain("pages.manage");
-    await kestrel.stop();
-  });
-
-  it("answers an empty permission list for a caller with no matching role", async () => {
-    const kestrel = await bootWithUniverse({ id: "v", claims: { roles: ["visitor"] } });
-    const trigger = { kind: "http" as const, name: "test" };
-    const res = await kestrel.run("me", { trigger });
-    expect(res.result).toMatchObject({ permissions: [] });
-    await kestrel.stop();
-  });
-
-  it("no longer reports role names on describeAccess: that is listRoles' job", async () => {
-    const kestrel = await bootWithUniverse({ id: "a", claims: { roles: ["autor"] } });
-    const trigger = { kind: "http" as const, name: "test" };
-    const res = await kestrel.run("me", { trigger });
-    expect(res.result).toEqual({ permissions: ["media.read"] });
-    await kestrel.stop();
+  it("does not register a describeAccess step", async () => {
+    await expect(
+      bootKestrel({
+        config: {
+          modules: [{ use: "@michaelthielemann/kestrel-authz-roles", config: { roles: {}, anonymous: [] } }],
+          triggers: [],
+          http: null,
+        },
+        modules: [module],
+        pipelines: [definePipeline({ name: "legacy", steps: ["authz.describeAccess"] })],
+        logger: silentLogger,
+      }),
+    ).rejects.toThrow(/unknown step "authz.describeAccess"/);
   });
 });

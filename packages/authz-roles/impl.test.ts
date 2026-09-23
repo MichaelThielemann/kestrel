@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import type { Manifest } from "@michaelthielemann/kestrel";
+import type { Manifest, PipelineManifest } from "@michaelthielemann/kestrel";
 import { authzContractTests } from "@michaelthielemann/kestrel-contracts/authz.contract.test";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createContext } from "@michaelthielemann/kestrel/context";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
-import { anonymousCan, createAuthzRoles, matches, permissionUniverse } from "./impl.ts";
+import { anonymousCan, createAuthzRoles, matches, requiredPermissions } from "./impl.ts";
 import module from "./module.ts";
 
 const config = { roles: { admin: ["*"], editor: ["pages.*", "media.read"] }, roleClaim: "roles", anonymous: ["pages.read"] };
@@ -47,33 +47,33 @@ describe("authz/roles", () => {
   });
 });
 
+function step(spec: string, atomic?: number): PipelineManifest["steps"][number] {
+  const name = spec.split(":")[0] ?? spec;
+  return { spec, name, module: "authz", description: { summary: "", reads: [], writes: [] }, ...(atomic === undefined ? {} : { atomic }) };
+}
+
 function manifestOf(specs: string[]): Manifest {
   return {
     core: { version: "0.0.0" },
     contracts: [],
     modules: [],
     steps: [],
-    pipelines: [{ name: "p", steps: specs.map((spec) => ({ spec, name: spec.split(":")[0] ?? spec, module: "authz", description: { summary: "", reads: [], writes: [] } })) }],
+    pipelines: [{ name: "p", steps: specs.map((spec) => step(spec)) }],
     triggers: { http: [], events: [], crons: [] },
   };
 }
 
-describe("authz/roles: permission universe", () => {
-  it("collects the distinct permissions from every authz.require step, sorted, ignoring other steps", () => {
-    const manifest = manifestOf(["authz.require:pages.write", "authn.requireUser", "authz.require:pages.read", "authz.require:pages.write"]);
-    expect(permissionUniverse(manifest)).toEqual(["pages.read", "pages.write"]);
+describe("requiredPermissions", () => {
+  it("collects each authz.require permission of a pipeline once, in step order, including steps in an atomic group", () => {
+    const pipeline: PipelineManifest = {
+      name: "p",
+      steps: [step("authz.require:a.b"), step("authn.requireUser"), step("authz.require:a.b"), step("authz.require:c.d", 1)],
+    };
+    expect(requiredPermissions(pipeline)).toEqual(["a.b", "c.d"]);
   });
+});
 
-  it("describeAccess throws before attach and answers the expanded permissions after", async () => {
-    const authz = createAuthzRoles({ roles: { admin: ["*"], editor: ["pages.*"] }, roleClaim: "roles", anonymous: [] });
-    expect(() => authz.describeAccess({ id: "a", claims: { roles: ["admin"] } })).toThrow();
-    const detach = authz.attach({ describe: () => manifestOf(["authz.require:pages.read", "authz.require:pages.write", "authz.require:users.manage"]), observe: () => () => {}, health: () => ({ ok: true, restartRequired: false, modules: [] }) });
-    expect(authz.describeAccess({ id: "e", claims: { roles: ["editor"] } })).toEqual({ permissions: ["pages.read", "pages.write"] });
-    expect(authz.describeAccess({ id: "v", claims: { roles: ["ghost"] } })).toEqual({ permissions: [] });
-    detach();
-    expect(() => authz.describeAccess({ id: "a", claims: { roles: ["admin"] } })).toThrow();
-  });
-
+describe("authz/roles: listRoles", () => {
   it("listRoles answers the configured role names in config order", () => {
     const authz = createAuthzRoles({ roles: { chef: ["pages.*"], autor: ["media.read"] }, roleClaim: "roles", anonymous: [] });
     expect(authz.listRoles()).toEqual(["chef", "autor"]);
@@ -90,10 +90,11 @@ describe("authz/roles: a role name shaped like an Object.prototype key never yie
     await expect(authz.can({ id: "x", claims: { roles: [role] } }, "pages.write")).resolves.toEqual({ ok: true, value: false });
   });
 
-  it.each(DANGEROUS_ROLE_NAMES)("describeAccess answers no permissions, never throws, for role %s", (role) => {
+  it.each(DANGEROUS_ROLE_NAMES)("answers denied, never throws, for a role named %s", (role) => {
     const authz = createAuthzRoles(dangerousConfig);
-    authz.attach({ describe: () => manifestOf(["authz.require:pages.read", "authz.require:pages.write"]), observe: () => () => {}, health: () => ({ ok: true, restartRequired: false, modules: [] }) });
-    expect(authz.describeAccess({ id: "x", claims: { roles: [role] } })).toEqual({ permissions: [] });
+    const detach = authz.attach({ describe: () => manifestOf(["authz.require:pages.read", "authz.require:pages.write"]), observe: () => () => {}, health: () => ({ ok: true, restartRequired: false, modules: [] }) });
+    expect(authz.describePipelineAccess({ id: "x", claims: { roles: [role] } })).toEqual({ p: "denied" });
+    detach();
   });
 
   it.each(DANGEROUS_ROLE_NAMES)("module.ts's require step answers 403 FORBIDDEN, never 500, for role %s", async (role) => {
