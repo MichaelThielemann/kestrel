@@ -128,9 +128,25 @@
 - `core`: `boot()` gains a fourth `BootWarning`, `output-fold-contradiction` — a step's
   `extendsOutput` merging onto an active output schema (from an earlier `output`) whose declared
   `type` is not `object`, which the fold otherwise coerces to `object` silently, discarding the
-  mismatch. Becomes a boot error in the next major, like the other three warnings.
+  mismatch.
+- `core`: `undeclared-output`, `undeclared-required` and `output-fold-contradiction` are no longer
+  `BootWarning`s — each now fails `boot()` outright with a `KestrelBootError` naming the pipeline,
+  the step and, for `undeclared-required`, the JSON path of the offending schema. A step that
+  writes `result` without declaring `output`/`extendsOutput`/`extendsItems`/`binary: true`, an
+  output object schema with `properties` but no `required`, or an `extendsOutput` merging onto a
+  non-`object` active schema each stop the boot instead of only logging.
+- `media-default`: the step `media.folderItems`, deprecated in favour of `media.listFolderItems`,
+  is removed; call `media.listFolderItems` instead.
+- `revisions-default`: `revisions.reassignAuthor` declares `reads: ["verifiedUser"]`, no longer
+  optional, and no longer falls back to an unverified `reassignTo` read from the payload. A
+  pipeline that runs it without a preceding step writing `verifiedUser` (such as
+  `authn.verifyUser`) fails to boot instead of reassigning to an unverified target.
 
 ### Added
+
+- `core`: `boot()` gains a `BootWarning`, `unwritten-optional-read` — an optional read (`"key?"`)
+  whose key no step of any booted pipeline writes and no trigger provides, naming the pipeline,
+  the step and the key. Almost always a typo in the key.
 
 - `Deps` gains `bootStartedAt?: number`, the epoch ms `boot()` captured at its very start, before
   any module's `setup()` ran, and shared by every module's `setup()` call in this boot. Optional,
@@ -218,7 +234,7 @@
   not recognize. Currently emitted: `unemitted-event`, for an event trigger whose event no pipeline
   emits via `events.emit` and no module declares in `emits`; and `undeclared-output`, for a step
   that writes `result` without declaring `output`, `extendsOutput`, `extendsItems` or
-  `binary: true` — **this becomes a boot error in the next major.**
+  `binary: true`.
 - `authn-single` and `authn-multi` share one behavioural test suite for the five steps both
   register (`login`, `identifyUser`, `requireUser`, `loadIdentity`, `logout`), also run against a
   new in-memory `authn@1` fake, so the three stay in lockstep.
@@ -290,8 +306,7 @@
   item lists, folder listings, delivery, replication and link/reference reports, among others).
   `boot()` adds a new, non-fatal `kestrel.warnings` entry, `{ code: "undeclared-required", message,
   pipeline, step, path }`, for an object schema with `properties` but no `required` key, naming the
-  JSON path of the offending schema; like `undeclared-output`, it becomes a boot error in the next
-  major.
+  JSON path of the offending schema.
 
 ## 5.8.1 – 2026-09-22
 
