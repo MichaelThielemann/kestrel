@@ -505,6 +505,12 @@ affected variant — upload and sync keep running unaffected. A cron job (every 
 `images.resume` and automatically continues a paused/failed/stuck sync job, even without a manual
 `POST /admin/images/sync`.
 
+They also return `variantCounts: { done, pending, error, failed }`, the effective sizes tallied by
+state: a size with no row yet, or a `done` row whose spec is outdated, counts as `pending`; a row for
+a size nobody declares any more is ignored. `variantCounts` is all zero for an item with no eligible
+variants (not an image, SVG, GIF), the same as an empty `variants[]`. It lets a client tell "no
+variants apply" apart from "still generating" without polling `variants[]` itself.
+
 A render that hangs is given up on after `renderTimeoutMs` (default 30000) and counts as a normal
 failed attempt (`render timed out after <n>ms`); the render itself cannot be aborted, so it is left
 to finish in the background and whatever it produces is dropped. After `maxAttempts` failures the

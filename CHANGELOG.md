@@ -225,6 +225,12 @@ Net changes since 5.8.1.
   `restartRequired: true`, once a rollback has failed; contention is never reported.
   `replication-sqlite` reports a prepared restore as `{ ok: true, note }`, since the instance
   keeps serving until a host restarts it to apply the restore.
+- `images-default`: `images.attach` also adds `variantCounts: { done, pending, error, failed }` to a
+  media item or list, tallying the effective sizes owned by `images-default`'s own eligibility rule
+  (an image, not SVG, not GIF) and size list: a size with no row yet, or a `done` row whose spec is
+  outdated, counts as `pending`; a row for a size nobody declares any more is ignored. All zero for a
+  non-eligible item, the same as an empty `variants[]`. Declared `required` in `attach`'s
+  `extendsItems`, next to `variants`.
 
 ### Changed
 
@@ -276,6 +282,9 @@ Net changes since 5.8.1.
   `hasOwnProperty`, `__proto__` or another `Object.prototype` key no longer trips an inherited,
   non-array value and a 500; role lookups go through a `Map`, not a plain object index, in both
   `authz.can`/`authz.require` and `authz.describePipelineAccess`.
+- `events-queue`: an instance with no event trigger anywhere in the manifest now installs an empty
+  delivery table at `setup()` instead of leaving delivery uninstalled, so `events.emit` drops the
+  event instead of writing a row with no pipeline that nothing could ever fan out or process.
 
 ## 5.8.1 – 2026-09-22
 
