@@ -47,6 +47,13 @@ export interface StepDescription {
   extendsOutput?: JsonSchema;
   /** Like extendsOutput, but merges into `properties.items.items` of the active output when it is a list result; falls back to a root merge otherwise. */
   extendsItems?: JsonSchema;
+  /**
+   * The complete shape of `result` when this step ends the run with `ctx.done()`. Not folded: no other
+   * step's `output`, `extendsOutput` or `extendsItems` applies to it, and it does not apply to a run that
+   * continues past this step. Required on every step that calls `ctx.done()`; boot cannot see that call,
+   * so a missing declaration surfaces only at run time under `validateOutput`.
+   */
+  terminalOutput?: JsonSchema;
   query?: Record<string, JsonSchema>;
   errors?: Record<number, string>;
   security?: "required" | "optional";

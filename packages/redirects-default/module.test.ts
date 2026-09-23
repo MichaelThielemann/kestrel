@@ -10,6 +10,7 @@ import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import type { RunResult } from "@michaelthielemann/kestrel/runner";
+import { validateSchema } from "@michaelthielemann/kestrel/schema";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import module, { configSchema } from "./module.ts";
 
@@ -89,6 +90,15 @@ describe("redirects/default module steps", () => {
     const miss = await run(["redirects.lookup"], { params: { path: "nope" } }, instance);
     expect(miss.status).toBe(200);
     expect(miss.result).toBeUndefined();
+  });
+
+  it("declares the hit as terminalOutput, whose status enum excludes a status like 303", async () => {
+    const { instance } = await boot(rules);
+    const description = module.describe!(instance).lookup;
+    const schema = description.terminalOutput;
+    expect(schema).toBeDefined();
+    expect(validateSchema(schema ?? {}, { redirect: { to: "/artikel/x", status: 303 } })).not.toEqual([]);
+    expect(validateSchema(schema ?? {}, { redirect: { to: "/artikel/x", status: 301 } })).toEqual([]);
   });
 
   it("export writes the compiled list and reports the summary", async () => {

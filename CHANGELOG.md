@@ -149,6 +149,25 @@ Net changes since 5.8.1.
   used, the reason (another type, a type array, an `allOf` schema, a union with a non-object or,
   for `extendsItems`, no list-shaped branch, or an extension that is itself not an object schema)
   and, where relevant, the earlier step that set the active schema.
+- `core`: `StepDescription` gains `terminalOutput`, the complete shape of `result` when a step ends
+  the run with `ctx.done()` — never folded with any other step's `output`, `extendsOutput` or
+  `extendsItems`, and never applied to a run that continues past the step. With `validateOutput`
+  (always on in `testing/runPipeline`), a step that calls `ctx.done()` without declaring it, or
+  whose early result does not match it, fails the run naming the step; a step that declares only
+  `terminalOutput` but changes `result` without calling `ctx.done()` fails as well. Boot cannot
+  detect a `ctx.done()` call, so a mismatch surfaces only at run time — add `terminalOutput` to
+  every step that calls `ctx.done()`, the same schema as `output` when the early result has that
+  shape, and declare `writes: ["result?"]` with no `output` for a step that only ever writes
+  `result` through `ctx.done()`. Boot fails for `terminalOutput` on a step with no write to
+  `result`, and for `terminalOutput` together with a `binary` step in the same pipeline.
+- `redirects-default`: `redirects.lookup` describes its hit as `terminalOutput` instead of `output`,
+  with `status` narrowed to `301 | 302 | 307 | 308` and the schema closed
+  (`additionalProperties: false`). The 200 of a route running it is now `anyOf` the page and
+  `{ redirect: { to, status } }` instead of losing the page shape to the redirect one, and generated
+  types become a union.
+- `media-default`: `media.upload`'s 200 is an `anyOf` as well; its continuing branch, which the fold
+  used to collapse to `{ _events }` alone once `events.relay` ran, carries the item or list result
+  again, with `_events` now optional in it. Responses themselves are unchanged.
 - `media-default`: the step `media.folderItems`, deprecated since 5.4.0 in favour of
   `media.listFolderItems`, is removed; call `media.listFolderItems` instead.
 - `revisions-default`: `revisions.reassignAuthor` no longer reads `reassignTo` from the payload or
@@ -160,6 +179,13 @@ Net changes since 5.8.1.
 
 ### Added
 
+- `core`: `resolveResultSchema` (`@michaelthielemann/kestrel/schema`) reports every shape a
+  pipeline's `result` can end in: the folded `output`, then each step's distinct `terminalOutput`,
+  as one `anyOf`; `kestrel-openapi` publishes a route's 200 through it.
+- `insights`: the manifest schema describes `terminalOutput` and `atomicSafe` (the latter was
+  missed when `atomicSafe` was introduced). Its schema-valued step-description members are now open
+  objects (`{ type: "object", additionalProperties: true }`) instead of a bare `{ type: "object" }`,
+  so generated types read them as `{ [key: string]: unknown }`.
 - `authz-roles`: the factory step `authz.validateRoles:<path>` reads an array of role names at
   `payload.<path>` and rejects it with 400 `VALIDATION` (unknown names in `details.unknown`) unless
   every entry is a configured role name; an absent value passes. It writes nothing and needs no

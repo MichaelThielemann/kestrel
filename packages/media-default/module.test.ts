@@ -12,6 +12,7 @@ import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
+import { validateSchema } from "@michaelthielemann/kestrel/schema";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import module, { configSchema } from "./module.ts";
 import { createMediaDefault, type Config, type Media } from "./impl.ts";
@@ -318,6 +319,28 @@ describe("media/default steps via runPipeline", () => {
     expect(again.status).toBe(200);
     expect(boundaryCast<{ id: string }>(again.result, "host").id).toBe(boundaryCast<{ id: string }>(first.result, "host").id);
     expect(emitted).toBe(1);
+  });
+
+  it("upload: an all-idempotent multi-file batch is a 200 ending the pipeline before events.emit", async () => {
+    const { media } = await makeInstance();
+    let emitted = 0;
+    const emit = { "events.emit": async (ctx: Context) => { emitted += 1; return ok(ctx); } };
+    const run = (files: Context["files"]) => runPipeline(pipeline("media.upload", "events.emit"), { files }, { modules: [{ module, instance: media }], steps: emit });
+    const first = await run([file("a.png"), file("b.png")]);
+    expect(first.status).toBe(200);
+    expect(emitted).toBe(1);
+    const repeat = await run([file("a.png"), file("b.png")]);
+    expect(repeat.status).toBe(200);
+    expect(boundaryCast<{ ids: string[] }>(repeat.result, "host").ids).toEqual([]);
+    expect(emitted).toBe(1);
+  });
+
+  it("upload's terminalOutput requires ids on the list-result branch", () => {
+    const description = module.describe!(undefined).upload;
+    const schema = description.terminalOutput;
+    expect(schema).toBeDefined();
+    expect(validateSchema(schema ?? {}, { items: [], errors: [] })).not.toEqual([]);
+    expect(validateSchema(schema ?? {}, { items: [], errors: [], ids: [] })).toEqual([]);
   });
 
   it("upload: multiple files return items and errors matching the declared output schema", async () => {

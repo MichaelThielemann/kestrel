@@ -775,6 +775,156 @@ describe("boot", () => {
     expect([...kestrel.pipelines.keys()]).toContain("getThenAttach");
   });
 
+  it("fails to boot when a step declares terminalOutput without a write to result", async () => {
+    const noWrite = defineModule({
+      name: "nowrite/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({ probe: async (ctx: Context) => ok(ctx) }),
+      describe: () => ({ probe: { summary: "declares terminalOutput but writes nothing", reads: [], writes: [], terminalOutput: { type: "object", properties: { done: { type: "boolean" } }, required: ["done"] } } }),
+    });
+    const probeOnly = definePipeline({ name: "probeOnly", steps: ["nowrite.probe"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./nowrite", config: {} }] };
+    await expect(boot({ config, modules: [...modules, noWrite], pipelines: [...pipelines, probeOnly], logger: silentLogger })).rejects.toThrow(
+      /\[pipelines\/probeOnly\] step "nowrite\.probe" declares terminalOutput without a write to result/,
+    );
+  });
+
+  it("boots a step that declares terminalOutput with an optional result write", async () => {
+    const withWrite = defineModule({
+      name: "withwrite/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({ probe: async (ctx: Context) => ctx.done({ done: true }) }),
+      describe: () => ({ probe: { summary: "declares terminalOutput with an optional result write", reads: [], writes: ["result?"], terminalOutput: { type: "object", properties: { done: { type: "boolean" } }, required: ["done"] } } }),
+    });
+    const probeOnly = definePipeline({ name: "probeOnly", steps: ["withwrite.probe"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./withwrite", config: {} }] };
+    kestrel = await boot({ config, modules: [...modules, withWrite], pipelines: [...pipelines, probeOnly], logger: silentLogger });
+    expect([...kestrel.pipelines.keys()]).toContain("probeOnly");
+  });
+
+  it("treats terminalOutput with a mandatory result write and no output as undeclared output", async () => {
+    const mandatory = defineModule({
+      name: "mandatory/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({ probe: async (ctx: Context) => ctx.done({ done: true }) }),
+      describe: () => ({ probe: { summary: "always ends with a mandatory result write", reads: [], writes: ["result"], terminalOutput: { type: "object", properties: { done: { type: "boolean" } }, required: ["done"] } } }),
+    });
+    const probeOnly = definePipeline({ name: "probeOnly", steps: ["mandatory.probe"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./mandatory", config: {} }] };
+    await expect(boot({ config, modules: [...modules, mandatory], pipelines: [...pipelines, probeOnly], logger: silentLogger })).rejects.toThrow(
+      /\[pipelines\/probeOnly\] step "mandatory\.probe" writes result without declaring output, extendsOutput, extendsItems or binary: true/,
+    );
+  });
+
+  it("fails to boot when a pipeline combines terminalOutput with a binary step", async () => {
+    const mixedBinary = defineModule({
+      name: "mixedbinary/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({
+        probe: async (ctx: Context) => ctx.done({ done: true }),
+        serve: async (ctx: Context) => ok({ ...ctx, result: binaryResult(new Uint8Array([1]), "application/octet-stream") }),
+      }),
+      describe: () => ({
+        probe: { summary: "declares terminalOutput", reads: [], writes: ["result?"], terminalOutput: { type: "object", properties: { done: { type: "boolean" } }, required: ["done"] } },
+        serve: { summary: "a binary step in the same pipeline", reads: [], writes: ["result"], binary: true },
+      }),
+    });
+    const probeThenServe = definePipeline({ name: "probeThenServe", steps: ["mixedbinary.probe", "mixedbinary.serve"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./mixedbinary", config: {} }] };
+    await expect(boot({ config, modules: [...modules, mixedBinary], pipelines: [...pipelines, probeThenServe], logger: silentLogger })).rejects.toThrow(
+      /\[pipelines\/probeThenServe\] step "mixedbinary\.probe" declares terminalOutput in a pipeline with a binary step/,
+    );
+  });
+
+  it("boots a pipeline with only a binary step and no terminalOutput step", async () => {
+    const binaryOnly = defineModule({
+      name: "binaryonly/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({ serve: async (ctx: Context) => ok({ ...ctx, result: binaryResult(new Uint8Array([1]), "application/octet-stream") }) }),
+      describe: () => ({ serve: { summary: "a lone binary step", reads: [], writes: ["result"], binary: true } }),
+    });
+    const serveOnly = definePipeline({ name: "serveOnly", steps: ["binaryonly.serve"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./binaryonly", config: {} }] };
+    kestrel = await boot({ config, modules: [...modules, binaryOnly], pipelines: [...pipelines, serveOnly], logger: silentLogger });
+    expect([...kestrel.pipelines.keys()]).toContain("serveOnly");
+  });
+
+  it("fails to boot for a terminalOutput object schema that declares properties without required", async () => {
+    const looseTerminal = defineModule({
+      name: "looseterminal/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({ probe: async (ctx: Context) => ctx.done({ redirect: { to: "/x" } }) }),
+      describe: () => ({
+        probe: {
+          summary: "terminalOutput with a nested object missing required",
+          reads: [],
+          writes: ["result?"],
+          terminalOutput: { type: "object", properties: { redirect: { type: "object", properties: { to: { type: "string" } } } }, required: ["redirect"] },
+        },
+      }),
+    });
+    const probeOnly = definePipeline({ name: "probeOnly", steps: ["looseterminal.probe"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./looseterminal", config: {} }] };
+    await expect(boot({ config, modules: [...modules, looseTerminal], pipelines: [...pipelines, probeOnly], logger: silentLogger })).rejects.toThrow(
+      /\[pipelines\/probeOnly\] step "looseterminal\.probe"'s output schema at \$\.terminalOutput\.properties\.redirect declares properties without declaring required/,
+    );
+  });
+
+  it("boots when the nested terminalOutput schema declares required throughout", async () => {
+    const okTerminal = defineModule({
+      name: "okterminal/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup(): Promise<null> {
+        return null;
+      },
+      steps: () => ({ probe: async (ctx: Context) => ctx.done({ redirect: { to: "/x" } }) }),
+      describe: () => ({
+        probe: {
+          summary: "terminalOutput with required declared throughout",
+          reads: [],
+          writes: ["result?"],
+          terminalOutput: { type: "object", properties: { redirect: { type: "object", properties: { to: { type: "string" } }, required: ["to"] } }, required: ["redirect"] },
+        },
+      }),
+    });
+    const probeOnly = definePipeline({ name: "probeOnly", steps: ["okterminal.probe"] });
+    const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./okterminal", config: {} }] };
+    kestrel = await boot({ config, modules: [...modules, okTerminal], pipelines: [...pipelines, probeOnly], logger: silentLogger });
+    expect([...kestrel.pipelines.keys()]).toContain("probeOnly");
+  });
+
   it("warns once for an optional read whose key no step of any pipeline writes and no trigger provides", async () => {
     const guesser = defineModule({
       name: "guesser/fake",

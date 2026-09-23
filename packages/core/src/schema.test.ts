@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { StepDescription } from "./defineModule.ts";
-import { coerceQuery, findMissingRequired, resolveOutputSchema, validateSchema } from "./schema.ts";
+import { coerceQuery, findMissingRequired, resolveOutputSchema, resolveResultSchema, validateSchema } from "./schema.ts";
 
 const step = (partial: Partial<StepDescription>): StepDescription => ({ summary: "s", reads: [], writes: [], ...partial });
 
@@ -216,6 +216,12 @@ describe("resolveOutputSchema", () => {
     });
   });
 
+  it("ignores terminalOutput entirely", () => {
+    const terminal = { type: "object", properties: { redirect: { type: "string" } }, required: ["redirect"] };
+    const extension = { type: "object", properties: { a: { type: "string" } }, required: ["a"] };
+    expect(resolveOutputSchema([step({ terminalOutput: terminal }), step({ extendsOutput: extension })])).toEqual(extension);
+  });
+
   it("extendsItems onto a union merges into the items of list-shaped branches and at the root of the others", () => {
     const listBranch = { type: "object", properties: { items: { type: "array", items: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } }, total: { type: "integer" } }, required: ["items", "total"] };
     const singleBranch = { type: "object", properties: { id: { type: "string" } }, required: ["id"] };
@@ -302,6 +308,32 @@ describe("resolveOutputSchema fold contradictions", () => {
     resolveOutputSchema([step({ output: { oneOf: [a, b] } }), step({ extendsOutput: extension })], collect);
     resolveOutputSchema([step({ output: a }), step({ extendsItems: extension })], collect);
     expect(hits).toEqual([]);
+  });
+});
+
+describe("resolveResultSchema", () => {
+  const page = { type: "object", properties: { id: { type: "string" } }, required: ["id"] };
+  const terminal = { type: "object", properties: { redirect: { type: "object", properties: { to: { type: "string" } }, required: ["to"] } }, required: ["redirect"] };
+
+  it("lists the fold, then each distinct terminalOutput, as anyOf", () => {
+    expect(resolveResultSchema([step({ output: page }), step({ terminalOutput: terminal })])).toEqual({ anyOf: [page, terminal] });
+  });
+
+  it("returns the fold as is when no step declares a distinct terminalOutput", () => {
+    expect(resolveResultSchema([step({ output: page })])).toEqual(page);
+  });
+
+  it("leaves out a terminalOutput equal to one already listed, keys sorted", () => {
+    const reordered = { required: ["redirect"], type: "object", properties: { redirect: { required: ["to"], type: "object", properties: { to: { type: "string" } } } } };
+    expect(resolveResultSchema([step({ output: terminal }), step({ terminalOutput: reordered })])).toEqual(terminal);
+  });
+
+  it("returns undefined when there is neither a fold nor a terminalOutput", () => {
+    expect(resolveResultSchema([step({}), step({})])).toBeUndefined();
+  });
+
+  it("returns the sole terminalOutput when there is no fold", () => {
+    expect(resolveResultSchema([step({ terminalOutput: terminal })])).toEqual(terminal);
   });
 });
 

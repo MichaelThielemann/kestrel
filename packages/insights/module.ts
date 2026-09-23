@@ -9,21 +9,24 @@ export const configSchema = z.object({ recentFailures: z.number().int().min(0).m
 
 const STRINGS: JsonSchema = { type: "array", items: { type: "string" } };
 const NULLABLE_NUMBER: JsonSchema = { type: ["number", "null"] };
+const JSON_SCHEMA: JsonSchema = { type: "object", additionalProperties: true };
 const STEP_DESCRIPTION: JsonSchema = {
   type: "object",
   properties: {
     summary: { type: "string" },
     reads: STRINGS,
     writes: STRINGS,
-    input: { type: "object" },
-    output: { type: "object" },
-    extendsOutput: { type: "object" },
-    extendsItems: { type: "object" },
-    query: { type: "object", additionalProperties: { type: "object" } },
+    input: JSON_SCHEMA,
+    output: JSON_SCHEMA,
+    extendsOutput: JSON_SCHEMA,
+    extendsItems: JSON_SCHEMA,
+    terminalOutput: JSON_SCHEMA,
+    query: { type: "object", additionalProperties: JSON_SCHEMA },
     errors: { type: "object", additionalProperties: { type: "string" } },
     security: { type: "string", enum: ["required", "optional"] },
     multipart: { type: "boolean" },
     binary: { type: "boolean" },
+    atomicSafe: { type: "boolean" },
   },
   required: ["summary", "reads", "writes"],
 };

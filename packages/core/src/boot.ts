@@ -138,8 +138,14 @@ function warnUnemittedEvents(modules: readonly ModuleDefinition[], pipelines: Re
   return warnings;
 }
 
+function solelyOptionalResultWrite(description: StepDescription): boolean {
+  const resultWrites = description.writes.filter((path) => writeRoot(path) === "result");
+  return resultWrites.length === 1 && resultWrites[0] === "result?";
+}
+
 function declaresOutput(description: StepDescription): boolean {
-  return description.output !== undefined || description.extendsOutput !== undefined || description.extendsItems !== undefined || description.binary === true;
+  if (description.output !== undefined || description.extendsOutput !== undefined || description.extendsItems !== undefined || description.binary === true) return true;
+  return description.terminalOutput !== undefined && solelyOptionalResultWrite(description);
 }
 
 function checkUndeclaredOutput(pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
@@ -156,6 +162,7 @@ function declaredOutputSchemas(description: StepDescription): Array<{ key: strin
   if (description.output !== undefined) schemas.push({ key: "output", schema: description.output });
   if (description.extendsOutput !== undefined) schemas.push({ key: "extendsOutput", schema: description.extendsOutput });
   if (description.extendsItems !== undefined) schemas.push({ key: "extendsItems", schema: description.extendsItems });
+  if (description.terminalOutput !== undefined) schemas.push({ key: "terminalOutput", schema: description.terminalOutput });
   return schemas;
 }
 
@@ -182,6 +189,21 @@ function checkOutputFold(pipelines: ReadonlyMap<string, ResolvedPipeline>): void
         throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}"'s ${keyword} cannot fold onto the active output schema: ${detail}`);
       },
     );
+  }
+}
+
+function checkTerminalOutputPlacement(pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
+  for (const pipeline of pipelines.values()) {
+    const hasBinary = pipeline.steps.some((s) => s.description.binary === true);
+    for (const step of pipeline.steps) {
+      if (step.description.terminalOutput === undefined) continue;
+      if (!step.description.writes.some((path) => writeRoot(path) === "result")) {
+        throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" declares terminalOutput without a write to result`);
+      }
+      if (hasBinary) {
+        throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" declares terminalOutput in a pipeline with a binary step`);
+      }
+    }
   }
 }
 
@@ -401,6 +423,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     checkUndeclaredOutput(pipelines);
     checkUndeclaredRequired(pipelines);
     checkOutputFold(pipelines);
+    checkTerminalOutputPlacement(pipelines);
     const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUnwrittenOptionalReads(pipelines, steps, logger)];
 
     const runs = createRunTracker();

@@ -106,6 +106,29 @@ describe("stepTable", () => {
     const [, , row] = stepTable([step]);
     expect(row).toBe("| `widget.create` | Create a widget | – | `result` | – | – | – | – | yes |");
   });
+
+  it("appends ends: <brief> to the Output column for a step declaring terminalOutput", () => {
+    const step: StepManifest = { name: "widget.stop", module: "widget/default", factory: false, description: { summary: "Maybe stop", reads: [], writes: ["result?"], terminalOutput: { type: "object", properties: { done: { type: "boolean" } }, required: ["done"], additionalProperties: false } } };
+    const [, , row] = stepTable([step]);
+    expect(row).toBe("| `widget.stop` | Maybe stop | – | `result?` | – | – (ends: { done: boolean }) | – | – | no |");
+  });
+
+  it("puts ends: <brief> next to the continuing output when both are declared", () => {
+    const step: StepManifest = {
+      name: "widget.upload",
+      module: "widget/default",
+      factory: false,
+      description: {
+        summary: "Upload",
+        reads: [],
+        writes: ["result"],
+        output: { type: "object", properties: { id: { type: "string" } }, required: ["id"], additionalProperties: false },
+        terminalOutput: { type: "object", properties: { id: { type: "string" } }, required: ["id"], additionalProperties: false },
+      },
+    };
+    const [, , row] = stepTable([step]);
+    expect(row).toBe("| `widget.upload` | Upload | – | `result` | – | { id: string } (ends: { id: string }) | – | – | no |");
+  });
 });
 
 describe("groupedArrowChain", () => {

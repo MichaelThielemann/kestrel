@@ -129,6 +129,26 @@ function checkOutput(step: ResolvedStep, descriptionsSoFar: readonly StepDescrip
   }
 }
 
+function declaresOnlyTerminal(description: StepDescription): boolean {
+  return description.terminalOutput !== undefined && description.output === undefined && description.extendsOutput === undefined && description.extendsItems === undefined;
+}
+
+function checkOnlyTerminal(step: ResolvedStep, before: Context, after: Context): void {
+  if (!declaresOnlyTerminal(step.description) || Object.is(before.result, after.result)) return;
+  throw new Error(`step "${step.name}" changed result without ctx.done() but declares only terminalOutput`);
+}
+
+function checkTerminalOutput(step: ResolvedStep, after: Context): void {
+  const schema = step.description.terminalOutput;
+  if (schema === undefined) {
+    throw new Error(`step "${step.name}" ended the run with ctx.done() without declaring describe().terminalOutput`);
+  }
+  const problems = validateSchema(schema, after.result);
+  if (problems.length > 0) {
+    throw new Error(`step "${step.name}": result does not match describe().terminalOutput (${problems.map((p) => `${p.path} ${p.message}`).join("; ")})`);
+  }
+}
+
 function inputProblems(description: ResolvedStep["description"], ctx: Context): SchemaProblem[] {
   const problems: SchemaProblem[] = description.input === undefined ? [] : validateSchema(description.input, ctx.body);
   const query = description.query;
@@ -222,12 +242,18 @@ async function runStep(
     checkWrites(step, ctx, out.value);
     const before = ctx;
     const after = Object.freeze(out.value);
+    const ended = Reflect.get(after, DONE) === true;
     if (validateOutput) {
-      descriptionsSoFar.push(step.description);
-      if (writesResult(step)) checkOutput(step, descriptionsSoFar, before, after);
+      if (ended) {
+        checkTerminalOutput(step, after);
+      } else {
+        descriptionsSoFar.push(step.description);
+        checkOnlyTerminal(step, before, after);
+        if (writesResult(step)) checkOutput(step, descriptionsSoFar, before, after);
+      }
     }
     log("ok", 200);
-    if (Reflect.get(after, DONE) === true) return { kind: "done", result: { runId, status: 200, result: after.result } };
+    if (ended) return { kind: "done", result: { runId, status: 200, result: after.result } };
     return { kind: "ok", ctx: after };
   } catch (caught) {
     log("error", 500);

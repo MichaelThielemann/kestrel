@@ -375,6 +375,50 @@ describe("runPipeline output validation", () => {
   });
 });
 
+describe("runPipeline terminal output validation", () => {
+  const TERMINAL = { type: "object", properties: { redirect: { type: "string" } }, required: ["redirect"] };
+
+  it("a ctx.done() without terminalOutput fails the run naming the step", async () => {
+    const step = { name: "maybe", description: { summary: "test", reads: [], writes: ["result?"] }, fn: async (ctx: Context) => ctx.done({ redirect: "/x" }) };
+    const res = await runPipeline({ name: "p", steps: [step] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    expect(res.status).toBe(500);
+    expect(res.error).toContain('step "maybe" ended the run with ctx.done() without declaring describe().terminalOutput');
+  });
+
+  it("without validateOutput, the same ctx.done() still ends the run with 200", async () => {
+    const step = { name: "maybe", description: { summary: "test", reads: [], writes: ["result?"] }, fn: async (ctx: Context) => ctx.done({ redirect: "/x" }) };
+    const res = await runPipeline({ name: "p", steps: [step] }, input, collectingLogger().logger);
+    expect(res).toMatchObject({ status: 200, result: { redirect: "/x" } });
+  });
+
+  it("a done result that does not match terminalOutput fails, naming the path", async () => {
+    const step = { name: "maybe", description: { summary: "test", reads: [], writes: ["result?"], terminalOutput: TERMINAL }, fn: async (ctx: Context) => ctx.done({ redirect: 1 }) };
+    const res = await runPipeline({ name: "p", steps: [step] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    expect(res.status).toBe(500);
+    expect(res.error).toContain('step "maybe": result does not match describe().terminalOutput');
+    expect(res.error).toContain("$.redirect expected string, got number");
+  });
+
+  it("a done result matching terminalOutput passes", async () => {
+    const step = { name: "maybe", description: { summary: "test", reads: [], writes: ["result?"], terminalOutput: TERMINAL }, fn: async (ctx: Context) => ctx.done({ redirect: "/x" }) };
+    const res = await runPipeline({ name: "p", steps: [step] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    expect(res).toMatchObject({ status: 200, result: { redirect: "/x" } });
+  });
+
+  it("a step declaring only terminalOutput that changes result without ctx.done() fails", async () => {
+    const step = { name: "sneaky", description: { summary: "test", reads: [], writes: ["result?"], terminalOutput: TERMINAL }, fn: async (ctx: Context) => ok({ ...ctx, result: { redirect: "/x" } }) };
+    const res = await runPipeline({ name: "p", steps: [step] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    expect(res.status).toBe(500);
+    expect(res.error).toContain('step "sneaky" changed result without ctx.done() but declares only terminalOutput');
+  });
+
+  it("a step declaring only terminalOutput that leaves result unchanged passes", async () => {
+    const step = { name: "quiet", description: { summary: "test", reads: [], writes: ["result?"], terminalOutput: TERMINAL }, fn: async (ctx: Context) => ok(ctx) };
+    const res = await runPipeline({ name: "p", steps: [step] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("runPipeline observer", () => {
   function recording() {
     const events: string[] = [];

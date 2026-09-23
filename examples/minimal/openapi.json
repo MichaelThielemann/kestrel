@@ -1513,21 +1513,30 @@
                                 }
                               },
                               "input": {
-                                "type": "object"
+                                "type": "object",
+                                "additionalProperties": true
                               },
                               "output": {
-                                "type": "object"
+                                "type": "object",
+                                "additionalProperties": true
                               },
                               "extendsOutput": {
-                                "type": "object"
+                                "type": "object",
+                                "additionalProperties": true
                               },
                               "extendsItems": {
-                                "type": "object"
+                                "type": "object",
+                                "additionalProperties": true
+                              },
+                              "terminalOutput": {
+                                "type": "object",
+                                "additionalProperties": true
                               },
                               "query": {
                                 "type": "object",
                                 "additionalProperties": {
-                                  "type": "object"
+                                  "type": "object",
+                                  "additionalProperties": true
                                 }
                               },
                               "errors": {
@@ -1547,6 +1556,9 @@
                                 "type": "boolean"
                               },
                               "binary": {
+                                "type": "boolean"
+                              },
+                              "atomicSafe": {
                                 "type": "boolean"
                               }
                             },
@@ -1606,21 +1618,30 @@
                                       }
                                     },
                                     "input": {
-                                      "type": "object"
+                                      "type": "object",
+                                      "additionalProperties": true
                                     },
                                     "output": {
-                                      "type": "object"
+                                      "type": "object",
+                                      "additionalProperties": true
                                     },
                                     "extendsOutput": {
-                                      "type": "object"
+                                      "type": "object",
+                                      "additionalProperties": true
                                     },
                                     "extendsItems": {
-                                      "type": "object"
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    },
+                                    "terminalOutput": {
+                                      "type": "object",
+                                      "additionalProperties": true
                                     },
                                     "query": {
                                       "type": "object",
                                       "additionalProperties": {
-                                        "type": "object"
+                                        "type": "object",
+                                        "additionalProperties": true
                                       }
                                     },
                                     "errors": {
@@ -1640,6 +1661,9 @@
                                       "type": "boolean"
                                     },
                                     "binary": {
+                                      "type": "boolean"
+                                    },
+                                    "atomicSafe": {
                                       "type": "boolean"
                                     }
                                   },
@@ -7143,146 +7167,291 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
+                  "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "filename": {
-                          "type": "string"
-                        },
-                        "folder": {
-                          "type": "string"
-                        },
-                        "contentType": {
-                          "type": "string"
-                        },
-                        "size": {
-                          "type": "number"
-                        },
-                        "key": {
-                          "type": "string"
-                        },
-                        "checksum": {
-                          "type": [
-                            "string",
-                            "null"
-                          ],
-                          "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                        },
-                        "status": {
-                          "type": "string",
-                          "enum": [
-                            "uploading",
-                            "ready",
-                            "failed"
-                          ],
-                          "description": "only ready items are listed, readable and downloadable"
-                        },
-                        "createdAt": {
-                          "type": "number"
-                        },
-                        "updatedAt": {
-                          "type": "number"
-                        },
-                        "provenance": {
+                      "oneOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "origin": {
-                              "type": "string",
-                              "enum": [
-                                "human",
-                                "ai",
-                                "mixed",
-                                "unknown"
-                              ]
-                            },
-                            "tool": {
+                            "id": {
                               "type": "string"
                             },
-                            "model": {
+                            "filename": {
                               "type": "string"
                             },
-                            "at": {
+                            "folder": {
+                              "type": "string"
+                            },
+                            "contentType": {
+                              "type": "string"
+                            },
+                            "size": {
                               "type": "number"
-                            }
-                          },
-                          "required": [
-                            "origin"
-                          ],
-                          "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
-                        },
-                        "width": {
-                          "type": [
-                            "number",
-                            "null"
-                          ]
-                        },
-                        "height": {
-                          "type": [
-                            "number",
-                            "null"
-                          ]
-                        },
-                        "alt": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "title": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "description": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "_events": {
-                          "type": "object",
-                          "properties": {
+                            },
+                            "key": {
+                              "type": "string"
+                            },
+                            "checksum": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
+                            },
                             "status": {
                               "type": "string",
                               "enum": [
-                                "done",
-                                "error",
-                                "pending",
-                                "queued"
+                                "uploading",
+                                "ready",
+                                "failed"
+                              ],
+                              "description": "only ready items are listed, readable and downloadable"
+                            },
+                            "createdAt": {
+                              "type": "number"
+                            },
+                            "updatedAt": {
+                              "type": "number"
+                            },
+                            "provenance": {
+                              "type": "object",
+                              "properties": {
+                                "origin": {
+                                  "type": "string",
+                                  "enum": [
+                                    "human",
+                                    "ai",
+                                    "mixed",
+                                    "unknown"
+                                  ]
+                                },
+                                "tool": {
+                                  "type": "string"
+                                },
+                                "model": {
+                                  "type": "string"
+                                },
+                                "at": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "origin"
+                              ],
+                              "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
+                            },
+                            "width": {
+                              "type": [
+                                "number",
+                                "null"
                               ]
                             },
-                            "pipelines": {
+                            "height": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "alt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "title": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "description": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "_events": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "done",
+                                    "error",
+                                    "pending",
+                                    "queued"
+                                  ]
+                                },
+                                "pipelines": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "event": {
+                                        "type": "string"
+                                      },
+                                      "pipeline": {
+                                        "type": "string"
+                                      },
+                                      "status": {
+                                        "type": "string",
+                                        "enum": [
+                                          "done",
+                                          "error",
+                                          "pending",
+                                          "queued"
+                                        ]
+                                      },
+                                      "attempts": {
+                                        "type": "integer"
+                                      },
+                                      "dead": {
+                                        "type": "boolean"
+                                      },
+                                      "error": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "event",
+                                      "pipeline",
+                                      "status",
+                                      "attempts",
+                                      "dead",
+                                      "error"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "pipelines"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "_events",
+                            "alt",
+                            "checksum",
+                            "contentType",
+                            "createdAt",
+                            "description",
+                            "filename",
+                            "folder",
+                            "height",
+                            "id",
+                            "key",
+                            "provenance",
+                            "size",
+                            "status",
+                            "title",
+                            "updatedAt",
+                            "width"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "items": {
                               "type": "array",
                               "items": {
                                 "type": "object",
                                 "properties": {
-                                  "event": {
+                                  "id": {
                                     "type": "string"
                                   },
-                                  "pipeline": {
+                                  "filename": {
                                     "type": "string"
+                                  },
+                                  "folder": {
+                                    "type": "string"
+                                  },
+                                  "contentType": {
+                                    "type": "string"
+                                  },
+                                  "size": {
+                                    "type": "number"
+                                  },
+                                  "key": {
+                                    "type": "string"
+                                  },
+                                  "checksum": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
                                   },
                                   "status": {
                                     "type": "string",
                                     "enum": [
-                                      "done",
-                                      "error",
-                                      "pending",
-                                      "queued"
+                                      "uploading",
+                                      "ready",
+                                      "failed"
+                                    ],
+                                    "description": "only ready items are listed, readable and downloadable"
+                                  },
+                                  "createdAt": {
+                                    "type": "number"
+                                  },
+                                  "updatedAt": {
+                                    "type": "number"
+                                  },
+                                  "provenance": {
+                                    "type": "object",
+                                    "properties": {
+                                      "origin": {
+                                        "type": "string",
+                                        "enum": [
+                                          "human",
+                                          "ai",
+                                          "mixed",
+                                          "unknown"
+                                        ]
+                                      },
+                                      "tool": {
+                                        "type": "string"
+                                      },
+                                      "model": {
+                                        "type": "string"
+                                      },
+                                      "at": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "origin"
+                                    ],
+                                    "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
+                                  },
+                                  "width": {
+                                    "type": [
+                                      "number",
+                                      "null"
                                     ]
                                   },
-                                  "attempts": {
-                                    "type": "integer"
+                                  "height": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ]
                                   },
-                                  "dead": {
-                                    "type": "boolean"
+                                  "alt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
                                   },
-                                  "error": {
+                                  "title": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "description": {
                                     "type": [
                                       "string",
                                       "null"
@@ -7290,240 +7459,351 @@
                                   }
                                 },
                                 "required": [
-                                  "event",
-                                  "pipeline",
+                                  "id",
+                                  "filename",
+                                  "folder",
+                                  "contentType",
+                                  "size",
+                                  "key",
+                                  "checksum",
                                   "status",
-                                  "attempts",
-                                  "dead",
-                                  "error"
+                                  "createdAt",
+                                  "updatedAt",
+                                  "provenance",
+                                  "width",
+                                  "height",
+                                  "alt",
+                                  "title",
+                                  "description"
                                 ]
                               }
+                            },
+                            "errors": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "filename": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "number"
+                                  },
+                                  "code": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "filename",
+                                  "status",
+                                  "code",
+                                  "message"
+                                ]
+                              }
+                            },
+                            "ids": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "description": "the newly stored items only; an unchanged re-upload is in `items` but not here, and is not announced as an event"
+                            },
+                            "_events": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "done",
+                                    "error",
+                                    "pending",
+                                    "queued"
+                                  ]
+                                },
+                                "pipelines": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "event": {
+                                        "type": "string"
+                                      },
+                                      "pipeline": {
+                                        "type": "string"
+                                      },
+                                      "status": {
+                                        "type": "string",
+                                        "enum": [
+                                          "done",
+                                          "error",
+                                          "pending",
+                                          "queued"
+                                        ]
+                                      },
+                                      "attempts": {
+                                        "type": "integer"
+                                      },
+                                      "dead": {
+                                        "type": "boolean"
+                                      },
+                                      "error": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "event",
+                                      "pipeline",
+                                      "status",
+                                      "attempts",
+                                      "dead",
+                                      "error"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "pipelines"
+                              ]
                             }
                           },
                           "required": [
-                            "status",
-                            "pipelines"
+                            "_events",
+                            "errors",
+                            "ids",
+                            "items"
                           ]
                         }
-                      },
-                      "required": [
-                        "_events",
-                        "alt",
-                        "checksum",
-                        "contentType",
-                        "createdAt",
-                        "description",
-                        "filename",
-                        "folder",
-                        "height",
-                        "id",
-                        "key",
-                        "provenance",
-                        "size",
-                        "status",
-                        "title",
-                        "updatedAt",
-                        "width"
                       ]
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "items": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "filename": {
-                                "type": "string"
-                              },
-                              "folder": {
-                                "type": "string"
-                              },
-                              "contentType": {
-                                "type": "string"
-                              },
-                              "size": {
-                                "type": "number"
-                              },
-                              "key": {
-                                "type": "string"
-                              },
-                              "checksum": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ],
-                                "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": [
-                                  "uploading",
-                                  "ready",
-                                  "failed"
-                                ],
-                                "description": "only ready items are listed, readable and downloadable"
-                              },
-                              "createdAt": {
-                                "type": "number"
-                              },
-                              "updatedAt": {
-                                "type": "number"
-                              },
-                              "provenance": {
-                                "type": "object",
-                                "properties": {
-                                  "origin": {
-                                    "type": "string",
-                                    "enum": [
-                                      "human",
-                                      "ai",
-                                      "mixed",
-                                      "unknown"
-                                    ]
-                                  },
-                                  "tool": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  },
-                                  "at": {
-                                    "type": "number"
-                                  }
-                                },
-                                "required": [
-                                  "origin"
-                                ],
-                                "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
-                              },
-                              "width": {
-                                "type": [
-                                  "number",
-                                  "null"
-                                ]
-                              },
-                              "height": {
-                                "type": [
-                                  "number",
-                                  "null"
-                                ]
-                              },
-                              "alt": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
-                              },
-                              "title": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
-                              },
-                              "description": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "filename",
-                              "folder",
-                              "contentType",
-                              "size",
-                              "key",
-                              "checksum",
-                              "status",
-                              "createdAt",
-                              "updatedAt",
-                              "provenance",
-                              "width",
-                              "height",
-                              "alt",
-                              "title",
-                              "description"
-                            ]
-                          }
-                        },
-                        "errors": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "filename": {
-                                "type": "string"
-                              },
-                              "status": {
-                                "type": "number"
-                              },
-                              "code": {
-                                "type": "string"
-                              },
-                              "message": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "filename",
-                              "status",
-                              "code",
-                              "message"
-                            ]
-                          }
-                        },
-                        "ids": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "the newly stored items only; an unchanged re-upload is in `items` but not here, and is not announced as an event"
-                        },
-                        "_events": {
+                      "oneOf": [
+                        {
                           "type": "object",
                           "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "filename": {
+                              "type": "string"
+                            },
+                            "folder": {
+                              "type": "string"
+                            },
+                            "contentType": {
+                              "type": "string"
+                            },
+                            "size": {
+                              "type": "number"
+                            },
+                            "key": {
+                              "type": "string"
+                            },
+                            "checksum": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
+                            },
                             "status": {
                               "type": "string",
                               "enum": [
-                                "done",
-                                "error",
-                                "pending",
-                                "queued"
+                                "uploading",
+                                "ready",
+                                "failed"
+                              ],
+                              "description": "only ready items are listed, readable and downloadable"
+                            },
+                            "createdAt": {
+                              "type": "number"
+                            },
+                            "updatedAt": {
+                              "type": "number"
+                            },
+                            "provenance": {
+                              "type": "object",
+                              "properties": {
+                                "origin": {
+                                  "type": "string",
+                                  "enum": [
+                                    "human",
+                                    "ai",
+                                    "mixed",
+                                    "unknown"
+                                  ]
+                                },
+                                "tool": {
+                                  "type": "string"
+                                },
+                                "model": {
+                                  "type": "string"
+                                },
+                                "at": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "origin"
+                              ],
+                              "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
+                            },
+                            "width": {
+                              "type": [
+                                "number",
+                                "null"
                               ]
                             },
-                            "pipelines": {
+                            "height": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "alt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "title": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "description": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "filename",
+                            "folder",
+                            "contentType",
+                            "size",
+                            "key",
+                            "checksum",
+                            "status",
+                            "createdAt",
+                            "updatedAt",
+                            "provenance",
+                            "width",
+                            "height",
+                            "alt",
+                            "title",
+                            "description"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "items": {
                               "type": "array",
                               "items": {
                                 "type": "object",
                                 "properties": {
-                                  "event": {
+                                  "id": {
                                     "type": "string"
                                   },
-                                  "pipeline": {
+                                  "filename": {
                                     "type": "string"
+                                  },
+                                  "folder": {
+                                    "type": "string"
+                                  },
+                                  "contentType": {
+                                    "type": "string"
+                                  },
+                                  "size": {
+                                    "type": "number"
+                                  },
+                                  "key": {
+                                    "type": "string"
+                                  },
+                                  "checksum": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
                                   },
                                   "status": {
                                     "type": "string",
                                     "enum": [
-                                      "done",
-                                      "error",
-                                      "pending",
-                                      "queued"
+                                      "uploading",
+                                      "ready",
+                                      "failed"
+                                    ],
+                                    "description": "only ready items are listed, readable and downloadable"
+                                  },
+                                  "createdAt": {
+                                    "type": "number"
+                                  },
+                                  "updatedAt": {
+                                    "type": "number"
+                                  },
+                                  "provenance": {
+                                    "type": "object",
+                                    "properties": {
+                                      "origin": {
+                                        "type": "string",
+                                        "enum": [
+                                          "human",
+                                          "ai",
+                                          "mixed",
+                                          "unknown"
+                                        ]
+                                      },
+                                      "tool": {
+                                        "type": "string"
+                                      },
+                                      "model": {
+                                        "type": "string"
+                                      },
+                                      "at": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "origin"
+                                    ],
+                                    "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
+                                  },
+                                  "width": {
+                                    "type": [
+                                      "number",
+                                      "null"
                                     ]
                                   },
-                                  "attempts": {
-                                    "type": "integer"
+                                  "height": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ]
                                   },
-                                  "dead": {
-                                    "type": "boolean"
+                                  "alt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
                                   },
-                                  "error": {
+                                  "title": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "description": {
                                     "type": [
                                       "string",
                                       "null"
@@ -7531,27 +7811,65 @@
                                   }
                                 },
                                 "required": [
-                                  "event",
-                                  "pipeline",
+                                  "id",
+                                  "filename",
+                                  "folder",
+                                  "contentType",
+                                  "size",
+                                  "key",
+                                  "checksum",
                                   "status",
-                                  "attempts",
-                                  "dead",
-                                  "error"
+                                  "createdAt",
+                                  "updatedAt",
+                                  "provenance",
+                                  "width",
+                                  "height",
+                                  "alt",
+                                  "title",
+                                  "description"
                                 ]
                               }
+                            },
+                            "errors": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "filename": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "type": "number"
+                                  },
+                                  "code": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "filename",
+                                  "status",
+                                  "code",
+                                  "message"
+                                ]
+                              }
+                            },
+                            "ids": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "description": "the newly stored items only; an unchanged re-upload is in `items` but not here, and is not announced as an event"
                             }
                           },
                           "required": [
-                            "status",
-                            "pipelines"
+                            "items",
+                            "errors",
+                            "ids"
                           ]
                         }
-                      },
-                      "required": [
-                        "_events",
-                        "errors",
-                        "ids",
-                        "items"
                       ]
                     }
                   ]
@@ -11773,7 +12091,7 @@
     "/site/{path}": {
       "get": {
         "operationId": "resolvePage",
-        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → Answer { redirect: { to, status } } and end the pipeline when the request path matches a rule → Resolve a site path to a pages document (default locale unprefixed) → Replace internal kestrel:<type>:<id> references in the pages document with public paths (_links map added)",
+        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → End the pipeline with { redirect: { to, status } } when the request path matches a rule; pass through otherwise → Resolve a site path to a pages document (default locale unprefixed) → Replace internal kestrel:<type>:<id> references in the pages document with public paths (_links map added)",
         "tags": [
           "site"
         ],
@@ -11810,122 +12128,157 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "createdAt": {
-                      "type": "number"
-                    },
-                    "updatedAt": {
-                      "type": "number"
-                    },
-                    "slug": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "title": {
-                      "anyOf": [
-                        {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
                           "type": "string"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "body": {
-                      "anyOf": [
-                        {},
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "status": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "draft",
-                            "finished",
-                            "published"
+                        "createdAt": {
+                          "type": "number"
+                        },
+                        "updatedAt": {
+                          "type": "number"
+                        },
+                        "slug": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                            },
+                            {
+                              "type": "null"
+                            }
                           ]
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "hero": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "description": "id of a media"
+                        "title": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "seo": {
-                      "anyOf": [
-                        {},
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "_locales": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "string"
-                      },
-                      "description": "origin locale per field, only with fallback"
-                    },
-                    "_translations": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "boolean"
-                      },
-                      "description": "per locale: required localized fields present"
-                    },
-                    "_locale": {
-                      "type": "string",
-                      "description": "effective locale of a site-resolved document"
-                    },
-                    "_links": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "object",
-                        "properties": {
-                          "path": {
+                        "body": {
+                          "anyOf": [
+                            {},
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "draft",
+                                "finished",
+                                "published"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "hero": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "description": "id of a media"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "seo": {
+                          "anyOf": [
+                            {},
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "_locales": {
+                          "type": "object",
+                          "additionalProperties": {
                             "type": "string"
                           },
-                          "locale": {
-                            "type": "string"
-                          },
-                          "broken": {
+                          "description": "origin locale per field, only with fallback"
+                        },
+                        "_translations": {
+                          "type": "object",
+                          "additionalProperties": {
                             "type": "boolean"
-                          }
+                          },
+                          "description": "per locale: required localized fields present"
                         },
-                        "required": []
+                        "_locale": {
+                          "type": "string",
+                          "description": "effective locale of a site-resolved document"
+                        },
+                        "_links": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "locale": {
+                                "type": "string"
+                              },
+                              "broken": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": []
+                          },
+                          "description": "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve"
+                        }
                       },
-                      "description": "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve"
+                      "required": [
+                        "createdAt",
+                        "id",
+                        "updatedAt"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "redirect": {
+                          "type": "object",
+                          "properties": {
+                            "to": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "integer",
+                              "enum": [
+                                301,
+                                302,
+                                307,
+                                308
+                              ]
+                            }
+                          },
+                          "required": [
+                            "to",
+                            "status"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "redirect"
+                      ],
+                      "additionalProperties": false
                     }
-                  },
-                  "required": [
-                    "createdAt",
-                    "id",
-                    "updatedAt"
                   ]
                 }
               }

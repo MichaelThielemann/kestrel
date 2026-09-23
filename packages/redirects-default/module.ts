@@ -73,10 +73,15 @@ export default defineModule({
       errors: { 400: "Row N: <reason>" },
     },
     lookup: {
-      summary: "Answer { redirect: { to, status } } and end the pipeline when the request path matches a rule",
+      summary: "End the pipeline with { redirect: { to, status } } when the request path matches a rule; pass through otherwise",
       reads: ["params.path"],
       writes: ["result?"],
-      output: { type: "object", properties: { redirect: { type: "object", properties: { to: { type: "string" }, status: { type: "integer" } }, required: ["to", "status"] } }, required: ["redirect"] },
+      terminalOutput: {
+        type: "object",
+        properties: { redirect: { type: "object", properties: { to: { type: "string" }, status: { type: "integer", enum: [301, 302, 307, 308] } }, required: ["to", "status"], additionalProperties: false } },
+        required: ["redirect"],
+        additionalProperties: false,
+      },
     },
     export: {
       summary: "Write redirects.json to the blobstore (adds `redirects: { rules, skipped }` to the result)",

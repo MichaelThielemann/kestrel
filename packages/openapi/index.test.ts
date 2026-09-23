@@ -44,6 +44,7 @@ const demo = defineModule({
     replaceAfterExtend: pass,
     list: pass,
     attachToItems: pass,
+    redirectish: pass,
   }),
   describe: () => ({
     requireUser: { summary: "Require a valid session", reads: [], writes: [], security: "required", errors: { 401: "not authenticated" } },
@@ -59,6 +60,7 @@ const demo = defineModule({
     replaceAfterExtend: { summary: "Replace after extend", reads: [], writes: ["result"], output: { type: "object", properties: { onlyThis: { type: "string" } }, required: ["onlyThis"] } },
     list: { summary: "List", reads: [], writes: ["result"], output: { type: "object", properties: { items: { type: "array", items: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } }, total: { type: "integer" } }, required: ["items", "total"] } },
     attachToItems: { summary: "Attach to items", reads: ["result"], writes: ["result.variants"], extendsItems: { type: "object", properties: { variants: { type: "array", items: { type: "string" } } }, required: ["variants"] } },
+    redirectish: { summary: "End with a redirect on a hit, pass through otherwise", reads: [], writes: ["result?"], terminalOutput: { type: "object", properties: { redirect: { type: "object", properties: { to: { type: "string" } }, required: ["to"] } }, required: ["redirect"] } },
   }),
 });
 const config = {
@@ -75,6 +77,7 @@ const config = {
     { http: "POST /replace-after-extend", pipeline: "replaceAfterExtendOnly" },
     { http: "GET /listed", pipeline: "listed" },
     { http: "GET /single", pipeline: "single" },
+    { http: "GET /redirectish/:id", pipeline: "redirectish" },
   ],
   http: null,
 };
@@ -89,6 +92,7 @@ const pipelines = [
   definePipeline({ name: "replaceAfterExtendOnly", steps: ["demo.exportRedirects", "demo.replaceAfterExtend"] }),
   definePipeline({ name: "listed", steps: ["demo.list", "demo.attachToItems"] }),
   definePipeline({ name: "single", steps: ["demo.replaceAfterExtend", "demo.attachToItems"] }),
+  definePipeline({ name: "redirectish", steps: ["demo.redirectish", "demo.get:pages"] }),
 ];
 
 async function generate(mountPath?: string) {
@@ -100,7 +104,7 @@ describe("kestrel-openapi", () => {
   it("emits one operation per trigger with params, body, responses and security", async () => {
     const doc = await generate();
     expect(doc.openapi).toBe("3.1.0");
-    expect(Object.keys(doc.paths).sort()).toEqual(["/listed", "/lonely-extend", "/media", "/media/{id}/file", "/pages", "/pages/{id}", "/plain", "/publish-all", "/replace-after-extend", "/single", "/site/{path}"]);
+    expect(Object.keys(doc.paths).sort()).toEqual(["/listed", "/lonely-extend", "/media", "/media/{id}/file", "/pages", "/pages/{id}", "/plain", "/publish-all", "/redirectish/{id}", "/replace-after-extend", "/single", "/site/{path}"]);
     const create = doc.paths["/pages"]?.post;
     expect(create?.operationId).toBe("createPage");
     expect(create?.security).toEqual([{ bearerAuth: [] }]);
@@ -210,5 +214,22 @@ describe("kestrel-openapi", () => {
       properties: { onlyThis: { type: "string" }, variants: { type: "array", items: { type: "string" } } },
       required: ["onlyThis", "variants"],
     });
+  });
+
+  it("the 200 is anyOf the fold and each distinct terminalOutput", async () => {
+    const doc = await generate();
+    const redirectish = doc.paths["/redirectish/{id}"]?.get;
+    expect(redirectish?.responses["200"]?.content["application/json"].schema).toEqual({
+      anyOf: [
+        { type: "object" },
+        { type: "object", properties: { redirect: { type: "object", properties: { to: { type: "string" } }, required: ["to"] } }, required: ["redirect"] },
+      ],
+    });
+  });
+
+  it("keeps the plain schema when no step of the pipeline declares a terminalOutput", async () => {
+    const doc = await generate();
+    const create = doc.paths["/pages"]?.post;
+    expect(create?.responses["200"]?.content["application/json"].schema).toEqual({ type: "object", properties: { id: { type: "string" } }, required: ["id"] });
   });
 });

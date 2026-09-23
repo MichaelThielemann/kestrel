@@ -59,6 +59,12 @@ function listOptions(payload: Record<string, unknown>): ListOptions & { locale?:
 const PROVENANCE = { type: "object", properties: { origin: { type: "string", enum: ["human", "ai", "mixed", "unknown"] }, tool: { type: "string" }, model: { type: "string" }, at: { type: "number" } }, required: ["origin"], description: "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown" };
 const MEDIA_ITEM_SCHEMA = { type: "object", properties: { id: { type: "string" }, filename: { type: "string" }, folder: { type: "string" }, contentType: { type: "string" }, size: { type: "number" }, key: { type: "string" }, checksum: { type: ["string", "null"], description: "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded" }, status: { type: "string", enum: ["uploading", "ready", "failed"], description: "only ready items are listed, readable and downloadable" }, createdAt: { type: "number" }, updatedAt: { type: "number" }, provenance: PROVENANCE, width: { type: ["number", "null"] }, height: { type: ["number", "null"] }, alt: { type: ["string", "null"] }, title: { type: ["string", "null"] }, description: { type: ["string", "null"] } }, required: ["id", "filename", "folder", "contentType", "size", "key", "checksum", "status", "createdAt", "updatedAt", "provenance", "width", "height", "alt", "title", "description"] };
 const RECONCILE_SCHEMA = { type: "object", properties: { blobsWithoutRow: { type: "array", items: { type: "string" } }, rowsWithoutBlob: { type: "array", items: { type: "string" } } }, required: ["blobsWithoutRow", "rowsWithoutBlob"] };
+const UPLOAD_RESULT_SCHEMA = {
+  oneOf: [
+    MEDIA_ITEM_SCHEMA,
+    { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, errors: { type: "array", items: { type: "object", properties: { filename: { type: "string" }, status: { type: "number" }, code: { type: "string" }, message: { type: "string" } }, required: ["filename", "status", "code", "message"] } }, ids: { type: "array", items: { type: "string" }, description: "the newly stored items only; an unchanged re-upload is in `items` but not here, and is not announced as an event" } }, required: ["items", "errors", "ids"] },
+  ],
+};
 const FOLDER_ITEMS_SUMMARY = "Item ids in a folder, for use with references.guardAll:media before removeFolder";
 
 function listFolderItemsStep(media: Media): (ctx: Context) => Promise<StepResult> {
@@ -218,12 +224,8 @@ export default defineModule({
       writes: ["result"],
       multipart: true,
       input: { type: "object", properties: { folder: { type: "string" }, provenance: { type: "string", description: "origin (human|ai|mixed|unknown) or JSON of the provenance object, applied to every file; omitted means unknown" } }, additionalProperties: false },
-      output: {
-        oneOf: [
-          MEDIA_ITEM_SCHEMA,
-          { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, errors: { type: "array", items: { type: "object", properties: { filename: { type: "string" }, status: { type: "number" }, code: { type: "string" }, message: { type: "string" } }, required: ["filename", "status", "code", "message"] } }, ids: { type: "array", items: { type: "string" }, description: "the newly stored items only; an unchanged re-upload is in `items` but not here, and is not announced as an event" } }, required: ["items", "errors", "ids"] },
-        ],
-      },
+      output: UPLOAD_RESULT_SCHEMA,
+      terminalOutput: UPLOAD_RESULT_SCHEMA,
       errors: { 400: "no file or invalid folder/provenance (per-file for a multi-file request)", 409: "filename already exists in that folder with different bytes, `details.field: \"key\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict", 413: "file exceeds maxBytes (per-file for a multi-file request)", 415: "type not allowed (per-file for a multi-file request)" },
     },
     get: { summary: "Media metadata", reads: ["params.id"], writes: ["result"], query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "unknown locale", 404: "not found" } },

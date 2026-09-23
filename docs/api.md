@@ -71,7 +71,7 @@ just with the `/api` prefix. In server code it also works without the handler, d
 
 ```ts
 const res = await kestrel.run("resolvePage", { trigger: { kind: "http", name: "ssr" }, params: { path: "en/kontakt" }, headers: {} });
-// res.status 200 → res.result is the document; 404 → res.error
+// res.status 200 → res.result is the document or { redirect: { to, status } }; 404 → res.error
 ```
 
 Notes: `node:sqlite` needs Node ≥ 22 (no edge runtime). Nuxt itself handles the health route and
@@ -240,8 +240,8 @@ once that language's localized required fields are set). `slug` matches
 
 ### Site resolution (public, for the frontend router)
 
-`GET /site/*path` (step `site.resolve:pages`, module `site-default`) → exactly one document or
-404. Only `status = published` **in the requested language** (status is localized: EN is only
+`GET /site/*path` (step `site.resolve:pages`, module `site-default`) → exactly one document, a
+redirect hit (below), or 404. Only `status = published` **in the requested language** (status is localized: EN is only
 delivered once EN itself is `published`). Fields without a translation fall back to the default
 language (`_locales` names the origin per field, e.g. `{ "slug": "de", "title": "en" }`); the
 fallback never overrides the publication status.

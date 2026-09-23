@@ -1,6 +1,6 @@
 import type { JsonSchema, Kestrel, ResolvedPipeline, Route, StepDescription } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { resolveOutputSchema } from "@michaelthielemann/kestrel/schema";
+import { resolveResultSchema } from "@michaelthielemann/kestrel/schema";
 
 export interface OpenApiInfo {
   title: string;
@@ -60,7 +60,7 @@ function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
 function operation(route: Route, pipeline: ResolvedPipeline, params: string[]): Record<string, unknown> {
   const descriptions = pipeline.steps.map((s) => s.description).filter((d): d is StepDescription => d !== undefined);
   const inputs = descriptions.map((d) => d.input).filter((i): i is JsonSchema => i !== undefined);
-  const output = resolveOutputSchema(descriptions);
+  const output = resolveResultSchema(descriptions);
   const binary = descriptions.some((d) => d.binary);
   const multipart = descriptions.some((d) => d.multipart);
   const errors: Record<number, string> = { ...DEFAULT_ERRORS };

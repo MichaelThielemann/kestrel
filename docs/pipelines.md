@@ -595,7 +595,21 @@ step and the JSON path, the way a `writes` mismatch already does. `testing/runPi
 validates this way, so a module's own tests catch a mismatch before it ships; turn the same check
 on in a running deployment by passing `validateOutput: true` to `boot()`.
 
-These three checks, like the dataflow check above, run after every module's `setup()` has already
+A step that may end the run with `ctx.done()` declares the complete shape of that result as
+`terminalOutput`, never folded with any other step's `output`, `extendsOutput` or `extendsItems`
+and never applied to a run that continues past the step. `resolveResultSchema` (also from the
+`schema` subpath) reports every shape a successful run can end in: the fold above, then each
+step's distinct `terminalOutput`, as one `anyOf` — this is what `kestrel-openapi` publishes as a
+route's 200 when a pipeline can end more than one way, for example `redirects.lookup`'s
+`{ redirect: { to, status } }` next to the page a resolver otherwise returns. Under
+`validateOutput`, a `ctx.done()` without a matching `terminalOutput` fails the run naming the step,
+and a step that declares only `terminalOutput` (no `output`) but changes `result` without calling
+`ctx.done()` fails as well. **Boot cannot see a `ctx.done()` call; a missing or wrong
+`terminalOutput` is found only at run time under `validateOutput` and by the upgrade assistant's
+source scan.** Boot does reject `terminalOutput` on a step with no write to `result`, and
+`terminalOutput` together with a `binary` step in the same pipeline.
+
+These checks, like the dataflow check above, run after every module's `setup()` has already
 run, so a boot that fails on one of them can still leave behind what `setup()` created — a database
 file, a migration, a seeded user.
 
@@ -686,7 +700,8 @@ uses this for an idempotent re-upload (same folder, same filename, same bytes): 
 the item that was already stored and no `media.uploaded` goes out, so nothing regenerates variants
 for a file that did not change. The alternative — emitting anyway and asking every listener to
 recognise the repeat — would spread one module's knowledge across all of them. A step that suppresses
-an event this way says so in its `describe().summary`, because the pipeline file does not show it.
+an event this way says so in its `describe().summary`, because the pipeline file does not show it,
+and declares the shape of that early result as `terminalOutput` (see "Output Validation" above).
 
 `events.emit:<name>?with=result` additionally adds `result: ctx.result` unchanged (a
 deliberate opt-in, not the default). **Careful:** the shape of `result` then depends on the

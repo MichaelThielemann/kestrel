@@ -73,4 +73,31 @@ describe("insights/default module steps via runPipeline", () => {
     expect(stats.result).toMatchObject({ runs: { total: 2 }, pipelines: [{ name: "insightsManifest", count: 1 }, { name: "pass", count: 1 }] });
     await kestrel.stop();
   });
+
+  it("readManifest's schema accepts a step declaring terminalOutput and atomicSafe", async () => {
+    const withTerminal = defineModule({
+      name: "withterminal/test",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ maybe: async (ctx: Context) => ok(ctx) }),
+      describe: () => ({ maybe: { summary: "maybe ends the run", reads: [], writes: ["result?"], terminalOutput: { type: "object", properties: { done: { type: "boolean" } }, required: ["done"] }, atomicSafe: false } }),
+    });
+    const kestrel = await boot({
+      config: { modules: [{ use: "./withterminal.ts", config: {} }, { use: "@michaelthielemann/kestrel-insights", config: {} }], triggers: [], http: null },
+      modules: [withTerminal, module],
+      pipelines: [definePipeline({ name: "maybe", steps: ["withterminal.maybe"] }), manifestPipeline],
+      logger: silentLogger,
+      validateOutput: true,
+    });
+    const manifest = await kestrel.run("insightsManifest", { trigger: { kind: "http", name: "GET /x" } });
+    expect(manifest.status).toBe(200);
+    const result = boundaryCast<{ pipelines: Array<{ name: string; steps: Array<{ description: Record<string, unknown> }> }> }>(manifest.result, "json");
+    const maybePipeline = result.pipelines.find((p) => p.name === "maybe");
+    expect(maybePipeline?.steps[0]?.description).toMatchObject({ terminalOutput: { type: "object", properties: { done: { type: "boolean" } }, required: ["done"] }, atomicSafe: false });
+    await kestrel.stop();
+  });
 });

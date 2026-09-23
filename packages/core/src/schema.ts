@@ -306,3 +306,30 @@ export function resolveOutputSchema(
   });
   return current;
 }
+
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (isRecord(value)) return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys(value[key])]));
+  return value;
+}
+
+function sameSchema(a: JsonSchema, b: JsonSchema): boolean {
+  return JSON.stringify(sortKeys(a)) === JSON.stringify(sortKeys(b));
+}
+
+/**
+ * Every shape a successful run's `result` can take: the fold of {@link resolveOutputSchema}, then
+ * each step's `terminalOutput` in pipeline order, as one `anyOf`. A schema equal to one already
+ * listed (keys sorted) is left out; without a fold or without a distinct `terminalOutput` the fold
+ * is returned as is.
+ */
+export function resolveResultSchema(descriptions: readonly StepDescription[]): JsonSchema | undefined {
+  const fold = resolveOutputSchema(descriptions);
+  const shapes: JsonSchema[] = fold === undefined ? [] : [fold];
+  for (const d of descriptions) {
+    const terminal = d.terminalOutput;
+    if (terminal === undefined || shapes.some((s) => sameSchema(s, terminal))) continue;
+    shapes.push(terminal);
+  }
+  return shapes.length < 2 ? shapes[0] : { anyOf: shapes };
+}

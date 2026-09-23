@@ -12,6 +12,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { KestrelConfigInput } from "@michaelthielemann/kestrel/defineConfig";
 import { pipelineSteps, type PipelineDefinition } from "@michaelthielemann/kestrel/definePipeline";
 import type { Result } from "@michaelthielemann/kestrel/result";
+import { validateSchema } from "@michaelthielemann/kestrel/schema";
 
 const root = dirname(fileURLToPath(import.meta.url));
 
@@ -902,6 +903,55 @@ describe("events/direct relay: a forced delivery.publish failure through POST /p
       expect(read.status).toBe(200);
       const revisions = await revisionsOf(kestrel, admin, body.id);
       expect(revisions.total).toBe(1);
+    } finally {
+      await dispose();
+    }
+  });
+});
+
+interface OpenApiSchemaDoc {
+  paths: Record<string, Record<string, { responses: Record<string, { content: { "application/json": { schema: Record<string, unknown> } } }> }>>;
+}
+
+describe("terminal output shapes at the HTTP boundary", () => {
+  it("a redirect hit matches the documented 200 of GET /site/{path}", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const rules = [{ from: "/alt", to: "/neu" }];
+      const set = await kestrel.run("setRedirects", { trigger, headers: bearer(admin.token), payload: { rules }, body: { rules } });
+      expect(set.status).toBe(200);
+
+      const hit = await kestrel.run("resolvePage", { trigger, params: { path: "alt" } });
+      expect(hit.status).toBe(200);
+      expect(hit.result).toEqual({ redirect: { to: "/neu", status: 301 } });
+
+      const openapi = boundaryCast<OpenApiSchemaDoc>(JSON.parse(readFileSync(join(root, "openapi.json"), "utf8")), "json");
+      const schema = openapi.paths["/site/{path}"]?.get?.responses["200"]?.content["application/json"].schema;
+      if (schema === undefined) throw new Error("missing schema for GET /site/{path} 200");
+      expect(validateSchema(schema, hit.result)).toEqual([]);
+
+      const pageBranchOnly = boundaryCast<{ anyOf: Record<string, unknown>[] }>(schema, "json").anyOf[0];
+      if (pageBranchOnly === undefined) throw new Error("missing the page branch of the anyOf");
+      expect(validateSchema(pageBranchOnly, hit.result)).not.toEqual([]);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("the continuing uploadMedia result carries the item plus _events", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const uploaded = await kestrel.run("uploadMedia", {
+        trigger,
+        headers: bearer(admin.token),
+        files: [{ field: "file", filename: "acceptance.png", contentType: "image/png", data: new Uint8Array([1, 2, 3, 4]) }],
+      });
+      expect(uploaded.status).toBe(200);
+      const body = boundaryCast<{ filename?: string; _events?: { status: string } }>(uploaded.result, "json");
+      expect(body.filename).toBe("acceptance.png");
+      expect(body._events).toBeDefined();
     } finally {
       await dispose();
     }

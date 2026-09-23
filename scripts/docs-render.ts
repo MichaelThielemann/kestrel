@@ -69,6 +69,11 @@ export function portabilityOf(name: string): "portable" | "beside" | "none" {
   return "none";
 }
 
+function outputCell(d: StepDescription): string {
+  const base = brief(d.output ?? d.extendsOutput ?? d.extendsItems);
+  return d.terminalOutput === undefined ? base : `${base} (ends: ${brief(d.terminalOutput)})`;
+}
+
 export function stepTable(steps: StepManifest[]): string[] {
   if (steps.length === 0) return [];
   const rows = steps.map((s) => {
@@ -76,7 +81,7 @@ export function stepTable(steps: StepManifest[]): string[] {
     const d = s.description;
     const paths = (list: readonly string[]) => (list.length === 0 ? "–" : list.map((p) => `\`${p}\``).join(", "));
     const portable = portabilityOf(s.name);
-    return `| ${name} | ${cell(d.summary)} | ${paths(d.reads)} | ${paths(d.writes)} | ${cell(inputCell(d))} | ${cell(brief(d.output ?? d.extendsOutput ?? d.extendsItems))} | ${cell(errors(d)) || "–"} | ${portable === "none" ? "–" : portable} | ${d.atomicSafe === true ? "yes" : "no"} |`;
+    return `| ${name} | ${cell(d.summary)} | ${paths(d.reads)} | ${paths(d.writes)} | ${cell(inputCell(d))} | ${cell(outputCell(d))} | ${cell(errors(d)) || "–"} | ${portable === "none" ? "–" : portable} | ${d.atomicSafe === true ? "yes" : "no"} |`;
   });
   return ["| Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |", "|---|---|---|---|---|---|---|---|---|", ...rows, ""];
 }
