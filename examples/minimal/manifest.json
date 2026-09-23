@@ -5615,6 +5615,26 @@
         ],
         "input": {
           "type": "object",
+          "properties": {
+            "<arg>": {
+              "type": [
+                "string",
+                "object",
+                "null"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ]
+            }
+          },
           "additionalProperties": true
         },
         "errors": {
@@ -7748,26 +7768,6 @@
         ],
         "input": {
           "type": "object",
-          "properties": {
-            "reassignTo": {
-              "type": [
-                "string",
-                "object",
-                "null"
-              ],
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "name": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "id"
-              ]
-            }
-          },
           "additionalProperties": true
         },
         "output": {
@@ -17190,6 +17190,32 @@
             ],
             "input": {
               "type": "object",
+              "properties": {
+                "result": {
+                  "type": "object",
+                  "properties": {
+                    "reassignTo": {
+                      "type": [
+                        "string",
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ]
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              },
               "additionalProperties": true
             },
             "errors": {
@@ -17215,26 +17241,6 @@
             ],
             "input": {
               "type": "object",
-              "properties": {
-                "reassignTo": {
-                  "type": [
-                    "string",
-                    "object",
-                    "null"
-                  ],
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id"
-                  ]
-                }
-              },
               "additionalProperties": true
             },
             "output": {
@@ -19324,6 +19330,26 @@
             ],
             "input": {
               "type": "object",
+              "properties": {
+                "reassignTo": {
+                  "type": [
+                    "string",
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              },
               "additionalProperties": true
             },
             "errors": {
@@ -19349,26 +19375,6 @@
             ],
             "input": {
               "type": "object",
-              "properties": {
-                "reassignTo": {
-                  "type": [
-                    "string",
-                    "object",
-                    "null"
-                  ],
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id"
-                  ]
-                }
-              },
               "additionalProperties": true
             },
             "output": {

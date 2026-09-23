@@ -4,7 +4,7 @@ import { AUTHZ } from "@michaelthielemann/kestrel-contracts/authz";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import "@michaelthielemann/kestrel-contracts/verifiedUser";
 import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
-import { defineModule } from "@michaelthielemann/kestrel/defineModule";
+import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { createAuthnMulti, tokenFromHeaders, type AuthnMulti } from "./impl.ts";
 
@@ -14,6 +14,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function payloadPath(ctx: Context, path: string): unknown {
   return path.split(".").reduce<unknown>((value, segment) => (isRecord(value) ? value[segment] : undefined), ctx.payload);
+}
+
+const USER_REFERENCE_SCHEMA: JsonSchema = { type: ["string", "object", "null"], properties: { id: { type: "string" }, name: { type: "string" } }, required: ["id"] };
+
+function nestedInputSchema(path: string, leaf: JsonSchema): JsonSchema {
+  return path.split(".").reduceRight<JsonSchema>((acc, key) => ({ type: "object", properties: { [key]: acc }, additionalProperties: true }), leaf);
 }
 
 export const configSchema = z
@@ -203,7 +209,7 @@ export default defineModule({
       summary: `Verify the user reference at payload.${path}: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over`,
       reads: [`payload.${path}`],
       writes: ["verifiedUser"],
-      input: { type: "object", additionalProperties: true },
+      input: nestedInputSchema(path, USER_REFERENCE_SCHEMA),
       errors: { 400: "the value is neither a user id, { id } nor null, or the user is not active", 404: "user not found" },
       atomicSafe: true,
     }),

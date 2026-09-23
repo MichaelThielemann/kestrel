@@ -53,8 +53,6 @@ const REPORT_SCHEMA: JsonSchema = { type: "object", properties: { inspected: { t
 const LABEL_SCHEMA: JsonSchema = { type: "object", properties: { label: { type: ["string", "null"], maxLength: 200 } }, required: ["label"], additionalProperties: false };
 const LOCALE_QUERY: Record<string, JsonSchema> = { locale: { type: "string" } };
 const TARGET_SCHEMA: JsonSchema = { type: ["object", "null"], properties: { id: { type: "string" }, name: { type: "string" } }, required: ["id", "name"] };
-const REASSIGN_INPUT_TARGET: JsonSchema = { type: ["string", "object", "null"], properties: { id: { type: "string" }, name: { type: "string" } }, required: ["id"] };
-const REASSIGN_INPUT: JsonSchema = { type: "object", properties: { reassignTo: REASSIGN_INPUT_TARGET }, additionalProperties: true };
 const REASSIGN_SCHEMA: JsonSchema = { type: "object", properties: { from: { type: "string" }, to: TARGET_SCHEMA, revisions: { type: "number" } }, required: ["from", "to", "revisions"] };
 
 function localeOf(ctx: Context, fallback: string): string {
@@ -267,7 +265,7 @@ export default defineModule({
         "Replace the author of every revision written by the user in `params.id` or the event payload's `id`, with the canonical `{ id, name }` a preceding step's `verifiedUser` (e.g. `authn.verifyUser`) verified. Without a target, the anonymous author `{ id: null, name: null }`",
       reads: ["params.id", "payload", "verifiedUser"],
       writes: ["result"],
-      input: REASSIGN_INPUT,
+      input: { type: "object", additionalProperties: true },
       output: REASSIGN_SCHEMA,
       errors: { 400: "no user id, or the former author again" },
       atomicSafe: true,
