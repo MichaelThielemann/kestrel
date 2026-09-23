@@ -434,7 +434,7 @@ async function bootWithQueue(mode: "queue" | "direct" = "queue"): Promise<{
       if (m.use === "@michaelthielemann/kestrel-persistence-sqlite") return { ...m, config: { ...(m.config as object), file: ":memory:" } };
       if (m.use === "@michaelthielemann/kestrel-replication-sqlite") return { ...m, config: { ...(m.config as object), file: join(dataDir, "replication.db") } };
       if (m.use === "@michaelthielemann/kestrel-blobstore-filesystem") return { ...m, config: { ...(m.config as object), root: join(dataDir, "blobs") } };
-      if (mode === "queue" && m.use === "@michaelthielemann/kestrel-events-direct") return { use: "@michaelthielemann/kestrel-events-queue", config: { maxAttempts: 1, relayMs: 5000 } };
+      if (mode === "queue" && m.use === "@michaelthielemann/kestrel-events-direct") return { use: "@michaelthielemann/kestrel-events-queue", config: { maxAttempts: 1, relayMs: 5000, relayPipelines: ["publishPage", "unpublishPage"] } };
       return m;
     }),
   };
@@ -825,6 +825,27 @@ describe("events/queue relay: a forced delivery.publish failure through POST /pa
       });
 
       expect(derivedTouches(calls)).toBe(touchesBeforeRetry);
+    } finally {
+      await dispose();
+    }
+  });
+});
+
+describe("events/queue relayPipelines: keeps a heavy subscriber off the request", () => {
+  it("login reports auditAuth queued instead of delivering it inline, and the worker delivers it right after", async () => {
+    const { kestrel, dispose } = await bootWithQueue();
+    try {
+      const logged = await kestrel.run("login", { trigger, payload: { username: "admin", password: "kestrel-demo" } });
+      expect(logged.status).toBe(200);
+      const body = boundaryCast<{ _events?: { status: string; pipelines: { pipeline: string; status: string }[] } }>(logged.result, "json");
+      expect(body._events?.status).toBe("pending");
+      expect(body._events?.pipelines).toContainEqual(expect.objectContaining({ pipeline: "auditAuth", status: "queued" }));
+
+      await pollUntil(async () => {
+        const status = await kestrel.run("queueStatus", { trigger });
+        const counts = boundaryCast<{ pending: number; running: number }>(status.result, "json");
+        return counts.pending === 0 && counts.running === 0;
+      });
     } finally {
       await dispose();
     }
