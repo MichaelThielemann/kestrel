@@ -5238,12 +5238,13 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Add variants[] to a media item or list (result.id or result.items)",
+        "summary": "Add variants[] and variantCounts (done/pending/error/failed over the effective sizes) to a media item or list (result.id or result.items)",
         "reads": [
           "result"
         ],
         "writes": [
-          "result.variants?"
+          "result.variants?",
+          "result.variantCounts?"
         ],
         "extendsItems": {
           "type": "object",
@@ -5291,10 +5292,34 @@
                   "path"
                 ]
               }
+            },
+            "variantCounts": {
+              "type": "object",
+              "properties": {
+                "done": {
+                  "type": "number"
+                },
+                "pending": {
+                  "type": "number"
+                },
+                "error": {
+                  "type": "number"
+                },
+                "failed": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "done",
+                "pending",
+                "error",
+                "failed"
+              ]
             }
           },
           "required": [
-            "variants"
+            "variants",
+            "variantCounts"
           ]
         }
       }
@@ -12609,12 +12634,13 @@
           "name": "images.attach",
           "module": "images/default",
           "description": {
-            "summary": "Add variants[] to a media item or list (result.id or result.items)",
+            "summary": "Add variants[] and variantCounts (done/pending/error/failed over the effective sizes) to a media item or list (result.id or result.items)",
             "reads": [
               "result"
             ],
             "writes": [
-              "result.variants?"
+              "result.variants?",
+              "result.variantCounts?"
             ],
             "extendsItems": {
               "type": "object",
@@ -12662,10 +12688,34 @@
                       "path"
                     ]
                   }
+                },
+                "variantCounts": {
+                  "type": "object",
+                  "properties": {
+                    "done": {
+                      "type": "number"
+                    },
+                    "pending": {
+                      "type": "number"
+                    },
+                    "error": {
+                      "type": "number"
+                    },
+                    "failed": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "done",
+                    "pending",
+                    "error",
+                    "failed"
+                  ]
                 }
               },
               "required": [
-                "variants"
+                "variants",
+                "variantCounts"
               ]
             }
           }
@@ -14683,12 +14733,13 @@
           "name": "images.attach",
           "module": "images/default",
           "description": {
-            "summary": "Add variants[] to a media item or list (result.id or result.items)",
+            "summary": "Add variants[] and variantCounts (done/pending/error/failed over the effective sizes) to a media item or list (result.id or result.items)",
             "reads": [
               "result"
             ],
             "writes": [
-              "result.variants?"
+              "result.variants?",
+              "result.variantCounts?"
             ],
             "extendsItems": {
               "type": "object",
@@ -14736,10 +14787,34 @@
                       "path"
                     ]
                   }
+                },
+                "variantCounts": {
+                  "type": "object",
+                  "properties": {
+                    "done": {
+                      "type": "number"
+                    },
+                    "pending": {
+                      "type": "number"
+                    },
+                    "error": {
+                      "type": "number"
+                    },
+                    "failed": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "done",
+                    "pending",
+                    "error",
+                    "failed"
+                  ]
                 }
               },
               "required": [
-                "variants"
+                "variants",
+                "variantCounts"
               ]
             }
           }

@@ -15,6 +15,11 @@ import type { Result } from "@michaelthielemann/kestrel/result";
 
 const root = dirname(fileURLToPath(import.meta.url));
 
+const TEST_JPEG = Buffer.from(
+  "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
+  "base64",
+);
+
 describe("static delivery media rewrite wiring", () => {
   it("configures the media publicPath for delivery-static", async () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
@@ -294,6 +299,29 @@ describe("image variants wiring", () => {
   it("leaves resolvePage untouched", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
     expect(pipelines.get("resolvePage")).not.toContain("images.attach");
+  });
+});
+
+describe("media list reports variant progress", () => {
+  it("GET /media?ids= carries variantCounts once an uploaded image's variants have rendered", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const uploaded = await kestrel.run("uploadMedia", {
+        trigger,
+        headers: bearer(admin.token),
+        files: [{ field: "file", filename: "a.jpg", contentType: "image/jpeg", data: TEST_JPEG }],
+      });
+      expect(uploaded.status).toBe(200);
+      const item = boundaryCast<{ id: string }>(uploaded.result, "json");
+
+      const listed = await kestrel.run("listMedia", { trigger, headers: bearer(admin.token), payload: { ids: item.id } });
+      expect(listed.status).toBe(200);
+      const body = boundaryCast<{ items: { id: string; variantCounts: { done: number; pending: number; error: number; failed: number } }[] }>(listed.result, "json");
+      expect(body.items[0]?.variantCounts).toEqual({ done: 5, pending: 0, error: 0, failed: 0 });
+    } finally {
+      await dispose();
+    }
   });
 });
 

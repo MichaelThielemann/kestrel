@@ -6767,7 +6767,7 @@
     "/media": {
       "get": {
         "operationId": "listMedia",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → List media, newest first → Add variants[] to a media item or list (result.id or result.items)",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → List media, newest first → Add variants[] and variantCounts (done/pending/error/failed over the effective sizes) to a media item or list (result.id or result.items)",
         "tags": [
           "media"
         ],
@@ -6997,6 +6997,29 @@
                                 "path"
                               ]
                             }
+                          },
+                          "variantCounts": {
+                            "type": "object",
+                            "properties": {
+                              "done": {
+                                "type": "number"
+                              },
+                              "pending": {
+                                "type": "number"
+                              },
+                              "error": {
+                                "type": "number"
+                              },
+                              "failed": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "done",
+                              "pending",
+                              "error",
+                              "failed"
+                            ]
                           }
                         },
                         "required": [
@@ -7015,6 +7038,7 @@
                           "status",
                           "title",
                           "updatedAt",
+                          "variantCounts",
                           "variants",
                           "width"
                         ]
@@ -7497,7 +7521,7 @@
       },
       "get": {
         "operationId": "getMedia",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → Media metadata → Add variants[] to a media item or list (result.id or result.items)",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → Media metadata → Add variants[] and variantCounts (done/pending/error/failed over the effective sizes) to a media item or list (result.id or result.items)",
         "tags": [
           "media"
         ],
@@ -7674,6 +7698,29 @@
                           "path"
                         ]
                       }
+                    },
+                    "variantCounts": {
+                      "type": "object",
+                      "properties": {
+                        "done": {
+                          "type": "number"
+                        },
+                        "pending": {
+                          "type": "number"
+                        },
+                        "error": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "done",
+                        "pending",
+                        "error",
+                        "failed"
+                      ]
                     }
                   },
                   "required": [
@@ -7692,6 +7739,7 @@
                     "status",
                     "title",
                     "updatedAt",
+                    "variantCounts",
                     "variants",
                     "width"
                   ]
