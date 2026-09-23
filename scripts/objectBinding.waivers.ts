@@ -35,7 +35,6 @@ export const OBJECT_BINDING_REGISTRY: Record<string, ObjectBindingDisposition> =
   [key("media/default", "get")]: { kind: "waiver", reason: "the only request-controlled value beside params.id is the query locale, not an object id." },
   [key("media/default", "renameFolder")]: { kind: "waiver", reason: "params.path names the folder itself; it is the resource being addressed, not a foreign object's id." },
   [key("media/default", "listFolderItems")]: { kind: "waiver", reason: "params.path names the folder itself; it is the resource being addressed, not a foreign object's id." },
-  [key("media/default", "folderItems")]: { kind: "waiver", reason: "deprecated alias of media.listFolderItems; params.path names the folder itself, not a foreign object's id." },
 
   [key("persistence/sqlite", "updateOne")]: { kind: "waiver", reason: "a generic per-collection primitive of the persistence contract, not reachable from an HTTP route on its own; the collection/id pairing is enforced by the module that calls it." },
 
@@ -46,8 +45,7 @@ export const OBJECT_BINDING_REGISTRY: Record<string, ObjectBindingDisposition> =
   [key("revisions/default", "removeTranslation")]: { kind: "waiver", reason: "the only request-controlled value beside params.id is the query locale, not an object id." },
   [key("revisions/default", "reassignAuthor")]: {
     kind: "waiver",
-    reason:
-      "prefers reassignTarget, the verified { id, name } authn.verifyUser writes after checking the target exists and is active; without a preceding step it falls back to the unverified reassignTo in the payload, so every example pipeline must run authn.verifyUser first.",
+    reason: "reads verifiedUser, the canonical { id, name } authn.verifyUser writes after checking the target exists and is active; the dataflow check at boot requires a preceding writer, so every example pipeline runs authn.verifyUser first.",
     upstream: "authn.verifyUser",
   },
 };
