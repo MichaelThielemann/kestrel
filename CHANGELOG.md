@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+Net changes since 5.8.1.
+
 ### Breaking
 
 - The pipeline grammar gains an atomic group: `steps` accepts `{ atomic: [...] }` next to a plain
@@ -62,8 +64,11 @@
   change (or written while the delivery table did not exist yet) carry no pipeline; the worker fans
   them out to every currently subscribed pipeline at the start of its first tick after upgrading.
 - Every event a pipeline receives now carries `eventId` (a fresh UUID unless the emitter supplied
-  one), `event` and `at`, including events raised through `events@1` by a module — additive to the
-  payload, not a contract change. `eventId` is the documented dedup key for at-least-once delivery.
+  one), `event` and `at` — additive to the payload, not a contract change — including events raised
+  through `events@1` by a module. `eventId` is the documented dedup key for at-least-once delivery.
+  A consumer step that validates the event payload against a schema with
+  `additionalProperties: false` must allow these three fields, or validation now rejects an event
+  it accepted before.
 - `core`: `Deps` (the argument to a module's `setup()`) gains a required `eventTriggers` property,
   the configured event triggers in configuration order. `Kestrel["contracts"]` is now typed
   `ContractLookup & { names(): string[] }` instead of `Deps & { names(): string[] }`; a reader of
@@ -76,9 +81,6 @@
   its own `setup()` and does not declare that event in `emits` may be set up before the delivery
   module exists, and with `events-queue` that event is then lost — there is nobody subscribed yet to
   catch it.
-- Every contract-level event a pipeline receives now also carries `eventId`, `event` and `at`. A
-  consumer step that validates the event payload against a schema with `additionalProperties: false`
-  must allow these three fields, or validation now rejects an event it accepted before.
 - Rolling back to the previous major with `events-queue` configured requires a drained queue first
   (`pending` and `running` at zero, visible through `events.readQueueStatus`): a fanned-out row is
   one row per pipeline where the previous major expects one row per event, and its worker would
@@ -125,34 +127,22 @@
   - Both relays require `ctx.result` to be an object or `undefined`: a result that is already some
     other value (an array, a string, …) is a wiring error and throws, the same way
     `authz.describeAccess` treats it.
-- `core`: `boot()` gains a fourth `BootWarning`, `output-fold-contradiction` — a step's
-  `extendsOutput` merging onto an active output schema (from an earlier `output`) whose declared
-  `type` is not `object`, which the fold otherwise coerces to `object` silently, discarding the
-  mismatch.
-- `core`: `undeclared-output`, `undeclared-required` and `output-fold-contradiction` are no longer
-  `BootWarning`s — each now fails `boot()` outright with a `KestrelBootError` naming the pipeline,
-  the step and, for `undeclared-required`, the JSON path of the offending schema. A step that
-  writes `result` without declaring `output`/`extendsOutput`/`extendsItems`/`binary: true`, an
-  output object schema with `properties` but no `required`, or an `extendsOutput` merging onto a
-  non-`object` active schema each stop the boot instead of only logging.
-- `media-default`: the step `media.folderItems`, deprecated in favour of `media.listFolderItems`,
-  is removed; call `media.listFolderItems` instead.
-- `revisions-default`: `revisions.reassignAuthor` declares `reads: ["verifiedUser"]`, no longer
-  optional, and no longer falls back to an unverified `reassignTo` read from the payload. A
-  pipeline that runs it without a preceding step writing `verifiedUser` (such as
-  `authn.verifyUser`) fails to boot instead of reassigning to an unverified target.
+- `core`: `boot()` fails outright, with a `KestrelBootError` naming the pipeline and the step, for
+  three shapes it previously let through: a step that writes `result` without declaring `output`,
+  `extendsOutput`, `extendsItems` or `binary: true`; an object schema inside one of those that
+  declares `properties` without a `required` key (the error also names the JSON path); and a
+  step's `extendsOutput` merging onto an active output schema — from an earlier `output` — whose
+  declared type is not `object` (the error names that earlier step and its type).
+- `media-default`: the step `media.folderItems`, deprecated since 5.4.0 in favour of
+  `media.listFolderItems`, is removed; call `media.listFolderItems` instead.
+- `revisions-default`: `revisions.reassignAuthor` no longer reads `reassignTo` from the payload or
+  the event hand-over itself. It declares `reads: ["verifiedUser"]` and requires a preceding step —
+  `authn.verifyUser:reassignTo` or `authn.verifyUser:result.reassignTo` — to verify the target and
+  write it there; a pipeline that omits such a step fails to boot naming both steps, instead of
+  reassigning to an unverified target at runtime. `examples/minimal`'s `reassignRevisionAuthor` and
+  `retryReassignRevisionAuthor` pipelines already run the verify step first.
 
 ### Added
-
-- `core`: `boot()` gains a `BootWarning`, `unwritten-optional-read` — an optional read (`"key?"`)
-  whose key no step of any booted pipeline writes and no trigger provides, naming the pipeline,
-  the step and the key. Almost always a typo in the key.
-
-- `Deps` gains `bootStartedAt?: number`, the epoch ms `boot()` captured at its very start, before
-  any module's `setup()` ran, and shared by every module's `setup()` call in this boot. Optional,
-  so a `Deps` built outside `boot()` still type-checks. `replication-sqlite` and `backup-blobstore`
-  declare `before: [persistence@1]` and use this field to judge whether their database or backed-up
-  file was created during the current boot (see "Changed" below).
 
 - `authz-roles`: the factory step `authz.validateRoles:<path>` reads an array of role names at
   `payload.<path>` and rejects it with 400 `VALIDATION` (unknown names in `details.unknown`) unless
@@ -162,23 +152,32 @@
   longer creates or updates a user silently. A pipeline that omits the step still boots and works
   unchanged — it simply does not validate role names.
 - A step may now declare a trailing `?` in `reads`, not only in `writes`: an optional read does not
-  require the key to be available at boot. Boot still rejects a pipeline where a *later* step
-  writes that key, since the read would then always see nothing — the same
-  `checkDataflow`/`KestrelBootError` mechanism as an undeclared or unsatisfied read, naming the
-  pipeline, the reading step, the writing step and the key. `revisions.record` now declares
-  `revisionParent?`, `revisions.reportRestore` declares `restoreReport?`, and
-  `revisions.reassignAuthor` declares `verifiedUser?`, closing a gap where all three read a context
-  key no describe() named. **Behaviour change:** a pipeline that writes one of these keys after the
-  step that reads it now fails to boot; this can only affect a pipeline that already ran the steps
-  in the wrong order and never saw the key it meant to read.
+  require the key to be available at boot, either from an earlier step or from the trigger. Boot
+  still rejects a pipeline where a *later* step writes that key, since the read would then always
+  see nothing — the same `checkDataflow`/`KestrelBootError` mechanism as an undeclared or
+  unsatisfied read, naming the pipeline, the reading step, the writing step and the key.
+  `revisions.record` declares `revisionParent?` and `revisions.reportRestore` declares
+  `restoreReport?`, closing a gap where both read a context key no `describe()` named.
+- `core`: `boot()` returns non-fatal conditions as `kestrel.warnings: BootWarning[]`, in addition to
+  logging them through `logger.warn`. `BootWarning` is a discriminated union on `code`; a future
+  minor release may add further codes, so code reading `kestrel.warnings` must handle one it does
+  not recognize. Two codes ship: `unemitted-event`, for an event trigger whose event no pipeline
+  emits via `events.emit` and no module declares in `emits`; and `unwritten-optional-read`, for an
+  optional read (`"key?"`) whose key no registered step writes and no trigger provides — almost
+  always a typo in the key — naming the pipeline, the step and the key.
 - `authn-multi`: the factory step `authn.verifyUser:<path>` looks up the user id at `payload.<path>`
   — a plain path, no fallback between locations — rejects an unknown or inactive one (404
   `NOT_FOUND` / 400 `VALIDATION`), and writes the canonical `{ id, name }` to a new context key,
   `verifiedUser`; a given name, if any, is never trusted. Absent or `null` writes `null`. It
   verifies a user reference generically: `authn.verifyUser:reassignTo` reads `payload.reassignTo`,
   `authn.verifyUser:result.reassignTo` reads `payload.result.reassignTo` (an event hand-over
-  shape). It does not check the caller, so an HTTP pipeline needs its own `authn.requireUser` and
-  `authz.require` in front of it.
+  shape), and its `input` schema follows the path. It does not check the caller, so an HTTP
+  pipeline needs its own `authn.requireUser` and `authz.require` in front of it.
+- `Deps` gains `bootStartedAt?: number`, the epoch ms `boot()` captured at its very start, before
+  any module's `setup()` ran, and shared by every module's `setup()` call in this boot. Optional,
+  so a `Deps` built outside `boot()` still type-checks. `replication-sqlite` and `backup-blobstore`
+  declare `before: [persistence@1]` and use this field to judge whether their database or backed-up
+  file was created during the current boot (see "Changed" below).
 - New package `@michaelthielemann/kestrel-events-direct`: inline event delivery, split out of
   `events-inmemory`. Requires `events@1`, provides the event trigger hook and `events.emit`.
 - `@michaelthielemann/kestrel-contracts` gains `defineStepSet`/`stepSets`
@@ -191,6 +190,29 @@
   `withEventIdentity` and the shared `eventDeliveryStepTests` suite (`events.envelope.ts`,
   `events.steps.contract.test.ts`), so `events-direct` and `events-queue` produce and verify the
   same `events.emit` envelope from one implementation.
+- `core`: new `boot({ validateOutput })` (default off) and `testing/runPipeline` (always on)
+  validate `ctx.result` after every step that writes it against the pipeline's output schema
+  folded up to that point (`@michaelthielemann/kestrel/schema`'s new `resolveOutputSchema`,
+  subpath-only), failing with the step name and the JSON path on a mismatch. A step whose write is
+  declared optional (`result?`) and left `ctx.result` unchanged is skipped. `validateOutput`
+  defaults to off, so production pays nothing for it unless a deployment opts in.
+- `authz-roles`: two new steps. `authz.describeAccess`, meant to run after `authn.loadIdentity`,
+  writes `result.permissions` — the caller's roles' patterns expanded against every permission a
+  booted pipeline requires via an `authz.require:<perm>` argument — so a client can learn its
+  concrete permissions without a copy of the pattern matcher. `authz.listRoles` writes
+  `result.roles`, the configured role names in config order; it performs no check of its own and is
+  meant to sit behind an `authz.require:<perm>` step, so only callers who may already manage the
+  instance (not every authenticated caller) learn the role table. `examples/minimal`'s `me`
+  pipeline runs `describeAccess`; a new `listRoles` pipeline (`GET /roles`, behind
+  `authz.require:users.manage`) runs `listRoles`.
+- `core`: a module can declare a synchronous `health(instance)` hook, with no I/O, that reads its
+  own state instead of the outcome of a call: `{ ok: true, note? }` or
+  `{ ok: false, reason, restartRequired }`. `kestrel.health()` aggregates every declaring module
+  into `{ ok, restartRequired, modules }`, reachable on the booted `Kestrel` and through
+  `Introspection` in `attach()`. `persistence-sqlite` reports the store unusable, with
+  `restartRequired: true`, once a rollback has failed; contention is never reported.
+  `replication-sqlite` reports a prepared restore as `{ ok: true, note }`, since the instance
+  keeps serving until a host restarts it to apply the restore.
 
 ### Changed
 
@@ -213,87 +235,18 @@
 - `backup-blobstore`: `setup()` gets the same check as `replication-sqlite` — including the shared
   `<file>.restored-at` sidecar and the "move aside" wording — minus the table-count fallback, since
   the backed-up file is not necessarily SQLite; an unavailable birth time is only logged, not failed.
-
-- `revisions.reassignAuthor` prefers a preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s
-  verified target) when one is present, ignoring the payload's own `reassignTo`. Without a
-  preceding step it behaves exactly as before: it reads the unverified `reassignTo` from the
-  payload or the event hand-over, so a pipeline built before this release, e.g.
-  `authn.requireUser → authz.require:users.manage → revisions.reassignAuthor`, keeps booting and
-  working unchanged — it simply does not verify the target user exists or is active.
-  `examples/minimal`'s `reassignRevisionAuthor` and `retryReassignRevisionAuthor` pipelines now run
-  `authn.verifyUser:result.reassignTo` and `authn.verifyUser:reassignTo` respectively first; new
-  pipelines should do the same to get a verified target.
-- `revisions.reassignAuthor`'s `reassignTo` input no longer requires a `name` alongside `id`, and
-  now also accepts a bare user id string, matching what a client sends when `authn.verifyUser`
-  precedes it: previously `{ reassignTo: { id } }` failed schema validation demanding `name`, and a
-  bare id passed `authn.verifyUser` only to then fail `revisions.reassignAuthor`'s own schema.
-
-- `boot()` now also returns non-fatal conditions as `kestrel.warnings: BootWarning[]`, in addition to
-  logging them through `logger.warn`. `BootWarning` is a discriminated union on `code`; a future
-  minor release may add further codes, so code reading `kestrel.warnings` must handle one it does
-  not recognize. Currently emitted: `unemitted-event`, for an event trigger whose event no pipeline
-  emits via `events.emit` and no module declares in `emits`; and `undeclared-output`, for a step
-  that writes `result` without declaring `output`, `extendsOutput`, `extendsItems` or
-  `binary: true`.
+- A `reassignTo` value in `authn.verifyUser`'s request body or event hand-over no longer requires a
+  `name` alongside `id`, and also accepts a bare user id string.
 - `authn-single` and `authn-multi` share one behavioural test suite for the five steps both
   register (`login`, `identifyUser`, `requireUser`, `loadIdentity`, `logout`), also run against a
   new in-memory `authn@1` fake, so the three stay in lockstep.
 - `revisions.read`/`restore`/`label` are now pinned to reject a revision id that belongs to another
   document or collection, and `images.serve`/`images.read` to never return another media item's
   variant for a matching size name.
-- `core`: new `boot({ validateOutput })` (default off) and `testing/runPipeline` (always on)
-  validate `ctx.result` after every step that writes it against the pipeline's output schema
-  folded up to that point (`@michaelthielemann/kestrel/schema`'s new `resolveOutputSchema`,
-  subpath-only), failing with the step name and the JSON path on a mismatch. A step whose write is
-  declared optional (`result?`) and left `ctx.result` unchanged is skipped. `validateOutput`
-  defaults to off, so production pays nothing for it unless a deployment opts in.
-- `authz-roles`: two new steps. `authz.describeAccess`, meant to run after `authn.loadIdentity`,
-  writes `result.permissions` — the caller's roles' patterns expanded against every permission a
-  booted pipeline requires via an `authz.require:<perm>` argument — so a client can learn its
-  concrete permissions without a copy of the pattern matcher. `authz.listRoles` writes
-  `result.roles`, the configured role names in config order; it performs no check of its own and is
-  meant to sit behind an `authz.require:<perm>` step, so only callers who may already manage the
-  instance (not every authenticated caller) learn the role table. `examples/minimal`'s `me`
-  pipeline runs `describeAccess`; a new `listRoles` pipeline (`GET /roles`, behind
-  `authz.require:users.manage`) runs `listRoles`.
 - `persistence-sqlite`, `redirects-default`, `site-default`: `createOne`/`findOne`/`updateOne` now
   declare `output: { type: "object" }`; `redirects.lookup` declares its real
   `{ redirect: { to, status } }`; `site.resolveLinks` restates the `_links` field as its own
   `extendsOutput`, alongside `site.resolve`'s existing `output`.
-- `core`: a module can declare a synchronous `health(instance)` hook, with no I/O, that reads its
-  own state instead of the outcome of a call: `{ ok: true, note? }` or
-  `{ ok: false, reason, restartRequired }`. `kestrel.health()` aggregates every declaring module
-  into `{ ok, restartRequired, modules }`, reachable on the booted `Kestrel` and through
-  `Introspection` in `attach()`. `persistence-sqlite` reports the store unusable, with
-  `restartRequired: true`, once a rollback has failed; contention is never reported.
-  `replication-sqlite` reports a prepared restore as `{ ok: true, note }`, since the instance
-  keeps serving until a host restarts it to apply the restore.
-
-### Changed
-
-- `revisions.reassignAuthor` prefers a preceding step's `verifiedUser` (e.g. `authn.verifyUser`'s
-  verified target) when one is present, ignoring the payload's own `reassignTo`. Without a
-  preceding step it behaves exactly as before: it reads the unverified `reassignTo` from the
-  payload or the event hand-over, so a pipeline built before this release, e.g.
-  `authn.requireUser → authz.require:users.manage → revisions.reassignAuthor`, keeps booting and
-  working unchanged — it simply does not verify the target user exists or is active.
-  `examples/minimal`'s `reassignRevisionAuthor` and `retryReassignRevisionAuthor` pipelines now run
-  `authn.verifyUser:result.reassignTo` and `authn.verifyUser:reassignTo` respectively first; new
-  pipelines should do the same to get a verified target.
-- `revisions.reassignAuthor`'s `reassignTo` input no longer requires a `name` alongside `id`, and
-  now also accepts a bare user id string, matching what a client sends when `authn.verifyUser`
-  precedes it: previously `{ reassignTo: { id } }` failed schema validation demanding `name`, and a
-  bare id passed `authn.verifyUser` only to then fail `revisions.reassignAuthor`'s own schema.
-
-### Fixed
-
-- `authz-roles`: a caller whose role claim is `constructor`, `toString`, `valueOf`,
-  `hasOwnProperty`, `__proto__` or another `Object.prototype` key no longer trips an inherited,
-  non-array value and a 500; role lookups go through a `Map`, not a plain object index, in both
-  `authz.can`/`authz.require` and the new `describeAccess`.
-
-### Changed
-
 - `openapi`: the fold that derives a pipeline's response schema from its steps' `describe().output`
   moved into `@michaelthielemann/kestrel/schema` (`resolveOutputSchema`, subpath-only); the
   generated OpenAPI document is unchanged except for one route's `required` array order (the
@@ -304,9 +257,13 @@
   underlying data was always there — but the generated OpenAPI document now describes them
   precisely: a consumer's generated types stop marking an always-present field as optional (media
   item lists, folder listings, delivery, replication and link/reference reports, among others).
-  `boot()` adds a new, non-fatal `kestrel.warnings` entry, `{ code: "undeclared-required", message,
-  pipeline, step, path }`, for an object schema with `properties` but no `required` key, naming the
-  JSON path of the offending schema.
+
+### Fixed
+
+- `authz-roles`: a caller whose role claim is `constructor`, `toString`, `valueOf`,
+  `hasOwnProperty`, `__proto__` or another `Object.prototype` key no longer trips an inherited,
+  non-array value and a 500; role lookups go through a `Map`, not a plain object index, in both
+  `authz.can`/`authz.require` and the new `describeAccess`.
 
 ## 5.8.1 – 2026-09-22
 
