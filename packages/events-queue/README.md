@@ -30,7 +30,9 @@ which may include a pipeline that was not subscribed when the event was original
 Requires exactly one delivery module per instance — this one or
 `@michaelthielemann/kestrel-events-direct` (inline), never both, never neither once a pipeline has
 an event trigger. The worker starts with the event triggers in `start()` and stops on `stop()`;
-without any event trigger nothing consumes the queue.
+without any event trigger in the whole manifest, `setup()` installs an empty delivery table right
+away (`start()` never gets the chance to), so `events.emit` drops the event instead of writing a row
+nothing could ever fan out, and the worker never starts.
 Config (all optional): `pollMs` 500, `batch` 20, `maxAttempts` 5, `backoffSeconds`
 `[5, 30, 120, 600]`, `lockTtlSeconds` 300, `retentionDays` 7, `relayMs` 5000, `relayPipelines`
 `"all"`.

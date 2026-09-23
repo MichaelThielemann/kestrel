@@ -9,6 +9,7 @@ import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/con
 import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
+import type { Runner } from "@michaelthielemann/kestrel/runner";
 import type { Unsubscribe } from "@michaelthielemann/kestrel-contracts/events";
 import { createEventsQueue, persistenceFailure, retryTarget, type EventsQueue } from "./impl.ts";
 
@@ -51,6 +52,7 @@ export const DEAD_SCHEMA: JsonSchema = {
 const COUNT = (key: string): JsonSchema => ({ type: "object", properties: { [key]: { type: "number" } }, required: [key] });
 const DEFAULT_DEAD_LIMIT = 50;
 const MAX_DEAD_LIMIT = 500;
+const NO_SUBSCRIBER_RUN: Runner = () => Promise.reject(new Error("events/queue: no pipeline is subscribed to any event"));
 
 type Instance = EventsQueue & { offs: Unsubscribe[]; logger: Logger; relayPipelines: string[] | "all" };
 
@@ -63,7 +65,9 @@ export default defineModule({
   async setup(config, deps): Promise<Instance> {
     const bus = deps.get(EVENTS);
     const queue = await createEventsQueue(config, { db: deps.get(PERSISTENCE), logger: deps.logger });
-    const offs = [...new Set(deps.eventTriggers.map((entry) => entry.event))].map((name) =>
+    const names = [...new Set(deps.eventTriggers.map((entry) => entry.event))];
+    if (names.length === 0) queue.setDelivery([], NO_SUBSCRIBER_RUN);
+    const offs = names.map((name) =>
       bus.on(name, async (event, data) => {
         await queue.enqueue(event, withEventIdentity(event, data));
       }),

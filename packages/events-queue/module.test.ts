@@ -15,7 +15,7 @@ import { ok } from "@michaelthielemann/kestrel/result";
 import type { RunResult, Runner } from "@michaelthielemann/kestrel/runner";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { createEventsInmemory } from "@michaelthielemann/kestrel-events-inmemory/impl";
-import { createEventsQueue, type EventsQueue, type QueueRow } from "./impl.ts";
+import { createEventsQueue, QUEUE, type EventsQueue, type QueueRow } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
 
 function jsonCopy(value: unknown): EventData {
@@ -88,6 +88,17 @@ describe("events/queue module shape", () => {
     await module.teardown!(instance);
     expect(instance.workerRunning()).toBe(false);
   });
+
+  it("installs an empty delivery table and writes no row when no event trigger exists anywhere in the manifest", async () => {
+    const logs: string[] = [];
+    const spyLogger: Deps["logger"] = { step() {}, info: (m) => logs.push(m), warn: (m) => logs.push(m), error: (m) => logs.push(m) };
+    const { db, instance } = await setup({}, spyLogger);
+    const res = await run(["events.emit:page.created"], {}, instance);
+    expect(res.status).toBe(200);
+    expect(expectOk(await db.count(QUEUE, {}))).toBe(0);
+    expect(instance.workerRunning()).toBe(false);
+    expect(logs).toEqual([]);
+  });
 });
 
 describe("events/queue module steps via runPipeline", () => {
@@ -112,6 +123,7 @@ describe("events/queue module steps via runPipeline", () => {
 
   it("emit fails with 503 TRANSIENT when the row cannot be persisted", async () => {
     const { db, instance } = await setup();
+    instance.setDelivery([{ event: "page.created", pipeline: "onCreated" }], async () => ({ runId: "r", status: 200 }));
     db.failNext("TRANSIENT");
     const res = await run(["events.emit:page.created"], {}, instance);
     expect(res).toMatchObject({ status: 503, code: "TRANSIENT", step: "events.emit:page.created" });
