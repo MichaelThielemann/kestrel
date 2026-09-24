@@ -6,7 +6,7 @@ import { failure } from "@michaelthielemann/kestrel/errors";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { err } from "@michaelthielemann/kestrel/result";
 import type { RunResult, Runner } from "@michaelthielemann/kestrel/runner";
-import { createEventsQueue, QUEUE, QueueWriteError, retryTarget, type Config, type QueueRow } from "./impl.ts";
+import { createEventsQueue, DISCOVERY_INTERVAL_MS, QUEUE, QueueWriteError, retryTarget, type Config, type QueueRow } from "./impl.ts";
 
 const CONFIG: Config = { pollMs: 5, batch: 2, maxAttempts: 3, backoffSeconds: [10, 100], lockTtlSeconds: 60, retentionDays: 1, relayMs: 5000, relayPipelines: "all", lanes: {} };
 
@@ -749,6 +749,63 @@ describe("events/queue coalescing", () => {
     const stored = await rows();
     expect(stored.filter((r) => r.pipeline === "p1")).toHaveLength(1);
   });
+
+  it("a stale coalesceKey left on a non-pending row is cleared so a later enqueue is not silently swallowed", async () => {
+    const { db, queue, rows } = await make();
+    await db.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "p1", state: "done", attempts: 0, createdAt: 1, availableAt: 1, lockedAt: null, lockedBy: null, finishedAt: 1, error: null, runId: null, coalesceKey: "p1:doc-1", lane: "main" });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    const stored = await rows();
+    expect(stored.filter((r) => r.state === "pending" && r.coalesceKey === "p1:doc-1")).toHaveLength(1);
+  });
+});
+
+describe("events/queue lanes: a mark during a lane job", () => {
+  it("a mark while a lane job runs enqueues one more row", async () => {
+    const { queue, rows } = await make({ lanes: { pages: ["render"] } });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let started: (() => void) | undefined;
+    const startedP = new Promise<void>((r) => {
+      started = r;
+    });
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      started?.();
+      await gate;
+      return OK;
+    });
+    await queue.enqueue("x", { coalesceKey: "k" });
+    const t = queue.tickLane("pages");
+    await startedP;
+    expect((await rows()).find((r) => r.state === "running")).toMatchObject({ coalesceKey: null });
+    await queue.enqueue("x", { coalesceKey: "k" });
+    expect(await rows()).toHaveLength(2);
+    release?.();
+    await t;
+  });
+
+  it("a failed lane row waits out its backoff before retrying; a new mark is written beside it", async () => {
+    const { queue, clock, rows } = await make({ backoffSeconds: [100], lanes: { pages: ["render"] } });
+    let runs = 0;
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      runs++;
+      return { runId: "r", status: 500, error: "boom", code: "INTERNAL", retryable: false };
+    });
+    await queue.enqueue("x", { coalesceKey: "k" });
+    expect(await queue.tickLane("pages")).toBe(1);
+    await queue.enqueue("x", { coalesceKey: "k" });
+    expect((await rows()).map((r) => [r.state, r.attempts, r.coalesceKey])).toEqual([
+      ["pending", 1, null],
+      ["pending", 0, "render:k"],
+    ]);
+    expect(await queue.tickLane("pages")).toBe(1);
+    expect(await queue.tickLane("pages")).toBe(0);
+    clock.t += 100_000;
+    expect(await queue.tickLane("pages")).toBe(1);
+    expect(runs).toBe(3);
+  });
 });
 
 describe("events/queue lanes: set at enqueue and fan-out", () => {
@@ -778,6 +835,15 @@ describe("events/queue lanes: set at enqueue and fan-out", () => {
     const row = expectOk(await db.findOne<QueueRow>(QUEUE, { id: "pre-lanes" }));
     expect(row).toMatchObject({ lane: "main" });
   });
+
+  it("a row written without a lane after setup is adopted into main by the periodic sweep", async () => {
+    const { db, queue, rows } = await make();
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await db.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "p1", state: "pending", attempts: 0, createdAt: 1, availableAt: 1, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: null });
+    expect(await queue.tick()).toBe(0);
+    expect((await rows())[0]).toMatchObject({ lane: "main" });
+    expect(await queue.tick()).toBe(1);
+  });
 });
 
 describe("events/queue lanes: status per lane", () => {
@@ -790,6 +856,25 @@ describe("events/queue lanes: status per lane", () => {
     const status = expectOk(await queue.status());
     expect(status.lanes).toEqual({ pages: { pending: 2, running: 0, oldestPendingAt: 1_000_000 }, variants: { pending: 0, running: 0, oldestPendingAt: null } });
     expect(status.pending).toBe(3);
+  });
+
+  it("a running lane row is counted in its own lane only", async () => {
+    const { queue } = await make({ lanes: { pages: ["render"], variants: ["generate"] } });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      await gate;
+      return OK;
+    });
+    await queue.enqueue("x", {});
+    const t = queue.tickLane("pages");
+    await new Promise((r) => setTimeout(r, 0));
+    const status = expectOk(await queue.status());
+    release?.();
+    await t;
+    expect(status.lanes).toEqual({ pages: { pending: 0, running: 1, oldestPendingAt: null }, variants: { pending: 0, running: 0, oldestPendingAt: null } });
   });
 });
 
@@ -887,6 +972,18 @@ describe("events/queue lanes: crash recovery per lane", () => {
     expect(await queue.tickLane("pages")).toBe(0);
     clock.t += 60_000;
     expect(await queue.tick()).toBe(0);
+    expect(await queue.tickLane("pages")).toBe(1);
+    expect((await rows())[0]).toMatchObject({ state: "done" });
+  });
+
+  it("a lane's own claim reclaims its expired locks without waiting for the main loop", async () => {
+    const { db, queue, clock, rows } = await make({ lanes: { pages: ["render"] } });
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => OK);
+    await queue.enqueue("x", {});
+    const [row] = await rows();
+    expectOk(await db.updateOne<QueueRow>(QUEUE, row!.id, { state: "running", lockedAt: clock.t, lockedBy: "dead@host" }));
+
+    clock.t += 60_000;
     expect(await queue.tickLane("pages")).toBe(1);
     expect((await rows())[0]).toMatchObject({ state: "done" });
   });
@@ -988,6 +1085,117 @@ describe("events/queue lanes: a pipeline moved out of a lane between two boots",
   });
 });
 
+describe("events/queue lanes: an orphan lane's rows are never stranded", () => {
+  it("retrying a dead row in a lane the current config no longer names starts that lane's loop on the next main tick", async () => {
+    const db = createFakePersistence();
+    const queue = await createEventsQueue({ ...CONFIG, lanes: {}, pollMs: 5 }, { db, logger: silentLogger, instanceId: "a@host" });
+    let runs = 0;
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      runs++;
+      return OK;
+    });
+    await db.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "render", state: "dead", attempts: 3, createdAt: 1, availableAt: 1, lockedAt: null, lockedBy: null, finishedAt: 1, error: "boom", runId: null, coalesceKey: null, lane: "pages" });
+
+    queue.startWorker();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(runs).toBe(0);
+
+    expect(expectOk(await queue.retryDead("all"))).toEqual({ retried: 1 });
+    await new Promise((r) => setTimeout(r, 40));
+    expect(runs).toBe(1);
+    await queue.stopWorker();
+  });
+
+  it("a discovery scan that fails is retried after the throttle window instead of stranding a lane's rows forever", async () => {
+    const realDb = createFakePersistence();
+    let discoveryCalls = 0;
+    function isDiscoveryQuery(filter: Record<string, unknown>): boolean {
+      return "state" in filter && !("lane" in filter) && !("pipeline" in filter);
+    }
+    const db: typeof realDb = {
+      ...realDb,
+      findMany: boundaryCast<typeof realDb.findMany>(async (collection: string, filter: Record<string, unknown>, options?: Record<string, unknown>) => {
+        if (isDiscoveryQuery(filter)) {
+          discoveryCalls++;
+          if (discoveryCalls === 1) return err(failure("TRANSIENT", "boom"));
+        }
+        return realDb.findMany<QueueRow>(collection, filter, options);
+      }, "host"),
+    };
+    const clock = { t: 1_000_000 };
+    const queue = await createEventsQueue({ ...CONFIG, lanes: {}, pollMs: 5 }, { db, logger: silentLogger, now: () => clock.t, instanceId: "a@host" });
+    await realDb.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "render", state: "pending", attempts: 0, createdAt: 1, availableAt: 1, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: null, coalesceKey: null, lane: "pages" });
+    let runs = 0;
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      runs++;
+      return OK;
+    });
+
+    queue.startWorker();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(runs).toBe(0);
+    expect(discoveryCalls).toBeGreaterThanOrEqual(1);
+
+    clock.t += DISCOVERY_INTERVAL_MS;
+    await new Promise((r) => setTimeout(r, 20));
+    expect(runs).toBe(1);
+    expect(discoveryCalls).toBeGreaterThanOrEqual(2);
+    await queue.stopWorker();
+  });
+});
+
+describe("events/queue lanes: a lost claim retries at once", () => {
+  it("a lost lane claim schedules its next attempt at once instead of waiting pollMs", async () => {
+    const realDb = createFakePersistence();
+    let findManyCalls = 0;
+    const waiters: Array<() => void> = [];
+    function isLaneClaimQuery(filter: Record<string, unknown>): boolean {
+      return filter.lane === "pages";
+    }
+    const db: typeof realDb = {
+      ...realDb,
+      findMany: boundaryCast<typeof realDb.findMany>(async (collection: string, filter: Record<string, unknown>, options?: Record<string, unknown>) => {
+        const result = await realDb.findMany<QueueRow>(collection, filter, options);
+        if (!isLaneClaimQuery(filter) || findManyCalls >= 2) return result;
+        findManyCalls++;
+        if (findManyCalls === 1) {
+          await new Promise<void>((resolve) => waiters.push(resolve));
+        } else {
+          for (const release of waiters.splice(0)) release();
+        }
+        return result;
+      }, "host"),
+    };
+    const queueA = await createEventsQueue({ ...CONFIG, pollMs: 3000, lanes: { pages: ["render"] } }, { db, logger: silentLogger, instanceId: "a@host" });
+    const queueB = await createEventsQueue({ ...CONFIG, pollMs: 3000, lanes: { pages: ["render"] } }, { db, logger: silentLogger, instanceId: "b@host" });
+    await realDb.createOne<QueueRow>(QUEUE, { name: "x", payload: { id: "1" }, pipeline: "render", state: "pending", attempts: 0, createdAt: 1, availableAt: 1, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: null, coalesceKey: null, lane: "pages" });
+    await realDb.createOne<QueueRow>(QUEUE, { name: "x", payload: { id: "2" }, pipeline: "render", state: "pending", attempts: 0, createdAt: 2, availableAt: 2, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: null, coalesceKey: null, lane: "pages" });
+    const order: string[] = [];
+    let releaseWinnerOfFirstRow: (() => void) | undefined;
+    const firstRowGate = new Promise<void>((r) => {
+      releaseWinnerOfFirstRow = r;
+    });
+    const run = (label: string): Runner =>
+      async (_pipeline, input) => {
+        const id = String(input.payload?.id);
+        order.push(`${label}:${id}`);
+        if (id === "1") await firstRowGate;
+        return OK;
+      };
+    queueA.setDelivery([{ event: "x", pipeline: "render" }], run("a"));
+    queueB.setDelivery([{ event: "x", pipeline: "render" }], run("b"));
+
+    queueA.startWorker();
+    queueB.startWorker();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(order.map((entry) => entry.split(":")[1]).sort()).toEqual(["1", "2"]);
+
+    releaseWinnerOfFirstRow?.();
+    await queueA.stopWorker();
+    await queueB.stopWorker();
+  });
+});
+
 describe("events/queue lanes: stopWorker awaits every loop", () => {
   it("awaits the main loop and every lane loop before resolving", async () => {
     const { queue } = await make({ lanes: { pages: ["render"] }, pollMs: 2 });
@@ -1027,5 +1235,34 @@ describe("events/queue lanes: stopWorker awaits every loop", () => {
     await stopping;
     expect(mainDone).toBe(true);
     expect(laneDone).toBe(true);
+  });
+
+  it("stopWorker still waits for a lane job once the main loop has already settled", async () => {
+    const { queue } = await make({ lanes: { pages: ["render"] } });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let started: (() => void) | undefined;
+    const startedP = new Promise<void>((r) => {
+      started = r;
+    });
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      started?.();
+      await gate;
+      return OK;
+    });
+    await queue.enqueue("x", {});
+    queue.startWorker();
+    await startedP;
+    let stopped = false;
+    const stopping = queue.stopWorker().then(() => {
+      stopped = true;
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(stopped).toBe(false);
+    release?.();
+    await stopping;
+    expect(stopped).toBe(true);
   });
 });
