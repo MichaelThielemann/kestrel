@@ -97,16 +97,21 @@ single-flight loop that claims and runs one due row of its own pipelines at a ti
 process; the relay never claims a lane row, whatever `relayPipelines` says. **A due row of one lane
 never waits for a row of another lane or of the main loop** — each loop claims independently, so
 however many rows are blocked in one lane, every other lane and the main loop keep claiming and
-running theirs. The cost: every running loop shares the process's CPU and, like the main loop,
-still runs one row at a time, so two lanes together are no faster than either alone — only never
-slower because of each other. `events.readQueueStatus` reports every lane this process currently
-knows of — configured, or found holding a row — with `pending`, `running` and `oldestPendingAt`
-under `lanes`; the top-level counters keep counting every row regardless of lane. Moving a pipeline
-out of a lane, or dropping the lane from the config, changes only where new rows land: the main
-loop re-scans for a lane it does not know of holding a `pending` or `running` row, at most every 30
-seconds and again right after `events.retryDead`, and starts that lane's loop, so no row is left
-without a loop to serve it. Every process sharing one queue should run the same `lanes`; a process
-missing a lane runs its pipelines in its own main loop instead, and its relay (with `"all"`) gives
+running theirs. The cost: every running loop shares the process's CPU. Each lane, like the main
+loop, still runs one row at a time — that is the guarantee: one lane's rows are never delayed by
+another's. Running several lanes overlaps their I/O and CPU-bound work (a page render's I/O,
+`sharp`'s thread pool), so the combined throughput across lanes is higher with more lanes busy, not
+lower. `events.readQueueStatus` reports every lane this process currently knows of — configured, or
+found holding a row — with `pending`, `running` and `oldestPendingAt` under `lanes`; the top-level
+counters keep counting every row regardless of lane. Moving a pipeline out of a lane, or dropping
+the lane from the config, changes only where new rows land: the main loop re-scans for a lane it
+does not know of holding a `pending` or `running` row, at most every 30 seconds in every process,
+and at once, in the process that served it, right after `events.retryDead` (another process still
+picks the lane up within its own 30-second window); either way it starts that lane's loop, so no
+row is left without a loop to serve it, and a lane found this way keeps its loop across that
+process's own later stop/start pairs. Every process sharing one queue should run the same `lanes`; a
+process missing a lane runs its pipelines in its own main loop instead, and its relay (with
+`"all"`) gives
 them a head start the other processes' lanes never would.
 
 <!-- kestrel-docs:start -->

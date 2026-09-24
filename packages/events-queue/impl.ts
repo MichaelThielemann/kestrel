@@ -576,7 +576,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       generation++;
       const gen = generation;
       schedule(gen, 0);
-      for (const name of Object.keys(config.lanes)) scheduleLane(gen, name, 0);
+      for (const name of knownLaneNames) scheduleLane(gen, name, 0);
     },
     async stopWorker() {
       running = false;

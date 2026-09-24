@@ -876,6 +876,16 @@ describe("events/queue lanes: status per lane", () => {
     await t;
     expect(status.lanes).toEqual({ pages: { pending: 0, running: 1, oldestPendingAt: null }, variants: { pending: 0, running: 0, oldestPendingAt: null } });
   });
+
+  it("status lists a discovered lane, not only the configured ones", async () => {
+    const { db, queue } = await make({ lanes: {} });
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => OK);
+    await db.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "render", state: "pending", attempts: 0, createdAt: 1, availableAt: 1, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: null, coalesceKey: null, lane: "pages" });
+
+    expect(await queue.tick()).toBe(0);
+    const status = expectOk(await queue.status());
+    expect(status.lanes).toEqual({ pages: { pending: 1, running: 0, oldestPendingAt: 1 } });
+  });
 });
 
 describe("events/queue lanes: no lane delays another", () => {
@@ -962,7 +972,7 @@ describe("events/queue lanes: no lane delays another", () => {
 });
 
 describe("events/queue lanes: crash recovery per lane", () => {
-  it("a lane row whose lock expired is reclaimed by the main tick's global sweep, then rerun by its own lane", async () => {
+  it("the main tick's global sweep releases a lane row's expired lock before that lane ever ticks, which then claims and runs it", async () => {
     const { db, queue, clock, rows } = await make({ lanes: { pages: ["render"] } });
     queue.setDelivery([{ event: "x", pipeline: "render" }], async () => OK);
     await queue.enqueue("x", {});
@@ -972,6 +982,8 @@ describe("events/queue lanes: crash recovery per lane", () => {
     expect(await queue.tickLane("pages")).toBe(0);
     clock.t += 60_000;
     expect(await queue.tick()).toBe(0);
+    expect((await rows())[0]).toMatchObject({ state: "pending", lockedAt: null, lockedBy: null });
+
     expect(await queue.tickLane("pages")).toBe(1);
     expect((await rows())[0]).toMatchObject({ state: "done" });
   });
@@ -1085,6 +1097,31 @@ describe("events/queue lanes: a pipeline moved out of a lane between two boots",
   });
 });
 
+describe("events/queue lanes: startWorker re-arms every lane this process knows of", () => {
+  it("a discovered lane's loop restarts at once across a stop/start pair, without waiting for another scan", async () => {
+    const db = createFakePersistence();
+    const queue = await createEventsQueue({ ...CONFIG, lanes: {}, pollMs: 5 }, { db, logger: silentLogger });
+    let runs = 0;
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      runs++;
+      return OK;
+    });
+    await db.createOne<QueueRow>(QUEUE, { name: "x", payload: { id: "1" }, pipeline: "render", state: "pending", attempts: 0, createdAt: 1, availableAt: 1, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: null, coalesceKey: null, lane: "pages" });
+
+    queue.startWorker();
+    await new Promise((r) => setTimeout(r, 40));
+    expect(runs).toBe(1);
+
+    await queue.stopWorker();
+    await db.createOne<QueueRow>(QUEUE, { name: "x", payload: { id: "2" }, pipeline: "render", state: "pending", attempts: 0, createdAt: 2, availableAt: 2, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: null, coalesceKey: null, lane: "pages" });
+
+    queue.startWorker();
+    await new Promise((r) => setTimeout(r, 40));
+    expect(runs).toBe(2);
+    await queue.stopWorker();
+  });
+});
+
 describe("events/queue lanes: an orphan lane's rows are never stranded", () => {
   it("retrying a dead row in a lane the current config no longer names starts that lane's loop on the next main tick", async () => {
     const db = createFakePersistence();
@@ -1141,6 +1178,19 @@ describe("events/queue lanes: an orphan lane's rows are never stranded", () => {
     expect(runs).toBe(1);
     expect(discoveryCalls).toBeGreaterThanOrEqual(2);
     await queue.stopWorker();
+  });
+
+  it("finds an orphan lane's row behind 200 active rows on the first page", async () => {
+    const { db, queue } = await make({ lanes: {} });
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => OK);
+    for (let i = 0; i < 200; i++) {
+      await db.createOne<QueueRow>(QUEUE, { id: `filler-${String(i).padStart(3, "0")}`, name: "x", payload: {}, pipeline: "filler", state: "running", attempts: 0, createdAt: i, availableAt: i, lockedAt: 1_000_000, lockedBy: "someone", finishedAt: null, error: null, runId: null, coalesceKey: null, lane: "main" });
+    }
+    await db.createOne<QueueRow>(QUEUE, { id: "zzz-orphan", name: "x", payload: {}, pipeline: "render", state: "pending", attempts: 0, createdAt: 300, availableAt: 1, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: null, coalesceKey: null, lane: "pages" });
+
+    expect(await queue.tick()).toBe(0);
+    const status = expectOk(await queue.status());
+    expect(status.lanes).toEqual({ pages: { pending: 1, running: 0, oldestPendingAt: 1 } });
   });
 });
 
