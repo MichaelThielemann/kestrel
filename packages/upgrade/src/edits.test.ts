@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { applyEdits } from "./apply.ts";
+import { parseTs } from "./ast.ts";
 import { addModuleEmits, insertModuleListEntry, insertPipelineStep, insertStepAfterEmitOutsideGroup, markStepBinary, renameContentField, renameStringLiterals, replaceModuleListEntry, setModuleConfigProperties, setStepRequired } from "./edits.ts";
 import { removeDependency, replaceDependency, setDependencyRange } from "./packageJson.ts";
 
@@ -44,6 +45,43 @@ describe("insertModuleListEntry", () => {
     const { text: fixed } = applyEdits(CONFIG_MULTILINE, [first!]);
     const second = insertModuleListEntry("kestrel.config.ts", fixed, { anchorUse: "kestrel-events-inmemory", position: "after", use: "kestrel-events-direct" });
     expect(second).toBeUndefined();
+  });
+
+  it("adds the comma a comma-less last anchor is missing, and the result re-parses", () => {
+    const source = `export default defineConfig({
+  modules: [
+    { use: "kestrel-persistence-sqlite", config: { file: "./data/kestrel.db" } },
+    { use: "kestrel-events-inmemory" }
+  ],
+  triggers: [],
+});
+`;
+    const edit = insertModuleListEntry("kestrel.config.ts", source, { anchorUse: "kestrel-events-inmemory", position: "after", use: "kestrel-events-direct" });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('{ use: "kestrel-events-inmemory" },\n    { use: "kestrel-events-direct" },\n  ],');
+    expect(() => parseTs(text)).not.toThrow();
+  });
+
+  it("matches the file's own single-quote style instead of always inserting double quotes", () => {
+    const source = `export default defineConfig({
+  modules: [
+    { use: 'kestrel-events-inmemory' },
+    { use: 'kestrel-persistence-sqlite' },
+  ],
+  triggers: [],
+});
+`;
+    const edit = insertModuleListEntry("kestrel.config.ts", source, { anchorUse: "kestrel-events-inmemory", position: "after", use: "kestrel-events-direct" });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain("{ use: 'kestrel-events-direct' }");
+  });
+
+  it("inserts with the file's own CRLF line ending instead of a bare LF", () => {
+    const source = CONFIG_MULTILINE.replace(/\n/g, "\r\n");
+    const edit = insertModuleListEntry("kestrel.config.ts", source, { anchorUse: "kestrel-events-inmemory", position: "after", use: "kestrel-events-direct" });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('{ use: "kestrel-events-inmemory" },\r\n    { use: "kestrel-events-direct" },\r\n');
+    expect(text).not.toMatch(/[^\r]\n/);
   });
 });
 

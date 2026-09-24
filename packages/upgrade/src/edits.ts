@@ -20,6 +20,10 @@ function isMultiline(source: string, array: AstNode): boolean {
   return source.slice(start, end).includes("\n");
 }
 
+function eolOf(source: string): string {
+  return source.includes("\r\n") ? "\r\n" : "\n";
+}
+
 function quoteOf(source: string, node: AstNode | undefined): '"' | "'" {
   if (node === undefined) return '"';
   const { start } = span(node);
@@ -38,6 +42,10 @@ function findModuleArray(root: AstNode): AstNode | undefined {
 
 function entryUse(entry: AstNode): string | undefined {
   return stringValue(objectProperty(entry, "use"));
+}
+
+function entryUseNode(entry: AstNode): AstNode | undefined {
+  return objectProperty(entry, "use");
 }
 
 /** Locates the `modules: [...]` array of a `defineConfig({...})` call or a default-exported config object literal. */
@@ -61,7 +69,7 @@ export function replaceModuleListEntry(file: string, source: string, options: Re
   if (array === undefined) return undefined;
   const entry = elements(array).find((e) => entryUse(e) === options.use);
   if (entry === undefined) return undefined;
-  const quote = quoteOf(source, entry);
+  const quote = quoteOf(source, entryUseNode(entry));
   const { start, end } = span(entry);
   return { file, start, end, text: entryLiteral(quote, options.newUse, options.config) };
 }
@@ -82,22 +90,9 @@ export function insertModuleListEntry(file: string, source: string, options: Ins
   const anchorIndex = entryNodes.findIndex((e) => entryUse(e) === options.anchorUse);
   if (anchorIndex === -1) return undefined;
   const anchor = entryNodes[anchorIndex]!;
-  const quote = quoteOf(source, entryNodes.find((e) => entryUse(e) !== undefined));
+  const quote = quoteOf(source, entryNodes.map(entryUseNode).find((n) => n !== undefined));
   const literal = entryLiteral(quote, options.use, options.config);
-  const multiline = isMultiline(source, array);
-  if (!multiline) {
-    const { start, end } = span(anchor);
-    return options.position === "after" ? { file, start: end, end, text: `, ${literal}` } : { file, start, end: start, text: `${literal}, ` };
-  }
-  const { indent } = lineOf(source, span(anchor).start);
-  if (options.position === "after") {
-    const { end } = span(anchor);
-    const lineEnd = source.indexOf("\n", end);
-    const insertAt = lineEnd === -1 ? end : lineEnd + 1;
-    return { file, start: insertAt, end: insertAt, text: `${indent}${literal},\n` };
-  }
-  const { lineStart } = lineOf(source, span(anchor).start);
-  return { file, start: lineStart, end: lineStart, text: `${indent}${literal},\n` };
+  return insertRelativeToAnchor(file, source, array, anchor, options.position, literal);
 }
 
 export interface SetModuleConfigOptions {
@@ -177,6 +172,7 @@ function stepArraysOf(top: AstNode): AstNode[] {
 }
 
 function insertRelativeToAnchor(file: string, source: string, array: AstNode, anchor: AstNode, position: "before" | "after", literal: string): Edit {
+  const eol = eolOf(source);
   if (!isMultiline(source, array)) {
     const { start, end } = span(anchor);
     return position === "after" ? { file, start: end, end, text: `, ${literal}` } : { file, start, end: start, text: `${literal}, ` };
@@ -184,12 +180,16 @@ function insertRelativeToAnchor(file: string, source: string, array: AstNode, an
   const { indent } = lineOf(source, span(anchor).start);
   if (position === "after") {
     const { end } = span(anchor);
-    const lineEnd = source.indexOf("\n", end);
-    const insertAt = lineEnd === -1 ? end : lineEnd + 1;
-    return { file, start: insertAt, end: insertAt, text: `${indent}${literal},\n` };
+    const nlIndex = source.indexOf("\n", end);
+    if (nlIndex === -1) return { file, start: end, end, text: `, ${literal}` };
+    const lineEnd = source[nlIndex - 1] === "\r" ? nlIndex - 1 : nlIndex;
+    const insertAt = nlIndex + 1;
+    const restOfLine = source.slice(end, lineEnd);
+    const needsComma = !restOfLine.includes(",");
+    return { file, start: end, end: insertAt, text: `${needsComma ? "," : ""}${restOfLine}${eol}${indent}${literal},${eol}` };
   }
   const { lineStart } = lineOf(source, span(anchor).start);
-  return { file, start: lineStart, end: lineStart, text: `${indent}${literal},\n` };
+  return { file, start: lineStart, end: lineStart, text: `${indent}${literal},${eol}` };
 }
 
 export interface InsertStepOptions {
@@ -280,10 +280,15 @@ export function addModuleEmits(file: string, source: string, events: readonly st
   const first = props[0]!;
   const { end } = span(first);
   if (!isMultiline(source, arg)) return { file, start: end, end, text: `, emits: ${literal}` };
+  const eol = eolOf(source);
   const { indent } = lineOf(source, span(first).start);
-  const lineEnd = source.indexOf("\n", end);
-  const insertAt = lineEnd === -1 ? end : lineEnd + 1;
-  return { file, start: insertAt, end: insertAt, text: `${indent}emits: ${literal},\n` };
+  const nlIndex = source.indexOf("\n", end);
+  if (nlIndex === -1) return { file, start: end, end, text: `, emits: ${literal}` };
+  const lineEnd = source[nlIndex - 1] === "\r" ? nlIndex - 1 : nlIndex;
+  const insertAt = nlIndex + 1;
+  const restOfLine = source.slice(end, lineEnd);
+  const needsComma = !restOfLine.includes(",");
+  return { file, start: end, end: insertAt, text: `${needsComma ? "," : ""}${restOfLine}${eol}${indent}emits: ${literal},${eol}` };
 }
 
 function describeObjectsOf(root: AstNode): AstNode[] {
