@@ -29,6 +29,13 @@ This module has no `relayPipelines` config and needs none: delivery is inline by
 subscribed pipeline has already run by the time `events.relay` reports on it, so there is nothing
 to keep in the request versus hand to a worker.
 
+`events.readDeliveryStatus` answers `{ dead, scope: "process", since, lastDeadAt }`: the
+deliveries the process answering the request gave up on, counted since it started. Nothing here
+retries, so every failed delivery is final and counted at once; a restart starts the count over,
+and a site behind several processes has one count per process. The number never reaches
+`kestrel.health()` or a readiness probe — a failed delivery does not take the instance out of
+rotation.
+
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
 `@michaelthielemann/kestrel-events-direct` – module `events/direct`: provides no contract; requires `events@1`; provides the event trigger hook.
@@ -41,6 +48,6 @@ Config: `{}` – nothing to set.
 | `events.relay` | Report how the events this run raised were delivered (adds `_events` to the result) | – | `result._events` | – | { _events: object, … } | – | portable | no |
 | `events.readDeliveryStatus` | Failed deliveries of the process that answers, since it started; inline delivery never retries, so each one is final | – | `result` | – | { dead: integer, scope: "store" \| "process", since: number \| null, lastDeadAt: number \| null, … } | – | portable | no |
 
-Used by 14 of 85 pipelines in `examples/minimal`.
+Used by 15 of 86 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

@@ -67,6 +67,12 @@ a subscriber that must show up in the response (publishing a page) keeps its hea
 pipeline that is not in the booted manifest fails at `attach()`, once every pipeline is resolved,
 with an error naming the module and the unknown pipeline(s).
 
+`events.readDeliveryStatus` answers `{ dead, scope: "store", since: null, lastDeadAt }`: the
+dead-letter rows across every process, the same count `events.readQueueStatus.dead` already
+carries. `since` stays `null` because the count is a store total, not a per-process one; a retry
+through `events.retryDead` lowers it. The number never reaches `kestrel.health()` or a readiness
+probe — a dead letter does not take the instance out of rotation.
+
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
 `@michaelthielemann/kestrel-events-queue` – module `events/queue`: provides no contract; requires `persistence@1`, `events@1`; provides the event trigger hook.

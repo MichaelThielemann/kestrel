@@ -163,6 +163,118 @@
         ]
       }
     },
+    "/admin/events/delivery": {
+      "get": {
+        "operationId": "eventsDeliveryStatus",
+        "summary": "Require a valid session → Requires permission system.manage → Failed deliveries of the process that answers, since it started; inline delivery never retries, so each one is final",
+        "tags": [
+          "admin"
+        ],
+        "x-kestrel-pipeline": "eventsDeliveryStatus",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:system.manage",
+          "events.readDeliveryStatus"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "dead": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "store",
+                        "process"
+                      ]
+                    },
+                    "since": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "lastDeadAt": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "dead",
+                    "scope",
+                    "since",
+                    "lastDeadAt"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission system.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "temporarily unavailable; retry after the Retry-After header",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/admin/images/prune": {
       "post": {
         "operationId": "pruneImages",

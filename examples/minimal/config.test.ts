@@ -806,6 +806,45 @@ describe("user deletion wiring", () => {
       await dispose();
     }
   });
+
+  it("a reassignment whose target no longer exists fails visibly and leaves the instance healthy", async () => {
+    const { kestrel, dispose } = await bootWithQueue();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const editor = await createEditor(kestrel, admin, "liam");
+      const target = await createEditor(kestrel, admin, "maya");
+
+      const deleted = await kestrel.run("deleteUser", { trigger, headers: bearer(admin.token), params: { id: editor.id }, payload: { reassignTo: target.id }, body: { reassignTo: target.id } });
+      expect(deleted.status).toBe(200);
+
+      const targetDeleted = await kestrel.run("deleteUser", { trigger, headers: bearer(admin.token), params: { id: target.id } });
+      expect(targetDeleted.status).toBe(200);
+
+      await pollUntil(async () => {
+        const status = await kestrel.run("queueStatus", { trigger, headers: bearer(admin.token) });
+        const counts = boundaryCast<{ pending: number; running: number }>(status.result, "json");
+        return counts.pending === 0 && counts.running === 0;
+      });
+
+      expect(await failedPipelines(kestrel, admin)).toContain("reassignRevisionAuthor");
+      const status = await kestrel.run("eventsDeliveryStatus", { trigger, headers: bearer(admin.token) });
+      expect(status.status).toBe(200);
+      expect(boundaryCast<{ dead: number }>(status.result, "json").dead).toBe(1);
+      expect(kestrel.health().ok).toBe(true);
+    } finally {
+      await dispose();
+    }
+  });
+});
+
+describe("events delivery status wiring", () => {
+  it("guards the route with a login and system.manage", async () => {
+    const config = await loadConfig(join(root, "kestrel.config.ts"));
+    const routes = config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline]);
+    expect(routes).toContainEqual(["GET /admin/events/delivery", "eventsDeliveryStatus"]);
+    const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
+    expect(pipelines.get("eventsDeliveryStatus")).toEqual(["authn.requireUser", "authz.require:system.manage", "events.readDeliveryStatus"]);
+  });
 });
 
 describe("events/queue relay: a forced delivery.publish failure through POST /pages", () => {

@@ -1,7 +1,9 @@
 # insights/default
 `insights@1`: one view of the running instance. `manifest()` is the core's `kestrel.describe()`
 (modules with version, contracts, config schema and variables, steps with their descriptions,
-pipelines with step order, triggers) — static, computed once;
+pipelines with step order, triggers, and boot warnings) — static, computed once. A boot warning is
+`{ code, message, ...context }`, every context field a string; a code this module does not know is
+passed through unchanged, so a future one needs no change here;
 `stats()` aggregates the core's run observer in this process: count, failed (every non-ok
 outcome), errors (5xx), p50/p95 ms per pipeline and per step spec, active runs, uptime,
 event-triggered runs per event name, and a ring buffer of the last failed runs

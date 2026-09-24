@@ -12523,6 +12523,89 @@
       ]
     },
     {
+      "name": "eventsDeliveryStatus",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:system.manage",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission system.manage",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission system.manage"
+            }
+          }
+        },
+        {
+          "spec": "events.readDeliveryStatus",
+          "name": "events.readDeliveryStatus",
+          "module": "events/direct",
+          "description": {
+            "summary": "Failed deliveries of the process that answers, since it started; inline delivery never retries, so each one is final",
+            "reads": [],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "object",
+              "properties": {
+                "dead": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "store",
+                    "process"
+                  ]
+                },
+                "since": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "lastDeadAt": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "dead",
+                "scope",
+                "since",
+                "lastDeadAt"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "exportMedia",
       "steps": [
         {
@@ -22816,6 +22899,11 @@
         "method": "GET",
         "path": "/admin/insights/stats",
         "pipeline": "insightsStats"
+      },
+      {
+        "method": "GET",
+        "path": "/admin/events/delivery",
+        "pipeline": "eventsDeliveryStatus"
       }
     ],
     "events": [

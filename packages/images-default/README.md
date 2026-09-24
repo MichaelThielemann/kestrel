@@ -114,6 +114,6 @@ cursor.
 | `images.serve` | Binary variant, or the original with x-kestrel-variant: pending while it isn't ready yet | `params.id`, `params.file` | `result` | – | – | 400 missing id or file; 404 media item or size not found, or the variant gave up after maxAttempts | – | no |
 | `images.export:<arg>` | Copy every done variant to <arg>/<folder>/<filename>.<size>.<ext> | – | `result.variants` | – | { variants: object, … } | – | – | no |
 
-Used by 15 of 85 pipelines in `examples/minimal`.
+Used by 15 of 86 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

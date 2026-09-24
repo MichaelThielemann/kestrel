@@ -141,6 +141,7 @@ export default defineConfig({
     { http: "GET /admin/content/model", pipeline: "contentModel" },
     { http: "GET /admin/insights/manifest", pipeline: "insightsManifest" },
     { http: "GET /admin/insights/stats", pipeline: "insightsStats" },
+    { http: "GET /admin/events/delivery", pipeline: "eventsDeliveryStatus" },
     { event: "auth.loggedIn", pipeline: "auditAuth" },
     { event: "auth.loggedOut", pipeline: "auditAuth" },
     { event: "user.deleted", pipeline: "reassignRevisionAuthor" },
