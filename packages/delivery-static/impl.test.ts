@@ -290,6 +290,23 @@ describe("delivery/static against site/default", () => {
     expect(statuses.map((s) => [s.locale, s.state])).toEqual([["de", "live"], ["en", "draft"]]);
     expect(renderer.documents.find((d) => d.slug === "dritte")?._translations).toEqual({ de: true, en: false });
   });
+
+  it("removes an inherited-slug locale's stale static output once the default locale it inherited from is unpublished", async () => {
+    const content = await createContentDefault(model, createFakePersistence());
+    const doc = expectOk(await content.create("pages", { slug: "erste", title: "Erste DE", status: "published" }));
+    expectOk(await content.update("pages", doc.id, { status: "published" }, { locale: "en" }));
+
+    const blobs = fakeBlobs();
+    const delivery = await createDeliveryStatic(config, { content, site: createSiteDefault(content), renderer: fakeRenderer(), blobs, db: createFakePersistence(), logger: fakeLogger() });
+    const first = expectOk(await delivery.publish("pages", doc.id));
+    expect(first.map((s) => [s.locale, s.state, s.path])).toEqual([["de", "live", "/erste"], ["en", "live", "/en/erste"]]);
+    expect([...blobs.blobs.keys()].filter((k) => k.endsWith("index.html")).sort()).toEqual(["site/en/erste/index.html", "site/erste/index.html"]);
+
+    expectOk(await content.update("pages", doc.id, { status: "draft" }));
+    const second = expectOk(await delivery.publish("pages", doc.id));
+    expect(second.map((s) => [s.locale, s.state, s.path])).toEqual([["de", "draft", null], ["en", "error", null]]);
+    expect([...blobs.blobs.keys()].filter((k) => k.endsWith("index.html"))).toEqual([]);
+  });
 });
 
 function fakeHtmlRenderer(html: string): Renderer {

@@ -1,7 +1,7 @@
 import TurndownService from "turndown";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentDocument, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
-import { defaultLocaleSatisfiesFilter } from "@michaelthielemann/kestrel-contracts/content-locale";
+import { publishedLocale } from "@michaelthielemann/kestrel-contracts/content-locale";
 import { isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -198,17 +198,8 @@ export async function exportLlms(config: LlmsConfig, deps: LlmsDeps): Promise<Re
     const sources = await deps.sources(type);
     if (isErr(sources)) return sources;
     for (const source of sources.value) {
-      let read = await deps.content.get(type, source.docId, source.locale === "" ? {} : { locale: source.locale });
+      const read = await publishedLocale(deps.content, type, source.docId, source.locale === "" ? undefined : source.locale, deps.filterFor(type), { fallback: deps.fallback, translations: false });
       if (isErr(read)) return read;
-      if (deps.fallback && source.locale !== "" && source.locale !== deps.defaultLocale) {
-        const defaultOk = await defaultLocaleSatisfiesFilter(deps.content, deps.defaultLocale, type, source.docId, deps.filterFor(type));
-        if (isErr(defaultOk)) return defaultOk;
-        if (defaultOk.value) {
-          const merged = await deps.content.get(type, source.docId, { locale: source.locale, fallback: true });
-          if (isErr(merged)) return merged;
-          read = merged;
-        }
-      }
       const doc = read.value;
       if (!doc) continue;
       const seo = doc[config.seoField];

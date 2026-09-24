@@ -9,7 +9,10 @@ narrowed to locales that satisfy it themselves, internal links resolved to publi
 path `site.pathOf` returns (default locale unprefixed unless `prefixPrimary`, `home` slug → `/`);
 other locales are removed. Outcome per
 locale in `delivery_publish_status` (`live` | `error` | `draft`, `path`, `error`, `publishedAt`); a failed
-render keeps the previous live output. `delivery.unpublish:<type>` after remove, `delivery.readStatus:<type>`
+render keeps the previous live output, but a locale that is published yet has no slug of its own or
+inherited (`state: "error"`, e.g. the default locale it inherited a slug from turned draft) removes
+its previous output instead — that content is no longer publishable, so it does not stay public.
+`delivery.unpublish:<type>` after remove, `delivery.readStatus:<type>`
 for the editor's second lamp, `delivery.publishAll:<type>` to re-render everything.
 `delivery.publish` takes the document id from `result.id` when present, else from the event
 payload's `id`, so it also runs as the first step of a pipeline an event triggers; it merges
@@ -25,7 +28,10 @@ A match is precise to a path segment: `/file` never matches `/file-x` or `/filea
 never matches `thumb.webp`. Unresolved references are logged and left untouched.
 `delivery.exportLlms` (always on; `llms` defaults to paths instead of URLs and no full file) (no argument; append it after `delivery.publish`/`unpublish`/`publishAll`
 and after saving the settings) writes `<prefix>llms.txt` per [llmstxt.org](https://llmstxt.org) from the `live` status rows
-of every delivered type: `# <settings title>`, `> <settings description>`, one `## <headings[type] ?? type>` section with
+of every delivered type, re-checking each source locale's own current values at read time — a
+`live` row only names where to look, not what to trust, so a document saved as a draft after its
+last successful publish is skipped even if its row has not caught up yet: `# <settings title>`,
+`> <settings description>`, one `## <headings[type] ?? type>` section with
 `- [<seo.title || title>](<siteUrl><path>): <seo.description>` per page; `seo.noindex === true` excludes a page.
 An empty `seo`/title field is filled from the default locale only when the default locale's own
 values equal `publishedValue` too, the same rule `delivery.publish` applies. `full: true`

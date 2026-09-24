@@ -285,7 +285,7 @@ export async function createDeliveryStatic(config: Config, deps: { content: Cont
       return setStatus(type, id, key, { state: "draft", path: null, error: null });
     };
     const statusFilter = { [tc.statusField]: tc.publishedValue };
-    const viewResult = await publishedLocale(content, model, type, id, locale, statusFilter, config.fallback);
+    const viewResult = await publishedLocale(content, type, id, locale, statusFilter, { fallback: config.fallback });
     if (isErr(viewResult)) return err(transientOnly(viewResult.error, "content@1"));
     const fetched = viewResult.value;
     if (!fetched) return unpublished();
@@ -295,7 +295,11 @@ export async function createDeliveryStatic(config: Config, deps: { content: Cont
     if (isErr(linked)) return err(transientOnly(linked.error, "site@1"));
     const doc = linked.value;
     const path = site.pathOf(type, doc, options);
-    if (path === null) return setStatus(type, id, key, { state: "error", error: `no ${tc.slugField}` });
+    if (path === null) {
+      const removed = await removeBlobs(previous?.path ?? null);
+      if (isErr(removed)) return removed;
+      return setStatus(type, id, key, { state: "error", path: null, error: `no ${tc.slugField}` });
+    }
     const failed = (message: string): Promise<Result<PublishStatus, DeliveryError>> =>
       setStatus(type, id, key, { state: "error", path: previous?.state === "live" ? previous.path : null, error: message });
     const loggedMedia = new Set<string>();

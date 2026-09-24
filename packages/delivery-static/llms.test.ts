@@ -180,6 +180,14 @@ describe("delivery/static llms export", () => {
     expect(txt).not.toContain("DE Beschreibung");
   });
 
+  it("re-checks the source locale itself instead of trusting a stale live status row", async () => {
+    const { delivery, blobs, put } = await setup({ ...base, llms: { ...llms, siteUrl: "https://example.org" } });
+    put("pages", "p1", { title__en: "EN DRAFT SECRET", status__en: "draft" });
+    expectOk(await delivery.exportLlms());
+    const txt = blobs.text("site/llms.txt")!;
+    expect(txt).not.toContain("EN DRAFT SECRET");
+  });
+
   it("emits paths without siteUrl and falls back to the type name and 'Website'", async () => {
     const { delivery, blobs, put } = await setup({ ...base, llms });
     put("settings", "settings", { title__de: "", description__de: "" });
