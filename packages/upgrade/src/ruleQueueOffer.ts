@@ -53,17 +53,27 @@ function errKey(e: BootProblem): string {
   return [e.code, e.owner, e.reason, e.module, e.pipeline, e.step, e.path].join(":");
 }
 
-type SwitchVerification = { verified: true; newErrors: readonly BootProblem[] } | { verified: false };
+type SwitchVerification = { verified: true; newErrors: readonly BootProblem[] } | { verified: false; noBootTier: boolean };
 
 async function verifySwitch(ctx: RuleContext, relayPipelines: readonly string[]): Promise<SwitchVerification> {
-  if (!ctx.previewBoot) return { verified: true, newErrors: [] };
-  const preview = await ctx.previewBoot(switchEdits(ctx, relayPipelines));
-  if (!preview) return { verified: false };
-  const baseline = new Set(ctx.bootCheck.errors.map(errKey));
-  return { verified: true, newErrors: preview.errors.filter((e) => !baseline.has(errKey(e))) };
+  if (!ctx.previewBoot) return { verified: false, noBootTier: true };
+  try {
+    const preview = await ctx.previewBoot(switchEdits(ctx, relayPipelines));
+    if (!preview) return { verified: false, noBootTier: false };
+    const baseline = new Set(ctx.bootCheck.errors.map(errKey));
+    return { verified: true, newErrors: preview.errors.filter((e) => !baseline.has(errKey(e))) };
+  } catch {
+    return { verified: false, noBootTier: false };
+  }
 }
 
-async function offerGate(ctx: RuleContext): Promise<{ unmet: string[]; unverified: boolean }> {
+function unverifiedGuidance(noBootTier: boolean): { subject: string; instruction: string } {
+  return noBootTier
+    ? { subject: "no boot check ran", instruction: `upgrade @michaelthielemann/kestrel to 6 first, then run \`fix\` again to verify` }
+    : { subject: `${EVENTS_QUEUE_PACKAGE} may not be installed`, instruction: `install ${EVENTS_QUEUE_PACKAGE}, then run \`fix\` again to verify` };
+}
+
+async function offerGate(ctx: RuleContext): Promise<{ unmet: string[]; unverified: boolean; noBootTier: boolean }> {
   const unmet: string[] = [];
   if (!ctx.project.input.config.triggers.some((t) => "event" in t)) unmet.push("no event trigger to move to the queue");
   if (!ctx.project.input.modules.some((m) => m.provides.some((c) => c.name === "persistence@1"))) unmet.push("no loaded module provides persistence@1");
@@ -76,9 +86,9 @@ async function offerGate(ctx: RuleContext): Promise<{ unmet: string[]; unverifie
   const blockers = switchBlockers(ctx);
   if (blockers.length > 0) unmet.push(`events-direct is imported where the switch cannot rewrite it: ${blockers.join(", ")}`);
   const verification = await verifySwitch(ctx, defaultRelayPipelines(ctx));
-  if (!verification.verified) return { unmet, unverified: true };
+  if (!verification.verified) return { unmet, unverified: true, noBootTier: verification.noBootTier };
   if (verification.newErrors.length > 0) unmet.push(`the switched project fails to boot: ${verification.newErrors.map((e) => e.reason).join("; ")}`);
-  return { unmet, unverified: false };
+  return { unmet, unverified: false, noBootTier: false };
 }
 
 function consumerEventPipelines(ctx: RuleContext): string[] {
@@ -134,27 +144,30 @@ const CONSEQUENCES = "uploads and other requests answer at once; a subscriber no
  * Offers switching a backend project's event delivery from events-direct to events-queue, never forcing it.
  * The offer only appears once an event is actually delivered through it, a durable persistence module
  * backs the queue, nothing suggests a short-lived process, no open finding leaves an event payload or
- * emit unresolved, and a sandboxed preview of the switch does not introduce a new boot error. When
- * events-queue is not installed yet, the preview cannot run at all: the offer still appears, but its
- * question has no default (so `--yes` never answers it) and names the package to install first. At-least-once
- * safety is then the `idempotent:<pipeline>` question per consumer event pipeline, asked only after
- * `switch-to-queue: yes`.
+ * emit unresolved, and a sandboxed preview of the switch actually booted with no new error. A preview that
+ * never ran at all — no boot tier because kestrel is not yet on 6, events-queue not installed, the reload
+ * failing, or the preview throwing — is unverified, never treated as clean: the offer still appears, but
+ * its question has no default (so `--yes` never answers it) and names what to fix first (upgrade kestrel,
+ * or install events-queue) before running `fix` again. At-least-once safety is then the
+ * `idempotent:<pipeline>` question per consumer event pipeline, asked only after `switch-to-queue: yes`.
  */
 export const queueOfferRule: Rule = {
   id: RULE_ID,
   async check(ctx) {
     if (!ctx.project.input.config.modules.some((m) => m.use.includes("events-direct"))) return [];
 
-    const { unmet, unverified } = await offerGate(ctx);
+    const { unmet, unverified, noBootTier } = await offerGate(ctx);
     if (unmet.length > 0) {
       return [infoFinding(RULE_ID, RULE_ID, `cannot switch to the queue: ${unmet.join("; ")}`, "resolve the conditions above and run check again", {}, "docs/upgrading.md#offer-event-queue")];
     }
 
     const switchAnswer = ctx.answers.get("switch-to-queue");
     if (switchAnswer === undefined) {
-      const fix: AskFix = unverified
-        ? { kind: "ask", question: "switch-to-queue", prompt: `switch event delivery to the queue? could not verify: ${EVENTS_QUEUE_PACKAGE} is not installed; install it, then run \`fix\` again to verify. ${CONSEQUENCES}`, choices: ["no", "yes"] }
-        : { kind: "ask", question: "switch-to-queue", prompt: `switch event delivery to the queue? ${CONSEQUENCES}`, choices: ["no", "yes"], defaultValue: "no" };
+      let fix: AskFix = { kind: "ask", question: "switch-to-queue", prompt: `switch event delivery to the queue? ${CONSEQUENCES}`, choices: ["no", "yes"], defaultValue: "no" };
+      if (unverified) {
+        const { subject, instruction } = unverifiedGuidance(noBootTier);
+        fix = { kind: "ask", question: "switch-to-queue", prompt: `switch event delivery to the queue? could not verify: ${subject}; ${instruction}. ${CONSEQUENCES}`, choices: ["no", "yes"] };
+      }
       return [{ id: RULE_ID, rule: RULE_ID, severity: "info", tier: "source", where: {}, message: "can switch to the queue", suggestion: "run fix to be asked; check never decides this on its own", fix, docs: "docs/upgrading.md#offer-event-queue" }];
     }
     if (switchAnswer !== "yes") return [];
@@ -201,6 +214,7 @@ export const queueOfferRule: Rule = {
 
     const finalVerification = await verifySwitch(ctx, relayPipelines);
     if (!finalVerification.verified) {
+      const { subject, instruction } = unverifiedGuidance(finalVerification.noBootTier);
       return [
         {
           id: `${RULE_ID}:relay-pipelines`,
@@ -208,8 +222,8 @@ export const queueOfferRule: Rule = {
           severity: "info",
           tier: "source",
           where: {},
-          message: `could not verify the switch: ${EVENTS_QUEUE_PACKAGE} is not installed`,
-          suggestion: `install ${EVENTS_QUEUE_PACKAGE}, then run \`fix\` again to verify`,
+          message: `could not verify the switch: ${subject}`,
+          suggestion: instruction,
           fix: { kind: "manual" },
           docs: "docs/upgrading.md#offer-event-queue",
         },

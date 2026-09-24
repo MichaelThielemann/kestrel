@@ -26,13 +26,15 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+const cleanPreviewBoot = async (): Promise<BootCheck> => ({ errors: [], warnings: [], notChecked: [] });
+
 function contextFor(
   project: LoadedProject,
   answers: ReadonlyMap<string, string> = new Map(),
-  previewBoot?: (edits: readonly Edit[]) => Promise<BootCheck | undefined>,
+  previewBoot: (edits: readonly Edit[]) => Promise<BootCheck | undefined> = cleanPreviewBoot,
 ): RuleContext {
   const check: BootCheck = { errors: [], warnings: [], notChecked: [] };
-  return { root: dir, scratch: dir, project, bootCheck: check, readFile: readFileOrUndefined, answers, ...(previewBoot === undefined ? {} : { previewBoot }) };
+  return { root: dir, scratch: dir, project, bootCheck: check, readFile: readFileOrUndefined, answers, previewBoot };
 }
 
 async function directProject(options: { sqliteFile?: string; publishPipeline?: boolean; groupedEmit?: boolean } = {}): Promise<LoadedProject> {
@@ -244,6 +246,17 @@ export const definePipeline = pipelineDefiner<KnownStep>();
     expect(findings[0]?.fix.kind).toBe("none");
     expect(findings[0]?.message).toContain("fails to boot");
     expect(findings[0]?.message).toContain("queue setup boom");
+  });
+
+  it("treats no boot tier at all (kestrel not yet on 6) as unverified, not clean", async () => {
+    const p = await directProject();
+    const check: BootCheck = { errors: [], warnings: [], notChecked: [] };
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: check, readFile: readFileOrUndefined, answers: new Map() };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("ask");
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.prompt : "").toContain("upgrade @michaelthielemann/kestrel to 6");
   });
 
   it("still offers the switch when the boot preview finds no new errors", async () => {

@@ -108,7 +108,7 @@ export default definePipeline({
   await symlink(resolve(HERE, "..", "..", "..", "node_modules", "zod"), join(nodeModules, "zod"), "dir");
 }
 
-async function runInCleanProcess(root: string, argv: string[], answers?: Record<string, string>): Promise<{ code: number; lines: string[] }> {
+async function runInCleanProcess(root: string, argv: string[], answers: Record<string, string> | undefined, forceInstalledMajor: number | undefined): Promise<{ code: number; lines: string[] }> {
   const scriptFile = join(root, "__run.mjs");
   const resultFile = join(root, "__result.json");
   const pluginModule = join(PACKAGES_DIR, "upgrade", "src", "plugin.ts");
@@ -118,12 +118,13 @@ async function runInCleanProcess(root: string, argv: string[], answers?: Record<
     await writeFile(answersFile, JSON.stringify(answers));
     answersFileArg = `, "--answers", ${JSON.stringify(answersFile)}`;
   }
+  const forceMajorProp = forceInstalledMajor === undefined ? "" : `, forceInstalledMajor: ${forceInstalledMajor}`;
   await writeFile(
     scriptFile,
     `import { writeFile } from "node:fs/promises";
 import { runUpgradeCli } from ${JSON.stringify(pluginModule)};
 const lines = [];
-const code = await runUpgradeCli([${argv.map((a) => JSON.stringify(a)).join(", ")}${answersFileArg}], { stdout: (l) => lines.push(l), stderr: (l) => lines.push("STDERR: " + l), forceInstalledMajor: 6 });
+const code = await runUpgradeCli([${argv.map((a) => JSON.stringify(a)).join(", ")}${answersFileArg}], { stdout: (l) => lines.push(l), stderr: (l) => lines.push("STDERR: " + l)${forceMajorProp} });
 await writeFile(${JSON.stringify(resultFile)}, JSON.stringify({ code, lines }));
 `,
   );
@@ -147,7 +148,7 @@ describe("offer/event-queue when events-queue is not installed", () => {
   it("asks with no default and names the package to install, instead of trusting an unverifiable preview", async () => {
     dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-queue-offer-missing-"));
     await buildDirectProject(dir, false);
-    const { lines } = await runInCleanProcess(dir, ["check", "--root", dir, "--json"]);
+    const { lines } = await runInCleanProcess(dir, ["check", "--root", dir, "--json"], undefined, 6);
     const report = boundaryCast<{ findings: Array<{ rule: string; fix: { kind: string; prompt?: string; defaultValue?: string } }> }>(JSON.parse(lines.join("\n")), "json");
     const offer = report.findings.find((f) => f.rule === "offer/event-queue");
     expect(offer?.fix.kind).toBe("ask");
@@ -160,7 +161,7 @@ describe("offer/event-queue when events-queue is not installed", () => {
   it("does not write the switch under --yes, since the offer has no default", async () => {
     dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-queue-offer-missing-yes-"));
     await buildDirectProject(dir, false);
-    await runInCleanProcess(dir, ["fix", "--root", dir, "--write", "--yes"]);
+    await runInCleanProcess(dir, ["fix", "--root", dir, "--write", "--yes"], undefined, 6);
     const configText = await readFile(join(dir, "kestrel.config.ts"), "utf8");
     expect(configText).toContain("@michaelthielemann/kestrel-events-direct");
     expect(configText).not.toContain("@michaelthielemann/kestrel-events-queue");
@@ -169,7 +170,7 @@ describe("offer/event-queue when events-queue is not installed", () => {
   it("reports manual, could-not-verify instead of writing, even when yes is answered explicitly", async () => {
     dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-queue-offer-missing-explicit-"));
     await buildDirectProject(dir, false);
-    const { lines } = await runInCleanProcess(dir, ["fix", "--root", dir, "--json"], { "switch-to-queue": "yes", "idempotent:onNoteCreated": "yes", "relay-pipelines": "" });
+    const { lines } = await runInCleanProcess(dir, ["fix", "--root", dir, "--json"], { "switch-to-queue": "yes", "idempotent:onNoteCreated": "yes", "relay-pipelines": "" }, 6);
     const reportLine = lines.find((l) => l.startsWith("{"));
     const report = boundaryCast<{ findings: Array<{ rule: string; message: string; fix: { kind: string } }> }>(JSON.parse(reportLine ?? "{}"), "json");
     const offer = report.findings.find((f) => f.rule === "offer/event-queue");
@@ -188,7 +189,7 @@ describe("offer/event-queue when events-queue is installed", () => {
   it("keeps the default no and offers no install hint", async () => {
     dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-queue-offer-present-"));
     await buildDirectProject(dir, true);
-    const { lines } = await runInCleanProcess(dir, ["check", "--root", dir, "--json"]);
+    const { lines } = await runInCleanProcess(dir, ["check", "--root", dir, "--json"], undefined, 6);
     const report = boundaryCast<{ findings: Array<{ rule: string; fix: { kind: string; prompt?: string; defaultValue?: string } }> }>(JSON.parse(lines.join("\n")), "json");
     const offer = report.findings.find((f) => f.rule === "offer/event-queue");
     expect(offer?.fix.kind).toBe("ask");
@@ -199,9 +200,37 @@ describe("offer/event-queue when events-queue is installed", () => {
   it("writes the switch once every question is answered yes", async () => {
     dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-queue-offer-present-write-"));
     await buildDirectProject(dir, true);
-    await runInCleanProcess(dir, ["fix", "--root", dir, "--write", "--yes"], { "switch-to-queue": "yes", "idempotent:onNoteCreated": "yes", "relay-pipelines": "" });
+    await runInCleanProcess(dir, ["fix", "--root", dir, "--write", "--yes"], { "switch-to-queue": "yes", "idempotent:onNoteCreated": "yes", "relay-pipelines": "" }, 6);
     const configText = await readFile(join(dir, "kestrel.config.ts"), "utf8");
     expect(configText).toContain("@michaelthielemann/kestrel-events-queue");
     expect(configText).not.toContain("@michaelthielemann/kestrel-events-direct");
+  });
+});
+
+describe("offer/event-queue when kestrel itself is not yet on 6 (no boot tier at all)", () => {
+  let dir: string;
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it("reports manual, could-not-verify on an explicit yes, naming the kestrel upgrade first", async () => {
+    dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-queue-offer-no-boot-tier-"));
+    await buildDirectProject(dir, true);
+    const { lines } = await runInCleanProcess(dir, ["fix", "--root", dir, "--json"], { "switch-to-queue": "yes", "idempotent:onNoteCreated": "yes", "relay-pipelines": "" }, undefined);
+    const reportLine = lines.find((l) => l.startsWith("{"));
+    const report = boundaryCast<{ findings: Array<{ rule: string; message: string; suggestion: string; fix: { kind: string } }> }>(JSON.parse(reportLine ?? "{}"), "json");
+    const offer = report.findings.find((f) => f.rule === "offer/event-queue");
+    expect(offer?.fix.kind).toBe("manual");
+    expect(offer?.message).toContain("could not verify");
+    expect(offer?.suggestion).toContain("upgrade @michaelthielemann/kestrel to 6");
+  });
+
+  it("writes nothing under --yes, since the offer has no default", async () => {
+    dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-queue-offer-no-boot-tier-yes-"));
+    await buildDirectProject(dir, true);
+    await runInCleanProcess(dir, ["fix", "--root", dir, "--write", "--yes"], undefined, undefined);
+    const configText = await readFile(join(dir, "kestrel.config.ts"), "utf8");
+    expect(configText).toContain("@michaelthielemann/kestrel-events-direct");
+    expect(configText).not.toContain("@michaelthielemann/kestrel-events-queue");
   });
 });
