@@ -148,7 +148,8 @@ re-render inside the request that marked it.
 A render that fails keeps the previous output (`state: "error"`), records `staleError` and is tried again after
 `dependencies.backoffSeconds`, up to `dependencies.maxAttempts` times; with `"events"`, set both to the event
 delivery's own values. A render that throws counts as a failed attempt. Rows of a type or a locale that is no longer
-delivered are never marked. Every render is bounded by `dependencies.renderTimeoutSeconds` per format (times the
+delivered are never marked. The loop claims up to five marked outputs at a time and renews the claim before each
+render; a row whose claim another process took over in the meantime is left to that process. Every render is bounded by `dependencies.renderTimeoutSeconds` per format (times the
 number of formats, it must stay below `claimTtlSeconds`): a
 render abandoned at the timeout is never written, but keeps its memory until it settles, and
 `readStaleStatus.abandoned` counts those.
@@ -156,16 +157,29 @@ render abandoned at the timeout is never written, but keeps its memory until it 
 **Concurrent renders, unpublish, crashes.** Every status write compares and increments the row's `version`, so an
 older render never overwrites a newer write. A render that loses removes the files it wrote, unless an output is
 live at that path, and marks its output again whenever that output is still `live` or `error`, so the newer write
-is always followed by a render of the current content. An output that is live at a path whose files were just
-removed is marked again, too.
-`delivery.unpublish` leaves a `deleted` row for every locale (also one that was never rendered), which blocks a
-render still in flight, and which `delivery.resumeStale` removes after `claimTtlSeconds`; reads never return it.
-`delivery.markDependents` records every change in `delivery_changes` before it looks for dependents. A render
-compares the changes recorded while it ran with what it read, in any process, and marks its output again when one of
-them touched it, so a dependency the render reads for the first time cannot slip past a mark made before its set was
-recorded. Changes older than `claimTtlSeconds` plus a minute are removed by `delivery.resumeStale`. Dependency sets are written before the status row names them, so a
-crash leaves either the previous complete set or an orphan that `delivery.resumeStale` removes. The one way a removed page can remain is a process that stops between
-a losing render's file write and its cleanup.
+is always followed by a render of the current content. `delivery.unpublish` leaves a `deleted` row for every locale
+(also one that was never rendered), which blocks a render still in flight, and which `delivery.resumeStale` removes
+after `claimTtlSeconds`; reads never return it.
+
+**Changes that overlap a render.** A render reads a document for the first time; the document changes and is
+marked before the render has recorded its dependencies, so the mark finds nothing. To close that gap without
+comparing clocks, `delivery.markDependents` first takes the next number of a sequence kept in `delivery_state`
+(compare-and-swap, so every process agrees on the order) and records the change under that number in
+`delivery_changes`, and only then looks for dependents. Every render reads the sequence before it reads anything
+else, and after its status write it looks at the changes numbered above that: when one of them touched something the
+render read (a document by id, or any document of a type it listed or read as a whole), the output is marked again
+before its old mark is cleared. A change numbered at or below the render's start was made before the render read
+anything, so the render saw it; a change whose record appears only after that look starts its own search for
+dependents afterwards and finds the dependencies the render has just recorded. Removing a path's files is recorded
+the same way, so a page that moved onto the path in the meantime is marked and writes its files again. Only the last
+10 000 changes are kept, pruned by number; a render that started before the kept range counts as overlapped. A
+failed render that stays marked for its retry keeps its attempt count and backoff; a change of the output's own
+document is left to that document's own publish.
+
+**Dependency sets** are written as `pending` before the status row names them, become `current` after the status
+write and `retired` when a later render replaces them, so a crash leaves either the previous complete set or a
+pending or retired set that `delivery.resumeStale` adopts or removes; it reads no set that is in use. The one way a
+removed page can remain is a process that stops between a losing render's file write and its cleanup.
 
 **Operations.** `delivery.markAll:<type>` marks every output of a type, creating a marked row for a document that
 was never delivered (drafts are checked and never rendered), and answers `{ marked }` at once.

@@ -606,9 +606,11 @@ Net changes since 5.8.1.
   through `events@1` (`delivery.republishOutput`, coalesced by the queue), with `"background"`
   (default) by the module's own loop in the process that marked them. Renders time out after
   `dependencies.renderTimeoutSeconds`; a failed re-render keeps the previous output and is retried
-  after `dependencies.backoffSeconds`, up to `dependencies.maxAttempts`; every change is recorded in
-  `delivery_changes`, and a render in any process that read something a change recorded during the
-  render touched marks its output again once it has committed.
+  after `dependencies.backoffSeconds`, up to `dependencies.maxAttempts`. Every change and every
+  removal of a path's files is numbered by a sequence in `delivery_state` and recorded in
+  `delivery_changes` (the last 10 000 are kept); a render, in any process, that read something a
+  change numbered after its start touched, or that wrote a path whose files were removed meanwhile,
+  marks its output again once it has committed. No clock is compared.
   `delivery.markAll:<type>`
   marks every output of a type, `delivery.checkBuild` marks everything once per new `payload.build`
   and stores the build only after marking succeeded, `delivery.resumeStale` releases expired claims,
@@ -623,9 +625,12 @@ Net changes since 5.8.1.
   `"background"`. Every re-render asks for one, so a site-wide re-render writes `llms.txt` once,
   after the pages it summarizes.
 - `@michaelthielemann/kestrel/reads`: `observeReads`, `noteRead` and `unobserved`, one read scope per
-  async context kept on `globalThis`. `content-default` notes the documents, single types and lists it
+  async context kept on `globalThis`; `noteRead` keeps a plain JSON copy of what it is given, and only
+  while a scope is open. `content-default` notes the documents, single types and lists it
   answers, `media-default` the media items, `site-default` the resolved document or missed slug
   lookup and one path per resolved link; `redirects-default`'s lookup is not noted.
+- The `site@1` contract tests check that a `kestrel:` reference held by any field, also one the model
+  does not declare, resolves; a third-party `site@1` provider has to pass that case too.
 - `examples/minimal` re-renders the pages that show a changed page, the settings or a media item in
   the background (`pageDependents`, `settingsDependents`, `mediaDependents`, `resumeStalePages`);
   `setSettings` writes inside an atomic group and emits `settings.updated`, and `publishPage`,

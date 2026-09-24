@@ -387,7 +387,9 @@ this boot while a restore point exists, if `restoreOnStart` is on (the default).
 `delivery.republishOutput` on `delivery.outputStale` (boot fails in that last case). Without marking, a
 published page is re-rendered only when it is saved itself; a change to the settings, a document it shows or
 a page it links to leaves its output stale. The `delivery-static` README ("Dependent outputs") shows the
-wiring for both render modes.
+wiring for both render modes. Outputs rendered before the upgrade have no recorded dependencies and are
+re-rendered on every change until they render once; run "Publish all" (`delivery.publishAll`) or
+`delivery.checkBuild` once after upgrading to record them all.
 
 #### deps-kestrel-range
 A `@michaelthielemann/kestrel*` dependency is not on a 6.x range; `deps/mixed-majors` fires when

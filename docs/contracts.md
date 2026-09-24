@@ -238,7 +238,8 @@ pages that read from it refresh only on their own publish.
 A provider must keep no process-wide in-flight dedupe or memo of reads: the scope lives in the async context of the
 render, so a cached answer shared between two callers attributes one render's reads to the other render, or to
 none. `noteRead` outside a scope, inside `unobserved`, or after the scope's function settled records nothing, and
-concurrent scopes never see each other's reads. Reads made in another process, over a socket, or answered from a
+concurrent scopes never see each other's reads. Inside a scope it keeps a plain JSON copy of the read, so a provider
+can pass its own filter or rules objects as they are. Reads made in another process, over a socket, or answered from a
 cache kept across requests are not observed.
 
 ## Content is configuration, not modules
