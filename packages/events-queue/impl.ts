@@ -325,7 +325,11 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     const row = due.value.items[0];
     if (!row) return undefined;
     const won = await db.updateMany<QueueRow>(QUEUE, { id: row.id, state: "pending" }, { state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null });
-    if (isErr(won) || won.value !== 1) {
+    if (isErr(won)) {
+      logger.error("events/queue: lane claim failed", { lane: name, id: row.id, error: won.error.message });
+      return undefined;
+    }
+    if (won.value !== 1) {
       laneContested.add(name);
       return undefined;
     }

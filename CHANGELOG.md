@@ -348,15 +348,16 @@ Net changes since 5.8.1.
   instead of the event being silently dropped.
 - `events-queue` runs named lanes: `lanes: { "<lane>": ["<pipeline>", …] }` gives each lane its own
   worker loop, which claims and runs one row at a time, retrying at once rather than waiting
-  `pollMs` when it loses a claim race. A due row of one lane never waits for a row of another lane
-  or of the main loop (the implicit lane for every pipeline `lanes` does not name), and the relay
-  never claims a lane row. Each lane's claim also reclaims that lane's own expired locks, so a
-  crashed process's row is retried by its own lane without waiting for the main loop. The main loop
-  re-scans, at most every 30 seconds and again right after `events.retryDead`, for a lane it does
-  not know of still holding a row, and starts that lane's loop, so a lane dropped from the config
-  (or a retried dead row of one) never strands its rows. `events.readQueueStatus` reports every
-  lane this process currently knows of — configured, or found holding a row — with `pending`,
-  `running` and `oldestPendingAt` under `lanes`.
+  `pollMs` when it loses a claim race to another process; a claim that instead fails outright (a
+  persistence error) is logged and waits `pollMs`, never spinning. A due row of one lane never
+  waits for a row of another lane or of the main loop (the implicit lane for every pipeline `lanes`
+  does not name), and the relay never claims a lane row. Each lane's claim also reclaims that
+  lane's own expired locks, so a crashed process's row is retried by its own lane without waiting
+  for the main loop. The main loop re-scans, at most every 30 seconds and again right after
+  `events.retryDead`, for a lane it does not know of still holding a row, and starts that lane's
+  loop, so a lane dropped from the config (or a retried dead row of one) never strands its rows.
+  `events.readQueueStatus` reports every lane this process currently knows of — configured, or
+  found holding a row — with `pending`, `running` and `oldestPendingAt` under `lanes`.
 
 ### Changed
 

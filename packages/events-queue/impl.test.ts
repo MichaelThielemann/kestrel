@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -1193,6 +1193,93 @@ describe("events/queue lanes: a lost claim retries at once", () => {
     releaseWinnerOfFirstRow?.();
     await queueA.stopWorker();
     await queueB.stopWorker();
+  });
+});
+
+describe("events/queue lanes: a claim error does not spin the loop", () => {
+  it("a claim whose UPDATE fails does not spin the lane loop", async () => {
+    const real = createFakePersistence();
+    const originalUpdateMany = real.updateMany.bind(real);
+    let claimAttempts = 0;
+    const db: typeof real = {
+      ...real,
+      updateMany: boundaryCast<typeof real.updateMany>(async (collection: string, filter: Record<string, unknown>, patch: Record<string, unknown>) => {
+        if (patch.state === "running") {
+          claimAttempts++;
+          return err(failure("INTERNAL", "database or disk is full"));
+        }
+        return originalUpdateMany(collection, boundaryCast<Parameters<typeof originalUpdateMany>[1]>(filter, "host"), boundaryCast<Parameters<typeof originalUpdateMany>[2]>(patch, "host"));
+      }, "host"),
+    };
+    const queue = await createEventsQueue({ ...CONFIG, pollMs: 1000, lanes: { pages: ["render"] } }, { db, logger: silentLogger });
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => OK);
+    await queue.enqueue("x", {});
+    queue.startWorker();
+    await new Promise((r) => setTimeout(r, 100));
+    await queue.stopWorker();
+    expect(claimAttempts).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("events/queue lanes: fake-timer pins for the shutdown ordering", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("stopWorker leaves no timer pending the moment it is called, while the main tick is still in flight", async () => {
+    vi.useFakeTimers();
+    const db = createFakePersistence();
+    const queue = await createEventsQueue({ ...CONFIG, pollMs: 500, lanes: { pages: ["render"] } }, { db, logger: silentLogger });
+    let releaseMain: (() => void) | undefined;
+    const mainGate = new Promise<void>((r) => {
+      releaseMain = r;
+    });
+    const laneStarts: string[] = [];
+    queue.setDelivery([{ event: "m", pipeline: "main1" }, { event: "x", pipeline: "render" }], async (pipeline) => {
+      if (pipeline === "main1") await mainGate;
+      else laneStarts.push(pipeline);
+      return OK;
+    });
+    await queue.enqueue("m", {});
+    queue.startWorker();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(1);
+    await queue.enqueue("x", {});
+    const stopping = queue.stopWorker();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(laneStarts).toEqual([]);
+    releaseMain?.();
+    await stopping;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a stop/start pair while a lane tick is in flight leaves exactly one timer chain per loop", async () => {
+    vi.useFakeTimers();
+    const db = createFakePersistence();
+    const queue = await createEventsQueue({ ...CONFIG, pollMs: 500, lanes: { pages: ["render"] } }, { db, logger: silentLogger });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let runs = 0;
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      runs++;
+      if (runs === 1) await gate;
+      return OK;
+    });
+    await queue.enqueue("x", {});
+    queue.startWorker();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runs).toBe(1);
+    void queue.stopWorker();
+    queue.startWorker();
+    await vi.advanceTimersByTimeAsync(0);
+    release?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(2);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(vi.getTimerCount()).toBe(2);
+    await queue.stopWorker();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
