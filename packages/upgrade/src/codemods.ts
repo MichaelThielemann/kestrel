@@ -19,4 +19,14 @@ export {
   walk,
   type AstNode,
 } from "./ast.ts";
-export { insertPipelineStep, renameContentField, type InsertStepOptions, type ModelFieldsLocator, type RenameContentFieldOptions, type StepListLocator } from "./edits.ts";
+export {
+  emitStepIsLocatable,
+  insertPipelineStep,
+  insertStepAfterEmitOutsideGroup,
+  renameContentField,
+  type InsertAfterEmitOptions,
+  type InsertStepOptions,
+  type ModelFieldsLocator,
+  type RenameContentFieldOptions,
+  type StepListLocator,
+} from "./edits.ts";

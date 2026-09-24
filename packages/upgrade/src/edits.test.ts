@@ -440,6 +440,26 @@ describe("insertStepAfterEmitOutsideGroup", () => {
     expect(insertStepAfterEmitOutsideGroup("p.ts", source, { pipelineName: "nope", emitStep: "events.emit:page.created", newStep: "events.relay" })).toBeUndefined();
     expect(insertStepAfterEmitOutsideGroup("p.ts", source, { pipelineName: "createPage", emitStep: "events.emit:nope", newStep: "events.relay" })).toBeUndefined();
   });
+
+  it("uses a plugin-supplied locateSteps for a layout the built-in search does not recognize", () => {
+    const source = `defineFlow({ id: "createPage", options: { steps: ["content.create", "events.emit:page.created"] } });\n`;
+    expect(insertStepAfterEmitOutsideGroup("p.ts", source, { pipelineName: "createPage", emitStep: "events.emit:page.created", newStep: "events.relay" })).toBeUndefined();
+
+    const locateSteps: StepListLocator = (root, pipelineName) => {
+      const arrays: AstNode[] = [];
+      for (const call of findCalls(root, "defineFlow")) {
+        const arg = firstArgument(call);
+        if (arg?.type !== "ObjectExpression" || objectProperty(arg, "id")?.value !== pipelineName) continue;
+        const options = objectProperty(arg, "options");
+        const steps = options?.type === "ObjectExpression" ? objectProperty(options, "steps") : undefined;
+        if (isArrayExpression(steps)) arrays.push(steps);
+      }
+      return arrays;
+    };
+    const edit = insertStepAfterEmitOutsideGroup("p.ts", source, { pipelineName: "createPage", emitStep: "events.emit:page.created", newStep: "events.relay", locateSteps });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('"content.create", "events.emit:page.created", "events.relay"');
+  });
 });
 
 describe("insertModulesTsEntry", () => {

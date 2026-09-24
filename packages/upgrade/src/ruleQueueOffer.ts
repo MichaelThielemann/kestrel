@@ -135,7 +135,7 @@ function switchEdits(ctx: RuleContext, relayPipelines: readonly string[]): Edit[
     const emitsOfInterest = steps.filter((s) => s.startsWith("events.emit:") && relayEvents.has(s.slice("events.emit:".length).split("?")[0]!));
     const lastEmit = emitsOfInterest.at(-1);
     if (lastEmit === undefined) continue;
-    const edit = insertStepAfterEmitOutsideGroup(file, source, { pipelineName: def.name, emitStep: lastEmit, newStep: "events.relay" });
+    const edit = insertStepAfterEmitOutsideGroup(file, source, { pipelineName: def.name, emitStep: lastEmit, newStep: "events.relay", ...(ctx.locateSteps === undefined ? {} : { locateSteps: ctx.locateSteps }) });
     if (edit) edits.push(edit);
   }
   return edits;
@@ -173,7 +173,7 @@ function verifiedSwitchEdits(ctx: RuleContext, relayPipelines: readonly string[]
     const emitsOfInterest = steps.filter((s) => s.startsWith("events.emit:") && relayEvents.has(s.slice("events.emit:".length).split("?")[0]!));
     const lastEmit = emitsOfInterest.at(-1);
     if (lastEmit === undefined) continue;
-    const options = { pipelineName: def.name, emitStep: lastEmit, newStep: "events.relay" };
+    const options = { pipelineName: def.name, emitStep: lastEmit, newStep: "events.relay", ...(ctx.locateSteps === undefined ? {} : { locateSteps: ctx.locateSteps }) };
     const label = `pipelines/${def.name}'s events.relay step`;
     if (!emitStepIsLocatable(source, options)) {
       parts[label] = undefined;

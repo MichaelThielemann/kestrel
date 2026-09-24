@@ -233,6 +233,8 @@ export interface InsertAfterEmitOptions {
   pipelineName: string;
   emitStep: string;
   newStep: string;
+  /** Locates the pipeline's own top-level step array(s) directly, for a project layout where it does not sit at a `definePipeline({ name, steps })` call; the built-in search runs when this is absent. Atomic-group detection inside each returned array is unaffected. */
+  locateSteps?: StepListLocator;
 }
 
 interface EmitAnchor {
@@ -241,9 +243,9 @@ interface EmitAnchor {
   alreadyPresent: boolean;
 }
 
-function locateEmitAnchor(source: string, options: InsertAfterEmitOptions): EmitAnchor | undefined {
-  const root = parseTs(source);
-  for (const top of pipelineStepsArrays(root, options.pipelineName)) {
+function locateEmitAnchor(root: AstNode, options: InsertAfterEmitOptions): EmitAnchor | undefined {
+  const tops = options.locateSteps ? options.locateSteps(root, options.pipelineName) : pipelineStepsArrays(root, options.pipelineName);
+  for (const top of tops) {
     const topElements = elements(top);
     for (let i = topElements.length - 1; i >= 0; i--) {
       const el = topElements[i]!;
@@ -267,7 +269,7 @@ function locateEmitAnchor(source: string, options: InsertAfterEmitOptions): Emit
  * array cannot be found, or `newStep` is already in place.
  */
 export function insertStepAfterEmitOutsideGroup(file: string, source: string, options: InsertAfterEmitOptions): Edit | undefined {
-  const anchor = locateEmitAnchor(source, options);
+  const anchor = locateEmitAnchor(parseTs(source), options);
   if (anchor === undefined || anchor.alreadyPresent) return undefined;
   const topElements = elements(anchor.top);
   const quote = quoteOf(source, topElements.find((e) => stringValue(e) !== undefined));
@@ -276,7 +278,7 @@ export function insertStepAfterEmitOutsideGroup(file: string, source: string, op
 
 /** True once `emitStep` itself can be found in the named pipeline, whether or not `newStep` still needs inserting after it — unlike the `undefined` `insertStepAfterEmitOutsideGroup` returns for either reason, this tells the two apart. */
 export function emitStepIsLocatable(source: string, options: InsertAfterEmitOptions): boolean {
-  return locateEmitAnchor(source, options) !== undefined;
+  return locateEmitAnchor(parseTs(source), options) !== undefined;
 }
 
 /** Adds `events` to a local module's `emits: [...]`, creating the property when it has none; already-listed events are skipped. `undefined` when there is nothing left to add, or no `defineModule({...})` call is found. */
