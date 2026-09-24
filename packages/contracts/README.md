@@ -16,5 +16,12 @@ for the suites. `testing/fakeAuthn` is a minimal `authn@1` for the shared step-c
 (`login`, `identifyUser`, `requireUser`, `loadIdentity`, `logout`) against.
 `links` is not a contract but a pure helper pair shared by the modules that read internal
 references (`INTERNAL_REF`, `collectInternalRefs`).
+`content-locale` is not a contract either: `satisfiesFilter`, `publishedLocale` and
+`narrowListTranslations` implement one rule on top of `content@1` — a locale that fails a filter is
+never a fallback source and never counted in `_translations` — for every module that builds a
+public view of content (`site-default`'s `resolve`/`resolveLinks`, `delivery-static`'s
+`delivery.publish`/`exportLlms`, `content-default`'s own `get`/`list` steps). A `Filter` entry must
+be a scalar; `satisfiesFilter` throws on a `Condition` (`{ in: [...] }`, `{ ne: ... }`, …) instead of
+excluding every document silently.
 Consumers may define their own contracts with `defineContract` from the core; the core treats
 them exactly like these.

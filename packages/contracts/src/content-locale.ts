@@ -1,33 +1,30 @@
-import type { Content, ContentDocument, ContentError, ContentModel } from "./content.ts";
+import type { Content, ContentDocument, ContentError } from "./content.ts";
 import { isErr, ok, type Result } from "./errors.ts";
 import type { Filter } from "./query.ts";
 
-function isLocalizedField(model: ContentModel, type: string, field: string): boolean {
-  const raw = model.types[type]?.fields[field];
-  return raw !== undefined && typeof raw !== "string" && raw.localized === true;
-}
+const CONDITION_OPERATORS = new Set(["eq", "ne", "gt", "gte", "lt", "lte", "in", "like"]);
 
-/** The entries of `filter` that are shared across every locale of a document (not declared `localized`). */
-export function nonLocalizedFilter(model: ContentModel, type: string, filter: Filter): Filter {
-  return Object.fromEntries(Object.entries(filter).filter(([f]) => !isLocalizedField(model, type, f)));
-}
-
-/** Whether a document's own field values (one locale, fetched strictly) satisfy every entry of `filter`. */
-export function satisfiesFilter(filter: Filter, values: Record<string, unknown> | null | undefined): boolean {
-  return Object.entries(filter).every(([f, v]) => values?.[f] === v);
+function isCondition(value: unknown): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 1 && Object.keys(value).every((k) => CONDITION_OPERATORS.has(k));
 }
 
 /**
- * Whether `id`'s default locale (fetched strictly, no field fallback) itself satisfies `filter`.
- * A `fallback: true` read is only safe once this holds — an unpublished default locale must never
- * be a fallback source for a single field either, the same rule `publishedLocale` applies to a
- * whole document.
+ * Whether a document's own field values (one locale, fetched strictly) satisfy every entry of
+ * `filter`. Only scalar equality is evaluated; a `Condition` (`{ in: [...] }`, `{ ne: ... }`, …)
+ * throws instead of silently failing every document it is compared against.
  */
-export async function defaultLocaleSatisfiesFilter(content: Content, defaultLocale: string | undefined, type: string, id: string, filter: Filter): Promise<Result<boolean, ContentError>> {
-  if (defaultLocale === undefined) return ok(false);
-  const defaultResult = await content.get(type, id, { locale: defaultLocale });
-  if (isErr(defaultResult)) return defaultResult;
-  return ok(satisfiesFilter(filter, defaultResult.value));
+export function satisfiesFilter(filter: Filter, values: Record<string, unknown> | null | undefined): boolean {
+  return Object.entries(filter).every(([f, v]) => {
+    if (isCondition(v)) throw new Error(`content-locale: satisfiesFilter needs scalar equality, got a Condition for "${f}"`);
+    return values?.[f] === v;
+  });
+}
+
+export interface PublishedLocaleOptions {
+  /** Fill an empty localized field from the default locale, but only once the default locale's own values satisfy `filter` too. */
+  fallback: boolean;
+  /** Narrow `_translations` to the locales that satisfy `filter` themselves. Default `true`; a caller that only reads one field can pass `false` to skip the extra per-locale reads. */
+  translations?: boolean;
 }
 
 /**
@@ -38,21 +35,16 @@ export async function defaultLocaleSatisfiesFilter(content: Content, defaultLoca
  * never a fallback source, so the field stays empty instead. `_translations`, when present, is
  * narrowed the same way: a locale counts only once its own values also satisfy `filter`.
  */
-export async function publishedLocale(
-  content: Content,
-  model: ContentModel,
-  type: string,
-  id: string,
-  locale: string | undefined,
-  filter: Filter,
-  fallback: boolean,
-): Promise<Result<ContentDocument | null, ContentError>> {
+export async function publishedLocale(content: Content, type: string, id: string | undefined, locale: string | undefined, filter: Filter, options: PublishedLocaleOptions): Promise<Result<ContentDocument | null, ContentError>> {
+  const model = content.model();
+  const keyOf = (l: string | undefined): string | undefined => l ?? model.defaultLocale;
   const cache = new Map<string | undefined, ContentDocument | null>();
   const strictOf = async (l: string | undefined): Promise<Result<ContentDocument | null, ContentError>> => {
-    if (cache.has(l)) return ok(cache.get(l) ?? null);
+    const key = keyOf(l);
+    if (cache.has(key)) return ok(cache.get(key) ?? null);
     const fetched = await content.get(type, id, l === undefined ? {} : { locale: l });
     if (isErr(fetched)) return fetched;
-    cache.set(l, fetched.value);
+    cache.set(key, fetched.value);
     return fetched;
   };
 
@@ -61,7 +53,7 @@ export async function publishedLocale(
   if (!satisfiesFilter(filter, strictResult.value)) return ok(null);
 
   let doc = strictResult.value;
-  if (doc && fallback && locale !== undefined && model.defaultLocale !== undefined && locale !== model.defaultLocale) {
+  if (doc && options.fallback && locale !== undefined && model.defaultLocale !== undefined && locale !== model.defaultLocale) {
     const defaultResult = await strictOf(model.defaultLocale);
     if (isErr(defaultResult)) return defaultResult;
     if (satisfiesFilter(filter, defaultResult.value)) {
@@ -71,7 +63,7 @@ export async function publishedLocale(
     }
   }
 
-  if (doc?._translations) {
+  if (doc?._translations && options.translations !== false && Object.keys(filter).length > 0) {
     const translations: Record<string, boolean> = {};
     for (const [l, complete] of Object.entries(doc._translations)) {
       if (!complete) {
@@ -86,4 +78,35 @@ export async function publishedLocale(
   }
 
   return ok(doc);
+}
+
+/**
+ * `items` (a `content.list` page) with `_translations` narrowed to the locales that satisfy
+ * `filter` themselves, batched across the whole page: one `content.list` call per locale other
+ * than `requestedLocale` (already known from `items` matching `filter` there), not one per item.
+ * A no-op when `filter` is empty, the model has no other locale, or no item carries `_translations`.
+ */
+export async function narrowListTranslations(content: Content, type: string, items: ContentDocument[], filter: Filter, requestedLocale: string | undefined): Promise<Result<ContentDocument[], ContentError>> {
+  if (Object.keys(filter).length === 0 || items.length === 0 || !items.some((d) => d._translations)) return ok(items);
+  const model = content.model();
+  const effective = requestedLocale ?? model.defaultLocale;
+  const otherLocales = (model.locales ?? []).filter((l) => l !== effective);
+  if (otherLocales.length === 0) return ok(items);
+
+  const ids = items.map((d) => d.id);
+  const passing = new Map<string, Set<string>>();
+  for (const l of otherLocales) {
+    const page = await content.list(type, { ...filter, id: { in: ids } }, { locale: l, limit: ids.length });
+    if (isErr(page)) return page;
+    passing.set(l, new Set(page.value.items.map((d) => d.id)));
+  }
+
+  return ok(
+    items.map((doc) => {
+      if (!doc._translations) return doc;
+      const translations: Record<string, boolean> = {};
+      for (const [l, complete] of Object.entries(doc._translations)) translations[l] = l === effective ? complete : complete && (passing.get(l)?.has(doc.id) ?? false);
+      return { ...doc, _translations: translations };
+    }),
+  );
 }
