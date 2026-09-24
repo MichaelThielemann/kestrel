@@ -87,23 +87,49 @@ describe("insertModuleListEntry", () => {
 
 describe("setModuleConfigProperties", () => {
   it("adds a property to an existing config object literal", () => {
-    const edit = setModuleConfigProperties("kestrel.config.ts", CONFIG_SINGLE_LINE, { use: "kestrel-persistence-sqlite", assignments: { acquireTimeoutMs: "15000" } });
-    const { text } = applyEdits(CONFIG_SINGLE_LINE, [edit!]);
+    const edits = setModuleConfigProperties("kestrel.config.ts", CONFIG_SINGLE_LINE, { use: "kestrel-persistence-sqlite", assignments: { acquireTimeoutMs: "15000" } });
+    const { text } = applyEdits(CONFIG_SINGLE_LINE, edits!);
     expect(text).toContain('config: { file: "./data/kestrel.db", acquireTimeoutMs: 15000 }');
   });
 
   it("replaces an existing property's value instead of duplicating the key", () => {
     const source = 'export default defineConfig({ modules: [{ use: "kestrel-persistence-sqlite", config: { file: "x", acquireTimeoutMs: 3000 } }], triggers: [] });\n';
-    const edit = setModuleConfigProperties("kestrel.config.ts", source, { use: "kestrel-persistence-sqlite", assignments: { acquireTimeoutMs: "15000" } });
-    const { text } = applyEdits(source, [edit!]);
+    const edits = setModuleConfigProperties("kestrel.config.ts", source, { use: "kestrel-persistence-sqlite", assignments: { acquireTimeoutMs: "15000" } });
+    const { text } = applyEdits(source, edits!);
     expect(text).toContain('config: { file: "x", acquireTimeoutMs: 15000 }');
     expect(text.match(/acquireTimeoutMs/g)).toHaveLength(1);
   });
 
   it("creates config: {} when the entry has none", () => {
-    const edit = setModuleConfigProperties("kestrel.config.ts", CONFIG_SINGLE_LINE, { use: "kestrel-events-inmemory", assignments: { relayPipelines: "[]" } });
-    const { text } = applyEdits(CONFIG_SINGLE_LINE, [edit!]);
+    const edits = setModuleConfigProperties("kestrel.config.ts", CONFIG_SINGLE_LINE, { use: "kestrel-events-inmemory", assignments: { relayPipelines: "[]" } });
+    const { text } = applyEdits(CONFIG_SINGLE_LINE, edits!);
     expect(text).toContain('{ use: "kestrel-events-inmemory", config: { relayPipelines: [] } }');
+  });
+
+  it("only splices the replaced property's value, leaving an unrelated comment on another property untouched", () => {
+    const source = `export default defineConfig({
+  modules: [
+    {
+      use: "kestrel-persistence-sqlite",
+      config: {
+        file: "x", // production path
+        acquireTimeoutMs: 3000,
+      },
+    },
+  ],
+  triggers: [],
+});
+`;
+    const edits = setModuleConfigProperties("kestrel.config.ts", source, { use: "kestrel-persistence-sqlite", assignments: { acquireTimeoutMs: "15000" } });
+    const { text } = applyEdits(source, edits!);
+    expect(text).toContain('file: "x", // production path');
+    expect(text).toContain("acquireTimeoutMs: 15000");
+  });
+
+  it("preserves a spread element by refusing to rewrite the config, leaving it manual", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "kestrel-persistence-sqlite", config: { ...sqliteBase, busyTimeoutMs: 8000 } }], triggers: [] });\n';
+    const edits = setModuleConfigProperties("kestrel.config.ts", source, { use: "kestrel-persistence-sqlite", assignments: { acquireTimeoutMs: "15000" } });
+    expect(edits).toBeUndefined();
   });
 });
 

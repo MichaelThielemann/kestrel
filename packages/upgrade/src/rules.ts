@@ -92,8 +92,8 @@ export const sqliteAcquireTimeoutRule: Rule = {
     const source = ctx.readFile(ctx.project.configFile);
     const edits: Edit[] = [];
     if (source !== undefined) {
-      const edit = setModuleConfigProperties(ctx.project.configFile, source, { use: entry.use, assignments: { acquireTimeoutMs: value } });
-      if (edit) edits.push(edit);
+      const configEdits = setModuleConfigProperties(ctx.project.configFile, source, { use: entry.use, assignments: { acquireTimeoutMs: value } });
+      if (configEdits) edits.push(...configEdits);
     }
     return [
       finding(

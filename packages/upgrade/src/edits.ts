@@ -102,10 +102,12 @@ export interface SetModuleConfigOptions {
 
 /**
  * Sets one or more properties on a module-list entry's `config` object literal, creating
- * `config: {}` first if the entry has none. An assignment whose key already exists replaces that
- * property's whole `key: value` text instead of appending a duplicate.
+ * `config: {}` first if the entry has none. An assignment whose key already exists splices just
+ * that property's value; a new one is appended after the last property. `undefined` when the
+ * config literal has a spread or a method — rebuilding it as plain properties would silently drop
+ * either, so the caller's finding falls back to manual instead.
  */
-export function setModuleConfigProperties(file: string, source: string, options: SetModuleConfigOptions): Edit | undefined {
+export function setModuleConfigProperties(file: string, source: string, options: SetModuleConfigOptions): Edit[] | undefined {
   const array = moduleListArray(source);
   if (array === undefined) return undefined;
   const entry = elements(array).find((e) => entryUse(e) === options.use);
@@ -119,23 +121,26 @@ export function setModuleConfigProperties(file: string, source: string, options:
     const closeBrace = source.lastIndexOf("}", end);
     let insertAt = closeBrace;
     while (insertAt > 0 && /\s/.test(source[insertAt - 1] ?? "")) insertAt--;
-    return { file, start: insertAt, end: closeBrace, text: `, config: { ${props} } ` };
+    return [{ file, start: insertAt, end: closeBrace, text: `, config: { ${props} } ` }];
   }
+  const members = Array.isArray(config.properties) ? config.properties : [];
+  if (members.some((m) => isAstNode(m) && m.type !== "ObjectProperty")) return undefined;
   const remaining = new Map(Object.entries(options.assignments));
-  const parts: string[] = [];
+  const edits: Edit[] = [];
   for (const prop of objectPropertyNodes(config)) {
     const key = propertyKeyName(prop);
-    if (key !== undefined && remaining.has(key)) {
-      parts.push(`${key}: ${remaining.get(key)}`);
-      remaining.delete(key);
-    } else {
-      const { start: propStart, end: propEnd } = span(prop);
-      parts.push(source.slice(propStart, propEnd));
-    }
+    const value = key === undefined ? undefined : remaining.get(key);
+    if (key === undefined || value === undefined) continue;
+    remaining.delete(key);
+    if (!isAstNode(prop.value)) continue;
+    const { start, end } = span(prop.value);
+    edits.push({ file, start, end, text: value });
   }
-  for (const [key, value] of remaining) parts.push(`${key}: ${value}`);
-  const { start, end } = span(config);
-  return { file, start, end, text: `{ ${parts.join(", ")} }` };
+  if (remaining.size > 0) {
+    const text = [...remaining].map(([key, value]) => `${key}: ${value}`).join(", ");
+    edits.push(appendProperty(source, config, file, text));
+  }
+  return edits;
 }
 
 /** Every string-literal occurrence of `from` in the file becomes `to`, keeping the original quote character. */
