@@ -82,4 +82,59 @@ describe("blobstore/filesystem", () => {
     vi.mocked(writeFile).mockRejectedValueOnce(denied);
     await expect(store.put("a.txt", new Uint8Array([1]))).rejects.toBe(denied);
   });
+
+  it("rejects a key ending in the temporary-file suffix", () => {
+    expect(() => assertKey("a/b.kestrel-tmp")).toThrow(/invalid key/);
+  });
+
+  it("list ignores a planted .kestrel-tmp file", async () => {
+    const root = await fresh();
+    await mkdir(join(root, "a"), { recursive: true });
+    await writeFile(join(root, "a", "x.txt"), "x");
+    await writeFile(join(root, "a", "x.txt.deadbeef.kestrel-tmp"), "half-written");
+    const store = createBlobstoreFilesystem({ root });
+    expect(expectOk(await store.list(""))).toEqual([{ key: "a/x.txt", size: 1 }]);
+  });
+
+  it("replaces a file atomically: a reader never observes a partial write across repeated overwrites", async () => {
+    const root = await fresh();
+    const store = createBlobstoreFilesystem({ root });
+    const versionA = new Uint8Array(8 * 1024 * 1024).fill(1);
+    const versionB = new Uint8Array(8 * 1024 * 1024).fill(2);
+    expectOk(await store.put("big.bin", versionA));
+
+    let stop = false;
+    const seenSizes = new Set<number>();
+    const reader = (async () => {
+      while (!stop) {
+        const data = expectOk(await store.get("big.bin"));
+        if (data) {
+          seenSizes.add(data.byteLength);
+          expect(data.every((byte) => byte === data[0])).toBe(true);
+        }
+      }
+    })();
+    for (let i = 0; i < 20; i++) {
+      expectOk(await store.put("big.bin", i % 2 === 0 ? versionB : versionA));
+    }
+    stop = true;
+    await reader;
+    expect([...seenSizes].every((size) => size === versionA.byteLength)).toBe(true);
+    const entries = await readdir(root);
+    expect(entries.filter((name) => name.includes("kestrel-tmp"))).toEqual([]);
+  });
+
+  it("removes the temporary file when the rename fails, leaving the original untouched", async () => {
+    const root = await fresh();
+    const store = createBlobstoreFilesystem({ root });
+    expectOk(await store.put("a.txt", new Uint8Array([1])));
+    const failure_ = Object.assign(new Error("disk full"), { code: "ENOSPC" });
+    const original = await import("node:fs/promises");
+    const renameSpy = vi.spyOn(original, "rename").mockRejectedValueOnce(failure_);
+    await expect(store.put("a.txt", new Uint8Array([2]))).rejects.toBe(failure_);
+    renameSpy.mockRestore();
+    expect(Array.from(expectOk(await store.get("a.txt")) ?? [])).toEqual([1]);
+    const entries = await readdir(root);
+    expect(entries.filter((name) => name.includes("kestrel-tmp"))).toEqual([]);
+  });
 });

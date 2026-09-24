@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { BlobInfo, Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
@@ -9,9 +10,10 @@ export interface Config {
 }
 
 const LEGACY_META = ".meta.json";
+const TMP_SUFFIX = ".kestrel-tmp";
 
 export function assertKey(key: string): void {
-  if (key === "" || key.startsWith("/") || key.split("/").some((part) => part === "" || part === "." || part === "..") || key.endsWith(LEGACY_META)) {
+  if (key === "" || key.startsWith("/") || key.split("/").some((part) => part === "" || part === "." || part === "..") || key.endsWith(LEGACY_META) || key.endsWith(TMP_SUFFIX)) {
     throw new Error(`blobstore/filesystem: invalid key ${JSON.stringify(key)}`);
   }
 }
@@ -75,11 +77,14 @@ export function createBlobstoreFilesystem(config: Config): Blobstore {
   return {
     async put(key, data) {
       const path = pathOf(key);
+      const tmp = `${path}.${randomUUID()}${TMP_SUFFIX}`;
       try {
         await mkdir(dirname(path), { recursive: true });
-        await writeFile(path, data);
+        await writeFile(tmp, data);
+        await rename(tmp, path);
         return ok();
       } catch (cause) {
+        await rm(tmp, { force: true }).catch(() => undefined);
         return transientOrRethrow(cause);
       }
     },
@@ -124,7 +129,7 @@ export function createBlobstoreFilesystem(config: Config): Blobstore {
       try {
         const out: BlobInfo[] = [];
         await walkFiles(root, async (path, name) => {
-          if (name.endsWith(LEGACY_META)) return;
+          if (name.endsWith(LEGACY_META) || name.endsWith(TMP_SUFFIX)) return;
           out.push({ key: relative(root, path).split(sep).join("/"), size: (await stat(path)).size });
         });
         return ok(out.filter((info) => info.key.startsWith(prefix)).sort((a, b) => a.key.localeCompare(b.key)));
