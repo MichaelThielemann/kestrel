@@ -57,6 +57,8 @@ export interface DataContentModel {
   locales?: readonly string[];
   /** The identifier `RuleContext.locateModelFields` receives as `use` when `model/underscore-field` renames a field here, for a project with no `kestrel.config.ts` module-list entry to name instead. */
   use?: string;
+  /** The file `model/underscore-field` reads and writes a rename edit into, for a project whose content model does not sit in `LoadedProject.configFile`; that file is used when this is absent. */
+  file?: string;
 }
 
 /** `offer/event-queue`'s switch for a project layout `UpgradePlugin.switchEdits` supplies. */

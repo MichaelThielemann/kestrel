@@ -474,6 +474,24 @@ describe("model/underscore-field", () => {
     expect(findings[0]?.message).toContain('"_hint"');
     expect(findings[0]?.message).toContain("2 stored value(s)");
   });
+
+  it("writes the rename into contentModel.file, not configFile, when the model lives in a separate file", async () => {
+    const modelFile = join(dir, "content-model.ts");
+    const modelSource = 'export default { modules: [{ use: "custom-content", config: { types: { page: { fields: { _hint: { type: "string" } } } } } }] };\n';
+    await writeFile(modelFile, modelSource);
+    const p = await project({});
+    const contentModel = { use: "custom-content", file: modelFile, types: { page: { fields: { _hint: {} } } } };
+    const findings = await underscoreFieldRule.check(contextFor({ ...p, contentModel }, { dataReport: { underscoreFields: { "page._hint": { unlocalized: 0 } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    expect(edits.length).toBeGreaterThan(0);
+    expect(edits.every((e) => e.file === modelFile)).toBe(true);
+    const { text } = applyEdits(modelSource, edits);
+    expect(text).toContain("fields: { hint:");
+    const configText = readFileOrUndefined(p.configFile);
+    expect(configText).not.toContain("hint");
+  });
 });
 
 describe("modules/emits", () => {
