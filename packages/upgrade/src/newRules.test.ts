@@ -246,6 +246,14 @@ describe("model/underscore-field", () => {
     expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
   });
 
+  it("never claims kestrel-upgrade data can prove no stored value exists", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
+    const findings = await underscoreFieldRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.suggestion).not.toMatch(/kestrel-upgrade data.*prove/);
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.prompt : "n/a").not.toMatch(/kestrel-upgrade data/);
+  });
+
   it("asks with no default when the data report proves a stored value exists", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
     const findings = await underscoreFieldRule.check(contextFor(p, { data: { "page._hint": true } }));

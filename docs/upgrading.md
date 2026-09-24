@@ -128,7 +128,7 @@ Every finding's `docs` field links to one of the anchors below.
 | [`steps/terminal-output`](#steps-terminal-output) | boot | manual | a misplaced or misdeclared `terminalOutput` |
 | [`pipelines/optional-read-order`](#pipelines-optional-read-order) | boot | manual | an optional read only a later step in the same pipeline writes |
 | [`pipelines/unwritten-optional-read`](#pipelines-unwritten-optional-read) | boot | none (warning) | an optional read nothing writes and no trigger provides |
-| [`model/underscore-field`](#model-underscore-field) | load | ask / auto | a content field name starting with `_` |
+| [`model/underscore-field`](#model-underscore-field) | load | ask | a content field name starting with `_` |
 | [`responses/delivery-members`](#responses-delivery-members) | load | none (info) | an HTTP pipeline running a delivery step |
 | [`runtime/bus-handler-throws`](#runtime-bus-handler-throws) | source | none (info) | a local `events.on` subscriber under `events-direct` |
 | [`runtime/bus-subscriber-queue`](#runtime-bus-subscriber-queue) | source | none (info) | a local `events.on` subscriber under `events-queue` |
@@ -192,8 +192,20 @@ A step optionally reads a key only a *later* step in the same pipeline writes.
 A step optionally reads a key nothing writes and no trigger provides — almost always a typo.
 
 #### model-underscore-field
-A content type field name starts with `_`, which fails boot on 6.0.0. The rename is automatic only
-once `kestrel-upgrade data` proves no stored value exists for it; otherwise it asks, with no default.
+A content type field name starts with `_`, which fails boot on 6.0.0. The tool cannot see stored
+values — `data` reads queue rows, not content documents — so it always asks, with no default,
+unless `--data-report <file>` supplies a hand-written `{ "<type>.<field>": false }` entry you have
+independently confirmed by hand (for example, that the field was added after the last write path
+that could have populated it, or by querying the content collection directly).
+
+Where a stored value can exist, rename it in two phases instead of trusting a mechanical edit:
+
+1. On the running 5.8.x instance, add the new field next to the old one and a `defineMigration`
+   that copies `_foo` to `foo`.
+2. Deploy that change and let it apply to every stored document.
+3. Remove `_foo` from the config.
+4. Only then run this tool and upgrade to 6.0.0 — by that point the field no longer starts with `_`
+   and this rule has nothing to ask about.
 
 #### responses-delivery-members
 An HTTP-triggered pipeline running a delivery step answers with the 6.0.0 response shape:

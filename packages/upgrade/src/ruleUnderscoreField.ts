@@ -54,7 +54,7 @@ export const underscoreFieldRule: Rule = {
             const edit = renameContentField(ctx.project.configFile, source, { use: entry.use, typeName, from: field, to: defaultName });
             if (edit) edits.push(edit);
           }
-          findings.push(finding(id, RULE_ID, `"${field}" on content type "${typeName}" starts with "_"; the data step found no stored value`, `rename to "${defaultName}"`, where, edits, "docs/upgrading.md#model-underscore-field"));
+          findings.push(finding(id, RULE_ID, `"${field}" on content type "${typeName}" starts with "_"; the supplied data report shows no stored value`, `rename to "${defaultName}"`, where, edits, "docs/upgrading.md#model-underscore-field"));
           continue;
         }
         if (answer !== undefined && answer !== "remove") {
@@ -71,7 +71,7 @@ export const underscoreFieldRule: Rule = {
         const fix: AskFix = {
           kind: "ask",
           question: questionId(typeName, field),
-          prompt: stored === undefined ? `rename "${field}" on "${typeName}" to (no data report given; a stored value may still exist)` : `rename "${field}" on "${typeName}" to`,
+          prompt: stored === undefined ? `rename "${field}" on "${typeName}" to (the tool cannot see stored values; see docs/upgrading.md#model-underscore-field)` : `rename "${field}" on "${typeName}" to`,
           choices: [defaultName, "remove"],
         };
         findings.push({
@@ -81,7 +81,7 @@ export const underscoreFieldRule: Rule = {
           tier: "source",
           where,
           message: `"${field}" on content type "${typeName}" starts with "_", which fails boot on 6.0.0`,
-          suggestion: stored === undefined ? "run `kestrel-upgrade data --db <copy>` first: a rename is only automatic once it proves no stored value" : "a stored value exists; add a migration on the running 5.8.x instance (defineMigration) copying it to the new key before upgrading",
+          suggestion: stored === undefined ? "the tool cannot see stored values; the rename is left to you unless you have independently confirmed by hand that none can exist — see docs/upgrading.md#model-underscore-field" : "a stored value exists; add a migration on the running 5.8.x instance (defineMigration) copying it to the new key before upgrading",
           fix,
           docs: "docs/upgrading.md#model-underscore-field",
         });

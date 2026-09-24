@@ -25,7 +25,11 @@ kestrel-upgrade data  --db <sqlite file> --root <dir> [--json] [--out <file>]
 diff for each automatic edit; `--write` shows the same diff per file and asks `y`/`n`/`d` on a
 terminal, or needs `--yes` without one (never silent). A question a finding's fix needs is asked
 over `node:readline` in order, resolved from `--answers` first, then the prompt, then `--yes`'s
-default; a question with no safe default stays open under `--yes`. `data` copies the given SQLite
+default; a question with no safe default stays open under `--yes`. `--data-report <file>` is a
+hand-written `{ "<key>": <value> }` file a rule can read back through `RuleContext.project.data`
+(for example `model/underscore-field` reads `"<type>.<field>": false` as proof, checked by hand,
+that no stored value exists for that field) — nothing in this package generates that file itself
+yet. `data` copies the given SQLite
 file (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_check` — the only SQL
 the tool issues itself — then reads it through the project's own installed `persistence-sqlite`, so
 the storage layout stays that module's knowledge. Exit codes: `0` nothing at or above `--fail-on`
