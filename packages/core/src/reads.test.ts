@@ -64,6 +64,20 @@ describe("reads: observeReads", () => {
     expect(reads).toEqual([doc("outer"), doc("outer-2")]);
   });
 
+  it("keeps a plain copy of what was noted: later changes to the caller's objects, proxies and functions never reach it", async () => {
+    const filter: Record<string, unknown> = { status: "published", when: () => 1 };
+    const proxied = new Proxy({ slug: "x" }, {});
+    const { reads } = await observeReads(async () => {
+      noteRead({ kind: "query", type: "speakers", filter });
+      noteRead({ kind: "path", type: "pages", id: "p", locale: "de", rules: proxied, path: null });
+    });
+    filter.status = "draft";
+    expect(reads).toEqual([
+      { kind: "query", type: "speakers", filter: { status: "published" } },
+      { kind: "path", type: "pages", id: "p", locale: "de", rules: { slug: "x" }, path: null },
+    ]);
+  });
+
   it("noteRead outside any scope is a no-op", () => {
     expect(() => noteRead(doc("nowhere"))).not.toThrow();
   });

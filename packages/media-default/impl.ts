@@ -121,8 +121,7 @@ export interface Upload {
   created: boolean;
 }
 
-/** The type name media reads are noted under in a read scope (`@michaelthielemann/kestrel/reads`). */
-export const MEDIA_READ_TYPE = "media";
+const MEDIA_READ_TYPE = "media";
 
 export interface Media {
   upload(file: { filename: string; contentType: string; data: Uint8Array }, folder?: string, provenance?: unknown): Promise<Result<Upload, MediaError>>;
@@ -683,6 +682,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       return ok(resolveWith(row.value, key.value));
     },
     async read(id) {
+      noteRead({ kind: "document", type: MEDIA_READ_TYPE, id });
       const row = await db.findOne<Document>(COLLECTION, { id });
       if (isErr(row)) return row;
       if (row.value === null) return ok(null);
@@ -694,6 +694,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       return ok({ item, data: blob.value });
     },
     async serveFile(id, name) {
+      noteRead({ kind: "document", type: MEDIA_READ_TYPE, id });
       const row = await db.findOne<Document>(COLLECTION, { id });
       if (isErr(row)) return row;
       if (row.value === null) return ok(null);

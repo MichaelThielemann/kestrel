@@ -73,6 +73,16 @@ describe("content/default notes what it answers inside a read scope", () => {
     expect(reads[0]).toEqual({ kind: "query", type: "speakers", filter: { status: "published" }, locale: "de" });
   });
 
+  it("lists with a filter a structured clone cannot copy, such as a proxy, inside and outside a scope", async () => {
+    const { content, ada } = await seeded();
+    const filter = new Proxy({ status: "published" }, {});
+    expect(expectOk(await content.list("speakers", filter, { locale: "de" })).items.map((d) => d.id)).toEqual([ada.id]);
+    const { reads } = await observeReads(async () => {
+      expectOk(await content.list("speakers", filter, { locale: "de" }));
+    });
+    expect(reads[0]).toEqual({ kind: "query", type: "speakers", filter: { status: "published" }, locale: "de" });
+  });
+
   it("notes nothing outside a scope", async () => {
     const { content, ada } = await seeded();
     expectOk(await content.get("speakers", ada.id));

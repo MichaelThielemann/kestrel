@@ -60,10 +60,13 @@ export async function observeReads<T>(fn: () => Promise<T>): Promise<{ result: P
   return { result, reads: frame.reads };
 }
 
-/** Records `read` in the innermost open read scope; a no-op outside a scope, inside {@link unobserved}, or after the scope sealed. */
+/**
+ * Records a plain JSON copy of `read` in the innermost open read scope, so a later change to the caller's objects never
+ * reaches it; a no-op, with no copy made, outside a scope, inside {@link unobserved}, or after the scope sealed.
+ */
 export function noteRead(read: ObservedRead): void {
   const frame = storage.getStore();
-  if (frame?.open === true) frame.reads.push(read);
+  if (frame?.open === true) frame.reads.push(boundaryCast<ObservedRead>(JSON.parse(JSON.stringify(read)), "json"));
 }
 
 /** Runs `fn` so that nothing it reads is noted in the enclosing scope: for lookups a provider makes on its own behalf before it notes the answer it gives. */

@@ -61,6 +61,23 @@ describe("media/default notes what it answers inside a read scope", () => {
     expect(reads).toEqual([{ kind: "type", type: "media" }]);
   });
 
+  it("reading an item's bytes notes the item, also when there is none", async () => {
+    const { media, first } = await seeded();
+    const { reads } = await observeReads(async () => {
+      expect(expectOk(await media.read(first.id))).not.toBeNull();
+      expect(expectOk(await media.serveFile("missing", "a.png"))).toBeNull();
+    });
+    expect(reads).toEqual([
+      { kind: "document", type: "media", id: first.id },
+      { kind: "document", type: "media", id: "missing" },
+    ]);
+  });
+
+  it("keeps the read type internal", async () => {
+    const impl = await import("./impl.ts");
+    expect(Reflect.has(impl, "MEDIA_READ_TYPE")).toBe(false);
+  });
+
   it("an update notes nothing", async () => {
     const { media, first } = await seeded();
     const { reads } = await observeReads(async () => {

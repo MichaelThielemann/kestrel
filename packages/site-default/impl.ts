@@ -122,7 +122,7 @@ export function createSiteDefault(content: Content): SiteDefault {
         return ok({ candidate: candidate.id, doc: viewResult.value });
       });
       if (isErr(answered)) return answered;
-      for (const locale of missed) noteRead({ kind: "query", type, filter: structuredClone(lookup), ...(locale === undefined ? {} : { locale }) });
+      for (const locale of missed) noteRead({ kind: "query", type, filter: lookup, ...(locale === undefined ? {} : { locale }) });
       const { candidate, doc } = answered.value;
       if (candidate !== null) noteRead({ kind: "document", type, id: candidate, ...(effective === undefined ? {} : { locale: effective }) });
       if (!doc) return ok(null);
@@ -159,7 +159,7 @@ export function createSiteDefault(content: Content): SiteDefault {
           if (isErr(viewResult)) return err(transientOnly(viewResult.error));
           const slug = viewResult.value?.[rules.slugField];
           if (typeof slug === "string" && slug !== "") path = publicPath(slug, locale, model.defaultLocale, rules.home, rules.prefixPrimary);
-          noteRead({ kind: "path", type: t, id, locale: locale ?? "", rules: structuredClone({ ...rules }), path });
+          noteRead({ kind: "path", type: t, id, locale: locale ?? "", rules: { ...rules }, path });
         }
         paths.set(ref, path);
         links[id] = path ? { path, locale: locale ?? "" } : { broken: true };

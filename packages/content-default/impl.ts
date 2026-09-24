@@ -245,7 +245,7 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
       }
       const at = locale.value === undefined ? {} : { locale: locale.value };
       const singleType = typeOf(typeName).kind === "single";
-      noteRead(singleType ? { kind: "type", type: typeName } : { kind: "query", type: typeName, filter: structuredClone(filter), ...at });
+      noteRead(singleType ? { kind: "type", type: typeName } : { kind: "query", type: typeName, filter, ...at });
       const page = await db.findMany<Document>(typeName, toFilter(typeName, filter, locale.value), query);
       if (isErr(page)) return page;
       if (!singleType) for (const row of page.value.items) noteRead({ kind: "document", type: typeName, id: row.id, ...at });
