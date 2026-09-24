@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { checkBoot, type BootCheck, type BootProblem } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
@@ -84,8 +84,21 @@ async function resolveProject(root: string, entry: string | undefined, scratchDi
 const execFileAsync = promisify(execFile);
 const TOOL_VERSION = "5.8.0";
 
+function realpathOrSelf(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+function insideScratch(file: string, scratch: string): boolean {
+  const rel = relative(realpathOrSelf(scratch), realpathOrSelf(file));
+  return !rel.startsWith("..") && !isAbsolute(rel);
+}
+
 function remap(file: string, scratch: string, root: string): string {
-  return resolve(root, relative(scratch, file));
+  return insideScratch(file, scratch) ? resolve(root, relative(scratch, file)) : file;
 }
 
 function remapFinding(finding: Finding, scratch: string, root: string): Finding {

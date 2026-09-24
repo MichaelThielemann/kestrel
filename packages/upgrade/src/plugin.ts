@@ -57,7 +57,13 @@ export interface DataContentModel {
   locales?: readonly string[];
   /** The identifier `RuleContext.locateModelFields` receives as `use` when `model/underscore-field` renames a field here, for a project with no `kestrel.config.ts` module-list entry to name instead. */
   use?: string;
-  /** The file `model/underscore-field` reads and writes a rename edit into, for a project whose content model does not sit in `LoadedProject.configFile`; that file is used when this is absent. */
+  /**
+   * The file `model/underscore-field` reads and writes a rename edit into, for a project whose
+   * content model does not sit in `LoadedProject.configFile`; that file is used when this is absent.
+   * An absolute path under the project's real root — `dataModel(root)` only ever receives that root,
+   * never the scratch copy `check`/`fix` runs rules against, so this is never a scratch path and is
+   * never remapped; it reaches the final report exactly as given.
+   */
   file?: string;
 }
 

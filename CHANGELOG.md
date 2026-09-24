@@ -495,6 +495,14 @@ Net changes since 5.8.1.
   `node_modules`) leaked its own temp directory — it was already tracked for signal-based cleanup, but
   nothing removed it on a normal, non-signal failure. `createScratchCopy` now removes and untracks its
   own partial copy before rethrowing.
+- `kestrel-upgrade`: `check`/`fix` remapped every finding's and edit's `file` from the scratch copy back
+  to the project root unconditionally, corrupting a path that was never inside the scratch copy to
+  begin with — `DataContentModel.file` (always a project-root path, since `dataModel(root)` only ever
+  receives the real root) and a path reached through a symlinked `node_modules` package resolving
+  outside it. For a project root that is not a sibling of the scratch dir at the same depth, the
+  corrupted path made `verifyAndApply` find nothing to read, downgrading an otherwise-verified
+  `model/underscore-field` rename to manual. Only a path that resolves (following symlinks) to inside
+  the scratch dir is remapped now; every other path reaches the report unchanged.
 
 ## 5.8.1 – 2026-09-22
 

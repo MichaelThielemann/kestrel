@@ -1,13 +1,17 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { isString } from "./guards.ts";
 import { runUpgradeCli } from "./plugin.ts";
 import type { LoadResult, Rule, UpgradePlugin } from "./plugin.ts";
 import type { UpgradeReport } from "./report.ts";
+
+const PROJECT_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 let dir: string;
 beforeEach(async () => {
@@ -318,5 +322,69 @@ describe("--data-report alongside a plugin that stores its own project.data", ()
 
     expect(seenData).toEqual({ pluginOwnKey: "plugin value" });
     expect(seenDataReport).toEqual({ underscoreFields: { "page._hint": { unlocalized: 0 } } });
+  });
+});
+
+describe("cli-run's remap: a path outside the scratch copy", () => {
+  it("leaves a finding's node_modules path unchanged, instead of corrupting it, for a root that is not a sibling of the scratch dir at the same depth", async () => {
+    const zodMain = createRequire(import.meta.url).resolve("zod");
+    const nestedBase = await mkdtemp(join(PROJECT_ROOT, "__fixtures__", ".tmp-remap-nested-"));
+    try {
+      const deepRoot = join(nestedBase, "a", "b", "c", "project");
+      await mkdir(deepRoot, { recursive: true });
+      await writeFile(join(deepRoot, "package.json"), JSON.stringify({ name: "app", dependencies: {} }));
+      const probeRule: Rule = {
+        id: "plugin/node-modules-probe",
+        check: () => [{ id: "plugin/node-modules-probe", rule: "plugin/node-modules-probe", severity: "info", tier: "source", where: { file: zodMain }, message: "probe", suggestion: "n/a", fix: { kind: "none" }, docs: "n/a" }],
+      };
+      const plugin: UpgradePlugin = {
+        kind: "custom-host",
+        detect: (root) => root === deepRoot,
+        load: () =>
+          Promise.resolve({
+            project: { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: "custom-host", configFile: join(deepRoot, "host.config.ts"), moduleFiles: new Map(), pipelineFiles: [] },
+            issues: [],
+          }),
+        rules: [probeRule],
+      };
+      const { report } = await runJsonAt(deepRoot, [plugin]);
+      const finding = report.findings.find((f) => f.rule === "plugin/node-modules-probe");
+      expect(finding?.where.file).toBe(zodMain);
+    } finally {
+      await rm(nestedBase, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a plugin's DataContentModel.file rename auto and applies it, for a project root that is not a sibling of the scratch dir at the same depth", async () => {
+    const nestedBase = await mkdtemp(join(PROJECT_ROOT, "__fixtures__", ".tmp-remap-nested-"));
+    try {
+      const deepRoot = join(nestedBase, "a", "b", "c", "project");
+      await mkdir(deepRoot, { recursive: true });
+      await writeFile(join(deepRoot, "package.json"), JSON.stringify({ name: "app", dependencies: {} }));
+      const modelFile = join(deepRoot, "content-model.ts");
+      const modelSource = 'export default { modules: [{ use: "custom-content", config: { types: { page: { fields: { _hint: { type: "string" } } } } } }] };\n';
+      await writeFile(modelFile, modelSource);
+      const reportFile = join(deepRoot, "data-report.json");
+      await writeFile(reportFile, JSON.stringify({ underscoreFields: { "page._hint": { unlocalized: 0 } } }));
+
+      const plugin: UpgradePlugin = {
+        kind: "custom-host",
+        detect: (root) => root === deepRoot,
+        load: () =>
+          Promise.resolve({
+            project: { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: "custom-host", configFile: join(deepRoot, "host.config.ts"), moduleFiles: new Map(), pipelineFiles: [] },
+            issues: [],
+          }),
+        dataModel: () => Promise.resolve({ use: "custom-content", file: modelFile, types: { page: { fields: { _hint: {} } } } }),
+      };
+
+      const lines: string[] = [];
+      const code = await runUpgradeCli(["fix", "--root", deepRoot, "--write", "--yes", "--allow-dirty", "--json", "--data-report", reportFile], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+      expect(code === 0 || code === 1).toBe(true);
+      const text = await readFile(modelFile, "utf8");
+      expect(text).toContain("fields: { hint:");
+    } finally {
+      await rm(nestedBase, { recursive: true, force: true });
+    }
   });
 });
