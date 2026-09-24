@@ -157,12 +157,13 @@ export function buildResponse(status: number, body: unknown, meta: ResponseMeta 
   if (meta.retryable === true && (status === 429 || status === 503)) headers["retry-after"] = String(retryAfterSecondsOf(meta));
   if (isBinaryResult(body)) {
     const own = Object.fromEntries(Object.entries(body.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+    const ownCaching = own["cache-control"]?.trim();
     return {
       status,
       headers: {
         ...own,
         ...headers,
-        ...(own["cache-control"] === undefined ? {} : { "cache-control": own["cache-control"] }),
+        ...(ownCaching === undefined || ownCaching === "" ? {} : { "cache-control": ownCaching }),
         "content-type": body.contentType,
         "content-length": String(body.data.byteLength),
         "content-disposition": disposition(body.contentType, body.filename, extraInline),

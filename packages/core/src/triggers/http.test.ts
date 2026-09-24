@@ -90,6 +90,13 @@ describe("http routes", () => {
     expect(headers["cache-control"]).toBe("no-store");
   });
 
+  it("keeps no-store when a binary result sets an empty or blank cache-control", () => {
+    for (const value of ["", "   "]) {
+      const body = { ...binaryResult(new Uint8Array([1]), "image/png", "a.png"), headers: { "cache-control": value } };
+      expect(buildResponse(200, body).headers["cache-control"]).toBe("no-store");
+    }
+  });
+
   it("also serves configured extra content types inline", () => {
     expect(disposition("image/svg+xml", "a.svg", ["image/svg+xml"])).toBe('inline; filename="a.svg"');
     expect(disposition("image/svg+xml", "a.svg", [])).toBe('attachment; filename="a.svg"');
