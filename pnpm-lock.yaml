@@ -347,6 +347,9 @@ importers:
       '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@michaelthielemann/kestrel-persistence-sqlite':
+        specifier: workspace:*
+        version: link:../persistence-sqlite
       '@michaelthielemann/kestrel-site-default':
         specifier: workspace:*
         version: link:../site-default

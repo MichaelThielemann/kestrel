@@ -1,14 +1,33 @@
 import { z } from "zod";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
+import { EVENTS } from "@michaelthielemann/kestrel-contracts/events";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { RENDERER } from "@michaelthielemann/kestrel-contracts/renderer";
 import { SITE } from "@michaelthielemann/kestrel-contracts/site";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
-import { defineModule } from "@michaelthielemann/kestrel/defineModule";
+import { defineModule, type Introspection } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { createDeliveryStatic, type Delivery } from "./impl.ts";
+import { createDeliveryStatic, LLMS_STALE, OUTPUT_STALE, type Delivery } from "./impl.ts";
+
+const dependenciesSchema = z
+  .object({
+    render: z.enum(["events", "background"]).default("background"),
+    rendererReadsDocument: z.boolean().default(false),
+    maxPerRender: z.number().int().positive().default(1000),
+    renderTimeoutSeconds: z.number().int().positive().default(60),
+    maxAttempts: z.number().int().positive().default(5),
+    backoffSeconds: z.array(z.number().int().nonnegative()).min(1).default([60, 300, 900, 3600]),
+    claimTtlSeconds: z.number().int().positive().default(300),
+    maxAgeSeconds: z.number().int().positive().nullable().default(null),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.renderTimeoutSeconds >= value.claimTtlSeconds) {
+      ctx.addIssue({ code: "custom", path: ["renderTimeoutSeconds"], message: `dependencies.renderTimeoutSeconds (${value.renderTimeoutSeconds}) must be below dependencies.claimTtlSeconds (${value.claimTtlSeconds})` });
+    }
+  });
 
 export const configSchema = z
   .object({
@@ -31,6 +50,7 @@ export const configSchema = z
       })
       .strict()
       .default({}),
+    dependencies: dependenciesSchema.default({}),
   })
   .strict();
 
@@ -44,22 +64,81 @@ function documentId(ctx: Context): string | null {
   return typeof ctx.payload.id === "string" ? ctx.payload.id : null;
 }
 
+function changedIds(payload: Record<string, unknown>): string[] {
+  const ids = Array.isArray(payload.ids) ? payload.ids.filter((v): v is string => typeof v === "string") : [];
+  if (typeof payload.id === "string") ids.push(payload.id);
+  return [...new Set(ids)];
+}
+
+function previousResult(ctx: Context): Record<string, unknown> {
+  return isRecord(ctx.result) ? ctx.result : {};
+}
+
+type Instance = Delivery & { render: "events" | "background" };
+
+/** With `dependencies.render: "events"`, boot needs the two job triggers and a queue as the event delivery module. */
+export function checkEventsWiring(kestrel: Introspection): void {
+  const manifest = kestrel.describe();
+  const stepsOf = new Map(manifest.pipelines.map((p) => [p.name, p.steps.map((s) => s.name)]));
+  const subscribed = (event: string, step: string): boolean => manifest.triggers.events.some((t) => t.event === event && (stepsOf.get(t.pipeline) ?? []).includes(step));
+  if (!subscribed(OUTPUT_STALE, "delivery.republishOutput")) throw new Error(`delivery/static: dependencies.render "events" needs a trigger that runs a pipeline with delivery.republishOutput on "${OUTPUT_STALE}"`);
+  if (!subscribed(LLMS_STALE, "delivery.exportLlms")) throw new Error(`delivery/static: dependencies.render "events" needs a trigger that runs a pipeline with delivery.exportLlms on "${LLMS_STALE}"`);
+  const hook = manifest.modules.find((m) => m.eventHook);
+  if (hook?.name === "events/direct") throw new Error('delivery/static: dependencies.render "events" would run every re-render inside the request that marked it under events/direct; use "background" or the queue');
+}
+
 const ENVELOPE_INPUT = { type: "object", additionalProperties: true };
+const NULLABLE_NUMBER = { type: ["number", "null"] };
+const NULLABLE_STRING = { type: ["string", "null"] };
+const STATE = { type: "string", enum: ["live", "error", "draft"] };
 
 const STATUS_SCHEMA = {
   type: "object",
-  properties: { type: { type: "string" }, docId: { type: "string" }, locale: { type: "string" }, state: { type: "string", enum: ["live", "error", "draft"] }, path: { type: ["string", "null"] }, error: { type: ["string", "null"] }, publishedAt: { type: ["number", "null"] }, updatedAt: { type: "number" } },
-  required: ["type", "docId", "locale", "state", "updatedAt"],
+  properties: {
+    type: { type: "string" },
+    docId: { type: "string" },
+    locale: { type: "string" },
+    state: STATE,
+    path: NULLABLE_STRING,
+    error: NULLABLE_STRING,
+    publishedAt: NULLABLE_NUMBER,
+    updatedAt: { type: "number" },
+    stale: { type: "boolean" },
+    staleSince: NULLABLE_NUMBER,
+    staleFailed: { type: "boolean" },
+    staleError: NULLABLE_STRING,
+    dependencies: NULLABLE_NUMBER,
+  },
+  required: ["type", "docId", "locale", "state", "updatedAt", "stale", "staleSince", "staleFailed", "staleError", "dependencies"],
+};
+
+const MARKED = { type: "object", properties: { marked: { type: "integer" } }, required: ["marked"] };
+
+const STALE_STATUS_SCHEMA = {
+  type: "object",
+  properties: { stale: { type: "integer" }, failed: { type: "integer" }, rendering: { type: "integer" }, unknown: { type: "integer" }, oldestStaleAt: NULLABLE_NUMBER, abandoned: { type: "integer" } },
+  required: ["stale", "failed", "rendering", "unknown", "oldestStaleAt", "abandoned"],
 };
 
 export default defineModule({
   name: "delivery/static",
   provides: [],
   requires: [CONTENT, RENDERER, BLOBSTORE, PERSISTENCE, SITE],
+  optional: [EVENTS],
+  emits: [OUTPUT_STALE, LLMS_STALE],
   configSchema,
 
-  async setup(config, deps): Promise<Delivery> {
-    return createDeliveryStatic(config, { content: deps.get(CONTENT), site: deps.get(SITE), renderer: deps.get(RENDERER), blobs: deps.get(BLOBSTORE), db: deps.get(PERSISTENCE), logger: deps.logger });
+  async setup(config, deps): Promise<Instance> {
+    const delivery = await createDeliveryStatic(config, { content: deps.get(CONTENT), site: deps.get(SITE), renderer: deps.get(RENDERER), blobs: deps.get(BLOBSTORE), db: deps.get(PERSISTENCE), logger: deps.logger, events: deps.find(EVENTS) });
+    return { ...delivery, render: config.dependencies.render };
+  },
+
+  attach: (instance, kestrel) => {
+    if (instance.render === "events") checkEventsWiring(kestrel);
+  },
+
+  teardown: async (instance) => {
+    await instance.close();
   },
 
   steps: (delivery) => ({
@@ -68,8 +147,7 @@ export default defineModule({
       if (id === null) return ctx.fail("VALIDATION", "delivery.publish: no document id in the result or the event payload");
       const published = await delivery.publish(type, id);
       if (isErr(published)) return ctx.fail(published.error);
-      const previous = isRecord(ctx.result) ? ctx.result : {};
-      return ok({ ...ctx, result: { ...previous, _delivery: published.value } });
+      return ok({ ...ctx, result: { ...previousResult(ctx), _delivery: published.value } });
     }),
     unpublish: stepFactory((type: string) => async (ctx: Context) => {
       const id = ctx.params.id ?? (typeof ctx.payload.id === "string" ? ctx.payload.id : undefined);
@@ -90,10 +168,53 @@ export default defineModule({
       return ok({ ...ctx, result: summary.value });
     }),
     exportLlms: async (ctx: Context) => {
-      const previous = isRecord(ctx.result) ? ctx.result : {};
       const exported = await delivery.exportLlms();
       if (isErr(exported)) return ctx.fail("TRANSIENT", `delivery.exportLlms: llms.txt was not written – try again (${exported.error.message})`);
-      return ok({ ...ctx, result: { ...previous, _llms: exported.value } });
+      return ok({ ...ctx, result: { ...previousResult(ctx), _llms: exported.value } });
+    },
+    markDependents: stepFactory((type: string) => async (ctx: Context) => {
+      const marked = await delivery.markDependents(type, changedIds(ctx.payload));
+      if (isErr(marked)) return ctx.fail(marked.error);
+      return ok({ ...ctx, result: { ...previousResult(ctx), _dependents: marked.value } });
+    }),
+    markAll: stepFactory((type: string) => async (ctx: Context) => {
+      const marked = await delivery.markAll(type);
+      if (isErr(marked)) return ctx.fail(marked.error);
+      return ok({ ...ctx, result: { ...previousResult(ctx), ...marked.value } });
+    }),
+    checkBuild: async (ctx: Context) => {
+      const build = ctx.payload.build;
+      if (typeof build !== "string" || build === "") return ctx.fail("VALIDATION", "delivery.checkBuild: payload.build must be a non-empty string");
+      const checked = await delivery.checkBuild(build);
+      if (isErr(checked)) return ctx.fail(checked.error);
+      return ok({ ...ctx, result: checked.value });
+    },
+    republishOutput: async (ctx: Context) => {
+      const { type, docId, locale } = ctx.payload;
+      if (typeof type !== "string" || typeof docId !== "string" || typeof locale !== "string") return ctx.fail("VALIDATION", "delivery.republishOutput: payload needs type, docId and locale");
+      const rendered = await delivery.republishOutput({ type, docId, locale });
+      if (isErr(rendered)) return ctx.fail(rendered.error);
+      return ok({ ...ctx, result: { ...previousResult(ctx), ...rendered.value } });
+    },
+    requestLlms: async (ctx: Context) => {
+      const requested = await delivery.requestLlms();
+      if (isErr(requested)) return ctx.fail(requested.error);
+      return ok(ctx);
+    },
+    resumeStale: async (ctx: Context) => {
+      const resumed = await delivery.resumeStale();
+      if (isErr(resumed)) return ctx.fail(resumed.error);
+      return ok({ ...ctx, result: resumed.value });
+    },
+    retryStale: async (ctx: Context) => {
+      const retried = await delivery.retryStale();
+      if (isErr(retried)) return ctx.fail(retried.error);
+      return ok({ ...ctx, result: { ...previousResult(ctx), ...retried.value } });
+    },
+    readStaleStatus: async (ctx: Context) => {
+      const status = await delivery.readStaleStatus();
+      if (isErr(status)) return ctx.fail(status.error);
+      return ok({ ...ctx, result: status.value });
     },
   }),
 
@@ -125,6 +246,62 @@ export default defineModule({
       reads: [],
       writes: ["result._llms"],
       extendsOutput: { type: "object", properties: { _llms: { type: "object", properties: { entries: { type: "integer" }, full: { type: "boolean" } }, required: ["entries", "full"] } }, required: ["_llms"] },
+    },
+    markDependents: (type: string) => ({
+      summary: `Mark every published output whose last render read the changed ${type} (payload id and ids) for a re-render, and start it outside the request (adds \`_dependents: { marked }\` to the result)`,
+      reads: ["payload"],
+      writes: ["result._dependents"],
+      input: ENVELOPE_INPUT,
+      extendsOutput: { type: "object", properties: { _dependents: MARKED }, required: ["_dependents"] },
+      errors: { 503: "the marks or their jobs could not be written" },
+    }),
+    markAll: (type: string) => ({
+      summary: `Mark every ${type} output for a re-render in the background, including documents that were never delivered (adds \`marked\` to the result)`,
+      reads: [],
+      writes: ["result"],
+      extendsOutput: MARKED,
+      errors: { 503: "the marks or their jobs could not be written" },
+    }),
+    checkBuild: {
+      summary: "Mark every delivered output for a re-render when payload.build differs from the stored build, then store it",
+      reads: ["payload"],
+      writes: ["result"],
+      input: { type: "object", properties: { build: { type: "string", minLength: 1 } }, required: ["build"], additionalProperties: true },
+      output: { type: "object", properties: { changed: { type: "boolean" }, marked: { type: "integer" } }, required: ["changed", "marked"] },
+      errors: { 400: "payload.build is missing", 503: "the marks could not be written; the build is not stored" },
+    },
+    republishOutput: {
+      summary: "Render one marked output (payload type, docId, locale) under a claim; a failed render is recorded on the output and answered as an error so the event delivery retries it",
+      reads: ["payload"],
+      writes: ["result"],
+      input: { type: "object", properties: { type: { type: "string" }, docId: { type: "string" }, locale: { type: "string" } }, required: ["type", "docId", "locale"], additionalProperties: true },
+      extendsOutput: { type: "object", properties: { rendered: { type: "boolean" }, state: { type: ["string", "null"], enum: ["live", "error", "draft", null] } }, required: ["rendered", "state"] },
+      errors: { 400: "payload needs type, docId and locale", 503: "the render failed or another render holds the output" },
+    },
+    requestLlms: {
+      summary: "Ask for an llms.txt export after the pending re-renders, without running it here",
+      reads: [],
+      writes: [],
+      errors: { 503: "the request could not be queued" },
+    },
+    resumeStale: {
+      summary: "Release expired render claims, remove old tombstones and orphaned dependency sets, and start the re-renders a stopped process or a lost job left marked",
+      reads: [],
+      writes: ["result"],
+      output: { type: "object", properties: { released: { type: "integer" }, swept: { type: "integer" }, dispatched: { type: "integer" }, aged: { type: "integer" } }, required: ["released", "swept", "dispatched", "aged"] },
+    },
+    retryStale: {
+      summary: "Reset the attempts of every output whose re-render failed maxAttempts times and start it again (adds `retried` to the result)",
+      reads: [],
+      writes: ["result"],
+      extendsOutput: { type: "object", properties: { retried: { type: "integer" } }, required: ["retried"] },
+    },
+    readStaleStatus: {
+      summary: "How many outputs wait for a re-render, failed it, are rendering or have unknown dependencies, the oldest mark, and the renders this process abandoned at the timeout",
+      reads: [],
+      writes: ["result"],
+      output: STALE_STATUS_SCHEMA,
+      atomicSafe: true,
     },
   }),
 });
