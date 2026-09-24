@@ -312,9 +312,9 @@ all localized fields of that language become `null` and `_translations[locale]` 
 non-localized fields are untouched. It answers 400 for an unknown language, 404 if the document or
 translation is missing, and 409 (`… is the last translation – remove the document`) for the last
 remaining translation — even the default language can be deleted as long as another one remains,
-though its URL then answers 404. Afterwards `references.index`, `links.extract`,
-`delivery.publish` (which removes the static file for that language) and `delivery.exportLlms` all
-run, and the event `page.translationRemoved` fires with the language in `params.locale`.
+though its URL then answers 404. Afterwards `references.index`, `links.extract` and
+`delivery.publish` (which removes the static file for that language) run, `llms.txt` is rewritten in
+the background, and the event `page.translationRemoved` fires with the language in `params.locale`.
 
 ### Page revisions
 
@@ -364,7 +364,7 @@ restoring that revision answers 409.
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/settings` | `?locale=` | document; as long as it was never set: 200 with an empty document (every field `null`, `_translations` all `false`). If the step carries a fixed filter (`content.get:settings?status=published`), it also applies to the empty document → 404 |
-| PUT | `/settings` | every field (+ `locale`) | `{ …document, llms: { entries, full } }` – replaces the language entirely (`settings.write`) and rewrites `llms.txt` (its title/description come from this document) |
+| PUT | `/settings` | every field (+ `locale`) | `{ …document, _events }` – replaces the language entirely (`settings.write`) and emits `settings.updated`; every published page that shows the settings is re-rendered in the background, and `llms.txt` (its title/description come from this document) is rewritten after them |
 
 `navigation` is checked against a JSON Schema: a list of `{ label, path, children? }`, both
 non-empty strings, no other fields — otherwise 400 with path and reason
@@ -579,11 +579,21 @@ language), `site/en/<slug>/index.html`, home page (`slug = home`) → `site/inde
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/admin/publish-status/pages/:id` | `[{ locale, state: live \| error \| draft, path, error, publishedAt, updatedAt }]` (`pages.manage`) |
-| POST | `/admin/publish-all/pages` | `{ documents, live, errors, redirects: { rules, skipped }, llms: { entries, full } }` – re-render everything, and afterwards also rewrite `redirects.json` and `llms.txt` (the pipeline chains `redirects.export` and `delivery.exportLlms` onto `delivery.publishAll:pages`) (`pages.manage`) |
+| GET | `/admin/publish-status/pages/:id` | `[{ locale, state: live \| error \| draft, path, error, publishedAt, updatedAt, stale, staleSince, staleFailed, staleError, dependencies }]` (`pages.manage`) |
+| POST | `/admin/publish-all/pages` | `{ documents, live, errors, redirects: { rules, skipped }, _llms: { entries, full } }` – re-render everything, and afterwards also rewrite `redirects.json` and `llms.txt` (the pipeline chains `redirects.export` and `delivery.exportLlms` onto `delivery.publishAll:pages`) (`pages.manage`) |
 
 `state`: `live` = delivered, `draft` = not published in that language, `error` = rendering or saving
-failed (`error` names the cause; the last `live` output stays in place). The example instance uses
+failed (`error` names the cause; the last `live` output stays in place).
+
+A page is also re-rendered when something it shows changes, without being saved itself: each render
+records what it read (with `renderer-plain`, the paths of the pages it links to; with a renderer that
+reads through this instance, also the settings, the documents and media it shows), and
+`pageDependents`, `settingsDependents` and `mediaDependents` mark the published pages that read what
+changed. The example's background loop renders them after the response; `stale` says a page waits
+for that, `staleFailed`/`staleError` that it failed `maxAttempts` times, `dependencies` how much its
+last render recorded (`null`: unknown, re-rendered on every change). `resumeStalePages` (every five
+minutes) picks up whatever a stopped process left marked. See the `delivery-static` README,
+"Dependent outputs", for the queue wiring. The example instance uses
 `renderer-plain` (an HTML skeleton) and the filesystem blob store (`data/blobs/site/`); in
 production: the site's own renderer + `blobstore-s3`.
 
@@ -604,19 +614,19 @@ the file.
 
 With `llms` configured, `delivery.exportLlms` writes two files per [llmstxt.org](https://llmstxt.org)
 next to `redirects.json` in the blob store (`site/llms.txt`, `site/llms-full.txt`); nginx serves
-them statically. The step takes no argument and, in the example instance, is chained onto
-`createPage`, `updatePage`, `deletePage`, `setSettings` and `publishAllPages`; it adds
-`llms: { entries, full }` to the result. The source is the `live` rows of the publish traffic light
+them statically. The step takes no argument and, in the example instance, runs at the end of
+`publishAllPages`, where it adds `_llms: { entries, full }` to the result; after a page save, a page
+delete or a settings change, `delivery.requestLlms` asks the background loop for one export after
+the re-renders instead, so those responses carry no `_llms`. The source is the `live` rows of the publish traffic light
 for every type configured under `types` — i.e. exactly what is delivered: drafts are absent, and a
 language only appears once it is itself published. For each row, the document is read; an empty
 `seo`/title field is filled from the default language only when the default language is itself
 published, the same rule `GET /site/*path` and static delivery apply — a draft default language
 never fills a field here either. `seo.noindex === true` excludes the page from both files. If
 `llms.txt` cannot be
-written, the whole request (i.e. `POST`/`PATCH /pages`,
-`DELETE /pages/:id[/translations/:locale]`, `PUT /settings`, `POST /admin/publish-all/pages`)
-answers with 503 (`TRANSIENT`, `retryable: true`, `Retry-After`) instead of the `llms` field it
-would otherwise contain — the same request can be retried. Likewise, `PUT /redirects` and
+written, `POST /admin/publish-all/pages` answers with 503 (`TRANSIENT`, `retryable: true`,
+`Retry-After`) instead of the `_llms` field it would otherwise contain — the same request can be
+retried; a background export that fails is logged and tried again. Likewise, `PUT /redirects` and
 `POST /admin/publish-all/pages` answer with 503 if `redirects.json` could not be written.
 
 `llms.txt`: `# <settings.title>` (default language; empty → the host from `siteUrl`, otherwise
