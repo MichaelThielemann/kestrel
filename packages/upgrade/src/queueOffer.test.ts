@@ -214,4 +214,28 @@ describe("offer/event-queue", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");
   });
+
+  it("re-checks the boot preview using the answered relay pipelines before writing, not the default", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", ""]]);
+    const newError: BootProblem = { code: "setup-failed", owner: "events-queue", reason: "boom without any relay" };
+    const previewBoot = async (edits: readonly Edit[]): Promise<BootCheck> => {
+      const relaysPublishPage = edits.some((e) => e.text.includes("publishPage"));
+      return relaysPublishPage ? { errors: [], warnings: [], notChecked: [] } : { errors: [newError], warnings: [], notChecked: [] };
+    };
+    const findings = await queueOfferRule.check(contextFor(p, answers, previewBoot));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).not.toBe("auto");
+    expect(findings[0]?.message).toContain("boom without any relay");
+  });
+
+  it("rejects a relay-pipelines answer naming a pipeline the project does not have", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPaeg"]]);
+    const findings = await queueOfferRule.check(contextFor(p, answers));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).not.toBe("auto");
+    expect(findings[0]?.severity).toBe("error");
+    expect(findings[0]?.message).toContain("publishPaeg");
+  });
 });

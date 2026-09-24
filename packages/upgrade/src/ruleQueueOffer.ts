@@ -127,6 +127,42 @@ export const queueOfferRule: Rule = {
       .split(",")
       .map((s) => s.trim())
       .filter((s) => s !== "");
+
+    const knownPipelines = new Set(ctx.project.input.pipelines.map((p) => p.name));
+    const unknownNames = relayPipelines.filter((name) => !knownPipelines.has(name));
+    if (unknownNames.length > 0) {
+      return [
+        {
+          id: `${RULE_ID}:relay-pipelines`,
+          rule: RULE_ID,
+          severity: "error",
+          tier: "source",
+          where: {},
+          message: `relay-pipelines names a pipeline this project does not have: ${unknownNames.join(", ")}`,
+          suggestion: `the project's pipelines are: ${[...knownPipelines].join(", ") || "(none)"}`,
+          fix: { kind: "manual" },
+          docs: "docs/upgrading.md#offer-event-queue",
+        },
+      ];
+    }
+
+    const finalBootErrors = await newBootErrors(ctx, relayPipelines);
+    if (finalBootErrors.length > 0) {
+      return [
+        {
+          id: `${RULE_ID}:relay-pipelines`,
+          rule: RULE_ID,
+          severity: "error",
+          tier: "source",
+          where: {},
+          message: `the switch with relayPipelines: [${relayPipelines.join(", ")}] fails to boot: ${finalBootErrors.map((e) => e.reason).join("; ")}`,
+          suggestion: "answer relay-pipelines differently, or resolve the boot error above",
+          fix: { kind: "manual" },
+          docs: "docs/upgrading.md#offer-event-queue",
+        },
+      ];
+    }
+
     const edits = switchEdits(ctx, relayPipelines);
     return [
       {
