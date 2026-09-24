@@ -98,3 +98,63 @@ describe("site/default", () => {
     if (!failed.ok) expect(failed.error.code).toBe("TRANSIENT");
   });
 });
+
+describe("site/default: the filter may mix localized and non-localized fields", () => {
+  const nonLocalizedStatusModel: ContentModel = {
+    locales: ["de", "en"],
+    defaultLocale: "de",
+    types: {
+      pages: {
+        kind: "multi",
+        fields: {
+          slug: { type: "slug", required: true, unique: true, localized: true },
+          title: { type: "text", required: true, localized: true },
+          body: { type: "text", localized: true },
+          status: { type: "enum", options: ["draft", "published"] },
+        },
+      },
+    },
+  };
+
+  it("applies a non-localized status field identically at every locale", async () => {
+    const { site, content } = await make(nonLocalizedStatusModel);
+    const doc = expectOk(await content.create("pages", { slug: "geteilt", title: "Geteilt", status: "published", body: "Text DE" }));
+    expectOk(await content.update("pages", doc.id, { slug: "shared", title: "Shared EN" }, { locale: "en" }));
+    const rules = { home: "home", fallback: true, filter: { status: "published" } };
+    expect(expectOk(await site.resolve("pages", "en/shared", { rules }))).toMatchObject({ title: "Shared EN", body: "Text DE" });
+    expect(expectOk(await site.resolve("pages", "geteilt", { rules }))).toMatchObject({ title: "Geteilt" });
+
+    expectOk(await content.update("pages", doc.id, { status: "draft" }));
+    expect(expectOk(await site.resolve("pages", "en/shared", { rules }))).toBeNull();
+    expect(expectOk(await site.resolve("pages", "geteilt", { rules }))).toBeNull();
+  });
+
+  const mixedFilterModel: ContentModel = {
+    locales: ["de", "en"],
+    defaultLocale: "de",
+    types: {
+      pages: {
+        kind: "multi",
+        fields: {
+          slug: { type: "slug", required: true, unique: true, localized: true },
+          title: { type: "text", required: true, localized: true },
+          status: { type: "enum", options: ["draft", "published"], localized: true },
+          archived: { type: "boolean" },
+        },
+      },
+    },
+  };
+
+  it("applies a filter mixing a localized and a non-localized entry", async () => {
+    const { site, content } = await make(mixedFilterModel);
+    const doc = expectOk(await content.create("pages", { slug: "mix", title: "Mix DE", status: "published", archived: false }));
+    expectOk(await content.update("pages", doc.id, { slug: "mix-en", title: "Mix EN", status: "published" }, { locale: "en" }));
+    const rules = { home: "home", filter: { status: "published", archived: false } };
+    expect(expectOk(await site.resolve("pages", "en/mix-en", { rules }))).toMatchObject({ title: "Mix EN" });
+    expect(expectOk(await site.resolve("pages", "mix", { rules }))).toMatchObject({ title: "Mix DE" });
+
+    expectOk(await content.update("pages", doc.id, { archived: true }));
+    expect(expectOk(await site.resolve("pages", "en/mix-en", { rules }))).toBeNull();
+    expect(expectOk(await site.resolve("pages", "mix", { rules }))).toBeNull();
+  });
+});
