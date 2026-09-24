@@ -623,6 +623,12 @@ Net changes since 5.8.1.
   corrupted path made `verifyAndApply` find nothing to read, downgrading an otherwise-verified
   `model/underscore-field` rename to manual. Only a path that resolves (following symlinks) to inside
   the scratch dir is remapped now; every other path reaches the report unchanged.
+- `kestrel-upgrade`: `offer/event-queue`'s unverified prompt named
+  `@michaelthielemann/kestrel-events-queue may not be installed` for every non-boot-tier failure, even
+  when the boot preview ran and succeeded but left one or more relay pipelines in `notChecked` (a
+  module's own config breaking their check, say). It now names each such pipeline and its own
+  `notChecked` reason instead, falling back to the install guidance only when the preview did not run
+  at all.
 
 ## 5.8.1 – 2026-09-22
 

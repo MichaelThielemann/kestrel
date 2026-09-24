@@ -319,6 +319,18 @@ export const definePipeline = pipelineDefiner<KnownStep>();
     expect(findings[0]?.message).toContain("boom without any relay");
   });
 
+  it("names the unchecked relay pipeline and its own reason in the final could-not-verify message, not events-queue may not be installed", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
+    const previewBoot = async (): Promise<BootCheck> => ({ errors: [], warnings: [], notChecked: [{ kind: "pipeline", name: "publishPage", because: "config.modules does not pair reliably with the loaded modules" }] });
+    const findings = await queueOfferRule.check(contextFor(p, answers, previewBoot));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).not.toBe("auto");
+    expect(findings[0]?.message).toContain("publishPage");
+    expect(findings[0]?.message).toContain("config.modules does not pair reliably with the loaded modules");
+    expect(findings[0]?.message).not.toContain("may not be installed");
+  });
+
   it("rejects a relay-pipelines answer naming a pipeline the project does not have", async () => {
     const p = await directProject({ publishPipeline: true });
     const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPaeg"]]);
@@ -378,6 +390,18 @@ describe("offer/event-queue: verifyEdits' notChecked-awareness", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");
     expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
+  });
+
+  it("names the unchecked relay pipeline and its own reason in the prompt, instead of guessing events-queue is not installed", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const previewBoot = async (): Promise<BootCheck> => ({ errors: [], warnings: [], notChecked: [{ kind: "pipeline", name: "publishPage", because: "config.modules does not pair reliably with the loaded modules" }] });
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [], previewBoot };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    const prompt = findings[0]?.fix.kind === "ask" ? findings[0].fix.prompt : "";
+    expect(prompt).toContain("publishPage");
+    expect(prompt).toContain("config.modules does not pair reliably with the loaded modules");
+    expect(prompt).not.toContain("may not be installed");
   });
 
   it("still offers the switch when every relay pipeline was checked and no new error appeared", async () => {

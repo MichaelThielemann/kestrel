@@ -54,29 +54,37 @@ function errKey(e: BootProblem): string {
   return [e.code, e.owner, e.reason, e.module, e.pipeline, e.step, e.path].join(":");
 }
 
+export interface UncheckedPipeline {
+  name: string;
+  because: string;
+}
+
 export interface VerifyEditsResult {
   verified: boolean;
   newErrors: readonly BootProblem[];
-  unchecked: readonly string[];
+  unchecked: readonly UncheckedPipeline[];
 }
 
 /**
  * The shared implementation behind `RuleContext.verifyEdits`: runs `previewBoot(edits)`, diffs its
  * errors against `baseline`'s, and folds in whether every name in `pipelines` was actually checked.
- * A rule falls back to calling this directly with `ctx.previewBoot`/`ctx.bootCheck` when `ctx.verifyEdits`
+ * `unchecked` names each one the preview's own `notChecked` lists, with its own reason, only once the
+ * preview actually reloaded — a preview that did not run at all (no boot tier, or the reload itself
+ * failing) carries no such reason and reports `unchecked: []`, still leaving `verified: false`. A rule
+ * falls back to calling this directly with `ctx.previewBoot`/`ctx.bootCheck` when `ctx.verifyEdits`
  * itself is absent (a hand-built context older than that field).
  */
 export async function verifyEditsWith(previewBoot: ((edits: readonly Edit[]) => Promise<BootCheck | undefined>) | undefined, baseline: BootCheck, edits: readonly Edit[], pipelines: readonly string[]): Promise<VerifyEditsResult> {
-  if (previewBoot === undefined) return { verified: false, newErrors: [], unchecked: pipelines };
+  if (previewBoot === undefined) return { verified: false, newErrors: [], unchecked: [] };
   try {
     const raw = await previewBoot(edits);
-    if (raw === undefined) return { verified: false, newErrors: [], unchecked: pipelines };
-    const unchecked = raw.notChecked.filter((item) => item.kind === "pipeline" && pipelines.includes(item.name)).map((item) => item.name);
+    if (raw === undefined) return { verified: false, newErrors: [], unchecked: [] };
+    const unchecked = raw.notChecked.filter((item) => item.kind === "pipeline" && pipelines.includes(item.name)).map((item) => ({ name: item.name, because: item.because }));
     const baselineKeys = new Set(baseline.errors.map(errKey));
     const newErrors = raw.errors.filter((e) => !baselineKeys.has(errKey(e)));
     return { verified: unchecked.length === 0, newErrors, unchecked };
   } catch {
-    return { verified: false, newErrors: [], unchecked: pipelines };
+    return { verified: false, newErrors: [], unchecked: [] };
   }
 }
 

@@ -102,10 +102,12 @@ export interface RuleContext {
    * Runs `previewBoot(edits)` and diffs its boot check against this run's own baseline, then folds in
    * whether every pipeline named in `pipelines` was actually checked: `verified` is true only when the
    * preview booted and none of them is in the result's `notChecked`. `unchecked` names the ones that
-   * were not, so a caller unable to trust a clean diff here can say why. `undefined` under the same
+   * were not, each with its own `notChecked` reason, so a caller unable to trust a clean diff here can
+   * say why — empty, not one entry per named pipeline, when the preview did not run at all (no boot
+   * tier, or the reload itself failing), which carries no such reason. `undefined` under the same
    * conditions `previewBoot` is.
    */
-  verifyEdits?: (edits: readonly Edit[], options?: { pipelines?: readonly string[] }) => Promise<{ verified: boolean; newErrors: readonly BootProblem[]; unchecked: readonly string[] }>;
+  verifyEdits?: (edits: readonly Edit[], options?: { pipelines?: readonly string[] }) => Promise<{ verified: boolean; newErrors: readonly BootProblem[]; unchecked: readonly { name: string; because: string }[] }>;
 }
 
 /** One 5.8 -> 6.0 rule: turns a loaded project (plus the boot check it produced) into findings. */

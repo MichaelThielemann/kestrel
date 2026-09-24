@@ -8,7 +8,7 @@ import { replaceDependency } from "./packageJson.ts";
 import type { Rule, RuleContext, SwitchEditsResult } from "./plugin.ts";
 import type { AskFix, Edit, Finding } from "./report.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
-import { KESTREL_RANGE, combineEditParts, fileForPipeline, infoFinding, moduleEntry, packageJsonPath, verifyEditsWith } from "./ruleHelpers.ts";
+import { KESTREL_RANGE, combineEditParts, fileForPipeline, infoFinding, moduleEntry, packageJsonPath, verifyEditsWith, type UncheckedPipeline } from "./ruleHelpers.ts";
 
 const RULE_ID = "offer/event-queue";
 const SERVERLESS_MARKERS = ["vercel.json", "netlify.toml", "wrangler.toml", "serverless.yml", "template.yaml"];
@@ -52,7 +52,7 @@ function switchBlockers(ctx: RuleContext): string[] {
   return blockers;
 }
 
-type SwitchVerification = { verified: true; newErrors: readonly BootProblem[] } | { verified: false; noBootTier: boolean };
+type SwitchVerification = { verified: true; newErrors: readonly BootProblem[] } | { verified: false; noBootTier: boolean; unchecked: readonly UncheckedPipeline[] };
 
 function builtInBlockers(ctx: RuleContext): string[] {
   const unmet: string[] = [];
@@ -73,19 +73,23 @@ async function switchAvailability(ctx: RuleContext, relayPipelines: readonly str
 
 async function verifySwitch(ctx: RuleContext, relayPipelines: readonly string[]): Promise<SwitchVerification> {
   const previewBoot = ctx.previewBoot;
-  if (!previewBoot) return { verified: false, noBootTier: true };
+  if (!previewBoot) return { verified: false, noBootTier: true, unchecked: [] };
   const { edits } = await switchAvailability(ctx, relayPipelines);
   const result = ctx.verifyEdits ? await ctx.verifyEdits(edits, { pipelines: relayPipelines }) : await verifyEditsWith(previewBoot, ctx.bootCheck, edits, relayPipelines);
-  return result.verified ? { verified: true, newErrors: result.newErrors } : { verified: false, noBootTier: false };
+  return result.verified ? { verified: true, newErrors: result.newErrors } : { verified: false, noBootTier: false, unchecked: result.unchecked };
 }
 
-function unverifiedGuidance(noBootTier: boolean): { subject: string; instruction: string } {
-  return noBootTier
-    ? { subject: "no boot check ran", instruction: `upgrade @michaelthielemann/kestrel to 6 first, then run \`fix\` again to verify` }
-    : { subject: `${EVENTS_QUEUE_PACKAGE} may not be installed`, instruction: `install ${EVENTS_QUEUE_PACKAGE}, then run \`fix\` again to verify` };
+function unverifiedGuidance(noBootTier: boolean, unchecked: readonly UncheckedPipeline[]): { subject: string; instruction: string } {
+  if (noBootTier) return { subject: "no boot check ran", instruction: `upgrade @michaelthielemann/kestrel to 6 first, then run \`fix\` again to verify` };
+  if (unchecked.length > 0) {
+    const plural = unchecked.length > 1;
+    const named = unchecked.map((u) => `"${u.name}" (${u.because})`).join("; ");
+    return { subject: `relay pipeline${plural ? "s were" : " was"} not checked: ${named}`, instruction: "resolve why, then run `fix` again to verify" };
+  }
+  return { subject: `${EVENTS_QUEUE_PACKAGE} may not be installed`, instruction: `install ${EVENTS_QUEUE_PACKAGE}, then run \`fix\` again to verify` };
 }
 
-async function offerGate(ctx: RuleContext): Promise<{ unmet: string[]; unverified: boolean; noBootTier: boolean }> {
+async function offerGate(ctx: RuleContext): Promise<{ unmet: string[]; unverified: boolean; noBootTier: boolean; unchecked: readonly UncheckedPipeline[] }> {
   const unmet: string[] = [];
   if (!ctx.project.input.config.triggers.some((t) => "event" in t)) unmet.push("no event trigger to move to the queue");
   if (!ctx.project.input.modules.some((m) => m.provides.some((c) => c.name === "persistence@1"))) unmet.push("no loaded module provides persistence@1");
@@ -96,9 +100,9 @@ async function offerGate(ctx: RuleContext): Promise<{ unmet: string[]; unverifie
   const { blockers } = await switchAvailability(ctx, defaultRelayPipelines(ctx));
   unmet.push(...blockers);
   const verification = await verifySwitch(ctx, defaultRelayPipelines(ctx));
-  if (!verification.verified) return { unmet, unverified: true, noBootTier: verification.noBootTier };
+  if (!verification.verified) return { unmet, unverified: true, noBootTier: verification.noBootTier, unchecked: verification.unchecked };
   if (verification.newErrors.length > 0) unmet.push(`the switched project fails to boot: ${verification.newErrors.map((e) => e.reason).join("; ")}`);
-  return { unmet, unverified: false, noBootTier: false };
+  return { unmet, unverified: false, noBootTier: false, unchecked: [] };
 }
 
 function consumerEventPipelines(ctx: RuleContext): string[] {
@@ -211,7 +215,7 @@ export const queueOfferRule: Rule = {
   async check(ctx) {
     if (!ctx.project.input.config.modules.some((m) => m.use.includes("events-direct"))) return [];
 
-    const { unmet, unverified, noBootTier } = await offerGate(ctx);
+    const { unmet, unverified, noBootTier, unchecked } = await offerGate(ctx);
     if (unmet.length > 0) {
       return [infoFinding(RULE_ID, RULE_ID, `cannot switch to the queue: ${unmet.join("; ")}`, "resolve the conditions above and run check again", {}, "docs/upgrading.md#offer-event-queue")];
     }
@@ -220,7 +224,7 @@ export const queueOfferRule: Rule = {
     if (switchAnswer === undefined) {
       let fix: AskFix = { kind: "ask", question: "switch-to-queue", prompt: `switch event delivery to the queue? ${CONSEQUENCES}`, choices: ["no", "yes"], defaultValue: "no" };
       if (unverified) {
-        const { subject, instruction } = unverifiedGuidance(noBootTier);
+        const { subject, instruction } = unverifiedGuidance(noBootTier, unchecked);
         fix = { kind: "ask", question: "switch-to-queue", prompt: `switch event delivery to the queue? could not verify: ${subject}; ${instruction}. ${CONSEQUENCES}`, choices: ["no", "yes"] };
       }
       return [{ id: RULE_ID, rule: RULE_ID, severity: "info", tier: "source", where: {}, message: "can switch to the queue", suggestion: "run fix to be asked; check never decides this on its own", fix, docs: "docs/upgrading.md#offer-event-queue" }];
@@ -269,7 +273,7 @@ export const queueOfferRule: Rule = {
 
     const finalVerification = await verifySwitch(ctx, relayPipelines);
     if (!finalVerification.verified) {
-      const { subject, instruction } = unverifiedGuidance(finalVerification.noBootTier);
+      const { subject, instruction } = unverifiedGuidance(finalVerification.noBootTier, finalVerification.unchecked);
       return [
         {
           id: `${RULE_ID}:relay-pipelines`,
