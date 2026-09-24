@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
-import { isErr, type Result } from "@michaelthielemann/kestrel/result";
-import type { Document, Page, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
+import { isErr } from "@michaelthielemann/kestrel/result";
+import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { trackTempDir, untrackTempDir } from "./cleanup.ts";
 import type { Finding, UpgradeReport } from "./report.ts";
@@ -80,23 +80,21 @@ async function loadProjectPersistenceSqlite(root: string): Promise<PersistenceSq
   }
 }
 
-function unwrap<T>(result: Result<T, PersistenceError>, fallback: T): T {
-  return isErr(result) ? fallback : result.value;
-}
-
 async function queueFindings(root: string, copy: string): Promise<{ findings: Finding[]; error?: string }> {
   const mod = await loadProjectPersistenceSqlite(root);
   if (mod === undefined) return { findings: [], error: "the project's own @michaelthielemann/kestrel-persistence-sqlite could not be resolved; install the project's dependencies first" };
   const db = mod.createPersistenceSqlite({ file: copy }, { logger: silentLogger });
   try {
     const ensured = await db.ensureCollection("events_queue", QUEUE_SCHEMA);
-    if (isErr(ensured)) return { findings: [] };
+    if (isErr(ensured)) return { findings: [], error: `could not read the events_queue collection: ${ensured.error.message}` };
 
     const unfanned = await db.findMany<QueueRow>("events_queue", { pipeline: null, state: { in: ["pending", "running"] } }, { limit: 10_000 });
+    if (isErr(unfanned)) return { findings: [], error: `could not read pending/running rows from events_queue: ${unfanned.error.message}` };
     const dead = await db.findMany<QueueRow>("events_queue", { pipeline: null, state: "dead" }, { limit: 10_000 });
+    if (isErr(dead)) return { findings: [], error: `could not read dead rows from events_queue: ${dead.error.message}` };
 
     const byEvent = new Map<string, number>();
-    for (const row of unwrap<Page<QueueRow>>(unfanned, { items: [], total: 0 }).items) byEvent.set(row.name, (byEvent.get(row.name) ?? 0) + 1);
+    for (const row of unfanned.value.items) byEvent.set(row.name, (byEvent.get(row.name) ?? 0) + 1);
 
     const findings: Finding[] = [...byEvent.entries()].map(([event, n]) => ({
       id: `data/queue-unfanned:${event}`,
@@ -110,7 +108,7 @@ async function queueFindings(root: string, copy: string): Promise<{ findings: Fi
       docs: "docs/upgrading.md#cutover",
     }));
 
-    const deadRows = unwrap<Page<QueueRow>>(dead, { items: [], total: 0 }).items;
+    const deadRows = dead.value.items;
     if (deadRows.length > 0) {
       findings.push({
         id: "data/queue-dead-unassigned",
