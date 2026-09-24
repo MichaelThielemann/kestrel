@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { relative, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -157,23 +158,20 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       tiers = { ...tiers, boot: "done" };
 
       previewBoot = async (edits) => {
-        const grouped = groupByFile(edits);
-        const originals = new Map<string, string | undefined>();
+        const preview = await createScratchCopy(root);
         try {
+          const grouped = groupByFile(edits);
           for (const [file, fileEdits] of grouped) {
-            const original = existsSync(file) ? readFileSync(file, "utf8") : undefined;
-            originals.set(file, original);
-            if (original === undefined) continue;
-            writeFileSync(file, applyEdits(original, fileEdits).text);
+            const target = resolve(preview.dir, relative(scratch.dir, file));
+            if (!existsSync(target)) continue;
+            writeFileSync(target, applyEdits(readFileSync(target, "utf8"), fileEdits).text);
           }
-          const reloadedProject = await reload(scratch.dir);
+          const reloadedProject = await reload(preview.dir);
           if (!reloadedProject) return undefined;
-          const previewSandbox = sandboxBootInput(reloadedProject.input, { dir: scratch.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
+          const previewSandbox = sandboxBootInput(reloadedProject.input, { dir: preview.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
           return await checkBoot(previewSandbox.input, { setup: previewSandbox.setup });
         } finally {
-          for (const [file, original] of originals) {
-            if (original !== undefined) writeFileSync(file, original);
-          }
+          await rm(preview.dir, { recursive: true, force: true });
         }
       };
     } else if (kestrelMajor !== undefined && kestrelMajor < 6) {
