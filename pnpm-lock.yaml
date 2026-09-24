@@ -691,9 +691,6 @@ importers:
       '@babel/parser':
         specifier: ^7.26.0
         version: 7.29.9
-      zod:
-        specifier: ^3.23.8
-        version: 3.25.76
     devDependencies:
       '@michaelthielemann/kestrel':
         specifier: workspace:*
@@ -716,6 +713,9 @@ importers:
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@22.20.1)
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
 
   packages/validate-jsonschema:
     dependencies:

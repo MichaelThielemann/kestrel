@@ -187,6 +187,8 @@ Net changes since 5.8.1.
 - `Manifest` gains a required `warnings: BootWarning[]`, the same entries as `kestrel.warnings`, so
   `describe()` and `insights.readManifest` carry the boot warnings. Code that builds a `Manifest` by
   hand adds `warnings: []`.
+- `new KestrelBootError(module, reason, code)` now requires a third argument, `code: BootErrorCode`;
+  code that constructs a `KestrelBootError` directly (rather than catching one `boot()` throws) adds it.
 
 ### Added
 
