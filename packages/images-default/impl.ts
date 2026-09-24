@@ -4,6 +4,7 @@ import type { Introspection } from "@michaelthielemann/kestrel";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/events.envelope";
+import { publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
 import type { Document, Filter, Persistence, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
@@ -162,6 +163,10 @@ interface Content {
 interface Owner {
   row: Variant | null;
   retired: Retired | null;
+}
+
+function publicTypeOf(contentType: string): string {
+  return publicFormOf(contentType).contentType;
 }
 
 function errorMessage(cause: unknown): string {
@@ -392,12 +397,12 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (row !== null && row.state !== "planned") {
       const rendered = await blobs.get(row.key);
       if (isErr(rendered)) return rendered;
-      if (rendered.value !== null) return ok({ data: rendered.value, contentType: contentTypeOf(row.format), rendered: true });
+      if (rendered.value !== null) return ok({ data: rendered.value, contentType: publicTypeOf(contentTypeOf(row.format)), rendered: true });
     }
     const original = await blobs.get(media.key);
     if (isErr(original)) return original;
     if (original.value === null) return ok(null);
-    return ok({ data: original.value, contentType: media.contentType, rendered: false });
+    return ok({ data: original.value, contentType: publicTypeOf(media.contentType), rendered: false });
   }
 
   function sameRow(a: Variant | null, b: Variant | null): boolean {
@@ -562,7 +567,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const retired = await db.createOne<Retired>(RETIRED, { mediaId, file: oldFile, slot: slotOf(mediaId, oldFile), retiredAt: now() });
       if (isErr(retired) && retired.error.code !== "CONFLICT") return retired;
       if (config.publicCopy !== undefined) {
-        const overwritten = await blobs.put(copyKey(mediaId, oldFile), original, { contentType: mediaRow.contentType });
+        const overwritten = await blobs.put(copyKey(mediaId, oldFile), original, { contentType: publicTypeOf(mediaRow.contentType) });
         if (isErr(overwritten)) return overwritten;
       }
       const dropped = await blobs.remove(row.key);
@@ -598,7 +603,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       toPlace.map((row) => async (): Promise<Result<void, KestrelError>> => {
         touch();
         const file = fileOf(row);
-        const put = await blobs.put(copyKey(mediaId, file), original, { contentType: mediaRow.contentType });
+        const put = await blobs.put(copyKey(mediaId, file), original, { contentType: publicTypeOf(mediaRow.contentType) });
         if (isErr(put)) return put;
         const advanced = await db.updateMany<Variant>(VARIANTS, { id: row.id, key: row.key, state: "planned" }, { state: settledState, updatedAt: now() });
         if (isErr(advanced)) return advanced;
@@ -746,7 +751,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(stored)) return failWrite(stored.error);
     const writeCopy = async (): Promise<Result<void, KestrelError>> => {
       if (config.publicCopy === undefined) return ok(undefined);
-      return blobs.put(copyKey(mediaId, file), rendered.data, { contentType: rendered.contentType });
+      return blobs.put(copyKey(mediaId, file), rendered.data, { contentType: publicTypeOf(rendered.contentType) });
     };
     const copied = await writeCopy();
     if (isErr(copied)) return failWrite(copied.error);
@@ -786,7 +791,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(owner)) return owner;
     if (owner.value.row !== null) return ok(undefined);
     if (owner.value.retired !== null) {
-      const put = await blobs.put(copyKey(mediaRow.id, file), original, { contentType: mediaRow.contentType });
+      const put = await blobs.put(copyKey(mediaRow.id, file), original, { contentType: publicTypeOf(mediaRow.contentType) });
       return isErr(put) ? put : ok(undefined);
     }
     const droppedCopy = await blobs.remove(copyKey(mediaRow.id, file));
@@ -1052,7 +1057,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         if (isErr(original)) return original;
         if (original.value !== null) {
           wrote = true;
-          const overwritten = await blobs.put(copyKey(mediaId, file), original.value, { contentType: mediaRow.contentType });
+          const overwritten = await blobs.put(copyKey(mediaId, file), original.value, { contentType: publicTypeOf(mediaRow.contentType) });
           if (isErr(overwritten)) return overwritten;
         }
       }

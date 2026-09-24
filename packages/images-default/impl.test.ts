@@ -548,7 +548,52 @@ describe("images/default size set changes", () => {
   });
 });
 
+describe("images/default placeholder types", () => {
+  const cases: Array<[string, string]> = [
+    ["image/jpeg; x=1, text/html", "application/octet-stream"],
+    ["image/x-foo, text/html", "application/octet-stream"],
+    ["IMAGE/JPEG", "image/jpeg"],
+    ["image/jpeg; q=1", "image/jpeg"],
+  ];
+  for (const [contentType, published] of cases) {
+    it(`writes and serves the placeholder of an original stored as ${JSON.stringify(contentType)} as ${published}`, async () => {
+      const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
+      const { id, key } = await seedMedia(db, { id: "m1", contentType });
+      expectOk(await blobs.put(key, await jpeg(400, 300), { contentType }));
+      expectOk(await images.plan([id]));
+      const tree = `site/media/${id}/variants/`;
+      const placed = [...blobs.blobs].filter(([copy]) => copy.startsWith(tree));
+      expect(placed.length).toBeGreaterThan(0);
+      for (const [, blob] of placed) expect(blob.contentType).toBe(published);
+      const served = expectOk(await images.read(id, placed[0]![0].slice(tree.length)));
+      expect(served).toMatchObject({ contentType: published, fallback: true });
+    });
+  }
+
+  it("writes no placeholder for an original stored with an empty type", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
+    const { id, key } = await seedMedia(db, { id: "m1", contentType: "" });
+    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "" }));
+    expectOk(await images.plan([id]));
+    expect([...blobs.blobs.keys()].filter((copy) => copy.startsWith("site/"))).toEqual([]);
+  });
+});
+
 describe("images/default size-set check at attach", () => {
+  it("counts an item of an XML image type as having no variants to place, so it starts no sync job", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    expectOk(await images.generate(id));
+    const drawing = await seedMedia(db, { id: "m2", contentType: "image/foo+xml" });
+    expectOk(await blobs.put(drawing.key, new TextEncoder().encode("<foo/>"), { contentType: "image/foo+xml" }));
+    expect(expectOk(await db.count(JOBS, {}))).toBe(0);
+    images.attach(introspectionOf(manifestWithPipelines([{ pipeline: "serveImageVariant", module: "images/default", step: "images.serve" }])));
+    await whenIdle(images);
+    expect(expectOk(await db.count(JOBS, {}))).toBe(0);
+    await images.close();
+  });
+
   it("logs a sync job that cannot start after a size-set change instead of dropping the failure", async () => {
     const errors: Array<{ message: string; error: unknown }> = [];
     const logger: Logger = { step() {}, info() {}, error: (message, fields) => errors.push({ message, error: (fields as { error?: unknown } | undefined)?.error }) };
