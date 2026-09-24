@@ -40,14 +40,21 @@ function patchGateAll(blobs: Blobstore, db: FakePersistence): void {
   patchGate(db, PERSISTENCE_METHODS);
 }
 
-async function setupReadyItem(folder = ""): Promise<Fixture> {
+type CopyState = "present" | "missing" | "wrong size";
+
+async function setupReadyItem(folder = "", copy: CopyState = "present"): Promise<Fixture> {
   const blobs = fakeBlobstore();
   const db = createFakePersistence();
   const media = await createMediaDefault(CONFIG, blobs, db, noLogger);
   const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1, 2, 3]) }, folder)).item;
+  const copyKey = `site/media/${item.id}/${item.filename}`;
+  if (copy === "missing") blobs.blobs.delete(copyKey);
+  if (copy === "wrong size") blobs.blobs.set(copyKey, { data: new Uint8Array([1]), contentType: "image/png" });
   patchGateAll(blobs, db);
-  return { media, blobs, db, id: item.id, copyKey: `site/media/${item.id}/${item.filename}` };
+  return { media, blobs, db, id: item.id, copyKey };
 }
+
+const COPY_STATES: CopyState[] = ["present", "missing", "wrong size"];
 
 async function assertConsistent(db: FakePersistence, id: string, copyKey: string, blobs: ReturnType<typeof fakeBlobstore>): Promise<void> {
   const row = expectOk(await db.findOne<{ id: string; status: string }>("media_items", { id }));
@@ -72,19 +79,40 @@ async function forEveryGap(make: () => Promise<Fixture>, targetOf: (f: Fixture) 
   await check(seqB);
 }
 
-describe("media-default publicCopy: syncPublic vs remove", () => {
+describe("media-default publicCopy: syncPublic vs remove", { timeout: 60_000 }, () => {
   const check = (f: Fixture) => assertConsistent(f.db, f.id, f.copyKey, f.blobs);
 
-  it("holds copy-exists-iff-row-ready with remove dropped into every gap of syncPublic", async () => {
-    await forEveryGap(() => setupReadyItem(), (f) => () => f.media.syncPublic().then(() => undefined), (f) => () => f.media.remove(f.id).then(() => undefined), check);
-  });
+  for (const copy of COPY_STATES) {
+    it(`holds copy-exists-iff-row-ready with remove dropped into every gap of syncPublic, copy ${copy} beforehand`, async () => {
+      await forEveryGap(() => setupReadyItem("", copy), (f) => () => f.media.syncPublic().then(() => undefined), (f) => () => f.media.remove(f.id).then(() => undefined), check);
+    });
 
-  it("holds copy-exists-iff-row-ready with syncPublic dropped into every gap of remove", async () => {
-    await forEveryGap(() => setupReadyItem(), (f) => () => f.media.remove(f.id).then(() => undefined), (f) => () => f.media.syncPublic().then(() => undefined), check);
-  });
+    it(`holds copy-exists-iff-row-ready with syncPublic dropped into every gap of remove, copy ${copy} beforehand`, async () => {
+      await forEveryGap(() => setupReadyItem("", copy), (f) => () => f.media.remove(f.id).then(() => undefined), (f) => () => f.media.syncPublic().then(() => undefined), check);
+    });
 
-  it("holds copy-exists-iff-row-ready with removeFolder dropped into every gap of syncPublic", async () => {
-    await forEveryGap(() => setupReadyItem("a"), (f) => () => f.media.syncPublic().then(() => undefined), (f) => () => f.media.removeFolder("a").then(() => undefined), check);
+    it(`holds copy-exists-iff-row-ready with removeFolder dropped into every gap of syncPublic, copy ${copy} beforehand`, async () => {
+      await forEveryGap(() => setupReadyItem("a", copy), (f) => () => f.media.syncPublic().then(() => undefined), (f) => () => f.media.removeFolder("a").then(() => undefined), check);
+    });
+
+    it(`holds copy-exists-iff-row-ready with syncPublic dropped into every gap of removeFolder, copy ${copy} beforehand`, async () => {
+      await forEveryGap(() => setupReadyItem("a", copy), (f) => () => f.media.removeFolder("a").then(() => undefined), (f) => () => f.media.syncPublic().then(() => undefined), check);
+    });
+  }
+
+  it("a ready item's copy ends with its own bytes after a sync, whichever gap of the sync a delete of another item lands in", async () => {
+    const make = async (): Promise<Fixture & { other: string }> => {
+      const f = await setupReadyItem("", "wrong size");
+      const other = expectOk(await f.media.upload({ filename: "b.png", contentType: "image/png", data: new Uint8Array([4, 5]) })).item.id;
+      return { ...f, other };
+    };
+    const probe = await make();
+    const n = await countGateCalls(() => probe.media.syncPublic().then(() => undefined));
+    for (let index = 0; index < n; index++) {
+      const f = await make();
+      await runWithGapAt(index, () => f.media.syncPublic().then(() => undefined), () => f.media.remove(f.other).then(() => undefined));
+      expect(Array.from(f.blobs.blobs.get(f.copyKey)?.data ?? []), `gap ${index}`).toEqual([1, 2, 3]);
+    }
   });
 
   it("stays consistent after a TRANSIENT failure at each of remove's own calls, once retried", async () => {
@@ -114,7 +142,7 @@ describe("media-default publicCopy: syncPublic vs remove", () => {
   });
 });
 
-describe("media-default publicCopy: syncPublic vs upload", () => {
+describe("media-default publicCopy: syncPublic vs upload", { timeout: 60_000 }, () => {
   async function setupEmpty(uploadStaleAfterMs: number): Promise<{ media: Media; blobs: ReturnType<typeof fakeBlobstore>; db: FakePersistence }> {
     const blobs = fakeBlobstore();
     const db = createFakePersistence();
@@ -149,5 +177,47 @@ describe("media-default publicCopy: syncPublic vs upload", () => {
     expect(synced).toEqual({ written: 0, removed: 0, missing: 0 });
     expect(blobs.blobs.has(`site/media/${uploaded.id}/a.png`)).toBe(true);
     void db;
+  });
+});
+
+describe("media-default publicCopy: syncPublic over more than one page", { timeout: 60_000 }, () => {
+  const ITEMS = 501;
+  interface Library {
+    media: Media;
+    blobs: ReturnType<typeof fakeBlobstore>;
+    db: FakePersistence;
+    ids: string[];
+    copyOf: Map<string, string>;
+  }
+
+  async function library(): Promise<Library> {
+    const blobs = fakeBlobstore();
+    const db = createFakePersistence();
+    let clock = 1000;
+    const media = await createMediaDefault(CONFIG, blobs, db, noLogger, () => clock++);
+    const ids: string[] = [];
+    const copyOf = new Map<string, string>();
+    for (let i = 0; i < ITEMS; i++) {
+      const item = expectOk(await media.upload({ filename: `f${i}.png`, contentType: "image/png", data: new Uint8Array([i % 256, 1]) })).item;
+      ids.push(item.id);
+      copyOf.set(item.id, `site/media/${item.id}/${item.filename}`);
+    }
+    blobs.blobs.delete(copyOf.get(ids[ITEMS - 1]!)!);
+    patchGate(db, ["findMany"]);
+    return { media, blobs, db, ids, copyOf };
+  }
+
+  it("keeps every ready item's copy and writes the missing one whichever page read a delete lands before", async () => {
+    const probe = await library();
+    const n = await countGateCalls(() => probe.media.syncPublic().then(() => undefined));
+    expect(n).toBeGreaterThan(1);
+    for (let index = 0; index < n; index++) {
+      const lib = await library();
+      const deleted = lib.ids[0]!;
+      await runWithGapAt(index, () => lib.media.syncPublic().then(() => undefined), () => lib.media.remove(deleted).then(() => undefined));
+      expect(lib.blobs.blobs.has(lib.copyOf.get(deleted)!), `page read ${index}: deleted item`).toBe(false);
+      const lost = lib.ids.slice(1).filter((id) => !lib.blobs.blobs.has(lib.copyOf.get(id)!));
+      expect(lost, `page read ${index}`).toEqual([]);
+    }
   });
 });

@@ -42,7 +42,10 @@ build step for media. New step `media.syncPublic` reconciles that copy tree with
 `uploadStaleAfterMs` (default 15 minutes, an abandoned upload) the same way a normal failure is
 handled, writes a missing or mismatched copy, and removes a copy whose item is gone or whose file no
 longer matches — never touching anything deeper than one path segment under `<id>/`, since that is
-where `images-default`'s own variant copies live. Boot fails if the copy tree and this module's own
+where `images-default`'s own variant copies live. It pages through the items by id, re-reads an
+item after writing its copy and removes the copy again when the item was deleted meanwhile, and
+reads a file's item once more right before removing the file, so an upload or a delete running at
+the same time never leaves a deleted item's copy behind or costs a ready item its copy. Boot fails if the copy tree and this module's own
 storage `prefix` overlap, if `publicCopy` is set but no pipeline runs `media.serve`, or if a pipeline
 runs `media.syncPublic` without `publicCopy` set.
 
@@ -58,13 +61,15 @@ The row is the truth, the blobstore only the storage. `media_items.key` is `uniq
 id-based, so it never collides on its own; the folder+filename clash check runs against `location`
 instead (see above). An upload writes the row first (`status: "uploading"`, `checksum` = sha256 of
 the bytes as hex), then the private blob, then (if `publicCopy` is set) the public copy, then
-`status: "ready"`; a failing write at any of those leaves `status: "failed"` and returns the
-blobstore's failure, so the pipeline still fails. Only `ready` items are returned by `media.get`,
+`status: "ready"`. A failing blob or copy write leaves `status: "failed"` and returns the
+blobstore's failure, so the pipeline still fails; a failing `ready` update returns the store's
+error and leaves the row `uploading`, which the next `media.syncPublic` marks `failed` once it is
+older than `uploadStaleAfterMs`, removing its copy and blob and freeing the name. Only `ready` items are returned by `media.get`,
 `media.list` and `media.download` (`NOT_FOUND` / filtered out otherwise), and a `failed` row is
 replaced when the same name is uploaded again, so a broken attempt never blocks a filename.
 `media.remove` and `media.removeFolder` remove the public copy, then the private blob, then the row,
 then sweep the item's own files once more — so a retry after a partial failure completes, and a
-failing blob delete now fails the step instead of only being logged.
+failing blob delete fails the step.
 
 Uploading is idempotent: same folder, same filename and the same bytes return the item that is
 already there — no second row, no second blob write, no second variant folder — and `media.upload`

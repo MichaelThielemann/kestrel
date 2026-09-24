@@ -329,8 +329,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
   };
   const eachItem = async (filter: Record<string, unknown>, fn: (item: MediaItem) => Promise<Result<void, MediaError>>): Promise<Result<number, MediaError>> => {
     let n = 0;
-    for (let offset = 0; ; offset += 500) {
-      const page = await db.findMany<MediaItem>(COLLECTION, filter, { sort: { createdAt: "asc", id: "asc" }, limit: 500, offset });
+    let last: string | null = null;
+    for (;;) {
+      const pageFilter: Record<string, unknown> = last === null ? filter : { ...filter, id: { gt: last } };
+      const page = await db.findMany<MediaItem>(COLLECTION, pageFilter, { sort: { id: "asc" }, limit: 500 });
       if (isErr(page)) return page;
       for (const item of page.value.items) {
         const applied = await fn(item);
@@ -338,6 +340,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         n += 1;
       }
       if (page.value.items.length < 500) break;
+      last = page.value.items[page.value.items.length - 1]!.id;
     }
     return ok(n);
   };
@@ -866,6 +869,9 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (isErr(processed)) return processed;
       for (const [key, entry] of depth1) {
         if (protect.has(entry.id) || expected.has(key)) continue;
+        const owner = await db.findOne<MediaItem>(COLLECTION, { id: entry.id });
+        if (isErr(owner)) return owner;
+        if (owner.value !== null && (owner.value.status === "uploading" || (owner.value.status === "ready" && copyKey(entry.id, urlNameOf(owner.value.key)) === key))) continue;
         const dropped = await blobs.remove(key);
         if (isErr(dropped)) return dropped;
         removed += 1;
