@@ -31,8 +31,11 @@ describe("non-interactive: never prompts", () => {
 
   it("fix without --write previews and never asks", async () => {
     const lines: string[] = [];
-    await runUpgradeCli(["fix", "--root", FIXTURE], { stdout: (l) => lines.push(l), stderr: () => undefined, isInteractive: false });
-    expect(lines.some((l) => l.includes("pipelines/verified-user"))).toBe(true);
+    await runUpgradeCli(["fix", "--root", FIXTURE, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, isInteractive: false });
+    const reportLine = lines.find((l) => l.startsWith("{"));
+    const report = boundaryCast<UpgradeReport>(JSON.parse(reportLine ?? "{}"), "json");
+    const finding = report.findings.find((f) => f.rule === "pipelines/verified-user");
+    expect(finding?.fix.kind).toBe("ask");
   });
 
   it("fix --write without a TTY and without --yes writes nothing and exits 2", async () => {
