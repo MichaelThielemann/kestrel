@@ -87,8 +87,18 @@ describe("kestrel-upgrade fix --write against a copy of the fixture", () => {
 describe("kestrel-upgrade fix preview (no --write)", () => {
   it("counts what its own edits would still leave behind, not the pre-edit total", async () => {
     const lines: string[] = [];
+    const code = await runUpgradeCli(["fix", "--root", FIXTURE, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined, forceInstalledMajor: 6 });
+    expect(code).toBe(1);
+    const reportLine = lines.find((l) => l.startsWith("{"));
+    const report = boundaryCast<UpgradeReport>(JSON.parse(reportLine ?? "{}"), "json");
+    const nonAuto = report.findings.filter((f) => f.severity === "error" && f.fix.kind !== "auto");
+    expect(nonAuto.map((f) => f.rule)).toEqual(["boot/unknown-step"]);
+  });
+
+  it("never prints a remaining-errors count when no boot tier ran at all", async () => {
+    const lines: string[] = [];
     await runUpgradeCli(["fix", "--root", FIXTURE], { stdout: (line) => lines.push(line), stderr: () => undefined });
-    const summaryLine = lines.find((l) => l.startsWith("after these edits:"));
-    expect(summaryLine).toBe("after these edits: 0 errors remain (0 need your answer, 0 manual)");
+    expect(lines.some((l) => l.startsWith("after these edits:"))).toBe(false);
+    expect(lines).toContain("could not verify the boot result: no boot check ran; upgrade @michaelthielemann/kestrel to 6 first, then run `fix` again to verify");
   });
 });

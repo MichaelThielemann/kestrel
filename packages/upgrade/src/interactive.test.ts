@@ -32,7 +32,7 @@ describe("non-interactive: never prompts", () => {
   it("fix without --write previews and never asks", async () => {
     const lines: string[] = [];
     await runUpgradeCli(["fix", "--root", FIXTURE], { stdout: (l) => lines.push(l), stderr: () => undefined, isInteractive: false });
-    expect(lines.some((l) => l.includes("need your answer"))).toBe(true);
+    expect(lines.some((l) => l.includes("pipelines/verified-user"))).toBe(true);
   });
 
   it("fix --write without a TTY and without --yes writes nothing and exits 2", async () => {

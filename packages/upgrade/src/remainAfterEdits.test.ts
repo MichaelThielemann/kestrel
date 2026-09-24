@@ -94,8 +94,8 @@ describe("fix preview counts what a boot of the fully edited copy would still re
     expect(await remainLine("event-emit-5.8")).toBe("after these edits: 0 errors remain (0 need your answer, 0 manual)");
   });
 
-  it("keeps an unknown-step boot error no edit resolves", async () => {
-    expect(await remainLine("minimal-5.8")).toBe("after these edits: 1 errors remain (0 need your answer, 1 manual)");
+  it("keeps an unknown-step boot error no edit resolves, and names the pipeline the failure left unchecked", async () => {
+    expect(await remainLine("minimal-5.8")).toBe("after these edits: 1 errors remain (0 need your answer, 1 manual) (1 not checked)");
   });
 });
 

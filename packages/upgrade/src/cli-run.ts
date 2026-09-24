@@ -485,9 +485,20 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
       for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);
     } else {
       const nonBootRemaining = adjustedFindings.filter((f) => f.fix.kind !== "auto" && !isRawBootError(f));
-      const bootRemaining = preview ? preview.bootCheck.errors.map(bootErrorFinding) : adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto");
-      const afterEdits = summarize([...nonBootRemaining, ...bootRemaining]);
-      stdout(`after these edits: ${afterEdits.error} errors remain (${afterEdits.ask} need your answer, ${afterEdits.manual} manual)`);
+      if (preview) {
+        const bootRemaining = preview.bootCheck.errors.map(bootErrorFinding);
+        const afterEdits = summarize([...nonBootRemaining, ...bootRemaining]);
+        const notChecked = preview.bootCheck.notChecked.length;
+        const notCheckedSuffix = notChecked > 0 ? ` (${notChecked} not checked)` : "";
+        stdout(`after these edits: ${afterEdits.error} errors remain (${afterEdits.ask} need your answer, ${afterEdits.manual} manual)${notCheckedSuffix}`);
+      } else {
+        stdout(
+          previewBoot === undefined
+            ? "could not verify the boot result: no boot check ran; upgrade @michaelthielemann/kestrel to 6 first, then run `fix` again to verify"
+            : "could not verify the boot result: the edited copy could not be reloaded; run `fix` again to verify",
+        );
+        for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);
+      }
     }
   }
   if (write && saveAnswersFile !== undefined) writeFileSync(resolve(saveAnswersFile), JSON.stringify(Object.fromEntries(answers), null, 2));
