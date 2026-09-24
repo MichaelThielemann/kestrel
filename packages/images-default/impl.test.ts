@@ -9,7 +9,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
-import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, RETIRED, VARIANTS, createImages, whenIdle } from "./impl.ts";
+import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, JOBS, RETIRED, VARIANTS, createImages, whenIdle } from "./impl.ts";
 import type { Config, Retired } from "./impl.ts";
 import type { Renderer } from "./generate.ts";
 
@@ -549,6 +549,20 @@ describe("images/default size set changes", () => {
 });
 
 describe("images/default size-set check at attach", () => {
+  it("logs a sync job that cannot start after a size-set change instead of dropping the failure", async () => {
+    const errors: Array<{ message: string; error: unknown }> = [];
+    const logger: Logger = { step() {}, info() {}, error: (message, fields) => errors.push({ message, error: (fields as { error?: unknown } | undefined)?.error }) };
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    expectOk(await images.generate(id));
+    const createOne = db.createOne.bind(db);
+    db.createOne = async (collection, doc) => (collection === JOBS ? err(failure("TRANSIENT", "store busy")) : createOne(collection, doc));
+    const reopened = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" } }, { blobs, db, logger, render: fixedRenderer }, () => 1000);
+    expectOk(await reopened.register([{ name: "extra", width: 100 }]));
+    expect(errors).toContainEqual({ message: "images: the size set changed, but the sync job that places it could not start", error: "store busy" });
+  });
+
   it("logs a store that throws during the check instead of leaving a rejected promise, and close waits for the check", async () => {
     const errors: string[] = [];
     const logger: Logger = { step() {}, info() {}, error: (message) => errors.push(message) };

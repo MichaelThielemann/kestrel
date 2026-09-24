@@ -82,7 +82,9 @@ this module did not put there — and starts the sync job when a row still waits
 decides that an item is gone, or that a file has no owner, by reading that item's rows right before
 it removes anything, never from a list it read earlier; it pages through rows by id, so rows it
 removes on the way never make it skip others; and after writing a copy it reads the owner again and
-removes the copy when the item was deleted meanwhile. Boot fails if the copy tree overlaps this module's own storage
+removes the copy when the item was deleted meanwhile. Serve the copy tree with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, as
+the Node origin does; a placeholder holds the original's bytes under the variant's extension until the
+render replaces it. Boot fails if the copy tree overlaps this module's own storage
 `prefix`, if `publicCopy` is set but no pipeline runs `images.serve`, or if a pipeline runs
 `images.syncPublic` without `publicCopy` set.
 
@@ -127,7 +129,9 @@ planners of one item at once end with one row per size.
 
 `available` (on `images.attach`'s output) is `false` for an eligible image that has at least one size
 still `planned` (no object at its path yet), `true` once every size has one — including for a
-non-eligible item (not an image, SVG, GIF), which has no variants at all and is always available.
+non-eligible item (not an image, SVG, GIF, or any other XML image type such as `image/foo+xml`,
+which a browser would open as a document that can run script), which has no variants at all and is
+always available.
 `variants[]` never lists a `planned` size; `variantCounts` (`{ done, pending, error, failed }`)
 counts a `planned` row as `pending` too, alongside a size with no row yet or a `done` row whose spec
 no longer matches the effective size; a row for a size nobody declares any more is ignored.

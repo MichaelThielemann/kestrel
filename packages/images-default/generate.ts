@@ -8,10 +8,10 @@ export function mediaTypeOf(contentType: string): string {
   return contentType.split(";")[0]?.trim().toLowerCase() ?? "";
 }
 
-/** Whether a media item gets variants: any raster image, judged by its media type alone; SVG and GIF keep only their original. */
+/** Whether a media item gets variants: any raster image, judged by its media type alone. SVG, GIF and every XML image type keep only their original; an XML type would be opened by a browser as a document that can run script, so its bytes never go to a variant path. */
 export function eligible(contentType: string): boolean {
   const mediaType = mediaTypeOf(contentType);
-  return mediaType.startsWith("image/") && mediaType !== "image/svg+xml" && mediaType !== "image/gif";
+  return mediaType.startsWith("image/") && mediaType !== "image/svg+xml" && mediaType !== "image/gif" && !mediaType.endsWith("+xml");
 }
 
 export interface Rendered {

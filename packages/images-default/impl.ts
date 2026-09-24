@@ -1070,7 +1070,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const images = await db.count(config.media.collection, { status: "ready", contentType: { like: "image/%" } });
     if (isErr(images)) return images;
     let n = images.value;
-    for (const excluded of ["image/svg+xml%", "image/gif%"]) {
+    for (const excluded of ["image/%+xml%", "image/gif%"]) {
       const count = await db.count(config.media.collection, { status: "ready", contentType: { like: excluded } });
       if (isErr(count)) return count;
       n -= count.value;
@@ -1093,7 +1093,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         return;
       }
       if (matching.value < total.value) {
-        await beginSync(false).catch(() => undefined);
+        const started = await beginSync(false);
+        if (isErr(started) && started.error.code !== "CONFLICT") logger.error("images: the size set changed, but the sync job that places it could not start", { error: started.error.message });
         return;
       }
     }

@@ -24,6 +24,11 @@ describe("eligible", () => {
     expect(eligible("text/plain")).toBe(false);
   });
 
+  it("rejects an XML image type, which a browser would open as a document that can run script", () => {
+    expect(eligible("image/foo+xml")).toBe(false);
+    expect(eligible("IMAGE/X-DRAWING+XML; charset=utf-8")).toBe(false);
+  });
+
   it("judges the media type alone, ignoring parameters and case", () => {
     expect(eligible("image/svg+xml; charset=utf-8")).toBe(false);
     expect(eligible("IMAGE/GIF")).toBe(false);
