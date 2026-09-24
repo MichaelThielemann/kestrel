@@ -46,6 +46,20 @@ export function findAll(root: AstNode, type: string): AstNode[] {
   return out;
 }
 
+/**
+ * True once any array literal in the tree has an elision (`[a, , b]`) -- a raw `null` in babel's own
+ * `elements`, never legitimate in this codebase's own source, and the shape a comma inserted next to
+ * an already-comma-separated entry leaves behind even though the file still parses.
+ */
+export function hasArrayHole(root: AstNode): boolean {
+  let found = false;
+  walk(root, (node) => {
+    if (found || node.type !== "ArrayExpression") return;
+    if (Array.isArray(node.elements) && node.elements.some((e) => e === null)) found = true;
+  });
+  return found;
+}
+
 export function stringValue(node: AstNode | undefined): string | undefined {
   if (node?.type !== "StringLiteral") return undefined;
   return typeof node.value === "string" ? node.value : undefined;

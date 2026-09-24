@@ -1,0 +1,10 @@
+{
+  "name": "upgrade-fixture-hole",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@michaelthielemann/kestrel": "^5.8.0",
+    "@michaelthielemann/kestrel-events-inmemory": "^5.8.0",
+    "@michaelthielemann/kestrel-persistence-sqlite": "^5.8.0"
+  }
+}

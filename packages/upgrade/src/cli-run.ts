@@ -4,7 +4,7 @@ import { relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { checkBoot, type BootCheck } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
-import { parseTs } from "./ast.ts";
+import { hasArrayHole, parseTs } from "./ast.ts";
 import { askFindings, parseAnswersFile, resolveAnswer, ttyPrompt, unknownAnswerIds, type PromptFn } from "./answers.ts";
 import { boolFlag, parseArgs, stringFlag, type ParsedArgs } from "./args.ts";
 import { unifiedDiff } from "./diff.ts";
@@ -250,8 +250,11 @@ async function runCheck(args: ParsedArgs, stdout: (line: string) => void, option
   const runSetupUses = args.repeated.get("run-setup") ?? [];
   const dataReport = readDataReport(stringFlag(args, "data-report"));
   const { report } = await buildReport(root, entry, { runSetupUses, answers: new Map(), dataReport, forceMajor: options.forceInstalledMajor, plugins: options.plugins });
-  printReport(report, args, stdout);
-  return exitCodeFor(report.findings, failOn);
+  const { rejectedIds } = verifyAndApply(report.findings);
+  const findings = downgradeRejected(report.findings, rejectedIds);
+  const verifiedReport: UpgradeReport = { ...report, findings, summary: summarize(findings) };
+  printReport(verifiedReport, args, stdout);
+  return exitCodeFor(verifiedReport.findings, failOn);
 }
 
 async function isDirty(file: string, root: string): Promise<boolean> {
@@ -264,7 +267,7 @@ async function isDirty(file: string, root: string): Promise<boolean> {
   }
 }
 
-function reparses(file: string, text: string): boolean {
+function verifiesAfterEdit(file: string, text: string): boolean {
   if (file.endsWith(".json")) {
     try {
       JSON.parse(text);
@@ -274,8 +277,7 @@ function reparses(file: string, text: string): boolean {
     }
   }
   try {
-    parseTs(text);
-    return true;
+    return !hasArrayHole(parseTs(text));
   } catch {
     return false;
   }
@@ -309,7 +311,7 @@ function verifyAndApply(findings: readonly Finding[]): { states: Map<string, Fil
         break;
       }
       const { text } = applyEdits(source, [...(accepted.get(file) ?? []), ...edits]);
-      if (!reparses(file, text)) {
+      if (!verifiesAfterEdit(file, text)) {
         ok = false;
         break;
       }
