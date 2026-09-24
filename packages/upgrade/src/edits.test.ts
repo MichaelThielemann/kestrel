@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { applyEdits } from "./apply.ts";
 import { parseTs } from "./ast.ts";
-import { addModuleEmits, insertModuleListEntry, insertModulesTsEntry, insertPipelineStep, insertStepAfterEmitOutsideGroup, markStepBinary, renameContentField, renameStringLiterals, replaceModuleListEntry, setModuleConfigProperties, setStepRequired } from "./edits.ts";
+import { addModuleEmits, insertModuleListEntry, insertModulesTsEntry, insertPipelineStep, insertStepAfterEmitOutsideGroup, markStepBinary, renameContentField, renameStringLiterals, replaceModuleListEntry, replaceModulesTsEntry, setModuleConfigProperties, setStepRequired } from "./edits.ts";
 import { removeDependency, replaceDependency, setDependencyRange } from "./packageJson.ts";
 
 function parsePkg(text: string): { dependencies: Record<string, string> } {
@@ -420,5 +420,44 @@ export const definePipeline = pipelineDefiner<KnownStep>();
   it("returns undefined when the file is not the modules.ts array-of-identifiers shape", () => {
     const source = 'export default defineConfig({ modules: [{ use: "kestrel-events-inmemory" }], triggers: [] });\n';
     expect(insertModulesTsEntry("kestrel.config.ts", source, "@michaelthielemann/kestrel-events-direct")).toBeUndefined();
+  });
+});
+
+describe("replaceModulesTsEntry", () => {
+  const MODULES_TS = `import { pipelineDefiner, type StepCatalogue } from "@michaelthielemann/kestrel";
+import eventsInmemory from "@michaelthielemann/kestrel-events-inmemory";
+import eventsDirect from "@michaelthielemann/kestrel-events-direct";
+import persistenceSqlite from "@michaelthielemann/kestrel-persistence-sqlite";
+
+const modules = [
+  eventsInmemory,
+  eventsDirect,
+  persistenceSqlite,
+] as const;
+
+export default modules;
+export type KnownStep = StepCatalogue<typeof modules>;
+export const definePipeline = pipelineDefiner<KnownStep>();
+`;
+
+  it("swaps the import and the array element in place", () => {
+    const edits = replaceModulesTsEntry("modules.ts", MODULES_TS, "@michaelthielemann/kestrel-events-direct", "@michaelthielemann/kestrel-events-queue");
+    expect(edits).toBeDefined();
+    const { text } = applyEdits(MODULES_TS, edits!);
+    expect(text).toContain('import eventsQueue from "@michaelthielemann/kestrel-events-queue";');
+    expect(text).not.toContain("events-direct");
+    expect(text).not.toContain("eventsDirect");
+    expect(text).toContain("  eventsInmemory,\n  eventsQueue,\n  persistenceSqlite,\n");
+    expect(() => parseTs(text)).not.toThrow();
+  });
+
+  it("returns undefined when the package is not imported there", () => {
+    const withoutDirect = MODULES_TS.replace('import eventsDirect from "@michaelthielemann/kestrel-events-direct";\n', "").replace("  eventsDirect,\n", "");
+    expect(replaceModulesTsEntry("modules.ts", withoutDirect, "@michaelthielemann/kestrel-events-direct", "@michaelthielemann/kestrel-events-queue")).toBeUndefined();
+  });
+
+  it("returns undefined when the file is not the modules.ts array-of-identifiers shape", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-events-direct" }], triggers: [] });\n';
+    expect(replaceModulesTsEntry("kestrel.config.ts", source, "@michaelthielemann/kestrel-events-direct", "@michaelthielemann/kestrel-events-queue")).toBeUndefined();
   });
 });

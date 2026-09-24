@@ -443,3 +443,40 @@ export function insertModulesTsEntry(file: string, source: string, packageName: 
   const arrayEdit = insertRelativeToAnchor(file, source, array, els[els.length - 1]!, "after", identifier);
   return [importEdit, arrayEdit];
 }
+
+/**
+ * Swaps one default-imported module for another in a `modules.ts`-style file, in place: the import's
+ * package specifier and local name, and the matching array element, all become the new package's.
+ * `undefined` when `fromPackage` is not imported there, or the file is not shaped like this
+ * array-of-identifiers pattern at all.
+ */
+export function replaceModulesTsEntry(file: string, source: string, fromPackage: string, toPackage: string): Edit[] | undefined {
+  const root = parseTs(source);
+  const array = findModulesIdentifierArray(root);
+  if (array === undefined) return undefined;
+  const imports = findAll(root, "ImportDeclaration");
+  const fromImport = imports.find((imp) => stringValue(isAstNode(imp.source) ? imp.source : undefined) === fromPackage);
+  if (fromImport === undefined) return undefined;
+  const specifiers = Array.isArray(fromImport.specifiers) ? fromImport.specifiers : [];
+  const defaultSpec = specifiers.find((s): s is AstNode => isAstNode(s) && s.type === "ImportDefaultSpecifier");
+  const localNode = defaultSpec && isAstNode(defaultSpec.local) ? defaultSpec.local : undefined;
+  const oldName = localNode && typeof localNode.name === "string" ? localNode.name : undefined;
+  if (oldName === undefined || localNode === undefined) return undefined;
+  const newName = packageIdentifier(toPackage);
+
+  const sourceNode = fromImport.source;
+  if (!isAstNode(sourceNode)) return undefined;
+  const quote = quoteOf(source, sourceNode);
+  const { start: srcStart, end: srcEnd } = span(sourceNode);
+  const importSourceEdit: Edit = { file, start: srcStart, end: srcEnd, text: `${quote}${toPackage}${quote}` };
+
+  const { start: nameStart, end: nameEnd } = span(localNode);
+  const importNameEdit: Edit = { file, start: nameStart, end: nameEnd, text: newName };
+
+  const arrayElement = elements(array).find((e) => e.type === "Identifier" && e.name === oldName);
+  if (arrayElement === undefined) return undefined;
+  const { start: elStart, end: elEnd } = span(arrayElement);
+  const arrayEdit: Edit = { file, start: elStart, end: elEnd, text: newName };
+
+  return [importSourceEdit, importNameEdit, arrayEdit];
+}

@@ -166,6 +166,46 @@ describe("offer/event-queue", () => {
     expect(createPageText).toContain('"events.emit:page.created", "events.relay"');
   });
 
+  it("also swaps events-direct for events-queue in a sibling modules.ts", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const modulesTsFile = join(dir, "modules.ts");
+    const modulesTsSource = `import { pipelineDefiner, type StepCatalogue } from "@michaelthielemann/kestrel";
+import eventsInmemory from "@michaelthielemann/kestrel-events-inmemory";
+import eventsDirect from "@michaelthielemann/kestrel-events-direct";
+import persistenceSqlite from "@michaelthielemann/kestrel-persistence-sqlite";
+
+const modules = [eventsInmemory, eventsDirect, persistenceSqlite] as const;
+
+export default modules;
+export type KnownStep = StepCatalogue<typeof modules>;
+export const definePipeline = pipelineDefiner<KnownStep>();
+`;
+    await writeFile(modulesTsFile, modulesTsSource);
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
+    const findings = await queueOfferRule.check(contextFor(p, answers));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const modulesTsEdits = edits.filter((e) => e.file === modulesTsFile);
+    expect(modulesTsEdits.length).toBeGreaterThan(0);
+    const { text } = applyEdits(modulesTsSource, modulesTsEdits);
+    expect(text).toContain('import eventsQueue from "@michaelthielemann/kestrel-events-queue";');
+    expect(text).not.toContain("events-direct");
+    expect(text).not.toContain("eventsDirect");
+    expect(text).toContain("const modules = [eventsInmemory, eventsQueue, persistenceSqlite] as const;");
+  });
+
+  it("blocks the offer when a file other than kestrel.config.ts or modules.ts imports events-direct directly", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const createPageFile = join(dir, "createPage.ts");
+    const createPageSource = readFileOrUndefined(createPageFile)!;
+    await writeFile(createPageFile, `import eventsDirect from "@michaelthielemann/kestrel-events-direct";\n${createPageSource}`);
+    const findings = await queueOfferRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).not.toBe("ask");
+    expect(findings[0]?.message).toContain("createPage.ts");
+  });
+
   it("produces valid, parseable JSON when events-direct was appended last in an unsorted package.json", async () => {
     const p = await directProject({ publishPipeline: true });
     const pkgFile = join(dir, "package.json");

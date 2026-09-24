@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { BootProblem } from "@michaelthielemann/kestrel";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
-import { insertStepAfterEmitOutsideGroup, replaceModuleListEntry } from "./edits.ts";
+import { insertStepAfterEmitOutsideGroup, replaceModuleListEntry, replaceModulesTsEntry } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { replaceDependency } from "./packageJson.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
@@ -12,6 +12,42 @@ import { KESTREL_RANGE, infoFinding, moduleEntry, packageJsonPath } from "./rule
 
 const RULE_ID = "offer/event-queue";
 const SERVERLESS_MARKERS = ["vercel.json", "netlify.toml", "wrangler.toml", "serverless.yml", "template.yaml"];
+const EVENTS_QUEUE_PACKAGE = "@michaelthielemann/kestrel-events-queue";
+
+function modulesTsFile(ctx: RuleContext): string {
+  return join(dirname(ctx.project.configFile), "modules.ts");
+}
+
+function importsPackage(source: string, packageName: string): boolean {
+  return source.includes(`"${packageName}"`) || source.includes(`'${packageName}'`);
+}
+
+function otherFilesImporting(ctx: RuleContext, packageName: string): string[] {
+  const candidates = new Map<string, string>();
+  for (const file of ctx.project.moduleFiles.values()) {
+    const source = ctx.readFile(file);
+    if (source !== undefined) candidates.set(file, source);
+  }
+  for (const file of ctx.project.pipelineFiles.values()) {
+    const source = ctx.readFile(file);
+    if (source !== undefined) candidates.set(file, source);
+  }
+  return [...candidates].filter(([, source]) => importsPackage(source, packageName)).map(([file]) => file);
+}
+
+function switchBlockers(ctx: RuleContext): string[] {
+  const directEntry = moduleEntry(ctx, "events-direct");
+  if (directEntry === undefined) return [];
+  const blockers: string[] = [];
+  const modulesTsPath = modulesTsFile(ctx);
+  const modulesTsSource = ctx.readFile(modulesTsPath);
+  if (modulesTsSource !== undefined && importsPackage(modulesTsSource, directEntry.use)) {
+    const replaced = replaceModulesTsEntry(modulesTsPath, modulesTsSource, directEntry.use, EVENTS_QUEUE_PACKAGE);
+    if (replaced === undefined) blockers.push(modulesTsPath);
+  }
+  blockers.push(...otherFilesImporting(ctx, directEntry.use));
+  return blockers;
+}
 
 function errKey(e: BootProblem): string {
   return [e.code, e.owner, e.reason, e.module, e.pipeline, e.step, e.path].join(":");
@@ -35,6 +71,8 @@ async function unmetConditions(ctx: RuleContext): Promise<string[]> {
   if (marker !== undefined) unmet.push(`"${marker}" suggests the process does not stay alive between requests`);
   if ((await eventPayloadRule.check(ctx)).length > 0) unmet.push("an open steps/closed-event-input finding exists");
   if ((await emitsRule.check(ctx)).some((f) => f.fix.kind === "ask")) unmet.push("an open modules/emits finding exists");
+  const blockers = switchBlockers(ctx);
+  if (blockers.length > 0) unmet.push(`events-direct is imported where the switch cannot rewrite it: ${blockers.join(", ")}`);
   const bootErrors = await newBootErrors(ctx, defaultRelayPipelines(ctx));
   if (bootErrors.length > 0) unmet.push(`the switched project fails to boot: ${bootErrors.map((e) => e.reason).join("; ")}`);
   return unmet;
@@ -57,13 +95,19 @@ function switchEdits(ctx: RuleContext, relayPipelines: readonly string[]): Edit[
   const configSource = ctx.readFile(ctx.project.configFile);
   if (directEntry !== undefined && configSource !== undefined) {
     const relayLiteral = `{ relayPipelines: [${relayPipelines.map((p) => `"${p}"`).join(", ")}] }`;
-    const edit = replaceModuleListEntry(ctx.project.configFile, configSource, { use: directEntry.use, newUse: "@michaelthielemann/kestrel-events-queue", config: relayLiteral });
+    const edit = replaceModuleListEntry(ctx.project.configFile, configSource, { use: directEntry.use, newUse: EVENTS_QUEUE_PACKAGE, config: relayLiteral });
     if (edit) edits.push(edit);
   }
   const pkgFile = packageJsonPath(ctx);
   const pkgSource = ctx.readFile(pkgFile);
   if (pkgSource !== undefined && directEntry !== undefined) {
-    edits.push(...replaceDependency(pkgFile, pkgSource, "dependencies", directEntry.use, "@michaelthielemann/kestrel-events-queue", KESTREL_RANGE));
+    edits.push(...replaceDependency(pkgFile, pkgSource, "dependencies", directEntry.use, EVENTS_QUEUE_PACKAGE, KESTREL_RANGE));
+  }
+  const modulesTsPath = modulesTsFile(ctx);
+  const modulesTsSource = ctx.readFile(modulesTsPath);
+  if (directEntry !== undefined && modulesTsSource !== undefined && importsPackage(modulesTsSource, directEntry.use)) {
+    const replaced = replaceModulesTsEntry(modulesTsPath, modulesTsSource, directEntry.use, EVENTS_QUEUE_PACKAGE);
+    if (replaced) edits.push(...replaced);
   }
   const relayEvents = new Set(ctx.project.input.config.triggers.flatMap((t) => ("event" in t && relayPipelines.includes(t.pipeline) ? [t.event] : [])));
   for (const def of ctx.project.input.pipelines) {
