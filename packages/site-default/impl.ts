@@ -1,5 +1,5 @@
 import type { Content, ContentDocument, ContentError, ContentModel, LocaleOptions } from "@michaelthielemann/kestrel-contracts/content";
-import { defaultLocaleSatisfiesFilter, nonLocalizedFilter, publishedLocale, satisfiesFilter } from "@michaelthielemann/kestrel-contracts/content-locale";
+import { publishedLocale } from "@michaelthielemann/kestrel-contracts/content-locale";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { LinkTarget } from "@michaelthielemann/kestrel-contracts/links";
 import { INTERNAL_REF, collectInternalRefs } from "@michaelthielemann/kestrel-contracts/links";
@@ -105,13 +105,12 @@ export function createSiteDefault(content: Content): SiteDefault {
       if (isErr(page)) return err(transientOnly(page.error));
       let candidate: ContentDocument | undefined = page.value.items[0];
       if (!candidate && rules.fallback && read.locale !== undefined && read.locale !== model.defaultLocale) {
-        const shared = nonLocalizedFilter(model, type, rules.filter);
-        const viaDefaultPage = await content.list(type, { ...shared, [rules.slugField]: slug }, { limit: 1 });
+        const viaDefaultPage = await content.list(type, { ...rules.filter, [rules.slugField]: slug }, { limit: 1 });
         if (isErr(viaDefaultPage)) return err(transientOnly(viaDefaultPage.error));
         candidate = viaDefaultPage.value.items[0];
       }
       if (!candidate) return ok(null);
-      const viewResult = await publishedLocale(content, model, type, candidate.id, read.locale, rules.filter, rules.fallback);
+      const viewResult = await publishedLocale(content, type, candidate.id, read.locale, rules.filter, { fallback: rules.fallback });
       if (isErr(viewResult)) return err(transientOnly(viewResult.error));
       const doc = viewResult.value;
       if (!doc) return ok(null);
@@ -145,22 +144,10 @@ export function createSiteDefault(content: Content): SiteDefault {
         const id = ref.slice(at + 1);
         let path: string | null = null;
         if (model.types[t]) {
-          const strictResult = await content.get(t, id, locale === undefined ? {} : { locale });
-          if (isErr(strictResult)) return err(transientOnly(strictResult.error));
-          const strict = strictResult.value;
-          if (strict && satisfiesFilter(rules.filter, strict)) {
-            let slug = strict[rules.slugField];
-            if ((slug === null || slug === undefined) && rules.fallback && locale !== undefined && locale !== model.defaultLocale) {
-              const defaultOk = await defaultLocaleSatisfiesFilter(content, model.defaultLocale, t, id, rules.filter);
-              if (isErr(defaultOk)) return err(transientOnly(defaultOk.error));
-              if (defaultOk.value) {
-                const fallbackResult = await content.get(t, id, { locale, fallback: true });
-                if (isErr(fallbackResult)) return err(transientOnly(fallbackResult.error));
-                slug = fallbackResult.value?.[rules.slugField];
-              }
-            }
-            if (typeof slug === "string" && slug !== "") path = publicPath(slug, locale, model.defaultLocale, rules.home, rules.prefixPrimary);
-          }
+          const viewResult = await publishedLocale(content, t, id, locale, rules.filter, { fallback: rules.fallback, translations: false });
+          if (isErr(viewResult)) return err(transientOnly(viewResult.error));
+          const slug = viewResult.value?.[rules.slugField];
+          if (typeof slug === "string" && slug !== "") path = publicPath(slug, locale, model.defaultLocale, rules.home, rules.prefixPrimary);
         }
         paths.set(ref, path);
         links[id] = path ? { path, locale: locale ?? "" } : { broken: true };

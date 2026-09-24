@@ -6,12 +6,15 @@ default locale has no prefix unless `?prefixPrimary=true` – onto one document 
 strings and richtext, `{ type: "internal", collection, id }` objects) to public paths in the
 document's locale; targets not served there become `href="#" data-kestrel-broken="…"` / `broken: true`,
 and `_links` maps every referenced id to its path. With `?fallback=true` a locale without its own
-slug is found through the default locale, but localized filters are re-checked strictly, so a locale
-that is not published itself stays unserved and is never replaced by another locale's content. An
-empty field of a served locale — including a linked page's slug inside `resolveLinks` — is filled
-from the default locale only when the default locale's own values pass the filter too; with no such
-default the field stays empty. `_translations` lists only the locales that pass the filter
-themselves.
+slug is found by the same slug in the default locale, but the default locale's own values must pass
+the filter too — the same rule as any other inherited field — so a locale that is not published
+itself, or whose default locale is only a draft, stays unserved and is never replaced by another
+locale's content; the two are indistinguishable from the outside (both 404). An empty field of a
+served locale — including a linked page's slug inside `resolveLinks` — is filled from the default
+locale only when the default locale's own values pass the filter too; with no such default the field
+stays empty. `_translations` lists only the locales that pass the filter themselves. Every `site@1`
+implementation must follow this rule; the shared contract suite
+(`@michaelthielemann/kestrel-contracts/site.contract.test`) tests it.
 Steps: `site.resolve:<t>?home=home&status=published&fallback=true` (`NOT_FOUND` otherwise) and
 `site.resolveLinks:<t>?…` with the same arguments. Config `{}`.
 Not included: rendering, storage, redirects (see delivery-static, redirects-default).

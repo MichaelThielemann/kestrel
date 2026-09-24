@@ -105,6 +105,14 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
         expect(await resolve("en/fourth")).toBeNull();
       });
 
+      it("never routes through a default locale's slug when the default locale is only a draft", async () => {
+        const doc = expectOk(await content.create("pages", { slug: "geheimer-launch", title: "Launch DE", status: "draft" }));
+        expectOk(await content.update("pages", doc.id, { slug: "launch", title: "Launch EN", status: "published" }, { locale: "en" }));
+        expect(await resolve("en/geheimer-launch")).toBeNull();
+        expect(await resolve("en/does-not-exist")).toBeNull();
+        expect(await resolve("en/launch")).toMatchObject({ title: "Launch EN" });
+      });
+
       it("prefixPrimary requires the locale prefix for every locale", async () => {
         expect(await resolve("", { prefixPrimary: true })).toBeNull();
         expect(await resolve("kontakt", { prefixPrimary: true })).toBeNull();
