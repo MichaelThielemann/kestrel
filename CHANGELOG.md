@@ -23,11 +23,12 @@ Net changes since 5.8.1.
   - `persistence/sqlite` implements the scope: one `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK` per
     group, serialized by a FIFO mutex so a concurrent read never observes an uncommitted row.
     `createMany` now uses `BEGIN IMMEDIATE` and joins an outer scope instead of opening its own.
-    Two new config keys, `acquireTimeoutMs` and `scopeTimeoutMs` (default 5000 each), are rejected
-    at setup unless `acquireTimeoutMs` exceeds `busyTimeoutMs`, so an instance that sets neither
-    fails to boot naming the key. A persistence call made after its own atomic scope rolled back
-    or timed out **throws** instead of writing (only reachable from work a step did not await); a
-    call made after the scope committed writes normally, with a warning logged.
+    Two new config keys, `acquireTimeoutMs` and `scopeTimeoutMs`. `scopeTimeoutMs` defaults to
+    `5000`; `acquireTimeoutMs` defaults to `busyTimeoutMs + 10000`. An explicit `acquireTimeoutMs`
+    that does not exceed `busyTimeoutMs` is rejected at setup, naming the key. A persistence call
+    made after its own atomic scope rolled back or timed out **throws** instead of writing (only
+    reachable from work a step did not await); a call made after the scope committed writes
+    normally, with a warning logged.
   - Every DB-only, single-document, request-bounded step of `content-default`, `revisions-default`,
     `references-default`, `links-default`, `events-queue`, `delivery-static` (`readStatus` only)
     and `authn-multi` (`verifyUser`, `deleteUser`) now declares `atomicSafe: true`; every other

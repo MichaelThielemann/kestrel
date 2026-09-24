@@ -223,7 +223,7 @@
             "acquireTimeoutMs": {
               "type": "integer",
               "minimum": 100,
-              "default": 5000
+              "description": "How long a request may wait for its turn at the connection before it is answered 503; when unset, busyTimeoutMs + 10000"
             },
             "scopeTimeoutMs": {
               "type": "integer",
@@ -262,11 +262,10 @@
             "type": "integer",
             "required": false,
             "secret": false,
-            "set": true,
-            "status": "set",
-            "value": 15000,
-            "redacted": false,
-            "default": 5000
+            "set": false,
+            "status": "missing",
+            "value": null,
+            "redacted": false
           },
           {
             "path": "scopeTimeoutMs",

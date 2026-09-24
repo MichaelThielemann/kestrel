@@ -63,9 +63,10 @@ queueing behind themselves. Everything waits, including a concurrent read: the m
 connection, so a read outside the group must not observe the group's uncommitted rows. Two
 independent budgets bound the wait: `acquireTimeoutMs` bounds how long a call may wait for its turn,
 `scopeTimeoutMs` bounds how long a group may hold the connection once it has it, timed from
-`BEGIN IMMEDIATE`. Setup rejects a config where `acquireTimeoutMs` does not exceed `busyTimeoutMs`,
-naming the key – `BEGIN IMMEDIATE` blocks the event loop for up to `busyTimeoutMs`, so an equal
-budget would expire exactly when the wait succeeded.
+`BEGIN IMMEDIATE`. `acquireTimeoutMs` defaults to `busyTimeoutMs + 10000` (`15000` when `busyTimeoutMs`
+is also left at its own default of `5000`). Setup rejects an explicit `acquireTimeoutMs` that does not
+exceed `busyTimeoutMs`, naming the key – `BEGIN IMMEDIATE` blocks the event loop for up to
+`busyTimeoutMs`, so an equal budget would expire exactly when the wait succeeded.
 
 A scope that closes leaves the store in one of two terminal states, and a call a step started
 without awaiting behaves differently depending on which: after a **commit**, a late call takes the
@@ -91,7 +92,7 @@ Not included: migrations beyond adding columns, savepoints or nested groups, ful
 |---|---|---|---|
 | `file` | string | yes | – |
 | `busyTimeoutMs` | integer | no | – |
-| `acquireTimeoutMs` | integer | no | `5000` |
+| `acquireTimeoutMs` | integer | no | – |
 | `scopeTimeoutMs` | integer | no | `5000` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
