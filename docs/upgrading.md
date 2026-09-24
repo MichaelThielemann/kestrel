@@ -194,11 +194,17 @@ an unlocalized field. `--out <report>.json` writes these counts alongside its ot
 that file back with `check --data-report <report>.json` / `fix --data-report <report>.json`:
 
 - Zero everywhere — the rename is a data-verified auto edit, applied like any other automatic fix.
-- A stored value in at least one locale — the rule still asks, with no default, reporting the counts
-  it saw so you can judge which locales need a migration.
+  Zero only comes from a successful count against a column that already exists on an already-existing
+  table: a missing table, a missing column, or a count that itself fails is `null`, never `0`, and
+  behaves like no data report at all.
+- A stored value, or a `null`, in at least one locale — the rule still asks, with no default,
+  reporting what it saw so you can judge which locales need a migration.
 - No data report at all — the rule asks, with no default, and points at `kestrel-upgrade data`.
 - An explicit rename answer given without a data report proving the field empty is still applied,
-  but stays a visible warning in the report until a later data report counts zero everywhere for it.
+  but stays a visible warning in the report and in `fix --write`'s own output, naming the old column
+  and how to check it, until a later data report counts every locale of that old column empty — the
+  rule tracks the old, now-unwritten column by name, not by remembering the run that wrote the edit,
+  so the warning survives across runs even once the field itself no longer starts with `_`.
 
 Where a stored value can exist, rename it in two phases instead of trusting a mechanical edit:
 

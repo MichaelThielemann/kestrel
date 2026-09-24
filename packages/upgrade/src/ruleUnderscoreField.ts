@@ -10,13 +10,13 @@ function questionId(typeName: string, field: string): string {
   return `underscore-field:${typeName}.${field}`;
 }
 
-function fieldsOf(config: unknown, typeName: string): string[] {
+function fieldNames(config: unknown, typeName: string): string[] {
   if (!isRecord(config)) return [];
   const types = config.types;
   if (!isRecord(types)) return [];
   const type = types[typeName];
   if (!isRecord(type) || !isRecord(type.fields)) return [];
-  return Object.keys(type.fields).filter((f) => f.startsWith("_"));
+  return Object.keys(type.fields);
 }
 
 function typeNames(config: unknown): string[] {
@@ -24,19 +24,22 @@ function typeNames(config: unknown): string[] {
   return Object.keys(config.types);
 }
 
-function storedCounts(ctx: { project: { data?: Record<string, unknown> } }, typeName: string, field: string): Record<string, number> | undefined {
+function storedCounts(ctx: { project: { data?: Record<string, unknown> } }, typeName: string, field: string): Record<string, number | null> | undefined {
   const underscoreFields = ctx.project.data?.underscoreFields;
   if (!isRecord(underscoreFields)) return undefined;
   const counts = underscoreFields[`${typeName}.${field}`];
   if (!isRecord(counts)) return undefined;
-  const out: Record<string, number> = {};
-  for (const [locale, n] of Object.entries(counts)) if (typeof n === "number") out[locale] = n;
+  const out: Record<string, number | null> = {};
+  for (const [locale, n] of Object.entries(counts)) if (typeof n === "number" || n === null) out[locale] = n;
   return out;
 }
 
-function describeCounts(counts: Record<string, number>): string {
+function describeCounts(counts: Record<string, number | null>): string {
   return Object.entries(counts)
-    .map(([locale, n]) => (locale === "unlocalized" ? `${n} stored value(s)` : `${n} in "${locale}"`))
+    .map(([locale, n]) => {
+      if (n === null) return locale === "unlocalized" ? "not counted" : `not counted in "${locale}"`;
+      return locale === "unlocalized" ? `${n} stored value(s)` : `${n} in "${locale}"`;
+    })
     .join(", ");
 }
 
@@ -48,12 +51,29 @@ export const underscoreFieldRule: Rule = {
     if (entry === undefined) return [];
     const findings: Finding[] = [];
     for (const typeName of typeNames(entry.config)) {
-      for (const field of fieldsOf(entry.config, typeName)) {
+      for (const field of fieldNames(entry.config, typeName)) {
+        if (!field.startsWith("_")) {
+          const orphanField = `_${field}`;
+          const orphanCounts = storedCounts(ctx, typeName, orphanField);
+          if (orphanCounts === undefined || Object.values(orphanCounts).every((n) => n === 0)) continue;
+          findings.push({
+            id: `${RULE_ID}:${typeName}.${orphanField}`,
+            rule: RULE_ID,
+            severity: "warning",
+            tier: "source",
+            where: { module: entry.use, path: `types.${typeName}.fields.${field}` },
+            message: `the old column "${orphanField}" on content type "${typeName}" still has stored data (${describeCounts(orphanCounts)}); the current field is named "${field}"`,
+            suggestion: `add a migration on the running 5.8.x instance (defineMigration) copying "${orphanField}" to "${field}", then run \`kestrel-upgrade data\` again to confirm "${orphanField}" is empty`,
+            fix: { kind: "none" },
+            docs: "docs/upgrading.md#model-underscore-field",
+          });
+          continue;
+        }
         const id = `${RULE_ID}:${typeName}.${field}`;
         const where = { module: entry.use, path: `types.${typeName}.fields.${field}` };
         const counts = storedCounts(ctx, typeName, field);
         const verifiedEmpty = counts !== undefined && Object.values(counts).every((n) => n === 0);
-        const hasStoredData = counts !== undefined && Object.values(counts).some((n) => n > 0);
+        const hasStoredData = counts !== undefined && Object.values(counts).some((n) => n !== null && n > 0);
         const defaultName = field.replace(/^_+/, "");
         const answer = ctx.answers.get(questionId(typeName, field));
         const target = answer === "remove" ? undefined : (answer ?? (verifiedEmpty ? defaultName : undefined));
@@ -81,7 +101,7 @@ export const underscoreFieldRule: Rule = {
               id,
               RULE_ID,
               `"${field}" on content type "${typeName}" starts with "_"`,
-              `renamed to "${answer}" — ${proof}, not a proving zero count; add a migration on the running 5.8.x instance before it upgrades, then run \`data\` again to clear this warning`,
+              `renamed to "${answer}" — ${proof}, not a proving zero count; the old column "${field}" on "${typeName}" may still hold data. Add a migration on the running 5.8.x instance before it upgrades, then run \`kestrel-upgrade data --db <file> --out <report>.json\` and check again with --data-report <report>.json to clear this warning`,
               where,
               edits,
               "docs/upgrading.md#model-underscore-field",

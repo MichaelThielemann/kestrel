@@ -133,14 +133,12 @@ async function contentDefaultConfig(root: string): Promise<unknown> {
   }
 }
 
-function underscoreFieldsOf(config: unknown): Array<{ typeName: string; field: string; localized: boolean }> {
+function contentFieldsOf(config: unknown): Array<{ typeName: string; field: string; localized: boolean }> {
   const out: Array<{ typeName: string; field: string; localized: boolean }> = [];
   if (!isRecord(config) || !isRecord(config.types)) return out;
   for (const [typeName, type] of Object.entries(config.types)) {
     if (!isRecord(type) || !isRecord(type.fields)) continue;
-    for (const [field, def] of Object.entries(type.fields)) {
-      if (field.startsWith("_")) out.push({ typeName, field, localized: isRecord(def) && def.localized === true });
-    }
+    for (const [field, def] of Object.entries(type.fields)) out.push({ typeName, field, localized: isRecord(def) && def.localized === true });
   }
   return out;
 }
@@ -150,32 +148,67 @@ function localesOf(config: unknown): string[] {
   return Array.isArray(locales) ? locales.filter((l): l is string => typeof l === "string") : [];
 }
 
-async function underscoreFieldCounts(db: Persistence, contentConfig: unknown): Promise<{ counts: Record<string, Record<string, number>>; error?: string }> {
-  const fields = underscoreFieldsOf(contentConfig);
-  const locales = localesOf(contentConfig);
-  const counts: Record<string, Record<string, number>> = {};
-  for (const { typeName, field, localized } of fields) {
-    const columnsOf = localized ? locales.map((locale) => ({ locale, column: `${field}__${locale}` })) : [{ locale: "unlocalized", column: field }];
-    const perLocale: Record<string, number> = {};
-    for (const { locale, column } of columnsOf) {
-      const ensured = await db.ensureCollection(typeName, { [column]: "string" });
-      if (isErr(ensured)) return { counts, error: `could not read collection "${typeName}": ${ensured.error.message}` };
-      const counted = await db.count(typeName, { [column]: { ne: null } });
-      if (isErr(counted)) return { counts, error: `could not count "${typeName}.${column}": ${counted.error.message}` };
-      perLocale[locale] = counted.value;
-    }
-    counts[`${typeName}.${field}`] = perLocale;
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function existingColumns(file: string, table: string): Set<string> | undefined {
+  if (!IDENTIFIER.test(table)) return undefined;
+  const raw = new DatabaseSync(file, { readOnly: true });
+  try {
+    const exists = raw.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+    if (exists === undefined) return undefined;
+    const rows = boundaryCast<Array<{ name: string }>>(raw.prepare(`PRAGMA table_info("${table}")`).all(), "host");
+    return new Set(rows.map((r) => r.name));
+  } finally {
+    raw.close();
   }
-  return { counts };
 }
 
-function describeCounts(counts: Record<string, number>): string {
+async function countColumn(db: Persistence, typeName: string, column: string): Promise<number | null> {
+  try {
+    const ensured = await db.ensureCollection(typeName, { [column]: "string" });
+    if (isErr(ensured)) return null;
+    const counted = await db.count(typeName, { [column]: { ne: null } });
+    return isErr(counted) ? null : counted.value;
+  } catch {
+    return null;
+  }
+}
+
+async function underscoreFieldCounts(file: string, db: Persistence, contentConfig: unknown): Promise<Record<string, Record<string, number | null>>> {
+  const locales = localesOf(contentConfig);
+  const columnsByType = new Map<string, Set<string> | undefined>();
+  const counts: Record<string, Record<string, number | null>> = {};
+  for (const { typeName, field, localized } of contentFieldsOf(contentConfig)) {
+    const shadowField = field.startsWith("_") ? field : `_${field}`;
+    const isOrphanProbe = shadowField !== field;
+    if (!columnsByType.has(typeName)) columnsByType.set(typeName, existingColumns(file, typeName));
+    const columns = columnsByType.get(typeName);
+    const columnsOf = localized ? locales.map((locale) => ({ locale, column: `${shadowField}__${locale}` })) : [{ locale: "unlocalized", column: shadowField }];
+    if (isOrphanProbe && (columns === undefined || !columnsOf.some((c) => columns.has(c.column)))) continue;
+
+    const perLocale: Record<string, number | null> = {};
+    for (const { locale, column } of columnsOf) {
+      if (columns === undefined || !columns.has(column)) {
+        perLocale[locale] = null;
+        continue;
+      }
+      perLocale[locale] = await countColumn(db, typeName, column);
+    }
+    counts[`${typeName}.${shadowField}`] = perLocale;
+  }
+  return counts;
+}
+
+function describeCounts(counts: Record<string, number | null>): string {
   return Object.entries(counts)
-    .map(([locale, n]) => (locale === "unlocalized" ? `${n} stored value(s)` : `${n} in "${locale}"`))
+    .map(([locale, n]) => {
+      if (n === null) return locale === "unlocalized" ? "not counted" : `not counted in "${locale}"`;
+      return locale === "unlocalized" ? `${n} stored value(s)` : `${n} in "${locale}"`;
+    })
     .join(", ");
 }
 
-function underscoreFieldFindings(counts: Record<string, Record<string, number>>): Finding[] {
+function underscoreFieldFindings(counts: Record<string, Record<string, number | null>>): Finding[] {
   const findings: Finding[] = [];
   for (const [key, perLocale] of Object.entries(counts)) {
     if (Object.values(perLocale).every((n) => n === 0)) continue;
@@ -185,7 +218,7 @@ function underscoreFieldFindings(counts: Record<string, Record<string, number>>)
       severity: "warning",
       tier: "data",
       where: { path: key },
-      message: `"${key}" has stored values (${describeCounts(perLocale)})`,
+      message: `"${key}": ${describeCounts(perLocale)}`,
       suggestion: "add a migration on the running 5.8.x instance (defineMigration) copying it to the new key before upgrading",
       fix: { kind: "none" },
       docs: "docs/upgrading.md#model-underscore-field",
@@ -212,14 +245,12 @@ export async function runDataStep(dbFile: string, root: string): Promise<DataSte
     if (mod === undefined) return { exitCode: 2, error: "the project's own @michaelthielemann/kestrel-persistence-sqlite could not be resolved; install the project's dependencies first" };
     const db = mod.createPersistenceSqlite({ file: copy }, { logger: silentLogger });
     let queued: { findings: Finding[]; error?: string };
-    let counts: Record<string, Record<string, number>>;
+    let counts: Record<string, Record<string, number | null>>;
     try {
       queued = await queueFindings(db);
       if (queued.error !== undefined) return { exitCode: 2, error: queued.error };
       const contentConfig = await contentDefaultConfig(root);
-      const counted = contentConfig === undefined ? { counts: {} } : await underscoreFieldCounts(db, contentConfig);
-      if (counted.error !== undefined) return { exitCode: 2, error: counted.error };
-      counts = counted.counts;
+      counts = contentConfig === undefined ? {} : await underscoreFieldCounts(copy, db, contentConfig);
     } finally {
       db.close();
     }

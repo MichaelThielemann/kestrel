@@ -315,6 +315,35 @@ describe("model/underscore-field", () => {
     const { text } = applyEdits(source, edits);
     expect(text).toContain("fields: { renamedHint:");
   });
+
+  it("keeps warning about an orphaned old column after the rename has already been written to the config", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { hint: { type: "string" } } } } } }] });
+    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 2 } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe("warning");
+    expect(findings[0]?.fix.kind).toBe("none");
+    expect(findings[0]?.message).toContain('"_hint"');
+    expect(findings[0]?.message).toContain("2 stored value(s)");
+  });
+
+  it("keeps warning about the orphaned old column when it could not be counted", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { hint: { type: "string" } } } } } }] });
+    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: null } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe("warning");
+  });
+
+  it("stops warning about the orphaned old column once a data report counts it empty", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { hint: { type: "string" } } } } } }] });
+    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 0 } } } }));
+    expect(findings).toEqual([]);
+  });
+
+  it("stays silent about a regular field with no data-report entry for an old column", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { hint: { type: "string" } } } } } }] });
+    expect(await underscoreFieldRule.check(contextFor(p))).toEqual([]);
+    expect(await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: {} } }))).toEqual([]);
+  });
 });
 
 describe("modules/emits", () => {

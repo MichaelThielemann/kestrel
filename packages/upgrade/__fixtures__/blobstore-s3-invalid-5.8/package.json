@@ -1,0 +1,11 @@
+{
+  "name": "upgrade-fixture-blobstore-s3-invalid",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@michaelthielemann/kestrel": "^5.8.0",
+    "@michaelthielemann/kestrel-blobstore-s3": "^5.8.0",
+    "@michaelthielemann/kestrel-events-inmemory": "^5.8.0",
+    "@michaelthielemann/kestrel-persistence-sqlite": "^5.8.0"
+  }
+}

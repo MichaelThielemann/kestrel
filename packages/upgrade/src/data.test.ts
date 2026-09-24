@@ -173,4 +173,63 @@ describe("runDataStep: underscore-field counts", () => {
     expect(result.exitCode).toBe(0);
     expect(result.report?.underscoreFields).toEqual({});
   });
+
+  it("reports null, never zero, when the type's table does not exist at all", async () => {
+    const root = await contentProjectRoot({ types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } });
+    const file = join(dir, "kestrel.db");
+    createPersistenceSqlite({ file }).close();
+    const result = await runDataStep(file, root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.underscoreFields).toEqual({ "page._hint": { unlocalized: null } });
+  });
+
+  it("reports null, never zero, when the column does not exist on an existing table", async () => {
+    const root = await contentProjectRoot({ types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } });
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { title: "string" });
+    db.close();
+    const result = await runDataStep(file, root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.underscoreFields).toEqual({ "page._hint": { unlocalized: null } });
+  });
+
+  it("reports null, never zero, when the count itself fails", async () => {
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { title: "string" });
+    db.close();
+    const raw = new DatabaseSync(file);
+    raw.exec('ALTER TABLE "page" ADD COLUMN "_hint with a space" TEXT');
+    raw.close();
+    const badRoot = await contentProjectRoot({ types: { page: { kind: "multi", fields: { "_hint with a space": { type: "string" } } } } });
+    const result = await runDataStep(file, badRoot);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.underscoreFields).toEqual({ "page._hint with a space": { unlocalized: null } });
+  });
+
+  it("stays silent about a regular field with no orphaned underscore column", async () => {
+    const root = await contentProjectRoot({ types: { page: { kind: "multi", fields: { hint: { type: "string" } } } } });
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { hint: "string" });
+    db.close();
+    const result = await runDataStep(file, root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.underscoreFields).toEqual({});
+    expect(result.report?.findings).toEqual([]);
+  });
+
+  it("still counts an orphaned underscore column left behind by a rename already applied to the config", async () => {
+    const root = await contentProjectRoot({ types: { page: { kind: "multi", fields: { hint: { type: "string" } } } } });
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { hint: "string", _hint: "string" });
+    await db.createOne("page", { id: "1", hint: "new value", _hint: "orphaned legacy value" });
+    db.close();
+    const result = await runDataStep(file, root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.underscoreFields).toEqual({ "page._hint": { unlocalized: 1 } });
+    expect(result.report?.findings).toEqual([expect.objectContaining({ rule: "data/underscore-field-stored", where: { path: "page._hint" } })]);
+  });
 });

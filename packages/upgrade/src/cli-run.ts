@@ -482,6 +482,12 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
   if (write) {
     for (const file of applied) stdout(`wrote ${file}`);
     if (applied.length > 0) stdout("run `pnpm install` to pick up any dependency range changes");
+    const writtenFiles = new Set(changed.filter(([file]) => applied.includes(relative(root, file))).map(([file]) => file));
+    for (const f of adjustedFindings) {
+      if (f.severity !== "warning" || f.fix.kind !== "auto") continue;
+      if (!f.fix.edits.some((e) => writtenFiles.has(e.file))) continue;
+      stdout(`  ${f.message}: ${f.suggestion}`);
+    }
   } else {
     printReport(adjustedReport, args, stdout);
     const isRawBootError = (f: Finding): boolean => f.rule.startsWith("boot/");

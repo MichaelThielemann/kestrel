@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { z } from "zod";
+import type { ZodTypeAny } from "zod";
 import type { ModuleDefinition } from "@michaelthielemann/kestrel";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok } from "@michaelthielemann/kestrel/result";
@@ -73,14 +73,16 @@ function createStandInBlobstore(root: string): Blobstore {
 /**
  * A local, filesystem-backed stand-in for a blobstore module the sandbox neither rewrites nor
  * trusts to run outside it, such as a network object store: proves every module requiring
- * `blobstore@1` boots, without reaching the network or touching the project's own storage.
+ * `blobstore@1` boots, without reaching the network or touching the project's own storage. Keeps
+ * the replaced module's own `configSchema` so an invalid config still fails the same way it would
+ * for the real module; the parsed value itself is never read, since the real config never applies.
  */
-export function blobstoreStandIn(name: string, scratchDir: string): ModuleDefinition {
+export function blobstoreStandIn(name: string, scratchDir: string, configSchema: ZodTypeAny): ModuleDefinition {
   return {
     name,
     provides: [BLOBSTORE],
     requires: [],
-    configSchema: z.any(),
+    configSchema,
     async setup() {
       const root = join(scratchDir, "sandbox", "blobstore-standin");
       await mkdir(root, { recursive: true });

@@ -52,8 +52,8 @@ export interface UpgradeReport {
   project: { root: string; kind: string; installed: Record<string, string> };
   tiers: Record<Tier, "done" | "skipped" | "failed" | "not-run">;
   sandbox?: { rewritten: string[]; consented: string[]; outside: string[] };
-  /** `data`'s stored-value count per `<type>.<field>` starting with `_`, keyed by locale (`"unlocalized"` for a field with none). */
-  underscoreFields?: Record<string, Record<string, number>>;
+  /** `data`'s stored-value count per `<type>.<field>` starting with `_`, keyed by locale (`"unlocalized"` for a field with none); `null` where the table, the column or the count itself could not be read. */
+  underscoreFields?: Record<string, Record<string, number | null>>;
   summary: { error: number; warning: number; info: number; auto: number; ask: number; manual: number };
   findings: Finding[];
   applied?: AppliedEdit[];

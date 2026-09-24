@@ -7,6 +7,7 @@ import type { UpgradeReport } from "./report.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(HERE, "..", "__fixtures__", "blobstore-s3-5.8");
+const INVALID_FIXTURE = join(HERE, "..", "__fixtures__", "blobstore-s3-invalid-5.8");
 
 async function runJson(argv: string[], forceInstalledMajor?: number): Promise<{ code: number; report: UpgradeReport }> {
   const lines: string[] = [];
@@ -29,5 +30,14 @@ describe("kestrel-upgrade check against the blobstore-s3-5.8 fixture", () => {
     expect(standIn?.message).toBe("blobstore replaced by a local stand-in for the check");
 
     expect(report.findings.some((f) => f.rule === "boot/not-checked" && f.where.module === "@michaelthielemann/kestrel-blobstore-s3")).toBe(false);
+  });
+});
+
+describe("kestrel-upgrade check against the blobstore-s3-invalid-5.8 fixture", () => {
+  it("reports the real module's own config error instead of letting the stand-in's schema accept it", async () => {
+    const { report } = await runJson(["check", "--root", INVALID_FIXTURE, "--json"], 6);
+    const configError = report.findings.find((f) => f.rule === "boot/invalid-module-config");
+    expect(configError?.where.module).toBe("blobstore/s3");
+    expect(configError?.message).toContain("bucket");
   });
 });

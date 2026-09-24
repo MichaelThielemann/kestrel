@@ -71,7 +71,7 @@ export function sandboxBootInput(input: BootInput, options: SandboxOptions): San
     if (loaded !== undefined && providesBlobstore(loaded)) {
       only.push(entry.use);
       replaced.push(entry.use);
-      loadedModules[i] = blobstoreStandIn(loaded.name, options.dir);
+      loadedModules[i] = blobstoreStandIn(loaded.name, options.dir, loaded.configSchema);
       return entry;
     }
     outside.push(entry.use);
