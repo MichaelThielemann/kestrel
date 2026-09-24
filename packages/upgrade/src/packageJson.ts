@@ -79,9 +79,12 @@ export function setDependencyRange(file: string, source: string, mapKey: "depend
     }
   }
   const last = list[list.length - 1]!;
-  const lineEnd = source.indexOf("\n", block.openBrace + 1 + last.valueEnd);
+  const afterValue = block.openBrace + 1 + last.valueEnd + 1;
+  const lineEnd = source.indexOf("\n", afterValue);
   const insertAt = lineEnd === -1 ? block.closeBrace : lineEnd + 1;
-  return { file, start: insertAt, end: insertAt, text: `${newLine},\n` };
+  const between = source.slice(afterValue, insertAt);
+  const needsComma = !between.trimStart().startsWith(",");
+  return { file, start: afterValue, end: insertAt, text: `${needsComma ? "," : ""}${between}${newLine}\n` };
 }
 
 /** Removes a dependency from the named map when present; `undefined` when it is not listed there. */

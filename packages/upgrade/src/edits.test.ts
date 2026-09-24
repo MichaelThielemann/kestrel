@@ -111,6 +111,23 @@ describe("package.json dependency edits", () => {
     expect(Object.keys(parsed.dependencies)).toEqual(["@michaelthielemann/kestrel", "@michaelthielemann/kestrel-events-direct", "@michaelthielemann/kestrel-events-inmemory", "zod"]);
   });
 
+  it("adds the comma the previous last entry was missing when a new entry sorts after every existing one", () => {
+    const edit = setDependencyRange("package.json", PKG, "dependencies", "zzz-last", "^1.0.0");
+    const { text } = applyEdits(PKG, [edit]);
+    const parsed = parsePkg(text);
+    expect(parsed.dependencies["zzz-last"]).toBe("^1.0.0");
+    expect(parsed.dependencies["zod"]).toBe("^3.23.8");
+  });
+
+  it("adds the missing comma when the map is not alphabetically sorted and the new entry is appended after the last one", () => {
+    const unsorted = `{\n  "dependencies": {\n    "@michaelthielemann/kestrel": "^5.8.0",\n    "@michaelthielemann/kestrel-events-inmemory": "^5.8.0",\n    "@michaelthielemann/kestrel-events-direct": "^5.8.0"\n  }\n}\n`;
+    const edit = setDependencyRange("package.json", unsorted, "dependencies", "@michaelthielemann/kestrel-events-queue", "^6.0.0");
+    const { text } = applyEdits(unsorted, [edit]);
+    const parsed = parsePkg(text);
+    expect(parsed.dependencies["@michaelthielemann/kestrel-events-direct"]).toBe("^5.8.0");
+    expect(parsed.dependencies["@michaelthielemann/kestrel-events-queue"]).toBe("^6.0.0");
+  });
+
   it("creates the dependencies map when the project has none", () => {
     const noDeps = `{\n  "name": "app"\n}\n`;
     const edit = setDependencyRange("package.json", noDeps, "dependencies", "@michaelthielemann/kestrel-events-direct", "^6.0.0");
