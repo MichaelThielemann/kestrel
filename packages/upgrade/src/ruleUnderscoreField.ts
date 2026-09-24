@@ -73,7 +73,6 @@ export const underscoreFieldRule: Rule = {
           question: questionId(typeName, field),
           prompt: stored === undefined ? `rename "${field}" on "${typeName}" to (no data report given; a stored value may still exist)` : `rename "${field}" on "${typeName}" to`,
           choices: [defaultName, "remove"],
-          defaultValue: defaultName,
         };
         findings.push({
           id,

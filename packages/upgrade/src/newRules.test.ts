@@ -213,12 +213,20 @@ describe("types/breaking-signatures", () => {
 });
 
 describe("model/underscore-field", () => {
-  it("asks by default, with the leading underscores stripped as the default answer", async () => {
+  it("asks with no default when no data report was given", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
     const findings = await underscoreFieldRule.check(contextFor(p));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");
-    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : undefined).toBe("hint");
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
+  });
+
+  it("asks with no default when the data report proves a stored value exists", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
+    const findings = await underscoreFieldRule.check(contextFor(p, { data: { "page._hint": true } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("ask");
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
   });
 
   it("auto-renames once the data report shows no stored value", async () => {
