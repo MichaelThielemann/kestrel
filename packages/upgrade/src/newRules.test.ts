@@ -31,7 +31,7 @@ function bootCheck(errors: BootProblem[] = [], warnings: BootWarning[] = []): Bo
 
 function contextFor(project: LoadedProject, options: { check?: BootCheck; answers?: ReadonlyMap<string, string>; data?: Record<string, unknown> } = {}): RuleContext {
   const withData = options.data === undefined ? project : { ...project, data: options.data };
-  return { root: dir, scratch: dir, project: withData, bootCheck: options.check ?? bootCheck(), readFile: readFileOrUndefined, answers: options.answers ?? new Map() };
+  return { root: dir, scratch: dir, project: withData, bootCheck: options.check ?? bootCheck(), readFile: readFileOrUndefined, answers: options.answers ?? new Map(), ownsPackages: [] };
 }
 
 async function project(options: { configModules?: Array<{ use: string; config?: Record<string, unknown> }>; triggers?: unknown[]; pipelines?: PipelineDefinition[]; pipelineFiles?: Record<string, string>; modules?: ModuleDefinition[]; moduleFiles?: Record<string, string> }): Promise<LoadedProject> {

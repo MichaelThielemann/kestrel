@@ -26,7 +26,7 @@ describe("previewBoot reloads from a fresh directory instead of the ESM-cached s
     const plugin: UpgradePlugin = {
       kind: "probe",
       detect: () => true,
-      load: async (_root, dir) => (await loadBackendProject(dir)).project!,
+      load: async (_root, dir) => loadBackendProject(dir),
       rules: [probeRule],
     };
 

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { BACKEND_PACKAGE_NAMES } from "./backendPackages.ts";
 import { insertModuleListEntry, insertModulesTsEntry, renameStringLiterals } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { setDependencyRange } from "./packageJson.ts";
@@ -99,7 +100,7 @@ export const removedStepsRule: Rule = {
   },
 };
 
-function kestrelDependencyRanges(source: string): Array<{ map: "dependencies" | "devDependencies" | "peerDependencies"; name: string; range: string }> {
+function kestrelDependencyRanges(source: string, ownsPackages: readonly string[]): Array<{ map: "dependencies" | "devDependencies" | "peerDependencies"; name: string; range: string }> {
   const pkg = boundaryCast<unknown>(JSON.parse(source), "json");
   const out: Array<{ map: "dependencies" | "devDependencies" | "peerDependencies"; name: string; range: string }> = [];
   if (!isRecord(pkg)) return out;
@@ -107,7 +108,7 @@ function kestrelDependencyRanges(source: string): Array<{ map: "dependencies" | 
     const value = pkg[map];
     if (!isRecord(value)) continue;
     for (const [name, range] of Object.entries(value)) {
-      if (typeof range === "string" && name.startsWith("@michaelthielemann/kestrel")) out.push({ map, name, range });
+      if (typeof range === "string" && BACKEND_PACKAGE_NAMES.includes(name) && !ownsPackages.includes(name)) out.push({ map, name, range });
     }
   }
   return out;
@@ -125,7 +126,7 @@ export const kestrelRangeRule: Rule = {
     const source = ctx.readFile(pkgFile);
     if (source === undefined) return [];
     const findings: Finding[] = [];
-    for (const dep of kestrelDependencyRanges(source)) {
+    for (const dep of kestrelDependencyRanges(source, ctx.ownsPackages)) {
       const major = majorOf(dep.range);
       if (major === 6) continue;
       const edit = setDependencyRange(pkgFile, source, dep.map, dep.name, KESTREL_RANGE);

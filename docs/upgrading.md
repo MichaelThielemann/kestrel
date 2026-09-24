@@ -147,6 +147,7 @@ Every finding's `docs` field links to one of the anchors below.
 | `boot/not-checked` | boot | none (warning) | a module or pipeline `checkBoot()` could not check safely |
 | `load/failed` | source | manual | a config, module or pipeline file that failed to load |
 | [`sandbox/blobstore-standin`](#sandbox-blobstore-standin) | boot | none (info) | a `blobstore@1` provider the sandbox replaced to keep the boot tier open |
+| [`plugin/rule-replaced`, `plugin/rule-disabled`](#plugin-api) | source | none (info) | a built-in rule a plugin's `overrides` replaced or disabled |
 
 #### modules-event-delivery
 An event trigger or `events.emit` needs exactly one delivery module (`events-direct` or
@@ -287,6 +288,11 @@ sandbox by design. Rather than leaving every module requiring `blobstore@1` unch
 tier swaps it for a local, filesystem-backed stand-in scoped to the scratch directory, so media,
 images, delivery, replication and backup modules still get checked. The real module's own `setup()`
 never runs during the check.
+
+#### plugin-api
+`plugin/rule-replaced` and `plugin/rule-disabled` report a plugin's `overrides` taking effect: a
+built-in rule's id maps to a replacement rule (`plugin/rule-replaced`) or to `null` (`plugin/rule-disabled`),
+naming the plugin. See "Programmatic use" below for the full plugin API surface.
 
 ## What the tool never does
 

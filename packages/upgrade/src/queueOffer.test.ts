@@ -34,7 +34,7 @@ function contextFor(
   previewBoot: (edits: readonly Edit[]) => Promise<BootCheck | undefined> = cleanPreviewBoot,
 ): RuleContext {
   const check: BootCheck = { errors: [], warnings: [], notChecked: [] };
-  return { root: dir, scratch: dir, project, bootCheck: check, readFile: readFileOrUndefined, answers, previewBoot };
+  return { root: dir, scratch: dir, project, bootCheck: check, readFile: readFileOrUndefined, answers, ownsPackages: [], previewBoot };
 }
 
 async function directProject(options: { sqliteFile?: string; publishPipeline?: boolean; groupedEmit?: boolean } = {}): Promise<LoadedProject> {
@@ -275,7 +275,7 @@ export const definePipeline = pipelineDefiner<KnownStep>();
   it("treats no boot tier at all (kestrel not yet on 6) as unverified, not clean", async () => {
     const p = await directProject();
     const check: BootCheck = { errors: [], warnings: [], notChecked: [] };
-    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: check, readFile: readFileOrUndefined, answers: new Map() };
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: check, readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [] };
     const findings = await queueOfferRule.check(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");
@@ -296,7 +296,7 @@ export const definePipeline = pipelineDefiner<KnownStep>();
     const existing: BootProblem = { code: "setup-failed", owner: "events-direct", reason: "already broken" };
     const check: BootCheck = { errors: [existing], warnings: [], notChecked: [] };
     const previewBoot = async (): Promise<BootCheck> => ({ errors: [existing], warnings: [], notChecked: [] });
-    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: check, readFile: readFileOrUndefined, answers: new Map(), previewBoot };
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: check, readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [], previewBoot };
     const findings = await queueOfferRule.check(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");

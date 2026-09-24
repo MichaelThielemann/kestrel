@@ -23,7 +23,7 @@ afterEach(async () => {
 });
 
 function contextFor(project: LoadedProject, answers: ReadonlyMap<string, string> = new Map()): RuleContext {
-  return { root: dir, scratch: dir, project, bootCheck: EMPTY_CHECK, readFile: readFileOrUndefined, answers };
+  return { root: dir, scratch: dir, project, bootCheck: EMPTY_CHECK, readFile: readFileOrUndefined, answers, ownsPackages: [] };
 }
 
 async function projectWithModules(source: string, modules: Array<{ use: string; config?: Record<string, unknown> }>): Promise<LoadedProject> {

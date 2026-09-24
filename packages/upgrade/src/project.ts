@@ -3,19 +3,10 @@ import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { BootInput, KestrelConfigInput, ModuleDefinition, PipelineDefinition } from "@michaelthielemann/kestrel";
 import { loadConfig, loadModule, loadPipelineFile, pipelineFiles } from "@michaelthielemann/kestrel/load";
-import type { LoadedProject } from "./plugin.ts";
+import type { LoadIssue, LoadResult } from "./plugin.ts";
 import type { Finding } from "./report.ts";
 
-export interface LoadIssue {
-  file?: string;
-  use?: string;
-  message: string;
-}
-
-export interface LoadResult {
-  project?: LoadedProject;
-  issues: LoadIssue[];
-}
+export type { LoadIssue, LoadResult } from "./plugin.ts";
 
 function resolveModuleFile(root: string, use: string): string {
   if (use.startsWith("./") || use.startsWith("../") || isAbsolute(use)) return resolve(root, use);

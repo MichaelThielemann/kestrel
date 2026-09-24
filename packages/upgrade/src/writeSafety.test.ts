@@ -47,7 +47,7 @@ describe("fix never writes an edit that fails to re-parse", () => {
         { id: "plugin/bad", rule: "plugin/bad", severity: "error", tier: "source", where: {}, message: "bad", suggestion: "replace b", fix: { kind: "auto", edits: [{ file: configFile, start: 0, end: 0, text: "}}}not valid ts{{{" }] }, docs: "n/a" },
       ],
     };
-    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject(configFile)), rules: [goodRule, badRule] };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [goodRule, badRule] };
 
     const lines: string[] = [];
     const code = await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
@@ -90,7 +90,7 @@ describe("fix never writes an edit that fails to re-parse", () => {
         },
       ],
     };
-    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject(configFile)), rules: [multiFileBadRule] };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [multiFileBadRule] };
     const code = await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin] });
     expect(code).toBe(1);
     expect(readFileSync(otherFile, "utf8")).toBe("export const x = 1;\n");
@@ -135,7 +135,7 @@ describe("fix --write runs the dirty guard for every touched file before writing
         },
       ],
     };
-    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject(configFile)), rules: [rule] };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [rule] };
     let errored = "";
     const code = await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: () => undefined, stderr: (l) => { errored = l; }, plugins: [plugin] });
     expect(code).toBe(2);
@@ -170,7 +170,7 @@ describe("fix --write runs the dirty guard for every touched file before writing
         },
       ],
     };
-    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject(configFile)), rules: [rule] };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [rule] };
 
     const originalPath = process.env.PATH;
     process.env.PATH = "/nonexistent";
@@ -207,7 +207,7 @@ describe("fix --write runs the dirty guard for every touched file before writing
         },
       ],
     };
-    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject(configFile)), rules: [rule] };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [rule] };
 
     const originalPath = process.env.PATH;
     process.env.PATH = "/nonexistent";

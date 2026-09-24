@@ -15,6 +15,19 @@ export interface LoadedProject {
   data?: Record<string, unknown>;
 }
 
+/** One file or module a plugin's `load()` (or the built-in loader) could not load; surfaces as a `load/failed` finding. */
+export interface LoadIssue {
+  file?: string;
+  use?: string;
+  message: string;
+}
+
+/** `load()`'s result: a project loaded file by file, one bad file becoming an issue without stopping the rest; `project` is absent only when the config file itself could not load. */
+export interface LoadResult {
+  project?: LoadedProject;
+  issues: LoadIssue[];
+}
+
 export interface RuleContext {
   root: string;
   scratch: string;
@@ -23,6 +36,8 @@ export interface RuleContext {
   readFile(file: string): string | undefined;
   /** Answers already known for this run (from `--answers`, a TTY prompt, or a `--yes` default), so a rule whose question only makes sense after another one's answer can look it up. */
   answers: ReadonlyMap<string, string>;
+  /** The active plugin's own `ownsPackages`, empty when none is active; built-in dependency rules never read or edit one of these. */
+  ownsPackages: readonly string[];
   /**
    * Applies the given edits to a scratch copy of the affected files, reloads the project and runs
    * `checkBoot()` on it, then restores the copy — a rule uses this to verify an edit it is about to
@@ -49,10 +64,14 @@ export interface Question {
 export interface UpgradePlugin {
   kind: string;
   detect(root: string): boolean | Promise<boolean>;
-  load(root: string, scratch: string): Promise<LoadedProject>;
+  load(root: string, scratch: string): Promise<LoadResult>;
   sandbox?: Record<string, (config: unknown, scratch: string) => unknown>;
   rules?: readonly Rule[];
   questions?: readonly Question[];
+  /** Package names this plugin owns the versioning of; built-in dependency rules (`deps/kestrel-range` and the mixed-majors check) never read or edit one of these, even under this repo's own npm scope. */
+  ownsPackages?: readonly string[];
+  /** Replaces or disables a built-in rule by id (`null` disables it); two plugins naming the same id is a load error. */
+  overrides?: Record<string, Rule | null>;
 }
 
 export interface RunUpgradeCliOptions {

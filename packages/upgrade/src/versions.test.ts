@@ -24,10 +24,10 @@ async function installFakePackage(root: string, name: string, version: string): 
 
 describe("installedVersions", () => {
   it("reads the version of a package whose exports map does not export ./package.json", async () => {
-    await installFakePackage(dir, "@michaelthielemann/kestrel-fake", "6.0.0");
-    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-fake": "^6.0.0" } }));
+    await installFakePackage(dir, "@michaelthielemann/kestrel-events-inmemory", "6.0.0");
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-events-inmemory": "^6.0.0" } }));
     const { installed, mixedMajors } = installedVersions(dir);
-    expect(installed["@michaelthielemann/kestrel-fake"]).toBe("6.0.0");
+    expect(installed["@michaelthielemann/kestrel-events-inmemory"]).toBe("6.0.0");
     expect(mixedMajors).toBe(false);
   });
 
@@ -37,13 +37,25 @@ describe("installedVersions", () => {
     expect(installed["@michaelthielemann/kestrel-not-installed"]).toBeUndefined();
   });
 
-  it("flags mixed majors across resolvable packages", async () => {
-    await installFakePackage(dir, "@michaelthielemann/kestrel-a", "6.0.0");
-    await installFakePackage(dir, "@michaelthielemann/kestrel-b", "5.8.0");
+  it("flags mixed majors across resolvable backend packages", async () => {
+    await installFakePackage(dir, "@michaelthielemann/kestrel-events-inmemory", "6.0.0");
+    await installFakePackage(dir, "@michaelthielemann/kestrel-persistence-sqlite", "5.8.0");
     await writeFile(
       join(dir, "package.json"),
-      JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-a": "^6.0.0", "@michaelthielemann/kestrel-b": "^5.8.0" } }),
+      JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-events-inmemory": "^6.0.0", "@michaelthielemann/kestrel-persistence-sqlite": "^5.8.0" } }),
     );
     expect(installedVersions(dir).mixedMajors).toBe(true);
+  });
+
+  it("never flags mixed majors from a plugin's own package, even one on a different major", async () => {
+    await installFakePackage(dir, "@michaelthielemann/kestrel-events-inmemory", "6.0.0");
+    await installFakePackage(dir, "@michaelthielemann/kestrel-example-plugin", "1.0.0");
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-events-inmemory": "^6.0.0", "@michaelthielemann/kestrel-example-plugin": "^1.0.0" } }),
+    );
+    const { installed, mixedMajors } = installedVersions(dir);
+    expect(installed["@michaelthielemann/kestrel-example-plugin"]).toBe("1.0.0");
+    expect(mixedMajors).toBe(false);
   });
 });

@@ -13,6 +13,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { isRecord } from "./guards.ts";
 import { loadBackendProject, loadIssuesAsFindings, type LoadIssue, type LoadResult } from "./project.ts";
 import type { LoadedProject, Rule, RunUpgradeCliOptions, UpgradePlugin } from "./plugin.ts";
+import { mergeRules, overrideConflicts } from "./pluginRules.ts";
 import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity, type UpgradeReport } from "./report.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
 import { sandboxBootInput, type SandboxTable } from "./sandbox.ts";
@@ -24,6 +25,8 @@ interface ResolvedProject {
   issues: LoadIssue[];
   rules: readonly Rule[];
   sandboxEntries?: SandboxTable;
+  ownsPackages: readonly string[];
+  notices: Finding[];
   reload: (scratchDir: string) => Promise<LoadResult>;
 }
 
@@ -40,26 +43,31 @@ async function detectPlugin(plugins: readonly UpgradePlugin[], root: string): Pr
 }
 
 async function resolveProject(root: string, entry: string | undefined, scratchDir: string, plugins: readonly UpgradePlugin[]): Promise<ResolvedProject> {
+  const conflicts = overrideConflicts(plugins);
   const { plugin, issues: detectIssues } = await detectPlugin(plugins, root);
   if (plugin === undefined) {
     const { project, issues } = await loadBackendProject(scratchDir, entry === undefined ? undefined : resolve(root, entry));
     const reload = (dir: string): Promise<LoadResult> => loadBackendProject(dir, entry === undefined ? undefined : resolve(root, entry));
-    return { ...(project === undefined ? {} : { project }), issues: [...detectIssues, ...issues], rules: DEFAULT_RULES, reload };
+    return { ...(project === undefined ? {} : { project }), issues: [...conflicts, ...detectIssues, ...issues], rules: DEFAULT_RULES, ownsPackages: [], notices: [], reload };
   }
-  const rules = [...DEFAULT_RULES, ...(plugin.rules ?? [])];
+  if (conflicts.length > 0) {
+    return { issues: [...conflicts, ...detectIssues], rules: DEFAULT_RULES, ownsPackages: [], notices: [], reload: async () => ({ issues: conflicts }) };
+  }
+  const { rules, notices } = mergeRules(DEFAULT_RULES, plugin);
   const sandboxEntries = plugin.sandbox === undefined ? {} : { sandboxEntries: plugin.sandbox };
+  const ownsPackages = plugin.ownsPackages ?? [];
   const reload = async (dir: string): Promise<LoadResult> => {
     try {
-      return { project: await plugin.load(root, dir), issues: [] };
+      return await plugin.load(root, dir);
     } catch (err) {
       return { issues: [{ message: err instanceof Error ? err.message : String(err) }] };
     }
   };
   try {
-    const project = await plugin.load(root, scratchDir);
-    return { project, issues: detectIssues, rules, ...sandboxEntries, reload };
+    const { project, issues } = await plugin.load(root, scratchDir);
+    return { ...(project === undefined ? {} : { project }), issues: [...detectIssues, ...issues], rules, ownsPackages, notices, ...sandboxEntries, reload };
   } catch (err) {
-    return { issues: [...detectIssues, { message: err instanceof Error ? err.message : String(err) }], rules, ...sandboxEntries, reload };
+    return { issues: [...detectIssues, { message: err instanceof Error ? err.message : String(err) }], rules, ownsPackages, notices, ...sandboxEntries, reload };
   }
 }
 
@@ -162,8 +170,8 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       });
     }
 
-    const { project, issues, rules, sandboxEntries, reload } = await resolveProject(root, entry, scratch.dir, options.plugins ?? []);
-    findings.push(...loadIssuesAsFindings(issues));
+    const { project, issues, rules, sandboxEntries, ownsPackages, notices, reload } = await resolveProject(root, entry, scratch.dir, options.plugins ?? []);
+    findings.push(...loadIssuesAsFindings(issues), ...notices);
 
     let tiers: UpgradeReport["tiers"] = { source: "not-run", load: "not-run", boot: "not-run", data: "not-run" };
     let bootCheck: Awaited<ReturnType<typeof checkBoot>> = { errors: [], warnings: [], notChecked: [] };
@@ -232,7 +240,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       }
 
       const projectWithData = options.dataReport === undefined ? project : { ...project, data: options.dataReport };
-      const ctx = { root: scratch.dir, scratch: scratch.dir, project: projectWithData, bootCheck, readFile: readFileOrUndefined, answers: options.answers, ...(previewBoot === undefined ? {} : { previewBoot }) };
+      const ctx = { root: scratch.dir, scratch: scratch.dir, project: projectWithData, bootCheck, readFile: readFileOrUndefined, answers: options.answers, ownsPackages, ...(previewBoot === undefined ? {} : { previewBoot }) };
       for (const rule of rules) findings.push(...(await rule.check(ctx)));
 
       const claimed = new Set(findings.map((f) => `${f.where.module ?? ""}|${f.where.pipeline ?? ""}|${f.where.step ?? ""}`));
