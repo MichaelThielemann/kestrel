@@ -83,3 +83,12 @@ describe("kestrel-upgrade fix --write against a copy of the fixture", () => {
     expect(configText).not.toContain("events-direct");
   });
 });
+
+describe("kestrel-upgrade fix preview (no --write)", () => {
+  it("counts what its own edits would still leave behind, not the pre-edit total", async () => {
+    const lines: string[] = [];
+    await runUpgradeCli(["fix", "--root", FIXTURE], { stdout: (line) => lines.push(line), stderr: () => undefined });
+    const summaryLine = lines.find((l) => l.startsWith("after these edits:"));
+    expect(summaryLine).toBe("after these edits: 0 errors remain (0 need your answer, 0 manual)");
+  });
+});

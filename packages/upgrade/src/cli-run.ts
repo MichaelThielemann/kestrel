@@ -432,7 +432,8 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     if (applied.length > 0) stdout("run `pnpm install` to pick up any dependency range changes");
   } else {
     printReport(adjustedReport, args, stdout);
-    stdout(`after these edits: ${adjustedReport.summary.error} errors remain (${adjustedReport.summary.ask} need your answer, ${adjustedReport.summary.manual} manual)`);
+    const afterEdits = summarize(adjustedFindings.filter((f) => f.fix.kind !== "auto"));
+    stdout(`after these edits: ${afterEdits.error} errors remain (${afterEdits.ask} need your answer, ${afterEdits.manual} manual)`);
   }
   if (write && saveAnswersFile !== undefined) writeFileSync(resolve(saveAnswersFile), JSON.stringify(Object.fromEntries(answers), null, 2));
   return exitCodeFor(adjustedReport.findings, failOn);
