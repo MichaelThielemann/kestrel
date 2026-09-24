@@ -272,10 +272,13 @@ For Nuxt: a catch-all route → `GET /site/<route.path>`.
 `kestrel:pages:<id>` in rich text/JSON becomes the public path of the target page in the requested
 language (`/impressum`, `/en/imprint`, home page `/`); link objects
 `{ type: "internal", collection: "pages", id }` get a `path`. If the target isn't published in that
-language: `href="#" data-kestrel-broken="pages:<id>"`, or `broken: true`. The document additionally
-carries `_links: { "<id>": { path, locale } | { broken: true } }` and `_locale` (the effective
-language). The frontend needs no URL rule and no individual lookups. The renderer in static delivery
-(`delivery.publish`) gets the same resolution — static HTML and `/site/*` contain identical paths.
+language: `href="#" data-kestrel-broken="pages:<id>"`, or `broken: true`. A target published in that
+language but without its own slug there gets one from the default language only when the default
+language is itself published; with no such default the link stays broken instead. The document
+additionally carries `_links: { "<id>": { path, locale } | { broken: true } }` and `_locale` (the
+effective language). The frontend needs no URL rule and no individual lookups. The renderer in
+static delivery (`delivery.publish`) gets the same resolution — static HTML and `/site/*` contain
+identical paths.
 
 ### Pages
 
@@ -564,8 +567,11 @@ them statically. The step takes no argument and, in the example instance, is cha
 `createPage`, `updatePage`, `deletePage`, `setSettings` and `publishAllPages`; it adds
 `llms: { entries, full }` to the result. The source is the `live` rows of the publish traffic light
 for every type configured under `types` — i.e. exactly what is delivered: drafts are absent, and a
-language only appears once it is itself published. For each row, the document is read (with field
-fallback); `seo.noindex === true` excludes the page from both files. If `llms.txt` cannot be
+language only appears once it is itself published. For each row, the document is read; an empty
+`seo`/title field is filled from the default language only when the default language is itself
+published, the same rule `GET /site/*path` and static delivery apply — a draft default language
+never fills a field here either. `seo.noindex === true` excludes the page from both files. If
+`llms.txt` cannot be
 written, the whole request (i.e. `POST`/`PATCH /pages`,
 `DELETE /pages/:id[/translations/:locale]`, `PUT /settings`, `POST /admin/publish-all/pages`)
 answers with 503 (`TRANSIENT`, `retryable: true`, `Retry-After`) instead of the `llms` field it
