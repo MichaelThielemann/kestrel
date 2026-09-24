@@ -51,9 +51,11 @@ export const underscoreFieldRule: Rule = {
     if (entry === undefined) return [];
     const findings: Finding[] = [];
     for (const typeName of typeNames(entry.config)) {
-      for (const field of fieldNames(entry.config, typeName)) {
+      const declaredFields = fieldNames(entry.config, typeName);
+      for (const field of declaredFields) {
         if (!field.startsWith("_")) {
           const orphanField = `_${field}`;
+          if (declaredFields.includes(orphanField)) continue;
           const orphanCounts = storedCounts(ctx, typeName, orphanField);
           if (orphanCounts === undefined || Object.values(orphanCounts).every((n) => n === 0)) continue;
           findings.push({

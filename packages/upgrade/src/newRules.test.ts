@@ -344,6 +344,18 @@ describe("model/underscore-field", () => {
     expect(await underscoreFieldRule.check(contextFor(p))).toEqual([]);
     expect(await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: {} } }))).toEqual([]);
   });
+
+  it("does not treat a declared underscore field as an orphan of a same-named regular field", async () => {
+    const p = await project({
+      configModules: [
+        { use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" }, hint: { type: "string" } } } } } },
+      ],
+    });
+    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 3 } } } }));
+    expect(findings.filter((f) => f.message.includes("current field is named"))).toEqual([]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.where.path).toBe("types.page.fields._hint");
+  });
 });
 
 describe("modules/emits", () => {

@@ -143,6 +143,16 @@ function contentFieldsOf(config: unknown): Array<{ typeName: string; field: stri
   return out;
 }
 
+function declaredFieldsByType(config: unknown): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  if (!isRecord(config) || !isRecord(config.types)) return out;
+  for (const [typeName, type] of Object.entries(config.types)) {
+    if (!isRecord(type) || !isRecord(type.fields)) continue;
+    out.set(typeName, new Set(Object.keys(type.fields)));
+  }
+  return out;
+}
+
 function localesOf(config: unknown): string[] {
   const locales = isRecord(config) ? config.locales : undefined;
   return Array.isArray(locales) ? locales.filter((l): l is string => typeof l === "string") : [];
@@ -176,11 +186,13 @@ async function countColumn(db: Persistence, typeName: string, column: string): P
 
 async function underscoreFieldCounts(file: string, db: Persistence, contentConfig: unknown): Promise<Record<string, Record<string, number | null>>> {
   const locales = localesOf(contentConfig);
+  const declaredFields = declaredFieldsByType(contentConfig);
   const columnsByType = new Map<string, Set<string> | undefined>();
   const counts: Record<string, Record<string, number | null>> = {};
   for (const { typeName, field, localized } of contentFieldsOf(contentConfig)) {
     const shadowField = field.startsWith("_") ? field : `_${field}`;
     const isOrphanProbe = shadowField !== field;
+    if (isOrphanProbe && declaredFields.get(typeName)?.has(shadowField)) continue;
     if (!columnsByType.has(typeName)) columnsByType.set(typeName, existingColumns(file, typeName));
     const columns = columnsByType.get(typeName);
     const columnsOf = localized ? locales.map((locale) => ({ locale, column: `${shadowField}__${locale}` })) : [{ locale: "unlocalized", column: shadowField }];
