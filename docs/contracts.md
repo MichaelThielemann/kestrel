@@ -139,6 +139,13 @@ export interface Authz {
 export const AUTHZ = defineContract<Authz>()("authz@1", ["can"]);
 ```
 
+A step's `anonymous: "required"` (on `StepDescription`) marks its output as also published without
+an access check: whichever module attaches to the booted instance is responsible for checking, for
+every pipeline that runs such a step, that an anonymous caller actually passes it. `authz-roles`
+does this at `attach()` and fails boot otherwise. `authz@1` itself carries no anonymous verdict, so
+this is a residual gap: another `authz@1` provider has to perform the same check itself, or the flag
+goes unchecked for that provider.
+
 ## Contract test: `contracts/persistence.contract.test.ts`
 
 Every implementation calls this function with a factory.

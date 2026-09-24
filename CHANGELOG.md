@@ -228,6 +228,81 @@ Net changes since 5.8.1.
   step and pointing at `site.resolve` — `fallback` is status-unaware by contract, so a filtered read
   must never use it. Every `site@1` implementation must follow the fallback/`_translations` rule now;
   the shared contract suite (`@michaelthielemann/kestrel-contracts/site.contract.test`) tests it.
+- **Every media file has exactly one public URL, and the API returns it.** `media-default` stores an
+  original under `<prefix><id>/<name>`. `<name>` is fixed at upload: the uploaded file name reduced
+  to `[A-Za-z0-9._-]`, with the extension of its content type (`Photo 1.JPG` sent as `image/jpeg` is
+  stored as `Photo-1.jpg`). `media.upload`, `media.get`, `media.list` and `media.update` return it as
+  `path`, `<publicPath>/<id>/<name>` (new config key `publicPath`, default `"/media"`). Renaming or
+  moving an item and renaming a folder change metadata only: no blob moves, and neither the key nor
+  `path` changes. `filename` starts out equal to `<name>` and is the display name from then on. A name
+  is still unique within its folder; a clash answers 409 with `details.field: "location"` (was
+  `"key"`).
+  - A media item in any output no longer carries `key`, `checksum` or `status`.
+  - Anonymous callers read media by id only: `media.list` without `ids`, and `media.listFolders`,
+    answer 401 to a caller without an identity. Set `anonymousList: "all"` to allow listing the
+    library anonymously.
+  - Media stored by 5.x are not converted. The start-up key migration is removed, and setup fails when
+    a stored item's key is not `<prefix><id>/<name>`, naming the first such item. Start 6.0.0 with an
+    empty media store.
+  - New step `media.serve` answers a file at its public URL (`params.id`, `params.name`), cacheable
+    for a year as `immutable`; any other name is 404. `media.download` is unchanged.
+  - `media.remove` and `media.removeFolder` delete the copy and the blob first and the row last, then
+    sweep the item's files once more. A failed blob delete now fails the step with the blob store's
+    error; it used to be logged. `media.removeFolder`'s result gains `ids`. Run `images.remove` /
+    `images.removeMany` after them, not before.
+- **Image variants have their URL before an image can be used.** New step `images.plan` decides each
+  size's format, extension, width and height from the original and makes every variant path answer
+  with the original's bytes and type until the rendered variant replaces them at the same path. With
+  a queue-style delivery module, placing and rendering are separate jobs connected by the new event
+  `images.planned`, so an item never waits for a render to become usable; with inline event delivery,
+  `images.generate` renders straight into the paths and a size it could not render is placed by
+  `images-default`'s background loop right after the request. `images.attach` adds `available` per
+  item: `false` while an image still lacks a variant path, and such an item lists no variant; an
+  output never names a path without a file. Variant rows gain the state `planned` (never in an
+  output); an attached variant carries its final `width`/`height` and `path` in every state. A variant
+  that fails keeps answering with the original instead of 404; an image that cannot be decoded gets
+  its variant paths the same way. A size whose format changes, and a pruned size, keep their old path
+  answering with the original's bytes until the item is deleted (new collection `images_retired`).
+  `original`-format sizes render as JPEG for types other than JPEG, PNG, WebP and AVIF; every render
+  has exactly the planned dimensions, and `cover` keeps the declared aspect without enlarging.
+  `images.serve` answers a file that is neither the size's current file nor a retired one with the
+  original's bytes and type instead of 404. Variants are generated for `ready` media items only; a
+  generation whose media item is deleted meanwhile removes what it wrote. `publicPath` must be `/`
+  followed by path segments, without a trailing `/`.
+  - `images-default` raises `media.updated` with `ids` through `events@1` for items it made available,
+    after `images.prune`, and for items whose variants changed because a size was added or its spec
+    changed. It declares the event in `emits` and uses `events@1` optionally.
+  - When a size is added or a size's spec changes (via `images.register` or at start), `images-default`
+    notices and its background sync places the new or changed variants of every existing image.
+- **Public copies.** `media-default` and `images-default` gain an optional `publicCopy: { prefix }`.
+  With it, each module keeps a copy of every ready original and every variant path at
+  `<prefix><publicPath without the leading "/">/<id>/<name>` and `…/<id>/variants/<size>.<ext>`. The
+  copy is written by the step that makes the file visible — upload, variant planning and rendering
+  including the background sync job and retries — and removed when the item is deleted. A failed copy
+  fails that step like a failed blob write. New steps `media.syncPublic` and `images.syncPublic`
+  reconcile the copies with the stored items and add `_publicMedia` / `_publicVariants` to the result;
+  `media.syncPublic` also treats an upload stuck longer than the new `uploadStaleAfterMs` (default 15
+  minutes) as failed, and `images.syncPublic` plans missing variants and starts a sync job for
+  unrendered ones. Setup fails when the copy location overlaps the module's own `prefix`; boot fails
+  when `publicCopy` is set and no pipeline runs the module's serve step, or when a pipeline runs a
+  `syncPublic` step without `publicCopy`.
+- `StepDescription` gains an optional `anonymous: "required"`: the step's output is also published
+  without an access check, so every pipeline running it must let an anonymous caller through. With
+  `publicCopy`, `media.serve` and `images.serve` declare it. `authz-roles` checks it when attached and
+  fails boot, naming the pipeline, the step and the permission anonymous callers lack, or the step
+  that requires a signed-in caller. Another `authz@1` provider has to make the same check itself.
+  `insights.readManifest`'s output schema follows the new field.
+- A binary step result may now set its own `cache-control`; without one, responses stay `no-store`.
+- **`delivery-static` no longer handles media.** The `media` option is removed — a config that still
+  sets it fails validation — and with it the rewriting of media URLs in rendered output, the copying
+  of media into the output prefix and the reads of `media_items` and `images_variants`. Rendered
+  output is stored byte for byte. `rewriteMedia`, `MediaMatch`, `MediaConfig` and
+  `contentTypeByExtension` are no longer exported from `./impl`. Pages reach media through the URLs the
+  API returned; set `publicCopy` on the media modules instead. New option `reservedPaths`: a page, or a
+  renderer asset, whose path equals or lies under one of them is not written, and the page's status is
+  `error`.
+- `blobstore-filesystem` replaces a file atomically (a temporary file in the same directory, then a
+  rename), so a reader never sees a partly written file. Keys ending in `.kestrel-tmp` are rejected.
 
 ### Added
 

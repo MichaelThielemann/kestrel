@@ -385,37 +385,47 @@ anyway, `redirects.read` only protects the editor view.
 
 ## Media
 
+Every file has exactly one public URL, `/media/<id>/<name>`, and the API returns it as `path` on
+every item. `<name>` is fixed at upload — it never changes on rename or move — so a client never
+builds a media URL from an id; it always reads `path` from the response.
+
 | Method | Path | Body | Response |
 |---|---|---|---|
 | POST | `/media` | `multipart/form-data`: repeatable `file` field, optional `folder`, optional `provenance` | one file or several, see below (`media.write`) |
-| GET | `/media/folders` | – | `[{ folder, count }]` – every folder, including empty ones (persisted in `media_folders`) and implicit parent folders (the client builds the prefix tree; `folder` is a label). The root is not a folder: files without a folder don't create a `""` entry |
+| GET | `/media/folders` | – | `[{ folder, count }]` – every folder, including empty ones (persisted in `media_folders`) and implicit parent folders (the client builds the prefix tree; `folder` is a label). The root is not a folder: files without a folder don't create a `""` entry (`media.read`, signed in) |
 | POST | `/media/folders` | `{ path }` | `{ folder, count }` – creates the folder (idempotent), including implicit parent folders (`media.write`); `count` is the number of files already there (0 for a new folder, otherwise the existing count) |
-| PATCH | `/media/folders/*path` | `{ path }` | `{ folder, moved }` – renames or moves the folder; subfolders and files move with it, blobs are renamed accordingly (`media.write`); 404 if the folder doesn't exist, 409 on a target conflict. If a rename aborts partway (the process dies between the blob move and the row update), the target folder stays occupied and a repeated PATCH answers 409: move the remaining files individually via `PATCH /media/:id`, then delete the source folder |
-| DELETE | `/media/folders/*path` | `?recursive=true` | `{ ok: true, removed }` – deletes a folder (`media.delete`); 409 if it isn't empty (without `recursive`); 409 if one of the contained files is referenced (nothing gets deleted) |
-| GET | `/media` | `?folder=&recursive=true&q=&sort=&limit=&offset=` | `{ items, total }`; `folder` matches exactly, with `recursive=true` the exact subtree (`2026` → `2026` and `2026/…`, not `2026x` or `2026-alt`); `q` = substring match on `filename` (case-sensitive); `sort` = `createdAt`, `filename`, `size`, a leading `-` = descending (default `-createdAt`); every item also carries `variants[]`, see [Image variants](#image-variants) |
-| GET | `/media?ids=a,b,c` | – | `{ items, total }` – exactly these items in the requested order (missing ones are skipped, max. 200); other parameters ignored |
-| GET | `/media/:id` | `?locale=` | metadata incl. `updatedAt`, `checksum` (sha256 of the bytes, hex; `null` for files predating the field), `status` (always `ready`, see below), `width`/`height` (from the file header for PNG/JPEG/GIF/WebP, otherwise `null`), `alt`/`title`/`description` for the requested language (`null` if not set; default language `de`), `variants[]` (see [Image variants](#image-variants)) |
-| GET | `/media/:id/file` | – | raw bytes, the file's `Content-Type`; images (incl. sanitized SVG)/audio/video `inline`, otherwise `attachment`; header `X-Content-Provenance: ai|mixed|unknown` when `provenance.origin` ≠ `human` |
-| GET | `/media/:id/variants/:file` | – | image variant, `:file` = `<size>.<ext>` (e.g. `thumb.webp`), see [Image variants](#image-variants) |
-| PATCH | `/media/:id` | `{ filename?, folder?, provenance?, locale?, alt?, title?, description? }` | metadata (`media.write`); changing `filename`/`folder` moves the underlying blob (key `media/<folder>/<filename>`), 409 on a conflict with an existing file; text fields apply to `locale` (body or query, default `de`), `null` or `""` clears that language's text; `updatedAt` advances on every PATCH |
-| DELETE | `/media/:id` | – | `{ ok: true }`; deletes the row first, then the blob — if deleting the blob fails, the request still succeeds and the blob is logged (`media.reconcile` cleans it up later); 409 if a page references it — via a `ref` field (`hero`) or via an internal link in a `json` field (a block tree, e.g. `body`), e.g. `media/<id> is referenced by pages/<id2> (hero)` (`media.delete`); also deletes every image variant of that item |
+| PATCH | `/media/folders/*path` | `{ path }` | `{ folder, moved }` – renames or moves the folder; a metadata-only change: no blob moves, and no file's `path` changes (`media.write`); 404 if the folder doesn't exist, 409 on a target conflict |
+| DELETE | `/media/folders/*path` | `?recursive=true` | `{ ok: true, removed, ids }` – deletes a folder (`media.delete`); 409 if it isn't empty (without `recursive`); 409 if one of the contained files is referenced (nothing gets deleted); `ids` lists the removed items, for a step after it (e.g. removing their image variants) |
+| GET | `/media` | `?folder=&recursive=true&q=&sort=&limit=&offset=` | `{ items, total }`; `folder` matches exactly, with `recursive=true` the exact subtree (`2026` → `2026` and `2026/…`, not `2026x` or `2026-alt`); `q` = substring match on `filename` (case-sensitive); `sort` = `createdAt`, `filename`, `size`, a leading `-` = descending (default `-createdAt`); every item also carries `available` and `variants[]`, see [Image variants](#image-variants). Without a signed-in caller and without `ids`, 401 (`UNAUTHENTICATED`) — anonymous callers read media by id only |
+| GET | `/media?ids=a,b,c` | – | `{ items, total }` – exactly these items in the requested order (missing ones are skipped, max. 200); other parameters ignored; this form is anonymous |
+| GET | `/media/:id` | `?locale=` | metadata incl. `path` (the file's one public URL), `updatedAt`, `width`/`height` (from the file header for PNG/JPEG/GIF/WebP, otherwise `null`), `alt`/`title`/`description` for the requested language (`null` if not set; default language `de`), `available` and `variants[]` (see [Image variants](#image-variants)); anonymous |
+| GET | `/media/:id/file` | – | raw bytes by id, the file's `Content-Type`, always `Cache-Control: no-store`; images (incl. sanitized SVG)/audio/video `inline`, otherwise `attachment`; header `X-Content-Provenance: ai|mixed|unknown` when `provenance.origin` ≠ `human` (`media.read`, `identifyUser`) |
+| GET | `/media/:id/:name` | – | the file at its one public URL; `:name` must be the exact name it was uploaded under, else 404; `Cache-Control: public, max-age=31536000, immutable`; anonymous |
+| GET | `/media/:id/variants/:file` | – | image variant, `:file` = `<size>.<ext>` (e.g. `thumb.webp`), see [Image variants](#image-variants); anonymous |
+| PATCH | `/media/:id` | `{ filename?, folder?, provenance?, locale?, alt?, title?, description? }` | metadata (`media.write`); a metadata-only change: renaming or moving never touches the blob or `path`, 409 on a name clash within the folder (`details.field: "location"`); text fields apply to `locale` (body or query, default `de`), `null` or `""` clears that language's text; `updatedAt` advances on every PATCH |
+| DELETE | `/media/:id` | – | `{ ok: true }`; removes the public copy (if configured), then the blob, then the row, then sweeps the item's files once more, so a retry after a partial failure completes; a failed blob delete now fails the request instead of only logging it; 409 if a page references it — via a `ref` field (`hero`) or via an internal link in a `json` field (a block tree, e.g. `body`), e.g. `media/<id> is referenced by pages/<id2> (hero)` (`media.delete`); also deletes every image variant of that item |
 
 **POST `/media`.** The body is `multipart/form-data` with a repeatable `file` field (send several
 for a multi-file upload), an optional `folder`, and an optional `provenance` (`human`/`ai`/`mixed`/
 `unknown`, or `{ origin, tool?, model?, at? }`; applies to every file in the request; defaults to
 `unknown` if omitted). A request with no `file` field answers 400.
 
-A single file returns `{ id, filename, folder, contentType, size, key, checksum, status, createdAt,
-provenance }` (needs `media.write`). Several files return `{ items: [...same shape...], errors:
-[{ filename, status, message }], ids }` — each file is checked independently (type, size, a 409 on
-a name conflict), and one failed file doesn't stop the rest (partial success still answers 200);
-`ids` lists only the newly stored items.
+A single file returns `{ id, path, filename, folder, contentType, size, createdAt, updatedAt,
+provenance, width, height, alt, title, description }` (needs `media.write`) — no internal field
+(`key`, `checksum`, `status`, the folder+filename uniqueness column) ever leaves the API. Several
+files return `{ items: [...same shape...], errors: [{ filename, status, message }], ids }` — each
+file is checked independently (type, size, a 409 on a name conflict), and one failed file doesn't
+stop the rest (partial success still answers 200); `ids` lists only the newly stored items.
 
-The blob key is `media/<folder>/<filename>` (or `media/<filename>` with no folder; the `media/`
-prefix is configurable and separates media from replication snapshots, the site export and
-`redirects.json`), so on disk e.g. `data/blobs/media/2026/press/photo.jpg`. The same filename in
-the same folder with *different* bytes answers 409 (`details: { collection: "media_items", field:
-"key" }`; for multi-file uploads, as an entry in `errors` rather than an HTTP status) — the same
+The blob key is `<prefix><id>/<name>` (the `media/` prefix is configurable and separates media from
+replication snapshots, the site export and `redirects.json`), so on disk e.g.
+`data/blobs/media/3f2e…-…/photo.jpg`. `<name>` is `filename` reduced to `[A-Za-z0-9._-]`, with the
+extension replaced by the one its content type implies (`Photo 1.JPG` sent as `image/jpeg` becomes
+`Photo-1.jpg`) so that a static host deriving `Content-Type` from the extension serves the right
+one; an unknown content type keeps the uploaded extension. `<name>` is fixed at upload and never
+changes again — renaming the item only changes the display `filename`, never the key or `path`. The
+same display name in the same folder answers 409 (`details: { collection: "media_items", field:
+"location" }`; for multi-file uploads, as an entry in `errors` rather than an HTTP status) — the same
 bytes again are idempotent, as described below.
 
 Rules: allows `image/*` (including SVG) and `application/pdf`, forbids `text/html` (415,
@@ -423,7 +433,7 @@ Rules: allows `image/*` (including SVG) and `application/pdf`, forbids `text/htm
 (`sanitize.svg` before `media.upload`): `script`, `style`, event handlers, `foreignObject`, `image`
 and external `href`/`xlink:href` are removed, only internal references (`#id`) survive; the XML
 prolog and comments are dropped; > 2 MB → 413 (`PAYLOAD_TOO_LARGE`), no `<svg>` root → 400
-(`VALIDATION`). Sanitized SVGs are served `inline` on `GET /media/:id/file`
+(`VALIDATION`). Sanitized SVGs are served `inline` on `GET /media/:id/file` and `GET /media/:id/:name`
 (`http.inlineTypes: ["image/svg+xml"]`), every other non-image type remains `attachment`. The two
 are linked: `image/svg+xml` in `http.inlineTypes` without a module that registers `sanitize.svg`
 aborts boot — unsanitized SVGs are never served inline. `folder` is a path label (`2026/press`), not
@@ -431,7 +441,8 @@ a directory: segments only `[A-Za-z0-9._-]`, separated by `/`, leading/trailing 
 `.`/`..` → 400. `filename` is sanitized on upload and rename (basename only, characters outside
 `[A-Za-z0-9._-]` → `-`, leading `.`/`-` stripped, empty → `file`) — the response can differ from the
 value that was sent; the UI should adopt the response value.
-Image URL in the frontend: `/media/<id>/file`. A page references it via `hero: "<media-id>"`.
+Image URL in the frontend: the item's own `path` — never build one from an id. A page references a
+medium via `hero: "<media-id>"`.
 `alt`, `title` and `description` are plain text and are validated as such: at most 2000 characters,
 no control characters other than tab and newline, otherwise 400
 (`media/default: alt must be plain text (max 2000 chars)`). Nothing is sanitized here — an HTML
@@ -441,42 +452,51 @@ sanitizer would corrupt legitimate text such as `5 < 6`; the frontend escapes on
 visibly flag `ai`/`mixed` (EU AI Act Art. 50) and send the origin with every upload. Without one,
 `{ origin: "unknown" }` is stored: a missing value is not proof that a human created the file. Rows
 predating the field also read as `unknown`.
-Three key families live in the blob store, with three owners: `media/<folder>/<filename>` are the
-originals this module writes (the `media/` prefix is configurable), `media-variants/<id>/<size>.webp`
-are the variants `images-default` generates ([Image variants](#image-variants)), and
-`site/media/<folder>/<filename>.<size>.webp` are the copies `delivery-static` publishes for static
-delivery, which is what the rendered HTML references
-([Static delivery](#static-delivery-the-second-traffic-light)).
-`media.reconcile` only ever looks at the first family.
 
-`media_items.key` is unique in the database, so a blob key belongs to exactly one item: two uploads
-of the same name into the same folder at the same time end as one item and one 409, never as two
-items sharing one blob. Uploading is idempotent: same folder, same filename and the same bytes
-(`checksum`) return the item that is already there, with 200 and its original `id` and `createdAt` —
-no second item, no second blob, no second set of variants, and no `media.uploaded` event
-(`media.upload` ends the pipeline itself, so the `events.emit:media.uploaded` step after it does not
-run, see [pipelines.md](pipelines.md#event-data)). The same name with *different* bytes stays a 409.
-Deleting an item deletes its blob only when no other row points at that key.
+With `publicCopy` configured, `media-default` also keeps a copy of every ready original under
+`<publicCopy.prefix><publicPath without its leading "/">/<id>/<name>` (e.g. `site/media/<id>/photo.jpg`
+with the example instance's config) — the same tree `images-default` writes its variant copies into,
+which is what a static export or a plain web server in front of the blob store serves directly, with
+no backend involved. The copy is written by the request that makes the original visible (or, for a
+variant, by the background job that places or renders it) and removed when the item is deleted; a
+failed copy write fails that request like a failed blob write. Steps `media.syncPublic` and
+`images.syncPublic` reconcile the copies with the stored items (used by an admin "repair public
+media copies" action and a nightly cron); `media.reconcile` is unrelated and only ever looks at the
+private blob prefix.
 
-Upload happens in two phases: first the row with `status: "uploading"` and the `checksum` of the
-bytes, then the blob, then `status: "ready"`. If writing the blob fails, the row stays at
-`status: "failed"` and the request answers with an error; a repeated upload of the same name
+`media_items`'s internal uniqueness column (folder + display filename) means a name belongs to
+exactly one item per folder: two uploads of the same name into the same folder at the same time end
+as one item and one 409, never as two items sharing one name. Uploading is idempotent: same folder,
+same filename and the same bytes (checksum) return the item that is already there, with 200 and its
+original `id` and `createdAt` — no second item, no second blob, no second set of variants, and no
+`media.uploaded` event (`media.upload` ends the pipeline itself, so the `events.emit:media.uploaded`
+step after it does not run, see [pipelines.md](pipelines.md#event-data)). The same name with
+*different* bytes stays a 409. Deleting an item removes its own copy and blob; nothing else shares
+its id-based key.
+
+Upload happens in phases: first the row with `status: "uploading"`, then the private blob, then (if
+`publicCopy` is set) the public copy, then the row turns `ready`. If writing the blob fails, the row
+stays at `status: "failed"` and the request answers with an error; a repeated upload of the same name
 replaces that row (no lasting 409). Only `ready` items are visible: `GET /media` (including `?ids=`)
-hides everything else, `GET /media/:id` and `GET /media/:id/file` answer 404. A reconciliation
-between the blob store and `media_items` is available as the step `media.reconcile`
-(`{ blobsWithoutRow, rowsWithoutBlob }`; with `delete: true`, blobs without a row are deleted, rows
-never); [`../examples/minimal`](../examples/minimal) doesn't wire up a route or a cron for it yet.
+hides everything else, `GET /media/:id`, `GET /media/:id/file` and `GET /media/:id/:name` answer 404.
+A reconciliation between the private blob store and `media_items` is available as the step
+`media.reconcile` (`{ blobsWithoutRow, rowsWithoutBlob }`; with `delete: true`, blobs without a row
+are deleted, rows never); [`../examples/minimal`](../examples/minimal) doesn't wire up a route or a
+cron for it yet.
 
-Migration: on start, a one-time check looks for blobs still under an old key scheme (`<uuid><ext>`
-or a path without the `media/` prefix); these are rekeyed to `media/<folder>/<filename>`, name
-collisions get the suffix `-2` (only in this migration step). The run is repeatable: if the blob is
-already at the target key, only the row still gets updated.
+No data migration: setup fails on start if a stored item's key is not `<prefix><id>/<name>`, naming
+the first such item. A store from before this change must start empty.
 
 ## Image variants
 
-For every image (not SVG, not GIF), `images-default` keeps a WebP variant per *effective size*:
-generated on upload (event `media.uploaded`), caught up by a resumable sync job, listed on the media
-metadata, served by path, exportable, deleted only on request. The original is never modified.
+For every image (not SVG, not GIF), `images-default` keeps a WebP variant per *effective size*, at
+`/media/<id>/variants/<size>.<ext>`. Its path, dimensions and format are decided from the original
+right after upload — before any variant is actually rendered — so the path never needs a republish:
+until the render lands, it answers with the original's own bytes and type instead of the resized
+image. `available` on the media item (`false` while any size still lacks its path, `true` once every
+size has one) is what an editor UI should gate insertion on; a page or an admin view can otherwise
+link every `variants[]` entry from the very first read. Generation is caught up by a resumable sync
+job if needed, and the item's variants are deleted only on request. The original is never modified.
 
 Default sizes (always generated unless the config replaces them): `thumb 320 · small 640 ·
 medium 1024 · large 1600 · xl 2400` (each `inside`, WebP, quality 82). Additional sizes can be
@@ -498,7 +518,7 @@ database: variants for a size nobody declares any more are reported under `orpha
 | GET | `/admin/images/status` | – | status of all sizes, the sync job, orphaned sizes and failed variants, see below (`images.read`) |
 | POST | `/admin/images/prune` | `{ sizes: [name] }` | deletes the variants (blob + row) for the named *orphaned* sizes; `{ sizes, variants }` (`images.manage`); 400 if a name is still declared or has no variants |
 | POST | `/admin/images/retry-failed` | `{ id? }` | puts every variant that gave up back to `pending` with `attempts: 0` — all of them, or with `id` only that media item's — and does the work: for one item right away (`job: null`), for all of them by starting a sync job from the first media item; `{ variants, media, job }`, `{ variants: 0, media: 0, job: null }` when nothing had given up (`images.manage`); 404 for an unknown `id` |
-| GET | `/media/:id/variants/:file` | – | variant image bytes, `Content-Type: image/webp`; 404 for an unknown size or unknown medium; if the variant isn't ready yet (pending/error), the original bytes are served instead with header `x-kestrel-variant: pending`; if the variant has permanently given up after `maxAttempts` tries (`failed`), there is no original as a fallback, instead 404 with the reason (`images: variant <size> for media/<id> failed after <n> attempts: <error>`) (`media.read`, `identifyUser`) |
+| GET | `/media/:id/variants/:file` | – | variant image bytes; 404 only when `:file` is neither a size this item currently has nor a size it once had before a format change or a prune retired it, or the medium is unknown; otherwise, whenever no render is at that path yet — not planned, still pending, erroring, or permanently `failed` after `maxAttempts` tries — the original's own bytes and type are served instead, with header `x-kestrel-variant: original`; always `Cache-Control: no-store` (`media.read`, `identifyUser`) |
 
 **GET `/admin/images/status`** returns `{ sizes: [{ …size, source, used, variants: { done, pending,
 error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen, failed:
@@ -512,18 +532,29 @@ error, failed } }], job, orphaned: { sizes: [name], variants: n }, registrySeen,
 - `failed`: variants that gave up across all sizes, plus the twenty most recent failures with
   their last error text.
 
-`GET /media/:id` and `GET /media` additionally return
+`GET /media/:id` and `GET /media` additionally return `available` and
 `variants: [{ size, width, height, format, bytes, state, path }]`; `path` is the stable public path
-`/media/<id>/variants/<size>.<ext>`. A broken original image only produces `state: "error"` on the
-affected variant — upload and sync keep running unaffected. A cron job (every 5 minutes) calls
-`images.resume` and automatically continues a paused/failed/stuck sync job, even without a manual
+`/media/<id>/variants/<size>.<ext>`, and `width`/`height` are the planned dimensions, present in
+every state, not only once the render is `done`. `variants[]` never lists a size whose path has no
+object at all yet (still `planned`, internal to `images-default`) — every listed path always answers.
+`available` is `false` for an eligible image with at least one such size still unplaced, `true`
+otherwise (including for a non-image, an SVG or a GIF, which have no variants at all). A broken
+original image only produces `state: "error"` (then `"failed"` after `maxAttempts`) on the affected
+variant, whose path keeps answering with the original meanwhile — upload and sync keep running
+unaffected. A cron job (every 5 minutes) calls `images.resume` and automatically continues a
+paused/failed/stuck sync job and finishes any item a crash left mid-way, even without a manual
 `POST /admin/images/sync`.
 
 They also return `variantCounts: { done, pending, error, failed }`, the effective sizes tallied by
-state: a size with no row yet, or a `done` row whose spec is outdated, counts as `pending`; a row for
-a size nobody declares any more is ignored. `variantCounts` is all zero for an item with no eligible
-variants (not an image, SVG, GIF), the same as an empty `variants[]`. It lets a client tell "no
-variants apply" apart from "still generating" without polling `variants[]` itself.
+state: a size with no row yet, a row not yet placed, or a `done` row whose spec is outdated, counts
+as `pending`; a row for a size nobody declares any more is ignored. `variantCounts` is all zero for
+an item with no eligible variants (not an image, SVG, GIF), the same as an empty `variants[]`. It
+lets a client tell "no variants apply" apart from "still generating" without polling `variants[]`
+itself.
+
+A size whose format changes, and a size that is pruned, keep their old path answering with the
+original's bytes until the item itself is deleted — nothing that ever linked the old path is left
+with a dangling link, even without a republish.
 
 A render that hangs is given up on after `renderTimeoutMs` (default 30000) and counts as a normal
 failed attempt (`render timed out after <n>ms`); the render itself cannot be aborted, so it is left
@@ -555,16 +586,18 @@ failed (`error` names the cause; the last `live` output stays in place). The exa
 `renderer-plain` (an HTML skeleton) and the filesystem blob store (`data/blobs/site/`); in
 production: the site's own renderer + `blobstore-s3`.
 
-With `media` configured (`publicPath`, `collection`, `variants`, `target`), `delivery-static` scans
-every rendered text output for `<publicPath>/<id>/file` and
-`<publicPath>/<id>/variants/<size>.<ext>` references, copies the original or every finished
-(`state: done`) variant under `site/media/<folder>/<filename>` or
-`site/media/<folder>/<filename>.<size>.<ext>`, and rewrites the references in the HTML to these
-paths — an exported site can therefore serve images without a running backend. Each target is
-copied only once per process (`publishAll` forces a full refresh), so a medium re-uploaded under
-the same name is only refreshed again by `publishAll`; unknown ids or variants that aren't ready yet
-stay unchanged and get logged (a missing blob for an otherwise-known reference makes the publish
-fail). The rewriter does not match HTML-escaped slashes (e.g. `&#x2F;`).
+`delivery-static` no longer knows about media: it stores rendered output byte for byte, and never
+reads `media_items` or `images_variants`. A page reaches a medium through the `path` the media API
+already returned as data — the same URL on the export as on the live backend — so there is nothing
+for `delivery-static` to rewrite, and no spelling (`&#x2F;`, a client-recomputed URL, …) can escape a
+rewrite that no longer happens. `media-default` and `images-default` keep the export in sync
+themselves: set `publicCopy` on both (see [Media](#media) and [Image variants](#image-variants)) to
+`{ prefix: "site/" }` matching `delivery-static`'s own `prefix`, so every file anonymous visitors may
+read lands under the same `site/` tree the pages do. `reservedPaths` (typically
+`["/api", "/admin", "/media"]`) keeps `delivery-static` from ever writing a page or an asset under a
+path the origin — or a media module's public copy — owns; a page whose slug collides is rejected
+before it is saved, and a publish that still collides fails with `state: "error"` instead of writing
+the file.
 
 ### llms.txt and llms-full.txt (GEO)
 

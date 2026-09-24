@@ -1,38 +1,70 @@
 # media/default
-Uploads: bytes go to `blobstore@1` under `<prefix><folder>/<filename>`, metadata (`filename`,
-`folder`, `contentType`, `size`, `key`, `checksum`, `status`, `createdAt`, `provenance`) into the
-persistence collection `media_items`. `folder` is a path-like label (`2026/press`), tracked in `media_folders`, with
-folder-tree operations (create/rename/remove) that move blobs along. `alt`, `title`, `description`
-are per-locale texts (plain text: max 2000 characters, no control characters except tab and
-newline, `VALIDATION` otherwise – they are not HTML and are never sanitized, which would rewrite legitimate
-text such as `5 < 6`); `width`/`height` are read from the file header of PNG/JPEG/GIF/WebP uploads
-(no image library). `provenance` records who made the file (`origin: human | ai | mixed | unknown`,
-plus `tool`/`model`/`at`) and is exposed via `X-Content-Provenance` on download for every origin but
-`human` — the anchor for labelling obligations such as EU AI Act Art. 50 (not legal advice;
-labelling itself is the frontend's job). An upload without `provenance` is recorded as
-`{ origin: "unknown" }`: a missing declaration is not evidence that a human made the file, and the
-caller (the admin UI, an import script) is the one that knows.
+Uploads: bytes go to `blobstore@1` under `<prefix><id>/<name>` — one blob key per item, fixed at
+upload and never touched again by a rename or a move. Metadata (`filename`, `folder`, `location`,
+`contentType`, `size`, `key`, `checksum`, `status`, `createdAt`, `provenance`) goes into the
+persistence collection `media_items`; only a public projection of it ever leaves the API (see
+below). `folder` is a path-like label (`2026/press`), tracked in `media_folders`, with folder-tree
+operations (create/rename/remove) that touch metadata only — a folder rename never moves a blob.
+`alt`, `title`, `description` are per-locale texts (plain text: max 2000 characters, no control
+characters except tab and newline, `VALIDATION` otherwise – they are not HTML and are never
+sanitized, which would rewrite legitimate text such as `5 < 6`); `width`/`height` are read from the
+file header of PNG/JPEG/GIF/WebP uploads (no image library). `provenance` records who made the file
+(`origin: human | ai | mixed | unknown`, plus `tool`/`model`/`at`) and is exposed via
+`X-Content-Provenance` on download and on the public URL for every origin but `human` — the anchor
+for labelling obligations such as EU AI Act Art. 50 (not legal advice; labelling itself is the
+frontend's job). An upload without `provenance` is recorded as `{ origin: "unknown" }`: a missing
+declaration is not evidence that a human made the file, and the caller (the admin UI, an import
+script) is the one that knows.
+
+## One public URL per file
+
+Every item has exactly one public URL, `path`: `<publicPath>/<id>/<name>` (default `publicPath`:
+`/media`). `<name>` is decided once, at upload, from the sent filename reduced to
+`[A-Za-z0-9._-]` with the extension of the content type (`Photo 1.JPG` sent as `image/jpeg` becomes
+`Photo-1.jpg`, so a static host that derives `Content-Type` from the extension serves the right one);
+it never changes again. `media.update`'s `filename` only changes the *display* name from then on —
+neither the blob key nor `path` ever move, so renaming or moving an item needs no republish anywhere
+it is linked. A name still has to be unique per folder: the check runs against an internal
+`location` column (`folder + display filename`), never against the id-based blob key; a clash
+answers 409 with `details.field: "location"`.
+
+New step `media.serve` answers a file at its public URL (`params.id`, `params.name`): the name must
+be exactly the one the item carries, or the request is `NOT_FOUND` — this is what makes `path`
+resolve on a plain origin, with no `/api` prefix. It is cacheable for a year as `immutable`, since
+the bytes behind a given `path` never change.
+
+With `publicCopy: { prefix }` configured, this module also keeps a copy of every `ready` item's
+original at `<publicCopy.prefix><publicPath without its leading "/">/<id>/<name>` (e.g.
+`site/media/<id>/photo.jpg`) — written by the same step that makes the original visible (upload) and
+removed when the item is deleted, so a static export or a bucket served directly needs no separate
+build step for media. New step `media.syncPublic` reconciles that copy tree with the stored items
+(`{ written, removed, missing }`): it fails an `uploading` row stuck longer than
+`uploadStaleAfterMs` (default 15 minutes, an abandoned upload) the same way a normal failure is
+handled, writes a missing or mismatched copy, and removes a copy whose item is gone or whose file no
+longer matches — never touching anything deeper than one path segment under `<id>/`, since that is
+where `images-default`'s own variant copies live. Boot fails if the copy tree and this module's own
+storage `prefix` overlap, if `publicCopy` is set but no pipeline runs `media.serve`, or if a pipeline
+runs `media.syncPublic` without `publicCopy` set.
 
 Three key families share the blobstore, with three owners:
 
 | Key | Owner | What it is |
 |---|---|---|
-| `media/<folder>/<file>` | this module (`prefix` configurable) | the original bytes, one blob per `media_items` row |
-| `media-variants/<id>/<size>.webp` | `images/default` | the generated variants of a medium; this module ignores them in `media.reconcile` |
-| `site/media/<folder>/<file>.<size>.webp` | `delivery-static` | the copies made at publish time (`prefix` + `media.target` there), referenced by the rendered HTML for static delivery |
+| `media/<id>/<name>` | this module (`prefix` configurable) | the original bytes, one blob per `media_items` row |
+| `media-variants/<id>/<size>.<ext>` | `images/default` | the generated variants of a medium; this module ignores them in `media.reconcile` |
+| `site/media/<id>/<name>` and `site/media/<id>/variants/<size>.<ext>` | this module and `images/default`, each writing only its own depth-1 files | the public copies, served directly by a static host or a bucket in front of the origin |
 
-The row is the truth, the blobstore only the storage. `media_items.key` is `unique`: a blob key
-belongs to exactly one row, so two concurrent uploads of the same name in the same folder end as one
-item and one `CONFLICT`, never as two rows over one blob. An upload writes the row first
-(`status: "uploading"`, `checksum` = sha256 of the bytes as hex), then the blob, then
-`status: "ready"`; a failing blob write leaves `status: "failed"` and returns the blobstore's
-failure, so the pipeline still fails. Only `ready` items are returned by `media.get`, `media.list`
-and `media.download` (`NOT_FOUND` / filtered out otherwise), and a `failed` row is replaced when the same name is uploaded
-again, so a broken attempt never blocks a filename. `checksum` and `status` are additive: rows
-written before them read as `checksum: null` / `status: "ready"`. Deleting removes the row first
-and the blob after — but only once no other row points at that key — a failing blob delete is
-logged, not fatal, and `media.reconcile` finds what is left over. A rename moves the blob first and
-moves it back if the row update fails.
+The row is the truth, the blobstore only the storage. `media_items.key` is `unique`, and is always
+id-based, so it never collides on its own; the folder+filename clash check runs against `location`
+instead (see above). An upload writes the row first (`status: "uploading"`, `checksum` = sha256 of
+the bytes as hex), then the private blob, then (if `publicCopy` is set) the public copy, then
+`status: "ready"`; a failing write at any of those leaves `status: "failed"` and returns the
+blobstore's failure, so the pipeline still fails. Only `ready` items are returned by `media.get`,
+`media.list` and `media.download` (`NOT_FOUND` / filtered out otherwise), and a `failed` row is
+replaced when the same name is uploaded again, so a broken attempt never blocks a filename.
+`media.remove` and `media.removeFolder` remove the public copy, then the private blob, then the row,
+then sweep the item's own files once more — so a retry after a partial failure completes, and a
+failing blob delete now fails the step instead of only being logged.
 
 Uploading is idempotent: same folder, same filename and the same bytes return the item that is
 already there — no second row, no second blob write, no second variant folder — and `media.upload`
@@ -47,7 +79,18 @@ depending on an image library.
 
 Config: `allowedTypes` (`image/*`, `application/pdf`, `*`), `deniedTypes` (default
 `image/svg+xml`, `text/html`, `application/xhtml+xml` — they can carry scripts), `maxBytes`,
-`prefix` (default `media/`, must end with `/`), `locales`/`defaultLocale`.
+`prefix` (default `media/`, must end with `/`), `publicPath` (default `/media`), `publicCopy`
+(optional `{ prefix }`), `uploadStaleAfterMs` (default 15 minutes), `anonymousList` (`"ids"` default,
+or `"all"` for a public catalogue), `locales`/`defaultLocale`.
+
+## Anonymous reads
+
+`media.get`, `media.serve` and `images.serve` answer an anonymous caller the same as a signed-in one
+(a file's URL is meant to be public once a page links it). `media.list` and `media.listFolders` are
+different: without a signed-in caller, `media.list` answers only when the request names `ids`
+explicitly (401 `UNAUTHENTICATED` otherwise), and `media.listFolders` always needs a signed-in
+caller. Set `anonymousList: "all"` to restore anonymous listing for a deployment that wants a public
+media catalogue; it is never the default.
 
 Steps: `media.upload` processes every file in `ctx.files`, in the order given, with the same checks
 applied to each. A single file returns the item unchanged. Two or more files return
@@ -56,25 +99,26 @@ or conflicting file, and `ids` lists only the newly stored items — one bad fil
 rest, so the response is still 200. A `TRANSIENT` blobstore or database failure is the exception: it
 is not per file, and fails the whole request. Other steps: `media.get`, `media.list` (folder, recursive, search, sort, ids, paging),
 `media.listFolders`, `media.createFolder`, `media.renameFolder`, `media.listFolderItems` (for
-`references.guardAll:media`), `media.removeFolder`, `media.update`, `media.download`,
-`media.remove`, `media.reconcile`, `media.reconcileDelete`, `media.export:<dir>`.
+`references.guardAll:media`), `media.removeFolder`, `media.update`, `media.download`, `media.serve`,
+`media.remove`, `media.reconcile`, `media.reconcileDelete`, `media.syncPublic`, `media.export:<dir>`.
 
 Error codes per step (every step can also answer `TRANSIENT` when the blobstore or the database is
 unavailable):
 
 | Step | codes |
 |---|---|
-| `media.upload` | `VALIDATION` (no file, invalid folder or provenance), `UNSUPPORTED` (type not allowed), `PAYLOAD_TOO_LARGE` (over `maxBytes`), `CONFLICT` (filename taken by other bytes; `details.field: "key"`) |
+| `media.upload` | `VALIDATION` (no file, invalid folder or provenance), `UNSUPPORTED` (type not allowed), `PAYLOAD_TOO_LARGE` (over `maxBytes`), `CONFLICT` (name taken in that folder; `details.field: "location"`) |
 | `media.get` | `VALIDATION` (unknown locale), `NOT_FOUND` |
-| `media.list` | `VALIDATION` (invalid folder, unknown locale) |
-| `media.update` | `VALIDATION` (name, folder, provenance or text), `NOT_FOUND`, `CONFLICT` (filename taken) |
-| `media.download` | `NOT_FOUND` |
+| `media.list` | `VALIDATION` (invalid folder, unknown locale), `UNAUTHENTICATED` (no identity and no `ids`, unless `anonymousList: "all"`) |
+| `media.listFolders` | `UNAUTHENTICATED` (no identity, unless `anonymousList: "all"`) |
+| `media.update` | `VALIDATION` (name, folder, provenance or text), `NOT_FOUND`, `CONFLICT` (name taken in that folder) |
+| `media.download`, `media.serve` | `NOT_FOUND` |
 | `media.remove` | `VALIDATION` (missing id) |
 | `media.createFolder` | `VALIDATION` |
 | `media.renameFolder` | `VALIDATION`, `NOT_FOUND`, `CONFLICT` (target exists or is inside the source) |
 | `media.listFolderItems` | `VALIDATION`, `NOT_FOUND`, `CONFLICT` (folder not empty and no `recursive`) |
 | `media.removeFolder` | `VALIDATION`, `NOT_FOUND` |
-| `media.listFolders`, `media.reconcile`, `media.reconcileDelete`, `media.export:<dir>` | – |
+| `media.reconcile`, `media.reconcileDelete`, `media.syncPublic`, `media.export:<dir>` | – |
 
 `media.reconcile` lists the blobs under `prefix` and compares them with the `media_items` keys:
 `{ blobsWithoutRow, rowsWithoutBlob }`. With `delete: true` it deletes the blobs nothing points at;
@@ -94,13 +138,12 @@ produce the internal metadata-sidecar suffix.
 
 `media.list`'s `q` is a case-sensitive substring match on the filename.
 
-`media.update` validates the whole patch, text fields included, before moving any blob, so a
-rejected patch never leaves a moved blob without a matching row. Retrying a move that failed partway
-finds the blob already at the target and only has to update the row.
+`media.update` validates the whole patch, text fields included, before touching the row; it never
+calls the blobstore, since neither a rename nor a move ever changes a key.
 
-At setup, item keys already on disk are migrated automatically to `<prefix><folder>/<filename>`. An
-item whose folder or filename does not match what the sanitizing rules for uploads would produce, or
-whose target key would end in `.meta.json`, is skipped and logged.
+No data migration: setup fails on start if a stored item's key is not `<prefix><id>/<name>`, naming
+the first such item and the count of items affected. A store from a version before this scheme must
+start empty.
 
 Not included: image resizing, tags, linking media to content documents.
 

@@ -1,9 +1,33 @@
 # images/default
-One variant per effective size for every raster image in `media-default`: generated on upload,
-completed/repaired by a resumable sync job, listed on media metadata, served by path, exportable,
-pruned only on explicit request. The original is never touched. Effective sizes = config/default
-sizes merged with `images.register`ed ones (a name colliding with a config size is `CONFLICT`).
-The default sizes render WebP; a size may set `format: "original"` to keep the source format.
+One variant per effective size for every raster image in `media-default`, at its own public URL
+before it is ever rendered: placed on upload, rendered in the background or inline depending on the
+event delivery mode, completed/repaired by a resumable sync job, listed on media metadata, served by
+path, exportable, pruned or retired only on explicit request. The original is never touched.
+Effective sizes = config/default sizes merged with `images.register`ed ones (a name colliding with a
+config size is `CONFLICT`). The default sizes render WebP; a size may set `format: "original"` to
+keep the source format (JPEG for a type sharp cannot re-encode as itself, e.g. HEIC or TIFF).
+
+## Paths exist before rendering
+
+A size's path, dimensions and format are decided from the *original* — never from the render — the
+moment the item is placed: `plannedDimensions` computes the exact width/height an `inside` or
+`cover` fit will produce from the oriented original (after EXIF rotation), and the format follows
+the size's own `format` (`webp`, or the type's native format for `original`). This is why a variant's
+`width`/`height` are already meaningful before any render ran, and why the render always produces
+exactly the planned pixels — the client never guesses them.
+
+Placing and rendering are two different pieces of work. New step `images.plan` places every
+effective size of one item: it creates the variant row (state `planned`) and, with `publicCopy`
+configured, writes the original's own bytes to the variant's public path — only once that write
+lands does the row turn `pending` and the item count as available. `images.generate` does the
+rendering: it replaces the placeholder (or, in the direct event-delivery mode, renders straight into
+the path without ever writing a placeholder first) and turns the row `done`. With a queuing event
+delivery module, an upload's placing runs in its own short pipeline (`images.plan`, then
+`events.emit:images.planned`) so an item becomes usable without waiting for a render; rendering
+subscribes to `images.planned` and can run in its own lane. With inline event delivery,
+`images.generate` alone does both in the upload request, and a size it could not render there is
+left `planned` and picked up by this module's own background loop right after the request — never
+inside it.
 
 Sizes are declared in code, so none of them are stored: config sizes come from the config on every
 boot and registered sizes live in the process that took them, rebuilt by every `images.register`
@@ -11,36 +35,80 @@ call. A host that registers sizes must therefore register them at boot — until
 `images.listSizes` and `images.serve` only know the config/default sizes, and `images.readStatus`
 reports nothing as orphaned (`registrySeen: false`) because it cannot yet tell a leftover from a
 size that has not been registered again yet. Size rows written by earlier versions are deleted once
-at setup, with a log line naming the count. `images_variants` is unaffected: variants stay in the
-database, and `images.readStatus` reports variants of sizes nobody declares any more under
-`orphaned`, which `images.prune` deletes. Config: `sizes` (defaults `thumb 320, small 640, medium 1024, large 1600, xl 2400`, all
-`inside`/`webp`/82), `prefix`, `publicPath`, `media.collection`, `chunk`, `staleAfterMs`,
-`maxAttempts` (default 5), `renderTimeoutMs` (default 30000).
+at setup, with a log line naming the count. Whenever the effective size set changes — a new size, or
+an existing one with a new width/height/fit/format/quality — this module compares it against the
+stored rows and starts its background sync job to place and render the difference on every existing
+item, raising `media.updated` (see below) per chunk it touches. `images_variants` is otherwise
+unaffected by a size change alone: variants stay in the database, and `images.readStatus` reports
+variants of sizes nobody declares any more under `orphaned`, which `images.prune` retires (see
+below).
+
+Config: `sizes` (defaults `thumb 320, small 640, medium 1024, large 1600, xl 2400`, all
+`inside`/`webp`/82), `prefix`, `publicPath` (default `/media`), `publicCopy` (optional `{ prefix }`),
+`media.collection`, `chunk`, `staleAfterMs`, `maxAttempts` (default 5), `renderTimeoutMs` (default
+30000).
 Steps: `images.register` (`VALIDATION` on an empty or malformed list, `CONFLICT` on a config
-collision), `images.listSizes`, `images.generate` (id from params/payload/event; `VALIDATION`
-without an id, `NOT_FOUND` for an unknown one), `images.sync` (`CONFLICT` while a fresh job runs),
-`images.resume` (cron), `images.retryFailed` (`NOT_FOUND` for an unknown id), `images.prune`
-(`VALIDATION` for a name that is still declared or has no variants), `images.readStatus`,
-`images.remove` (`VALIDATION` without an id), `images.removeMany` (after `media.listFolderItems`, reads
-`result.ids`), `images.attach` (adds `variants[]` and `variantCounts` to `result`), `images.serve` (binary;
-`VALIDATION` without id/file, `NOT_FOUND` otherwise), `images.export:<dir>` (nests its counts under
-their own key in `result`, so running it after `media.export` in one pipeline keeps that step's counts).
-Every step passes a persistence or blobstore failure through unchanged, so a busy database is a
-retryable `TRANSIENT` (503).
+collision), `images.listSizes`, `images.plan` (id from params/payload/event; places without
+rendering), `images.generate` (id from params/payload/event; `VALIDATION` without an id, `NOT_FOUND`
+for an unknown one), `images.sync` (`CONFLICT` while a fresh job runs), `images.resume` (cron: also
+places and renders any item still `planned`, or any recent item with no rows at all), `images.retryFailed`
+(`NOT_FOUND` for an unknown id), `images.prune` (`VALIDATION` for a name that is still declared or
+has no variants; retires rather than deletes the path), `images.readStatus`, `images.remove`
+(`VALIDATION` without an id), `images.removeMany` (after `media.listFolderItems` or
+`media.removeFolder`, reads `result.ids`), `images.attach` (adds `available` and `variants[]`/
+`variantCounts` to `result`), `images.serve` (binary; `VALIDATION` without id/file, `NOT_FOUND`
+otherwise), `images.syncPublic` (reconciles the public copy tree), `images.export:<dir>` (nests its
+counts under their own key in `result`, so running it after `media.export` in one pipeline keeps
+that step's counts). Every step passes a persistence or blobstore failure through unchanged, so a
+busy database is a retryable `TRANSIENT` (503).
+
+## Public copies
+
+With `publicCopy: { prefix }` configured, every variant's public path also gets a copy at
+`<publicCopy.prefix><publicPath without its leading "/">/<id>/variants/<size>.<ext>` (e.g.
+`site/media/<id>/variants/thumb.webp`) — the original's bytes until the render replaces them at the
+same path, so a static export or a bucket served directly always has *something* at every listed
+path, never a 404. `images.syncPublic` reconciles that tree: it removes copies (and rows) of items
+that are gone, places a ready item missing a size, rewrites a copy that does not match its row, and
+removes a foreign file — all restricted to files directly under `<id>/variants/`, never anything
+this module did not put there. Boot fails if the copy tree overlaps this module's own storage
+`prefix`, if `publicCopy` is set but no pipeline runs `images.serve`, or if a pipeline runs
+`images.syncPublic` without `publicCopy` set.
+
+## Retired paths
+
+A path, once listed, keeps answering until the item itself is deleted — even after the size behind
+it stops existing. A format change (`webp` ↔ `original`, or one `original` type to another) retires
+the *old* path: a record in `images_retired` remembers it, its copy is overwritten with the
+original's bytes, and the size is re-planned at its *new* path. `images.prune` does the same for a
+size that is no longer declared at all: retire, overwrite the copy with the original, delete the
+private blob and the variant row — the path stays, `images.prune`'s `{ sizes, variants }` counts what
+it touched. `images.serve` and the content rule below treat a retired file exactly like a variant row
+that never got its render: always the original's bytes and type. This is what lets a page published
+before a size or format changed keep working without a republish; only `images.attach`'s own
+`variants[]` stops listing the retired path for pages rendered afterwards.
+
+## `media.updated`
+
+`images-default` raises `media.updated` (`{ id: null, ids, identity: null, params: {} }`) through the
+optional `events@1` contract — declared in `emits`, never required — whenever it changes what a
+page would need to re-render for: an item it placed (made `available`), the items a size-set change
+or `images.prune` touched. A rejected emit (no subscriber, or a subscriber that throws) is logged
+with the affected ids and does not undo the change; without any `events@1` provider nothing is
+raised at all, since nothing could be subscribed.
 
 ## Behaviour
 
 Concurrent requests to generate variants for the same media item share one render instead of running
 it twice; two callers that start a sync job in the same instant share the same start, so only one job
-row is ever created.
+row is ever created. Placing never runs more than four public-copy writes at a time.
 
-Changing a size's format regenerates its variant under a new storage key; the previous blob is removed
-as part of that rewrite.
-
-`variantCounts` (`{ done, pending, error, failed }`) tallies the effective sizes for one item: a size
-with no row yet, or a `done` row whose spec no longer matches the effective size, counts as `pending`;
-a row for a size nobody declares any more is ignored. A non-eligible item (not an image, SVG, GIF) is
-all zero, the same as an empty `variants[]`.
+`available` (on `images.attach`'s output) is `false` for an eligible image that has at least one size
+still `planned` (no object at its path yet), `true` once every size has one — including for a
+non-eligible item (not an image, SVG, GIF), which has no variants at all and is always available.
+`variants[]` never lists a `planned` size; `variantCounts` (`{ done, pending, error, failed }`)
+counts a `planned` row as `pending` too, alongside a size with no row yet or a `done` row whose spec
+no longer matches the effective size; a row for a size nobody declares any more is ignored.
 
 Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered HTML.
 
@@ -48,24 +116,29 @@ Not included: AVIF, request-time resizing, rewriting `src`/`srcset` in delivered
 
 **A crash mid-render** leaves the variant row at `state: "pending"` with the attempt already
 counted, never at a stale `"done"`. The next `images.generate` or sync pass picks it up, and
-`images.serve` hands out the full-size original meanwhile (header `x-kestrel-variant: pending`).
+`images.serve` hands out the full-size original meanwhile (header `x-kestrel-variant: original`).
 A job row whose `updatedAt` is older than `staleAfterMs` counts as abandoned, so `images.sync` and
 the `images.resume` cron take it over instead of answering `CONFLICT`. The job's counters are
 written after each image rather than only at the end of a chunk, so a long-running chunk is never
-mistaken for a stalled job by `images.readStatus` or the `staleAfterMs` takeover.
+mistaken for a stalled job by `images.readStatus` or the `staleAfterMs` takeover. `images.resume`
+also places and renders any row still stuck at `planned` (a placement that never finished) and any
+media item created in the last 24 hours with no rows at all (a generation that never started).
 
 **A render that hangs** (a pathological image that keeps sharp busy, a blocked file descriptor) is
 given up on after `renderTimeoutMs`. sharp cannot be aborted, so the render is left to finish in the
 background and its result is dropped: the variant already carries the failed attempt, and writing
 the late result would resurrect a variant the admin was told had failed. The timeout counts as a
 normal failed attempt with the error text `render timed out after <n>ms`. Without it the render
-would hold its slot for good and the sync job would never reach the next image.
+would hold its slot for good and the sync job would never reach the next image. A `planned` row
+whose render fails this way is left `planned`, not counted as an attempt, and handed to the
+background loop to place right after the request.
 
 **Repeated failure** is bounded by `maxAttempts`: the last failure sets `state: "failed"` instead of
 `"error"`, and generate/sync/resume skip the variant from then on, so one broken original cannot
 burn the whole budget of the job forever. `images.serve` does not hide such a variant behind the
-original: a `pending` one still falls back to it, a `failed` one is `NOT_FOUND` naming the attempt
-count and the error. `images.readStatus` counts `failed` per size next to `done`/`pending`/`error`
+original: it keeps answering with the original's bytes and type, marked `x-kestrel-variant: original`,
+exactly like a `pending` one — a variant never 404s once it has been placed.
+`images.readStatus` counts `failed` per size next to `done`/`pending`/`error`
 and adds `failed: { variants, recent }` — the totals over all sizes plus the twenty most recently
 failed variants with `mediaId`, `size`, `attempts`, `error` and `updatedAt`, which is what an admin
 UI shows.
