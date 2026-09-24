@@ -207,9 +207,9 @@ describe("root package table", () => {
     expect(rows).toEqual(["| `@michaelthielemann/kestrel` | Core |", "| `@michaelthielemann/kestrel-widget-default` | Steps widget.get/list |"]);
   });
 
-  it("has 30 rows in the fixed-then-alphabetical order, against the real packages directory", () => {
+  it("has 32 rows in the fixed-then-alphabetical order, against the real packages directory", () => {
     const ordered = orderPackages(realPackages());
-    expect(ordered).toHaveLength(31);
+    expect(ordered).toHaveLength(32);
     expect(ordered.slice(0, 4).map((p) => p.name)).toEqual(ROOT_ORDER);
     const rest = ordered.slice(4).map((p) => p.name);
     expect(rest).toEqual([...rest].sort((a, b) => a.localeCompare(b)));

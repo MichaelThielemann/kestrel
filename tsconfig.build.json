@@ -92,6 +92,9 @@
       "path": "./packages/site-default"
     },
     {
+      "path": "./packages/upgrade"
+    },
+    {
       "path": "./packages/validate-jsonschema"
     }
   ]

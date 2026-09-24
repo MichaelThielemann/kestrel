@@ -1,0 +1,62 @@
+{
+  "name": "@michaelthielemann/kestrel-upgrade",
+  "version": "5.8.0",
+  "description": "5.8 -> 6.0 upgrade assistant: check, fix and data commands, an exported sandbox helper and a plugin API a host layer can register rules and a project loader through.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "bin": {
+    "kestrel-upgrade": "./src/cli.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./plugin": "./src/plugin.ts",
+    "./sandbox": "./src/sandbox.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./plugin": {
+        "types": "./dist/plugin.d.ts",
+        "default": "./dist/plugin.js"
+      },
+      "./sandbox": {
+        "types": "./dist/sandbox.d.ts",
+        "default": "./dist/sandbox.js"
+      }
+    },
+    "bin": {
+      "kestrel-upgrade": "./dist/cli.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json"
+  },
+  "peerDependencies": {
+    "@michaelthielemann/kestrel": "workspace:^"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.26.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@michaelthielemann/kestrel": "workspace:*",
+    "vitest": "^3.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelThielemann/kestrel.git",
+    "directory": "packages/upgrade"
+  },
+  "homepage": "https://github.com/MichaelThielemann/kestrel#readme",
+  "bugs": "https://github.com/MichaelThielemann/kestrel/issues"
+}

@@ -279,6 +279,23 @@ Net changes since 5.8.1.
   process that answers, since it started (`scope: "process"`). `EVENT_DELIVERY_STEPS` lists it next
   to `events.emit` and `events.relay`. A failed delivery never makes `health()` report the instance
   unhealthy.
+- `core`: `checkBoot(input, { setup })` (root export) runs every check `boot()` runs and returns
+  every problem as data instead of throwing at the first one: `errors: BootProblem[]` (`errors[0]`
+  is what `boot()` throws), `warnings: BootWarning[]`, and `notChecked` for a module or pipeline a
+  problem it depends on made impossible to check safely. `setup` has no default —
+  `setup()`/`attach()`/`teardown()` reach whatever storage the selected modules' config names — and
+  is `"none"` (no module code beyond `configSchema`), `"all"`, or `{ only: [...] }` naming the config
+  `use` entries allowed to run. `KestrelBootError` gains a `readonly code: BootErrorCode`; codes are
+  covered by semver from 6.0.0, `reason` and every message text are not. Per-item loaders
+  (`loadModule`, `pipelineFiles`, `loadPipelineFile`) let a caller load a project file by file and
+  keep going after one failure.
+- A new package, `@michaelthielemann/kestrel-upgrade` (bin `kestrel-upgrade`, commands `check`,
+  `fix`, `data`), finds the 5.8 -> 6.0 breaks a project meets, previews a mechanical fix for the
+  ones it can edit, and reads a database copy for the one check only stored data answers. It never
+  installs, commits, pushes or reaches the network; see `docs/upgrading.md`. It exports a sandbox
+  helper (`@michaelthielemann/kestrel-upgrade/sandbox`) that composes with `checkBoot()` for a CI
+  gate, and a plugin API (`@michaelthielemann/kestrel-upgrade/plugin`) a host CLI registers its own
+  project loader and rules through instead of shipping a second copy of the engine.
 
 ### Changed
 

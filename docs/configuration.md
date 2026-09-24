@@ -127,6 +127,30 @@ HTTP and writes an OpenAPI 3.1 document:
 kestrel-openapi --out openapi.json [--title t] [--version v] [--server url] [--mount /api]
 ```
 
+## Checking a boot without starting it
+
+`checkBoot(input, { setup })`, exported from the package root, runs every check `boot()` runs —
+config, module order, module config, setup, step registration, pipeline resolution, triggers,
+dataflow, hooks, output declarations, attach — and returns every problem as data (`errors`,
+`warnings`, `notChecked`) instead of throwing at the first one. `setup` has no default: `"none"`
+runs no module code beyond `configSchema`, `"all"` runs every module's `setup()`, and
+`{ only: [...] }` names the config `use` entries whose `setup()` may run, since `setup()`,
+`attach()` and `teardown()` reach whatever storage a module's config names. Each problem's `code` is
+covered by semver from 6.0.0 and a reader must handle one it does not recognize; `reason` and every
+message text are not covered and may change in any release.
+
+`@michaelthielemann/kestrel-upgrade` (`docs/upgrading.md`) builds on this: its exported
+`sandboxBootInput()` rewrites a loaded project's storage modules to write into a scratch directory,
+so a CI gate can call `checkBoot()` on a real project without touching it:
+
+```ts
+import { checkBoot } from "@michaelthielemann/kestrel";
+import { sandboxBootInput } from "@michaelthielemann/kestrel-upgrade/sandbox";
+
+const box = sandboxBootInput(input, { dir: scratchDir });
+const result = await checkBoot(box.input, { setup: box.setup });
+```
+
 ## Logging
 
 The `kestrel` binary logs JSON lines to stdout: one `step` line per step (`runId`, pipeline, step,
