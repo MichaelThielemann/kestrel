@@ -1,4 +1,5 @@
 import type { Content, ContentDocument, ContentError, ContentModel, LocaleOptions } from "@michaelthielemann/kestrel-contracts/content";
+import { nonLocalizedFilter, publishedLocale } from "@michaelthielemann/kestrel-contracts/content-locale";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { LinkTarget } from "@michaelthielemann/kestrel-contracts/links";
 import { INTERNAL_REF, collectInternalRefs } from "@michaelthielemann/kestrel-contracts/links";
@@ -99,35 +100,20 @@ export function createSiteDefault(content: Content): SiteDefault {
       if (!parsed) return ok(null);
       const read: LocaleOptions = {};
       if (parsed.locale !== undefined) read.locale = parsed.locale;
-      if (rules.fallback) read.fallback = true;
       const slug = parsed.slug === "" ? rules.home : parsed.slug;
       const page = await content.list(type, { ...rules.filter, [rules.slugField]: slug }, { ...read, limit: 1 });
       if (isErr(page)) return err(transientOnly(page.error));
-      let doc: ContentDocument | undefined = page.value.items[0];
-      if (!doc && read.fallback && read.locale !== undefined && read.locale !== model.defaultLocale) {
-        const fields = model.types[type]?.fields ?? {};
-        const isLocalized = (field: string): boolean => {
-          const raw = fields[field];
-          return raw !== undefined && typeof raw !== "string" && raw.localized === true;
-        };
-        const shared = Object.fromEntries(Object.entries(rules.filter).filter(([f]) => !isLocalized(f)));
+      let candidate: ContentDocument | undefined = page.value.items[0];
+      if (!candidate && rules.fallback && read.locale !== undefined && read.locale !== model.defaultLocale) {
+        const shared = nonLocalizedFilter(model, type, rules.filter);
         const viaDefaultPage = await content.list(type, { ...shared, [rules.slugField]: slug }, { limit: 1 });
         if (isErr(viaDefaultPage)) return err(transientOnly(viaDefaultPage.error));
-        const viaDefault = viaDefaultPage.value.items[0];
-        if (viaDefault) {
-          const strictResult = await content.get(type, viaDefault.id, { locale: read.locale });
-          if (isErr(strictResult)) return err(transientOnly(strictResult.error));
-          const strict = strictResult.value;
-          const localizedFiltersHold = Object.entries(rules.filter)
-            .filter(([f]) => isLocalized(f))
-            .every(([f, v]) => strict?.[f] === v);
-          if (localizedFiltersHold) {
-            const finalResult = await content.get(type, viaDefault.id, read);
-            if (isErr(finalResult)) return err(transientOnly(finalResult.error));
-            doc = finalResult.value ?? undefined;
-          }
-        }
+        candidate = viaDefaultPage.value.items[0];
       }
+      if (!candidate) return ok(null);
+      const viewResult = await publishedLocale(content, model, type, candidate.id, read.locale, rules.filter, rules.fallback);
+      if (isErr(viewResult)) return err(transientOnly(viewResult.error));
+      const doc = viewResult.value;
       if (!doc) return ok(null);
       const effective = parsed.locale ?? model.defaultLocale;
       return ok(effective === undefined ? doc : { ...doc, _locale: effective });

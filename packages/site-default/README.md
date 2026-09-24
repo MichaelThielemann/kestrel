@@ -7,7 +7,10 @@ strings and richtext, `{ type: "internal", collection, id }` objects) to public 
 document's locale; targets not served there become `href="#" data-kestrel-broken="…"` / `broken: true`,
 and `_links` maps every referenced id to its path. With `?fallback=true` a locale without its own
 slug is found through the default locale, but localized filters are re-checked strictly, so a locale
-that is not published itself stays unserved.
+that is not published itself stays unserved and is never replaced by another locale's content. An
+empty field of a served locale is filled from the default locale only when the default locale's own
+values pass the filter too; with no such default the field stays empty. `_translations` lists only
+the locales that pass the filter themselves.
 Steps: `site.resolve:<t>?home=home&status=published&fallback=true` (`NOT_FOUND` otherwise) and
 `site.resolveLinks:<t>?…` with the same arguments. Config `{}`.
 Not included: rendering, storage, redirects (see delivery-static, redirects-default).

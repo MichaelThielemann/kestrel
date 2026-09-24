@@ -78,6 +78,33 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
         expect(await resolve("en", { fallback: false })).toMatchObject({ title: "Home" });
       });
 
+      describe("field fallback only from a published default locale", () => {
+        it("fills an empty field from the default locale when the default locale is published", async () => {
+          const doc = expectOk(await content.create("pages", { slug: "erste", title: "Erste", status: "published", body: "Text DE" }));
+          expectOk(await content.update("pages", doc.id, { slug: "first", title: "First", status: "published" }, { locale: "en" }));
+          expect(await resolve("en/first")).toMatchObject({ body: "Text DE" });
+        });
+
+        it("leaves the field empty when the default locale is only a draft", async () => {
+          const doc = expectOk(await content.create("pages", { slug: "zweite", title: "Zweite", status: "draft", body: "Text DE" }));
+          expectOk(await content.update("pages", doc.id, { slug: "second", title: "Second", status: "published" }, { locale: "en" }));
+          expect(await resolve("en/second")).toMatchObject({ body: null });
+        });
+
+        it("never uses a field the translation already has, whatever the default locale's status", async () => {
+          const doc = expectOk(await content.create("pages", { slug: "dritte", title: "Dritte", status: "draft", body: "Text DE" }));
+          expectOk(await content.update("pages", doc.id, { slug: "third", title: "Third", status: "published", body: "Text EN" }, { locale: "en" }));
+          expect(await resolve("en/third")).toMatchObject({ body: "Text EN" });
+        });
+      });
+
+      it("keeps a locale out of _translations once it fails the filter itself, even with complete fields", async () => {
+        const doc = expectOk(await content.create("pages", { slug: "vierte", title: "Vierte", status: "published" }));
+        expectOk(await content.update("pages", doc.id, { slug: "fourth", title: "Fourth", status: "draft" }, { locale: "en" }));
+        expect(await resolve("vierte")).toMatchObject({ _translations: { de: true, en: false } });
+        expect(await resolve("en/fourth")).toBeNull();
+      });
+
       it("prefixPrimary requires the locale prefix for every locale", async () => {
         expect(await resolve("", { prefixPrimary: true })).toBeNull();
         expect(await resolve("kontakt", { prefixPrimary: true })).toBeNull();
