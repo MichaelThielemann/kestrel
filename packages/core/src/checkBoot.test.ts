@@ -176,6 +176,89 @@ describe("checkBoot: collecting every problem", () => {
     expect(check.notChecked).not.toContainEqual(expect.objectContaining({ name: "good/store" }));
   });
 
+  it("does not report svg-without-sanitizer when the only module that could provide it was not set up", async () => {
+    const sanitizer = defineModule({
+      name: "sanitize/svg",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ svg: async (ctx: Context) => ok(ctx) }),
+      describe: () => ({ svg: { summary: "sanitize", reads: [], writes: [] } }),
+    });
+    const input: BootInput = { config: { modules: [{ use: "./sanitize-svg", config: {} }], triggers: [], http: { inlineTypes: ["image/svg+xml"] } }, modules: [sanitizer], pipelines: [], logger: silentLogger };
+    const check = await checkBoot(input, { setup: "none" });
+    expect(check.errors).toEqual([]);
+  });
+
+  it("does not report event-hook-missing when the only module that could provide it was not set up", async () => {
+    const hookModule = defineModule({
+      name: "hook/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ noop: async (ctx: Context) => ok(ctx) }),
+      describe: () => ({ noop: { summary: "no-op", reads: [], writes: [] } }),
+      triggers: { event: () => () => {} },
+    });
+    const onEvent = definePipeline({ name: "onEvent", steps: ["hook.noop"] });
+    const input: BootInput = { config: { modules: [{ use: "./hook-fake", config: {} }], triggers: [{ event: "x", pipeline: "onEvent" }] }, modules: [hookModule], pipelines: [onEvent], logger: silentLogger };
+    const check = await checkBoot(input, { setup: "none" });
+    expect(check.errors).toEqual([]);
+  });
+
+  it("does not report atomic-scope-missing when the only module that could provide it was not set up", async () => {
+    const scopeModule = defineModule({
+      name: "scope/fake",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      atomicScope: async (_instance, _info, body) => ({ kind: "settled", verdict: await body() }),
+    });
+    const grouped = definePipeline({ name: "grouped", steps: [{ atomic: ["good.ping"] }] });
+    const good = goodProvider();
+    const input: BootInput = { config: { modules: [{ use: "./scope-fake", config: {} }, { use: "./good-store", config: {} }], triggers: [] }, modules: [scopeModule, good], pipelines: [grouped], logger: silentLogger };
+    const check = await checkBoot(input, { setup: "none" });
+    expect(check.errors.map((e) => e.code)).not.toContain("atomic-scope-missing");
+  });
+
+  it("does not warn unemitted-event for an event a not-checked pipeline's own definition still emits", async () => {
+    const onEvent = definePipeline({ name: "onEvent", steps: ["good.ping"] });
+    const emitter = definePipeline({ name: "emitter", steps: ["good.create", "events.emit:x"] });
+    const good = goodProvider();
+    const input: BootInput = { config: { modules: [{ use: "./good-store", config: {} }], triggers: [{ event: "x", pipeline: "onEvent" }] }, modules: [good], pipelines: [onEvent, emitter], logger: silentLogger };
+    const check = await checkBoot(input, { setup: "none" });
+    expect(check.warnings.map((w) => w.code)).not.toContain("unemitted-event");
+  });
+
+  it("a step that fails to register makes a pipeline using it not-checked, without a duplicate unknown-step error", async () => {
+    const broken: ModuleDefinition = {
+      name: "broken/module",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ ok: async (ctx: Context) => ok(ctx), bad: async (ctx: Context) => ok(ctx) }),
+      describe: () => ({ ok: { summary: "fine", reads: [], writes: [] } }),
+    };
+    const usesBadStep = definePipeline({ name: "usesBadStep", steps: ["broken.bad"] });
+    const input: BootInput = { config: { modules: [{ use: "./broken-module", config: {} }], triggers: [] }, modules: [broken], pipelines: [usesBadStep], logger: silentLogger };
+    const check = await checkBoot(input, { setup: "all" });
+    expect(check.errors).toHaveLength(1);
+    expect(check.errors[0]?.code).toBe("step-undescribed");
+    expect(check.notChecked).toContainEqual({ kind: "pipeline", name: "usesBadStep", because: 'depends on step "broken.bad" which failed to register' });
+  });
+
   it("never starts a trigger: an event hook is never asked to subscribe", async () => {
     const eventSpy = vi.fn(() => () => {});
     const hookModule = defineModule({

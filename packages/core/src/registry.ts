@@ -60,6 +60,7 @@ type Entry =
 
 export class StepRegistry {
   private readonly entries = new Map<string, Entry>();
+  private readonly unregistered = new Set<string>();
 
   /**
    * Registers every step of one module. Given a collecting sink, a problem with one step (not a
@@ -72,6 +73,7 @@ export class StepRegistry {
       const name = `${prefix}.${key}`;
       if (typeof fn !== "function") {
         sink.fail("step-not-function", owner, `step "${name}" is not a function`, { step: name });
+        this.unregistered.add(name);
         continue;
       }
       const existing = this.entries.get(name);
@@ -82,11 +84,13 @@ export class StepRegistry {
       const describe = descriptions[key];
       if (describe === undefined) {
         sink.fail("step-undescribed", owner, `step "${name}" has no describe() entry`, { step: name });
+        this.unregistered.add(name);
         continue;
       }
       if (typeof describe === "function") {
         if (!isStepFactory(fn)) {
           sink.fail("describe-shape", owner, `step "${name}" takes no argument but its describe() entry is a function`, { step: name });
+          this.unregistered.add(name);
           continue;
         }
         let placeholder: StepDescription;
@@ -94,12 +98,19 @@ export class StepRegistry {
           placeholder = describe(PLACEHOLDER_ARG);
         } catch (err) {
           sink.fail("describe-threw", owner, `step "${name}" describe() threw for the placeholder argument "${PLACEHOLDER_ARG}": ${err instanceof Error ? err.message : String(err)}`, { step: name });
+          this.unregistered.add(name);
           continue;
         }
-        if (!checkPaths(sink, owner, name, placeholder)) continue;
+        if (!checkPaths(sink, owner, name, placeholder)) {
+          this.unregistered.add(name);
+          continue;
+        }
         this.entries.set(name, { owner, factory: true, fn, describe });
       } else {
-        if (!checkPaths(sink, owner, name, describe)) continue;
+        if (!checkPaths(sink, owner, name, describe)) {
+          this.unregistered.add(name);
+          continue;
+        }
         this.entries.set(name, isStepFactory(fn) ? { owner, factory: true, fn, describe } : { owner, factory: false, fn, describe });
       }
     }
@@ -110,6 +121,11 @@ export class StepRegistry {
 
   has(name: string): boolean {
     return this.entries.has(name);
+  }
+
+  /** Every step name a `register()` call tried and failed to register, and so never resolves -- a pipeline referencing one fails with `unknown-step` for a reason already reported once, at registration. */
+  failedToRegister(name: string): boolean {
+    return this.unregistered.has(name);
   }
 
   names(): string[] {

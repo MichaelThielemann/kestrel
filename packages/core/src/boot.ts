@@ -147,11 +147,11 @@ function emittedEvent(spec: string): string | undefined {
   return query === -1 ? arg : arg.slice(0, query);
 }
 
-function warnUnemittedEvents(modules: readonly ModuleDefinition[], pipelines: ReadonlyMap<string, ResolvedPipeline>, events: readonly EventEntry[], logger: Logger): UnemittedEventWarning[] {
+function warnUnemittedEvents(modules: readonly ModuleDefinition[], definitions: ReadonlyMap<string, PipelineDefinition>, events: readonly EventEntry[], logger: Logger): UnemittedEventWarning[] {
   const emitted = new Set<string>();
-  for (const pipeline of pipelines.values()) {
-    for (const step of pipeline.steps) {
-      const event = emittedEvent(step.name);
+  for (const def of definitions.values()) {
+    for (const step of pipelineSteps(def.steps)) {
+      const event = emittedEvent(step);
       if (event !== undefined) emitted.add(event);
     }
   }
@@ -476,7 +476,9 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
     steps.register(mod.name, stepPrefix(mod.name), mod.steps(instances.get(mod)), mod.describe?.(instances.get(mod)) ?? {}, sink);
   }
 
-  if (config.http?.inlineTypes.includes(SVG) && !steps.has(SANITIZE_SVG)) {
+  const svgSanitizerProvider = prefixToModule.get(SANITIZE_SVG.split(".")[0]!);
+  const svgSanitizerUnchecked = svgSanitizerProvider !== undefined && notSetUp.has(svgSanitizerProvider);
+  if (config.http?.inlineTypes.includes(SVG) && !steps.has(SANITIZE_SVG) && !svgSanitizerUnchecked) {
     sink.fail("svg-without-sanitizer", CORE, `http.inlineTypes contains "${SVG}" but no module registers the step "${SANITIZE_SVG}"`);
   }
   if (config.http !== null) {
@@ -506,6 +508,7 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
       continue;
     }
     let cascadeModule: ModuleDefinition | undefined;
+    let cascadeStep: string | undefined;
     let failed = false;
     const resolved = resolveEntries(def.steps, (s) => {
       if (failed) return DUMMY_STEP;
@@ -514,10 +517,13 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
       } catch (err) {
         if (!(err instanceof KestrelBootError)) throw err;
         if (!sink.collecting) throw err;
-        const prefix = s.split(":")[0]?.split(".")[0];
+        const stepName = s.split(":")[0];
+        const prefix = stepName?.split(".")[0];
         const owner = prefix === undefined ? undefined : prefixToModule.get(prefix);
         if (err.code === "unknown-step" && owner !== undefined && notSetUp.has(owner)) {
           cascadeModule = owner;
+        } else if (err.code === "unknown-step" && stepName !== undefined && steps.failedToRegister(stepName)) {
+          cascadeStep = stepName;
         } else {
           sink.fail(err.code, err.module, err.reason, { step: s });
         }
@@ -526,7 +532,11 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
       }
     });
     if (failed) {
-      const because = cascadeModule ? `depends on module "${cascadeModule.name}" which is not set up` : "a step failed to resolve";
+      const because = cascadeModule
+        ? `depends on module "${cascadeModule.name}" which is not set up`
+        : cascadeStep
+          ? `depends on step "${cascadeStep}" which failed to register`
+          : "a step failed to resolve";
       notCheckedPipelines.add(def.name);
       notChecked.push({ kind: "pipeline", name: def.name, because });
       continue;
@@ -577,15 +587,19 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
     else checkDataflow(pipeline, pipelineRoutes, hasCron, hasEvent);
   }
 
-  const eventHooks = ordered.filter((mod) => !notSetUp.has(mod) && mod.triggers?.event !== undefined);
+  const potentialEventHooks = ordered.filter((mod) => mod.triggers?.event !== undefined);
+  const eventHooks = potentialEventHooks.filter((mod) => !notSetUp.has(mod));
+  const eventHookUnchecked = potentialEventHooks.some((mod) => notSetUp.has(mod));
   if (eventHooks.length > 1) sink.fail("event-hooks-twice", CORE, `modules "${eventHooks[0]?.name ?? ""}" and "${eventHooks[1]?.name ?? ""}" both provide an event trigger hook`);
-  if (events.length > 0 && eventHooks.length === 0) sink.fail("event-hook-missing", CORE, "event triggers need a module that provides an event trigger hook");
+  if (events.length > 0 && eventHooks.length === 0 && !eventHookUnchecked) sink.fail("event-hook-missing", CORE, "event triggers need a module that provides an event trigger hook");
   const eventHook = eventHooks[0];
 
-  const scopeHooks = ordered.filter((mod) => !notSetUp.has(mod) && mod.atomicScope !== undefined);
+  const potentialScopeHooks = ordered.filter((mod) => mod.atomicScope !== undefined);
+  const scopeHooks = potentialScopeHooks.filter((mod) => !notSetUp.has(mod));
+  const scopeHookUnchecked = potentialScopeHooks.some((mod) => notSetUp.has(mod));
   if (scopeHooks.length > 1) sink.fail("atomic-scope-twice", CORE, `modules "${scopeHooks[0]?.name ?? ""}" and "${scopeHooks[1]?.name ?? ""}" both provide an atomic scope`);
   const grouped = [...pipelines.values()].filter((p) => p.steps.some((s) => s.atomic !== undefined));
-  if (grouped.length > 0 && scopeHooks.length === 0) {
+  if (grouped.length > 0 && scopeHooks.length === 0 && !scopeHookUnchecked) {
     sink.fail("atomic-scope-missing", CORE, `pipeline "${grouped[0]?.name ?? ""}" has an atomic group but no module provides an atomic scope`);
   }
   const scopeHook = scopeHooks[0];
@@ -595,7 +609,7 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
   checkUndeclaredRequired(sink, pipelines);
   checkOutputFold(sink, pipelines);
   checkTerminalOutputPlacement(sink, pipelines);
-  const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUnwrittenOptionalReads(pipelines, steps, logger)];
+  const warnings = [...warnUnemittedEvents(ordered, definitions, events, logger), ...warnUnwrittenOptionalReads(pipelines, steps, logger)];
 
   const hub = createObserverHub(logger);
   let manifest: Manifest | undefined;
