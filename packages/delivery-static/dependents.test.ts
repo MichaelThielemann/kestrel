@@ -826,6 +826,28 @@ describe("delivery/static dependencies: dependency sets survive failures", () =>
   });
 });
 
+describe("delivery/static dependencies: a failed render whose own rows cannot be written", () => {
+  it("leaves the previous set's rows in place until its status write, and the output then counts as unknown", async () => {
+    const fake = createFakePersistence();
+    const content = await createContentDefault(model, fake);
+    const h0 = await harness({ db: fake, content });
+    const ids = await seed(h0);
+    const before = (await h0.row(ids.programm))!;
+    const failing = failingOnce(fake, "createMany", DEPENDENCIES);
+    const db = pausingSwaps(fake);
+    const h = await harness({ db: { ...db, createMany: (c, d) => failing.createMany(c, d) }, content, blobs: h0.blobs });
+    expectOk(await content.update("speakers", ids.grace, { name: "FAIL" }));
+    const swap = db.pauseNextSwap();
+    const publishing = h.delivery.publish("pages", ids.programm);
+    await swap.reached;
+    expect(failing.tripped()).toBe(true);
+    expect(await setKeysExist(fake, before.depSet!)).toBe(true);
+    swap.release();
+    const [de] = expectOk(await publishing);
+    expect(de).toMatchObject({ state: "error", dependencies: null });
+  });
+});
+
 describe("delivery/static dependencies: the render timeout", () => {
   it("a render that never resolves fails at the timeout and the next marked output still renders", async () => {
     const h = await harness({ render: "background", dependencies: { renderTimeoutSeconds: 1, claimTtlSeconds: 5, maxAttempts: 1 } });
@@ -1136,5 +1158,284 @@ describe("delivery/static dependencies: markAll, checkBuild and the recovery pas
     expect(status.oldestStaleAt).toBeGreaterThanOrEqual(before);
     held.release();
     expectOk(await rendering);
+  });
+});
+
+function pausingSwaps(fake: FakePersistence): Persistence & { pauseNextSwap(): Gate } {
+  let pending: ReturnType<typeof gate> | null = null;
+  return {
+    ...fake,
+    updateMany: async (c, f, p) => {
+      if (pending !== null && c === STATUS && "version" in f) {
+        const g = pending;
+        pending = null;
+        g.arrive();
+        await g.wait;
+      }
+      return fake.updateMany(c, f, p);
+    },
+    pauseNextSwap() {
+      const g = gate();
+      pending = g;
+      return g;
+    },
+  };
+}
+
+describe("delivery/static dependencies: a newer write that loses to an older render", () => {
+  it("the page's own publish of a new slug loses to an older re-render: the output is marked and ends at the new slug", async () => {
+    const h = await harness();
+    const ids = await seed(h);
+    expectOk(await h.delivery.markDependents("speakers", [ids.grace]));
+    const older = h.reading.hold(ids.programm);
+    const rerender = h.delivery.republishOutput({ type: "pages", docId: ids.programm, locale: "de" });
+    await older.reached;
+    expectOk(await h.content.update("pages", ids.programm, { slug: "programm-neu", title: "Programm Neu" }, { locale: "de" }));
+    const newer = h.reading.hold(ids.programm);
+    const own = h.delivery.publish("pages", ids.programm);
+    await newer.reached;
+    older.release();
+    expectOk(await rerender);
+    newer.release();
+    const [de] = expectOk(await own);
+    expect(de).toMatchObject({ stale: true });
+    expect(await h.marked()).toContain(`${ids.programm}/de`);
+    expectOk(await h.delivery.republishOutput({ type: "pages", docId: ids.programm, locale: "de" }));
+    expect(h.html("/programm")).toBeNull();
+    expect(h.html("/programm-neu")).toContain("Programm Neu");
+    expect(await h.row(ids.programm)).toMatchObject({ state: "live", path: "/programm-neu" });
+  });
+
+  it("the page's own switch to draft loses to an older re-render: the output is marked and the withdrawn file removed", async () => {
+    const fake = createFakePersistence();
+    const db = pausingSwaps(fake);
+    const h = await harness({ db, content: await createContentDefault(model, fake) });
+    const ids = await seed(h);
+    expectOk(await h.delivery.markDependents("speakers", [ids.grace]));
+    const older = h.reading.hold(ids.programm);
+    const rerender = h.delivery.republishOutput({ type: "pages", docId: ids.programm, locale: "de" });
+    await older.reached;
+    expectOk(await h.content.update("pages", ids.programm, { status: "draft" }, { locale: "de" }));
+    const swap = db.pauseNextSwap();
+    const own = h.delivery.publish("pages", ids.programm);
+    await swap.reached;
+    older.release();
+    expectOk(await rerender);
+    swap.release();
+    expectOk(await own);
+    expect(await h.marked()).toContain(`${ids.programm}/de`);
+    expectOk(await h.delivery.republishOutput({ type: "pages", docId: ids.programm, locale: "de" }));
+    expect(h.html("/programm")).toBeNull();
+    expect((await h.row(ids.programm))?.state).toBe("draft");
+  });
+});
+
+describe("delivery/static dependencies: overlapping changes across processes", () => {
+  it("a render in one process that newly reads a document another process changed and marked meanwhile marks its output", async () => {
+    const h = await harness();
+    const ids = await seed(h);
+    const other = await harness({ db: h.db, content: h.content, blobs: h.blobs });
+    const fresh = expectOk(await h.content.create("speakers", { name: "Hedy", status: "published" })).id;
+    const lineup = expectOk(await h.content.create("lineups", { title: "Late", speakers: [fresh] })).id;
+    expectOk(await h.content.update("pages", ids.kontakt, { body: [{ type: "lineup", id: lineup }] }, { locale: "de" }));
+    const held = h.reading.hold(ids.kontakt);
+    const publishing = h.delivery.publish("pages", ids.kontakt);
+    await held.reached;
+    expectOk(await h.content.update("speakers", fresh, { name: "Hedy L." }));
+    expectOk(await other.delivery.markDependents("speakers", [fresh]));
+    held.release();
+    expectOk(await publishing);
+    expect(await h.marked()).toContain(`${ids.kontakt}/de`);
+  });
+
+  it("a change recorded before a render started never marks that render's output again", async () => {
+    const h = await harness();
+    const ids = await seed(h);
+    expectOk(await h.content.update("speakers", ids.grace, { name: "Grace H." }));
+    expectOk(await h.delivery.markDependents("speakers", [ids.grace]));
+    expectOk(await h.delivery.republishOutput({ type: "pages", docId: ids.programm, locale: "de" }));
+    expectOk(await h.delivery.republishOutput({ type: "pages", docId: ids.programm, locale: "en" }));
+    expect(await h.marked()).toEqual([]);
+    expect(h.html("/programm")).toContain("Grace H.");
+  });
+});
+
+describe("delivery/static dependencies: rows the loop cannot render", () => {
+  it("a row whose locale left the model is never marked, and the other rows render", async () => {
+    const h = await harness({ render: "background" });
+    const ids = await seed(h);
+    const at = Date.now() - 1000;
+    expectOk(await h.db.createOne<StatusRow>(STATUS, { id: `pages/${ids.programm}/fr`, type: "pages", docId: ids.programm, locale: "fr", state: "live", path: "/fr/programm", error: null, publishedAt: at, updatedAt: at, version: 0, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null }));
+    expectOk(await h.content.update("speakers", ids.grace, { name: "Grace H." }));
+    expectOk(await h.delivery.markDependents("speakers", [ids.grace]));
+    expect((await h.row(ids.programm, "fr"))?.staleToken).toBeNull();
+    await h.settle();
+    expect(h.html("/programm")).toContain("Grace H.");
+    expect(h.html("/en/program")).toContain("Grace H.");
+    expectOk(await h.delivery.markAll("pages"));
+    expect((await h.row(ids.programm, "fr"))?.staleToken).toBeNull();
+    await h.settle();
+  });
+
+  it("a render that throws records an attempt, releases its claim and never stalls the other rows of the pass", async () => {
+    const db = createFakePersistence();
+    const real = await createContentDefault(model, db);
+    let broken = "";
+    const content: Content = {
+      ...real,
+      get: (type, id, options) => (type === "pages" && id === broken ? Promise.resolve(err(failure("VALIDATION", "stored row no longer fits the model"))) : real.get(type, id, options)),
+    };
+    const h = await harness({ render: "background", db, content, dependencies: { maxAttempts: 1 } });
+    const ids = await seed(h);
+    broken = ids.info;
+    expectOk(await h.content.set("settings", { title: "Festival 2027" }, { locale: "de" }));
+    expectOk(await h.delivery.markDependents("settings", []));
+    await pollUntilOk(async () => expectOk(await h.delivery.readStaleStatus()).stale === 0);
+    expect(h.html("/programm")).toContain("Festival 2027");
+    expect(h.html("/kontakt")).toContain("Festival 2027");
+    const info = (await h.row(ids.info))!;
+    expect(info).toMatchObject({ claimedBy: null, staleAttempts: 1 });
+    expect(info.staleError).toContain("threw");
+    expect(expectOk(await h.db.count(STATUS, { claimedBy: { ne: null } }))).toBe(0);
+  });
+
+  it("a row of a type that is no longer delivered is never marked", async () => {
+    const h = await harness();
+    const ids = await seed(h);
+    const at = Date.now();
+    expectOk(await h.db.createOne<StatusRow>(STATUS, { id: `posts/${ids.programm}/de`, type: "posts", docId: ids.programm, locale: "de", state: "live", path: "/posts/x", error: null, publishedAt: at, updatedAt: at, version: 0, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null }));
+    expectOk(await h.delivery.markDependents("lineups", ["nothing"]));
+    expect(await h.marked()).toEqual([]);
+  });
+});
+
+async function pollUntilOk(check: () => Promise<boolean>, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error("timed out");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+describe("delivery/static dependencies: restores, sweeps and shared paths", () => {
+  it("a page that takes over a path while the previous owner's files there are being removed is marked and writes them again", async () => {
+    const fake = createFakePersistence();
+    let pauseRemoval: ReturnType<typeof gate> | null = null;
+    const blobs = memoryBlobs();
+    const pausing: typeof blobs = {
+      ...blobs,
+      files: blobs.files,
+      async remove(key) {
+        if (pauseRemoval !== null && key === "site/kontakt/index.html") {
+          const g = pauseRemoval;
+          pauseRemoval = null;
+          g.arrive();
+          await g.wait;
+        }
+        return blobs.remove(key);
+      },
+    };
+    const h = await harness({ db: fake, content: await createContentDefault(model, fake), blobs: pausing });
+    const ids = await seed(h);
+    expectOk(await h.content.update("pages", ids.kontakt, { slug: "kontakt-alt" }, { locale: "de" }));
+    const removal = gate();
+    pauseRemoval = removal;
+    const moving = h.delivery.publish("pages", ids.kontakt);
+    await removal.reached;
+    const successor = await h.page({ slug: "kontakt", title: "Neuer Kontakt", status: "published", body: [] });
+    expectOk(await h.delivery.publish("pages", successor));
+    removal.release();
+    expectOk(await moving);
+    expect(await h.marked()).toContain(`${successor}/de`);
+    expectOk(await h.delivery.republishOutput({ type: "pages", docId: successor, locale: "de" }));
+    expect(h.html("/kontakt")).toContain("Neuer Kontakt");
+    expect(h.html("/kontakt-alt")).toContain("Kontakt");
+  });
+
+  it("a restore that commits after an unpublish removed its freshly written file marks itself and writes it again", async () => {
+    const fake = createFakePersistence();
+    let pauseRemoval: ReturnType<typeof gate> | null = null;
+    const blobs = memoryBlobs();
+    const pausing: typeof blobs = {
+      ...blobs,
+      files: blobs.files,
+      async remove(key) {
+        if (pauseRemoval !== null && key === "site/kontakt/index.html") {
+          const g = pauseRemoval;
+          pauseRemoval = null;
+          g.arrive();
+          await g.wait;
+        }
+        return blobs.remove(key);
+      },
+    };
+    const db = pausingSwaps(fake);
+    const h = await harness({ db, content: await createContentDefault(model, fake), blobs: pausing });
+    const ids = await seed(h);
+    const removal = gate();
+    pauseRemoval = removal;
+    const unpublishing = h.delivery.unpublish("pages", ids.kontakt);
+    await removal.reached;
+    const swap = db.pauseNextSwap();
+    const restoring = h.delivery.publish("pages", ids.kontakt);
+    await swap.reached;
+    removal.release();
+    expectOk(await unpublishing);
+    expect(h.html("/kontakt")).toBeNull();
+    swap.release();
+    const [de] = expectOk(await restoring);
+    expect(de).toMatchObject({ state: "live", path: "/kontakt", stale: true });
+    expectOk(await h.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" }));
+    expect(h.html("/kontakt")).toContain("Kontakt");
+  });
+
+  it("a restore whose tombstone is swept while it renders is still published", async () => {
+    const h = await harness({ dependencies: { claimTtlSeconds: 120 } });
+    const ids = await seed(h);
+    expectOk(await h.delivery.unpublish("pages", ids.kontakt));
+    h.advance(121_000);
+    const held = h.reading.hold(ids.kontakt);
+    const restoring = h.delivery.publish("pages", ids.kontakt);
+    await held.reached;
+    expect(expectOk(await h.delivery.resumeStale()).swept).toBeGreaterThanOrEqual(1);
+    held.release();
+    const [de] = expectOk(await restoring);
+    expect(de).toMatchObject({ state: "live", path: "/kontakt" });
+    expect(h.html("/kontakt")).toContain("Kontakt");
+  });
+
+  it("an unpublish whose file removal overlaps a restore of the same page marks the revived page, which writes its file again", async () => {
+    const fake = createFakePersistence();
+    let pauseRemoval: ReturnType<typeof gate> | null = null;
+    const blobs = memoryBlobs();
+    const pausing: typeof blobs = {
+      ...blobs,
+      files: blobs.files,
+      async remove(key) {
+        if (pauseRemoval !== null && key === "site/kontakt/index.html") {
+          const g = pauseRemoval;
+          pauseRemoval = null;
+          g.arrive();
+          await g.wait;
+        }
+        return blobs.remove(key);
+      },
+    };
+    const h = await harness({ db: fake, content: await createContentDefault(model, fake), blobs: pausing });
+    const ids = await seed(h);
+    const removal = gate();
+    pauseRemoval = removal;
+    const unpublishing = h.delivery.unpublish("pages", ids.kontakt);
+    await removal.reached;
+    expect((await h.row(ids.kontakt))?.state).toBe("deleted");
+    const restored = expectOk(await h.delivery.publish("pages", ids.kontakt));
+    expect(restored[0]).toMatchObject({ state: "live", path: "/kontakt" });
+    removal.release();
+    expectOk(await unpublishing);
+    expect((await h.row(ids.kontakt))).toMatchObject({ state: "live", path: "/kontakt" });
+    expect(await h.marked()).toEqual([`${ids.kontakt}/de`]);
+    expectOk(await h.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" }));
+    expect(h.html("/kontakt")).toContain("Kontakt");
+    expect(h.html("/kontakt")).toContain("Kontakt");
   });
 });

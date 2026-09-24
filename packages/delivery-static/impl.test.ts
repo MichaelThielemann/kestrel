@@ -418,7 +418,7 @@ describe("delivery/static: rendered output is stored byte for byte, no media rew
     expect(new TextDecoder().decode(blobs.blobs.get("site/seite/index.html")?.data)).toBe(html);
   });
 
-  it("reads and writes only delivery_publish_status, never media_items or images_variants", async () => {
+  it("reads and writes only its own collections, never media_items or images_variants", async () => {
     const { content, put } = fakeContent();
     const blobs = fakeBlobs();
     const db = createFakePersistence();
@@ -428,7 +428,8 @@ describe("delivery/static: rendered output is stored byte for byte, no media rew
     expectOk(await delivery.publish("pages", "p1"));
     expectOk(await delivery.status("pages", "p1"));
     const collections = new Set(findManySpy.mock.calls.map(([collection]) => collection));
-    expect(collections).toEqual(new Set([STATUS]));
+    expect(collections.has(STATUS)).toBe(true);
+    expect([...collections].every((c) => c.startsWith("delivery_"))).toBe(true);
   });
 });
 

@@ -22,12 +22,7 @@ const dependenciesSchema = z
     claimTtlSeconds: z.number().int().positive().default(300),
     maxAgeSeconds: z.number().int().positive().nullable().default(null),
   })
-  .strict()
-  .superRefine((value, ctx) => {
-    if (value.renderTimeoutSeconds >= value.claimTtlSeconds) {
-      ctx.addIssue({ code: "custom", path: ["renderTimeoutSeconds"], message: `dependencies.renderTimeoutSeconds (${value.renderTimeoutSeconds}) must be below dependencies.claimTtlSeconds (${value.claimTtlSeconds})` });
-    }
-  });
+  .strict();
 
 export const configSchema = z
   .object({
@@ -52,7 +47,14 @@ export const configSchema = z
       .default({}),
     dependencies: dependenciesSchema.default({}),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const { renderTimeoutSeconds, claimTtlSeconds } = value.dependencies;
+    const formats = value.formats.length;
+    if (renderTimeoutSeconds * formats >= claimTtlSeconds) {
+      ctx.addIssue({ code: "custom", path: ["dependencies", "renderTimeoutSeconds"], message: `dependencies.renderTimeoutSeconds (${renderTimeoutSeconds}) times the ${formats} format(s) must be below dependencies.claimTtlSeconds (${claimTtlSeconds})` });
+    }
+  });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

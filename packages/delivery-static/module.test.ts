@@ -277,10 +277,12 @@ describe("delivery/static: dependencies config and the events wiring", () => {
     expect(configSchema.parse({ types: {} }).dependencies).toEqual({ render: "background", rendererReadsDocument: false, maxPerRender: 1000, renderTimeoutSeconds: 60, maxAttempts: 5, backoffSeconds: [60, 300, 900, 3600], claimTtlSeconds: 300, maxAgeSeconds: null });
   });
 
-  it("refuses a render timeout that is not below the claim lifetime, naming both keys", () => {
+  it("refuses a render timeout that, over every format, is not below the claim lifetime, naming both keys", () => {
     const parsed = configSchema.safeParse({ types: {}, dependencies: { renderTimeoutSeconds: 300, claimTtlSeconds: 300 } });
     expect(parsed.success).toBe(false);
-    expect(JSON.stringify(parsed.error?.issues)).toContain("dependencies.renderTimeoutSeconds (300) must be below dependencies.claimTtlSeconds (300)");
+    expect(JSON.stringify(parsed.error?.issues)).toContain("dependencies.renderTimeoutSeconds (300) times the 1 format(s) must be below dependencies.claimTtlSeconds (300)");
+    expect(configSchema.safeParse({ types: {}, formats: ["html", "pdf"], dependencies: { renderTimeoutSeconds: 100, claimTtlSeconds: 150 } }).success).toBe(false);
+    expect(configSchema.safeParse({ types: {}, formats: ["html"], dependencies: { renderTimeoutSeconds: 100, claimTtlSeconds: 150 } }).success).toBe(true);
   });
 
   it("accepts the queue wiring", () => {

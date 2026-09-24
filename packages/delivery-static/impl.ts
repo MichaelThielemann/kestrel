@@ -21,6 +21,7 @@ export const STATUS = "delivery_publish_status";
 export const DEPENDENCIES = "delivery_dependencies";
 export const DEPENDENCY_SETS = "delivery_dependency_sets";
 export const STATE = "delivery_state";
+export const CHANGES = "delivery_changes";
 
 /** Raised through `events@1` for every marked output with `dependencies.render: "events"`; its data carries `coalesceKey`. */
 export const OUTPUT_STALE = "delivery.outputStale";
@@ -147,6 +148,12 @@ interface DependencySet extends Document {
   createdAt: number;
 }
 
+interface ChangeRow extends Document {
+  type: string;
+  ids: string[];
+  at: number;
+}
+
 interface BuildState extends Document {
   value: string;
   updatedAt: number;
@@ -173,7 +180,8 @@ interface Change {
 }
 
 interface Flight {
-  changes: Change[];
+  startedAt: number;
+  known: Set<string> | null;
 }
 
 interface RenderOutcome {
@@ -188,6 +196,8 @@ const LOOP_BATCH = 5;
 const RESUME_MIN_AGE_MS = 60_000;
 const UNPUBLISH_TRIES = 5;
 const LLMS_COALESCE_KEY = "llms";
+const CHANGE_WINDOW_MS = 60_000;
+const CHANGE_PAGE = 1000;
 const MARKABLE: RowState[] = ["live", "error"];
 const ALL_OUTPUTS: RowState[] = ["live", "error", "draft"];
 
@@ -292,6 +302,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     await db.ensureCollection(DEPENDENCIES, { type: "string", docId: "string", locale: "string", output: "string", kind: "string", depType: "string", depId: "string", depLocale: "string", filter: "json", rules: "json", path: "string" }),
     await db.ensureCollection(DEPENDENCY_SETS, { output: "string", keys: "json", createdAt: "number" }),
     await db.ensureCollection(STATE, { value: "string", updatedAt: "number" }),
+    await db.ensureCollection(CHANGES, { type: "string", ids: "json", at: "number" }),
   ];
   for (const p of prepared) if (isErr(p)) throw new Error(`delivery/static: cannot prepare its collections: ${p.error.message}`);
   const versioned = await db.updateMany<StatusRow>(STATUS, { version: null }, { version: 0 });
@@ -304,7 +315,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   let llmsRequested = false;
   let stopping = false;
   let loop: BackgroundLoop | undefined;
-  const inFlight = new Set<Flight>();
+  const deliveredTypes = Object.keys(config.types);
+  const deliveredLocales = locales.length > 0 ? [...locales] : [""];
 
   const typeConfig = (type: string): TypeConfig => {
     const tc = config.types[type];
@@ -362,17 +374,19 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   };
   const pathKeys = (path: string): string[] => config.formats.map((format) => keyFor(config.prefix, path, format));
 
-  const pathOwnedByOther = async (path: string, ownId: string | null, output: OutputRef): Promise<Result<boolean, DeliveryError>> => {
-    const owners = await db.findMany<StatusRow>(STATUS, { path, state: { in: MARKABLE } }, { limit: 10 });
+  const pathOwned = async (path: string): Promise<Result<boolean, DeliveryError>> => {
+    const owners = await db.count(STATUS, { path, state: { in: MARKABLE } });
     if (isErr(owners)) return err(dbFailure(owners.error));
-    return ok(owners.value.items.some((row) => row.id !== ownId && !(row.type === output.type && row.docId === output.docId && row.locale === output.locale)));
+    return ok(owners.value > 0);
   };
 
-  const removePathUnlessOwned = async (path: string, ownId: string | null, output: OutputRef): Promise<Result<void, DeliveryError>> => {
-    const owned = await pathOwnedByOther(path, ownId, output);
+  const removePathUnlessOwned = async (path: string): Promise<Result<void, DeliveryError>> => {
+    const owned = await pathOwned(path);
     if (isErr(owned)) return owned;
     if (owned.value) return ok();
-    return removeKeys(pathKeys(path));
+    const removed = await removeKeys(pathKeys(path));
+    if (isErr(removed)) return removed;
+    return markOwners(path);
   };
 
   const deleteDependencyRows = async (ids: readonly string[]): Promise<Result<void, DeliveryError>> => {
@@ -433,10 +447,19 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     const token = randomUUID();
     const at = now();
     for (const chunk of chunks(unique, MARK_CHUNK)) {
-      const marked = await db.updateMany<StatusRow>(STATUS, { id: { in: chunk }, state: { in: states } }, { staleAt: at, staleToken: token, staleRetryAt: at, staleAttempts: 0, staleError: null });
+      const marked = await db.updateMany<StatusRow>(STATUS, { id: { in: chunk }, state: { in: states }, type: { in: deliveredTypes }, locale: { in: deliveredLocales } }, { staleAt: at, staleToken: token, staleRetryAt: at, staleAttempts: 0, staleError: null });
       if (isErr(marked)) return err(dbFailure(marked.error));
     }
     return dispatchToken(token);
+  };
+
+  const markOwners = async (path: string): Promise<Result<void, DeliveryError>> => {
+    const owners = await db.findMany<StatusRow>(STATUS, { path, state: { in: MARKABLE } }, { limit: 10 });
+    if (isErr(owners)) return err(dbFailure(owners.error));
+    if (owners.value.items.length === 0) return ok();
+    const marked = await markRows(owners.value.items.map((row) => row.id), MARKABLE);
+    if (isErr(marked)) return marked;
+    return ok();
   };
 
   const writeSet = async (output: OutputRef, outputId: string, renderId: string, specs: DependencySpec[], inherited: string[]): Promise<{ setId: string; created: string[]; count: number } | null> => {
@@ -453,7 +476,9 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       const written = await db.createMany<DependencyRow>(DEPENDENCIES, rows);
       if (isErr(written)) {
         logger.error("delivery/static: could not record the dependencies of a render, the output is marked by every change until its next render", { ...output, error: written.error.message });
-        logged("could not remove a partly written dependency set, the sweep removes it", output)(await deleteSet(setId, false));
+        const rowsGone = await deleteDependencyRows(created);
+        if (isErr(rowsGone)) logger.error("delivery/static: could not remove a partly written dependency set, the sweep removes it", { ...output, error: rowsGone.error.message });
+        else logged("could not remove a partly written dependency set, the sweep removes it", output)(await deleteSet(setId, true));
         return null;
       }
     }
@@ -498,7 +523,11 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     const set = await recordSet(output, before, renderId, work.set);
     const dropOwnSet = async (): Promise<void> => {
       if (set === null) return;
-      logged("could not remove the dependencies of a render that lost, the sweep removes them", output)(await deleteDependencyRows(set.created));
+      const rowsGone = await deleteDependencyRows(set.created);
+      if (isErr(rowsGone)) {
+        logger.error("delivery/static: could not remove the dependencies of a render that lost, the sweep removes them", { ...output, error: rowsGone.error.message });
+        return;
+      }
       const removed = await db.deleteMany(DEPENDENCY_SETS, { id: set.setId });
       if (isErr(removed)) logger.error("delivery/static: could not remove the dependency set of a render that lost, the sweep removes it", { ...output, error: removed.error.message });
     };
@@ -553,13 +582,14 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     if (won) {
       const ownId = before?.id ?? statusIdOf(output.type, output.docId, output.locale);
       const oldPath = before === null ? null : before.path;
-      if (oldPath !== null && oldPath !== target.path) logged("could not remove the files of a path this output left", { ...output, path: oldPath })(await removePathUnlessOwned(oldPath, ownId, output));
+      if (oldPath !== null && oldPath !== target.path) logged("could not remove the files of a path this output left", { ...output, path: oldPath })(await removePathUnlessOwned(oldPath));
       if (before?.depSet && before.depSet !== set?.setId) logged("could not remove the previous dependency set, the sweep removes it", output)(await deleteSet(before.depSet, set?.inheritsPrevious === true));
       if (work.failure === null && before?.staleToken) {
         const cleared = await db.updateMany<StatusRow>(STATUS, { id: ownId, staleToken: before.staleToken }, { staleToken: null, staleAt: null, staleRetryAt: null, staleAttempts: 0, staleError: null });
         if (isErr(cleared)) return err(dbFailure(cleared.error));
       }
-      if (touches(readsOf(work.set), flight.changes)) {
+      const revivedDuringRemoval = before?.state === "deleted" && before.path !== null;
+      if (target.state !== "draft" && (revivedDuringRemoval || (await overlapped(flight, set === null ? null : readsOf(work.set))))) {
         const remarked = await markRows([ownId], MARKABLE);
         if (isErr(remarked)) logger.error("delivery/static: could not mark an output whose render overlapped a change, the recovery pass marks it", { ...output, error: remarked.error.message });
       }
@@ -571,20 +601,46 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     const after = await readRow(output.type, output.docId, output.locale);
     if (isErr(after)) return after;
     const current = after.value;
-    if (work.written.length > 0 && work.renderPath !== null) {
-      if (current === null || current.state === "deleted" || current.state === "draft" || current.path !== work.renderPath) {
-        const owned = await pathOwnedByOther(work.renderPath, current?.id ?? null, output);
-        if (isErr(owned)) return owned;
-        if (!owned.value) logged("could not remove the files of a render that lost", { ...output, path: work.renderPath })(await removeKeys(work.written));
-      } else {
-        const remarked = await markRows([current.id], MARKABLE);
-        if (isErr(remarked)) logger.error("delivery/static: could not mark an output a render that lost may have overwritten, the recovery pass marks it", { ...output, error: remarked.error.message });
-      }
+    if (current === null && before?.state === "deleted") {
+      await dropOwnSet();
+      return commit(flight, output, null, renderId, target, work);
+    }
+    const stillServed = current !== null && (current.state === "live" || current.state === "error");
+    if (work.written.length > 0 && work.renderPath !== null && !(stillServed && current.path === work.renderPath)) {
+      const owned = await pathOwned(work.renderPath);
+      if (isErr(owned)) return owned;
+      if (!owned.value) logged("could not remove the files of a render that lost", { ...output, path: work.renderPath })(await removeKeys(work.written));
+    }
+    if (stillServed) {
+      const remarked = await markRows([current.id], MARKABLE);
+      if (isErr(remarked)) logger.error("delivery/static: could not mark an output a newer write raced, the recovery pass marks it", { ...output, error: remarked.error.message });
     }
     await dropOwnSet();
     const reread = await readRow(output.type, output.docId, output.locale);
     if (isErr(reread)) return reread;
     return ok({ status: reread.value === null || reread.value.state === "deleted" ? null : toPublic(reread.value), failure: work.failure });
+  };
+
+  const changesSince = async (startedAt: number): Promise<ChangeRow[] | null> => {
+    const page = await db.findMany<ChangeRow>(CHANGES, { at: { gte: startedAt - CHANGE_WINDOW_MS } }, { limit: CHANGE_PAGE });
+    if (isErr(page) || page.value.items.length >= CHANGE_PAGE) return null;
+    return page.value.items;
+  };
+
+  const startFlight = async (): Promise<Result<Flight, DeliveryError>> => {
+    const startedAt = now();
+    const page = await db.findMany<ChangeRow>(CHANGES, { at: { gte: startedAt - CHANGE_WINDOW_MS } }, { limit: CHANGE_PAGE });
+    if (isErr(page)) return err(dbFailure(page.error));
+    return ok({ startedAt, known: page.value.items.length >= CHANGE_PAGE ? null : new Set(page.value.items.map((c) => c.id)) });
+  };
+
+  const overlapped = async (flight: Flight, reads: readonly ObservedRead[] | null): Promise<boolean> => {
+    const current = await changesSince(flight.startedAt);
+    if (current === null || flight.known === null) return true;
+    const known = flight.known;
+    const fresh: Change[] = current.filter((c) => !known.has(c.id));
+    if (fresh.length === 0) return false;
+    return reads === null || touches(reads, fresh);
   };
 
   const renderWithTimeout = async (input: RenderInput): Promise<Result<RenderOutput, RendererError> | "timeout"> => {
@@ -629,13 +685,9 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   };
 
   const publishLocale = async (type: string, id: string, locale: string | undefined): Promise<Result<RenderOutcome, DeliveryError>> => {
-    const flight: Flight = { changes: [] };
-    inFlight.add(flight);
-    try {
-      return await renderLocale(flight, type, id, locale);
-    } finally {
-      inFlight.delete(flight);
-    }
+    const flight = await startFlight();
+    if (isErr(flight)) return flight;
+    return renderLocale(flight.value, type, id, locale);
   };
 
   const renderLocale = async (flight: Flight, type: string, id: string, locale: string | undefined): Promise<Result<RenderOutcome, DeliveryError>> => {
@@ -765,7 +817,12 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   };
 
   const renderMarked = async (row: StatusRow): Promise<Result<RenderOutcome, DeliveryError>> => {
-    const outcome = await publishLocale(row.type, row.docId, row.locale === "" ? undefined : row.locale);
+    let outcome: Result<RenderOutcome, DeliveryError>;
+    try {
+      outcome = await publishLocale(row.type, row.docId, row.locale === "" ? undefined : row.locale);
+    } catch (error) {
+      outcome = err(transient(`delivery/static: rendering ${row.type}/${row.docId}/${row.locale} threw: ${errorText(error)}`));
+    }
     if (isErr(outcome)) await recordFailure(row, outcome.error.message);
     else if (outcome.value.failure !== null) await recordFailure(row, outcome.value.failure);
     return outcome;
@@ -799,7 +856,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   const pass = async (): Promise<PassOutcome> => {
     unwrap(await releaseExpiredClaims());
     const at = now();
-    const due = await db.findMany<StatusRow>(STATUS, { staleRetryAt: { lte: at }, claimedBy: null, staleAttempts: { lt: dependencies.maxAttempts } }, { sort: { staleRetryAt: "asc" }, limit: LOOP_BATCH });
+    const due = await db.findMany<StatusRow>(STATUS, { staleRetryAt: { lte: at }, claimedBy: null, staleAttempts: { lt: dependencies.maxAttempts }, type: { in: deliveredTypes } }, { sort: { staleRetryAt: "asc" }, limit: LOOP_BATCH });
     if (isErr(due)) throw new Error(due.error.message);
     if (due.value.items.length > 0) {
       const token = randomUUID();
@@ -808,11 +865,15 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       const mine = await db.findMany<StatusRow>(STATUS, { claimedBy: token }, { sort: { staleRetryAt: "asc" } });
       if (isErr(mine)) throw new Error(mine.error.message);
       for (const row of mine.value.items) {
-        if (row.staleToken !== null && !stopping) {
-          await renderMarked(row);
-          llmsRequested = true;
+        try {
+          if (row.staleToken !== null && !stopping) {
+            await db.updateMany<StatusRow>(STATUS, { id: row.id, claimedBy: token }, { claimedAt: now() });
+            await renderMarked(row);
+            llmsRequested = true;
+          }
+        } finally {
+          await release(row.id, token);
         }
-        await release(row.id, token);
       }
       return { busy: true, sleepMs: null };
     }
@@ -835,7 +896,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
 
   const markDependents: Delivery["markDependents"] = async (type, ids) => {
     const changed = [...new Set(ids)];
-    for (const flight of inFlight) flight.changes.push({ type, ids: changed });
+    const recorded = await db.createOne<ChangeRow>(CHANGES, { id: randomUUID(), type, ids: changed, at: now() });
+    if (isErr(recorded)) return err(dbFailure(recorded.error));
     const outputs = new Set<string>();
     const isModelType = model.types[type] !== undefined;
     for (const id of changed) {
@@ -851,7 +913,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         pathGroups.set(key, group);
       }
       for (const group of pathGroups.values()) {
-        const stub = { id: "", createdAt: 0, updatedAt: 0, ref: `kestrel:${type}:${id}` };
+        const stub = { id: "", createdAt: 0, updatedAt: 0, ref: { type: "internal", collection: type, id } };
         const resolved = await site.resolveLinks(type, stub, { ...(group.locale === "" ? {} : { locale: group.locale }), rules: group.rules });
         const link = isErr(resolved) ? undefined : resolved.value._links?.[id];
         const current = link !== undefined && "path" in link && typeof link.path === "string" ? link.path : null;
@@ -886,7 +948,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         }
       }
     }
-    const unknown = await pagedRows({ depSet: null, state: { in: MARKABLE } }, (rows) => {
+    const unknown = await pagedRows({ depSet: null, state: { in: MARKABLE }, type: { in: deliveredTypes }, locale: { in: deliveredLocales } }, (rows) => {
       for (const row of rows) outputs.add(row.id);
       return ok();
     });
@@ -901,7 +963,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     const token = randomUUID();
     const at = now();
     const mark = { staleAt: at, staleToken: token, staleRetryAt: at, staleAttempts: 0, staleError: null };
-    const existing = await db.updateMany<StatusRow>(STATUS, { type, state: { in: ALL_OUTPUTS } }, mark);
+    const existing = await db.updateMany<StatusRow>(STATUS, { type, state: { in: ALL_OUTPUTS }, locale: { in: deliveredLocales } }, mark);
     if (isErr(existing)) return err(dbFailure(existing.error));
     const targets = locales.length > 0 ? locales : [""];
     for (let offset = 0; ; offset += PAGE) {
@@ -980,7 +1042,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         if (current === null) continue;
         if (tombstoned) count += 1;
         if (current.path !== null) {
-          const removed = await removePathUnlessOwned(current.path, current.id, output);
+          const removed = await removePathUnlessOwned(current.path);
           if (isErr(removed)) return removed;
           const cleared = await db.updateMany<StatusRow>(STATUS, { id: current.id, state: "deleted" }, { path: null });
           if (isErr(cleared)) return err(dbFailure(cleared.error));
@@ -1070,7 +1132,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       if (isErr(tombstones)) return err(dbFailure(tombstones.error));
       for (const row of tombstones.value.items) {
         if (row.path !== null) {
-          const removed = await removePathUnlessOwned(row.path, row.id, row);
+          const removed = await removePathUnlessOwned(row.path);
           if (isErr(removed)) continue;
           const cleared = await db.updateMany<StatusRow>(STATUS, { id: row.id, version: row.version }, { path: null });
           if (isErr(cleared) || cleared.value === 0) continue;
@@ -1089,6 +1151,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
           if (owner.value?.depSet === set.id) continue;
           const shared = owner.value?.depSet ? await db.findOne<DependencySet>(DEPENDENCY_SETS, { id: owner.value.depSet }) : undefined;
           if (shared !== undefined && isErr(shared)) return err(dbFailure(shared.error));
+          if (shared !== undefined && shared.value === null) continue;
           const keep = new Set(shared?.value?.keys ?? []);
           const rows = await deleteDependencyRows(set.keys.filter((k) => !keep.has(k)));
           if (isErr(rows)) return rows;
@@ -1099,6 +1162,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         lastSet = sets.value.items.at(-1)?.id;
         if (sets.value.items.length < ROW_PAGE || lastSet === undefined) break;
       }
+      const pruned = await db.deleteMany(CHANGES, { at: { lt: at - claimTtlMs - CHANGE_WINDOW_MS } });
+      if (isErr(pruned)) return err(dbFailure(pruned.error));
       let aged = 0;
       if (dependencies.maxAgeSeconds !== null) {
         const old: string[] = [];
@@ -1112,7 +1177,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         aged = marked.value;
       }
       let dispatched = 0;
-      const due = await pagedRows({ staleAt: { lte: at - RESUME_MIN_AGE_MS }, claimedBy: null, staleRetryAt: { lte: at }, staleAttempts: { lt: dependencies.maxAttempts } }, async (rows) => {
+      const due = await pagedRows({ staleAt: { lte: at - RESUME_MIN_AGE_MS }, claimedBy: null, staleRetryAt: { lte: at }, staleAttempts: { lt: dependencies.maxAttempts }, type: { in: deliveredTypes } }, async (rows) => {
         dispatched += rows.length;
         return dispatch(rows);
       });

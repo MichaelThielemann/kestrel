@@ -606,8 +606,9 @@ Net changes since 5.8.1.
   through `events@1` (`delivery.republishOutput`, coalesced by the queue), with `"background"`
   (default) by the module's own loop in the process that marked them. Renders time out after
   `dependencies.renderTimeoutSeconds`; a failed re-render keeps the previous output and is retried
-  after `dependencies.backoffSeconds`, up to `dependencies.maxAttempts`; a change marked while a render
-  in the same process was reading it marks that output again once the render has committed.
+  after `dependencies.backoffSeconds`, up to `dependencies.maxAttempts`; every change is recorded in
+  `delivery_changes`, and a render in any process that read something a change recorded during the
+  render touched marks its output again once it has committed.
   `delivery.markAll:<type>`
   marks every output of a type, `delivery.checkBuild` marks everything once per new `payload.build`
   and stores the build only after marking succeeded, `delivery.resumeStale` releases expired claims,
@@ -633,8 +634,9 @@ Net changes since 5.8.1.
 ### Changed
 
 - `delivery-static` writes each status row with a version check, so a render that finishes after a
-  newer write, an unpublish or a path change removes the files it wrote instead of keeping them, or
-  marks its output again when that output is still live at the same path. `delivery.unpublish`
+  newer write, an unpublish or a path change removes the files it wrote instead of keeping them, and
+  marks its output again whenever that output is still served; an output live at a path whose files
+  were just removed is marked again too. `delivery.unpublish`
   leaves a short-lived `deleted` row per locale, also for a locale that was never rendered, which
   `delivery.resumeStale` removes after `dependencies.claimTtlSeconds`; `readStatus`, `_delivery` and
   `llms.txt` never show it. A failed render keeps a previous `error` row's path, so its last live
