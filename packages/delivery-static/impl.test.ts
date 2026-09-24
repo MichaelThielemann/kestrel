@@ -381,6 +381,28 @@ describe("delivery/static: reservedPaths", () => {
     const status = expectOk(await delivery.publish("pages", "p1"));
     expect(status.find((s) => s.locale === "de")).toMatchObject({ state: "error", error: "asset /media/x.js lies under the reserved path /media" });
   });
+
+  it("a renderer asset under a reserved path leaves the live page as it was, not overwritten", async () => {
+    const { content, put } = fakeContent();
+    const db = createFakePersistence();
+    const blobs = fakeBlobs();
+    let reservedAsset = false;
+    const renderer: Renderer = {
+      formats: () => ["html"],
+      async render() {
+        return ok({ data: reservedAsset ? "<h1>new</h1>" : "<h1>old</h1>", contentType: "text/html", extension: "html", assets: reservedAsset ? [{ path: "/media/x.js", data: "1", contentType: "text/javascript" }] : [] });
+      },
+    };
+    const reserved = configSchema.parse({ ...config, reservedPaths: ["/media"] });
+    const delivery = await createDeliveryStatic(reserved, { content, site, renderer, blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published" });
+    expectOk(await delivery.publish("pages", "p1"));
+    reservedAsset = true;
+    const status = expectOk(await delivery.publish("pages", "p1"));
+    expect(status.find((s) => s.locale === "de")).toMatchObject({ state: "error", path: "/seite" });
+    expect(new TextDecoder().decode(blobs.blobs.get("site/seite/index.html")?.data)).toBe("<h1>old</h1>");
+    expect(blobs.blobs.has("site/media/x.js")).toBe(false);
+  });
 });
 
 describe("delivery/static: rendered output is stored byte for byte, no media rewrite", () => {

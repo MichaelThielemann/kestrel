@@ -5,7 +5,7 @@ import { publishedLocale } from "@michaelthielemann/kestrel-contracts/content-lo
 import { err, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
-import type { Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
+import type { Renderer, RenderOutput } from "@michaelthielemann/kestrel-contracts/renderer";
 import type { Site } from "@michaelthielemann/kestrel-contracts/site";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { exportLlms, validateLlmsConfig, type LlmsSource } from "./llms.ts";
@@ -166,18 +166,23 @@ export async function createDeliveryStatic(config: Config, deps: { content: Cont
     const reservedPage = reservedMatch(path, config.reservedPaths);
     if (reservedPage !== undefined) return failed(`path ${path} is reserved (${reservedPage})`);
     try {
+      const outputs: RenderOutput[] = [];
       for (const format of config.formats) {
         const rendered = await renderer.render({ type, id, ...(locale === undefined ? {} : { locale }), path, format, document: doc });
         if (isErr(rendered)) return failed(rendered.error.message);
-        const out = rendered.value;
-        const stored = await blobs.put(keyFor(config.prefix, path, out.extension), bytes(out.data), { contentType: out.contentType });
-        if (isErr(stored)) return failed(stored.error.message);
-        for (const asset of out.assets ?? []) {
+        for (const asset of rendered.value.assets ?? []) {
           const assetPath = asset.path.replace(/^\/+/, "");
           if (assetPath === "" || assetPath.split("/").some((p) => p === "..")) throw new Error(`delivery/static: invalid asset path ${JSON.stringify(asset.path)}`);
           const reservedAsset = reservedMatch(`/${assetPath}`, config.reservedPaths);
           if (reservedAsset !== undefined) return failed(`asset /${assetPath} lies under the reserved path ${reservedAsset}`);
-          const key = `${config.prefix}${assetPath}`;
+        }
+        outputs.push(rendered.value);
+      }
+      for (const out of outputs) {
+        const stored = await blobs.put(keyFor(config.prefix, path, out.extension), bytes(out.data), { contentType: out.contentType });
+        if (isErr(stored)) return failed(stored.error.message);
+        for (const asset of out.assets ?? []) {
+          const key = `${config.prefix}${asset.path.replace(/^\/+/, "")}`;
           if (!uploadedAssets.has(key)) {
             const put = await blobs.put(key, bytes(asset.data), { contentType: asset.contentType });
             if (isErr(put)) return failed(put.error.message);
