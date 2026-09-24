@@ -35,7 +35,7 @@ away (`start()` never gets the chance to), so `events.emit` drops the event inst
 nothing could ever fan out, and the worker never starts.
 Config (all optional): `pollMs` 500, `batch` 20, `maxAttempts` 5, `backoffSeconds`
 `[5, 30, 120, 600]`, `lockTtlSeconds` 300, `retentionDays` 7, `relayMs` 5000, `relayPipelines`
-`"all"`.
+`"all"`, `lanes` `{}`.
 Steps: `events.emit:<name>`, `events.readQueueStatus`, `events.listDead` (`?limit`, max 500;
 each item names its `pipeline` and `runId`), `events.retryDead:all` / `events.retryDead:one`
 (`params.id`, retries one pipeline's copy), `events.purgeDone` (cron), `events.relay`.
@@ -73,6 +73,33 @@ carries. `since` stays `null` because the count is a store total, not a per-proc
 through `events.retryDead` lowers it. The number never reaches `kestrel.health()` or a readiness
 probe — a dead letter does not take the instance out of rotation.
 
+An event whose data carries a string `coalesceKey` is coalesced: for each subscribed pipeline,
+`enqueue` writes at most one row per `"<pipeline>:<coalesceKey>"` while an earlier row of that key
+has not started — a later `enqueue` with the same key hits a `CONFLICT` on the unique
+`coalesceKey` column and writes nothing, instead of failing the run. A claim, whether by the
+worker, a lane's own loop or the relay, clears the row's `coalesceKey` the moment it starts
+running, so a fresh event with the same key can be enqueued again once that row is merely running,
+before it has finished. An event with no `coalesceKey` is never coalesced, and a `CONFLICT` on any
+other column still fails `emit` as before. `coalesceKey` is a plain string on the event's data;
+this module attaches no meaning to it beyond the key.
+
+`lanes` (default `{}`) gives named pipelines their own worker loop: `{ "<lane>": ["<pipeline>",
+…] }`. A lane name matches `^[a-z][a-z0-9-]*$`; `main` is reserved for the pipelines no lane names,
+and a pipeline may be in at most one lane and never also in `relayPipelines`. Every pipeline not
+listed runs in the implicit `main` lane, together with the worker's fan-out of unfanned rows and
+its reclaim of every lane's expired locks. Each named lane runs its own single-flight loop that
+claims and runs one due row of its own pipelines at a time, on the same `pollMs`; the relay never
+claims a lane row, whatever `relayPipelines` says. **A due row of one lane never waits for a row of
+another lane or of the main loop** — each loop claims independently, so however many rows are
+blocked in one lane, every other lane and the main loop keep claiming and running theirs at their
+own pace. The cost: every running loop shares the process's CPU, and each lane, like the main loop,
+still runs one row at a time, so a lane's own throughput is unaffected by another lane only in that
+it is never made to wait for it. `events.readQueueStatus` reports each configured lane's `pending`,
+`running` and `oldestPendingAt` under `lanes`; the top-level counters keep counting every row
+regardless of lane. Moving a pipeline out of a lane, or dropping the lane from the config, changes
+only where new rows land — a lane with rows still `pending` or `running` from an earlier
+configuration keeps a loop, discovered once at start, until those rows finish.
+
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
 `@michaelthielemann/kestrel-events-queue` – module `events/queue`: provides no contract; requires `persistence@1`, `events@1`; provides the event trigger hook.
@@ -87,11 +114,12 @@ probe — a dead letter does not take the instance out of rotation.
 | `retentionDays` | integer | no | `7` |
 | `relayMs` | integer | no | `5000` |
 | `relayPipelines` | union | no | `"all"` |
+| `lanes` | record | no | `{}` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
 | `events.emit:<arg>` | Queue event "<arg>" for the subscribed handler pipelines; the worker delivers it after this run | – | – | – | – | 503 the event could not be persisted | portable | yes |
-| `events.readQueueStatus` | Queue counters per state, the oldest pending event and the worker state of this process | – | `result` | – | { pending: number, running: number, dead: number, done24h: number, oldestPendingAt: number \| null, worker: object, … } | – | beside | yes |
+| `events.readQueueStatus` | Queue counters per state, the oldest pending event, the worker state of this process, and pending/running/oldestPendingAt per configured lane | – | `result` | – | { pending: number, running: number, dead: number, done24h: number, oldestPendingAt: number \| null, worker: object, lanes: object, … } | – | beside | yes |
 | `events.readDeliveryStatus` | Dead-letter rows of the queue across every process: deliveries that used up maxAttempts and wait for events.retryDead | – | `result` | – | { dead: integer, scope: "store" \| "process", since: number \| null, lastDeadAt: number \| null, … } | 503 the queue could not be read | portable | no |
 | `events.listDead` | Dead-letter events, most recently failed first | – | `result` | ?limit: integer | { items: object[], … } | – | beside | yes |
 | `events.retryDead:<arg>` | Requeue every dead-letter event | – | `result` | – | { retried: number, … } | – | beside | yes |

@@ -340,6 +340,16 @@ Net changes since 5.8.1.
   it cannot be read from a `content-default` module's config on `kestrel.config.ts`; the counter
   itself, and the rest of the `data` command, stays SQLite-only either way.
 
+- `events-queue` coalesces: an event whose data carries a string `coalesceKey` is queued at most
+  once per subscribed pipeline and key while an earlier row of that key has not started; a claim,
+  by the worker, a lane's own loop or the relay, clears the key so a fresh event with the same key
+  can be enqueued again once that row is running.
+- `events-queue` runs named lanes: `lanes: { "<lane>": ["<pipeline>", …] }` gives each lane its own
+  worker loop, which claims and runs one row at a time. A due row of one lane never waits for a row
+  of another lane or of the main loop (the implicit lane for every pipeline `lanes` does not name),
+  and the relay never claims a lane row. `events.readQueueStatus` reports each configured lane's
+  `pending`, `running` and `oldestPendingAt` under `lanes`.
+
 ### Changed
 
 - `replication-sqlite`: `setup()` no longer silently skips restoring the database when the file
