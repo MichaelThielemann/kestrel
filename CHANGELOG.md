@@ -183,6 +183,9 @@ Net changes since 5.8.1.
   write it there; a pipeline that omits such a step fails to boot naming both steps, instead of
   reassigning to an unverified target at runtime. `examples/minimal`'s `reassignRevisionAuthor` and
   `retryReassignRevisionAuthor` pipelines already run the verify step first.
+- `Manifest` gains a required `warnings: BootWarning[]`, the same entries as `kestrel.warnings`, so
+  `describe()` and `insights.readManifest` carry the boot warnings. Code that builds a `Manifest` by
+  hand adds `warnings: []`.
 
 ### Added
 
@@ -269,6 +272,12 @@ Net changes since 5.8.1.
   outdated, counts as `pending`; a row for a size nobody declares any more is ignored. All zero for a
   non-eligible item, the same as an empty `variants[]`. Declared `required` in `attach`'s
   `extendsItems`, next to `variants`.
+- Every event delivery module registers `events.readDeliveryStatus`, answering `{ dead, scope,
+  since, lastDeadAt }`: the deliveries the module gave up on. `events/queue` counts its dead-letter
+  rows across every process (`scope: "store"`); `events/direct` counts the failed deliveries of the
+  process that answers, since it started (`scope: "process"`). `EVENT_DELIVERY_STEPS` lists it next
+  to `events.emit` and `events.relay`. A failed delivery never makes `health()` report the instance
+  unhealthy.
 
 ### Changed
 

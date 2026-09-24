@@ -795,6 +795,21 @@ including one raised through `events@1` directly). If persistence itself fails o
 `events.emit` step fails with 503 `TRANSIENT` rather than silently dropping the event. Payload
 rules are unchanged: no tokens (only `identity`), a frozen shallow copy per handler.
 
+### `events.readDeliveryStatus`
+
+Both delivery modules also register `events.readDeliveryStatus`, one portable step with one shared
+shape: `{ dead, scope, since, lastDeadAt }`. It answers the deliveries the module gave up on —
+"dead" reuses the vocabulary `events.relay`'s `dead` already has — but what each field means depends
+on the module, named by `scope`. `events-queue` answers `scope: "store"`: `dead` is the dead-letter
+count across every process, the same number `events.readQueueStatus.dead` already carries, lowered
+by `events.retryDead`; `since` is always `null`. `events-direct` answers `scope: "process"`: `dead`
+counts the failed deliveries of the process that answers, since it started at `since` — another
+process of the same site keeps its own count, and a restart starts at 0, because nothing here
+retries and every failure is final at once. Neither number is a readiness or liveness signal:
+`kestrel.health()` and `/api/ready`/`/api/health` never read it, and a module never puts it in its
+own `health()` hook. A consumer wires one route to it — the step and its shape are identical across
+both delivery modules, so the route works whichever one is configured.
+
 ## Replaying a Stored Payload
 
 A flow that has to save something the system stored earlier — restoring a revision, replaying an

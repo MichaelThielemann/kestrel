@@ -17,6 +17,10 @@ may define its own contracts with the same `defineContract`; the core treats the
   `blobstore@1` is its own contract (different technology), `user-persistence@1` is not.
 - Contracts don't change once frozen. A capability that needs a different shape becomes a new
   major (`persistence@2`) next to the old one.
+- A frozen contract freezes its methods, their meaning and the types its own file defines. A core
+  type it returns by reference, such as `Manifest` from `insights@1`'s `manifest()`, belongs to the
+  core and grows additively with the core's major; an implementation that passes the core's value
+  through needs no change.
 - The query vocabulary types (`Filter`, `Condition`, `FindOptions`, `Page`) live in
   `contracts/query.ts` and are shared by `persistence@1`, `content@1` and `site@1`, so no contract
   file has to import another one for them.

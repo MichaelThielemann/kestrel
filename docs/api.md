@@ -658,11 +658,14 @@ itself. `recentFailures` is a ring buffer of the last runs that ended with a sta
 above (newest first, 50 by default, `recentFailures` in the module's config, `0` turns it off).
 `message` is the same text the failing run returned to its caller, truncated at 500 characters;
 an unexpected throw shows only `"<pipeline>/<step>: unexpected <ErrorName>"`, and a stack never
-leaves the log.
+leaves the log. `warnings` carries the non-fatal conditions boot found (`BootWarning`, e.g. an
+event trigger whose event no pipeline emits): `{ code, message, ...context }`, every context field
+a string; a client must render a `code` it does not recognize generically. A boot warning never
+influences readiness or `health()`.
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/admin/insights/manifest` | `{ generatedAt, core: { version }, contracts: ["persistence@1", …], modules: [Module], steps: [Step], pipelines: [Pipeline], triggers: { http: [{ method, path, pipeline }], events: [{ event, pipeline }], crons: [{ expression, pipeline }] } }` — computed once at boot, `generatedAt` is the response time |
+| GET | `/admin/insights/manifest` | `{ generatedAt, core: { version }, contracts: ["persistence@1", …], modules: [Module], steps: [Step], pipelines: [Pipeline], triggers: { http: [{ method, path, pipeline }], events: [{ event, pipeline }], crons: [{ expression, pipeline }] }, warnings: [BootWarning] }` — computed once at boot, `generatedAt` is the response time |
 | GET | `/admin/insights/stats` | `{ generatedAt, process: { pid, startedAt, uptimeMs }, runs: { active, total, failed, errors }, pipelines: [{ name, count, failed, errors, p50Ms, p95Ms, lastAt }], steps: [{ pipeline, step, count, failed, errors, p50Ms, p95Ms }], events: [{ name, count, lastAt }], ratelimit: [], recentFailures: [{ at, runId, pipeline, trigger: { kind, name }, status, ms, code?, step?, message? }] }` |
 
 `Module`: `{ name: "authn/multi", use: "@michaelthielemann/kestrel-authn-multi", version: string | null (null when the package cannot be resolved from the boot root, and for path entries), provides, requires, optional: ["<contract>@<major>"], config: { schema: JsonSchema, variables: [{ path: "bootstrap.passwordHash", type, required, default?, secret, set, status, value, redacted }] }, steps: ["authn.login", …], eventHook: boolean, emits: ["migrations.applied"] (events the module emits from a contract method, `[]` for most modules) }`.
@@ -727,6 +730,17 @@ names and response shapes are not.
 | GET `/admin/events/dead` | `events.listDead` | `{ items: [{ id, name, pipeline, attempts, error, createdAt, availableAt }] }` – most recently failed first (`?limit`, max 500) |
 | POST `/admin/events/retry` | `events.retryDead:all` | `{ retried }` – requeues every dead-letter event with `attempts` reset |
 | POST `/admin/events/dead/:id/retry` | `events.retryDead:one` | `{ retried: 1 }` – requeues one; 404 when there is no dead event with that id |
+
+### Event delivery status
+
+`events.readDeliveryStatus` is on both delivery modules, so a consumer wires one route regardless
+of which one runs; `examples/minimal` puts it at `GET /admin/events/delivery`
+(`system.manage`). It answers `{ dead, scope, since, lastDeadAt }`: the deliveries the module gave
+up on. With `events-queue`, `scope` is `"store"` — the dead-letter count across every process, the
+same number as `events.readQueueStatus.dead`, `since` is `null`. With `events-direct`, `scope` is
+`"process"` — the failed deliveries of the process that answers, counted since it started at
+`since`; another process of the same site has its own count, and a restart starts at 0. Neither
+number reaches `health()` or `/api/ready`.
 
 ## Personal data
 

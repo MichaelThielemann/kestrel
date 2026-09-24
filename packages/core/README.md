@@ -7,7 +7,9 @@ pipelines and validates triggers; any problem throws `KestrelBootError { module,
 condition that boot does not treat as fatal — for example an event trigger whose event no
 pipeline emits and no module declares in `emits` — is both logged through `logger.warn` and
 returned as `kestrel.warnings: BootWarning[]`, so a caller can assert the list is empty even
-against a logger that discards warnings. `BootWarning` is a discriminated union on `code`;
+against a logger that discards warnings; the same list is also in `describe().warnings`, so a
+module's `attach()` hook and `insights.readManifest` see it without a separate channel.
+`BootWarning` is a discriminated union on `code`;
 today's members are `{ code: "unemitted-event", message, pipeline, event }` and `{ code:
 "unwritten-optional-read", message, pipeline, step, key }` (an optional read, `"key?"`, whose key
 no step of any booted pipeline writes and no trigger provides — almost always a typo), and a
