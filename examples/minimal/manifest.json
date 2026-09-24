@@ -20443,35 +20443,6 @@
       "name": "serveImageVariant",
       "steps": [
         {
-          "spec": "authn.identifyUser",
-          "name": "authn.identifyUser",
-          "module": "authn/multi",
-          "description": {
-            "summary": "Identify the caller if a valid token is present",
-            "reads": [],
-            "writes": [
-              "token?",
-              "identity?"
-            ],
-            "security": "optional"
-          }
-        },
-        {
-          "spec": "authz.require:media.read",
-          "name": "authz.require",
-          "module": "authz/roles",
-          "description": {
-            "summary": "Requires permission media.read",
-            "reads": [],
-            "writes": [],
-            "security": "required",
-            "errors": {
-              "401": "not authenticated",
-              "403": "missing permission media.read"
-            }
-          }
-        },
-        {
           "spec": "images.serve",
           "name": "images.serve",
           "module": "images/default",
@@ -20497,35 +20468,6 @@
     {
       "name": "serveMediaFile",
       "steps": [
-        {
-          "spec": "authn.identifyUser",
-          "name": "authn.identifyUser",
-          "module": "authn/multi",
-          "description": {
-            "summary": "Identify the caller if a valid token is present",
-            "reads": [],
-            "writes": [
-              "token?",
-              "identity?"
-            ],
-            "security": "optional"
-          }
-        },
-        {
-          "spec": "authz.require:media.read",
-          "name": "authz.require",
-          "module": "authz/roles",
-          "description": {
-            "summary": "Requires permission media.read",
-            "reads": [],
-            "writes": [],
-            "security": "required",
-            "errors": {
-              "401": "not authenticated",
-              "403": "missing permission media.read"
-            }
-          }
-        },
         {
           "spec": "media.serve",
           "name": "media.serve",

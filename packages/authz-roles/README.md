@@ -28,7 +28,11 @@ so every pipeline that runs it must actually let an anonymous caller through. Bo
 pipeline, the step and either the permission anonymous callers lack or the authn step (other than
 `authz.require` itself) that requires a signed-in caller. This is a check by this module only:
 `authz@1` carries no anonymous verdict, so a different `authz@1` provider has to perform the same
-check itself, or the flag goes unchecked under it.
+check itself, or the flag goes unchecked under it. `authz.require` checks a signed-in caller's roles
+only, never the `anonymous` grants: a signed-in user whose roles lack a permission is refused where an
+anonymous caller passes. A pipeline serving output that is published anyway should therefore not
+gate it with `authz.require` at all; the example serves `/media/:id/:name` and
+`/media/:id/variants/:file` with `media.serve` and `images.serve` alone.
 Not included: ownership/resource checks (the `resource` argument is ignored), roles stored in a database.
 
 <!-- kestrel-docs:start -->
@@ -48,6 +52,6 @@ Not included: ownership/resource checks (the `resource` argument is ignored), ro
 | `authz.listRoles` | The configured role names, in config order | – | `result.roles` | – | { roles: string[], … } | – | – | no |
 | `authz.validateRoles:<arg>` | Validate the role names at payload.<arg> against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept | `payload.<arg>` | – | object | – | 400 the value is not an array of known role names | – | no |
 
-Used by 67 of 89 pipelines in `examples/minimal`.
+Used by 65 of 89 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

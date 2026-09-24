@@ -286,7 +286,8 @@ describe("image variants wiring", () => {
     expect(pipelines.get("syncImages")).toEqual(["authn.requireUser", "authz.require:images.manage", "images.sync"]);
     expect(pipelines.get("pruneImages")).toEqual(["authn.requireUser", "authz.require:images.manage", "images.prune"]);
     expect(pipelines.get("imagesStatus")).toEqual(["authn.requireUser", "authz.require:images.read", "images.readStatus"]);
-    expect(pipelines.get("serveImageVariant")).toEqual(["authn.identifyUser", "authz.require:media.read", "images.serve"]);
+    expect(pipelines.get("serveImageVariant")).toEqual(["images.serve"]);
+    expect(pipelines.get("serveMediaFile")).toEqual(["media.serve"]);
     expect(pipelines.get("generateImageVariants")).toEqual(["images.generate"]);
     expect(pipelines.get("resumeImages")).toEqual(["images.resume"]);
   });
