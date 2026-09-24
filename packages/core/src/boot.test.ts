@@ -291,6 +291,17 @@ describe("boot", () => {
     expect([...kestrel.pipelines.keys()].sort()).toEqual(["createPage", "download", "onCreated", "readPage", "upload", "whoami"]);
   });
 
+  it("keeps register() and failedToRegister() off the public Kestrel.steps type", async () => {
+    kestrel = await boot({ config: baseConfig, modules, pipelines, logger: silentLogger });
+    // @ts-expect-error register() only exists on the internal StepRegistry, not the public Kestrel.steps type
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- the point of the test is that this call does not type-check
+    kestrel.steps.register("probe", "x", {});
+    // @ts-expect-error failedToRegister() only exists on the internal StepRegistry, not the public Kestrel.steps type
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- the point of the test is that this call does not type-check
+    kestrel.steps.failedToRegister("x");
+    expect(kestrel.steps.has("store.create")).toBe(true);
+  });
+
   it("passes the same bootStartedAt to every module's setup(), captured before any setup() runs", async () => {
     const before = Date.now();
     const seen: number[] = [];

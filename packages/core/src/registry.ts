@@ -18,6 +18,15 @@ export interface RegisteredStep {
   describe: StepDescriptions[string];
 }
 
+/** The read side of the step registry a booted `Kestrel` exposes; registration itself is a boot-time-only operation. */
+export interface Steps {
+  has(name: string): boolean;
+  names(): string[];
+  owner(name: string): string | undefined;
+  list(): RegisteredStep[];
+  resolve(spec: string, owner?: string): ResolvedStep;
+}
+
 const CONTEXT_PATH = /^[a-zA-Z][A-Za-z0-9]*(\.[A-Za-z0-9_-]+)*\??$/;
 
 /** The argument a factory step's describe() sees when no pipeline supplies one. */

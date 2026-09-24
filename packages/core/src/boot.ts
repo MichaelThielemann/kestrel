@@ -13,7 +13,7 @@ import { resolveEntries } from "./resolveEntries.ts";
 import { KestrelBootError } from "./errors.ts";
 import { consoleLogger, logWarn, type Logger } from "./logger.ts";
 import { createObserverHub } from "./observer.ts";
-import { PLACEHOLDER_ARG, StepRegistry, type ResolvedStep } from "./registry.ts";
+import { PLACEHOLDER_ARG, StepRegistry, type ResolvedStep, type Steps } from "./registry.ts";
 import { findMissingRequired, resolveOutputSchema } from "./schema.ts";
 import { ok } from "./result.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
@@ -85,7 +85,7 @@ export interface UnwrittenOptionalReadWarning {
 export interface Kestrel extends Introspection {
   config: KestrelConfig;
   contracts: ContractLookup & { names(): string[] };
-  steps: StepRegistry;
+  steps: Steps;
   pipelines: ReadonlyMap<string, ResolvedPipeline>;
   triggers: Triggers;
   warnings: readonly BootWarning[];

@@ -16,7 +16,6 @@
     "./cast": "./src/cast.ts",
     "./catalogue": "./src/catalogue.ts",
     "./context": "./src/context.ts",
-    "./dataflow": "./src/dataflow.ts",
     "./defineConfig": "./src/defineConfig.ts",
     "./defineContract": "./src/defineContract.ts",
     "./defineModule": "./src/defineModule.ts",
@@ -50,10 +49,6 @@
       "./context": {
         "types": "./dist/context.d.ts",
         "default": "./dist/context.js"
-      },
-      "./dataflow": {
-        "types": "./dist/dataflow.d.ts",
-        "default": "./dist/dataflow.js"
       },
       "./defineConfig": {
         "types": "./dist/defineConfig.d.ts",

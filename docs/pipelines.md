@@ -477,8 +477,8 @@ sub-key replaces the whole object, and with it every previously written `result.
 `payload.*` reads are never checked (the client owns the payload; [Payload
 Validation](#payload-validation) checks it against `describe().input`/`query` instead).
 
-After resolving each pipeline, boot runs a dataflow check (`checkDataflow`,
-`@michaelthielemann/kestrel/dataflow`): for every step in order, each field it reads must already
+After resolving each pipeline, boot runs a dataflow check (`checkDataflow`, from
+`@michaelthielemann/kestrel`): for every step in order, each field it reads must already
 have been written by an earlier step, or boot aborts with a `KestrelBootError` naming the pipeline,
 step, path, and the writes seen so far. An optional read is exempt from that rule, but not from
 ordering: if no earlier step supplies the key but a *later* step in the same pipeline writes it

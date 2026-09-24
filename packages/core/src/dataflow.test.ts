@@ -1,10 +1,27 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
+import { boundaryCast } from "./cast.ts";
 import { checkDataflow } from "./dataflow.ts";
 import type { StepDescription } from "./defineModule.ts";
 import { KestrelBootError } from "./errors.ts";
 import { ok } from "./result.ts";
 import type { ResolvedPipeline } from "./runner.ts";
 import { parseRoute, type Route } from "./triggers/http.ts";
+
+const PACKAGE_JSON = resolve(dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+
+describe("package exports", () => {
+  it("does not publish ./dataflow, so checkDataflowCollecting stays out of the public surface", () => {
+    const pkg = boundaryCast<{ exports: Record<string, unknown>; publishConfig: { exports: Record<string, unknown> } }>(
+      JSON.parse(readFileSync(PACKAGE_JSON, "utf8")),
+      "json",
+    );
+    expect(Object.keys(pkg.exports)).not.toContain("./dataflow");
+    expect(Object.keys(pkg.publishConfig.exports)).not.toContain("./dataflow");
+  });
+});
 
 const DECLARED: Record<string, Pick<StepDescription, "reads" | "writes">> = {
   "authn.identifyUser": { reads: [], writes: ["token?", "identity?"] },

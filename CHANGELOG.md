@@ -189,6 +189,14 @@ Net changes since 5.8.1.
   hand adds `warnings: []`.
 - `new KestrelBootError(module, reason, code)` now requires a third argument, `code: BootErrorCode`;
   code that constructs a `KestrelBootError` directly (rather than catching one `boot()` throws) adds it.
+- `core`: the `./dataflow` export path is gone. `checkDataflowCollecting` was only ever meant for
+  `boot()`'s own use; `checkDataflow`, the throwing check pipelines already relied on, remains
+  available from the package's main export.
+- `core`: `Kestrel.steps` is now typed as the new exported `Steps` interface (`has`, `names`,
+  `owner`, `list`, `resolve`) instead of the internal `StepRegistry` class. `register()` and
+  `failedToRegister()` are boot-time-only operations with no reader outside `boot()` and are no
+  longer part of the public type; code that only read a booted instance's steps is unaffected.
+  `RegisteredStep`, already `list()`'s return type, is now exported alongside `Steps`.
 
 ### Added
 

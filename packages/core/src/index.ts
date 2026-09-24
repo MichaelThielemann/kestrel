@@ -8,7 +8,7 @@ export { SECRET } from "./describe.ts";
 export { REDACTED, type JsonValue } from "./configValue.ts";
 export type { RunObserver, RunStartEvent, RunEndEvent, StepStartEvent, StepEndEvent, Unobserve } from "./observer.ts";
 export type { ResolvedPipeline } from "./runner.ts";
-export type { ResolvedStep } from "./registry.ts";
+export type { ResolvedStep, RegisteredStep, Steps } from "./registry.ts";
 export { definePipeline, pipelineDefiner, isAtomicGroup, pipelineSteps, type PipelineDefinition, type PipelineEntry, type AtomicGroup } from "./definePipeline.ts";
 export type { AtomicScope, AtomicScopeInfo, AtomicVerdict, AtomicOutcome } from "./atomic.ts";
 export type { StepsOf, StepCatalogue } from "./catalogue.ts";
