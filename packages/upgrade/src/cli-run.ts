@@ -4,7 +4,6 @@ import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { checkBoot, type BootCheck, type BootProblem } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
-import { hasArrayHole, parseTs } from "./ast.ts";
 import { askFindings, parseAnswersFile, resolveAnswer, ttyPrompt, unknownAnswerIds, type PromptFn } from "./answers.ts";
 import { boolFlag, parseArgs, stringFlag, type ParsedArgs } from "./args.ts";
 import { unifiedDiff } from "./diff.ts";
@@ -18,6 +17,7 @@ import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
 import { sandboxBootInput, type SandboxTable } from "./sandbox.ts";
 import { createScratchCopy, removeScratchCopy } from "./scratch.ts";
+import { verifiesAfterEdit } from "./verify.ts";
 import { installedVersions, majorOf } from "./versions.ts";
 
 interface ResolvedProject {
@@ -316,22 +316,6 @@ async function isDirty(file: string, root: string): Promise<boolean | undefined>
     return stdout.trim() !== "";
   } catch {
     return isInsideGitTree(root) ? undefined : false;
-  }
-}
-
-function verifiesAfterEdit(file: string, text: string): boolean {
-  if (file.endsWith(".json")) {
-    try {
-      JSON.parse(text);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  try {
-    return !hasArrayHole(parseTs(text));
-  } catch {
-    return false;
   }
 }
 

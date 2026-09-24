@@ -12,6 +12,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./codemods": "./src/codemods.ts",
     "./plugin": "./src/plugin.ts",
     "./sandbox": "./src/sandbox.ts"
   },
@@ -20,6 +21,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
+      },
+      "./codemods": {
+        "types": "./dist/codemods.d.ts",
+        "default": "./dist/codemods.js"
       },
       "./plugin": {
         "types": "./dist/plugin.d.ts",
