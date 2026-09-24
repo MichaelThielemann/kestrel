@@ -233,6 +233,24 @@ describe("checkBoot: collecting every problem", () => {
     expect(teardownTwo).toHaveBeenCalledTimes(1);
   });
 
+  it("tears down a module whose setup() result lacks the contract methods it provides", async () => {
+    const teardown = vi.fn();
+    const broken = defineModule({
+      name: "good/store",
+      provides: [GOOD],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      teardown,
+    });
+    const input: BootInput = { config: { modules: [{ use: "./store", config: {} }], triggers: [] }, modules: [broken], pipelines: [], logger: silentLogger };
+    const check = await checkBoot(input, { setup: "all" });
+    expect(check.errors).toContainEqual(expect.objectContaining({ code: "missing-methods", owner: "good/store" }));
+    expect(teardown).toHaveBeenCalledTimes(1);
+  });
+
   it("skips attach() while an error exists, and reports it as not checked", async () => {
     const attachSpy = vi.fn();
     const withAttach = defineModule({

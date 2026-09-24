@@ -1423,6 +1423,29 @@ describe("boot", () => {
     expect(order).toEqual(["teardown/one"]);
   });
 
+  it("tears down a module whose setup() result lacks the contract methods it provides", async () => {
+    const teardown = vi.fn();
+    const broken = defineModule({
+      name: "store/broken",
+      provides: [STORE],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      teardown,
+    });
+    await expect(
+      boot({
+        config: { modules: [{ use: "./store", config: {} }], triggers: [] },
+        modules: [broken],
+        pipelines: [],
+        logger: silentLogger,
+      }),
+    ).rejects.toThrow(/\[store\/broken\] setup\(\) result lacks store@1 method\(s\): put, get, all/);
+    expect(teardown).toHaveBeenCalledTimes(1);
+  });
+
   it("tears down already-constructed modules when a later boot stage fails (invalid trigger)", async () => {
     const order: string[] = [];
     const mod = defineModule({

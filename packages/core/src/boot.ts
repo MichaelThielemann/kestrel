@@ -456,6 +456,7 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
       markNotSetUp(notSetUp, mod, "setup() threw");
       continue;
     }
+    instances.set(mod, instance);
     const allMissing = mod.provides.flatMap((c) => {
       const missing = missingMethods(c, instance);
       return missing.length > 0 ? [{ contract: c, missing }] : [];
@@ -466,7 +467,6 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
       markNotSetUp(notSetUp, mod, "setup() result lacks required contract methods");
       continue;
     }
-    instances.set(mod, instance);
     for (const contract of mod.provides) registered.set(contract.name, instance);
   }
 
