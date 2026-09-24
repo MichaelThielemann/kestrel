@@ -4,7 +4,7 @@ import { authzContractTests } from "@michaelthielemann/kestrel-contracts/authz.c
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createContext } from "@michaelthielemann/kestrel/context";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
-import { anonymousCan, createAuthzRoles, matches, requiredPermissions } from "./impl.ts";
+import { anonymousCan, assertAnonymousAccess, createAuthzRoles, matches, requiredPermissions } from "./impl.ts";
 import module from "./module.ts";
 
 const config = { roles: { admin: ["*"], editor: ["pages.*", "media.read"] }, roleClaim: "roles", anonymous: ["pages.read"] };
@@ -63,6 +63,47 @@ function manifestOf(specs: string[]): Manifest {
     warnings: [],
   };
 }
+
+function pipelineWith(name: string, steps: Array<{ spec: string; description?: Partial<PipelineManifest["steps"][number]["description"]> }>): PipelineManifest {
+  return { name, steps: steps.map(({ spec, description }) => ({ ...step(spec), description: { summary: "", reads: [], writes: [], ...description } })) };
+}
+
+function manifestWith(pipelines: PipelineManifest[]): Manifest {
+  return { core: { version: "0.0.0" }, contracts: [], modules: [], steps: [], pipelines, triggers: { http: [], events: [], crons: [] }, warnings: [] };
+}
+
+describe("assertAnonymousAccess", () => {
+  const anonymous = { roles: {}, roleClaim: "roles", anonymous: ["media.read"] };
+
+  it("throws when anonymous callers lack a required permission", () => {
+    const manifest = manifestWith([pipelineWith("serveMediaFile", [{ spec: "authz.require:pages.read", description: {} }, { spec: "media.serve", description: { anonymous: "required" } }])]);
+    expect(() => assertAnonymousAccess(anonymous, manifest)).toThrow(/pipeline "serveMediaFile" runs media.serve.*anonymous callers lack "pages.read"/);
+  });
+
+  it("throws when anonymous is empty", () => {
+    const manifest = manifestWith([pipelineWith("serveMediaFile", [{ spec: "authz.require:media.read", description: {} }, { spec: "media.serve", description: { anonymous: "required" } }])]);
+    expect(() => assertAnonymousAccess({ ...anonymous, anonymous: [] }, manifest)).toThrow(/anonymous callers lack "media.read"/);
+  });
+
+  it("throws when an authn step other than authz.require requires a signed-in caller", () => {
+    const manifest = manifestWith([pipelineWith("serveMediaFile", [{ spec: "authn.requireUser", description: { security: "required" } }, { spec: "media.serve", description: { anonymous: "required" } }])]);
+    expect(() => assertAnonymousAccess(anonymous, manifest)).toThrow(/pipeline "serveMediaFile" runs media.serve.*authn.requireUser requires a signed-in caller/);
+  });
+
+  it("passes with an exact, wildcard-scoped or full-wildcard grant, and for a pipeline without authz.require", () => {
+    for (const grant of ["media.read", "media.*", "*"]) {
+      const manifest = manifestWith([pipelineWith("serveMediaFile", [{ spec: "authz.require:media.read", description: {} }, { spec: "media.serve", description: { anonymous: "required" } }])]);
+      expect(() => assertAnonymousAccess({ ...anonymous, anonymous: [grant] }, manifest)).not.toThrow();
+    }
+    const openManifest = manifestWith([pipelineWith("serveMediaFile", [{ spec: "media.serve", description: { anonymous: "required" } }])]);
+    expect(() => assertAnonymousAccess(anonymous, openManifest)).not.toThrow();
+  });
+
+  it("leaves a pipeline without an anonymous: \"required\" step unaffected, even if it fully requires sign-in", () => {
+    const manifest = manifestWith([pipelineWith("adminOnly", [{ spec: "authn.requireUser", description: { security: "required" } }, { spec: "media.serve", description: {} }])]);
+    expect(() => assertAnonymousAccess({ ...anonymous, anonymous: [] }, manifest)).not.toThrow();
+  });
+});
 
 describe("requiredPermissions", () => {
   it("collects each authz.require permission of a pipeline once, in step order, including steps in an atomic group", () => {

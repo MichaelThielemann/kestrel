@@ -1,6 +1,6 @@
 import type { Identity } from "@michaelthielemann/kestrel-contracts/authn";
 import type { Authz, AuthzError } from "@michaelthielemann/kestrel-contracts/authz";
-import type { Detach, Introspection, PipelineManifest } from "@michaelthielemann/kestrel";
+import type { Detach, Introspection, Manifest, PipelineManifest } from "@michaelthielemann/kestrel";
 import { ok, type Result } from "@michaelthielemann/kestrel/result";
 
 export interface Config {
@@ -26,6 +26,26 @@ export function rolesOf(identity: Identity, claim: string): string[] {
 
 export function anonymousCan(config: Config, permission: string): boolean {
   return config.anonymous.some((granted) => matches(granted, permission));
+}
+
+/**
+ * Throws on the first pipeline that runs a step declaring `anonymous: "required"` without letting an
+ * anonymous caller through: an authn step other than `authz.require` requires a signed-in caller, or the
+ * pipeline's `authz.require` permissions are not all granted to `anonymous`.
+ */
+export function assertAnonymousAccess(config: Config, manifest: Pick<Manifest, "pipelines">): void {
+  for (const pipeline of manifest.pipelines) {
+    const flagged = pipeline.steps.find((step) => step.description.anonymous === "required");
+    if (!flagged) continue;
+    const authnGate = pipeline.steps.find((step) => step.description.security === "required" && step.name !== "authz.require");
+    if (authnGate) {
+      throw new Error(`authz/roles: pipeline "${pipeline.name}" runs ${flagged.name}, whose output is also published without an access check, but ${authnGate.name} requires a signed-in caller`);
+    }
+    const missing = requiredPermissions(pipeline).find((permission) => !anonymousCan(config, permission));
+    if (missing !== undefined) {
+      throw new Error(`authz/roles: pipeline "${pipeline.name}" runs ${flagged.name}, whose output is also published without an access check, but anonymous callers lack "${missing}" – grant it in "anonymous" or stop publishing that step's output`);
+    }
+  }
 }
 
 /** The permissions of one pipeline's `authz.require:<perm>` steps, deduplicated, in step order. Steps inside an atomic group count like any other. */
@@ -68,7 +88,9 @@ export function createAuthzRoles(config: Config): AuthzRoles {
       return anonymousCan(config, permission);
     },
     attach(kestrel) {
-      gates = new Map(kestrel.describe().pipelines.map((p): [string, readonly string[]] => [p.name, requiredPermissions(p)]));
+      const manifest = kestrel.describe();
+      assertAnonymousAccess(config, manifest);
+      gates = new Map(manifest.pipelines.map((p): [string, readonly string[]] => [p.name, requiredPermissions(p)]));
       return () => {
         gates = undefined;
       };
