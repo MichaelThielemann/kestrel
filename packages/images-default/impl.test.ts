@@ -1,17 +1,17 @@
-import { mkdtemp, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import type { Blobstore, PutOptions } from "@michaelthielemann/kestrel-contracts/blobstore";
+import type { EventHandler, Events } from "@michaelthielemann/kestrel-contracts/events";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
-import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import type { Introspection, Manifest } from "@michaelthielemann/kestrel";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
-import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, JOBS, SIZES, VARIANTS, createImages, whenIdle } from "./impl.ts";
-import type { Config, Job, Variant } from "./impl.ts";
-import type { Rendered, Renderer } from "./generate.ts";
+import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, RETIRED, VARIANTS, createImages, whenIdle } from "./impl.ts";
+import type { Config, Retired } from "./impl.ts";
+import type { Renderer } from "./generate.ts";
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
   const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
@@ -41,6 +41,26 @@ function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; c
   };
 }
 
+function fakeEvents(): Events & { emitted: Array<{ name: string; data: Record<string, unknown> }> } {
+  const handlers = new Map<string, Set<EventHandler>>();
+  const emitted: Array<{ name: string; data: Record<string, unknown> }> = [];
+  return {
+    emitted,
+    async emit(name, data) {
+      emitted.push({ name, data });
+      const set = handlers.get(name);
+      if (!set) return;
+      for (const handler of [...set]) await handler(name, data);
+    },
+    on(name, handler) {
+      const set = handlers.get(name) ?? new Set();
+      set.add(handler);
+      handlers.set(name, set);
+      return () => set.delete(handler);
+    },
+  };
+}
+
 const noLogger: Logger = { step() {}, info() {}, error() {} };
 
 const MEDIA = "media_items";
@@ -51,782 +71,413 @@ async function jpeg(width: number, height: number): Promise<Uint8Array> {
 
 const baseConfig: Config = { prefix: "media-variants/", publicPath: "/media", media: { collection: MEDIA }, chunk: 20, staleAfterMs: 60000, maxAttempts: DEFAULT_MAX_ATTEMPTS, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS };
 
-async function make(config: Partial<Config> = {}, now: () => number = () => 1000, render?: Renderer) {
+async function make(config: Partial<Config> = {}, now: () => number = () => 1000, render?: Renderer, events?: Events) {
   const blobs = fakeBlobstore();
   const db = createFakePersistence();
-  await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string" });
-  const images = await createImages({ ...baseConfig, ...config }, { blobs, db, logger: noLogger, ...(render ? { render } : {}) }, now);
+  await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", width: "number", height: "number", createdAt: "number" });
+  const images = await createImages({ ...baseConfig, ...config }, { blobs, db, logger: noLogger, ...(render ? { render } : {}), ...(events ? { events } : {}) }, now);
   return { images, blobs, db };
 }
 
-async function addImage(db: ReturnType<typeof createFakePersistence>, blobs: ReturnType<typeof fakeBlobstore>, id: string, data: Uint8Array, contentType = "image/jpeg"): Promise<void> {
-  const key = `orig/${id}.jpg`;
-  await db.createOne(MEDIA, { id, key, contentType, folder: "", filename: `${id}.jpg` });
-  await blobs.put(key, data, { contentType });
+async function seedMedia(db: ReturnType<typeof createFakePersistence>, patch: Record<string, unknown> = {}): Promise<{ id: string; key: string }> {
+  const id = boundaryCast<string | undefined>(patch.id, "host");
+  const key = `media/${id ?? "x"}/photo.jpg`;
+  const created = expectOk(await db.createOne(MEDIA, { key, contentType: "image/jpeg", folder: "", filename: "photo.jpg", status: "ready", width: null, height: null, createdAt: 1000, ...patch }));
+  return { id: created.id, key: boundaryCast<string>(created.key, "host") };
 }
 
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-  let resolve!: () => void;
-  const promise = new Promise<void>((r) => {
-    resolve = r;
-  });
-  return { promise, resolve };
+function introspectionOf(manifest: Manifest): Introspection {
+  return { describe: () => manifest, observe: () => () => {}, health: () => ({ ok: true, restartRequired: false, modules: [] }) };
+}
+function manifestWithPipelines(names: Array<{ pipeline: string; module: string; step: string }>): Manifest {
+  return {
+    core: { version: "0.0.0" },
+    contracts: [],
+    modules: [],
+    steps: [],
+    pipelines: [...new Set(names.map((n) => n.pipeline))].map((pipeline) => ({
+      name: pipeline,
+      steps: names.filter((n) => n.pipeline === pipeline).map((n) => ({ spec: n.step, name: n.step, module: n.module, description: { summary: "", reads: [], writes: [] } })),
+    })),
+    triggers: { http: [], events: [], crons: [] },
+    warnings: [],
+  };
 }
 
-async function waitFor(cond: () => boolean | Promise<boolean>, timeoutMs = 3000): Promise<void> {
-  const start = Date.now();
-  while (!(await cond())) {
-    if (Date.now() - start > timeoutMs) throw new Error("waitFor: condition not met in time");
-    await new Promise((resolve) => setTimeout(resolve, 2));
-  }
-}
+const fixedRenderer: Renderer = async (_data, _size, planned) => ({ data: new Uint8Array([9, 9]), width: planned.width, height: planned.height, format: planned.format, ext: planned.format === "webp" ? "webp" : planned.format, contentType: `image/${planned.format}` });
 
-describe("images/default boot", () => {
-  it("seeds the default sizes", async () => {
-    const { images } = await make();
-    const sizes = await images.sizes();
-    expect(sizes.map((s) => s.name).sort()).toEqual(["large", "medium", "small", "thumb", "xl"]);
-    expect(sizes.every((s) => s.source === "default")).toBe(true);
-  });
-
-  it("seeds config sizes instead of defaults when configured", async () => {
-    const { images } = await make({ sizes: [{ name: "hero", width: 1000, fit: "inside", format: "webp", quality: 82 }] });
-    const sizes = await images.sizes();
-    expect(sizes).toHaveLength(1);
-    expect(sizes[0]).toMatchObject({ name: "hero", source: "config" });
-  });
-});
-
-describe("register", () => {
-  it("rejects an empty list", async () => {
-    const { images } = await make();
-    expect(expectErr(await images.register([]), "VALIDATION").message).toContain("must not be empty");
-    expect(expectErr(await images.register("nope"), "VALIDATION").message).toContain("must not be empty");
-  });
-
-  it("rejects a name colliding with a config size", async () => {
-    const { images } = await make({ sizes: [{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }] });
-    expect(expectErr(await images.register([{ name: "thumb", width: 999 }]), "CONFLICT").message).toContain("defined in config");
-  });
-
-  it("registers new sizes and reports them as used and registered", async () => {
-    const { images } = await make();
-    const rows = expectOk(await images.register([{ name: "card", width: 480 }]));
-    const card = rows.find((r) => r.name === "card");
-    expect(card).toMatchObject({ width: 480, source: "registered" });
-    const status = expectOk(await images.status());
-    expect(status.sizes.find((s) => s.name === "card")?.used).toBe(true);
-  });
-
-  it("drops a size that is not resent and reports its leftover variants as orphaned", async () => {
+describe("images/default planning (images.plan)", () => {
+  it("decides format, extension and dimensions per size and creates them as planned", async () => {
     const { images, db, blobs } = await make();
-    expectOk(await images.register([{ name: "card", width: 480 }]));
-    await addImage(db, blobs, "a", await jpeg(600, 400));
-    expectOk(await images.generate("a"));
-    expectOk(await images.register([{ name: "banner", width: 900 }]));
-
-    const status = expectOk(await images.status());
-    expect(status.sizes.find((s) => s.name === "card")).toBeUndefined();
-    expect(status.orphaned.sizes).toEqual(["card"]);
-    expect(status.orphaned.variants).toBe(1);
+    const data = await jpeg(2000, 1000);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, data, { contentType: "image/jpeg" }));
+    expectOk(await images.plan([id]));
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    const thumb = rows.find((r) => r.size === "thumb");
+    expect(thumb).toBeDefined();
+    expect(thumb!.width).toBe(320);
+    expect(thumb!.height).toBe(160);
+    expect(thumb!.format).toBe("webp");
+    expect(thumb!.key).toBe(`media-variants/${id}/thumb.webp`);
+    expect(["pending"]).toContain(thumb!.state);
   });
 
-  it("never writes a size row and drops rows written by earlier versions", async () => {
+  it("without publicCopy, rows go straight to pending with no blob put", async () => {
     const blobs = fakeBlobstore();
     const db = createFakePersistence();
-    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string" });
-    const images = await createImages(baseConfig, { blobs, db, logger: noLogger }, () => 1000);
-    expectOk(await images.register([{ name: "card", width: 480 }]));
-    expect(expectOk(await db.count(SIZES, {}))).toBe(0);
-
-    await db.createOne(SIZES, { name: "card", width: 480, height: null, fit: "inside", format: "webp", quality: 82, source: "registered", updatedAt: 1 });
-    const infos: string[] = [];
-    const logger: Logger = { step() {}, info(message) { infos.push(message); }, error() {} };
-    const restarted = await createImages(baseConfig, { blobs, db, logger }, () => 2000);
-    expect(expectOk(await db.count(SIZES, {}))).toBe(0);
-    expect(infos.some((message) => message.includes("dropped 1 persisted size rows"))).toBe(true);
-    expect((await restarted.sizes()).some((size) => size.name === "card")).toBe(false);
-  });
-});
-
-describe("exists", () => {
-  it("reports whether a media id is known", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(200, 200));
-    expect(expectOk(await images.exists("a"))).toBe(true);
-    expect(expectOk(await images.exists("nope"))).toBe(false);
-  });
-});
-
-describe("generate", () => {
-  it("creates one done variant per effective size with correct dims and blob key", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(1200, 800));
-    const variants = expectOk(await images.generate("a"));
-    expect(variants).toHaveLength(5);
-    const medium = variants.find((v) => v.size === "medium")!;
-    expect(medium).toMatchObject({ state: "done", width: 1024, height: 683, format: "webp", key: "media-variants/a/medium.webp", attempts: 1 });
-    expect(blobs.blobs.has(medium.key)).toBe(true);
-  });
-
-  it("is idempotent: a second call does not touch the blobstore", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(1200, 800));
-    expectOk(await images.generate("a"));
+    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", width: "number", height: "number", createdAt: "number" });
     let puts = 0;
-    const originalPut = blobs.put.bind(blobs);
-    blobs.put = async (key: string, data: Uint8Array, options?: PutOptions) => {
-      puts += 1;
-      return originalPut(key, data, options);
-    };
-    const second = expectOk(await images.generate("a"));
+    const countingBlobs: Blobstore = { ...blobs, put: (...a: Parameters<Blobstore["put"]>) => { puts += 1; return blobs.put(...a); } };
+    const images = await createImages(baseConfig, { blobs: countingBlobs, db, logger: noLogger }, () => 1000);
+    const data = await jpeg(2000, 1000);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, data, { contentType: "image/jpeg" }));
+    expectOk(await images.plan([id]));
     expect(puts).toBe(0);
-    expect(second.every((v) => v.attempts === 1)).toBe(true);
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    expect(rows.every((r) => r.state === "pending")).toBe(true);
   });
 
-  it("regenerates only the size whose definition changed", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(1200, 800));
-    expectOk(await images.generate("a"));
-    expectOk(await images.register([{ name: "thumb", width: 111 }]));
+  it("with publicCopy, writes a placeholder copy of the original for every size, then turns pending", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
+    const data = await jpeg(1200, 800);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, data, { contentType: "image/jpeg" }));
+    expectOk(await images.plan([id]));
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.state).toBe("pending");
+      const copy = blobs.blobs.get(`site/media/${id}/variants/${row.size}.${row.format === "webp" ? "webp" : row.format}`);
+      expect(copy?.data).toEqual(data);
+    }
+  });
 
-    const putKeys: string[] = [];
-    const originalPut = blobs.put.bind(blobs);
-    blobs.put = async (key: string, data: Uint8Array, options?: PutOptions) => {
-      putKeys.push(key);
-      return originalPut(key, data, options);
+  it("never runs more than four placement writes at a time", async () => {
+    const blobs = fakeBlobstore();
+    const db = createFakePersistence();
+    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", width: "number", height: "number", createdAt: "number" });
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const gatedBlobs: Blobstore = {
+      ...blobs,
+      async put(key: string, data: Uint8Array, options?: PutOptions) {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight -= 1;
+        return blobs.put(key, data, options);
+      },
     };
-    const variants = expectOk(await images.generate("a"));
-    expect(putKeys).toEqual(["media-variants/a/thumb.webp"]);
-    expect(variants.find((v) => v.size === "thumb")).toMatchObject({ width: 111, attempts: 2 });
-    expect(variants.find((v) => v.size === "medium")).toMatchObject({ attempts: 1 });
+    const images = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes: [1, 2, 3, 4, 5, 6].map((n) => ({ name: `s${n}`, width: 100 + n, fit: "inside" as const, format: "webp" as const, quality: 82 })) }, { blobs: gatedBlobs, db, logger: noLogger }, () => 1000);
+    const data = await jpeg(1200, 800);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, data, { contentType: "image/jpeg" }));
+    expectOk(await images.plan([id]));
+    expect(maxInFlight).toBeLessThanOrEqual(4);
   });
 
-  it("marks every size error with attempts 1 on a corrupt original", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", new Uint8Array([1, 2, 3, 4, 5]));
-    const variants = expectOk(await images.generate("a"));
-    expect(variants).toHaveLength(5);
-    expect(variants.every((v) => v.state === "error" && v.attempts === 1)).toBe(true);
+  it("plans dimensions and a failed placeholder for an image sharp cannot decode, so it still becomes available", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
+    const { id, key } = await seedMedia(db, { id: "m1", width: 100, height: 50 });
+    expectOk(await blobs.put(key, new Uint8Array([1, 2, 3]), { contentType: "image/jpeg" }));
+    expectOk(await images.plan([id]));
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    expect(rows.every((r) => r.state === "failed")).toBe(true);
+    expect(rows.every((r) => r.width === 100 && r.height === 50)).toBe(true);
+    for (const row of rows) expect(blobs.blobs.has(`site/media/${id}/variants/${row.size}.${row.format}`)).toBe(true);
   });
 
-  it("creates no rows for a non-eligible original", async () => {
-    const { images, db } = await make();
-    await db.createOne(MEDIA, { id: "a", key: "orig/a.svg", contentType: "image/svg+xml", folder: "", filename: "a.svg" });
-    const variants = expectOk(await images.generate("a"));
-    expect(variants).toEqual([]);
-    expect(expectOk(await db.count(VARIANTS, {}))).toBe(0);
+  it("raises media.updated for the ids it made available", async () => {
+    const events = fakeEvents();
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, undefined, events);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    expectOk(await images.plan([id]));
+    expect(events.emitted).toHaveLength(1);
+    expect(events.emitted[0]?.name).toBe("media.updated");
+    expect(events.emitted[0]?.data).toMatchObject({ id: null, ids: [id], identity: null });
   });
 
-  it("marks every size error when the original blob is missing", async () => {
-    const { images, db } = await make();
-    await db.createOne(MEDIA, { id: "a", key: "orig/missing.jpg", contentType: "image/jpeg", folder: "", filename: "a.jpg" });
-    const variants = expectOk(await images.generate("a"));
-    expect(variants).toHaveLength(5);
-    expect(variants.every((v) => v.state === "error" && v.error === "original blob missing")).toBe(true);
+  it("does nothing, and emits nothing, a second time once already placed", async () => {
+    const events = fakeEvents();
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, undefined, events);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    expectOk(await images.plan([id]));
+    events.emitted.length = 0;
+    expectOk(await images.plan([id]));
+    expect(events.emitted).toHaveLength(0);
   });
 });
 
-describe("sync", () => {
-  it("processes media in chunks and finishes done with cursor at the last id", async () => {
-    const { images, db, blobs } = await make({ chunk: 2 });
-    for (const id of ["a", "b", "c"]) await addImage(db, blobs, id, await jpeg(400, 300));
-    expectOk(await images.sync());
-    await whenIdle(images);
-    const status = expectOk(await images.status());
-    expect(status.job).toMatchObject({ state: "done", cursor: "c", done: 3, failed: 0 });
-    expect(expectOk(await db.count(VARIANTS, { state: "done" }))).toBe(15);
+describe("images/default content rule (images.read)", () => {
+  it("serves the original's bytes and type for a planned, pending, error or failed row", async () => {
+    const { images, db, blobs } = await make();
+    const original = await jpeg(400, 300);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, original, { contentType: "image/jpeg" }));
+    expectOk(await images.plan([id]));
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    const thumb = rows.find((r) => r.size === "thumb")!;
+    const served = expectOk(await images.read(id, `thumb.${thumb.format}`));
+    expect(served?.variant).toBe("original");
+    expect(served?.fallback).toBe(true);
+    expect(served?.contentType).toBe("image/jpeg");
+    expect(Array.from(served?.data ?? [])).toEqual(Array.from(original));
   });
 
-  it("close() mid-run pauses the job; a fresh instance's sync() resumes it without re-rendering finished variants", async () => {
-    const { images, db, blobs } = await make({ chunk: 1 });
-    for (const id of ["a", "b", "c"]) await addImage(db, blobs, id, await jpeg(300, 200));
+  it("serves the variant's own bytes once done", async () => {
+    const { images, db, blobs } = await make({}, undefined, fixedRenderer);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    expectOk(await images.generate(id));
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    const thumb = rows.find((r) => r.size === "thumb")!;
+    expect(thumb.state).toBe("done");
+    const served = expectOk(await images.read(id, `thumb.${thumb.format}`));
+    expect(served?.variant).toBe("done");
+    expect(served?.fallback).toBe(false);
+  });
 
-    let gateOpen = false;
-    let firstVariantPutSeen = false;
-    const gate = deferred();
-    const originalPut = blobs.put.bind(blobs);
-    blobs.put = async (key: string, data: Uint8Array, options?: PutOptions) => {
-      if (!gateOpen && key.startsWith("media-variants/")) {
-        firstVariantPutSeen = true;
-        await gate.promise;
+  it("404s (null) for a name that is neither current nor retired, or an unready item", async () => {
+    const { images, db, blobs } = await make();
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    expectOk(await images.plan([id]));
+    expect(expectOk(await images.read(id, "thumb.jpg"))).toBeNull();
+    expect(expectOk(await images.read("missing", "thumb.webp"))).toBeNull();
+    expectOk(await db.updateOne(MEDIA, id, { status: "uploading" }));
+    expect(expectOk(await images.read(id, "thumb.webp"))).toBeNull();
+  });
+
+  it("serves the original for a retired file, forever, even after the current row moved on", async () => {
+    const { images, db, blobs } = await make({ sizes: [{ name: "hero", width: 800, fit: "inside", format: "original", quality: 82 }] });
+    const original = await jpeg(1000, 600);
+    const { id, key } = await seedMedia(db, { id: "m1", contentType: "image/jpeg" });
+    expectOk(await blobs.put(key, original, { contentType: "image/jpeg" }));
+    expectOk(await images.plan([id]));
+    const oldFile = (expectOk(await images.variantsOf([id])).get(id) ?? [])[0]!;
+    expect(oldFile.format).toBe("jpeg");
+
+    const reformed = await createImages({ ...baseConfig, sizes: [{ name: "hero", width: 800, fit: "inside", format: "webp", quality: 82 }] }, { blobs, db, logger: noLogger }, () => 1000);
+    expectOk(await reformed.plan([id]));
+    const retiredRows = expectOk(await db.findMany<Retired>(RETIRED, { mediaId: id })).items;
+    expect(retiredRows.map((r) => r.file)).toContain("hero.jpg");
+    const servedOld = expectOk(await reformed.read(id, "hero.jpg"));
+    expect(servedOld?.variant).toBe("original");
+  });
+});
+
+describe("images/default rendering", () => {
+  it("renders to exactly the planned dimensions and writes the private blob (and copy, if publicCopy is set)", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    expectOk(await images.generate(id));
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    const thumb = rows.find((r) => r.size === "thumb")!;
+    expect(thumb.state).toBe("done");
+    expect(thumb.width).toBe(320);
+    expect(blobs.blobs.has(thumb.key)).toBe(true);
+    expect(blobs.blobs.has(`site/media/${id}/variants/thumb.webp`)).toBe(true);
+  });
+
+  it("direct mode: a failed render writes no placeholder and leaves the row planned, then the background loop places it", async () => {
+    let fail = true;
+    const flaky: Renderer = async (data, size, planned) => {
+      if (fail) throw new Error("render failed");
+      return { data: new Uint8Array([1]), width: planned.width, height: planned.height, format: planned.format, ext: "webp", contentType: "image/webp" };
+    };
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }] }, undefined, flaky);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    let puts = 0;
+    const before = blobs.put.bind(blobs);
+    blobs.put = (...a: Parameters<Blobstore["put"]>) => { puts += 1; return before(...a); };
+    await images.generate(id);
+    expect(puts).toBe(0);
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    expect(rows[0]?.state).toBe("planned");
+    fail = false;
+    await whenIdle(images);
+    const after = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    expect(after[0]?.state).toBe("pending");
+    expect(blobs.blobs.has(`site/media/${id}/variants/thumb.webp`)).toBe(true);
+  });
+
+  it("a render failure on an already-placed row counts an attempt and keeps the path's existing content", async () => {
+    const fail = true;
+    const flaky: Renderer = async (_data, _size, planned) => {
+      if (fail) throw new Error("render failed");
+      return { data: new Uint8Array([1]), width: planned.width, height: planned.height, format: "webp", ext: "webp", contentType: "image/webp" };
+    };
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }], maxAttempts: 2 }, undefined, flaky);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    expectOk(await images.plan([id]));
+    await images.generate(id);
+    let rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    expect(rows[0]?.state).toBe("error");
+    await images.generate(id);
+    rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    expect(rows[0]?.state).toBe("failed");
+    expect(blobs.blobs.has(`site/media/${id}/variants/thumb.webp`)).toBe(true);
+  });
+
+  it("removes what it wrote when the media item is gone by the time it re-reads", async () => {
+    const blobs = fakeBlobstore();
+    const db = createFakePersistence();
+    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", width: "number", height: "number", createdAt: "number" });
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    let reads = 0;
+    const wrapped = { ...db, async findOne<T extends { id: string }>(collection: string, filter: Record<string, unknown>) {
+      if (collection === MEDIA) {
+        reads += 1;
+        if (reads > 1) return ok(null);
       }
-      return originalPut(key, data, options);
-    };
+      return db.findOne<T>(collection, filter);
+    } };
+    const images = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" } }, { blobs, db: wrapped, logger: noLogger, render: fixedRenderer }, () => 1000);
+    await images.generate(id);
+    expect(expectOk(await images.variantsOf([id])).get(id) ?? []).toEqual([]);
+  });
+});
 
-    expectOk(await images.sync());
-    await waitFor(() => firstVariantPutSeen);
+describe("images/default prune and remove", () => {
+  it("prune retires the size, keeps the path answering with the original, and removes the private blob and row", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    expectOk(await images.generate(id));
+    const before = (expectOk(await images.variantsOf([id])).get(id) ?? []).find((r) => r.size === "thumb")!;
+    expect(before.state).toBe("done");
 
-    const closing = images.close();
-    gateOpen = true;
-    gate.resolve();
-    await closing;
-
-    const paused = expectOk(await images.status());
-    expect(paused.job).toMatchObject({ state: "paused", cursor: "a", done: 1 });
-
-    let putsAfterResume = 0;
-    blobs.put = async (key: string, data: Uint8Array, options?: PutOptions) => {
-      putsAfterResume += 1;
-      return originalPut(key, data, options);
-    };
-    const resumed = await createImages({ ...baseConfig, chunk: 1 }, { blobs, db, logger: noLogger });
-    await resumed.sync();
-    await whenIdle(resumed);
-
-    const done = expectOk(await resumed.status());
-    expect(done.job).toMatchObject({ state: "done", cursor: "c", done: 3 });
-    expect(putsAfterResume).toBe(10);
+    const remainingSizes = (await images.sizes()).filter((s) => s.name !== "thumb");
+    const narrowed = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes: remainingSizes }, { blobs, db, logger: noLogger, render: fixedRenderer }, () => 1000);
+    expectOk(await narrowed.prune(["thumb"]));
+    expect((expectOk(await narrowed.variantsOf([id])).get(id) ?? []).some((r) => r.size === "thumb")).toBe(false);
+    expect(blobs.blobs.has(before.key)).toBe(false);
+    const served = expectOk(await narrowed.read(id, `thumb.${before.format}`));
+    expect(served?.variant).toBe("original");
   });
 
-  it("answers CONFLICT for a fresh running job and resumes a stale one", async () => {
-    let clock = 1000;
-    const { images, db, blobs } = await make({ chunk: 1, staleAfterMs: 500 }, () => clock);
-    await addImage(db, blobs, "a", await jpeg(200, 200));
+  it("remove deletes variant rows, retired rows, their copies and blobs, then sweeps", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "a", width: 100, fit: "inside", format: "original", quality: 82 }, { name: "b", width: 200, fit: "inside", format: "webp", quality: 82 }] }, undefined, fixedRenderer);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    expectOk(await images.generate(id));
+    const narrowed = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes: [{ name: "b", width: 200, fit: "inside", format: "webp", quality: 82 }] }, { blobs, db, logger: noLogger, render: fixedRenderer }, () => 1000);
+    expectOk(await narrowed.prune(["a"]));
+    expectOk(await blobs.put(`site/media/${id}/variants/stray.png`, new Uint8Array([1]), { contentType: "image/png" }));
+    expectOk(await narrowed.remove(id));
+    expect(expectOk(await db.count(VARIANTS, { mediaId: id }))).toBe(0);
+    expect(expectOk(await db.count(RETIRED, { mediaId: id }))).toBe(0);
+    expect(expectOk(await blobs.list(`site/media/${id}/variants/`))).toEqual([]);
+    expect(expectOk(await blobs.list(`media-variants/${id}/`))).toEqual([]);
+  });
+});
 
-    const gate = deferred();
-    const originalPut = blobs.put.bind(blobs);
-    blobs.put = async (key: string, data: Uint8Array, options?: PutOptions) => {
-      if (key.startsWith("media-variants/")) await gate.promise;
-      return originalPut(key, data, options);
-    };
+describe("images/default syncPublic", () => {
+  it("writes a missing copy, removes a foreign file and a copy of a deleted item", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    expectOk(await images.generate(id));
+    const row = (expectOk(await images.variantsOf([id])).get(id) ?? [])[0]!;
+    const copyKey = `site/media/${id}/variants/${row.size}.${row.format}`;
+    blobs.blobs.delete(copyKey);
+    expectOk(await blobs.put(`site/media/${id}/variants/stray.png`, new Uint8Array([1]), { contentType: "image/png" }));
+    expectOk(await blobs.put(`site/media/ghost/variants/gone.webp`, new Uint8Array([1]), { contentType: "image/webp" }));
 
-    const job = expectOk(await images.sync());
-    expectErr(await images.sync(), "CONFLICT");
+    const synced = expectOk(await images.syncPublic());
+    expect(synced.written).toBe(1);
+    expect(synced.removed).toBe(2);
+    expect(blobs.blobs.has(copyKey)).toBe(true);
+  });
 
-    clock = 1000 + 501;
-    const resumed = expectOk(await images.sync());
-    expect(resumed.id).toBe(job.id);
-    expect(resumed.state).toBe("running");
-
-    blobs.put = originalPut;
-    gate.resolve();
+  it("plans a missing size and reports it, starting a sync job", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
+    const { key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    const synced = expectOk(await images.syncPublic());
+    expect(synced.planned).toBeGreaterThan(0);
     await whenIdle(images);
-    const status = expectOk(await images.status());
-    expect(status.job?.state).toBe("done");
   });
 
-  it("resume() is a no-op without a resumable job and resumes a paused one for cron", async () => {
-    const { images, db, blobs } = await make({ chunk: 1 });
-    expect(expectOk(await images.resume())).toBeNull();
-
-    await addImage(db, blobs, "a", await jpeg(200, 200));
-    expectOk(await images.sync());
-    await whenIdle(images);
-    expect(expectOk(await images.resume())).toBeNull();
-  });
-});
-
-describe("sync job failures", () => {
-  it("records a persistence failure inside the loop on the job row and logs it", async () => {
-    const errors: string[] = [];
-    const logger: Logger = { step() {}, info() {}, error(message) { errors.push(message); } };
-    const blobs = fakeBlobstore();
-    const db = createFakePersistence();
-    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string" });
-    const images = await createImages({ ...baseConfig, chunk: 1 }, { blobs, db, logger }, () => 1000);
-    await addImage(db, blobs, "a", await jpeg(200, 200));
-
-    expectOk(await images.sync());
-    db.failNext("TRANSIENT");
-    await whenIdle(images);
-
-    const job = expectOk(await db.findOne<Job>(JOBS, {}));
-    expect(job).toMatchObject({ state: "error" });
-    expect(job?.error).toContain("injected TRANSIENT");
-    expect(errors).toContain("images: sync job failed");
-  });
-});
-
-describe("prune", () => {
-  it("deletes only orphaned sizes and their blobs, refusing a declared name", async () => {
-    const { images, db, blobs } = await make();
-    expectOk(await images.register([{ name: "card", width: 480 }]));
-    await addImage(db, blobs, "a", await jpeg(600, 400));
-    expectOk(await images.generate("a"));
-    expectOk(await images.register([{ name: "other", width: 100 }]));
-
-    expect(expectErr(await images.prune(["thumb"]), "VALIDATION").message).toContain("not an orphan");
-    expect(expectErr(await images.prune(["gone"]), "VALIDATION").message).toContain("has no variants");
-
-    const result = expectOk(await images.prune(["card"]));
-    expect(result).toEqual({ sizes: 1, variants: 1 });
-    expect(expectOk(await db.count(VARIANTS, { size: "card" }))).toBe(0);
-    expect(expectOk(await images.status()).orphaned).toEqual({ sizes: [], variants: 0 });
-  });
-});
-
-describe("status", () => {
-  it("reports per-size variant counts and used flags", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(600, 400));
-    expectOk(await images.generate("a"));
-    const status = expectOk(await images.status());
-    const thumb = status.sizes.find((s) => s.name === "thumb")!;
-    expect(thumb.used).toBe(false);
-    expect(thumb.variants).toEqual({ done: 1, pending: 0, error: 0, failed: 0 });
-  });
-});
-
-describe("remove", () => {
-  it("deletes an item's variant blobs and rows", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(600, 400));
-    expectOk(await images.generate("a"));
-    const removed = expectOk(await images.remove("a"));
-    expect(removed).toBe(5);
-    expect(expectOk(await db.count(VARIANTS, { mediaId: "a" }))).toBe(0);
-    expect([...blobs.blobs.keys()].some((k) => k.startsWith("media-variants/a/"))).toBe(false);
-  });
-});
-
-describe("read", () => {
-  it("returns a done variant, falls back to the original for a pending/error size, and is null for an unknown size", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(600, 400));
-    expectOk(await images.generate("a"));
-
-    const thumb = expectOk(await images.read("a", "thumb.webp"));
-    expect(thumb).toMatchObject({ fallback: false, contentType: "image/webp" });
-
-    expect(expectOk(await images.read("a", "nope.webp"))).toBeNull();
-
-    await db.deleteMany(VARIANTS, { mediaId: "a", size: "small" });
-    const fallback = expectOk(await images.read("a", "small.webp"));
-    expect(fallback).toMatchObject({ fallback: true, contentType: "image/jpeg" });
-  });
-
-  it("does not serve another media item's variant of the same size name", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(600, 400));
-    await addImage(db, blobs, "b", await jpeg(600, 400));
-    expectOk(await images.generate("b"));
-
-    const own = expectOk(await images.read("a", "thumb.webp"));
-    expect(own).toMatchObject({ fallback: true });
-
-    const other = expectOk(await images.read("b", "thumb.webp"));
-    expect(other).toMatchObject({ fallback: false });
-  });
-});
-
-describe("exportTo", () => {
-  it("writes <dir>/<folder>/<filename>.<size>.webp for every done variant", async () => {
-    const { images, db, blobs } = await make();
-    await db.createOne(MEDIA, { id: "a", key: "orig/a.jpg", contentType: "image/jpeg", folder: "press", filename: "hero.jpg" });
-    await blobs.put("orig/a.jpg", await jpeg(600, 400), { contentType: "image/jpeg" });
-    expectOk(await images.generate("a"));
-
-    const dir = await mkdtemp(join(tmpdir(), "images-export-"));
-    try {
-      const first = expectOk(await images.exportTo(dir));
-      expect(first).toEqual({ written: 5, skipped: 0 });
-      const target = join(dir, "press", "hero.jpg.thumb.webp");
-      expect((await stat(target)).size).toBeGreaterThan(0);
-
-      const second = expectOk(await images.exportTo(dir));
-      expect(second).toEqual({ written: 0, skipped: 5 });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe("close()", () => {
-  it("is a no-op without an active job", async () => {
+  it("without publicCopy, is a no-op", async () => {
     const { images } = await make();
-    await expect(images.close()).resolves.toBeUndefined();
-  });
-
-  it("answers CONFLICT from sync() and resume() once close() has started, before it finishes", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(200, 200));
-    expectOk(await images.sync());
-    await whenIdle(images);
-
-    const closing = images.close();
-    expect(expectErr(await images.sync(), "CONFLICT").message).toContain("shutting down");
-    expect(expectErr(await images.resume(), "CONFLICT").message).toContain("shutting down");
-    await closing;
+    expect(expectOk(await images.syncPublic())).toEqual({ written: 0, removed: 0, planned: 0, missing: 0 });
   });
 });
 
-describe("generate concurrency", () => {
-  it("serializes concurrent generate() calls for the same mediaId, producing exactly one row per size", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(1200, 800));
-    const [r1, r2] = await Promise.all([images.generate("a"), images.generate("a")]);
-    expect(r1).toBe(r2);
-    expect(expectOk(await db.count(VARIANTS, { mediaId: "a" }))).toBe(5);
-  });
-});
-
-describe("exportTo escape guard", () => {
-  it("refuses to write a variant outside the export directory", async () => {
-    const { images, db, blobs } = await make();
-    await db.createOne(MEDIA, { id: "a", key: "orig/a.jpg", contentType: "image/jpeg", folder: "../..", filename: "hero.jpg" });
-    await blobs.put("orig/a.jpg", await jpeg(200, 200), { contentType: "image/jpeg" });
-    expectOk(await images.generate("a"));
-
-    const dir = await mkdtemp(join(tmpdir(), "images-export-escape-"));
-    try {
-      await expect(images.exportTo(dir)).rejects.toThrow(/escapes/);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe("variantsOf batching", () => {
-  it("chunks more than 200 mediaIds and paginates through more than 500 result rows", async () => {
-    const { images, db } = await make();
-    const ids = Array.from({ length: 250 }, (_, i) => `m${i}`);
-    for (const id of ids) {
-      for (const size of ["a", "b", "c"]) {
-        await db.createOne(VARIANTS, { mediaId: id, size, spec: "s", width: 1, height: 1, format: "webp", key: `k/${id}/${size}`, bytes: 1, state: "done", error: null, attempts: 1, updatedAt: 1 });
-      }
-    }
-    const map = expectOk(await images.variantsOf(ids));
-    expect(map.size).toBe(250);
-    expect(map.get("m0")).toHaveLength(3);
-    expect(map.get("m249")).toHaveLength(3);
-    const total = [...map.values()].reduce((sum, v) => sum + v.length, 0);
-    expect(total).toBe(750);
-  });
-});
-
-describe("variantCounts", () => {
-  it("reports every effective size as pending for an eligible item with no rows yet", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(400, 300));
-    const counts = expectOk(await images.variantCounts(["a"]));
-    expect(counts.get("a")).toEqual({ done: 0, pending: 5, error: 0, failed: 0 });
+describe("images/default boot rules", () => {
+  it("throws when the copy tree and the store prefix overlap", async () => {
+    await expect(createImages({ ...baseConfig, prefix: "media/", publicPath: "/media", publicCopy: { prefix: "" } }, { blobs: fakeBlobstore(), db: createFakePersistence(), logger: noLogger })).rejects.toThrow(/publicCopy tree "media\/" and prefix "media\/" overlap/);
   });
 
-  it("counts done, error, failed and a missing row, ignoring a row whose size is no longer declared", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(400, 300));
-    expectOk(await images.generate("a"));
-    const rows = expectOk(await db.findMany<Variant>(VARIANTS, { mediaId: "a" }, { limit: 50 })).items;
-    const byName = new Map(rows.map((row) => [row.size, row]));
-    await db.updateOne(VARIANTS, byName.get("small")!.id, { state: "error" });
-    await db.updateOne(VARIANTS, byName.get("medium")!.id, { state: "failed" });
-    await db.deleteOne(VARIANTS, byName.get("large")!.id);
-    await db.createOne(VARIANTS, { mediaId: "a", size: "legacy", spec: "s", width: 1, height: 1, format: "webp", key: "k", bytes: 1, state: "done", error: null, attempts: 1, updatedAt: 1 });
-
-    const counts = expectOk(await images.variantCounts(["a"]));
-    expect(counts.get("a")).toEqual({ done: 2, pending: 1, error: 1, failed: 1 });
+  it("attach throws when publicCopy is set but no pipeline runs images.serve", async () => {
+    const { images } = await make({ publicCopy: { prefix: "site/" } });
+    expect(() => images.attach(introspectionOf(manifestWithPipelines([{ pipeline: "getMedia", module: "media/default", step: "media.get" }])))).toThrow(/no pipeline runs images\.serve/);
+    expect(() => images.attach(introspectionOf(manifestWithPipelines([{ pipeline: "serveImageVariant", module: "images/default", step: "images.serve" }])))).not.toThrow();
   });
 
-  it("reports zero for every state when the item is not an eligible image", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "svg", new Uint8Array([1]), "image/svg+xml");
-    await addImage(db, blobs, "gif", new Uint8Array([1]), "image/gif");
-    await addImage(db, blobs, "pdf", new Uint8Array([1]), "application/pdf");
-    const counts = expectOk(await images.variantCounts(["svg", "gif", "pdf"]));
-    for (const id of ["svg", "gif", "pdf"]) expect(counts.get(id)).toEqual({ done: 0, pending: 0, error: 0, failed: 0 });
-  });
-
-  it("counts a done row against an outdated size definition as pending", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(1200, 800));
-    expectOk(await images.generate("a"));
-    expectOk(await images.register([{ name: "thumb", width: 111 }]));
-
-    const counts = expectOk(await images.variantCounts(["a"]));
-    expect(counts.get("a")).toEqual({ done: 4, pending: 1, error: 0, failed: 0 });
-  });
-
-  it("defaults an unknown media id to zero", async () => {
+  it("attach throws when a pipeline runs images.syncPublic without publicCopy", async () => {
     const { images } = await make();
-    const counts = expectOk(await images.variantCounts(["nope"]));
-    expect(counts.get("nope")).toEqual({ done: 0, pending: 0, error: 0, failed: 0 });
+    expect(() => images.attach(introspectionOf(manifestWithPipelines([{ pipeline: "repairPublicMedia", module: "images/default", step: "images.syncPublic" }])))).toThrow(/pipeline "repairPublicMedia" runs images\.syncPublic, but publicCopy is not set/);
   });
 });
 
-describe("remove pagination", () => {
-  it("removes more than 500 variant rows for one id", async () => {
-    const { images, db, blobs } = await make();
-    for (let i = 0; i < 620; i += 1) {
-      const key = `media-variants/a/size${i}.webp`;
-      await blobs.put(key, new Uint8Array([1]), { contentType: "image/webp" });
-      await db.createOne(VARIANTS, { mediaId: "a", size: `size${i}`, spec: "s", width: 1, height: 1, format: "webp", key, bytes: 1, state: "done", error: null, attempts: 1, updatedAt: 1 });
-    }
-    const removed = expectOk(await images.remove("a"));
-    expect(removed).toBe(620);
-    expect(expectOk(await db.count(VARIANTS, { mediaId: "a" }))).toBe(0);
-  });
-});
-
-describe("prune dedupe and pagination", () => {
-  it("dedupes repeated names and paginates through more than 500 variant rows", async () => {
-    const { images, db, blobs } = await make();
-    for (let i = 0; i < 620; i += 1) {
-      const key = `media-variants/m${i}/card.webp`;
-      await blobs.put(key, new Uint8Array([1]), { contentType: "image/webp" });
-      await db.createOne(VARIANTS, { mediaId: `m${i}`, size: "card", spec: "s", width: 1, height: 1, format: "webp", key, bytes: 1, state: "done", error: null, attempts: 1, updatedAt: 1 });
-    }
-    const result = expectOk(await images.prune(["card", "card"]));
-    expect(result).toEqual({ sizes: 1, variants: 620 });
-    expect(expectOk(await db.count(VARIANTS, { size: "card" }))).toBe(0);
-  });
-});
-
-describe("status registrySeen", () => {
-  it("does not report orphaned sizes before this process has ever called register()", async () => {
-    const blobs = fakeBlobstore();
-    const db = createFakePersistence();
-    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string" });
-    const images1 = await createImages(baseConfig, { blobs, db, logger: noLogger }, () => 1000);
-    await images1.register([{ name: "card", width: 480 }]);
-    await addImage(db, blobs, "a", await jpeg(600, 400));
-    expectOk(await images1.generate("a"));
-
-    const images2 = await createImages(baseConfig, { blobs, db, logger: noLogger }, () => 2000);
-    const before = expectOk(await images2.status());
-    expect(before.registrySeen).toBe(false);
-    expect(before.orphaned).toEqual({ sizes: [], variants: 0 });
-    expect(before.sizes.find((s) => s.name === "card")).toBeUndefined();
-
-    expectOk(await images2.register([{ name: "other", width: 100 }]));
-    const after = expectOk(await images2.status());
-    expect(after.registrySeen).toBe(true);
-    expect(after.orphaned.sizes).toEqual(["card"]);
-  });
-});
-
-describe("pending variant rows", () => {
-  it("leaves an error row behind when the render fails", async () => {
-    const { images, db, blobs } = await make();
-    await db.createOne(MEDIA, { id: "a", key: "orig/a.jpg", contentType: "image/jpeg", folder: "", filename: "a.jpg" });
-    await blobs.put("orig/a.jpg", new Uint8Array([1, 2, 3]), { contentType: "image/jpeg" });
-    expectOk(await images.generate("a"));
-    const rows = expectOk(await db.findMany<Variant>(VARIANTS, { mediaId: "a" }, { limit: 50 })).items;
-    expect(rows).toHaveLength(5);
-    expect(rows.every((row) => row.state === "error")).toBe(true);
-  });
-
-  it("writes the row as pending before the render finishes", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(1200, 900));
-    const running = images.generate("a");
-    await waitFor(async () => expectOk(await db.findOne<Variant>(VARIANTS, { mediaId: "a" })) !== null);
-    const first = expectOk(await db.findOne<Variant>(VARIANTS, { mediaId: "a" }));
-    expect(first?.state).toBe("pending");
-    await running;
-  });
-
-  it("read() falls back to the original while a row is still pending", async () => {
-    const { images, db, blobs } = await make();
-    await addImage(db, blobs, "a", await jpeg(400, 300));
-    await db.createOne(VARIANTS, { mediaId: "a", size: "thumb", spec: "x", width: 0, height: 0, format: "", key: "", bytes: 0, state: "pending", error: null, attempts: 1, updatedAt: 1000 });
-    const found = expectOk(await images.read("a", "thumb.webp"));
-    expect(found).toMatchObject({ fallback: true, variant: "pending" });
-  });
-});
-
-describe("bounded attempts", () => {
-  const corrupt = async (config: Partial<Config> = { maxAttempts: 2 }) => {
-    const made = await make(config);
-    await made.db.createOne(MEDIA, { id: "a", key: "orig/a.jpg", contentType: "image/jpeg", folder: "", filename: "a.jpg" });
-    await made.blobs.put("orig/a.jpg", new Uint8Array([1, 2, 3]), { contentType: "image/jpeg" });
-    return made;
-  };
-
-  it("gives up after maxAttempts and stops retrying the variant", async () => {
-    const { images, db } = await corrupt();
-    expect(expectOk(await images.generate("a")).every((v) => v.state === "error" && v.attempts === 1)).toBe(true);
-    expect(expectOk(await images.generate("a")).every((v) => v.state === "failed" && v.attempts === 2)).toBe(true);
-    expect(expectOk(await images.generate("a")).every((v) => v.state === "failed" && v.attempts === 2)).toBe(true);
-    expect(expectOk(await db.count(VARIANTS, { state: "failed" }))).toBe(5);
-  });
-
-  it("defaults the budget to five attempts", async () => {
-    const { images } = await corrupt({});
-    for (let attempt = 1; attempt < 5; attempt += 1) expect(expectOk(await images.generate("a")).every((v) => v.state === "error")).toBe(true);
-    expect(expectOk(await images.generate("a")).every((v) => v.state === "failed")).toBe(true);
-  });
-
-  it("leaves a failed variant out of the sync loop", async () => {
-    const { images, db } = await corrupt();
-    expectOk(await images.generate("a"));
-    expectOk(await images.generate("a"));
-    expectOk(await images.sync());
+describe("images/default size set changes", () => {
+  it("registering a spec change for a block-registered (non-config) size with existing items starts a background sync that re-plans them", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    expectOk(await images.generate(id));
+    expectOk(await images.register([{ name: "thumb", width: 400, fit: "inside", format: "webp", quality: 82 }]));
     await whenIdle(images);
-    expect(expectOk(await db.count(VARIANTS, { attempts: { gt: 2 } }))).toBe(0);
-    expect(expectOk(await images.status()).job).toMatchObject({ state: "done", done: 0, failed: 1 });
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    expect(rows.find((r) => r.size === "thumb")?.width).toBe(400);
   });
 
-  it("404s instead of serving the original once a variant has failed, and names the failure", async () => {
-    const { images } = await corrupt();
-    expectOk(await images.generate("a"));
-    expect(expectOk(await images.read("a", "thumb.webp"))).toMatchObject({ fallback: true, variant: "pending" });
-    expect(expectOk(await images.failure("a", "thumb.webp"))).toBeNull();
-
-    expectOk(await images.generate("a"));
-    expect(expectOk(await images.read("a", "thumb.webp"))).toBeNull();
-    expect(expectOk(await images.failure("a", "thumb.webp"))).toMatchObject({ size: "thumb", attempts: 2 });
-  });
-
-  it("counts failed variants separately in status()", async () => {
-    const { images } = await corrupt();
-    expectOk(await images.generate("a"));
-    expectOk(await images.generate("a"));
-    const thumb = expectOk(await images.status()).sizes.find((s) => s.name === "thumb")!;
-    expect(thumb.variants).toEqual({ done: 0, pending: 0, error: 0, failed: 1 });
-  });
-
-  it("retries with a fresh budget when the size definition changes", async () => {
-    const { images } = await corrupt();
-    expectOk(await images.generate("a"));
-    expectOk(await images.generate("a"));
-    expectOk(await images.register([{ name: "thumb", width: 111 }]));
-    const retried = expectOk(await images.generate("a")).find((v) => v.size === "thumb");
-    expect(retried).toMatchObject({ state: "error", attempts: 1 });
-  });
-});
-
-describe("render timeout", () => {
-  const ONE_SIZE = [{ name: "thumb", width: 100, fit: "inside", format: "webp", quality: 82 }] satisfies Config["sizes"];
-
-  const hanging = async (render: Renderer, config: Partial<Config> = {}) => {
-    const made = await make({ sizes: ONE_SIZE, renderTimeoutMs: 10, maxAttempts: 2, ...config }, () => 1000, render);
-    await addImage(made.db, made.blobs, "a", await jpeg(200, 200));
-    return made;
-  };
-
-  const never: Renderer = () => new Promise<Rendered>(() => {});
-
-  it("counts a render that never returns as a failed attempt and keeps generating", async () => {
-    const { images } = await hanging(never);
-    expect(expectOk(await images.generate("a"))[0]).toMatchObject({ state: "error", attempts: 1, error: "render timed out after 10ms" });
-    expect(expectOk(await images.generate("a"))[0]).toMatchObject({ state: "failed", attempts: 2 });
-  });
-
-  it("lets the sync job finish although every render hangs", async () => {
-    const { images } = await hanging(never);
-    expectOk(await images.sync());
+  it("an unchanged register does not start a sync", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const { id, key } = await seedMedia(db, { id: "m1" });
+    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    expectOk(await images.generate(id));
+    expectOk(await images.register([{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }]));
     await whenIdle(images);
-    expect(expectOk(await images.status()).job).toMatchObject({ state: "done", failed: 1 });
-  });
-
-  it("drops the result of a render that only returns after the timeout", async () => {
-    const late = deferred();
-    const { images, blobs } = await hanging(async () => {
-      await late.promise;
-      return { data: new Uint8Array([7]), width: 100, height: 100, format: "webp", ext: "webp", contentType: "image/webp" };
-    });
-    expect(expectOk(await images.generate("a"))[0]).toMatchObject({ state: "error", key: "" });
-    late.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(blobs.blobs.has("media-variants/a/thumb.webp")).toBe(false);
-    expect(expectOk(await images.read("a", "thumb.webp"))).toMatchObject({ fallback: true, variant: "pending" });
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    expect(rows.find((r) => r.size === "thumb")?.width).toBe(320);
+    expect(rows.find((r) => r.size === "thumb")?.state).toBe("done");
   });
 });
 
-describe("retryFailed", () => {
-  const corrupt = async (config: Partial<Config> = {}) => {
-    const made = await make({ maxAttempts: 1, ...config });
-    await made.db.createOne(MEDIA, { id: "a", key: "orig/a.jpg", contentType: "image/jpeg", folder: "", filename: "a.jpg" });
-    await made.blobs.put("orig/a.jpg", new Uint8Array([1, 2, 3]), { contentType: "image/jpeg" });
-    return made;
-  };
+describe("images/default resume repair pass", () => {
+  it("places and renders items created recently with no rows at all", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const now = Date.now();
+    const { id: a, key: keyA } = await seedMedia(db, { id: "a", createdAt: now });
+    expectOk(await blobs.put(keyA, await jpeg(400, 300), { contentType: "image/jpeg" }));
 
-  it("reports nothing to do while no variant has given up", async () => {
-    const { images } = await corrupt();
-    expect(expectOk(await images.retryFailed())).toEqual({ variants: 0, media: 0, job: null });
+    await images.resume();
+    const rowsA = expectOk(await images.variantsOf([a])).get(a) ?? [];
+    expect(rowsA.some((r) => r.state === "done")).toBe(true);
   });
 
-  it("puts every failed variant back to pending with a fresh budget and starts a full pass", async () => {
-    const { images, db } = await corrupt();
-    expectOk(await images.generate("a"));
-    expect(expectOk(await db.count(VARIANTS, { state: "failed" }))).toBe(5);
+  it("places and renders a row a crash left stuck at planned", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const { id: b, key: keyB } = await seedMedia(db, { id: "b", createdAt: 1 });
+    expectOk(await blobs.put(keyB, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    expectOk(await images.plan([b]));
+    const rows = expectOk(await images.variantsOf([b])).get(b) ?? [];
+    for (const row of rows) expectOk(await db.updateOne(VARIANTS, row.id, { state: "planned" }));
 
-    const retried = expectOk(await images.retryFailed());
-    expect(retried).toMatchObject({ variants: 5, media: 1 });
-    expect(retried.job).toMatchObject({ state: "running", cursor: "" });
-    await whenIdle(images);
-
-    const rows = expectOk(await db.findMany<Variant>(VARIANTS, {}, { limit: 50 })).items;
-    expect(rows.every((row) => row.attempts === 1)).toBe(true);
-  });
-
-  it("retries one media item at once and leaves the others quarantined", async () => {
-    const { images, db, blobs } = await corrupt();
-    await db.createOne(MEDIA, { id: "b", key: "orig/b.jpg", contentType: "image/jpeg", folder: "", filename: "b.jpg" });
-    await blobs.put("orig/b.jpg", new Uint8Array([1, 2, 3]), { contentType: "image/jpeg" });
-    expectOk(await images.generate("a"));
-    expectOk(await images.generate("b"));
-    await blobs.put("orig/a.jpg", await jpeg(400, 300), { contentType: "image/jpeg" });
-
-    expect(expectOk(await images.retryFailed("a"))).toEqual({ variants: 5, media: 1, job: null });
-    expect(expectOk(await db.count(VARIANTS, { mediaId: "a", state: "done" }))).toBe(5);
-    expect(expectOk(await db.count(VARIANTS, { mediaId: "b", state: "failed" }))).toBe(5);
-  });
-
-  it("refuses once images are shutting down", async () => {
-    const { images } = await corrupt();
-    await images.close();
-    expect(expectErr(await images.retryFailed(), "CONFLICT").status).toBe(409);
-  });
-
-  it("lists the variants that gave up with their last error in status()", async () => {
-    const { images } = await corrupt();
-    expectOk(await images.generate("a"));
-    const status = expectOk(await images.status());
-    expect(status.failed.variants).toBe(5);
-    expect(status.failed.recent).toHaveLength(5);
-    expect(status.failed.recent[0]).toMatchObject({ mediaId: "a", attempts: 1, updatedAt: 1000 });
-    expect(status.failed.recent[0]!.error).toEqual(expect.any(String));
+    await images.resume();
+    const rowsB = expectOk(await images.variantsOf([b])).get(b) ?? [];
+    expect(rowsB.some((r) => r.state === "done")).toBe(true);
   });
 });
 
-describe("job progress", () => {
-  it("advances done/updatedAt after each image, not once per chunk", async () => {
-    const blobs = fakeBlobstore();
-    const db = createFakePersistence();
-    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string" });
-    let clock = 1000;
-    const images = await createImages({ ...baseConfig, chunk: 5 }, { blobs, db, logger: noLogger }, () => (clock += 1000));
-    await addImage(db, blobs, "a", await jpeg(200, 200));
-    await addImage(db, blobs, "b", await jpeg(200, 200));
-
-    const progress: Array<{ done: number; updatedAt: number }> = [];
-    const updateOne = db.updateOne.bind(db);
-    db.updateOne = ((collection, id, patch) => {
-      const job = patch as Partial<Job>;
-      if (collection === JOBS && job.done !== undefined) progress.push({ done: job.done, updatedAt: job.updatedAt! });
-      return updateOne(collection, id, patch);
-    }) satisfies typeof db.updateOne;
-
-    const job = expectOk(await images.sync());
-    await whenIdle(images);
-    expect(progress.map((p) => p.done)).toEqual([1, 2, 2]);
-    expect(progress[0]!.updatedAt).toBeGreaterThan(job.updatedAt);
-  });
-});
-
-describe("concurrent sync()", () => {
-  it("returns the same job for two simultaneous calls and creates one job row", async () => {
-    const { images, db, blobs } = await make({ chunk: 1 });
-    await addImage(db, blobs, "a", await jpeg(200, 200));
-    const [first, second] = await Promise.all([images.sync(), images.sync()]);
-    expect(expectOk(first).id).toBe(expectOk(second).id);
-    expect(expectOk(await db.count(JOBS, {}))).toBe(1);
-    await whenIdle(images);
-  });
-});
-
-describe("variant key changes", () => {
-  it("deletes the previous blob when a size switches format", async () => {
-    const { images, db, blobs } = await make({ sizes: [{ name: "thumb", width: 100, fit: "inside", format: "webp", quality: 80 }] });
-    await addImage(db, blobs, "a", await jpeg(400, 300));
-    expectOk(await images.generate("a"));
-    expect([...blobs.blobs.keys()]).toContain("media-variants/a/thumb.webp");
-
-    const other = await createImages({ ...baseConfig, sizes: [{ name: "thumb", width: 100, fit: "inside", format: "original", quality: 80 }] }, { blobs, db, logger: noLogger }, () => 2000);
-    await other.generate("a");
-    expect([...blobs.blobs.keys()]).not.toContain("media-variants/a/thumb.webp");
-    expect([...blobs.blobs.keys()]).toContain("media-variants/a/thumb.jpg");
-  });
-});

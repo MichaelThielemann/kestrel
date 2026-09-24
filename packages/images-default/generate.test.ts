@@ -28,12 +28,11 @@ describe("eligible", () => {
 describe("render", () => {
   const medium: Size = { name: "medium", width: 1024, fit: "inside", format: "webp", quality: 82 };
   const thumbCover: Size = { name: "thumb", width: 320, height: 200, fit: "cover", format: "webp", quality: 82 };
-  const xl: Size = { name: "xl", width: 2400, fit: "inside", format: "webp", quality: 82 };
   const original: Size = { name: "orig", width: 2400, fit: "inside", format: "original", quality: 82 };
 
-  it("resizes 1200x800 to 1024 wide, preserving aspect ratio, as webp", async () => {
+  it("renders to exactly the planned width and height, as webp", async () => {
     const data = await jpeg(1200, 800);
-    const result = await render(data, medium);
+    const result = await render(data, medium, { width: 1024, height: 683, format: "webp" });
     expect(result.width).toBe(1024);
     expect(result.height).toBe(683);
     expect(result.format).toBe("webp");
@@ -41,43 +40,29 @@ describe("render", () => {
     expect(result.contentType).toBe("image/webp");
   });
 
-  it("crops to exact dimensions for cover fit", async () => {
+  it("crops to exactly the planned dimensions for cover fit", async () => {
     const data = await jpeg(1200, 800);
-    const result = await render(data, thumbCover);
+    const result = await render(data, thumbCover, { width: 320, height: 200, format: "webp" });
     expect(result.width).toBe(320);
     expect(result.height).toBe(200);
   });
 
-  it("does not enlarge a smaller original", async () => {
-    const data = await jpeg(200, 100);
-    const result = await render(data, xl);
-    expect(result.width).toBe(200);
-    expect(result.height).toBe(100);
-  });
-
-  it("keeps original format when format is original", async () => {
+  it("renders in the planned format for format \"original\", regardless of the decoder's own report", async () => {
     const data = await jpeg(1200, 800);
-    const result = await render(data, original);
-    expect(result.format).toBe("jpeg");
-    expect(result.ext).toBe("jpg");
-    expect(result.contentType).toBe("image/jpeg");
+    const result = await render(data, original, { width: 2400, height: 1600, format: "png" });
+    expect(result.format).toBe("png");
+    expect(result.ext).toBe("png");
+    expect(result.contentType).toBe("image/png");
   });
 
   it("rejects corrupt bytes", async () => {
     const data = new Uint8Array([1, 2, 3, 4, 5]);
-    await expect(render(data, medium)).rejects.toThrow();
+    await expect(render(data, medium, { width: 100, height: 100, format: "webp" })).rejects.toThrow();
   });
 
   it("rejects a truncated jpeg", async () => {
     const data = await jpeg(1200, 800);
     const truncated = data.slice(0, Math.floor(data.byteLength * 0.6));
-    await expect(render(truncated, medium)).rejects.toThrow();
-  });
-
-  it("does not enlarge a smaller original for cover fit, keeping its original dimensions", async () => {
-    const data = await jpeg(200, 100);
-    const result = await render(data, thumbCover);
-    expect(result.width).toBe(200);
-    expect(result.height).toBe(100);
+    await expect(render(truncated, medium, { width: 1024, height: 683, format: "webp" })).rejects.toThrow();
   });
 });
