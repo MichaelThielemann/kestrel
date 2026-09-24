@@ -230,9 +230,10 @@ Net changes since 5.8.1.
 
 - `@michaelthielemann/kestrel-contracts/content-locale`: `satisfiesFilter`, `publishedLocale` and
   `narrowListTranslations` — the shared rule behind the two entries above, for any module that
-  builds a public view on top of `content@1`. `satisfiesFilter` throws on a `Condition` (`{ in: [...]
-  }`, `{ ne: ... }`, …) instead of silently excluding every document a `Filter` with one is compared
-  against.
+  builds a public view on top of `content@1`. `satisfiesFilter` decides membership through
+  `content.list` itself, so a `Condition` entry (`{ in: [...] }`, `{ ne: ... }`, …) is evaluated
+  with the store's own semantics instead of being reimplemented, and never turns into a false
+  negative or a thrown error at request time.
 - `core`: `resolveResultSchema` (`@michaelthielemann/kestrel/schema`) reports every shape a
   pipeline's `result` can end in: the folded `output`, then each step's distinct `terminalOutput`,
   as one `anyOf`; `kestrel-openapi` publishes a route's 200 through it.

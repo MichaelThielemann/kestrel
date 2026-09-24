@@ -2,22 +2,19 @@ import type { Content, ContentDocument, ContentError } from "./content.ts";
 import { isErr, ok, type Result } from "./errors.ts";
 import type { Filter } from "./query.ts";
 
-const CONDITION_OPERATORS = new Set(["eq", "ne", "gt", "gte", "lt", "lte", "in", "like"]);
-
-function isCondition(value: unknown): boolean {
-  return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 1 && Object.keys(value).every((k) => CONDITION_OPERATORS.has(k));
-}
-
 /**
- * Whether a document's own field values (one locale, fetched strictly) satisfy every entry of
- * `filter`. Only scalar equality is evaluated; a `Condition` (`{ in: [...] }`, `{ ne: ... }`, …)
- * throws instead of silently failing every document it is compared against.
+ * Whether `id`'s row at `locale` satisfies `filter`, decided by `content.list` itself: a
+ * `Condition` entry (`{ in: [...] }`, `{ ne: ... }`, …) is evaluated with the store's own
+ * semantics, never reimplemented here, so it can never turn into a false negative or a thrown
+ * error at request time. `id` is ignored for a single type, which `content@1` itself never keys by
+ * id either. A `filter` with no entries is always satisfied, without a read.
  */
-export function satisfiesFilter(filter: Filter, values: Record<string, unknown> | null | undefined): boolean {
-  return Object.entries(filter).every(([f, v]) => {
-    if (isCondition(v)) throw new Error(`content-locale: satisfiesFilter needs scalar equality, got a Condition for "${f}"`);
-    return values?.[f] === v;
-  });
+export async function satisfiesFilter(content: Content, type: string, id: string | undefined, locale: string | undefined, filter: Filter): Promise<Result<boolean, ContentError>> {
+  if (Object.keys(filter).length === 0) return ok(true);
+  const single = content.model().types[type]?.kind === "single";
+  const page = await content.list(type, { ...filter, ...(single || id === undefined ? {} : { id }) }, { ...(locale === undefined ? {} : { locale }), limit: 1 });
+  if (isErr(page)) return page;
+  return ok(page.value.total > 0);
 }
 
 export interface PublishedLocaleOptions {
@@ -37,26 +34,19 @@ export interface PublishedLocaleOptions {
  */
 export async function publishedLocale(content: Content, type: string, id: string | undefined, locale: string | undefined, filter: Filter, options: PublishedLocaleOptions): Promise<Result<ContentDocument | null, ContentError>> {
   const model = content.model();
-  const keyOf = (l: string | undefined): string | undefined => l ?? model.defaultLocale;
-  const cache = new Map<string | undefined, ContentDocument | null>();
-  const strictOf = async (l: string | undefined): Promise<Result<ContentDocument | null, ContentError>> => {
-    const key = keyOf(l);
-    if (cache.has(key)) return ok(cache.get(key) ?? null);
-    const fetched = await content.get(type, id, l === undefined ? {} : { locale: l });
-    if (isErr(fetched)) return fetched;
-    cache.set(key, fetched.value);
-    return fetched;
-  };
+  const effective = locale ?? model.defaultLocale;
 
-  const strictResult = await strictOf(locale);
+  const strictResult = await content.get(type, id, locale === undefined ? {} : { locale });
   if (isErr(strictResult)) return strictResult;
-  if (!satisfiesFilter(filter, strictResult.value)) return ok(null);
+  const holds = await satisfiesFilter(content, type, id, locale, filter);
+  if (isErr(holds)) return holds;
+  if (!holds.value) return ok(null);
 
   let doc = strictResult.value;
   if (doc && options.fallback && locale !== undefined && model.defaultLocale !== undefined && locale !== model.defaultLocale) {
-    const defaultResult = await strictOf(model.defaultLocale);
-    if (isErr(defaultResult)) return defaultResult;
-    if (satisfiesFilter(filter, defaultResult.value)) {
+    const defaultHolds = await satisfiesFilter(content, type, id, model.defaultLocale, filter);
+    if (isErr(defaultHolds)) return defaultHolds;
+    if (defaultHolds.value) {
       const merged = await content.get(type, id, { locale, fallback: true });
       if (isErr(merged)) return merged;
       if (merged.value) doc = merged.value;
@@ -70,9 +60,13 @@ export async function publishedLocale(content: Content, type: string, id: string
         translations[l] = false;
         continue;
       }
-      const localeResult = await strictOf(l);
-      if (isErr(localeResult)) return localeResult;
-      translations[l] = satisfiesFilter(filter, localeResult.value);
+      if (l === effective) {
+        translations[l] = true;
+        continue;
+      }
+      const lHolds = await satisfiesFilter(content, type, id, l, filter);
+      if (isErr(lHolds)) return lHolds;
+      translations[l] = lHolds.value;
     }
     doc = { ...doc, _translations: translations };
   }
@@ -83,8 +77,10 @@ export async function publishedLocale(content: Content, type: string, id: string
 /**
  * `items` (a `content.list` page) with `_translations` narrowed to the locales that satisfy
  * `filter` themselves, batched across the whole page: one `content.list` call per locale other
- * than `requestedLocale` (already known from `items` matching `filter` there), not one per item.
- * A no-op when `filter` is empty, the model has no other locale, or no item carries `_translations`.
+ * than `requestedLocale` (already known from `items` matching `filter` there), not one per item —
+ * the store decides each locale's membership the same way `satisfiesFilter` does, `Condition`
+ * entries included. A no-op when `filter` is empty, the model has no other locale, or no item
+ * carries `_translations`.
  */
 export async function narrowListTranslations(content: Content, type: string, items: ContentDocument[], filter: Filter, requestedLocale: string | undefined): Promise<Result<ContentDocument[], ContentError>> {
   if (Object.keys(filter).length === 0 || items.length === 0 || !items.some((d) => d._translations)) return ok(items);

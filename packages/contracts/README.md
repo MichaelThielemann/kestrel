@@ -20,8 +20,9 @@ references (`INTERNAL_REF`, `collectInternalRefs`).
 `narrowListTranslations` implement one rule on top of `content@1` — a locale that fails a filter is
 never a fallback source and never counted in `_translations` — for every module that builds a
 public view of content (`site-default`'s `resolve`/`resolveLinks`, `delivery-static`'s
-`delivery.publish`/`exportLlms`, `content-default`'s own `get`/`list` steps). A `Filter` entry must
-be a scalar; `satisfiesFilter` throws on a `Condition` (`{ in: [...] }`, `{ ne: ... }`, …) instead of
-excluding every document silently.
+`delivery.publish`/`exportLlms`, `content-default`'s own `get`/`list` steps). `satisfiesFilter`
+decides membership through `content.list` itself, so a `Condition` entry (`{ in: [...] }`,
+`{ ne: ... }`, …) is evaluated with the store's own semantics — never reimplemented, and never
+turns into a false negative or a thrown error at request time.
 Consumers may define their own contracts with `defineContract` from the core; the core treats
 them exactly like these.
