@@ -24,9 +24,11 @@ export {
   insertPipelineStep,
   insertStepAfterEmitOutsideGroup,
   renameContentField,
+  replaceModuleListEntry,
   type InsertAfterEmitOptions,
   type InsertStepOptions,
   type ModelFieldsLocator,
   type RenameContentFieldOptions,
+  type ReplaceModuleEntryOptions,
   type StepListLocator,
 } from "./edits.ts";

@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { applyEdits, combineEditParts, verifiesAfterEdit, type Edit } from "./codemods.ts";
+import { applyEdits, combineEditParts, replaceModuleListEntry, verifiesAfterEdit, type Edit } from "./codemods.ts";
 
 const PACKAGE_JSON = resolve(dirname(fileURLToPath(import.meta.url)), "..", "package.json");
 
@@ -43,5 +43,21 @@ describe("the edit, verify and all-or-nothing combine primitives", () => {
     const missingPart = combineEditParts({ "part a": partA, "part b": undefined });
     expect(missingPart.edits).toEqual([]);
     expect(missingPart.missing).toEqual(["part b"]);
+  });
+});
+
+describe("the module-list replacement primitive", () => {
+  it("replaces a module-list entry with a new use and config, so a plugin's own switchEdits can build its module-list switch", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-events-direct" }], triggers: [] });\n';
+    const edit = replaceModuleListEntry("kestrel.config.ts", source, { use: "@michaelthielemann/kestrel-events-direct", newUse: "@michaelthielemann/kestrel-events-queue", config: '{ relayPipelines: ["publishPage"] }' });
+    expect(edit).toBeDefined();
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('@michaelthielemann/kestrel-events-queue", config: { relayPipelines: ["publishPage"] }');
+    expect(text).not.toContain("events-direct");
+  });
+
+  it("returns undefined when the entry is not found, so a plugin's switchEdits can report that part missing", () => {
+    const source = 'export default defineConfig({ modules: [], triggers: [] });\n';
+    expect(replaceModuleListEntry("kestrel.config.ts", source, { use: "@michaelthielemann/kestrel-events-direct", newUse: "@michaelthielemann/kestrel-events-queue" })).toBeUndefined();
   });
 });
