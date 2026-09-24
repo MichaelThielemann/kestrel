@@ -197,6 +197,14 @@ Net changes since 5.8.1.
   `failedToRegister()` are boot-time-only operations with no reader outside `boot()` and are no
   longer part of the public type; code that only read a booted instance's steps is unaffected.
   `RegisteredStep`, already `list()`'s return type, is now exported alongside `Steps`.
+- `site-default`'s `site.resolve` and `delivery-static`'s `delivery.publish` no longer fill an empty
+  localized field from the default locale unless the default locale's own values pass the request's
+  filter too (e.g. `status=published`); with no such default locale the field stays empty instead of
+  showing a draft value. `_translations` now lists only the locales that pass the filter themselves.
+  A locale that does not pass the filter itself was already never replaced by another one, and still
+  isn't. A page that relied on inheriting a field from a default locale that is only a draft renders
+  with that field empty after upgrading; publish the default locale, or fill the field directly in
+  each locale, to keep it.
 
 ### Added
 

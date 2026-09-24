@@ -242,9 +242,13 @@ once that language's localized required fields are set). `slug` matches
 
 `GET /site/*path` (step `site.resolve:pages`, module `site-default`) → exactly one document, a
 redirect hit (below), or 404. Only `status = published` **in the requested language** (status is localized: EN is only
-delivered once EN itself is `published`). Fields without a translation fall back to the default
-language (`_locales` names the origin per field, e.g. `{ "slug": "de", "title": "en" }`); the
-fallback never overrides the publication status.
+delivered once EN itself is `published`); a language that is not published is never replaced by
+another one. Fields without a translation fall back to the default language (`_locales` names the
+origin per field, e.g. `{ "slug": "de", "title": "en" }`), but only when the default language is
+itself `published`; otherwise the field stays empty. `_translations` reports only the languages
+that are themselves `published`.
+Static delivery (`delivery.publish`) derives its published document the same way, so the export and
+the live API never disagree.
 When a redirect rule matches, the route responds with `{ redirect: { to, status } }` instead of a
 document — even if a page exists at that path. `redirects.lookup` runs only after
 `authz.require:pages.read`; if `anonymous` lacks the `pages.read` permission on a deployment, logged

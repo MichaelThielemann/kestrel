@@ -270,7 +270,11 @@ translation is `null`, the frontend decides what to do. `fallback: true` (step a
 Website routing is not `content@1`'s job but `site@1`'s (`site-default`, activated after
 `content-default`): `site.resolve:pages?home=home&status=published&fallback=true` on a
 wildcard route (`GET /site/*path`): `/`, `/<slug>`, `/<lang>`, `/<lang>/<slug>` — the primary
-language without a prefix.
+language without a prefix. `content@1`'s own `fallback: true` fills a field from `defaultLocale`
+unconditionally, since `content@1` carries no notion of "published"; `site@1` adds that on top,
+using the step argument's filter: it only uses `content@1`'s fallback once the default locale's own
+values pass the filter too, and narrows `_translations` to the locales that pass it themselves.
+`delivery-static` derives its published document the same way.
 
 **Status** is an `enum` field the consumer defines. The rule "public only shows published" is a
 pipeline concern: `content.list:pages?status=published` — a fixed filter in the step argument
