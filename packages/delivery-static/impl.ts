@@ -1,7 +1,8 @@
 import { extname } from "node:path";
 import type { z } from "zod";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
-import type { Content, ContentDocument } from "@michaelthielemann/kestrel-contracts/content";
+import type { Content } from "@michaelthielemann/kestrel-contracts/content";
+import { publishedLocale } from "@michaelthielemann/kestrel-contracts/content-locale";
 import { err, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
@@ -282,18 +283,12 @@ export async function createDeliveryStatic(config: Config, deps: { content: Cont
       if (isErr(removed)) return removed;
       return setStatus(type, id, key, { state: "draft", path: null, error: null });
     };
-    const read = await content.get(type, id, locale === undefined ? {} : { locale });
-    if (isErr(read)) return err(transientOnly(read.error, "content@1"));
-    const strict = read.value;
-    if (!strict) return unpublished();
-    if (strict[tc.statusField] !== tc.publishedValue) return unpublished();
-    let fetched: ContentDocument = strict;
-    if (config.fallback && locale !== undefined) {
-      const merged = await content.get(type, id, { locale, fallback: true });
-      if (isErr(merged)) return err(transientOnly(merged.error, "content@1"));
-      if (merged.value !== null) fetched = merged.value;
-    }
-    const rules = { home: tc.home, slugField: tc.slugField, prefixPrimary: config.prefixPrimary, fallback: config.fallback, filter: { [tc.statusField]: tc.publishedValue } };
+    const statusFilter = { [tc.statusField]: tc.publishedValue };
+    const viewResult = await publishedLocale(content, model, type, id, locale, statusFilter, config.fallback);
+    if (isErr(viewResult)) return err(transientOnly(viewResult.error, "content@1"));
+    const fetched = viewResult.value;
+    if (!fetched) return unpublished();
+    const rules = { home: tc.home, slugField: tc.slugField, prefixPrimary: config.prefixPrimary, fallback: config.fallback, filter: statusFilter };
     const options = { ...(locale === undefined ? {} : { locale }), rules };
     const linked = await site.resolveLinks(type, fetched, options);
     if (isErr(linked)) return err(transientOnly(linked.error, "site@1"));

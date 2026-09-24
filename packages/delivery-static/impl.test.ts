@@ -16,7 +16,7 @@ import module, { configSchema } from "./module.ts";
 const model: ContentModel = {
   locales: ["de", "en"],
   defaultLocale: "de",
-  types: { pages: { kind: "multi", fields: { slug: { type: "slug", localized: true, required: true }, title: { type: "text", localized: true }, status: { type: "enum", options: ["draft", "published"], localized: true } } } },
+  types: { pages: { kind: "multi", fields: { slug: { type: "slug", localized: true, required: true }, title: { type: "text", localized: true }, body: { type: "text", localized: true }, status: { type: "enum", options: ["draft", "published"], localized: true } } } },
 };
 
 function fakeContent() {
@@ -260,6 +260,35 @@ describe("delivery/static against site/default", () => {
     expect(expectOk(await site.resolve("pages", "en/contact", { rules: { filter: { status: "published" } } }))).toMatchObject({ slug: "contact", _locale: "en", _translations: { de: false, en: true } });
     expect(site.pathOf("pages", expectOk(await content.get("pages", kontakt.id, { locale: "en" }))!, { locale: "en" })).toBe("/en/contact");
     expect(site.pathOf("pages", expectOk(await content.get("pages", kontakt.id))!, { locale: "de" })).toBeNull();
+  });
+
+  it("fills an empty field from the default locale only when the default locale is itself published", async () => {
+    const content = await createContentDefault(model, createFakePersistence());
+    const withDefault = expectOk(await content.create("pages", { slug: "erste", title: "Erste", status: "published", body: "Text DE" }));
+    expectOk(await content.update("pages", withDefault.id, { slug: "first", title: "First", status: "published" }, { locale: "en" }));
+    const draftDefault = expectOk(await content.create("pages", { slug: "zweite", title: "Zweite", status: "draft", body: "Text DE" }));
+    expectOk(await content.update("pages", draftDefault.id, { slug: "second", title: "Second", status: "published" }, { locale: "en" }));
+
+    const renderer = fakeRenderer();
+    const delivery = await createDeliveryStatic(config, { content, site: createSiteDefault(content), renderer, blobs: fakeBlobs(), db: createFakePersistence(), logger: fakeLogger() });
+    expectOk(await delivery.publish("pages", withDefault.id));
+    expectOk(await delivery.publish("pages", draftDefault.id));
+
+    const bySlug = new Map(renderer.documents.map((d) => [d.slug, d]));
+    expect(bySlug.get("first")).toMatchObject({ body: "Text DE" });
+    expect(bySlug.get("second")).toMatchObject({ body: null });
+  });
+
+  it("keeps a locale that fails the filter out of _translations, even with complete fields", async () => {
+    const content = await createContentDefault(model, createFakePersistence());
+    const doc = expectOk(await content.create("pages", { slug: "dritte", title: "Dritte", status: "published" }));
+    expectOk(await content.update("pages", doc.id, { slug: "third", title: "Third", status: "draft" }, { locale: "en" }));
+
+    const renderer = fakeRenderer();
+    const delivery = await createDeliveryStatic(config, { content, site: createSiteDefault(content), renderer, blobs: fakeBlobs(), db: createFakePersistence(), logger: fakeLogger() });
+    const statuses = expectOk(await delivery.publish("pages", doc.id));
+    expect(statuses.map((s) => [s.locale, s.state])).toEqual([["de", "live"], ["en", "draft"]]);
+    expect(renderer.documents.find((d) => d.slug === "dritte")?._translations).toEqual({ de: true, en: false });
   });
 });
 

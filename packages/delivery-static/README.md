@@ -2,10 +2,12 @@
 Static delivery with a publish status per document and locale. Requires `content@1`, `site@1`,
 `renderer@1` (the site's own renderer), `blobstore@1` (filesystem or S3) and
 `persistence@1`. `delivery.publish:<type>` after `content.create/update`: for every locale whose
-own `statusField` equals `publishedValue` the document (fields with fallback, internal links
-resolved to public paths via `site.resolveLinks`, `_links` attached) is rendered in each
-configured format and stored under the path `site.pathOf` returns (default locale
-unprefixed unless `prefixPrimary`, `home` slug → `/`); other locales are removed. Outcome per
+own `statusField` equals `publishedValue` the document (an empty field filled from the default
+locale only when the default locale's own values equal `publishedValue` too, `_translations`
+narrowed to locales that satisfy it themselves, internal links resolved to public paths via
+`site.resolveLinks`, `_links` attached) is rendered in each configured format and stored under the
+path `site.pathOf` returns (default locale unprefixed unless `prefixPrimary`, `home` slug → `/`);
+other locales are removed. Outcome per
 locale in `delivery_publish_status` (`live` | `error` | `draft`, `path`, `error`, `publishedAt`); a failed
 render keeps the previous live output. `delivery.unpublish:<type>` after remove, `delivery.readStatus:<type>`
 for the editor's second lamp, `delivery.publishAll:<type>` to re-render everything.
