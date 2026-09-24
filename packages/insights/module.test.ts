@@ -6,8 +6,9 @@ import type { Context } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
 import { ok } from "@michaelthielemann/kestrel/result";
+import { validateSchema } from "@michaelthielemann/kestrel/schema";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
-import module, { configSchema } from "./module.ts";
+import module, { configSchema, MANIFEST_SCHEMA } from "./module.ts";
 
 const deps: Deps = {
   get<T>(contract: Contract<T>): T {
@@ -99,5 +100,52 @@ describe("insights/default module steps via runPipeline", () => {
     const maybePipeline = result.pipelines.find((p) => p.name === "maybe");
     expect(maybePipeline?.steps[0]?.description).toMatchObject({ terminalOutput: { type: "object", properties: { done: { type: "boolean" } }, required: ["done"] }, atomicSafe: false });
     await kestrel.stop();
+  });
+
+  it("readManifest answers the boot warnings and matches its output schema", async () => {
+    const probeOptional = defineModule({
+      name: "probe2/test",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ pass: async (ctx: Context) => ok(ctx) }),
+      describe: () => ({ pass: { summary: "pass", reads: ["typo?"], writes: [] } }),
+    });
+    const kestrel = await boot({
+      config: { modules: [{ use: "./probe2.ts", config: {} }, { use: "@michaelthielemann/kestrel-insights", config: {} }], triggers: [], http: null },
+      modules: [probeOptional, module],
+      pipelines: [definePipeline({ name: "pass2", steps: ["probe2.pass"] }), manifestPipeline],
+      logger: silentLogger,
+      validateOutput: true,
+    });
+    const manifest = await kestrel.run("insightsManifest", { trigger: { kind: "http", name: "GET /x" } });
+    expect(manifest.status).toBe(200);
+    expect(manifest.result).toMatchObject({ warnings: [{ code: "unwritten-optional-read", pipeline: "pass2", step: "probe2.pass", key: "typo" }] });
+    expect(validateSchema(MANIFEST_SCHEMA, manifest.result)).toEqual([]);
+    await kestrel.stop();
+  });
+});
+
+const BASE_MANIFEST = {
+  generatedAt: 1,
+  core: { version: "0.0.0" },
+  contracts: [],
+  modules: [],
+  steps: [],
+  pipelines: [],
+  triggers: { http: [], events: [], crons: [] },
+};
+
+describe("insights manifest schema: warnings", () => {
+  it("the manifest schema accepts a warning of an unknown code with its own string fields", () => {
+    const manifest = { ...BASE_MANIFEST, warnings: [{ code: "future-check", message: "something to look at", widget: "gizmo" }] };
+    expect(validateSchema(MANIFEST_SCHEMA, manifest)).toEqual([]);
+  });
+
+  it("the manifest schema requires warnings", () => {
+    expect(validateSchema(MANIFEST_SCHEMA, BASE_MANIFEST)).not.toEqual([]);
   });
 });

@@ -37,7 +37,7 @@ ratelimit contract exists), numbers across processes.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `insights.readManifest` | The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers | – | `result` | – | { generatedAt: number, core: object, contracts: string[], modules: object[], steps: object[], pipelines: object[], triggers: object, … } | – | – | no |
+| `insights.readManifest` | The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers and boot warnings | – | `result` | – | { generatedAt: number, core: object, contracts: string[], modules: object[], steps: object[], pipelines: object[], triggers: object, warnings: object[], … } | – | – | no |
 | `insights.readStats` | Live counters of this process: runs, pipelines, steps, events, and the most recent failed runs | – | `result` | – | { generatedAt: number, process: object, runs: object, pipelines: object[], steps: object[], events: object[], ratelimit: object[], recentFailures: object[], … } | – | – | no |
 
 Pipelines in `examples/minimal` using these steps:

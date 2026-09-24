@@ -68,6 +68,15 @@ const PIPELINE_STEP: JsonSchema = {
   required: ["spec", "name", "module", "description"],
 };
 const TRIGGER = (key: string): JsonSchema => ({ type: "object", properties: { [key]: { type: "string" }, pipeline: { type: "string" } }, required: [key, "pipeline"] });
+const BOOT_WARNING: JsonSchema = {
+  type: "object",
+  properties: {
+    code: { type: "string", description: "The check that produced it; a minor release may add codes" },
+    message: { type: "string" },
+  },
+  required: ["code", "message"],
+  additionalProperties: { type: "string", description: "The context of the condition, e.g. pipeline, step, event, key" },
+};
 
 export const MANIFEST_SCHEMA: JsonSchema = {
   type: "object",
@@ -87,8 +96,9 @@ export const MANIFEST_SCHEMA: JsonSchema = {
       },
       required: ["http", "events", "crons"],
     },
+    warnings: { type: "array", items: BOOT_WARNING },
   },
-  required: ["generatedAt", "core", "contracts", "modules", "steps", "pipelines", "triggers"],
+  required: ["generatedAt", "core", "contracts", "modules", "steps", "pipelines", "triggers", "warnings"],
 };
 
 const TIMING = { count: { type: "number" }, failed: { type: "number" }, errors: { type: "number" }, p50Ms: { type: "number" }, p95Ms: { type: "number" } };
@@ -140,7 +150,7 @@ export default defineModule({
   }),
 
   describe: () => ({
-    readManifest: { summary: "The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers", reads: [], writes: ["result"], output: MANIFEST_SCHEMA },
+    readManifest: { summary: "The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers and boot warnings", reads: [], writes: ["result"], output: MANIFEST_SCHEMA },
     readStats: { summary: "Live counters of this process: runs, pipelines, steps, events, and the most recent failed runs", reads: [], writes: ["result"], output: STATS_SCHEMA },
   }),
 });

@@ -39,6 +39,7 @@ Config: `{}` – nothing to set.
 |---|---|---|---|---|---|---|---|---|
 | `events.emit:<arg>` | Emit event "<arg>" to every subscribed handler pipeline and wait for them | – | – | – | – | 500 a subscribed handler failed | portable | no |
 | `events.relay` | Report how the events this run raised were delivered (adds `_events` to the result) | – | `result._events` | – | { _events: object, … } | – | portable | no |
+| `events.readDeliveryStatus` | Failed deliveries of the process that answers, since it started; inline delivery never retries, so each one is final | – | `result` | – | { dead: integer, scope: "store" \| "process", since: number \| null, lastDeadAt: number \| null, … } | – | portable | no |
 
 Used by 14 of 85 pipelines in `examples/minimal`.
 

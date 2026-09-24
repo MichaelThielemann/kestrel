@@ -1310,7 +1310,7 @@
     "/admin/insights/manifest": {
       "get": {
         "operationId": "insightsManifest",
-        "summary": "Require a valid session → Requires permission insights.read → The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers",
+        "summary": "Require a valid session → Requires permission insights.read → The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers and boot warnings",
         "tags": [
           "admin"
         ],
@@ -1759,6 +1759,29 @@
                         "events",
                         "crons"
                       ]
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "description": "The check that produced it; a minor release may add codes"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "additionalProperties": {
+                          "type": "string",
+                          "description": "The context of the condition, e.g. pipeline, step, event, key"
+                        }
+                      }
                     }
                   },
                   "required": [
@@ -1768,7 +1791,8 @@
                     "modules",
                     "steps",
                     "pipelines",
-                    "triggers"
+                    "triggers",
+                    "warnings"
                   ]
                 }
               }

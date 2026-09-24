@@ -2527,7 +2527,8 @@
       },
       "steps": [
         "events.emit",
-        "events.relay"
+        "events.relay",
+        "events.readDeliveryStatus"
       ],
       "eventHook": true,
       "atomicScope": false,
@@ -8334,6 +8335,52 @@
       }
     },
     {
+      "name": "events.readDeliveryStatus",
+      "module": "events/direct",
+      "factory": false,
+      "description": {
+        "summary": "Failed deliveries of the process that answers, since it started; inline delivery never retries, so each one is final",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "dead": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "store",
+                "process"
+              ]
+            },
+            "since": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "lastDeadAt": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "dead",
+            "scope",
+            "since",
+            "lastDeadAt"
+          ]
+        }
+      }
+    },
+    {
       "name": "migrations.list",
       "module": "migrations/default",
       "factory": false,
@@ -9009,7 +9056,7 @@
       "module": "insights/default",
       "factory": false,
       "description": {
-        "summary": "The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers",
+        "summary": "The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers and boot warnings",
         "reads": [],
         "writes": [
           "result"
@@ -9447,6 +9494,29 @@
                 "events",
                 "crons"
               ]
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "description": "The check that produced it; a minor release may add codes"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "message"
+                ],
+                "additionalProperties": {
+                  "type": "string",
+                  "description": "The context of the condition, e.g. pipeline, step, event, key"
+                }
+              }
             }
           },
           "required": [
@@ -9456,7 +9526,8 @@
             "modules",
             "steps",
             "pipelines",
-            "triggers"
+            "triggers",
+            "warnings"
           ]
         }
       }
@@ -13666,7 +13737,7 @@
           "name": "insights.readManifest",
           "module": "insights/default",
           "description": {
-            "summary": "The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers",
+            "summary": "The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers and boot warnings",
             "reads": [],
             "writes": [
               "result"
@@ -14104,6 +14175,29 @@
                     "events",
                     "crons"
                   ]
+                },
+                "warnings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "code": {
+                        "type": "string",
+                        "description": "The check that produced it; a minor release may add codes"
+                      },
+                      "message": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "code",
+                      "message"
+                    ],
+                    "additionalProperties": {
+                      "type": "string",
+                      "description": "The context of the condition, e.g. pipeline, step, event, key"
+                    }
+                  }
                 }
               },
               "required": [
@@ -14113,7 +14207,8 @@
                 "modules",
                 "steps",
                 "pipelines",
-                "triggers"
+                "triggers",
+                "warnings"
               ]
             }
           }
@@ -22799,5 +22894,6 @@
         "pipeline": "pruneAudit"
       }
     ]
-  }
+  },
+  "warnings": []
 }

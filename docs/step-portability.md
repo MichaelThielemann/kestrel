@@ -109,6 +109,7 @@ prefix).
 | `validate.check` | none |
 | `events.emit` | portable |
 | `events.relay` | portable |
+| `events.readDeliveryStatus` | portable |
 | `migrations.list` | none |
 | `migrations.apply` | none |
 | `delivery.publish` | none |
