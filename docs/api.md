@@ -122,10 +122,11 @@ without Nuxt: [`../examples/h3`](../examples/h3).
   (`DANGLING_REF`) additionally delivers `{ "refs": [{ "field", "to", "id" }] }`; a body rejected by
   `validate.check` delivers `{ "problems": [{ "path", "message" }] }` and also duplicates one
   problem at the field root into `fields`.
-- **Every response** carries `X-Kestrel-Run-Id` (for support/logs), `Cache-Control: no-store`,
-  `X-Content-Type-Options: nosniff`. If the caller sends `X-Request-Id` (short printable ASCII, max.
-  200 characters), that value appears in the log of every line of the run and is returned as
-  `X-Request-Id`; anything else is discarded.
+- **Every response** carries `X-Kestrel-Run-Id` (for support/logs), `X-Content-Type-Options:
+  nosniff` and `Cache-Control: no-store`, except where a file response sets its own caching: the
+  public media file at `/media/:id/:name` is `immutable`. If the caller sends `X-Request-Id` (short
+  printable ASCII, max. 200 characters), that value appears in the log of every line of the run and
+  is returned as `X-Request-Id`; anything else is discarded.
 - **Auth**: send the token from `POST /login` as `Authorization: Bearer <token>` (alternatively the
   `kestrel_token` cookie, impractical for cross-origin use). Sessions expire after 24 h.
 - **Permissions**: anonymous callers may read (`pages.read`, `settings.read`, `media.read`);

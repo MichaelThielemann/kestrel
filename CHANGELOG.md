@@ -261,14 +261,27 @@ Net changes since 5.8.1.
   output never names a path without a file. Variant rows gain the state `planned` (never in an
   output); an attached variant carries its final `width`/`height` and `path` in every state. A variant
   that fails keeps answering with the original instead of 404; an image that cannot be decoded gets
-  its variant paths the same way. A size whose format changes, and a pruned size, keep their old path
-  answering with the original's bytes until the item is deleted (new collection `images_retired`).
-  `original`-format sizes render as JPEG for types other than JPEG, PNG, WebP and AVIF; every render
-  has exactly the planned dimensions, and `cover` keeps the declared aspect without enlarging.
-  `images.serve` answers a file that is neither the size's current file nor a retired one with the
-  original's bytes and type instead of 404. Variants are generated for `ready` media items only; a
-  generation whose media item is deleted meanwhile removes what it wrote. `publicPath` must be `/`
-  followed by path segments, without a trailing `/`.
+  its variant paths the same way, and its rows turn `failed` only once those paths exist. A size
+  whose format changes, and a pruned size, keep their old path answering with the original's bytes
+  until the item is deleted (new collection `images_retired`); a format change moves the size's own
+  row to the new path, so an item never has two rows for one size. `original`-format sizes render
+  as JPEG for types other than JPEG, PNG, WebP and AVIF; every render has exactly the planned
+  dimensions, and `cover` keeps the declared aspect without enlarging. `images.serve` answers a
+  size's current file and every file a format change or a prune retired, and 404 for any other file;
+  until a render is at the path, and after a render failed for good, it answers with the original's
+  bytes and type (header `x-kestrel-variant: original`) instead of 404. Variants are generated for
+  `ready` media items only. `publicPath` must be `/` followed by path segments, without a trailing
+  `/`.
+  - `images_variants` gains a unique `slot` (`<mediaId>/<size>`) and `images_retired` a unique `slot`
+    (`<mediaId>/<file>`): the store keeps at most one row per item and size, so two planners of one
+    item at once create one set of rows.
+  - A plan or a render re-reads its media item after writing; when the item was deleted meanwhile —
+    in this process or another — it removes what it wrote. `images.remove` waits for a plan or a
+    render of the same item already running in this process.
+  - A missing original is a data problem: `images.plan` and `images.generate` answer `INTERNAL` (500)
+    for it instead of `TRANSIENT`, unless the item was deleted meanwhile. The repair pass in
+    `images.resume` and the sync job log an item they cannot place or render and go on with the next
+    one; `images.resume` resumes a stalled sync job either way.
   - `images-default` raises `media.updated` with `ids` through `events@1` for items it made available,
     after `images.prune`, and for items whose variants changed because a size was added or its spec
     changed. It declares the event in `emits` and uses `events@1` optionally.
@@ -282,8 +295,10 @@ Net changes since 5.8.1.
   fails that step like a failed blob write. New steps `media.syncPublic` and `images.syncPublic`
   reconcile the copies with the stored items and add `_publicMedia` / `_publicVariants` to the result;
   `media.syncPublic` also treats an upload stuck longer than the new `uploadStaleAfterMs` (default 15
-  minutes) as failed, and `images.syncPublic` plans missing variants and starts a sync job for
-  unrendered ones. Setup fails when the copy location overlaps the module's own `prefix`; boot fails
+  minutes) as failed, and `images.syncPublic` plans missing variants and starts a sync job that
+  renders unrendered ones. Both syncs page through their rows by id and check a file's owner again
+  right before they remove it, so a concurrent upload, plan or delete never costs a live item its
+  copy. Setup fails when the copy location overlaps the module's own `prefix`; boot fails
   when `publicCopy` is set and no pipeline runs the module's serve step, or when a pipeline runs a
   `syncPublic` step without `publicCopy`.
 - `StepDescription` gains an optional `anonymous: "required"`: the step's output is also published
@@ -293,6 +308,8 @@ Net changes since 5.8.1.
   that requires a signed-in caller. Another `authz@1` provider has to make the same check itself.
   `insights.readManifest`'s output schema follows the new field.
 - A binary step result may now set its own `cache-control`; without one, responses stay `no-store`.
+  `media.serve` uses it to mark an original `immutable`; `images.serve` keeps `no-store`, because a
+  variant path changes content when its render replaces the original's bytes.
 - **`delivery-static` no longer handles media.** The `media` option is removed — a config that still
   sets it fails validation — and with it the rewriting of media URLs in rendered output, the copying
   of media into the output prefix and the reads of `media_items` and `images_variants`. Rendered

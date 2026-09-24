@@ -255,8 +255,12 @@ survives as a comma-separated string, which is why cookie auth works.
 ### HTTP Operation
 
 Every response carries `X-Kestrel-Run-Id` (error responses also in the body),
-`X-Content-Type-Options: nosniff` and `Cache-Control: no-store`. Headers a step sets may add to
-those, never weaken them: the mandatory ones are written last. A submitted
+`X-Content-Type-Options: nosniff` and, by default, `Cache-Control: no-store`. A binary result may
+set headers of its own. They add to the mandatory ones and never replace `X-Content-Type-Options`,
+`Content-Type`, `Content-Length`, `Content-Disposition` or the sandboxing
+`Content-Security-Policy`, which are written last. `Cache-Control` is the one header a binary result
+decides itself: when it sets one, that value is sent (`media.serve` marks an original
+`immutable`); when it does not, the response stays `no-store`. A submitted
 `X-Request-Id` shows up as `requestId` in the context, in the `http` log line and again in
 the response header. Each request produces one `http` log line with method, path, pipeline,
 status, duration, IP and — if present — `requestId`. `http.timeouts` sets `requestMs`
