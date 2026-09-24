@@ -208,9 +208,31 @@ Net changes since 5.8.1.
   slug, or an `llms.txt` title/description from a default locale that is only a draft renders with
   that field, link or entry empty after upgrading; publish the default locale, or fill the field
   directly in each locale, to keep it.
+- The same rule now also covers `content-default`'s `content.get`/`content.list` steps: whenever a
+  step argument carries a fixed filter (e.g. `content.list:pages?status=published`, already what
+  every shipped public read pipeline uses), `_translations` on the response is narrowed to the
+  locales that pass that filter too. This is automatic wherever a public read pipeline's step
+  argument already names the filter (as `content.list:pages?status=published` does); a consumer
+  whose collection pipelines apply a public filter some other way (outside the step argument) must
+  move it into the step argument for the narrowing to see it. `site-default`'s slug-through-the-default-locale lookup now applies the
+  full filter, not only its non-localized entries, so a locale whose only route to a path is a
+  draft default locale's slug answers 404, the same as an unknown path, instead of 200.
+  `delivery.exportLlms` re-checks a source locale's own current values instead of trusting its
+  `delivery_publish_status` row being `live` (that row can lag one failed or queued publish behind).
+  `delivery.publish` removes a locale's previous static output once it can no longer be published at
+  all (no slug of its own or inherited), instead of leaving the old file live at its old path. A step
+  argument may no longer combine a fixed filter with `fallback=true`; boot refuses it, naming the
+  step and pointing at `site.resolve` — `fallback` is status-unaware by contract, so a filtered read
+  must never use it. Every `site@1` implementation must follow the fallback/`_translations` rule now;
+  the shared contract suite (`@michaelthielemann/kestrel-contracts/site.contract.test`) tests it.
 
 ### Added
 
+- `@michaelthielemann/kestrel-contracts/content-locale`: `satisfiesFilter`, `publishedLocale` and
+  `narrowListTranslations` — the shared rule behind the two entries above, for any module that
+  builds a public view on top of `content@1`. `satisfiesFilter` throws on a `Condition` (`{ in: [...]
+  }`, `{ ne: ... }`, …) instead of silently excluding every document a `Filter` with one is compared
+  against.
 - `core`: `resolveResultSchema` (`@michaelthielemann/kestrel/schema`) reports every shape a
   pipeline's `result` can end in: the folded `output`, then each step's distinct `terminalOutput`,
   as one `anyOf`; `kestrel-openapi` publishes a route's 200 through it.

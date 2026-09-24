@@ -299,6 +299,13 @@ identical paths.
 `limit`, the list returns every match. Write calls need `pages.write`, deletion needs `pages.delete`
 (deleting a single translation is a write, `pages.write`).
 
+`GET /pages` and `GET /pages/:id` carry a fixed filter (`status=published`) in their step argument;
+`_translations` on their response is narrowed to the languages that are themselves `published` too,
+the same rule `GET /site/*path` follows — a language whose required fields are all present but is
+itself a draft still reports `false`. `GET /admin/pages` and `GET /admin/pages/:id` carry no fixed
+filter, so their `_translations` reports plain field completeness, every status included. A step
+argument may never combine a fixed filter with `?fallback=true`; boot refuses it, naming the step.
+
 **Deleting a translation.** `DELETE /pages/:id/translations/:locale` empties only that language:
 all localized fields of that language become `null` and `_translations[locale]` becomes `false`;
 non-localized fields are untouched. It answers 400 for an unknown language, 404 if the document or

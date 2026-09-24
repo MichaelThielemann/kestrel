@@ -271,13 +271,18 @@ Website routing is not `content@1`'s job but `site@1`'s (`site-default`, activat
 `content-default`): `site.resolve:pages?home=home&status=published&fallback=true` on a
 wildcard route (`GET /site/*path`): `/`, `/<slug>`, `/<lang>`, `/<lang>/<slug>` — the primary
 language without a prefix. `content@1`'s own `fallback: true` fills a field from `defaultLocale`
-unconditionally, since `content@1` carries no notion of "published"; `site@1` adds that on top,
-using the step argument's filter: it only uses `content@1`'s fallback once the default locale's own
-values pass the filter too, and narrows `_translations` to the locales that pass it themselves.
-`delivery-static` derives its published document the same way.
+unconditionally, since `content@1` carries no notion of "published"; every module that builds a
+public view on top of it adds that on top, through `@michaelthielemann/kestrel-contracts/content-locale`'s
+`publishedLocale`: it only uses `content@1`'s fallback once the default locale's own values pass the
+given filter too, and narrows `_translations` to the locales that pass it themselves. `site@1`,
+`delivery-static` and `content-default`'s own `get`/`list` steps (whenever their step argument
+carries a fixed filter) all apply this the same way, using `narrowListTranslations` for a list page
+so the narrowing is batched, not per item.
 
 **Status** is an `enum` field the consumer defines. The rule "public only shows published" is a
 pipeline concern: `content.list:pages?status=published` — a fixed filter in the step argument
-that the client cannot override.
+that the client cannot override. That same step refuses to also carry `?fallback=true`: fallback is
+status-unaware by contract, so a filtered read must never use it; combining them fails to boot,
+naming the step and pointing at `site.resolve` instead.
 
 A type only becomes its own module once it needs *behavior* (media: upload into `blobstore@1`).
