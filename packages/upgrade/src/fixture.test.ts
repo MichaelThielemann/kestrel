@@ -54,7 +54,7 @@ describe("kestrel-upgrade fix --write against a copy of the fixture", () => {
 
     const configText = readFileSync(join(scratch.dir, "kestrel.config.ts"), "utf8");
     expect(configText).toContain("@michaelthielemann/kestrel-events-direct");
-    expect(configText).toContain("acquireTimeoutMs: 15000");
+    expect(configText).toContain("acquireTimeoutMs: 18000");
 
     const pipelineText = readFileSync(join(scratch.dir, "pipelines", "deleteMediaFolder.ts"), "utf8");
     expect(pipelineText).toContain("media.listFolderItems");

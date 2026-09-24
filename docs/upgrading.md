@@ -156,8 +156,10 @@ An event trigger or `events.emit` needs exactly one delivery module (`events-dir
 to it.
 
 #### config-sqlite-acquire-timeout
-`persistence-sqlite` rejects a config where `acquireTimeoutMs` does not exceed `busyTimeoutMs`
-(both default to 5000). The fix adds `acquireTimeoutMs`.
+`persistence-sqlite` rejects a config where `acquireTimeoutMs` does not exceed `busyTimeoutMs`, but
+defaults `acquireTimeoutMs` itself when it is left unset, so this only fires when a project sets
+both explicitly and they contradict. The fix raises `acquireTimeoutMs` past `busyTimeoutMs`; it
+never adds `acquireTimeoutMs` to a config that did not already set it.
 
 #### steps-removed
 A step removed in 6.0.0 (for example `media.folderItems`) is renamed to its replacement.

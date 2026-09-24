@@ -84,21 +84,21 @@ export const eventBusRule: Rule = {
   },
 };
 
-function effectiveTimeout(config: unknown, key: string): number {
+function timeoutValue(config: unknown, key: string): number | undefined {
   const value = isRecord(config) ? config[key] : undefined;
-  return typeof value === "number" ? value : 5000;
+  return typeof value === "number" ? value : undefined;
 }
 
+/** persistence-sqlite defaults acquireTimeoutMs from busyTimeoutMs on its own, so this only fires on a contradiction the consumer wrote explicitly. */
 export const sqliteAcquireTimeoutRule: Rule = {
   id: "config/sqlite-acquire-timeout",
   check(ctx) {
     const entry = moduleEntry(ctx, "persistence-sqlite");
     if (!entry) return [];
-    const acquire = effectiveTimeout(entry.config, "acquireTimeoutMs");
-    const busy = effectiveTimeout(entry.config, "busyTimeoutMs");
-    if (acquire > busy) return [];
-    const busySet = typeof entry.config === "object" && entry.config !== null && "busyTimeoutMs" in entry.config;
-    const value = busySet ? `${busy + 10000}` : "15000";
+    const acquire = timeoutValue(entry.config, "acquireTimeoutMs");
+    const busy = timeoutValue(entry.config, "busyTimeoutMs");
+    if (acquire === undefined || busy === undefined || acquire > busy) return [];
+    const value = `${busy + 10000}`;
     const source = ctx.readFile(ctx.project.configFile);
     const edits: Edit[] = [];
     if (source !== undefined) {
@@ -109,8 +109,8 @@ export const sqliteAcquireTimeoutRule: Rule = {
       finding(
         "config/sqlite-acquire-timeout",
         "config/sqlite-acquire-timeout",
-        "persistence-sqlite requires acquireTimeoutMs to exceed busyTimeoutMs; both default to 5000",
-        `add acquireTimeoutMs: ${value}`,
+        "persistence-sqlite requires acquireTimeoutMs to exceed busyTimeoutMs; both are set explicitly and contradict",
+        `raise acquireTimeoutMs to ${value}`,
         { file: ctx.project.configFile, module: entry.use },
         edits,
         "docs/upgrading.md#config-sqlite-acquire-timeout",
