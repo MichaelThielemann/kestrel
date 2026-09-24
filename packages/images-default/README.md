@@ -27,7 +27,10 @@ delivery module, an upload's placing runs in its own short pipeline (`images.pla
 subscribes to `images.planned` and can run in its own lane. With inline event delivery,
 `images.generate` alone does both in the upload request, and a size it could not render there is
 left `planned` and picked up by this module's own background loop right after the request — never
-inside it.
+inside it. An image sharp cannot decode gets its rows too (dimensions from the media item, error
+`cannot decode`): they stay `planned` until the original's bytes are at every path, and turn
+`failed` only then, so such an item becomes available like any other and never lists a path without
+a file.
 
 Sizes are declared in code, so none of them are stored: config sizes come from the config on every
 boot and registered sizes live in the process that took them, rebuilt by every `images.register`
@@ -71,7 +74,11 @@ same path, so a static export or a bucket served directly always has *something*
 path, never a 404. `images.syncPublic` reconciles that tree: it removes copies (and rows) of items
 that are gone, places a ready item missing a size, rewrites a copy that does not match its row, and
 removes a foreign file — all restricted to files directly under `<id>/variants/`, never anything
-this module did not put there. Boot fails if the copy tree overlaps this module's own storage
+this module did not put there — and starts the sync job when a row still waits for its render. It
+decides that an item is gone, or that a file has no owner, by reading that item's rows right before
+it removes anything, never from a list it read earlier; it pages through rows by id, so rows it
+removes on the way never make it skip others; and after writing a copy it reads the owner again and
+removes the copy when the item was deleted meanwhile. Boot fails if the copy tree overlaps this module's own storage
 `prefix`, if `publicCopy` is set but no pipeline runs `images.serve`, or if a pipeline runs
 `images.syncPublic` without `publicCopy` set.
 
@@ -80,7 +87,9 @@ this module did not put there. Boot fails if the copy tree overlaps this module'
 A path, once listed, keeps answering until the item itself is deleted — even after the size behind
 it stops existing. A format change (`webp` ↔ `original`, or one `original` type to another) retires
 the *old* path: a record in `images_retired` remembers it, its copy is overwritten with the
-original's bytes, and the size is re-planned at its *new* path. `images.prune` does the same for a
+original's bytes, and the size's own row moves to its *new* path and is placed and rendered there.
+`images_variants.slot` (`<mediaId>/<size>`) is unique, so an item never has two rows for one size;
+changing the format back makes the old file current again instead of keeping it retired. `images.prune` does the same for a
 size that is no longer declared at all: retire, overwrite the copy with the original, delete the
 private blob and the variant row — the path stays, `images.prune`'s `{ sizes, variants }` counts what
 it touched. `images.serve` and the content rule below treat a retired file exactly like a variant row
@@ -103,6 +112,14 @@ Concurrent requests to generate variants for the same media item share one rende
 it twice; two callers that start a sync job in the same instant share the same start, so only one job
 row is ever created. Placing never runs more than four public-copy writes at a time.
 
+Within one process, placing, rendering and `images.remove` of one item run one at a time, so
+`images.remove` waits for a plan or a render of that item already in progress. Across processes the
+store decides: a plan or a render reads the media item again after its last write and, when the item
+was deleted meanwhile, removes everything it wrote; a render marks its row `done` only if the row
+still has the path and spec it rendered for, and otherwise drops what it wrote at a path the row no
+longer has; a placement that finds its row already rendered puts the render back at the path. Two
+planners of one item at once end with one row per size.
+
 `available` (on `images.attach`'s output) is `false` for an eligible image that has at least one size
 still `planned` (no object at its path yet), `true` once every size has one — including for a
 non-eligible item (not an image, SVG, GIF), which has no variants at all and is always available.
@@ -122,7 +139,11 @@ the `images.resume` cron take it over instead of answering `CONFLICT`. The job's
 written after each image rather than only at the end of a chunk, so a long-running chunk is never
 mistaken for a stalled job by `images.readStatus` or the `staleAfterMs` takeover. `images.resume`
 also places and renders any row still stuck at `planned` (a placement that never finished) and any
-media item created in the last 24 hours with no rows at all (a generation that never started).
+media item created in the last 24 hours with no rows at all (a generation that never started). An
+item it cannot place or render — for instance one whose original is missing from the blob store,
+which `images.plan` and `images.generate` report as `INTERNAL` — is logged and skipped, and the
+stalled job is resumed regardless. The sync job skips such an item the same way and counts it as
+failed; only a `TRANSIENT` failure stops the job, which `images.resume` then resumes.
 
 **A render that hangs** (a pathological image that keeps sharp busy, a blocked file descriptor) is
 given up on after `renderTimeoutMs`. sharp cannot be aborted, so the render is left to finish in the

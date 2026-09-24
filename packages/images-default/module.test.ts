@@ -281,9 +281,8 @@ describe("serve step", () => {
   it("serves the original, not 404, once a variant gives up", async () => {
     const { images, db, blobs, steps } = await make({ maxAttempts: 1 });
     await addImage(db, blobs, "a", await jpeg(400, 300));
-    blobs.blobs.delete("orig/a.jpg");
-    expectOk(await images.generate("a"));
-    blobs.blobs.set("orig/a.jpg", { data: await jpeg(400, 300), contentType: "image/jpeg" });
+    expectOk(await images.plan(["a"]));
+    expectOk(await db.updateMany(VARIANTS, { mediaId: "a" }, { state: "failed", error: "gave up" }));
     const ctx = expectOk(await steps.serve(fakeCtx({ params: { id: "a", file: "thumb.webp" } })));
     expect(boundaryCast<{ binary: true; headers?: Record<string, string> }>(ctx.result, "host").headers).toEqual({ "x-kestrel-variant": "original" });
   });

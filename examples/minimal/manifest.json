@@ -5015,6 +5015,9 @@
                       "size": {
                         "type": "string"
                       },
+                      "slot": {
+                        "type": "string"
+                      },
                       "spec": {
                         "type": "string"
                       },
@@ -5060,6 +5063,7 @@
                       "id",
                       "mediaId",
                       "size",
+                      "slot",
                       "spec",
                       "width",
                       "height",
@@ -5102,6 +5106,9 @@
                               "type": "string"
                             },
                             "size": {
+                              "type": "string"
+                            },
+                            "slot": {
                               "type": "string"
                             },
                             "spec": {
@@ -5149,6 +5156,7 @@
                             "id",
                             "mediaId",
                             "size",
+                            "slot",
                             "spec",
                             "width",
                             "height",
@@ -13015,6 +13023,9 @@
                           "size": {
                             "type": "string"
                           },
+                          "slot": {
+                            "type": "string"
+                          },
                           "spec": {
                             "type": "string"
                           },
@@ -13060,6 +13071,7 @@
                           "id",
                           "mediaId",
                           "size",
+                          "slot",
                           "spec",
                           "width",
                           "height",
@@ -13102,6 +13114,9 @@
                                   "type": "string"
                                 },
                                 "size": {
+                                  "type": "string"
+                                },
+                                "slot": {
                                   "type": "string"
                                 },
                                 "spec": {
@@ -13149,6 +13164,7 @@
                                 "id",
                                 "mediaId",
                                 "size",
+                                "slot",
                                 "spec",
                                 "width",
                                 "height",
