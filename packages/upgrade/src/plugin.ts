@@ -1,9 +1,11 @@
 import type { BootCheck, BootInput } from "@michaelthielemann/kestrel";
 import type { PromptFn } from "./answers.ts";
+import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import type { Edit, Finding } from "./report.ts";
 import { runCli } from "./cli-run.ts";
 
 export type { AskFix, Edit, Finding, FindingFix, FindingLocation, Severity, Tier, UpgradeReport } from "./report.ts";
+export type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 
 /** A project a plugin knows how to find and load; the layer registers one of these for its own project shape. */
 export interface LoadedProject {
@@ -38,6 +40,10 @@ export interface RuleContext {
   answers: ReadonlyMap<string, string>;
   /** The active plugin's own `ownsPackages`, empty when none is active; built-in dependency rules never read or edit one of these. */
   ownsPackages: readonly string[];
+  /** The active plugin's own step-list locator, when it supplies one; a rule that edits a pipeline's step list (like `pipelines/verified-user`) passes it through to `insertPipelineStep`. */
+  locateSteps?: StepListLocator;
+  /** The active plugin's own content-model locator, when it supplies one; `model/underscore-field` passes it through to `renameContentField`. */
+  locateModelFields?: ModelFieldsLocator;
   /**
    * Applies the given edits to a scratch copy of the affected files, reloads the project and runs
    * `checkBoot()` on it, then restores the copy — a rule uses this to verify an edit it is about to
@@ -72,6 +78,10 @@ export interface UpgradePlugin {
   ownsPackages?: readonly string[];
   /** Replaces or disables a built-in rule by id (`null` disables it); two plugins naming the same id is a load error. */
   overrides?: Record<string, Rule | null>;
+  /** Locates a pipeline's own step array(s) directly, for a project layout where a pipeline is not a `definePipeline({ name, steps })` call; the built-in search runs when this is absent. */
+  locateSteps?: StepListLocator;
+  /** Locates a content type's `fields` object literal directly, for a project layout where it does not sit at `config.types.<typeName>.fields` on a module-list entry; the built-in search runs when this is absent. */
+  locateModelFields?: ModelFieldsLocator;
 }
 
 export interface RunUpgradeCliOptions {

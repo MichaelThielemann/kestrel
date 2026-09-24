@@ -71,7 +71,7 @@ export const verifiedUserRule: Rule = {
       const edits: Edit[] = [];
       const source = file === undefined ? undefined : ctx.readFile(file);
       if (file !== undefined && source !== undefined) {
-        const edit = insertPipelineStep(file, source, { pipelineName: def.name, anchorStep: "revisions.reassignAuthor", position: "before", newStep: `authn.verifyUser:${path}` });
+        const edit = insertPipelineStep(file, source, { pipelineName: def.name, anchorStep: "revisions.reassignAuthor", position: "before", newStep: `authn.verifyUser:${path}`, ...(ctx.locateSteps === undefined ? {} : { locateSteps: ctx.locateSteps }) });
         if (edit) edits.push(edit);
       }
       findings.push(finding(`${RULE_ID}:${def.name}`, RULE_ID, message, `insert authn.verifyUser:${path} before revisions.reassignAuthor (it now rejects an unknown or inactive target with 404/400, where 5.8 accepted one)`, where, edits, "docs/upgrading.md#pipelines-verified-user"));
@@ -84,7 +84,7 @@ export const verifiedUserRule: Rule = {
     const file = ctx.project.pipelineFiles.get(pipelineName);
     const source = file === undefined ? undefined : ctx.readFile(file);
     if (file === undefined || source === undefined) return undefined;
-    const edit = insertPipelineStep(file, source, { pipelineName, anchorStep: "revisions.reassignAuthor", position: "before", newStep: `authn.verifyUser:${value}` });
+    const edit = insertPipelineStep(file, source, { pipelineName, anchorStep: "revisions.reassignAuthor", position: "before", newStep: `authn.verifyUser:${value}`, ...(ctx.locateSteps === undefined ? {} : { locateSteps: ctx.locateSteps }) });
     return edit ? [edit] : undefined;
   },
 };

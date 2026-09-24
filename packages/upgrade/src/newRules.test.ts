@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { BootCheck, BootProblem, BootWarning, ModuleDefinition, PipelineDefinition } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
+import { findCalls, firstArgument, isArrayExpression, objectProperty } from "./ast.ts";
+import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
 import { readFileOrUndefined } from "./rules.ts";
 import { breakingStepShapesRule, busHandlerThrowsRule, busSubscriberQueueRule, ctxDoneTerminalOutputRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule, typeSignaturesRule } from "./ruleInfo.ts";
@@ -29,9 +31,19 @@ function bootCheck(errors: BootProblem[] = [], warnings: BootWarning[] = []): Bo
   return { errors, warnings, notChecked: [] };
 }
 
-function contextFor(project: LoadedProject, options: { check?: BootCheck; answers?: ReadonlyMap<string, string>; data?: Record<string, unknown> } = {}): RuleContext {
+function contextFor(project: LoadedProject, options: { check?: BootCheck; answers?: ReadonlyMap<string, string>; data?: Record<string, unknown>; locateSteps?: StepListLocator; locateModelFields?: ModelFieldsLocator } = {}): RuleContext {
   const withData = options.data === undefined ? project : { ...project, data: options.data };
-  return { root: dir, scratch: dir, project: withData, bootCheck: options.check ?? bootCheck(), readFile: readFileOrUndefined, answers: options.answers ?? new Map(), ownsPackages: [] };
+  return {
+    root: dir,
+    scratch: dir,
+    project: withData,
+    bootCheck: options.check ?? bootCheck(),
+    readFile: readFileOrUndefined,
+    answers: options.answers ?? new Map(),
+    ownsPackages: [],
+    ...(options.locateSteps === undefined ? {} : { locateSteps: options.locateSteps }),
+    ...(options.locateModelFields === undefined ? {} : { locateModelFields: options.locateModelFields }),
+  };
 }
 
 async function project(options: { configModules?: Array<{ use: string; config?: Record<string, unknown> }>; triggers?: unknown[]; pipelines?: PipelineDefinition[]; pipelineFiles?: Record<string, string>; modules?: ModuleDefinition[]; moduleFiles?: Record<string, string> }): Promise<LoadedProject> {
@@ -59,6 +71,34 @@ describe("pipelines/verified-user", () => {
       pipelineFiles: { retry: file },
     });
     const findings = await verifiedUserRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const { text } = applyEdits(source, edits);
+    expect(text).toContain('"authn.verifyUser:reassignTo", "revisions.reassignAuthor"');
+  });
+
+  it("edits a plugin project's own pipeline layout through ctx.locateSteps", async () => {
+    const file = join(dir, "retry.ts");
+    const source = 'defineFlow({ id: "retry", options: { steps: ["authn.requireUser", "revisions.reassignAuthor"] } });\n';
+    await writeFile(file, source);
+    const p = await project({
+      configModules: [{ use: "@michaelthielemann/kestrel-authn-multi" }],
+      triggers: [{ http: "POST /retry", pipeline: "retry" }],
+      pipelines: [{ name: "retry", steps: ["authn.requireUser", "revisions.reassignAuthor"] }],
+      pipelineFiles: { retry: file },
+    });
+    const locateSteps: StepListLocator = (root, pipelineName) => {
+      for (const call of findCalls(root, "defineFlow")) {
+        const arg = firstArgument(call);
+        if (arg?.type !== "ObjectExpression" || objectProperty(arg, "id")?.value !== pipelineName) continue;
+        const options = objectProperty(arg, "options");
+        const steps = options?.type === "ObjectExpression" ? objectProperty(options, "steps") : undefined;
+        if (isArrayExpression(steps)) return [steps];
+      }
+      return [];
+    };
+    const findings = await verifiedUserRule.check(contextFor(p, { locateSteps }));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("auto");
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
@@ -276,6 +316,27 @@ describe("model/underscore-field", () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
     await writeFile(p.configFile, source);
     const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 0 } } } }));
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const { text } = applyEdits(source, edits);
+    expect(text).toContain("fields: { hint:");
+  });
+
+  it("edits a plugin project's own content-model layout through ctx.locateModelFields", async () => {
+    const source = 'defineContentModel({ name: "page", schema: { fields: { _hint: { type: "string" }, title: { type: "string" } } } });\n';
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
+    await writeFile(p.configFile, source);
+    const locateModelFields: ModelFieldsLocator = (root, { typeName }) => {
+      for (const call of findCalls(root, "defineContentModel")) {
+        const arg = firstArgument(call);
+        if (arg?.type !== "ObjectExpression" || objectProperty(arg, "name")?.value !== typeName) continue;
+        const schema = objectProperty(arg, "schema");
+        const fields = schema?.type === "ObjectExpression" ? objectProperty(schema, "fields") : undefined;
+        if (fields?.type === "ObjectExpression") return fields;
+      }
+      return undefined;
+    };
+    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 0 } } }, locateModelFields }));
     expect(findings[0]?.fix.kind).toBe("auto");
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
     const { text } = applyEdits(source, edits);

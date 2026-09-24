@@ -84,7 +84,7 @@ export const underscoreFieldRule: Rule = {
           const source = ctx.readFile(ctx.project.configFile);
           const edits: Edit[] = [];
           if (source !== undefined) {
-            const edit = renameContentField(ctx.project.configFile, source, { use: entry.use, typeName, from: field, to: target });
+            const edit = renameContentField(ctx.project.configFile, source, { use: entry.use, typeName, from: field, to: target, ...(ctx.locateModelFields === undefined ? {} : { locateModelFields: ctx.locateModelFields }) });
             if (edit) edits.push(edit);
           }
           findings.push(finding(id, RULE_ID, `"${field}" on content type "${typeName}" starts with "_"; a data report counted zero stored values (${describeCounts(counts)})`, `rename to "${target}"`, where, edits, "docs/upgrading.md#model-underscore-field"));
@@ -94,7 +94,7 @@ export const underscoreFieldRule: Rule = {
           const source = ctx.readFile(ctx.project.configFile);
           const edits: Edit[] = [];
           if (source !== undefined) {
-            const edit = renameContentField(ctx.project.configFile, source, { use: entry.use, typeName, from: field, to: answer });
+            const edit = renameContentField(ctx.project.configFile, source, { use: entry.use, typeName, from: field, to: answer, ...(ctx.locateModelFields === undefined ? {} : { locateModelFields: ctx.locateModelFields }) });
             if (edit) edits.push(edit);
           }
           const proof = counts === undefined ? "no data report was supplied" : `a data report counted stored values (${describeCounts(counts)})`;
@@ -149,7 +149,7 @@ export const underscoreFieldRule: Rule = {
     const entry = moduleEntry(ctx, "content-default");
     const source = entry === undefined ? undefined : ctx.readFile(ctx.project.configFile);
     if (entry === undefined || source === undefined) return undefined;
-    const edit = renameContentField(ctx.project.configFile, source, { use: entry.use, typeName, from: field, to: value });
+    const edit = renameContentField(ctx.project.configFile, source, { use: entry.use, typeName, from: field, to: value, ...(ctx.locateModelFields === undefined ? {} : { locateModelFields: ctx.locateModelFields }) });
     return edit ? [edit] : undefined;
   },
 };

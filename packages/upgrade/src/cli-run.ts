@@ -9,6 +9,7 @@ import { boolFlag, parseArgs, stringFlag, type ParsedArgs } from "./args.ts";
 import { unifiedDiff } from "./diff.ts";
 import { runDataStep } from "./data.ts";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { loadBackendProject, loadIssuesAsFindings, type LoadIssue, type LoadResult } from "./project.ts";
 import type { LoadedProject, Rule, RunUpgradeCliOptions, UpgradePlugin } from "./plugin.ts";
@@ -26,6 +27,8 @@ interface ResolvedProject {
   rules: readonly Rule[];
   sandboxEntries?: SandboxTable;
   ownsPackages: readonly string[];
+  locateSteps?: StepListLocator;
+  locateModelFields?: ModelFieldsLocator;
   notices: Finding[];
   reload: (scratchDir: string) => Promise<LoadResult>;
 }
@@ -56,6 +59,7 @@ async function resolveProject(root: string, entry: string | undefined, scratchDi
   const { rules, notices } = mergeRules(DEFAULT_RULES, plugin);
   const sandboxEntries = plugin.sandbox === undefined ? {} : { sandboxEntries: plugin.sandbox };
   const ownsPackages = plugin.ownsPackages ?? [];
+  const locators = { ...(plugin.locateSteps === undefined ? {} : { locateSteps: plugin.locateSteps }), ...(plugin.locateModelFields === undefined ? {} : { locateModelFields: plugin.locateModelFields }) };
   const reload = async (dir: string): Promise<LoadResult> => {
     try {
       return await plugin.load(root, dir);
@@ -65,9 +69,9 @@ async function resolveProject(root: string, entry: string | undefined, scratchDi
   };
   try {
     const { project, issues } = await plugin.load(root, scratchDir);
-    return { ...(project === undefined ? {} : { project }), issues: [...detectIssues, ...issues], rules, ownsPackages, notices, ...sandboxEntries, reload };
+    return { ...(project === undefined ? {} : { project }), issues: [...detectIssues, ...issues], rules, ownsPackages, notices, ...sandboxEntries, ...locators, reload };
   } catch (err) {
-    return { issues: [...detectIssues, { message: err instanceof Error ? err.message : String(err) }], rules, ownsPackages, notices, ...sandboxEntries, reload };
+    return { issues: [...detectIssues, { message: err instanceof Error ? err.message : String(err) }], rules, ownsPackages, notices, ...sandboxEntries, ...locators, reload };
   }
 }
 
@@ -170,7 +174,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       });
     }
 
-    const { project, issues, rules, sandboxEntries, ownsPackages, notices, reload } = await resolveProject(root, entry, scratch.dir, options.plugins ?? []);
+    const { project, issues, rules, sandboxEntries, ownsPackages, locateSteps, locateModelFields, notices, reload } = await resolveProject(root, entry, scratch.dir, options.plugins ?? []);
     findings.push(...loadIssuesAsFindings(issues), ...notices);
 
     let tiers: UpgradeReport["tiers"] = { source: "not-run", load: "not-run", boot: "not-run", data: "not-run" };
@@ -240,7 +244,18 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       }
 
       const projectWithData = options.dataReport === undefined ? project : { ...project, data: options.dataReport };
-      const ctx = { root: scratch.dir, scratch: scratch.dir, project: projectWithData, bootCheck, readFile: readFileOrUndefined, answers: options.answers, ownsPackages, ...(previewBoot === undefined ? {} : { previewBoot }) };
+      const ctx = {
+        root: scratch.dir,
+        scratch: scratch.dir,
+        project: projectWithData,
+        bootCheck,
+        readFile: readFileOrUndefined,
+        answers: options.answers,
+        ownsPackages,
+        ...(locateSteps === undefined ? {} : { locateSteps }),
+        ...(locateModelFields === undefined ? {} : { locateModelFields }),
+        ...(previewBoot === undefined ? {} : { previewBoot }),
+      };
       for (const rule of rules) findings.push(...(await rule.check(ctx)));
 
       const claimed = new Set(findings.map((f) => `${f.where.module ?? ""}|${f.where.pipeline ?? ""}|${f.where.step ?? ""}`));

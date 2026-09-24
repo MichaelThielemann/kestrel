@@ -201,27 +201,30 @@ function insertRelativeToAnchor(file: string, source: string, array: AstNode, an
   return { file, start: lineStart, end: lineStart, text: `${indent}${literal},${eol}` };
 }
 
+export type StepListLocator = (root: AstNode, pipelineName: string) => readonly AstNode[];
+
 export interface InsertStepOptions {
   pipelineName: string;
   anchorStep: string;
   position: "before" | "after";
   newStep: string;
+  /** Locates the pipeline's own step array(s) directly, for a project layout where it does not sit at a `definePipeline({ name, steps })` call; the built-in search (which also expands into an atomic group's own array) runs when this is absent. */
+  locateSteps?: StepListLocator;
 }
 
 /** Inserts `newStep` next to `anchorStep` in the named pipeline's step list, including inside an atomic group; `undefined` when the pipeline, the array or the anchor cannot be found, or `newStep` is already there. */
 export function insertPipelineStep(file: string, source: string, options: InsertStepOptions): Edit | undefined {
   const root = parseTs(source);
-  for (const top of pipelineStepsArrays(root, options.pipelineName)) {
-    for (const array of stepArraysOf(top)) {
-      const stepElements = elements(array);
-      if (stepElements.some((e) => stringValue(e) === options.newStep)) return undefined;
-      const anchorIndex = stepElements.findIndex((e) => stringValue(e) === options.anchorStep);
-      if (anchorIndex === -1) continue;
-      const anchor = stepElements[anchorIndex]!;
-      const quote = quoteOf(source, stepElements.find((e) => stringValue(e) !== undefined));
-      const literal = `${quote}${options.newStep}${quote}`;
-      return insertRelativeToAnchor(file, source, array, anchor, options.position, literal);
-    }
+  const arrays = options.locateSteps ? options.locateSteps(root, options.pipelineName) : pipelineStepsArrays(root, options.pipelineName).flatMap(stepArraysOf);
+  for (const array of arrays) {
+    const stepElements = elements(array);
+    if (stepElements.some((e) => stringValue(e) === options.newStep)) return undefined;
+    const anchorIndex = stepElements.findIndex((e) => stringValue(e) === options.anchorStep);
+    if (anchorIndex === -1) continue;
+    const anchor = stepElements[anchorIndex]!;
+    const quote = quoteOf(source, stepElements.find((e) => stringValue(e) !== undefined));
+    const literal = `${quote}${options.newStep}${quote}`;
+    return insertRelativeToAnchor(file, source, array, anchor, options.position, literal);
   }
   return undefined;
 }
@@ -380,22 +383,31 @@ export function setStepRequired(file: string, source: string, stepName: string, 
   return appendProperty(source, output, file, `required: ${literal}`);
 }
 
+export type ModelFieldsLocator = (root: AstNode, options: { use: string; typeName: string }) => AstNode | undefined;
+
+function builtInModelFields(root: AstNode, use: string, typeName: string): AstNode | undefined {
+  const array = findModuleArray(root);
+  if (array === undefined) return undefined;
+  const entry = elements(array).find((e) => entryUse(e) === use);
+  const config = entry && objectProperty(entry, "config");
+  const types = config?.type === "ObjectExpression" ? objectProperty(config, "types") : undefined;
+  const typeObj = types?.type === "ObjectExpression" ? objectProperty(types, typeName) : undefined;
+  return typeObj?.type === "ObjectExpression" ? objectProperty(typeObj, "fields") : undefined;
+}
+
 export interface RenameContentFieldOptions {
   use: string;
   typeName: string;
   from: string;
   to: string;
+  /** Locates the content type's `fields` object literal directly, for a project layout where it does not sit at `config.types.<typeName>.fields` on the module-list entry named `use`; the built-in search runs when this is absent. */
+  locateModelFields?: ModelFieldsLocator;
 }
 
-/** Renames a content type's field key, `config.types.<typeName>.fields.<from>`, on a module-list entry named `use`. */
+/** Renames a content type's field key, `config.types.<typeName>.fields.<from>`, on a module-list entry named `use` (or wherever `locateModelFields` says it lives). */
 export function renameContentField(file: string, source: string, options: RenameContentFieldOptions): Edit | undefined {
-  const array = moduleListArray(source);
-  if (array === undefined) return undefined;
-  const entry = elements(array).find((e) => entryUse(e) === options.use);
-  const config = entry && objectProperty(entry, "config");
-  const types = config?.type === "ObjectExpression" ? objectProperty(config, "types") : undefined;
-  const typeObj = types?.type === "ObjectExpression" ? objectProperty(types, options.typeName) : undefined;
-  const fields = typeObj?.type === "ObjectExpression" ? objectProperty(typeObj, "fields") : undefined;
+  const root = parseTs(source);
+  const fields = options.locateModelFields ? options.locateModelFields(root, { use: options.use, typeName: options.typeName }) : builtInModelFields(root, options.use, options.typeName);
   if (fields === undefined || fields.type !== "ObjectExpression") return undefined;
   const prop = objectPropertyNodes(fields).find((p) => propertyKeyName(p) === options.from);
   const key = prop && propertyKeyNode(prop);

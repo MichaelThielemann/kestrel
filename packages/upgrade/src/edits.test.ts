@@ -1,8 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { applyEdits } from "./apply.ts";
-import { parseTs } from "./ast.ts";
-import { addModuleEmits, insertModuleListEntry, insertModulesTsEntry, insertPipelineStep, insertStepAfterEmitOutsideGroup, markStepBinary, renameContentField, renameStringLiterals, replaceModuleListEntry, replaceModulesTsEntry, setModuleConfigProperties, setStepRequired } from "./edits.ts";
+import { findCalls, firstArgument, isArrayExpression, objectProperty, parseTs, type AstNode } from "./ast.ts";
+import {
+  addModuleEmits,
+  insertModuleListEntry,
+  insertModulesTsEntry,
+  insertPipelineStep,
+  insertStepAfterEmitOutsideGroup,
+  markStepBinary,
+  renameContentField,
+  renameStringLiterals,
+  replaceModuleListEntry,
+  replaceModulesTsEntry,
+  setModuleConfigProperties,
+  setStepRequired,
+  type ModelFieldsLocator,
+  type StepListLocator,
+} from "./edits.ts";
 import { removeDependency, replaceDependency, setDependencyRange } from "./packageJson.ts";
 
 function parsePkg(text: string): { dependencies: Record<string, string> } {
@@ -270,6 +285,26 @@ describe("insertPipelineStep", () => {
     expect(text.indexOf("authn.requireUser")).toBeLessThan(text.indexOf("authn.verifyUser:reassignTo"));
     expect(text.indexOf("authz.require")).toBeLessThan(text.indexOf("authn.verifyUser:reassignTo"));
   });
+
+  it("uses a plugin-supplied locateSteps for a layout the built-in search does not recognize", () => {
+    const source = `defineFlow({ id: "custom", options: { steps: ["authn.requireUser", "revisions.reassignAuthor"] } });\n`;
+    expect(insertPipelineStep("p.ts", source, { pipelineName: "custom", anchorStep: "revisions.reassignAuthor", position: "before", newStep: "authn.verifyUser:reassignTo" })).toBeUndefined();
+
+    const locateSteps: StepListLocator = (root, pipelineName) => {
+      const arrays: AstNode[] = [];
+      for (const call of findCalls(root, "defineFlow")) {
+        const arg = firstArgument(call);
+        if (arg?.type !== "ObjectExpression" || objectProperty(arg, "id")?.value !== pipelineName) continue;
+        const options = objectProperty(arg, "options");
+        const steps = options?.type === "ObjectExpression" ? objectProperty(options, "steps") : undefined;
+        if (isArrayExpression(steps)) arrays.push(steps);
+      }
+      return arrays;
+    };
+    const edit = insertPipelineStep("p.ts", source, { pipelineName: "custom", anchorStep: "revisions.reassignAuthor", position: "before", newStep: "authn.verifyUser:reassignTo", locateSteps });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('"authn.requireUser", "authn.verifyUser:reassignTo", "revisions.reassignAuthor"');
+  });
 });
 
 describe("renameContentField", () => {
@@ -284,6 +319,25 @@ describe("renameContentField", () => {
   it("returns undefined for an unknown field or type", () => {
     expect(renameContentField("kestrel.config.ts", CONFIG, { use: "@michaelthielemann/kestrel-content-default", typeName: "page", from: "_nope", to: "nope" })).toBeUndefined();
     expect(renameContentField("kestrel.config.ts", CONFIG, { use: "@michaelthielemann/kestrel-content-default", typeName: "nope", from: "_hint", to: "hint" })).toBeUndefined();
+  });
+
+  it("uses a plugin-supplied locateModelFields for a layout the built-in search does not recognize", () => {
+    const source = `defineContentModel({ name: "page", schema: { fields: { _hint: { type: "string" }, title: { type: "string" } } } });\n`;
+    expect(renameContentField("model.ts", source, { use: "irrelevant", typeName: "page", from: "_hint", to: "hint" })).toBeUndefined();
+
+    const locateModelFields: ModelFieldsLocator = (root, { typeName }) => {
+      for (const call of findCalls(root, "defineContentModel")) {
+        const arg = firstArgument(call);
+        if (arg?.type !== "ObjectExpression" || objectProperty(arg, "name")?.value !== typeName) continue;
+        const schema = objectProperty(arg, "schema");
+        const fields = schema?.type === "ObjectExpression" ? objectProperty(schema, "fields") : undefined;
+        if (fields?.type === "ObjectExpression") return fields;
+      }
+      return undefined;
+    };
+    const edit = renameContentField("model.ts", source, { use: "irrelevant", typeName: "page", from: "_hint", to: "hint", locateModelFields });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain("fields: { hint: { type: \"string\" }, title:");
   });
 });
 
