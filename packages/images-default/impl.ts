@@ -478,6 +478,12 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const created = await db.createMany<Variant>(VARIANTS, rows);
       if (isErr(created)) return created;
       for (const row of created.value) byName.set(row.size, row);
+      if (!decodable && config.publicCopy !== undefined && dims.value.bytes !== null) {
+        for (const row of created.value) {
+          const put = await blobs.put(copyKey(mediaId, fileOf(row)), dims.value.bytes, { contentType: mediaRow.contentType });
+          if (isErr(put)) return put;
+        }
+      }
     }
 
     let original: Uint8Array | null = null;

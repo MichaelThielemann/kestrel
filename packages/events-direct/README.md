@@ -48,6 +48,6 @@ Config: `{}` – nothing to set.
 | `events.relay` | Report how the events this run raised were delivered (adds `_events` to the result) | – | `result._events` | – | { _events: object, … } | – | portable | no |
 | `events.readDeliveryStatus` | Failed deliveries of the process that answers, since it started; inline delivery never retries, so each one is final | – | `result` | – | { dead: integer, scope: "store" \| "process", since: number \| null, lastDeadAt: number \| null, … } | – | portable | no |
 
-Used by 15 of 86 pipelines in `examples/minimal`.
+Used by 16 of 89 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

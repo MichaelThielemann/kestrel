@@ -1,4 +1,3 @@
-import { extname } from "node:path";
 import type { z } from "zod";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content } from "@michaelthielemann/kestrel-contracts/content";
@@ -16,7 +15,6 @@ export const STATUS = "delivery_publish_status";
 
 export type Config = z.output<typeof configSchema>;
 export type TypeConfig = Config["types"][string];
-export type MediaConfig = NonNullable<Config["media"]>;
 
 export type State = "live" | "error" | "draft";
 
@@ -56,81 +54,14 @@ function bytes(data: Uint8Array | string): Uint8Array {
   return typeof data === "string" ? new TextEncoder().encode(data) : data;
 }
 
-const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
-  webp: "image/webp", avif: "image/avif", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", svg: "image/svg+xml",
-  ico: "image/x-icon", pdf: "application/pdf", mp4: "video/mp4", webm: "video/webm", mp3: "audio/mpeg", json: "application/json", txt: "text/plain",
-};
-
-export function contentTypeByExtension(key: string): string {
-  const extension = extname(key).slice(1).toLowerCase();
-  return CONTENT_TYPE_BY_EXTENSION[extension] ?? "application/octet-stream";
-}
-
 export function keyFor(prefix: string, path: string, extension: string): string {
   const dir = path === "/" ? "" : `${path.slice(1)}/`;
   return `${prefix}${dir}index.${extension}`;
 }
 
-export interface MediaMatch {
-  raw: string;
-  id: string;
-  size?: string;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function mediaPattern(publicPath: string): RegExp {
-  return new RegExp(`${escapeRegExp(publicPath)}/([0-9a-f-]{36})/(?:file(?![A-Za-z0-9._-])|variants/([a-z][a-z0-9-]*)\\.([a-z0-9]+)(?![A-Za-z0-9._-]))`, "g");
-}
-
-function mediaKey(id: string, size: string | undefined): string {
-  return size === undefined ? `${id}|file` : `${id}|${size}`;
-}
-
-function mediaMatches(html: string, publicPath: string): MediaMatch[] {
-  const re = mediaPattern(publicPath);
-  const out: MediaMatch[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) out.push({ raw: m[0], id: m[1]!, ...(m[2] === undefined ? {} : { size: m[2] }) });
-  return out;
-}
-
-export function rewriteMedia(html: string, publicPath: string, resolve: (match: MediaMatch) => string | undefined): string {
-  return html.replace(mediaPattern(publicPath), (raw, id: string, size: string | undefined) => resolve({ raw, id, ...(size === undefined ? {} : { size }) }) ?? raw);
-}
-
-interface MediaRow extends Document {
-  key: string;
-  folder: string;
-  filename: string;
-  contentType: string;
-}
-
-interface VariantRow extends Document {
-  mediaId: string;
-  size: string;
-  key: string;
-  state: string;
-}
-
-function assertSafeMediaSegment(value: string, label: string, id: string): void {
-  if (value.startsWith("/") || value.split("/").some((p) => p === "..")) throw new Error(`delivery/static: invalid media ${label} ${JSON.stringify(value)} for ${id}`);
-}
-
-async function findManyIn<T extends Document>(db: Persistence, collection: string, field: string, values: string[]): Promise<Result<T[], DeliveryError>> {
-  const out: T[] = [];
-  for (let i = 0; i < values.length; i += 200) {
-    const chunk = values.slice(i, i + 200);
-    for (let offset = 0; ; offset += 500) {
-      const page = await db.findMany<T>(collection, { [field]: { in: chunk } }, { limit: 500, offset });
-      if (isErr(page)) return err(transientOnly(page.error, "persistence@1"));
-      out.push(...page.value.items);
-      if (page.value.items.length < 500) break;
-    }
-  }
-  return ok(out);
+/** The reserved path `path` equals or lies under, if any. */
+export function reservedMatch(path: string, reservedPaths: readonly string[]): string | undefined {
+  return reservedPaths.find((reserved) => path === reserved || path.startsWith(`${reserved}/`));
 }
 
 export async function createDeliveryStatic(config: Config, deps: { content: Content; site: Site; renderer: Renderer; blobs: Blobstore; db: Persistence; logger: Logger }, now: () => number = Date.now): Promise<Delivery> {
@@ -203,76 +134,6 @@ export async function createDeliveryStatic(config: Config, deps: { content: Cont
     return ok();
   };
 
-  const rewriteAndCopyMedia = async (html: string, logged: Set<string>): Promise<Result<string, DeliveryError>> => {
-    const media = config.media;
-    if (!media) return ok(html);
-    const matches = mediaMatches(html, media.publicPath);
-    if (matches.length === 0) return ok(html);
-
-    const ids = [...new Set(matches.map((m) => m.id))];
-    const mediaRows = await findManyIn<MediaRow>(db, media.collection, "id", ids);
-    if (isErr(mediaRows)) return mediaRows;
-    const mediaById = new Map(mediaRows.value.map((r) => [r.id, r]));
-    const variantIds = [...new Set(matches.filter((m) => m.size !== undefined).map((m) => m.id))];
-    const variantByKey = new Map<string, VariantRow>();
-    if (variantIds.length > 0) {
-      const variantRows = await findManyIn<VariantRow>(db, media.variants, "mediaId", variantIds);
-      if (isErr(variantRows)) return variantRows;
-      for (const r of variantRows.value) variantByKey.set(`${r.mediaId}|${r.size}`, r);
-    }
-
-    const resolutions = new Map<string, string | undefined>();
-    const copies: Array<{ source: string; dest: string; id: string }> = [];
-    for (const match of matches) {
-      const key = mediaKey(match.id, match.size);
-      if (resolutions.has(key)) continue;
-      const row = mediaById.get(match.id);
-      if (!row) {
-        if (!logged.has(key)) {
-          logger.error("delivery/static: media reference not exported", { id: match.id, path: match.raw });
-          logged.add(key);
-        }
-        resolutions.set(key, undefined);
-        continue;
-      }
-      assertSafeMediaSegment(row.folder, "folder", match.id);
-      assertSafeMediaSegment(row.filename, "filename", match.id);
-      const folderPrefix = row.folder ? `${row.folder}/` : "";
-      if (match.size === undefined) {
-        const dest = `${media.target}${folderPrefix}${row.filename}`;
-        copies.push({ source: row.key, dest, id: match.id });
-        resolutions.set(key, `/${dest}`);
-        continue;
-      }
-      const variant = variantByKey.get(`${match.id}|${match.size}`);
-      if (!variant || variant.state !== "done") {
-        if (!logged.has(key)) {
-          logger.error("delivery/static: media reference not exported", { id: match.id, size: match.size, path: match.raw });
-          logged.add(key);
-        }
-        resolutions.set(key, undefined);
-        continue;
-      }
-      const ext = extname(variant.key).replace(/^\./, "");
-      const dest = `${media.target}${folderPrefix}${row.filename}.${match.size}.${ext}`;
-      copies.push({ source: variant.key, dest, id: match.id });
-      resolutions.set(key, `/${dest}`);
-    }
-
-    for (const { source, dest, id } of copies) {
-      const destKey = `${config.prefix}${dest}`;
-      if (uploadedAssets.has(destKey)) continue;
-      const blob = await blobs.get(source);
-      if (isErr(blob)) return err(transientOnly(blob.error, "blobstore@1"));
-      if (!blob.value) throw new Error(`delivery/static: media blob ${source} missing for ${id}`);
-      const stored = await blobs.put(destKey, blob.value, { contentType: contentTypeByExtension(dest) });
-      if (isErr(stored)) return err(transientOnly(stored.error, "blobstore@1"));
-      uploadedAssets.add(destKey);
-    }
-
-    return ok(rewriteMedia(html, media.publicPath, (match) => resolutions.get(mediaKey(match.id, match.size))));
-  };
-
   const publishLocale = async (type: string, id: string, locale: string | undefined): Promise<Result<PublishStatus, DeliveryError>> => {
     const tc = typeConfig(type);
     const key = locale ?? "";
@@ -302,24 +163,20 @@ export async function createDeliveryStatic(config: Config, deps: { content: Cont
     }
     const failed = (message: string): Promise<Result<PublishStatus, DeliveryError>> =>
       setStatus(type, id, key, { state: "error", path: previous?.state === "live" ? previous.path : null, error: message });
-    const loggedMedia = new Set<string>();
+    const reservedPage = reservedMatch(path, config.reservedPaths);
+    if (reservedPage !== undefined) return failed(`path ${path} is reserved (${reservedPage})`);
     try {
       for (const format of config.formats) {
         const rendered = await renderer.render({ type, id, ...(locale === undefined ? {} : { locale }), path, format, document: doc });
         if (isErr(rendered)) return failed(rendered.error.message);
         const out = rendered.value;
-        let data: Uint8Array | string = out.data;
-        if (config.media && (typeof out.data === "string" || out.contentType.startsWith("text/"))) {
-          const html = typeof out.data === "string" ? out.data : new TextDecoder().decode(out.data);
-          const rewritten = await rewriteAndCopyMedia(html, loggedMedia);
-          if (isErr(rewritten)) return failed(rewritten.error.message);
-          data = rewritten.value;
-        }
-        const stored = await blobs.put(keyFor(config.prefix, path, out.extension), bytes(data), { contentType: out.contentType });
+        const stored = await blobs.put(keyFor(config.prefix, path, out.extension), bytes(out.data), { contentType: out.contentType });
         if (isErr(stored)) return failed(stored.error.message);
         for (const asset of out.assets ?? []) {
           const assetPath = asset.path.replace(/^\/+/, "");
           if (assetPath === "" || assetPath.split("/").some((p) => p === "..")) throw new Error(`delivery/static: invalid asset path ${JSON.stringify(asset.path)}`);
+          const reservedAsset = reservedMatch(`/${assetPath}`, config.reservedPaths);
+          if (reservedAsset !== undefined) return failed(`asset /${assetPath} lies under the reserved path ${reservedAsset}`);
           const key = `${config.prefix}${assetPath}`;
           if (!uploadedAssets.has(key)) {
             const put = await blobs.put(key, bytes(asset.data), { contentType: asset.contentType });

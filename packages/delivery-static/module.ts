@@ -19,15 +19,7 @@ export const configSchema = z
     prefix: z.string().default(""),
     prefixPrimary: z.boolean().default(false),
     fallback: z.boolean().default(true),
-    media: z
-      .object({
-        publicPath: z.string().regex(/^\/[A-Za-z0-9._/-]*$/).default("/media"),
-        collection: z.string().default("media_items"),
-        variants: z.string().default("images_variants"),
-        target: z.string().regex(/^([A-Za-z0-9._-]+\/)+$/).default("media/"),
-      })
-      .strict()
-      .optional(),
+    reservedPaths: z.array(z.string().regex(/^(\/[A-Za-z0-9._-]+)+$/)).default([]),
     llms: z
       .object({
         siteUrl: z.string().url().optional(),

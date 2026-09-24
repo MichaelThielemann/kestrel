@@ -21,11 +21,15 @@ const TEST_JPEG = Buffer.from(
   "base64",
 );
 
-describe("static delivery media rewrite wiring", () => {
-  it("configures the media publicPath for delivery-static", async () => {
+describe("static delivery reserves the media path instead of rewriting it", () => {
+  it("configures reservedPaths on delivery-static, publicCopy on the media modules", async () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
-    const delivery = boundaryCast<{ media?: { publicPath: string } }>(config.modules.find((m) => m.use === "@michaelthielemann/kestrel-delivery-static")!.config, "json");
-    expect(delivery.media?.publicPath).toBe("/media");
+    const delivery = boundaryCast<{ reservedPaths?: string[] }>(config.modules.find((m) => m.use === "@michaelthielemann/kestrel-delivery-static")!.config, "json");
+    expect(delivery.reservedPaths).toEqual(["/media"]);
+    const media = boundaryCast<{ publicCopy?: { prefix: string } }>(config.modules.find((m) => m.use === "@michaelthielemann/kestrel-media-default")!.config, "json");
+    expect(media.publicCopy).toEqual({ prefix: "site/" });
+    const images = boundaryCast<{ publicCopy?: { prefix: string } }>(config.modules.find((m) => m.use === "@michaelthielemann/kestrel-images-default")!.config, "json");
+    expect(images.publicCopy).toEqual({ prefix: "site/" });
   });
 });
 
@@ -246,7 +250,7 @@ describe("media folders wiring", () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
     expect(pipelines.get("createMediaFolder")).toEqual(["authn.requireUser", "authz.require:media.write", "media.createFolder"]);
     expect(pipelines.get("renameMediaFolder")).toEqual(["authn.requireUser", "authz.require:media.write", "media.renameFolder"]);
-    expect(pipelines.get("deleteMediaFolder")).toEqual(["authn.requireUser", "authz.require:media.delete", "media.listFolderItems", "references.guardAll:media", "images.removeMany", "media.removeFolder"]);
+    expect(pipelines.get("deleteMediaFolder")).toEqual(["authn.requireUser", "authz.require:media.delete", "media.listFolderItems", "references.guardAll:media", "media.removeFolder", "images.removeMany", "events.emit:media.deleted", "events.relay"]);
   });
 });
 
@@ -294,7 +298,7 @@ describe("image variants wiring", () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
     expect(pipelines.get("getMedia")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.get", "images.attach"]);
     expect(pipelines.get("listMedia")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.list", "images.attach"]);
-    expect(pipelines.get("deleteMedia")).toEqual(["authn.requireUser", "authz.require:media.delete", "references.guard:media", "images.remove", "media.remove", "events.emit:media.deleted", "events.relay"]);
+    expect(pipelines.get("deleteMedia")).toEqual(["authn.requireUser", "authz.require:media.delete", "references.guard:media", "media.remove", "images.remove", "events.emit:media.deleted", "events.relay"]);
     expect(pipelines.get("exportMedia")).toEqual(["authn.requireUser", "authz.require:media.manage", "media.export:./data/export", "images.export:./data/export"]);
   });
   it("leaves resolvePage untouched", async () => {
@@ -320,6 +324,68 @@ describe("media list reports variant progress", () => {
       expect(listed.status).toBe(200);
       const body = boundaryCast<{ items: { id: string; variantCounts: { done: number; pending: number; error: number; failed: number } }[] }>(listed.result, "json");
       expect(body.items[0]?.variantCounts).toEqual({ done: 5, pending: 0, error: 0, failed: 0 });
+    } finally {
+      await dispose();
+    }
+  });
+});
+
+describe("one public URL per media file", () => {
+  it("serves the original and every variant at the path the item returned, anonymously and without a rewrite", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const uploaded = await kestrel.run("uploadMedia", {
+        trigger,
+        headers: bearer(admin.token),
+        files: [{ field: "file", filename: "a.jpg", contentType: "image/jpeg", data: TEST_JPEG }],
+      });
+      expect(uploaded.status).toBe(200);
+      const uploadedItem = boundaryCast<{ id: string; path: string }>(uploaded.result, "json");
+      expect(uploadedItem.path).toBe(`/media/${uploadedItem.id}/a.jpg`);
+
+      const got = await kestrel.run("getMedia", { trigger, headers: bearer(admin.token), params: { id: uploadedItem.id } });
+      expect(got.status).toBe(200);
+      const item = boundaryCast<{ id: string; path: string; available: boolean; variants: Array<{ path: string }> }>(got.result, "json");
+      expect(item.available).toBe(true);
+      expect(item.variants.length).toBeGreaterThan(0);
+
+      const name = item.path.split("/").pop()!;
+      const served = await kestrel.run("serveMediaFile", { trigger, params: { id: item.id, name } });
+      expect(served.status).toBe(200);
+
+      for (const variant of item.variants) {
+        const file = variant.path.split("/").pop()!;
+        const servedVariant = await kestrel.run("serveImageVariant", { trigger, params: { id: item.id, file } });
+        expect(servedVariant.status).toBe(200);
+      }
+
+      const anonymousList = await kestrel.run("listMedia", { trigger });
+      expect(anonymousList.status).toBe(401);
+      const anonymousById = await kestrel.run("listMedia", { trigger, payload: { ids: item.id } });
+      expect(anonymousById.status).toBe(200);
+      const anonymousFolders = await kestrel.run("listMediaFolders", { trigger });
+      expect(anonymousFolders.status).toBe(401);
+
+      const deleted = await kestrel.run("deleteMedia", { trigger, headers: bearer(admin.token), params: { id: item.id } });
+      expect(deleted.status).toBe(200);
+      const goneOriginal = await kestrel.run("serveMediaFile", { trigger, params: { id: item.id, name } });
+      expect(goneOriginal.status).toBe(404);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("repairPublicMedia and the nightly syncPublicMedia reconcile the public copies", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      await kestrel.run("uploadMedia", { trigger, headers: bearer(admin.token), files: [{ field: "file", filename: "a.jpg", contentType: "image/jpeg", data: TEST_JPEG }] });
+      const repaired = await kestrel.run("repairPublicMedia", { trigger, headers: bearer(admin.token) });
+      expect(repaired.status).toBe(200);
+      expect(boundaryCast<{ _publicMedia: { written: number }; _publicVariants: { written: number } }>(repaired.result, "json")).toMatchObject({ _publicMedia: expect.any(Object) as object, _publicVariants: expect.any(Object) as object });
+      const synced = await kestrel.run("syncPublicMedia", { trigger });
+      expect(synced.status).toBe(200);
     } finally {
       await dispose();
     }

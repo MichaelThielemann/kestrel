@@ -21,11 +21,14 @@ payload's `id`, so it also runs as the first step of a pipeline an event trigger
 document, instead of throwing.
 Formats come from the renderer (`html`, `pdf`, …) – `formats: ["html", "pdf"]` writes both.
 Assets the renderer returns (`assets: [{ path: "/_assets/app.js", … }]` – hydration bundles, CSS)
-are stored under `<prefix><path>` once per process; they are never removed on unpublish.
-With `media` configured, text output is scanned for `<publicPath>/<id>/file` and `<publicPath>/<id>/variants/<size>.<ext>` (HTML-escaped slashes, e.g. `&#x2F;`, are not matched) and copied to
-`<prefix><target><folder>/<filename>[.<size>.<ext>]`, rewritten in place; each target is copied once per process, so a file re-uploaded under the same name is refreshed in the export only by `publishAll`.
-A match is precise to a path segment: `/file` never matches `/file-x` or `/fileabc`, and `thumb.webp.bak`
-never matches `thumb.webp`. Unresolved references are logged and left untouched.
+are stored under `<prefix><path>` once per process; they are never removed on unpublish. Rendered
+output is stored exactly as the renderer returned it: this module never scans or rewrites it, so
+any media reference it contains (a URL a media module already returned as data) reaches the export
+unchanged, in whatever spelling the renderer produced.
+`reservedPaths` (e.g. `["/api", "/admin", "/media"]`) names paths the origin – not this export –
+owns. A page whose path equals or lies under one of them is not written; its status becomes
+`error` with `path <path> is reserved (<reserved>)`, and the previous live output (if any) stays. A
+renderer asset under a reserved path fails the same way, naming the asset's own path.
 `delivery.exportLlms` (always on; `llms` defaults to paths instead of URLs and no full file) (no argument; append it after `delivery.publish`/`unpublish`/`publishAll`
 and after saving the settings) writes `<prefix>llms.txt` per [llmstxt.org](https://llmstxt.org) from the `live` status rows
 of every delivered type, re-checking each source locale's own current values at read time — a
@@ -45,9 +48,8 @@ in the generated file. The result gains `_llms: { entries, full }`.
 Every `Delivery` method returns a `Result`; a failure is an `Err(KestrelError)`, never an exception.
 A render failure (`RENDER_FAILED` or `TRANSIENT` from `renderer@1`) is not a step failure: it is
 recorded on the status row as `state: "error"` with the message and the remaining locales are still
-published. Only wiring bugs throw (unknown type, unconfigured type, a media path that is absolute or
-contains a `..` segment, an asset path that is empty or contains a `..` segment, a media row whose blob
-is gone).
+published. Only wiring bugs throw (unknown type, unconfigured type, an asset path that is empty or contains a
+`..` segment).
 
 | Step | reads | writes | codes |
 |---|---|---|---|
@@ -70,11 +72,7 @@ Not included: sitemap, CDN invalidation.
 | `prefix` | string | no | `""` |
 | `prefixPrimary` | boolean | no | `false` |
 | `fallback` | boolean | no | `true` |
-| `media` | object | no | – |
-| `media.publicPath` | string | no | `"/media"` |
-| `media.collection` | string | no | `"media_items"` |
-| `media.variants` | string | no | `"images_variants"` |
-| `media.target` | string | no | `"media/"` |
+| `reservedPaths` | array | no | `[]` |
 | `llms` | object | no | `{}` |
 | `llms.siteUrl` | string | no | – |
 | `llms.full` | boolean | no | `false` |

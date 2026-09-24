@@ -10,7 +10,7 @@ import { createFakePersistence, matchesFilter } from "@michaelthielemann/kestrel
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createContext } from "@michaelthielemann/kestrel/context";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
-import { createDeliveryStatic, keyFor, rewriteMedia, STATUS } from "./impl.ts";
+import { createDeliveryStatic, keyFor, STATUS } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
 
 const model: ContentModel = {
@@ -335,142 +335,87 @@ function fakeHtmlRenderer(html: string): Renderer {
   };
 }
 
-describe("rewriteMedia (pure)", () => {
-  it("rewrites known ids in src and comma-separated srcset candidates, leaves unknown ids", () => {
-    const known = "11111111-1111-1111-1111-111111111111";
-    const unknown = "22222222-2222-2222-2222-222222222222";
-    const html = `<img src="/media/${known}/file" srcset="/media/${known}/variants/thumb.webp 1x, /media/${unknown}/variants/thumb.webp 2x">`;
-    const out = rewriteMedia(html, "/media", (m) => (m.id === known ? `/site/media/x/y${m.size ? `.${m.size}.webp` : ""}` : undefined));
-    expect(out).toBe(`<img src="/site/media/x/y" srcset="/site/media/x/y.thumb.webp 1x, /media/${unknown}/variants/thumb.webp 2x">`);
+describe("delivery/static: reservedPaths", () => {
+  it("rejects a 5.x media config", () => {
+    expect(configSchema.safeParse({ ...config, media: { publicPath: "/media" } }).success).toBe(false);
   });
 
-  it("only matches at a segment boundary, but still rewrites through a query string or trailing segment", () => {
+  it("fails a reserved page path without rendering, and keeps the previous live output", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const renderer = fakeRenderer();
+    const db = createFakePersistence();
+    const reserved = configSchema.parse({ ...config, reservedPaths: ["/media"] });
+    const delivery = await createDeliveryStatic(reserved, { content, site, renderer, blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published", status__en: "published" });
+    put("p2", { slug__de: "media", title__de: "Media", status__de: "published" });
+    expectOk(await delivery.publish("pages", "p1"));
+    const before = renderer.calls.length;
+    const status = expectOk(await delivery.publish("pages", "p2"));
+    expect(status.find((s) => s.locale === "de")).toMatchObject({ state: "error", error: "path /media is reserved (/media)" });
+    expect(renderer.calls.length).toBe(before);
+  });
+
+  it("does not treat a longer segment as reserved", async () => {
+    const { content, put } = fakeContent();
+    const db = createFakePersistence();
+    const reserved = configSchema.parse({ ...config, reservedPaths: ["/media"] });
+    const delivery = await createDeliveryStatic(reserved, { content, site, renderer: fakeRenderer(), blobs: fakeBlobs(), db, logger: fakeLogger() });
+    put("p1", { slug__de: "mediax", title__de: "Mediax", status__de: "published" });
+    const status = expectOk(await delivery.publish("pages", "p1"));
+    expect(status.find((s) => s.locale === "de")).toMatchObject({ state: "live", path: "/mediax" });
+  });
+
+  it("fails a renderer asset under a reserved path", async () => {
+    const { content, put } = fakeContent();
+    const db = createFakePersistence();
+    const renderer: Renderer = {
+      formats: () => ["html"],
+      async render() {
+        return ok({ data: "<h1>x</h1>", contentType: "text/html", extension: "html", assets: [{ path: "/media/x.js", data: "1", contentType: "text/javascript" }] });
+      },
+    };
+    const reserved = configSchema.parse({ ...config, reservedPaths: ["/media"] });
+    const delivery = await createDeliveryStatic(reserved, { content, site, renderer, blobs: fakeBlobs(), db, logger: fakeLogger() });
+    put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published" });
+    const status = expectOk(await delivery.publish("pages", "p1"));
+    expect(status.find((s) => s.locale === "de")).toMatchObject({ state: "error", error: "asset /media/x.js lies under the reserved path /media" });
+  });
+});
+
+describe("delivery/static: rendered output is stored byte for byte, no media rewrite", () => {
+  it("stores every spelling of a media reference unchanged", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
     const id = "11111111-1111-1111-1111-111111111111";
-    const resolve = () => "/site/media/x/y";
-    expect(rewriteMedia(`/media/${id}/file-x`, "/media", resolve)).toBe(`/media/${id}/file-x`);
-    expect(rewriteMedia(`/media/${id}/fileabc`, "/media", resolve)).toBe(`/media/${id}/fileabc`);
-    expect(rewriteMedia(`/media/${id}/variants/thumb.webp.bak`, "/media", resolve)).toBe(`/media/${id}/variants/thumb.webp.bak`);
-    expect(rewriteMedia(`/media/${id}/file?v=2`, "/media", resolve)).toBe(`/site/media/x/y?v=2`);
-    expect(rewriteMedia(`/media/${id}/variants/thumb.webp/extra`, "/media", resolve)).toBe(`/site/media/x/y/extra`);
-  });
-});
-
-describe("delivery/static media rewrite", () => {
-  const mediaId = "11111111-1111-1111-1111-111111111111";
-  const mediaConfig = { publicPath: "/media", collection: "media_items", variants: "images_variants", target: "media/" };
-
-  async function seedMedia(db: ReturnType<typeof createFakePersistence>): Promise<void> {
-    expectOk(await db.ensureCollection(mediaConfig.collection, { filename: "string", folder: "string", contentType: "string", key: "string", updatedAt: "number" }));
-    expectOk(await db.ensureCollection(mediaConfig.variants, { mediaId: "string", size: "string", key: "string", state: "string", format: "string" }));
-  }
-
-  async function seedOneMedia(db: ReturnType<typeof createFakePersistence>, blobs: Blobstore): Promise<void> {
-    await seedMedia(db);
-    expectOk(await db.createOne(mediaConfig.collection, { id: mediaId, filename: "cat.jpg", folder: "pics", contentType: "image/jpeg", key: "media/pics/cat.jpg", updatedAt: 1 }));
-    expectOk(await db.createOne(mediaConfig.variants, { id: "v1", mediaId, size: "thumb", key: "media-variants/pics/thumb.webp", state: "done", format: "webp" }));
-    expectOk(await db.createOne(mediaConfig.variants, { id: "v2", mediaId, size: "large", key: "media-variants/pics/large.webp", state: "pending", format: "webp" }));
-    expectOk(await blobs.put("media/pics/cat.jpg", new TextEncoder().encode("cat-bytes"), { contentType: "image/jpeg" }));
-    expectOk(await blobs.put("media-variants/pics/thumb.webp", new TextEncoder().encode("thumb-bytes"), { contentType: "image/webp" }));
-  }
-
-  it("copies the original and done variants, rewrites URLs, leaves pending ones and logs once", async () => {
-    const { content, put } = fakeContent();
-    const blobs = fakeBlobs();
-    const db = createFakePersistence();
-    await seedOneMedia(db, blobs);
-    const html = `<img src="/media/${mediaId}/file"><img srcset="/media/${mediaId}/variants/thumb.webp 1x, /media/${mediaId}/variants/large.webp 2x">`;
-    const logger = fakeLogger();
-    const delivery = await createDeliveryStatic({ ...config, media: mediaConfig }, { content, site, renderer: fakeHtmlRenderer(html), blobs, db, logger });
-    put("p1", { slug__de: "team", title__de: "Team", status__de: "published" });
-    expectOk(await delivery.publish("pages", "p1"));
-
-    const out = new TextDecoder().decode(blobs.blobs.get("site/team/index.html")?.data);
-    expect(out).toContain('src="/media/pics/cat.jpg"');
-    expect(out).toContain("/media/pics/cat.jpg.thumb.webp");
-    expect(out).toContain(`/media/${mediaId}/variants/large.webp`);
-    expect(blobs.blobs.has("site/media/pics/cat.jpg")).toBe(true);
-    expect(blobs.blobs.has("site/media/pics/cat.jpg.thumb.webp")).toBe(true);
-    expect(logger.errors).toEqual([{ message: "delivery/static: media reference not exported", data: { id: mediaId, size: "large", path: `/media/${mediaId}/variants/large.webp` } }]);
-  });
-
-  it("copies media only once per process, publishAll refreshes it", async () => {
-    const { content, put } = fakeContent();
-    const blobs = fakeBlobs();
-    const db = createFakePersistence();
-    await seedOneMedia(db, blobs);
-    const html = `<img src="/media/${mediaId}/file"><img srcset="/media/${mediaId}/variants/thumb.webp 1x">`;
-    const delivery = await createDeliveryStatic({ ...config, media: mediaConfig }, { content, site, renderer: fakeHtmlRenderer(html), blobs, db, logger: fakeLogger() });
-    put("p1", { slug__de: "team", title__de: "Team", status__de: "published" });
-    put("p2", { slug__de: "other", title__de: "Other", status__de: "published" });
-
-    const putSpy = vi.spyOn(blobs, "put");
-    const mediaCopies = () => putSpy.mock.calls.filter(([key]) => key === "site/media/pics/cat.jpg" || key === "site/media/pics/cat.jpg.thumb.webp").length;
-
-    expectOk(await delivery.publish("pages", "p1"));
-    expect(mediaCopies()).toBe(2);
-    expectOk(await delivery.publish("pages", "p2"));
-    expect(mediaCopies()).toBe(2);
-
-    expectOk(await delivery.publishAll("pages"));
-    expect(mediaCopies()).toBe(4);
-  });
-
-  it("leaves HTML unchanged and copies nothing when media is not configured", async () => {
-    const { content, put } = fakeContent();
-    const blobs = fakeBlobs();
-    const db = createFakePersistence();
-    const html = `<img src="/media/${mediaId}/file">`;
+    const html = `<img src="/media/${id}/photo.jpg"><script>var u="\\u002Fmedia\\u002F${id}\\u002Fphoto.jpg";</script><a href="&#x2F;media&#x2F;${id}&#x2F;photo.jpg">x</a>`;
     const delivery = await createDeliveryStatic(config, { content, site, renderer: fakeHtmlRenderer(html), blobs, db, logger: fakeLogger() });
-    put("p1", { slug__de: "team", title__de: "Team", status__de: "published" });
+    put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published" });
     expectOk(await delivery.publish("pages", "p1"));
-    expect(new TextDecoder().decode(blobs.blobs.get("site/team/index.html")?.data)).toBe(html);
-    expect([...blobs.blobs.keys()]).toEqual(["site/team/index.html"]);
+    expect(new TextDecoder().decode(blobs.blobs.get("site/seite/index.html")?.data)).toBe(html);
   });
 
-  it("supports a custom publicPath", async () => {
+  it("reads and writes only delivery_publish_status, never media_items or images_variants", async () => {
     const { content, put } = fakeContent();
     const blobs = fakeBlobs();
     const db = createFakePersistence();
-    await seedMedia(db);
-    expectOk(await db.createOne(mediaConfig.collection, { id: mediaId, filename: "cat.jpg", folder: "pics", contentType: "image/jpeg", key: "media/pics/cat.jpg", updatedAt: 1 }));
-    expectOk(await blobs.put("media/pics/cat.jpg", new TextEncoder().encode("cat-bytes"), { contentType: "image/jpeg" }));
-    const html = `<img src="/api/media/${mediaId}/file">`;
-    const delivery = await createDeliveryStatic({ ...config, media: { ...mediaConfig, publicPath: "/api/media" } }, { content, site, renderer: fakeHtmlRenderer(html), blobs, db, logger: fakeLogger() });
-    put("p1", { slug__de: "team", title__de: "Team", status__de: "published" });
+    const findManySpy = vi.spyOn(db, "findMany");
+    const delivery = await createDeliveryStatic(config, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published" });
     expectOk(await delivery.publish("pages", "p1"));
-    const out = new TextDecoder().decode(blobs.blobs.get("site/team/index.html")?.data);
-    expect(out).toContain('src="/media/pics/cat.jpg"');
-    expect(blobs.blobs.has("site/media/pics/cat.jpg")).toBe(true);
-  });
-
-  it("fails the locale instead of rewriting to a blob that was never copied", async () => {
-    const { content, put } = fakeContent();
-    const blobs = fakeBlobs();
-    const db = createFakePersistence();
-    await seedMedia(db);
-    expectOk(await db.createOne(mediaConfig.collection, { id: mediaId, filename: "cat.jpg", folder: "pics", contentType: "image/jpeg", key: "media/pics/cat.jpg", updatedAt: 1 }));
-    const html = `<img src="/media/${mediaId}/file">`;
-    const delivery = await createDeliveryStatic({ ...config, media: mediaConfig }, { content, site, renderer: fakeHtmlRenderer(html), blobs, db, logger: fakeLogger() });
-    put("p1", { slug__de: "team", title__de: "Team", status__de: "published" });
-    const [status] = expectOk(await delivery.publish("pages", "p1"));
-    expect(status).toMatchObject({ state: "error", error: `delivery/static: media blob media/pics/cat.jpg missing for ${mediaId}` });
-    expect(blobs.blobs.has("site/team/index.html")).toBe(false);
-  });
-
-  it("rejects a media row whose folder attempts path traversal", async () => {
-    const { content, put } = fakeContent();
-    const blobs = fakeBlobs();
-    const db = createFakePersistence();
-    await seedMedia(db);
-    expectOk(await db.createOne(mediaConfig.collection, { id: mediaId, filename: "cat.jpg", folder: "../..", contentType: "image/jpeg", key: "media/pics/cat.jpg", updatedAt: 1 }));
-    expectOk(await blobs.put("media/pics/cat.jpg", new TextEncoder().encode("cat-bytes"), { contentType: "image/jpeg" }));
-    const html = `<img src="/media/${mediaId}/file">`;
-    const delivery = await createDeliveryStatic({ ...config, media: mediaConfig }, { content, site, renderer: fakeHtmlRenderer(html), blobs, db, logger: fakeLogger() });
-    put("p1", { slug__de: "team", title__de: "Team", status__de: "published" });
-    const [status] = expectOk(await delivery.publish("pages", "p1"));
-    expect(status?.state).toBe("error");
-    expect(status?.error).toMatch(/invalid media folder "\.\.\/\.\.".*for/);
-    expect(blobs.blobs.has("site/media/../../cat.jpg")).toBe(false);
-    expect([...blobs.blobs.keys()]).toEqual(["media/pics/cat.jpg"]);
+    expectOk(await delivery.status("pages", "p1"));
+    const collections = new Set(findManySpy.mock.calls.map(([collection]) => collection));
+    expect(collections).toEqual(new Set([STATUS]));
   });
 });
+
+describe("rewriteMedia (pure), removed", () => {
+  it("rewriteMedia is no longer exported from ./impl", async () => {
+    const impl = await import("./impl.ts");
+    expect(Reflect.has(impl, "rewriteMedia")).toBe(false);
+    expect(Reflect.has(impl, "MediaMatch")).toBe(false);
+    expect(Reflect.has(impl, "contentTypeByExtension")).toBe(false);
+  });
+});
+

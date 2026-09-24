@@ -189,6 +189,16 @@ describe("images/default planning (images.plan)", () => {
     for (const row of rows) expect(blobs.blobs.has(`site/media/${id}/variants/${row.size}.${row.format}`)).toBe(true);
   });
 
+  it("images.generate (direct delivery) also writes the copy for an undecodable image, not only images.plan", async () => {
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
+    const { id, key } = await seedMedia(db, { id: "m1", width: 100, height: 50 });
+    expectOk(await blobs.put(key, new Uint8Array([1, 2, 3]), { contentType: "image/jpeg" }));
+    expectOk(await images.generate(id));
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    expect(rows.every((r) => r.state === "failed")).toBe(true);
+    for (const row of rows) expect(blobs.blobs.get(`site/media/${id}/variants/${row.size}.${row.format}`)?.data).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
   it("raises media.updated for the ids it made available", async () => {
     const events = fakeEvents();
     const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, undefined, events);

@@ -84,13 +84,15 @@ cursor.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
-`@michaelthielemann/kestrel-images-default` – module `images/default`: provides no contract; requires `blobstore@1`, `persistence@1`.
+`@michaelthielemann/kestrel-images-default` – module `images/default`: provides no contract; requires `blobstore@1`, `persistence@1`; optional `events@1`.
 
 | Config | Type | Required | Default |
 |---|---|---|---|
 | `sizes` | array | no | – |
 | `prefix` | string | no | `"media-variants/"` |
 | `publicPath` | string | no | `"/media"` |
+| `publicCopy` | object | no | – |
+| `publicCopy.prefix` | string | no | – |
 | `media` | object | no | `{"collection":"media_items"}` |
 | `media.collection` | string | no | `"media_items"` |
 | `chunk` | integer | no | `20` |
@@ -102,18 +104,20 @@ cursor.
 |---|---|---|---|---|---|---|---|---|
 | `images.register` | Replace the sizes registered by this instance – code-declared sizes are held in memory, never stored | – | `result` | { sizes: object[] } | object[] | 400 empty list or invalid size definition; 409 a size collides with a config size | – | no |
 | `images.listSizes` | Effective sizes (defaults/config merged with the sizes registered in this process) | – | `result` | – | object[] | – | – | no |
+| `images.plan` | Decide every effective size's format, extension, dimensions and path for one media item (id from params.id or payload.id), or for each id in payload.ids, and make its public copies answer with the original's bytes; never renders | – | `result` | { id?: string, ids?: string[], … } | object \| object | 400 missing media id | – | no |
 | `images.generate` | Generate variants for one media item (id from params.id or payload.id), or for each id in payload.ids (unknown ids are skipped) | – | `result` | { id?: string, ids?: string[], … } | object \| object | 400 missing media id; 404 media item not found | – | no |
 | `images.sync` | Start a sync job, or resume a paused/error/stale one | – | `result` | – | { id: string, state: "running" \| "paused" \| "done" \| "error", total: number, done: number, failed: number, cursor: string, startedAt: number, updatedAt: number, finishedAt: number \| null, error: string \| null, … } | 409 a fresh job is already running | – | no |
-| `images.resume` | Resume a paused/error/stale job, or no-op (for cron) | – | `result` | – | object \| null | – | – | no |
+| `images.resume` | Place and render any item left unfinished (a repair pass), then resume a paused/error/stale sync job, or no-op (for cron) | – | `result` | – | object \| null | – | – | no |
 | `images.retryFailed` | Put every variant that gave up after maxAttempts back to pending with a fresh attempt budget – all of them, or one media item's (id from params.id or payload.id) – and start the work that regenerates them | – | `result` | { id?: string } | { variants: number, media: number, job: object \| null, … } | 404 media item not found; 409 images are shutting down | – | no |
-| `images.prune` | Delete the variants of sizes that are no longer declared | – | `result` | { sizes: string[] } | { sizes: number, variants: number, … } | 400 missing sizes, or a name is still declared or has no variants | – | no |
+| `images.prune` | Retire the variants of sizes that are no longer declared: their paths keep answering with the original's bytes until the item is deleted | – | `result` | { sizes: string[] } | { sizes: number, variants: number, … } | 400 missing sizes, or a name is still declared or has no variants | – | no |
 | `images.readStatus` | Sizes with usage/variant counts, current job, the variants that gave up with their last error, and sizes whose variants are left over from a size the code no longer declares | – | `result` | – | { sizes: object[], job: object \| null, orphaned: object, registrySeen: boolean, failed: object, … } | – | – | no |
-| `images.remove` | Delete one media item's variants (blob + rows) | `params.id` | – | – | – | 400 missing id | – | no |
-| `images.removeMany` | Delete variants for every id in result.ids (from media.listFolderItems) | `result.ids` | – | – | – | – | – | no |
-| `images.attach` | Add variants[] and variantCounts (done/pending/error/failed over the effective sizes) to a media item or list (result.id or result.items) | `result` | `result.variants?`, `result.variantCounts?` | – | { variants: object[], variantCounts: object, … } | – | – | no |
-| `images.serve` | Binary variant, or the original with x-kestrel-variant: pending while it isn't ready yet | `params.id`, `params.file` | `result` | – | – | 400 missing id or file; 404 media item or size not found, or the variant gave up after maxAttempts | – | no |
+| `images.remove` | Delete one media item's variants and retired paths (blob + rows) | `params.id` | – | – | – | 400 missing id | – | no |
+| `images.removeMany` | Delete variants for every id in result.ids (from media.listFolderItems or media.removeFolder) | `result.ids` | – | – | – | – | – | no |
+| `images.attach` | Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed | `result` | `result.available?`, `result.variants?`, `result.variantCounts?` | – | { available: boolean, variants: object[], variantCounts: object, … } | – | – | no |
+| `images.serve` | The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback | `params.id`, `params.file` | `result` | – | – | 400 missing id or file; 404 media item not found, not ready, or the file is neither a current nor a retired size | – | no |
+| `images.syncPublic` | Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result) | – | `result._publicVariants` | – | { _publicVariants: object, … } | – | – | no |
 | `images.export:<arg>` | Copy every done variant to <arg>/<folder>/<filename>.<size>.<ext> | – | `result.variants` | – | { variants: object, … } | – | – | no |
 
-Used by 15 of 86 pipelines in `examples/minimal`.
+Used by 17 of 89 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

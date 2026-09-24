@@ -5,13 +5,13 @@
   "contracts": [
     "blobstore@1",
     "persistence@1",
+    "events@1",
     "authz@1",
     "authn@1",
     "content@1",
     "site@1",
     "revisions@1",
     "validate@1",
-    "events@1",
     "migrations@1",
     "renderer@1",
     "insights@1"
@@ -391,6 +391,37 @@
               "type": "string",
               "pattern": "^([A-Za-z0-9._-]+\\/)+$",
               "default": "media/"
+            },
+            "publicPath": {
+              "type": "string",
+              "pattern": "^(\\/[A-Za-z0-9._-]+)+$",
+              "default": "/media"
+            },
+            "publicCopy": {
+              "type": "object",
+              "properties": {
+                "prefix": {
+                  "type": "string",
+                  "pattern": "^([A-Za-z0-9._-]+\\/)*$"
+                }
+              },
+              "required": [
+                "prefix"
+              ],
+              "additionalProperties": false
+            },
+            "uploadStaleAfterMs": {
+              "type": "integer",
+              "minimum": 60000,
+              "default": 900000
+            },
+            "anonymousList": {
+              "type": "string",
+              "enum": [
+                "ids",
+                "all"
+              ],
+              "default": "ids"
             }
           },
           "additionalProperties": false
@@ -476,6 +507,61 @@
             "value": "media/",
             "redacted": false,
             "default": "media/"
+          },
+          {
+            "path": "publicPath",
+            "type": "string",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": "/media",
+            "redacted": false,
+            "default": "/media"
+          },
+          {
+            "path": "publicCopy",
+            "type": "object",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": {
+              "prefix": "site/"
+            },
+            "redacted": false
+          },
+          {
+            "path": "publicCopy.prefix",
+            "type": "string",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": "site/",
+            "redacted": false
+          },
+          {
+            "path": "uploadStaleAfterMs",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 900000,
+            "redacted": false,
+            "default": 900000
+          },
+          {
+            "path": "anonymousList",
+            "type": "enum",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": "ids",
+            "redacted": false,
+            "default": "ids"
           }
         ]
       },
@@ -490,9 +576,11 @@
         "media.listFolderItems",
         "media.removeFolder",
         "media.download",
+        "media.serve",
         "media.remove",
         "media.reconcile",
         "media.reconcileDelete",
+        "media.syncPublic",
         "media.export"
       ],
       "eventHook": false,
@@ -508,7 +596,9 @@
         "blobstore@1",
         "persistence@1"
       ],
-      "optional": [],
+      "optional": [
+        "events@1"
+      ],
       "config": {
         "schema": {
           "type": "object",
@@ -568,8 +658,21 @@
             },
             "publicPath": {
               "type": "string",
-              "pattern": "^\\/[A-Za-z0-9._/-]*$",
+              "pattern": "^(\\/[A-Za-z0-9._-]+)+$",
               "default": "/media"
+            },
+            "publicCopy": {
+              "type": "object",
+              "properties": {
+                "prefix": {
+                  "type": "string",
+                  "pattern": "^([A-Za-z0-9._-]+\\/)*$"
+                }
+              },
+              "required": [
+                "prefix"
+              ],
+              "additionalProperties": false
             },
             "media": {
               "type": "object",
@@ -642,6 +745,28 @@
             "value": "/media",
             "redacted": false,
             "default": "/media"
+          },
+          {
+            "path": "publicCopy",
+            "type": "object",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": {
+              "prefix": "site/"
+            },
+            "redacted": false
+          },
+          {
+            "path": "publicCopy.prefix",
+            "type": "string",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": "site/",
+            "redacted": false
           },
           {
             "path": "media",
@@ -718,6 +843,7 @@
       "steps": [
         "images.register",
         "images.listSizes",
+        "images.plan",
         "images.generate",
         "images.sync",
         "images.resume",
@@ -728,11 +854,14 @@
         "images.removeMany",
         "images.attach",
         "images.serve",
+        "images.syncPublic",
         "images.export"
       ],
       "eventHook": false,
       "atomicScope": false,
-      "emits": []
+      "emits": [
+        "media.updated"
+      ]
     },
     {
       "name": "authn/multi",
@@ -2005,29 +2134,13 @@
               "type": "boolean",
               "default": true
             },
-            "media": {
-              "type": "object",
-              "properties": {
-                "publicPath": {
-                  "type": "string",
-                  "pattern": "^\\/[A-Za-z0-9._/-]*$",
-                  "default": "/media"
-                },
-                "collection": {
-                  "type": "string",
-                  "default": "media_items"
-                },
-                "variants": {
-                  "type": "string",
-                  "default": "images_variants"
-                },
-                "target": {
-                  "type": "string",
-                  "pattern": "^([A-Za-z0-9._-]+\\/)+$",
-                  "default": "media/"
-                }
+            "reservedPaths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^(\\/[A-Za-z0-9._-]+)+$"
               },
-              "additionalProperties": false
+              "default": []
             },
             "llms": {
               "type": "object",
@@ -2151,63 +2264,17 @@
             "default": true
           },
           {
-            "path": "media",
-            "type": "object",
+            "path": "reservedPaths",
+            "type": "array",
             "required": false,
             "secret": false,
             "set": true,
             "status": "set",
-            "value": {
-              "publicPath": "/media",
-              "collection": "media_items",
-              "variants": "images_variants",
-              "target": "media/"
-            },
-            "redacted": false
-          },
-          {
-            "path": "media.publicPath",
-            "type": "string",
-            "required": false,
-            "secret": false,
-            "set": true,
-            "status": "set",
-            "value": "/media",
+            "value": [
+              "/media"
+            ],
             "redacted": false,
-            "default": "/media"
-          },
-          {
-            "path": "media.collection",
-            "type": "string",
-            "required": false,
-            "secret": false,
-            "set": false,
-            "status": "default",
-            "value": "media_items",
-            "redacted": false,
-            "default": "media_items"
-          },
-          {
-            "path": "media.variants",
-            "type": "string",
-            "required": false,
-            "secret": false,
-            "set": false,
-            "status": "default",
-            "value": "images_variants",
-            "redacted": false,
-            "default": "images_variants"
-          },
-          {
-            "path": "media.target",
-            "type": "string",
-            "required": false,
-            "secret": false,
-            "set": false,
-            "status": "default",
-            "value": "media/",
-            "redacted": false,
-            "default": "media/"
+            "default": []
           },
           {
             "path": "llms",
@@ -3089,6 +3156,10 @@
                 "id": {
                   "type": "string"
                 },
+                "path": {
+                  "type": "string",
+                  "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                },
                 "filename": {
                   "type": "string"
                 },
@@ -3100,25 +3171,6 @@
                 },
                 "size": {
                   "type": "number"
-                },
-                "key": {
-                  "type": "string"
-                },
-                "checksum": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                },
-                "status": {
-                  "type": "string",
-                  "enum": [
-                    "uploading",
-                    "ready",
-                    "failed"
-                  ],
-                  "description": "only ready items are listed, readable and downloadable"
                 },
                 "createdAt": {
                   "type": "number"
@@ -3186,13 +3238,11 @@
               },
               "required": [
                 "id",
+                "path",
                 "filename",
                 "folder",
                 "contentType",
                 "size",
-                "key",
-                "checksum",
-                "status",
                 "createdAt",
                 "updatedAt",
                 "provenance",
@@ -3201,7 +3251,8 @@
                 "alt",
                 "title",
                 "description"
-              ]
+              ],
+              "additionalProperties": false
             },
             {
               "type": "object",
@@ -3214,6 +3265,10 @@
                       "id": {
                         "type": "string"
                       },
+                      "path": {
+                        "type": "string",
+                        "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                      },
                       "filename": {
                         "type": "string"
                       },
@@ -3225,25 +3280,6 @@
                       },
                       "size": {
                         "type": "number"
-                      },
-                      "key": {
-                        "type": "string"
-                      },
-                      "checksum": {
-                        "type": [
-                          "string",
-                          "null"
-                        ],
-                        "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                      },
-                      "status": {
-                        "type": "string",
-                        "enum": [
-                          "uploading",
-                          "ready",
-                          "failed"
-                        ],
-                        "description": "only ready items are listed, readable and downloadable"
                       },
                       "createdAt": {
                         "type": "number"
@@ -3311,13 +3347,11 @@
                     },
                     "required": [
                       "id",
+                      "path",
                       "filename",
                       "folder",
                       "contentType",
                       "size",
-                      "key",
-                      "checksum",
-                      "status",
                       "createdAt",
                       "updatedAt",
                       "provenance",
@@ -3326,7 +3360,8 @@
                       "alt",
                       "title",
                       "description"
-                    ]
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "errors": {
@@ -3379,6 +3414,10 @@
                 "id": {
                   "type": "string"
                 },
+                "path": {
+                  "type": "string",
+                  "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                },
                 "filename": {
                   "type": "string"
                 },
@@ -3390,25 +3429,6 @@
                 },
                 "size": {
                   "type": "number"
-                },
-                "key": {
-                  "type": "string"
-                },
-                "checksum": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                },
-                "status": {
-                  "type": "string",
-                  "enum": [
-                    "uploading",
-                    "ready",
-                    "failed"
-                  ],
-                  "description": "only ready items are listed, readable and downloadable"
                 },
                 "createdAt": {
                   "type": "number"
@@ -3476,13 +3496,11 @@
               },
               "required": [
                 "id",
+                "path",
                 "filename",
                 "folder",
                 "contentType",
                 "size",
-                "key",
-                "checksum",
-                "status",
                 "createdAt",
                 "updatedAt",
                 "provenance",
@@ -3491,7 +3509,8 @@
                 "alt",
                 "title",
                 "description"
-              ]
+              ],
+              "additionalProperties": false
             },
             {
               "type": "object",
@@ -3504,6 +3523,10 @@
                       "id": {
                         "type": "string"
                       },
+                      "path": {
+                        "type": "string",
+                        "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                      },
                       "filename": {
                         "type": "string"
                       },
@@ -3515,25 +3538,6 @@
                       },
                       "size": {
                         "type": "number"
-                      },
-                      "key": {
-                        "type": "string"
-                      },
-                      "checksum": {
-                        "type": [
-                          "string",
-                          "null"
-                        ],
-                        "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                      },
-                      "status": {
-                        "type": "string",
-                        "enum": [
-                          "uploading",
-                          "ready",
-                          "failed"
-                        ],
-                        "description": "only ready items are listed, readable and downloadable"
                       },
                       "createdAt": {
                         "type": "number"
@@ -3601,13 +3605,11 @@
                     },
                     "required": [
                       "id",
+                      "path",
                       "filename",
                       "folder",
                       "contentType",
                       "size",
-                      "key",
-                      "checksum",
-                      "status",
                       "createdAt",
                       "updatedAt",
                       "provenance",
@@ -3616,7 +3618,8 @@
                       "alt",
                       "title",
                       "description"
-                    ]
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "errors": {
@@ -3663,7 +3666,7 @@
         },
         "errors": {
           "400": "no file or invalid folder/provenance (per-file for a multi-file request)",
-          "409": "filename already exists in that folder with different bytes, `details.field: \"key\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict",
+          "409": "the folder already has a file with that name, `details.field: \"location\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict",
           "413": "file exceeds maxBytes (per-file for a multi-file request)",
           "415": "type not allowed (per-file for a multi-file request)"
         }
@@ -3674,7 +3677,7 @@
       "module": "media/default",
       "factory": false,
       "description": {
-        "summary": "Rename, move, set provenance or texts (alt/title/description per locale)",
+        "summary": "Rename, move, set provenance or texts (alt/title/description per locale); the file's key and path never change",
         "reads": [
           "params.id"
         ],
@@ -3752,6 +3755,10 @@
             "id": {
               "type": "string"
             },
+            "path": {
+              "type": "string",
+              "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+            },
             "filename": {
               "type": "string"
             },
@@ -3763,25 +3770,6 @@
             },
             "size": {
               "type": "number"
-            },
-            "key": {
-              "type": "string"
-            },
-            "checksum": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "uploading",
-                "ready",
-                "failed"
-              ],
-              "description": "only ready items are listed, readable and downloadable"
             },
             "createdAt": {
               "type": "number"
@@ -3849,13 +3837,11 @@
           },
           "required": [
             "id",
+            "path",
             "filename",
             "folder",
             "contentType",
             "size",
-            "key",
-            "checksum",
-            "status",
             "createdAt",
             "updatedAt",
             "provenance",
@@ -3864,12 +3850,13 @@
             "alt",
             "title",
             "description"
-          ]
+          ],
+          "additionalProperties": false
         },
         "errors": {
           "400": "invalid name, folder or text (texts are plain text, max 2000 chars)",
           "404": "not found",
-          "409": "filename already exists in that folder"
+          "409": "the folder already has a file with that name, `details.field: \"location\"`"
         }
       }
     },
@@ -3896,6 +3883,10 @@
             "id": {
               "type": "string"
             },
+            "path": {
+              "type": "string",
+              "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+            },
             "filename": {
               "type": "string"
             },
@@ -3907,25 +3898,6 @@
             },
             "size": {
               "type": "number"
-            },
-            "key": {
-              "type": "string"
-            },
-            "checksum": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "uploading",
-                "ready",
-                "failed"
-              ],
-              "description": "only ready items are listed, readable and downloadable"
             },
             "createdAt": {
               "type": "number"
@@ -3993,13 +3965,11 @@
           },
           "required": [
             "id",
+            "path",
             "filename",
             "folder",
             "contentType",
             "size",
-            "key",
-            "checksum",
-            "status",
             "createdAt",
             "updatedAt",
             "provenance",
@@ -4008,7 +3978,8 @@
             "alt",
             "title",
             "description"
-          ]
+          ],
+          "additionalProperties": false
         },
         "errors": {
           "400": "unknown locale",
@@ -4021,8 +3992,10 @@
       "module": "media/default",
       "factory": false,
       "description": {
-        "summary": "List media, newest first",
-        "reads": [],
+        "summary": "List media, newest first; anonymous callers may only fetch by ids",
+        "reads": [
+          "identity?"
+        ],
         "writes": [
           "result"
         ],
@@ -4063,6 +4036,10 @@
                   "id": {
                     "type": "string"
                   },
+                  "path": {
+                    "type": "string",
+                    "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                  },
                   "filename": {
                     "type": "string"
                   },
@@ -4074,25 +4051,6 @@
                   },
                   "size": {
                     "type": "number"
-                  },
-                  "key": {
-                    "type": "string"
-                  },
-                  "checksum": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "uploading",
-                      "ready",
-                      "failed"
-                    ],
-                    "description": "only ready items are listed, readable and downloadable"
                   },
                   "createdAt": {
                     "type": "number"
@@ -4160,13 +4118,11 @@
                 },
                 "required": [
                   "id",
+                  "path",
                   "filename",
                   "folder",
                   "contentType",
                   "size",
-                  "key",
-                  "checksum",
-                  "status",
                   "createdAt",
                   "updatedAt",
                   "provenance",
@@ -4175,7 +4131,8 @@
                   "alt",
                   "title",
                   "description"
-                ]
+                ],
+                "additionalProperties": false
               }
             },
             "total": {
@@ -4188,7 +4145,8 @@
           ]
         },
         "errors": {
-          "400": "invalid folder or unknown locale"
+          "400": "invalid folder or unknown locale",
+          "401": "no identity and no ids (unless anonymousList is \"all\")"
         }
       }
     },
@@ -4197,8 +4155,10 @@
       "module": "media/default",
       "factory": false,
       "description": {
-        "summary": "Folders (persistent and implied) with item counts",
-        "reads": [],
+        "summary": "Folders (persistent and implied) with item counts; anonymous callers are refused",
+        "reads": [
+          "identity?"
+        ],
         "writes": [
           "result"
         ],
@@ -4219,6 +4179,9 @@
               "count"
             ]
           }
+        },
+        "errors": {
+          "401": "no identity (unless anonymousList is \"all\")"
         }
       }
     },
@@ -4269,7 +4232,7 @@
       "module": "media/default",
       "factory": false,
       "description": {
-        "summary": "Rename or move a folder, moving its blobs",
+        "summary": "Rename or move a folder (metadata only: keys and paths do not change)",
         "reads": [
           "params.path"
         ],
@@ -4357,7 +4320,7 @@
       "module": "media/default",
       "factory": false,
       "description": {
-        "summary": "Delete a folder and everything in it",
+        "summary": "Delete a folder and everything in it (each item as media.remove)",
         "reads": [
           "params.path"
         ],
@@ -4372,11 +4335,18 @@
             },
             "removed": {
               "type": "number"
+            },
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": [
             "ok",
-            "removed"
+            "removed",
+            "ids"
           ]
         },
         "errors": {
@@ -4405,11 +4375,31 @@
       }
     },
     {
+      "name": "media.serve",
+      "module": "media/default",
+      "factory": false,
+      "description": {
+        "summary": "The file at its public URL (params.id, params.name); the name must be the one it was uploaded under",
+        "reads": [
+          "params.id",
+          "params.name"
+        ],
+        "writes": [
+          "result"
+        ],
+        "binary": true,
+        "errors": {
+          "404": "not found, not ready, or not the name the file was uploaded under"
+        },
+        "anonymous": "required"
+      }
+    },
+    {
       "name": "media.remove",
       "module": "media/default",
       "factory": false,
       "description": {
-        "summary": "Delete file and metadata",
+        "summary": "Delete file and metadata (copy, blob, row, then a final sweep)",
         "reads": [
           "params.id"
         ],
@@ -4508,6 +4498,45 @@
       }
     },
     {
+      "name": "media.syncPublic",
+      "module": "media/default",
+      "factory": false,
+      "description": {
+        "summary": "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result)",
+        "reads": [],
+        "writes": [
+          "result._publicMedia"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "_publicMedia": {
+              "type": "object",
+              "properties": {
+                "written": {
+                  "type": "number"
+                },
+                "removed": {
+                  "type": "number"
+                },
+                "missing": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "written",
+                "removed",
+                "missing"
+              ]
+            }
+          },
+          "required": [
+            "_publicMedia"
+          ]
+        }
+      }
+    },
+    {
       "name": "media.export",
       "module": "media/default",
       "factory": true,
@@ -4538,6 +4567,146 @@
             "skipped",
             "missing",
             "conflicts"
+          ]
+        }
+      }
+    },
+    {
+      "name": "events.emit",
+      "module": "events/direct",
+      "factory": true,
+      "description": {
+        "summary": "Emit event \"<arg>\" to every subscribed handler pipeline and wait for them",
+        "reads": [],
+        "writes": [],
+        "errors": {
+          "500": "a subscribed handler failed"
+        }
+      }
+    },
+    {
+      "name": "events.relay",
+      "module": "events/direct",
+      "factory": false,
+      "description": {
+        "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+        "reads": [],
+        "writes": [
+          "result._events"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "_events": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "done",
+                    "error",
+                    "pending",
+                    "queued"
+                  ]
+                },
+                "pipelines": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "event": {
+                        "type": "string"
+                      },
+                      "pipeline": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "done",
+                          "error",
+                          "pending",
+                          "queued"
+                        ]
+                      },
+                      "attempts": {
+                        "type": "integer"
+                      },
+                      "dead": {
+                        "type": "boolean"
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "event",
+                      "pipeline",
+                      "status",
+                      "attempts",
+                      "dead",
+                      "error"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "pipelines"
+              ]
+            }
+          },
+          "required": [
+            "_events"
+          ]
+        }
+      }
+    },
+    {
+      "name": "events.readDeliveryStatus",
+      "module": "events/direct",
+      "factory": false,
+      "description": {
+        "summary": "Failed deliveries of the process that answers, since it started; inline delivery never retries, so each one is final",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "dead": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "store",
+                "process"
+              ]
+            },
+            "since": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "lastDeadAt": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "dead",
+            "scope",
+            "since",
+            "lastDeadAt"
           ]
         }
       }
@@ -4739,6 +4908,66 @@
       }
     },
     {
+      "name": "images.plan",
+      "module": "images/default",
+      "factory": false,
+      "description": {
+        "summary": "Decide every effective size's format, extension, dimensions and path for one media item (id from params.id or payload.id), or for each id in payload.ids, and make its public copies answer with the original's bytes; never renders",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": true,
+          "description": "reached either directly (id/ids) or as the media.uploaded / images.planned event envelope, which carries further fields this step ignores"
+        },
+        "output": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "ids"
+              ]
+            }
+          ]
+        },
+        "errors": {
+          "400": "missing media id"
+        }
+      }
+    },
+    {
       "name": "images.generate",
       "module": "images/default",
       "factory": false,
@@ -4762,7 +4991,7 @@
             }
           },
           "additionalProperties": true,
-          "description": "reached either directly (id/ids) or as the media.uploaded event envelope, which carries further fields this step ignores"
+          "description": "reached either directly (id/ids) or as the media.uploaded / images.planned event envelope, which carries further fields this step ignores"
         },
         "output": {
           "oneOf": [
@@ -4807,6 +5036,7 @@
                       "state": {
                         "type": "string",
                         "enum": [
+                          "planned",
                           "pending",
                           "done",
                           "error",
@@ -4895,6 +5125,7 @@
                             "state": {
                               "type": "string",
                               "enum": [
+                                "planned",
                                 "pending",
                                 "done",
                                 "error",
@@ -5030,7 +5261,7 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Resume a paused/error/stale job, or no-op (for cron)",
+        "summary": "Place and render any item left unfinished (a repair pass), then resume a paused/error/stale sync job, or no-op (for cron)",
         "reads": [],
         "writes": [
           "result"
@@ -5215,7 +5446,7 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Delete the variants of sizes that are no longer declared",
+        "summary": "Retire the variants of sizes that are no longer declared: their paths keep answering with the original's bytes until the item is deleted",
         "reads": [],
         "writes": [
           "result"
@@ -5501,7 +5732,7 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Delete one media item's variants (blob + rows)",
+        "summary": "Delete one media item's variants and retired paths (blob + rows)",
         "reads": [
           "params.id"
         ],
@@ -5516,7 +5747,7 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Delete variants for every id in result.ids (from media.listFolderItems)",
+        "summary": "Delete variants for every id in result.ids (from media.listFolderItems or media.removeFolder)",
         "reads": [
           "result.ids"
         ],
@@ -5528,17 +5759,21 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Add variants[] and variantCounts (done/pending/error/failed over the effective sizes) to a media item or list (result.id or result.items)",
+        "summary": "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed",
         "reads": [
           "result"
         ],
         "writes": [
+          "result.available?",
           "result.variants?",
           "result.variantCounts?"
         ],
         "extendsItems": {
           "type": "object",
           "properties": {
+            "available": {
+              "type": "boolean"
+            },
             "variants": {
               "type": "array",
               "items": {
@@ -5608,6 +5843,7 @@
             }
           },
           "required": [
+            "available",
             "variants",
             "variantCounts"
           ]
@@ -5619,7 +5855,7 @@
       "module": "images/default",
       "factory": false,
       "description": {
-        "summary": "Binary variant, or the original with x-kestrel-variant: pending while it isn't ready yet",
+        "summary": "The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback",
         "reads": [
           "params.id",
           "params.file"
@@ -5630,7 +5866,51 @@
         "binary": true,
         "errors": {
           "400": "missing id or file",
-          "404": "media item or size not found, or the variant gave up after maxAttempts"
+          "404": "media item not found, not ready, or the file is neither a current nor a retired size"
+        },
+        "anonymous": "required"
+      }
+    },
+    {
+      "name": "images.syncPublic",
+      "module": "images/default",
+      "factory": false,
+      "description": {
+        "summary": "Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
+        "reads": [],
+        "writes": [
+          "result._publicVariants"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "_publicVariants": {
+              "type": "object",
+              "properties": {
+                "written": {
+                  "type": "number"
+                },
+                "removed": {
+                  "type": "number"
+                },
+                "planned": {
+                  "type": "number"
+                },
+                "missing": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "written",
+                "removed",
+                "planned",
+                "missing"
+              ]
+            }
+          },
+          "required": [
+            "_publicVariants"
+          ]
         }
       }
     },
@@ -8240,146 +8520,6 @@
       }
     },
     {
-      "name": "events.emit",
-      "module": "events/direct",
-      "factory": true,
-      "description": {
-        "summary": "Emit event \"<arg>\" to every subscribed handler pipeline and wait for them",
-        "reads": [],
-        "writes": [],
-        "errors": {
-          "500": "a subscribed handler failed"
-        }
-      }
-    },
-    {
-      "name": "events.relay",
-      "module": "events/direct",
-      "factory": false,
-      "description": {
-        "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
-        "reads": [],
-        "writes": [
-          "result._events"
-        ],
-        "extendsOutput": {
-          "type": "object",
-          "properties": {
-            "_events": {
-              "type": "object",
-              "properties": {
-                "status": {
-                  "type": "string",
-                  "enum": [
-                    "done",
-                    "error",
-                    "pending",
-                    "queued"
-                  ]
-                },
-                "pipelines": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "event": {
-                        "type": "string"
-                      },
-                      "pipeline": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "type": "string",
-                        "enum": [
-                          "done",
-                          "error",
-                          "pending",
-                          "queued"
-                        ]
-                      },
-                      "attempts": {
-                        "type": "integer"
-                      },
-                      "dead": {
-                        "type": "boolean"
-                      },
-                      "error": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "event",
-                      "pipeline",
-                      "status",
-                      "attempts",
-                      "dead",
-                      "error"
-                    ]
-                  }
-                }
-              },
-              "required": [
-                "status",
-                "pipelines"
-              ]
-            }
-          },
-          "required": [
-            "_events"
-          ]
-        }
-      }
-    },
-    {
-      "name": "events.readDeliveryStatus",
-      "module": "events/direct",
-      "factory": false,
-      "description": {
-        "summary": "Failed deliveries of the process that answers, since it started; inline delivery never retries, so each one is final",
-        "reads": [],
-        "writes": [
-          "result"
-        ],
-        "output": {
-          "type": "object",
-          "properties": {
-            "dead": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "scope": {
-              "type": "string",
-              "enum": [
-                "store",
-                "process"
-              ]
-            },
-            "since": {
-              "type": [
-                "number",
-                "null"
-              ]
-            },
-            "lastDeadAt": {
-              "type": [
-                "number",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "dead",
-            "scope",
-            "since",
-            "lastDeadAt"
-          ]
-        }
-      }
-    },
-    {
       "name": "migrations.list",
       "module": "migrations/default",
       "factory": false,
@@ -9294,6 +9434,12 @@
                       },
                       "atomicSafe": {
                         "type": "boolean"
+                      },
+                      "anonymous": {
+                        "type": "string",
+                        "enum": [
+                          "required"
+                        ]
                       }
                     },
                     "required": [
@@ -9399,6 +9545,12 @@
                             },
                             "atomicSafe": {
                               "type": "boolean"
+                            },
+                            "anonymous": {
+                              "type": "string",
+                              "enum": [
+                                "required"
+                              ]
                             }
                           },
                           "required": [
@@ -11459,26 +11611,11 @@
           }
         },
         {
-          "spec": "images.remove",
-          "name": "images.remove",
-          "module": "images/default",
-          "description": {
-            "summary": "Delete one media item's variants (blob + rows)",
-            "reads": [
-              "params.id"
-            ],
-            "writes": [],
-            "errors": {
-              "400": "missing id"
-            }
-          }
-        },
-        {
           "spec": "media.remove",
           "name": "media.remove",
           "module": "media/default",
           "description": {
-            "summary": "Delete file and metadata",
+            "summary": "Delete file and metadata (copy, blob, row, then a final sweep)",
             "reads": [
               "params.id"
             ],
@@ -11496,6 +11633,21 @@
                 "ok"
               ]
             },
+            "errors": {
+              "400": "missing id"
+            }
+          }
+        },
+        {
+          "spec": "images.remove",
+          "name": "images.remove",
+          "module": "images/default",
+          "description": {
+            "summary": "Delete one media item's variants and retired paths (blob + rows)",
+            "reads": [
+              "params.id"
+            ],
+            "writes": [],
             "errors": {
               "400": "missing id"
             }
@@ -11690,23 +11842,11 @@
           }
         },
         {
-          "spec": "images.removeMany",
-          "name": "images.removeMany",
-          "module": "images/default",
-          "description": {
-            "summary": "Delete variants for every id in result.ids (from media.listFolderItems)",
-            "reads": [
-              "result.ids"
-            ],
-            "writes": []
-          }
-        },
-        {
           "spec": "media.removeFolder",
           "name": "media.removeFolder",
           "module": "media/default",
           "description": {
-            "summary": "Delete a folder and everything in it",
+            "summary": "Delete a folder and everything in it (each item as media.remove)",
             "reads": [
               "params.path"
             ],
@@ -11721,17 +11861,130 @@
                 },
                 "removed": {
                   "type": "number"
+                },
+                "ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "required": [
                 "ok",
-                "removed"
+                "removed",
+                "ids"
               ]
             },
             "errors": {
               "400": "invalid path",
               "404": "folder not found",
               "409": "folder not empty or still referenced"
+            }
+          }
+        },
+        {
+          "spec": "images.removeMany",
+          "name": "images.removeMany",
+          "module": "images/default",
+          "description": {
+            "summary": "Delete variants for every id in result.ids (from media.listFolderItems or media.removeFolder)",
+            "reads": [
+              "result.ids"
+            ],
+            "writes": []
+          }
+        },
+        {
+          "spec": "events.emit:media.deleted",
+          "name": "events.emit",
+          "module": "events/direct",
+          "description": {
+            "summary": "Emit event \"media.deleted\" to every subscribed handler pipeline and wait for them",
+            "reads": [],
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
+          }
+        },
+        {
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
+          "description": {
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
+            "reads": [],
+            "writes": [
+              "result._events"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_events": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending",
+                        "queued"
+                      ]
+                    },
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending",
+                              "queued"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "pipelines"
+                  ]
+                }
+              },
+              "required": [
+                "_events"
+              ]
             }
           }
         }
@@ -12738,7 +12991,7 @@
                 }
               },
               "additionalProperties": true,
-              "description": "reached either directly (id/ids) or as the media.uploaded event envelope, which carries further fields this step ignores"
+              "description": "reached either directly (id/ids) or as the media.uploaded / images.planned event envelope, which carries further fields this step ignores"
             },
             "output": {
               "oneOf": [
@@ -12783,6 +13036,7 @@
                           "state": {
                             "type": "string",
                             "enum": [
+                              "planned",
                               "pending",
                               "done",
                               "error",
@@ -12871,6 +13125,7 @@
                                 "state": {
                                   "type": "string",
                                   "enum": [
+                                    "planned",
                                     "pending",
                                     "done",
                                     "error",
@@ -12984,6 +13239,10 @@
                 "id": {
                   "type": "string"
                 },
+                "path": {
+                  "type": "string",
+                  "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                },
                 "filename": {
                   "type": "string"
                 },
@@ -12995,25 +13254,6 @@
                 },
                 "size": {
                   "type": "number"
-                },
-                "key": {
-                  "type": "string"
-                },
-                "checksum": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                },
-                "status": {
-                  "type": "string",
-                  "enum": [
-                    "uploading",
-                    "ready",
-                    "failed"
-                  ],
-                  "description": "only ready items are listed, readable and downloadable"
                 },
                 "createdAt": {
                   "type": "number"
@@ -13081,13 +13321,11 @@
               },
               "required": [
                 "id",
+                "path",
                 "filename",
                 "folder",
                 "contentType",
                 "size",
-                "key",
-                "checksum",
-                "status",
                 "createdAt",
                 "updatedAt",
                 "provenance",
@@ -13096,7 +13334,8 @@
                 "alt",
                 "title",
                 "description"
-              ]
+              ],
+              "additionalProperties": false
             },
             "errors": {
               "400": "unknown locale",
@@ -13109,17 +13348,21 @@
           "name": "images.attach",
           "module": "images/default",
           "description": {
-            "summary": "Add variants[] and variantCounts (done/pending/error/failed over the effective sizes) to a media item or list (result.id or result.items)",
+            "summary": "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed",
             "reads": [
               "result"
             ],
             "writes": [
+              "result.available?",
               "result.variants?",
               "result.variantCounts?"
             ],
             "extendsItems": {
               "type": "object",
               "properties": {
+                "available": {
+                  "type": "boolean"
+                },
                 "variants": {
                   "type": "array",
                   "items": {
@@ -13189,6 +13432,7 @@
                 }
               },
               "required": [
+                "available",
                 "variants",
                 "variantCounts"
               ]
@@ -14058,6 +14302,12 @@
                           },
                           "atomicSafe": {
                             "type": "boolean"
+                          },
+                          "anonymous": {
+                            "type": "string",
+                            "enum": [
+                              "required"
+                            ]
                           }
                         },
                         "required": [
@@ -14163,6 +14413,12 @@
                                 },
                                 "atomicSafe": {
                                   "type": "boolean"
+                                },
+                                "anonymous": {
+                                  "type": "string",
+                                  "enum": [
+                                    "required"
+                                  ]
                                 }
                               },
                               "required": [
@@ -15080,8 +15336,10 @@
           "name": "media.list",
           "module": "media/default",
           "description": {
-            "summary": "List media, newest first",
-            "reads": [],
+            "summary": "List media, newest first; anonymous callers may only fetch by ids",
+            "reads": [
+              "identity?"
+            ],
             "writes": [
               "result"
             ],
@@ -15122,6 +15380,10 @@
                       "id": {
                         "type": "string"
                       },
+                      "path": {
+                        "type": "string",
+                        "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                      },
                       "filename": {
                         "type": "string"
                       },
@@ -15133,25 +15395,6 @@
                       },
                       "size": {
                         "type": "number"
-                      },
-                      "key": {
-                        "type": "string"
-                      },
-                      "checksum": {
-                        "type": [
-                          "string",
-                          "null"
-                        ],
-                        "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                      },
-                      "status": {
-                        "type": "string",
-                        "enum": [
-                          "uploading",
-                          "ready",
-                          "failed"
-                        ],
-                        "description": "only ready items are listed, readable and downloadable"
                       },
                       "createdAt": {
                         "type": "number"
@@ -15219,13 +15462,11 @@
                     },
                     "required": [
                       "id",
+                      "path",
                       "filename",
                       "folder",
                       "contentType",
                       "size",
-                      "key",
-                      "checksum",
-                      "status",
                       "createdAt",
                       "updatedAt",
                       "provenance",
@@ -15234,7 +15475,8 @@
                       "alt",
                       "title",
                       "description"
-                    ]
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "total": {
@@ -15247,7 +15489,8 @@
               ]
             },
             "errors": {
-              "400": "invalid folder or unknown locale"
+              "400": "invalid folder or unknown locale",
+              "401": "no identity and no ids (unless anonymousList is \"all\")"
             }
           }
         },
@@ -15256,17 +15499,21 @@
           "name": "images.attach",
           "module": "images/default",
           "description": {
-            "summary": "Add variants[] and variantCounts (done/pending/error/failed over the effective sizes) to a media item or list (result.id or result.items)",
+            "summary": "Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed",
             "reads": [
               "result"
             ],
             "writes": [
+              "result.available?",
               "result.variants?",
               "result.variantCounts?"
             ],
             "extendsItems": {
               "type": "object",
               "properties": {
+                "available": {
+                  "type": "boolean"
+                },
                 "variants": {
                   "type": "array",
                   "items": {
@@ -15336,6 +15583,7 @@
                 }
               },
               "required": [
+                "available",
                 "variants",
                 "variantCounts"
               ]
@@ -15348,17 +15596,20 @@
       "name": "listMediaFolders",
       "steps": [
         {
-          "spec": "authn.identifyUser",
-          "name": "authn.identifyUser",
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Identify the caller if a valid token is present",
+            "summary": "Require a valid session",
             "reads": [],
             "writes": [
-              "token?",
-              "identity?"
+              "token",
+              "identity"
             ],
-            "security": "optional"
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
           }
         },
         {
@@ -15381,8 +15632,10 @@
           "name": "media.listFolders",
           "module": "media/default",
           "description": {
-            "summary": "Folders (persistent and implied) with item counts",
-            "reads": [],
+            "summary": "Folders (persistent and implied) with item counts; anonymous callers are refused",
+            "reads": [
+              "identity?"
+            ],
             "writes": [
               "result"
             ],
@@ -15403,6 +15656,9 @@
                   "count"
                 ]
               }
+            },
+            "errors": {
+              "401": "no identity (unless anonymousList is \"all\")"
             }
           }
         }
@@ -17103,7 +17359,7 @@
           "name": "images.prune",
           "module": "images/default",
           "description": {
-            "summary": "Delete the variants of sizes that are no longer declared",
+            "summary": "Retire the variants of sizes that are no longer declared: their paths keep answering with the original's bytes until the item is deleted",
             "reads": [],
             "writes": [
               "result"
@@ -18336,7 +18592,7 @@
           "name": "media.renameFolder",
           "module": "media/default",
           "description": {
-            "summary": "Rename or move a folder, moving its blobs",
+            "summary": "Rename or move a folder (metadata only: keys and paths do not change)",
             "reads": [
               "params.path"
             ],
@@ -18419,6 +18675,125 @@
                   "status"
                 ]
               }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "repairPublicMedia",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:media.manage",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission media.manage",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission media.manage"
+            }
+          }
+        },
+        {
+          "spec": "media.syncPublic",
+          "name": "media.syncPublic",
+          "module": "media/default",
+          "description": {
+            "summary": "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result)",
+            "reads": [],
+            "writes": [
+              "result._publicMedia"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_publicMedia": {
+                  "type": "object",
+                  "properties": {
+                    "written": {
+                      "type": "number"
+                    },
+                    "removed": {
+                      "type": "number"
+                    },
+                    "missing": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "written",
+                    "removed",
+                    "missing"
+                  ]
+                }
+              },
+              "required": [
+                "_publicMedia"
+              ]
+            }
+          }
+        },
+        {
+          "spec": "images.syncPublic",
+          "name": "images.syncPublic",
+          "module": "images/default",
+          "description": {
+            "summary": "Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
+            "reads": [],
+            "writes": [
+              "result._publicVariants"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_publicVariants": {
+                  "type": "object",
+                  "properties": {
+                    "written": {
+                      "type": "number"
+                    },
+                    "removed": {
+                      "type": "number"
+                    },
+                    "planned": {
+                      "type": "number"
+                    },
+                    "missing": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "written",
+                    "removed",
+                    "planned",
+                    "missing"
+                  ]
+                }
+              },
+              "required": [
+                "_publicVariants"
+              ]
             }
           }
         }
@@ -19589,7 +19964,7 @@
           "name": "images.resume",
           "module": "images/default",
           "description": {
-            "summary": "Resume a paused/error/stale job, or no-op (for cron)",
+            "summary": "Place and render any item left unfinished (a repair pass), then resume a paused/error/stale sync job, or no-op (for cron)",
             "reads": [],
             "writes": [
               "result"
@@ -20085,7 +20460,7 @@
           "name": "images.serve",
           "module": "images/default",
           "description": {
-            "summary": "Binary variant, or the original with x-kestrel-variant: pending while it isn't ready yet",
+            "summary": "The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback",
             "reads": [
               "params.id",
               "params.file"
@@ -20096,8 +20471,63 @@
             "binary": true,
             "errors": {
               "400": "missing id or file",
-              "404": "media item or size not found, or the variant gave up after maxAttempts"
+              "404": "media item not found, not ready, or the file is neither a current nor a retired size"
+            },
+            "anonymous": "required"
+          }
+        }
+      ]
+    },
+    {
+      "name": "serveMediaFile",
+      "steps": [
+        {
+          "spec": "authn.identifyUser",
+          "name": "authn.identifyUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Identify the caller if a valid token is present",
+            "reads": [],
+            "writes": [
+              "token?",
+              "identity?"
+            ],
+            "security": "optional"
+          }
+        },
+        {
+          "spec": "authz.require:media.read",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission media.read",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission media.read"
             }
+          }
+        },
+        {
+          "spec": "media.serve",
+          "name": "media.serve",
+          "module": "media/default",
+          "description": {
+            "summary": "The file at its public URL (params.id, params.name); the name must be the one it was uploaded under",
+            "reads": [
+              "params.id",
+              "params.name"
+            ],
+            "writes": [
+              "result"
+            ],
+            "binary": true,
+            "errors": {
+              "404": "not found, not ready, or not the name the file was uploaded under"
+            },
+            "anonymous": "required"
           }
         }
       ]
@@ -20732,6 +21162,93 @@
       ]
     },
     {
+      "name": "syncPublicMedia",
+      "steps": [
+        {
+          "spec": "media.syncPublic",
+          "name": "media.syncPublic",
+          "module": "media/default",
+          "description": {
+            "summary": "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result)",
+            "reads": [],
+            "writes": [
+              "result._publicMedia"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_publicMedia": {
+                  "type": "object",
+                  "properties": {
+                    "written": {
+                      "type": "number"
+                    },
+                    "removed": {
+                      "type": "number"
+                    },
+                    "missing": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "written",
+                    "removed",
+                    "missing"
+                  ]
+                }
+              },
+              "required": [
+                "_publicMedia"
+              ]
+            }
+          }
+        },
+        {
+          "spec": "images.syncPublic",
+          "name": "images.syncPublic",
+          "module": "images/default",
+          "description": {
+            "summary": "Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
+            "reads": [],
+            "writes": [
+              "result._publicVariants"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_publicVariants": {
+                  "type": "object",
+                  "properties": {
+                    "written": {
+                      "type": "number"
+                    },
+                    "removed": {
+                      "type": "number"
+                    },
+                    "planned": {
+                      "type": "number"
+                    },
+                    "missing": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "written",
+                    "removed",
+                    "planned",
+                    "missing"
+                  ]
+                }
+              },
+              "required": [
+                "_publicVariants"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "unpublishPage",
       "steps": [
         {
@@ -20831,7 +21348,7 @@
           "name": "media.update",
           "module": "media/default",
           "description": {
-            "summary": "Rename, move, set provenance or texts (alt/title/description per locale)",
+            "summary": "Rename, move, set provenance or texts (alt/title/description per locale); the file's key and path never change",
             "reads": [
               "params.id"
             ],
@@ -20909,6 +21426,10 @@
                 "id": {
                   "type": "string"
                 },
+                "path": {
+                  "type": "string",
+                  "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                },
                 "filename": {
                   "type": "string"
                 },
@@ -20920,25 +21441,6 @@
                 },
                 "size": {
                   "type": "number"
-                },
-                "key": {
-                  "type": "string"
-                },
-                "checksum": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                },
-                "status": {
-                  "type": "string",
-                  "enum": [
-                    "uploading",
-                    "ready",
-                    "failed"
-                  ],
-                  "description": "only ready items are listed, readable and downloadable"
                 },
                 "createdAt": {
                   "type": "number"
@@ -21006,13 +21508,11 @@
               },
               "required": [
                 "id",
+                "path",
                 "filename",
                 "folder",
                 "contentType",
                 "size",
-                "key",
-                "checksum",
-                "status",
                 "createdAt",
                 "updatedAt",
                 "provenance",
@@ -21021,12 +21521,13 @@
                 "alt",
                 "title",
                 "description"
-              ]
+              ],
+              "additionalProperties": false
             },
             "errors": {
               "400": "invalid name, folder or text (texts are plain text, max 2000 chars)",
               "404": "not found",
-              "409": "filename already exists in that folder"
+              "409": "the folder already has a file with that name, `details.field: \"location\"`"
             }
           }
         },
@@ -21870,6 +22371,10 @@
                     "id": {
                       "type": "string"
                     },
+                    "path": {
+                      "type": "string",
+                      "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                    },
                     "filename": {
                       "type": "string"
                     },
@@ -21881,25 +22386,6 @@
                     },
                     "size": {
                       "type": "number"
-                    },
-                    "key": {
-                      "type": "string"
-                    },
-                    "checksum": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "uploading",
-                        "ready",
-                        "failed"
-                      ],
-                      "description": "only ready items are listed, readable and downloadable"
                     },
                     "createdAt": {
                       "type": "number"
@@ -21967,13 +22453,11 @@
                   },
                   "required": [
                     "id",
+                    "path",
                     "filename",
                     "folder",
                     "contentType",
                     "size",
-                    "key",
-                    "checksum",
-                    "status",
                     "createdAt",
                     "updatedAt",
                     "provenance",
@@ -21982,7 +22466,8 @@
                     "alt",
                     "title",
                     "description"
-                  ]
+                  ],
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -21995,6 +22480,10 @@
                           "id": {
                             "type": "string"
                           },
+                          "path": {
+                            "type": "string",
+                            "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                          },
                           "filename": {
                             "type": "string"
                           },
@@ -22006,25 +22495,6 @@
                           },
                           "size": {
                             "type": "number"
-                          },
-                          "key": {
-                            "type": "string"
-                          },
-                          "checksum": {
-                            "type": [
-                              "string",
-                              "null"
-                            ],
-                            "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                          },
-                          "status": {
-                            "type": "string",
-                            "enum": [
-                              "uploading",
-                              "ready",
-                              "failed"
-                            ],
-                            "description": "only ready items are listed, readable and downloadable"
                           },
                           "createdAt": {
                             "type": "number"
@@ -22092,13 +22562,11 @@
                         },
                         "required": [
                           "id",
+                          "path",
                           "filename",
                           "folder",
                           "contentType",
                           "size",
-                          "key",
-                          "checksum",
-                          "status",
                           "createdAt",
                           "updatedAt",
                           "provenance",
@@ -22107,7 +22575,8 @@
                           "alt",
                           "title",
                           "description"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "errors": {
@@ -22160,6 +22629,10 @@
                     "id": {
                       "type": "string"
                     },
+                    "path": {
+                      "type": "string",
+                      "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                    },
                     "filename": {
                       "type": "string"
                     },
@@ -22171,25 +22644,6 @@
                     },
                     "size": {
                       "type": "number"
-                    },
-                    "key": {
-                      "type": "string"
-                    },
-                    "checksum": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "uploading",
-                        "ready",
-                        "failed"
-                      ],
-                      "description": "only ready items are listed, readable and downloadable"
                     },
                     "createdAt": {
                       "type": "number"
@@ -22257,13 +22711,11 @@
                   },
                   "required": [
                     "id",
+                    "path",
                     "filename",
                     "folder",
                     "contentType",
                     "size",
-                    "key",
-                    "checksum",
-                    "status",
                     "createdAt",
                     "updatedAt",
                     "provenance",
@@ -22272,7 +22724,8 @@
                     "alt",
                     "title",
                     "description"
-                  ]
+                  ],
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -22285,6 +22738,10 @@
                           "id": {
                             "type": "string"
                           },
+                          "path": {
+                            "type": "string",
+                            "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                          },
                           "filename": {
                             "type": "string"
                           },
@@ -22296,25 +22753,6 @@
                           },
                           "size": {
                             "type": "number"
-                          },
-                          "key": {
-                            "type": "string"
-                          },
-                          "checksum": {
-                            "type": [
-                              "string",
-                              "null"
-                            ],
-                            "description": "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded"
-                          },
-                          "status": {
-                            "type": "string",
-                            "enum": [
-                              "uploading",
-                              "ready",
-                              "failed"
-                            ],
-                            "description": "only ready items are listed, readable and downloadable"
                           },
                           "createdAt": {
                             "type": "number"
@@ -22382,13 +22820,11 @@
                         },
                         "required": [
                           "id",
+                          "path",
                           "filename",
                           "folder",
                           "contentType",
                           "size",
-                          "key",
-                          "checksum",
-                          "status",
                           "createdAt",
                           "updatedAt",
                           "provenance",
@@ -22397,7 +22833,8 @@
                           "alt",
                           "title",
                           "description"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "errors": {
@@ -22444,7 +22881,7 @@
             },
             "errors": {
               "400": "no file or invalid folder/provenance (per-file for a multi-file request)",
-              "409": "filename already exists in that folder with different bytes, `details.field: \"key\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict",
+              "409": "the folder already has a file with that name, `details.field: \"location\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict",
               "413": "file exceeds maxBytes (per-file for a multi-file request)",
               "415": "type not allowed (per-file for a multi-file request)"
             }
@@ -22810,6 +23247,11 @@
         "pipeline": "serveImageVariant"
       },
       {
+        "method": "GET",
+        "path": "/media/:id/:name",
+        "pipeline": "serveMediaFile"
+      },
+      {
         "method": "PATCH",
         "path": "/media/:id",
         "pipeline": "updateMedia"
@@ -22818,6 +23260,11 @@
         "method": "POST",
         "path": "/admin/media/export",
         "pipeline": "exportMedia"
+      },
+      {
+        "method": "POST",
+        "path": "/admin/media/repair-public",
+        "pipeline": "repairPublicMedia"
       },
       {
         "method": "DELETE",
@@ -22971,6 +23418,10 @@
       {
         "expression": "*/5 * * * *",
         "pipeline": "resumeImages"
+      },
+      {
+        "expression": "45 3 * * *",
+        "pipeline": "syncPublicMedia"
       },
       {
         "expression": "* * * * *",
