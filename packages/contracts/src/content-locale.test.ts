@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Content, ContentDocument, ContentModel } from "./content.ts";
 import { ok } from "./errors.ts";
-import { nonLocalizedFilter, publishedLocale, satisfiesFilter } from "./content-locale.ts";
+import { defaultLocaleSatisfiesFilter, nonLocalizedFilter, publishedLocale, satisfiesFilter } from "./content-locale.ts";
 
 const model: ContentModel = {
   locales: ["de", "en"],
@@ -117,5 +117,23 @@ describe("publishedLocale", () => {
     const result = await publishedLocale(spied, model, "pages", "p1", "de", { status: "published" }, true);
     expect(result.ok && result.value?._translations).toEqual({ de: true, en: false });
     expect(calls).not.toContain("en");
+  });
+});
+
+describe("defaultLocaleSatisfiesFilter", () => {
+  it("is true only when the default locale's own strict values satisfy the filter", async () => {
+    const published = fakeContent({ p1: { locales: { de: { status: "published" } } } });
+    expect(await defaultLocaleSatisfiesFilter(published, "de", "pages", "p1", { status: "published" })).toEqual({ ok: true, value: true });
+
+    const draft = fakeContent({ p1: { locales: { de: { status: "draft" } } } });
+    expect(await defaultLocaleSatisfiesFilter(draft, "de", "pages", "p1", { status: "published" })).toEqual({ ok: true, value: false });
+  });
+
+  it("is false without a default locale, without fetching anything", async () => {
+    const content = fakeContent({ p1: { locales: { de: { status: "published" } } } });
+    const calls: Array<string | undefined> = [];
+    const spied: Content = { ...content, get: (type, id, options) => (calls.push(options?.locale), content.get(type, id, options)) };
+    expect(await defaultLocaleSatisfiesFilter(spied, undefined, "pages", "p1", { status: "published" })).toEqual({ ok: true, value: false });
+    expect(calls).toEqual([]);
   });
 });

@@ -18,6 +18,19 @@ export function satisfiesFilter(filter: Filter, values: Record<string, unknown> 
 }
 
 /**
+ * Whether `id`'s default locale (fetched strictly, no field fallback) itself satisfies `filter`.
+ * A `fallback: true` read is only safe once this holds — an unpublished default locale must never
+ * be a fallback source for a single field either, the same rule `publishedLocale` applies to a
+ * whole document.
+ */
+export async function defaultLocaleSatisfiesFilter(content: Content, defaultLocale: string | undefined, type: string, id: string, filter: Filter): Promise<Result<boolean, ContentError>> {
+  if (defaultLocale === undefined) return ok(false);
+  const defaultResult = await content.get(type, id, { locale: defaultLocale });
+  if (isErr(defaultResult)) return defaultResult;
+  return ok(satisfiesFilter(filter, defaultResult.value));
+}
+
+/**
  * `id`'s field values at `locale`, restricted to what `filter` allows to be served there: `null`
  * when `locale` itself does not satisfy `filter` (a locale that fails the filter is never replaced
  * by another one). With `fallback`, an empty localized field is filled from the default locale, but
