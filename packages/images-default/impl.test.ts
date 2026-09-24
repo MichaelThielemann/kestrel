@@ -346,6 +346,70 @@ describe("images/default rendering", () => {
   });
 });
 
+describe("images/default media.updated outside an upload", () => {
+  const THUMB = { name: "thumb", width: 320, fit: "inside" as const, format: "webp" as const, quality: 82 };
+  const HERO = { name: "hero", width: 800, fit: "inside" as const, format: "original" as const, quality: 82 };
+
+  async function threeRendered(events?: Events, logger: Logger = noLogger) {
+    const blobs = fakeBlobstore();
+    const db = createFakePersistence();
+    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", width: "number", height: "number", createdAt: "number" });
+    const open = (sizes: Array<typeof THUMB | typeof HERO>, chunk = 20) => createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes, chunk }, { blobs, db, logger, render: fixedRenderer, ...(events ? { events } : {}) }, () => 1000);
+    const images = await open([THUMB, HERO]);
+    const ids: string[] = [];
+    for (const id of ["a", "b", "c"]) {
+      const { key } = await seedMedia(db, { id });
+      expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+      expectOk(await images.generate(id));
+      ids.push(id);
+    }
+    return { blobs, db, ids, open };
+  }
+
+  it("a prune of a size three items use raises one event with those three ids", async () => {
+    const events = fakeEvents();
+    const { ids, open } = await threeRendered(events);
+    events.emitted.length = 0;
+    const narrowed = await open([THUMB]);
+    expectOk(await narrowed.prune(["hero"]));
+    expect(events.emitted).toHaveLength(1);
+    expect(events.emitted[0]).toMatchObject({ name: "media.updated", data: { id: null, identity: null, params: {} } });
+    expect(boundaryCast<{ ids: string[] }>(events.emitted[0]!.data, "host").ids.sort()).toEqual(ids);
+  });
+
+  it("a format change applied by the sync job raises one event per chunk with the ids it changed", async () => {
+    const events = fakeEvents();
+    const { open } = await threeRendered(events);
+    events.emitted.length = 0;
+    const reformed = await open([THUMB, { ...HERO, format: "webp" }], 2);
+    reformed.attach(introspectionOf(manifestWithPipelines([{ pipeline: "serveImageVariant", module: "images/default", step: "images.serve" }])));
+    await whenIdle(reformed);
+    const updates = events.emitted.filter((e) => e.name === "media.updated").map((e) => boundaryCast<{ ids: string[] }>(e.data, "host").ids);
+    expect(updates).toEqual([["a", "b"], ["c"]]);
+  });
+
+  it("without an events provider nothing is raised and the prune still succeeds", async () => {
+    const { db, open } = await threeRendered();
+    const narrowed = await open([THUMB]);
+    expect(expectOk(await narrowed.prune(["hero"]))).toEqual({ sizes: 1, variants: 3 });
+    expect(expectOk(await db.count(RETIRED, {}))).toBe(3);
+  });
+
+  it("a rejected emit is logged with the ids and the prune stands", async () => {
+    const logged: Array<{ message: string; ids: unknown }> = [];
+    const logger: Logger = { step() {}, info() {}, error: (message, fields) => logged.push({ message, ids: (fields as { ids?: unknown } | undefined)?.ids }) };
+    const rejecting: Events = { emit: () => Promise.reject(new Error("subscriber down")), on: () => () => {} };
+    const { db, blobs, open } = await threeRendered(rejecting, logger);
+    const narrowed = await open([THUMB]);
+    expectOk(await narrowed.prune(["hero"]));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(logged.some((entry) => entry.message.includes("media.updated") && Array.isArray(entry.ids) && entry.ids.length === 3)).toBe(true);
+    expect(expectOk(await db.count(VARIANTS, { size: "hero" }))).toBe(0);
+    expect(expectOk(await db.count(RETIRED, {}))).toBe(3);
+    expect(blobs.blobs.has("site/media/a/variants/hero.jpg")).toBe(true);
+  });
+});
+
 describe("images/default prune and remove", () => {
   it("prune retires the size, keeps the path answering with the original, and removes the private blob and row", async () => {
     const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);

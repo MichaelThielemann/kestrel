@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -332,7 +332,7 @@ describe("media list reports variant progress", () => {
 
 describe("one public URL per media file", () => {
   it("serves the original and every variant at the path the item returned, anonymously and without a rewrite", async () => {
-    const { kestrel, dispose } = await bootIsolated();
+    const { kestrel, blobRoot, dispose } = await bootIsolated();
     try {
       const admin = await login(kestrel, "admin", "kestrel-demo");
       const uploaded = await kestrel.run("uploadMedia", {
@@ -353,11 +353,15 @@ describe("one public URL per media file", () => {
       const name = item.path.split("/").pop()!;
       const served = await kestrel.run("serveMediaFile", { trigger, params: { id: item.id, name } });
       expect(served.status).toBe(200);
+      expect(boundaryCast<{ headers?: Record<string, string> }>(served.result, "json").headers?.["cache-control"]).toBe("public, max-age=31536000, immutable");
+      expect(existsSync(join(blobRoot, "site", "media", item.id, name))).toBe(true);
 
       for (const variant of item.variants) {
         const file = variant.path.split("/").pop()!;
         const servedVariant = await kestrel.run("serveImageVariant", { trigger, params: { id: item.id, file } });
         expect(servedVariant.status).toBe(200);
+        expect(boundaryCast<{ headers?: Record<string, string> }>(servedVariant.result, "json").headers?.["cache-control"]).toBeUndefined();
+        expect(existsSync(join(blobRoot, "site", "media", item.id, "variants", file))).toBe(true);
       }
 
       const anonymousList = await kestrel.run("listMedia", { trigger });
@@ -371,6 +375,7 @@ describe("one public URL per media file", () => {
       expect(deleted.status).toBe(200);
       const goneOriginal = await kestrel.run("serveMediaFile", { trigger, params: { id: item.id, name } });
       expect(goneOriginal.status).toBe(404);
+      expect(existsSync(join(blobRoot, "site", "media", item.id))).toBe(false);
     } finally {
       await dispose();
     }
@@ -445,7 +450,7 @@ describe("content model wiring", () => {
   });
 });
 
-async function bootIsolated(withPipelines?: (pipelines: PipelineDefinition[]) => PipelineDefinition[]): Promise<{ kestrel: Awaited<ReturnType<typeof boot>>; dispose: () => Promise<void> }> {
+async function bootIsolated(withPipelines?: (pipelines: PipelineDefinition[]) => PipelineDefinition[]): Promise<{ kestrel: Awaited<ReturnType<typeof boot>>; blobRoot: string; dispose: () => Promise<void> }> {
   const configInput = await loadConfig(join(root, "kestrel.config.ts"));
   const dataDir = mkdtempSync(join(tmpdir(), "kestrel-minimal-"));
   const isolated: KestrelConfigInput = {
@@ -471,6 +476,7 @@ async function bootIsolated(withPipelines?: (pipelines: PipelineDefinition[]) =>
   await kestrel.start();
   return {
     kestrel,
+    blobRoot: join(dataDir, "blobs"),
     dispose: async () => {
       await kestrel.stop();
       rmSync(dataDir, { recursive: true, force: true });

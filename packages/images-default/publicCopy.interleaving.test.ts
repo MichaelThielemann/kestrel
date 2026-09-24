@@ -370,8 +370,15 @@ describe("images/default publicCopy: images.syncPublic over more than one page",
     expect(n).toBeGreaterThan(4);
     for (let index = 0; index < n; index++) {
       const w = await library();
+      const removed: string[] = [];
+      const remove = w.blobs.remove.bind(w.blobs);
+      w.blobs.remove = async (key) => {
+        removed.push(key);
+        return remove(key);
+      };
       await runWithGapAt(index, () => syncByWriter(w), () => deleteItem(w));
       const label = `page read ${index} of ${n}`;
+      expect(removed.filter((key) => key.startsWith("site/") && !key.includes(`/${w.id}/`) && !key.includes("/gone/")), label).toEqual([]);
       expect(await violations(w), label).toEqual([]);
       for (const id of w.ids.slice(1)) expect(w.blobs.blobs.has(`site/media/${id}/variants/thumb.webp`), `${label}: ${id}`).toBe(true);
       expect(expectOk(await w.db.count(VARIANTS, { mediaId: "gone" })), label).toBe(0);

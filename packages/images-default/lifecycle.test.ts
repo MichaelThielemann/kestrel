@@ -83,6 +83,16 @@ function gate(): { wait: Promise<void>; open(): void; reached: Promise<void>; ar
   return { wait, open, reached, arrive };
 }
 
+function recordRemovals(w: World): string[] {
+  const removed: string[] = [];
+  const remove = w.blobs.remove.bind(w.blobs);
+  w.blobs.remove = async (key) => {
+    removed.push(key);
+    return remove(key);
+  };
+  return removed;
+}
+
 function isAvailable(rows: Variant[]): boolean {
   return rows.length > 0 && rows.every((r) => r.state !== "planned");
 }
@@ -194,8 +204,10 @@ describe("images/default: images.syncPublic never removes a live variant", { tim
     }
     const before = ids.flatMap((id) => copiesOf(w, id)).length;
     expect(before).toBe(505);
+    const removed = recordRemovals(w);
     expectOk(await w.images.syncPublic());
     await whenIdle(w.images);
+    expect(removed.filter((key) => key.startsWith("site/") && !key.includes("/gone/"))).toEqual([]);
     expect(ids.flatMap((id) => copiesOf(w, id)).length).toBe(before);
     expect(await rowsOf(w, "gone")).toEqual([]);
   });
@@ -216,8 +228,10 @@ describe("images/default: images.syncPublic never removes a live variant", { tim
       }
       return findMany(collection, filter, options);
     };
+    const removed = recordRemovals(w);
     expectOk(await w.images.syncPublic());
     await whenIdle(w.images);
+    expect(removed).toEqual([]);
     expect(await rowsOf(w, "fresh")).toHaveLength(1);
     expect(copiesOf(w, "fresh")).toHaveLength(1);
   });
