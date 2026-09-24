@@ -255,6 +255,21 @@ describe("insertPipelineStep", () => {
     expect(insertPipelineStep("p.ts", PIPELINE, { pipelineName: "nope", anchorStep: "revisions.reassignAuthor", position: "before", newStep: "x" })).toBeUndefined();
     expect(insertPipelineStep("p.ts", PIPELINE, { pipelineName: "retryReassignRevisionAuthor", anchorStep: "nope.step", position: "before", newStep: "x" })).toBeUndefined();
   });
+
+  it("inserts directly before the anchor, not at the start of a line several steps share", () => {
+    const source = `definePipeline({
+  name: "reassign",
+  steps: [
+    "authn.requireUser", "authz.require:users.manage", "revisions.reassignAuthor",
+  ],
+});
+`;
+    const edit = insertPipelineStep("p.ts", source, { pipelineName: "reassign", anchorStep: "revisions.reassignAuthor", position: "before", newStep: "authn.verifyUser:reassignTo" });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('"authn.requireUser", "authz.require:users.manage", "authn.verifyUser:reassignTo", "revisions.reassignAuthor",');
+    expect(text.indexOf("authn.requireUser")).toBeLessThan(text.indexOf("authn.verifyUser:reassignTo"));
+    expect(text.indexOf("authz.require")).toBeLessThan(text.indexOf("authn.verifyUser:reassignTo"));
+  });
 });
 
 describe("renameContentField", () => {

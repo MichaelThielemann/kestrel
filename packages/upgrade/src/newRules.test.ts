@@ -66,6 +66,31 @@ describe("pipelines/verified-user", () => {
     expect(text).toContain('"authn.verifyUser:reassignTo", "revisions.reassignAuthor"');
   });
 
+  it("inserts after authn.requireUser and authz.require, never before them, when several steps share one line", async () => {
+    const file = join(dir, "reassign.ts");
+    const source = `definePipeline({
+  name: "reassign",
+  steps: [
+    "authn.requireUser", "authz.require:users.manage", "revisions.reassignAuthor",
+  ],
+});
+`;
+    await writeFile(file, source);
+    const p = await project({
+      configModules: [{ use: "@michaelthielemann/kestrel-authn-multi" }],
+      triggers: [{ http: "POST /admin/users/:id/revisions/reassign", pipeline: "reassign" }],
+      pipelines: [{ name: "reassign", steps: ["authn.requireUser", "authz.require:users.manage", "revisions.reassignAuthor"] }],
+      pipelineFiles: { reassign: file },
+    });
+    const findings = await verifiedUserRule.check(contextFor(p));
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const { text } = applyEdits(source, edits);
+    expect(text.indexOf('"authn.requireUser"')).toBeLessThan(text.indexOf("authn.verifyUser:reassignTo"));
+    expect(text.indexOf("authz.require")).toBeLessThan(text.indexOf("authn.verifyUser:reassignTo"));
+    expect(text.indexOf("authn.verifyUser:reassignTo")).toBeLessThan(text.indexOf("revisions.reassignAuthor"));
+  });
+
   it("asks when a pipeline has both http and event triggers", async () => {
     const p = await project({
       configModules: [{ use: "@michaelthielemann/kestrel-authn-multi" }],

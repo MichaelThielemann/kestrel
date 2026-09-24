@@ -194,6 +194,10 @@ function insertRelativeToAnchor(file: string, source: string, array: AstNode, an
     return { file, start: end, end: insertAt, text: `${needsComma ? "," : ""}${restOfLine}${eol}${indent}${literal},${eol}` };
   }
   const { lineStart } = lineOf(source, span(anchor).start);
+  const anchorStart = span(anchor).start;
+  if (source.slice(lineStart, anchorStart).trim() !== "") {
+    return { file, start: anchorStart, end: anchorStart, text: `${literal}, ` };
+  }
   return { file, start: lineStart, end: lineStart, text: `${indent}${literal},${eol}` };
 }
 
