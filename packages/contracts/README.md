@@ -16,6 +16,12 @@ for the suites. `testing/fakeAuthn` is a minimal `authn@1` for the shared step-c
 (`login`, `identifyUser`, `requireUser`, `loadIdentity`, `logout`) against.
 `links` is not a contract but a pure helper pair shared by the modules that read internal
 references (`INTERNAL_REF`, `collectInternalRefs`).
+`mediaType` is not a contract either: `mediaTypeEssence` accepts a declared content type only when
+it is exactly one media type (RFC 9110 tokens, optional `;` parameters, no comma) and answers its
+lower-cased `type/subtype`; `publicFormOf` answers the `Content-Type` and extension every module
+publishes a stored file with — a type from `EXTENSION_BY_TYPE`, none of which a browser runs as a
+document, or `application/octet-stream` and `bin` for anything else, including an SVG that did not
+pass `sanitize.svg`.
 `content-locale` is not a contract either: `satisfiesFilter`, `publishedLocale` and
 `narrowListTranslations` implement one rule on top of `content@1` — a locale that fails a filter is
 never a fallback source and never counted in `_translations` — for every module that builds a
