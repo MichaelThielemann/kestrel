@@ -143,6 +143,65 @@ export function setModuleConfigProperties(file: string, source: string, options:
   return edits;
 }
 
+export interface RemoveModuleConfigOptions {
+  use: string;
+  key: string;
+}
+
+/**
+ * Removes a named property from a module-list entry's `config` object literal, along with the comma
+ * that separated it from a neighbor, so the object literal stays valid with every other property
+ * untouched. `undefined` when the entry, its `config` object, or the key cannot be found — the
+ * caller's finding falls back to manual instead of guessing at the surrounding punctuation.
+ */
+export function removeModuleConfigProperty(file: string, source: string, options: RemoveModuleConfigOptions): Edit | undefined {
+  const array = moduleListArray(source);
+  if (array === undefined) return undefined;
+  const entry = elements(array).find((e) => entryUse(e) === options.use);
+  if (entry === undefined) return undefined;
+  const config = objectProperty(entry, "config");
+  if (config === undefined || config.type !== "ObjectExpression") return undefined;
+  const props = objectPropertyNodes(config);
+  const index = props.findIndex((p) => propertyKeyName(p) === options.key);
+  if (index === -1) return undefined;
+  const { start: propStart, end: propEnd } = span(props[index]!);
+  if (index < props.length - 1) {
+    const nextStart = span(props[index + 1]!).start;
+    return { file, start: propStart, end: nextStart, text: "" };
+  }
+  if (index > 0) {
+    const prevEnd = span(props[index - 1]!).end;
+    return { file, start: prevEnd, end: propEnd, text: "" };
+  }
+  return { file, start: propStart, end: propEnd, text: "" };
+}
+
+export interface ReplaceModuleConfigKeyOptions {
+  use: string;
+  fromKey: string;
+  toText: string;
+}
+
+/**
+ * Replaces a module-list entry's config property named `fromKey`, key and value together, with the
+ * literal `toText` (e.g. `reservedPaths: ["/media"]`), in one edit — the safe way to turn one
+ * property into a differently-named one, since removing `fromKey` and separately appending a new
+ * property can anchor the append on the very property being removed. `undefined` when the entry,
+ * its `config` object, or the key cannot be found.
+ */
+export function replaceModuleConfigProperty(file: string, source: string, options: ReplaceModuleConfigKeyOptions): Edit | undefined {
+  const array = moduleListArray(source);
+  if (array === undefined) return undefined;
+  const entry = elements(array).find((e) => entryUse(e) === options.use);
+  if (entry === undefined) return undefined;
+  const config = objectProperty(entry, "config");
+  if (config === undefined || config.type !== "ObjectExpression") return undefined;
+  const prop = objectPropertyNodes(config).find((p) => propertyKeyName(p) === options.fromKey);
+  if (prop === undefined) return undefined;
+  const { start, end } = span(prop);
+  return { file, start, end, text: options.toText };
+}
+
 /** Every string-literal occurrence of `from` in the file becomes `to`, keeping the original quote character. */
 export function renameStringLiterals(file: string, source: string, from: string, to: string): Edit[] {
   const root = parseTs(source);

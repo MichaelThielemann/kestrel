@@ -537,6 +537,20 @@ Net changes since 5.8.1.
   now an empty result from `locateSteps`, or `undefined` from `locateModelFields`, falls back to the
   exact built-in search for that target, so a plugin's locator only needs to answer for the layouts it
   actually recognizes.
+- `kestrel-upgrade` gains five rules for the `media`/`images`/`delivery-static`/`authz-roles` change:
+  `modules/delivery-media` auto-migrates `delivery-static`'s removed `media` option to `publicCopy` on
+  `media-default`/`images-default` and a `reservedPaths` entry on `delivery-static`, falling back to
+  manual when `reservedPaths` already has entries it cannot safely merge into;
+  `modules/media-public-path` auto-fixes (warning) `images-default`'s `publicPath` not matching
+  `media-default`'s; `pipelines/media-serve` reports, manual only since the tool does not create
+  pipeline files, a `publicCopy` with no pipeline serving it and an `authz-roles` `anonymous` list
+  missing `media.read` for one that does; `runtime/authz-anonymous-floor` reports (no fix) that a
+  signed-in caller now also holds whatever `authz-roles`'s `anonymous` list grants;
+  `imports/removed-export` reports (manual) custom code importing `rewriteMedia`, `MediaMatch`,
+  `MediaConfig` or `contentTypeByExtension` from `kestrel-delivery-static/impl`, or calling the
+  removed `migrateKeys`. `types/breaking-signatures` and `responses/breaking-step-shapes` are
+  extended for `Media`/`Images`'s own shape changes and the `media.*`/`images.*` steps affected. See
+  `docs/upgrading.md`.
 
 - `events-queue` coalesces: an event whose data carries a string `coalesceKey` is queued at most
   once per subscribed pipeline and key while an earlier row of that key has not started; a claim,

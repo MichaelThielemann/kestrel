@@ -11,6 +11,7 @@ import { combineEditParts, finding, KESTREL_RANGE, moduleEntry, packageJsonPath 
 import { bootWrapRules } from "./ruleBootWraps.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { INFO_RULES } from "./ruleInfo.ts";
+import { mediaRules } from "./ruleMedia.ts";
 import { queueOfferRule } from "./ruleQueueOffer.ts";
 import { underscoreFieldRules } from "./ruleUnderscoreField.ts";
 import { verifiedUserRule } from "./ruleVerifiedUser.ts";
@@ -148,6 +149,7 @@ export const DEFAULT_RULES: readonly Rule[] = [
   emitsRule,
   eventPayloadRule,
   queueOfferRule,
+  ...mediaRules,
   ...INFO_RULES,
 ];
 

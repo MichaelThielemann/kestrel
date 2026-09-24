@@ -69,14 +69,26 @@ export const typeSignaturesRule: Rule = {
   id: "types/breaking-signatures",
   check() {
     return [
-      infoFinding("types/breaking-signatures", "types/breaking-signatures", "Deps.eventTriggers, Introspection.health(), PipelineDefinition[\"steps\"] (readonly PipelineEntry[]), ModuleManifest.atomicScope, FakePersistence's atomic members, Manifest.warnings and Kestrel[\"contracts\"].names() are all required now", "run your own typecheck after installing the 6.0.0 packages; a hand-built implementation of any of these needs the new members", {}, "docs/upgrading.md#types-breaking-signatures"),
+      infoFinding("types/breaking-signatures", "types/breaking-signatures", "Deps.eventTriggers, Introspection.health(), PipelineDefinition[\"steps\"] (readonly PipelineEntry[]), ModuleManifest.atomicScope, FakePersistence's atomic members, Manifest.warnings and Kestrel[\"contracts\"].names() are all required now. Media: Media lost migrateKeys, gained serveFile, syncPublic, toPublicItem, publicCopyEnabled, anonymousListAllowed and attach; MediaItem gained location. Images: Images gained plan, syncPublic, publicCopyEnabled, publicPath and attach, and its Renderer takes a third planned argument; VariantState gained planned", "run your own typecheck after installing the 6.0.0 packages; a hand-built implementation of any of these needs the new members", {}, "docs/upgrading.md#types-breaking-signatures"),
     ];
   },
 };
 
 const STEP_SHAPE_CHANGES: Record<string, string> = {
   "redirects.lookup": "its hit is now terminalOutput: { redirect: { to, status } }, combined with the 200 as anyOf; status is narrowed to 301 | 302 | 307 | 308 and the schema is closed",
-  "media.upload": "its 200 is now anyOf, not oneOf: the continuing branch (after events.relay) carries _events alongside the item or list result, a ctx.done() branch does not -- narrow with '_events' in res, not res._events",
+  "media.upload":
+    "its 200 is now anyOf, not oneOf: the continuing branch (after events.relay) carries _events alongside the item or list result, a ctx.done() branch does not -- narrow with '_events' in res, not res._events. Its output gains path, and drops key/checksum/status. allowedTypes/deniedTypes now match the media type before ';', lower-cased: a parameterised type that passed a denylist is refused; an upload whose base name is 'file' or 'variants' (unknown type) is stored as '…-upload'",
+  "media.get": "its output gains path (the item's one public URL, <publicPath>/<id>/<name>); key, checksum and status are gone",
+  "media.list": "its items gain path and drop key/checksum/status; an anonymous caller without ids now answers 401",
+  "media.update": "its output gains path and drops key/checksum/status",
+  "media.listFolders": "an anonymous caller now answers 401 (unless anonymousList is \"all\")",
+  "media.remove": "a failed blob delete now fails the step with the blob store's error, instead of being logged and ignored",
+  "media.removeFolder": "a failed blob delete now fails the step; its result gains ids; run images.removeMany before it, not after",
+  "media.renameFolder": "renames metadata only; no blob moves and no path changes",
+  "images.attach": "gains available (false while a size still lacks a variant path, and such a size lists no path); no row is ever in state planned in an output; an attached variant carries its final width/height and path in every state",
+  "images.serve": "answers the size's current file and every file a format change or a prune retired, never 404 for either; a size that never rendered, or whose render failed for good, answers with the original's bytes and type instead of 404; any other file is 404",
+  "images.prune": "a pruned size's old path keeps answering with the original's bytes and type until the item is deleted, instead of 404 right away",
+  "images.generate": "renders for ready media items only, and a variant row can be in state planned before it is called",
   "insights.readManifest": "its output schema follows Manifest's two new fields, atomicScope and warnings",
   "events.listDead": "its items now carry pipeline and runId, and rows are no longer ordered across pipelines",
 };

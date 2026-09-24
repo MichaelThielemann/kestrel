@@ -1,0 +1,14 @@
+{
+  "name": "upgrade-fixture-media-delivery",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@michaelthielemann/kestrel": "^5.8.0",
+    "@michaelthielemann/kestrel-media-default": "^5.8.0",
+    "@michaelthielemann/kestrel-images-default": "^5.8.0",
+    "@michaelthielemann/kestrel-delivery-static": "^5.8.0",
+    "@michaelthielemann/kestrel-content-default": "^5.8.0",
+    "@michaelthielemann/kestrel-persistence-sqlite": "^5.8.0",
+    "@michaelthielemann/kestrel-authz-roles": "^5.8.0"
+  }
+}

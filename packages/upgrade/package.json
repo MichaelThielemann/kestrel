@@ -56,6 +56,7 @@
   },
   "devDependencies": {
     "@michaelthielemann/kestrel": "workspace:*",
+    "@michaelthielemann/kestrel-authz-roles": "workspace:*",
     "@michaelthielemann/kestrel-backup-blobstore": "workspace:*",
     "@michaelthielemann/kestrel-blobstore-s3": "workspace:*",
     "@michaelthielemann/kestrel-contracts": "workspace:*",

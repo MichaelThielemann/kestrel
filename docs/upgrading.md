@@ -135,6 +135,11 @@ Every finding's `docs` field links to one of the anchors below.
 | [`data/underscore-field-stored`](#model-underscore-field) | data | none (warning) | the `data` command counted a stored value under a `_`-prefixed content field |
 | [`steps/closed-event-input`](#steps-closed-event-input) | source | manual | an event-triggered pipeline's step closes its input schema |
 | [`modules/emits`](#modules-emits) | source | ask | a local module's heuristic `.emit(` calls, undeclared in `emits` |
+| [`modules/delivery-media`](#modules-delivery-media) | source | auto | `delivery-static`'s removed `media` option |
+| [`modules/media-public-path`](#modules-media-public-path) | source | auto (warning) | `images-default`'s `publicPath` not matching `media-default`'s |
+| [`pipelines/media-serve`](#pipelines-media-serve) | source | manual | `publicCopy` set with no pipeline serving it, or anonymous callers refused it |
+| [`runtime/authz-anonymous-floor`](#runtime-authz-anonymous-floor) | source | none (info) | `authz-roles` with a non-empty `anonymous` |
+| [`imports/removed-export`](#imports-removed-export) | source | manual | an import or call of a `delivery-static` export removed in 6.0.0 |
 | [`types/breaking-signatures`](#types-breaking-signatures) | source | none (info), always | type-level members a hand-built implementation must add |
 | [`responses/breaking-step-shapes`](#responses-breaking-step-shapes) | source | none (info) | a pipeline running a step whose response or manifest shape changed |
 | [`steps/ctx-done-terminal-output`](#steps-ctx-done-terminal-output) | source | none (info) | a local module calling `ctx.done()` |
@@ -239,14 +244,49 @@ can now reject the event payload.
 A local module raises an event from `setup()` (found heuristically via `.emit(` calls) without
 declaring it in `emits`. The default answer lists the names found.
 
+#### modules-delivery-media
+`delivery-static`'s `media` option (URL rewriting, copying media into the output prefix, reading
+`media_items`/`images_variants` directly) is removed in 6.0.0 — a config that still sets it fails
+validation. The fix removes `media`, sets `publicCopy: { prefix: <delivery-static's own prefix> }`
+on `media-default` and `images-default`, adds `reservedPaths: [<the old media.publicPath,
+normalised>]` to `delivery-static`, and carries a non-default `publicPath` over to both media
+modules. Falls back to manual, naming what it could not locate, when `reservedPaths` already has
+entries the tool cannot safely merge into, or `media-default` is not configured at all.
+
+#### modules-media-public-path
+`images-default`'s `publicPath` must match `media-default`'s exactly — no trailing slash, which a
+5.x regex allowed on either. A mismatch answers 404 for every image variant path.
+
+#### pipelines-media-serve
+`publicCopy` set on `media-default` or `images-default` (including one `modules/delivery-media`'s
+fix is about to add) needs a pipeline running `media.serve` / `images.serve`, or boot fails; the
+tool does not create pipeline files itself, so this stays manual, naming the steps and the HTTP
+trigger to add (`GET <publicPath>/:id/:name` and `GET <publicPath>/:id/variants/:file`). A separate
+finding fires when `authz-roles` is configured but its `anonymous` grants do not include
+`media.read`, since a pipeline declaring its serve step's output public then fails boot too.
+
+#### runtime-authz-anonymous-floor
+`authz-roles` with a non-empty `anonymous` list: a signed-in caller now also holds every permission
+`anonymous` grants, in `authz.require`, `can` and `describePipelineAccess` — a signed-in caller
+refused something an anonymous visitor could do before is served now.
+
+#### imports-removed-export
+`rewriteMedia`, `MediaMatch`, `MediaConfig` and `contentTypeByExtension` are no longer exported from
+`kestrel-delivery-static/impl`, and the startup key migration `migrateKeys` no longer exists. Custom
+code importing any of the former, or calling the latter, needs a by-hand rewrite: reach a media file
+through the API's own `path` field and set `publicCopy` on the media modules for a static copy.
+
 #### types-breaking-signatures
 `Deps`, `Introspection`, `PipelineDefinition["steps"]`, `ModuleManifest`, `FakePersistence`,
-`Manifest` and `Kestrel["contracts"]` all gained required members; only the consumer's own
-typecheck sees a violation in a hand-built implementation of one of them.
+`Manifest`, `Kestrel["contracts"]`, `Media` and `Images` all gained required members or new ones
+worth knowing about; only the consumer's own typecheck sees a violation in a hand-built
+implementation of one of them.
 
 #### responses-breaking-step-shapes
-A pipeline runs `redirects.lookup`, `media.upload`, `insights.readManifest` or `events.listDead`,
-each of which has a different 6.0.0 response or manifest shape; the finding names which one and how.
+A pipeline runs a step whose 6.0.0 response or manifest shape differs from 5.8's — `redirects.lookup`,
+`media.upload`, `media.get`, `media.list`, `media.update`, `media.listFolders`, `media.remove`,
+`media.removeFolder`, `media.renameFolder`, `images.attach`, `images.serve`, `images.prune`,
+`images.generate`, `insights.readManifest` or `events.listDead`; the finding names which one and how.
 
 #### steps-ctx-done-terminal-output
 A local module calls `ctx.done()`. A step whose early result does not match its `terminalOutput`

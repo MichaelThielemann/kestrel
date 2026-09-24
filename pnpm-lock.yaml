@@ -698,6 +698,9 @@ importers:
       '@michaelthielemann/kestrel':
         specifier: workspace:*
         version: link:../core
+      '@michaelthielemann/kestrel-authz-roles':
+        specifier: workspace:*
+        version: link:../authz-roles
       '@michaelthielemann/kestrel-backup-blobstore':
         specifier: workspace:*
         version: link:../backup-blobstore

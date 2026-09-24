@@ -9,7 +9,9 @@ import {
   insertPipelineStep,
   insertStepAfterEmitOutsideGroup,
   markStepBinary,
+  removeModuleConfigProperty,
   renameContentField,
+  replaceModuleConfigProperty,
   renameStringLiterals,
   replaceModuleListEntry,
   replaceModulesTsEntry,
@@ -145,6 +147,61 @@ describe("setModuleConfigProperties", () => {
     const source = 'export default defineConfig({ modules: [{ use: "kestrel-persistence-sqlite", config: { ...sqliteBase, busyTimeoutMs: 8000 } }], triggers: [] });\n';
     const edits = setModuleConfigProperties("kestrel.config.ts", source, { use: "kestrel-persistence-sqlite", assignments: { acquireTimeoutMs: "15000" } });
     expect(edits).toBeUndefined();
+  });
+});
+
+describe("removeModuleConfigProperty", () => {
+  it("removes a property in the middle, keeping the ones before and after intact", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { prefix: "", media: { publicPath: "/media" }, fallback: true } }], triggers: [] });\n';
+    const edit = removeModuleConfigProperty("kestrel.config.ts", source, { use: "kestrel-delivery-static", key: "media" });
+    expect(edit).toBeDefined();
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('config: { prefix: "", fallback: true }');
+  });
+
+  it("removes the last property, taking the preceding comma with it", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { prefix: "", media: { publicPath: "/media" } } }], triggers: [] });\n';
+    const edit = removeModuleConfigProperty("kestrel.config.ts", source, { use: "kestrel-delivery-static", key: "media" });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('config: { prefix: "" }');
+  });
+
+  it("removes the only property, leaving an empty config object", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { media: { publicPath: "/media" } } }], triggers: [] });\n';
+    const edit = removeModuleConfigProperty("kestrel.config.ts", source, { use: "kestrel-delivery-static", key: "media" });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain("config: {  }");
+  });
+
+  it("returns undefined when the entry, its config, or the key cannot be found", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { prefix: "" } }], triggers: [] });\n';
+    expect(removeModuleConfigProperty("kestrel.config.ts", source, { use: "kestrel-delivery-static", key: "media" })).toBeUndefined();
+    expect(removeModuleConfigProperty("kestrel.config.ts", source, { use: "nope", key: "media" })).toBeUndefined();
+    const noConfig = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static" }], triggers: [] });\n';
+    expect(removeModuleConfigProperty("kestrel.config.ts", noConfig, { use: "kestrel-delivery-static", key: "media" })).toBeUndefined();
+  });
+});
+
+describe("replaceModuleConfigProperty", () => {
+  it("replaces a property's key and value together when it is one of several", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { prefix: "site/", media: { publicPath: "/media" } } }], triggers: [] });\n';
+    const edit = replaceModuleConfigProperty("kestrel.config.ts", source, { use: "kestrel-delivery-static", fromKey: "media", toText: 'reservedPaths: ["/media"]' });
+    expect(edit).toBeDefined();
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('config: { prefix: "site/", reservedPaths: ["/media"] }');
+  });
+
+  it("replaces the only property without leaving a stray comma or brace", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { media: { publicPath: "/media" } } }], triggers: [] });\n';
+    const edit = replaceModuleConfigProperty("kestrel.config.ts", source, { use: "kestrel-delivery-static", fromKey: "media", toText: 'reservedPaths: ["/media"]' });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('config: { reservedPaths: ["/media"] }');
+  });
+
+  it("returns undefined when the entry, its config, or the key cannot be found", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "kestrel-delivery-static", config: { prefix: "" } }], triggers: [] });\n';
+    expect(replaceModuleConfigProperty("kestrel.config.ts", source, { use: "kestrel-delivery-static", fromKey: "media", toText: "x: 1" })).toBeUndefined();
+    expect(replaceModuleConfigProperty("kestrel.config.ts", source, { use: "nope", fromKey: "media", toText: "x: 1" })).toBeUndefined();
   });
 });
 
