@@ -84,6 +84,10 @@ function readingRenderer(content: Content) {
             names.push(String(speaker.name));
           }
         }
+        if (block.type === "page" && block.id !== undefined) {
+          const other = expectOk(await content.get("pages", block.id, input.locale === undefined ? {} : { locale: input.locale }));
+          names.push(typeof other?.title === "string" ? other.title : "");
+        }
         if (block.type === "speakers") {
           const listed = expectOk(await content.list("speakers", block.filter ?? {}, { sort: { name: "asc" } }));
           names.push(...listed.items.map((s) => String(s.name)));
@@ -352,6 +356,48 @@ describe("delivery/static dependencies: marking", () => {
     expectOk(await h.db.updateMany<StatusRow>(STATUS, { id: kontakt.id }, { depSet: null, state: "error" }));
     expectOk(await h.delivery.markDependents("lineups", ["nothing-reads-this"]));
     expect(await h.marked()).toEqual([`${ids.kontakt}/de`]);
+  });
+});
+
+describe("delivery/static dependencies: cycles and repeated build checks", () => {
+  it("two pages that show each other: saving one renders the other once, and that render marks nothing", async () => {
+    const h = await harness();
+    await seed(h);
+    const a = await h.page({ slug: "a", title: "A", status: "published", body: [] });
+    const b = await h.page({ slug: "b", title: "B", status: "published", body: [{ type: "page", id: a }] });
+    expectOk(await h.content.update("pages", a, { body: [{ type: "page", id: b }] }, { locale: "de" }));
+    expectOk(await h.delivery.publish("pages", a));
+    expectOk(await h.delivery.publish("pages", b));
+    expectOk(await h.content.update("pages", a, { title: "A2" }, { locale: "de" }));
+    expectOk(await h.delivery.publish("pages", a));
+    h.emitted.length = 0;
+    expectOk(await h.delivery.markDependents("pages", [a]));
+    expect(h.jobs()).toEqual([`${b}/de`]);
+    const calls = h.reading.calls.length;
+    expectOk(await h.delivery.republishOutput({ type: "pages", docId: b, locale: "de" }));
+    expect(h.reading.calls.slice(calls)).toEqual([`${b}/de`]);
+    expect(h.html("/b")).toContain("A2");
+    expect(h.emitted.filter((e) => e.name !== LLMS_STALE).map((e) => e.name)).toEqual([OUTPUT_STALE]);
+    expect(await h.marked()).toEqual([]);
+  });
+
+  it("two processes that see a new build both mark, and every output is rendered and the build stored", async () => {
+    const db = createFakePersistence();
+    const content = await createContentDefault(model, db);
+    const blobs = memoryBlobs();
+    const one = await harness({ render: "background", db, content, blobs });
+    const two = await harness({ render: "background", db, content, blobs });
+    const ids = await seed(one);
+    await one.settle();
+    const [first, second] = await Promise.all([one.delivery.checkBuild("build-9"), two.delivery.checkBuild("build-9")]);
+    expect(expectOk(first).changed || expectOk(second).changed).toBe(true);
+    await one.settle();
+    await two.settle();
+    expect(expectOk(await db.findOne<{ id: string; value: string }>(STATE, { id: "build" }))?.value).toBe("build-9");
+    expect(expectOk(await one.delivery.checkBuild("build-9"))).toEqual({ changed: false, marked: 0 });
+    expect(one.html("/programm")).toContain("Programm");
+    expect(one.html("/entwurf")).toBeNull();
+    expect((await one.row(ids.programm))?.depSet).not.toBeNull();
   });
 });
 
