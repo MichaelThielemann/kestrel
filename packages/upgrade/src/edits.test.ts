@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { applyEdits } from "./apply.ts";
-import { addModuleEmits, insertModuleListEntry, insertPipelineStep, markStepBinary, renameContentField, renameStringLiterals, setModuleConfigProperties, setStepRequired } from "./edits.ts";
+import { addModuleEmits, insertModuleListEntry, insertPipelineStep, markStepBinary, renameContentField, renameStringLiterals, replaceModuleListEntry, setModuleConfigProperties, setStepRequired } from "./edits.ts";
 import { removeDependency, setDependencyRange } from "./packageJson.ts";
 
 function parsePkg(text: string): { dependencies: Record<string, string> } {
@@ -225,5 +225,20 @@ describe("setStepRequired", () => {
     const edit = setStepRequired("module.ts", withRequired, "create", []);
     const { text } = applyEdits(withRequired, [edit!]);
     expect(text).toContain('required: []');
+  });
+});
+
+describe("replaceModuleListEntry", () => {
+  it("replaces the whole entry with a new use and config", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "kestrel-events-inmemory" }, { use: "kestrel-events-direct" }], triggers: [] });\n';
+    const edit = replaceModuleListEntry("kestrel.config.ts", source, { use: "kestrel-events-direct", newUse: "@michaelthielemann/kestrel-events-queue", config: '{ relayPipelines: ["publishPage"] }' });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('{ use: "@michaelthielemann/kestrel-events-queue", config: { relayPipelines: ["publishPage"] } }');
+    expect(text).not.toContain("events-direct");
+  });
+
+  it("returns undefined when the entry is not found", () => {
+    const source = 'export default defineConfig({ modules: [{ use: "kestrel-events-inmemory" }], triggers: [] });\n';
+    expect(replaceModuleListEntry("kestrel.config.ts", source, { use: "kestrel-events-direct", newUse: "kestrel-events-queue" })).toBeUndefined();
   });
 });

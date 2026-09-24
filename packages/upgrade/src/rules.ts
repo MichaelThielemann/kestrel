@@ -9,6 +9,7 @@ import { finding, KESTREL_RANGE, moduleEntry, packageJsonPath } from "./ruleHelp
 import { bootWrapRules } from "./ruleBootWraps.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { INFO_RULES } from "./ruleInfo.ts";
+import { queueOfferRule } from "./ruleQueueOffer.ts";
 import { underscoreFieldRules } from "./ruleUnderscoreField.ts";
 import { verifiedUserRule } from "./ruleVerifiedUser.ts";
 import { useToken } from "./useToken.ts";
@@ -174,6 +175,7 @@ export const DEFAULT_RULES: readonly Rule[] = [
   ...underscoreFieldRules,
   emitsRule,
   eventPayloadRule,
+  queueOfferRule,
   ...INFO_RULES,
 ];
 

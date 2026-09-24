@@ -1,0 +1,149 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
+import type { BootCheck, ModuleDefinition, PipelineDefinition } from "@michaelthielemann/kestrel";
+import { defineContract } from "@michaelthielemann/kestrel/defineContract";
+import { applyEdits } from "./apply.ts";
+import type { LoadedProject, RuleContext } from "./plugin.ts";
+import { readFileOrUndefined } from "./rules.ts";
+import { queueOfferRule } from "./ruleQueueOffer.ts";
+
+const PERSISTENCE = defineContract<{ x(): void }>()("persistence@1", ["x"]);
+
+function persistenceModule(): ModuleDefinition {
+  return { name: "persistence/sqlite", provides: [PERSISTENCE], requires: [], configSchema: z.object({}), async setup() { return {}; } };
+}
+
+let dir: string;
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-queue-offer-"));
+});
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true });
+});
+
+function contextFor(project: LoadedProject, answers: ReadonlyMap<string, string> = new Map()): RuleContext {
+  const check: BootCheck = { errors: [], warnings: [], notChecked: [] };
+  return { root: dir, scratch: dir, project, bootCheck: check, readFile: readFileOrUndefined, answers };
+}
+
+async function directProject(options: { sqliteFile?: string; publishPipeline?: boolean } = {}): Promise<LoadedProject> {
+  const configFile = join(dir, "kestrel.config.ts");
+  const configSource = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-events-inmemory" }, { use: "@michaelthielemann/kestrel-events-direct" }, { use: "@michaelthielemann/kestrel-persistence-sqlite" }], triggers: [] });\n';
+  await writeFile(configFile, configSource);
+  await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-events-direct": "^6.0.0" } }, null, 2));
+
+  const createPageFile = join(dir, "createPage.ts");
+  const createPageSteps = options.publishPipeline ? ["content.create", "events.emit:page.created"] : ["content.create"];
+  await writeFile(createPageFile, `definePipeline({ name: "createPage", steps: [${createPageSteps.map((s) => `"${s}"`).join(", ")}] });\n`);
+  const publishPageFile = join(dir, "publishPage.ts");
+  await writeFile(publishPageFile, 'definePipeline({ name: "publishPage", steps: ["delivery.publish:pages"] });\n');
+
+  const pipelines: PipelineDefinition[] = [
+    { name: "createPage", steps: createPageSteps },
+    { name: "publishPage", steps: ["delivery.publish:pages"] },
+  ];
+
+  return {
+    input: {
+      config: {
+        modules: [
+          { use: "@michaelthielemann/kestrel-events-inmemory", config: {} },
+          { use: "@michaelthielemann/kestrel-events-direct", config: {} },
+          { use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: options.sqliteFile ?? "./data/kestrel.db" } },
+        ],
+        triggers: [
+          { http: "POST /pages", pipeline: "createPage" },
+          { event: "page.created", pipeline: "publishPage" },
+        ],
+      },
+      modules: [persistenceModule()],
+      pipelines,
+    },
+    kind: "backend",
+    configFile,
+    moduleFiles: new Map(),
+    pipelineFiles: new Map([["createPage", createPageFile], ["publishPage", publishPageFile]]),
+  };
+}
+
+describe("offer/event-queue", () => {
+  it("does not fire once the project is already on the queue", async () => {
+    const p = await directProject();
+    p.input.config.modules = p.input.config.modules.filter((m) => !m.use.includes("events-direct"));
+    expect(await queueOfferRule.check(contextFor(p))).toEqual([]);
+  });
+
+  it("reports the unmet conditions when storage is not durable", async () => {
+    const p = await directProject({ sqliteFile: ":memory:" });
+    const findings = await queueOfferRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain(":memory:");
+  });
+
+  it("reports the unmet conditions when nothing emits an event", async () => {
+    const p = await directProject();
+    p.input.config.triggers = p.input.config.triggers.filter((t) => !("event" in t));
+    const findings = await queueOfferRule.check(contextFor(p));
+    expect(findings[0]?.message).toContain("no event trigger");
+  });
+
+  it("offers the switch, with default no, when every condition is met", async () => {
+    const p = await directProject();
+    const findings = await queueOfferRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("ask");
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : undefined).toBe("no");
+  });
+
+  it("asks idempotent per consumer event pipeline once switch-to-queue is yes", async () => {
+    const p = await directProject();
+    const findings = await queueOfferRule.check(contextFor(p, new Map([["switch-to-queue", "yes"]])));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.question : undefined).toBe("idempotent:publishPage");
+  });
+
+  it("withdraws the switch once an idempotent answer is no", async () => {
+    const p = await directProject();
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "no"]]);
+    expect(await queueOfferRule.check(contextFor(p, answers))).toEqual([]);
+  });
+
+  it("asks relay-pipelines, defaulting to pipelines that publish or unpublish", async () => {
+    const p = await directProject();
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"]]);
+    const findings = await queueOfferRule.check(contextFor(p, answers));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : undefined).toBe("publishPage");
+  });
+
+  it("applies the codemod once relay-pipelines is answered: module swap, relayPipelines, events.relay after the emit", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
+    const findings = await queueOfferRule.check(contextFor(p, answers));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+
+    const configSource = readFileOrUndefined(p.configFile)!;
+    const configEdits = edits.filter((e) => e.file === p.configFile);
+    const { text: configText } = applyEdits(configSource, configEdits);
+    expect(configText).toContain('@michaelthielemann/kestrel-events-queue", config: { relayPipelines: ["publishPage"] }');
+    expect(configText).not.toContain("events-direct");
+
+    const pkgFile = join(dir, "package.json");
+    const pkgSource = readFileOrUndefined(pkgFile)!;
+    const pkgEdits = edits.filter((e) => e.file === pkgFile);
+    const { text: pkgText } = applyEdits(pkgSource, pkgEdits);
+    expect(pkgText).toContain("@michaelthielemann/kestrel-events-queue");
+    expect(pkgText).not.toContain("events-direct");
+
+    const createPageFile = join(dir, "createPage.ts");
+    const createPageSource = readFileOrUndefined(createPageFile)!;
+    const createPageEdits = edits.filter((e) => e.file === createPageFile);
+    const { text: createPageText } = applyEdits(createPageSource, createPageEdits);
+    expect(createPageText).toContain('"events.emit:page.created", "events.relay"');
+  });
+});

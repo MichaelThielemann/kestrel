@@ -701,6 +701,15 @@ importers:
       '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@michaelthielemann/kestrel-events-direct':
+        specifier: workspace:*
+        version: link:../events-direct
+      '@michaelthielemann/kestrel-events-inmemory':
+        specifier: workspace:*
+        version: link:../events-inmemory
+      '@michaelthielemann/kestrel-events-queue':
+        specifier: workspace:*
+        version: link:../events-queue
       '@michaelthielemann/kestrel-persistence-sqlite':
         specifier: workspace:*
         version: link:../persistence-sqlite

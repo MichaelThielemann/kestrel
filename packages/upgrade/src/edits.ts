@@ -49,6 +49,23 @@ function entryLiteral(quote: '"' | "'", use: string, config?: string): string {
   return config === undefined ? `{ use: ${quote}${use}${quote} }` : `{ use: ${quote}${use}${quote}, config: ${config} }`;
 }
 
+export interface ReplaceModuleEntryOptions {
+  use: string;
+  newUse: string;
+  config?: string;
+}
+
+/** Replaces a module-list entry named `use` with a new `{ use: newUse, config }` literal; `undefined` when the array or the entry cannot be found. */
+export function replaceModuleListEntry(file: string, source: string, options: ReplaceModuleEntryOptions): Edit | undefined {
+  const array = moduleListArray(source);
+  if (array === undefined) return undefined;
+  const entry = elements(array).find((e) => entryUse(e) === options.use);
+  if (entry === undefined) return undefined;
+  const quote = quoteOf(source, entry);
+  const { start, end } = span(entry);
+  return { file, start, end, text: entryLiteral(quote, options.newUse, options.config) };
+}
+
 export interface InsertModuleEntryOptions {
   anchorUse: string;
   position: "before" | "after";
