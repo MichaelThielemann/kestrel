@@ -33,6 +33,22 @@ export interface LoadResult {
   issues: LoadIssue[];
 }
 
+/** One content field the `data` command's underscore-field counter reads, whether it starts with `_` or not; `localized` decides whether it counts one column or one per locale. */
+export interface DataContentField {
+  localized?: boolean;
+}
+
+/** One content type the `data` command's underscore-field counter reads; `fields` in the shape stored in `persistence@1`, one column (or one per locale) per field. */
+export interface DataContentType {
+  fields: Record<string, DataContentField>;
+}
+
+/** The content model the `data` command's underscore-field counter needs: every type's fields and whether each is localized, plus the project's locales. */
+export interface DataContentModel {
+  types: Record<string, DataContentType>;
+  locales?: readonly string[];
+}
+
 export interface RuleContext {
   root: string;
   scratch: string;
@@ -100,6 +116,13 @@ export interface UpgradePlugin {
   locateSteps?: StepListLocator;
   /** Locates a content type's `fields` object literal directly, for a project layout where it does not sit at `config.types.<typeName>.fields` on a module-list entry; the built-in search runs when this is absent. */
   locateModelFields?: ModelFieldsLocator;
+  /**
+   * Supplies the content model the `data` command's underscore-field counter needs, for a project
+   * layout where it cannot be read from a `content-default` module's config on `kestrel.config.ts`.
+   * `undefined` (the hook itself, or its result) skips underscore-field counting for this project
+   * without failing the rest of the `data` command, which stays SQLite-only either way.
+   */
+  dataModel?(root: string): Promise<DataContentModel | undefined>;
 }
 
 export interface RunUpgradeCliOptions {

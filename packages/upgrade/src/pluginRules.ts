@@ -1,6 +1,18 @@
 import type { LoadIssue, Rule, UpgradePlugin } from "./plugin.ts";
 import type { Finding } from "./report.ts";
 
+export async function detectPlugin(plugins: readonly UpgradePlugin[], root: string): Promise<{ plugin?: UpgradePlugin; issues: LoadIssue[] }> {
+  const issues: LoadIssue[] = [];
+  for (const plugin of plugins) {
+    try {
+      if (await plugin.detect(root)) return { plugin, issues };
+    } catch (err) {
+      issues.push({ message: `plugin "${plugin.kind}" detect() threw: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+  return { issues };
+}
+
 export function overrideConflicts(plugins: readonly UpgradePlugin[]): LoadIssue[] {
   const owners = new Map<string, string>();
   const conflicts = new Set<string>();

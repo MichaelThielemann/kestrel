@@ -13,7 +13,7 @@ import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { loadBackendProject, loadIssuesAsFindings, type LoadIssue, type LoadResult } from "./project.ts";
 import type { LoadedProject, Rule, RunUpgradeCliOptions, UpgradePlugin } from "./plugin.ts";
-import { mergeRules, overrideConflicts } from "./pluginRules.ts";
+import { detectPlugin, mergeRules, overrideConflicts } from "./pluginRules.ts";
 import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity, type UpgradeReport } from "./report.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
 import { sandboxBootInput, type SandboxTable } from "./sandbox.ts";
@@ -31,18 +31,6 @@ interface ResolvedProject {
   locateModelFields?: ModelFieldsLocator;
   notices: Finding[];
   reload: (scratchDir: string) => Promise<LoadResult>;
-}
-
-async function detectPlugin(plugins: readonly UpgradePlugin[], root: string): Promise<{ plugin?: UpgradePlugin; issues: LoadIssue[] }> {
-  const issues: LoadIssue[] = [];
-  for (const plugin of plugins) {
-    try {
-      if (await plugin.detect(root)) return { plugin, issues };
-    } catch (err) {
-      issues.push({ message: `plugin "${plugin.kind}" detect() threw: ${err instanceof Error ? err.message : String(err)}` });
-    }
-  }
-  return { issues };
 }
 
 async function resolveProject(root: string, entry: string | undefined, scratchDir: string, plugins: readonly UpgradePlugin[], cache: Map<string, unknown>): Promise<ResolvedProject> {
@@ -535,14 +523,14 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
   return exitCodeFor(adjustedReport.findings, failOn);
 }
 
-async function runData(args: ParsedArgs, stdout: (line: string) => void, stderr: (line: string) => void): Promise<number> {
+async function runData(args: ParsedArgs, stdout: (line: string) => void, stderr: (line: string) => void, options: RunUpgradeCliOptions): Promise<number> {
   const db = stringFlag(args, "db");
   if (db === undefined) {
     stderr("data requires --db <sqlite file>");
     return 2;
   }
   const root = resolve(stringFlag(args, "root") ?? ".");
-  const result = await runDataStep(resolve(db), root);
+  const result = await runDataStep(resolve(db), root, options.plugins ?? []);
   if (result.error !== undefined) {
     stderr(result.error);
     return result.exitCode;
@@ -564,7 +552,7 @@ export async function runCli(argv: readonly string[], options: RunUpgradeCliOpti
   try {
     if (command === "check") return await runCheck(args, stdout, options);
     if (command === "fix") return await runFix(args, stdout, stderr, options);
-    if (command === "data") return await runData(args, stdout, stderr);
+    if (command === "data") return await runData(args, stdout, stderr, options);
   } catch (err) {
     stderr(err instanceof Error ? err.message : String(err));
     return 2;

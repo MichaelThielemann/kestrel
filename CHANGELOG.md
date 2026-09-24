@@ -328,6 +328,17 @@ Net changes since 5.8.1.
   verify and all-or-nothing combine primitives (`applyEdits`, `verifiesAfterEdit`,
   `combineEditParts`), plus the AST reading primitives a locator is written with, are published from
   a new `@michaelthielemann/kestrel-upgrade/codemods` export.
+- `kestrel-upgrade`'s plugin API gains three more pieces closing gaps found against its first real
+  host: `insertStepAfterEmitOutsideGroup` (and `emitStepIsLocatable`) now take the same optional
+  `locateSteps` as `insertPipelineStep`/`renameContentField`, threaded from `RuleContext` the same
+  way, and both are published from `@michaelthielemann/kestrel-upgrade/codemods` alongside them.
+  `--data-report`'s parsed content now lands in a separate `LoadedProject.dataReport`, instead of
+  overwriting `LoadedProject.data`, so a plugin's own `load()`-stored data survives a `data`-report
+  run (`model/underscore-field` reads its stored counts from `dataReport`). `UpgradePlugin` gains
+  `dataModel?(root)`, supplying the typed content model (`DataContentModel`/`DataContentType`/
+  `DataContentField`) the `data` command's underscore-field counter needs for a project layout where
+  it cannot be read from a `content-default` module's config on `kestrel.config.ts`; the counter
+  itself, and the rest of the `data` command, stays SQLite-only either way.
 
 ### Changed
 

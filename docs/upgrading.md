@@ -360,6 +360,12 @@ directory) with only the built-in rules.
   call's options object). `RuleContext` carries the active plugin's own locators through, and
   `pipelines/verified-user` / `model/underscore-field` pass them to the codemod instead of only ever
   searching the built-in shape; absent, both fall back to the exact built-in search unchanged.
+- `dataModel?(root): Promise<DataContentModel | undefined>` — supplies the content model the `data`
+  command's underscore-field counter needs (`types`, each with a `fields` map of `{ localized? }`,
+  plus optional `locales`), for a project layout where it cannot be read from a `content-default`
+  module's config on `kestrel.config.ts`. Consulted through the same `detect()` used for `check`/`fix`;
+  `undefined`, from the hook or its result, skips underscore-field counting for this project without
+  failing the rest of the `data` command, which stays SQLite-only either way.
 - `questions?: readonly Question[]` — reserved for a plugin's own standalone questions.
 
 `RuleContext` (passed to every `Rule.check()`) additionally carries `ownsPackages`, `locateSteps` and

@@ -12,6 +12,8 @@ import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { trackTempDir, untrackTempDir } from "./cleanup.ts";
 import { isRecord } from "./guards.ts";
+import type { DataContentModel, UpgradePlugin } from "./plugin.ts";
+import { detectPlugin } from "./pluginRules.ts";
 import type { Finding, UpgradeReport } from "./report.ts";
 import { summarize } from "./report.ts";
 import { useToken } from "./useToken.ts";
@@ -124,38 +126,54 @@ async function queueFindings(db: Persistence): Promise<{ findings: Finding[]; er
   return { findings };
 }
 
-async function contentDefaultConfig(root: string): Promise<unknown> {
+function contentDefaultModel(config: unknown): DataContentModel | undefined {
+  if (!isRecord(config) || !isRecord(config.types)) return undefined;
+  const types: Record<string, { fields: Record<string, { localized?: boolean }> }> = {};
+  for (const [typeName, type] of Object.entries(config.types)) {
+    if (!isRecord(type) || !isRecord(type.fields)) continue;
+    const fields: Record<string, { localized?: boolean }> = {};
+    for (const [field, def] of Object.entries(type.fields)) fields[field] = { localized: isRecord(def) && def.localized === true };
+    types[typeName] = { fields };
+  }
+  const locales = config.locales;
+  return { types, ...(Array.isArray(locales) ? { locales: locales.filter((l): l is string => typeof l === "string") } : {}) };
+}
+
+async function builtInDataModel(root: string): Promise<DataContentModel | undefined> {
   try {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
-    return config.modules.find((m) => useToken(m.use) === "content-default")?.config;
+    return contentDefaultModel(config.modules.find((m) => useToken(m.use) === "content-default")?.config);
   } catch {
     return undefined;
   }
 }
 
-function contentFieldsOf(config: unknown): Array<{ typeName: string; field: string; localized: boolean }> {
+async function activeDataModel(root: string, plugins: readonly UpgradePlugin[]): Promise<DataContentModel | undefined> {
+  const { plugin } = await detectPlugin(plugins, root);
+  if (plugin?.dataModel === undefined) return builtInDataModel(root);
+  try {
+    return await plugin.dataModel(root);
+  } catch {
+    return undefined;
+  }
+}
+
+function contentFieldsOf(model: DataContentModel): Array<{ typeName: string; field: string; localized: boolean }> {
   const out: Array<{ typeName: string; field: string; localized: boolean }> = [];
-  if (!isRecord(config) || !isRecord(config.types)) return out;
-  for (const [typeName, type] of Object.entries(config.types)) {
-    if (!isRecord(type) || !isRecord(type.fields)) continue;
-    for (const [field, def] of Object.entries(type.fields)) out.push({ typeName, field, localized: isRecord(def) && def.localized === true });
+  for (const [typeName, type] of Object.entries(model.types)) {
+    for (const [field, def] of Object.entries(type.fields)) out.push({ typeName, field, localized: def.localized === true });
   }
   return out;
 }
 
-function declaredFieldsByType(config: unknown): Map<string, Set<string>> {
+function declaredFieldsByType(model: DataContentModel): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
-  if (!isRecord(config) || !isRecord(config.types)) return out;
-  for (const [typeName, type] of Object.entries(config.types)) {
-    if (!isRecord(type) || !isRecord(type.fields)) continue;
-    out.set(typeName, new Set(Object.keys(type.fields)));
-  }
+  for (const [typeName, type] of Object.entries(model.types)) out.set(typeName, new Set(Object.keys(type.fields)));
   return out;
 }
 
-function localesOf(config: unknown): string[] {
-  const locales = isRecord(config) ? config.locales : undefined;
-  return Array.isArray(locales) ? locales.filter((l): l is string => typeof l === "string") : [];
+function localesOf(model: DataContentModel): string[] {
+  return model.locales === undefined ? [] : [...model.locales];
 }
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -184,12 +202,12 @@ async function countColumn(db: Persistence, typeName: string, column: string): P
   }
 }
 
-async function underscoreFieldCounts(file: string, db: Persistence, contentConfig: unknown): Promise<Record<string, Record<string, number | null>>> {
-  const locales = localesOf(contentConfig);
-  const declaredFields = declaredFieldsByType(contentConfig);
+async function underscoreFieldCounts(file: string, db: Persistence, contentModel: DataContentModel): Promise<Record<string, Record<string, number | null>>> {
+  const locales = localesOf(contentModel);
+  const declaredFields = declaredFieldsByType(contentModel);
   const columnsByType = new Map<string, Set<string> | undefined>();
   const counts: Record<string, Record<string, number | null>> = {};
-  for (const { typeName, field, localized } of contentFieldsOf(contentConfig)) {
+  for (const { typeName, field, localized } of contentFieldsOf(contentModel)) {
     const shadowField = field.startsWith("_") ? field : `_${field}`;
     const isOrphanProbe = shadowField !== field;
     if (isOrphanProbe && declaredFields.get(typeName)?.has(shadowField)) continue;
@@ -240,7 +258,7 @@ function underscoreFieldFindings(counts: Record<string, Record<string, number | 
 }
 
 /** Copies `dbFile` (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_check`, then reads it through the project's own persistence-sqlite; the given file is never opened after the copy. The copy directory is always removed before returning, whether the step succeeds or refuses. */
-export async function runDataStep(dbFile: string, root: string): Promise<DataStepResult> {
+export async function runDataStep(dbFile: string, root: string, plugins: readonly UpgradePlugin[] = []): Promise<DataStepResult> {
   const dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-data-"));
   trackTempDir(dir);
   try {
@@ -261,8 +279,8 @@ export async function runDataStep(dbFile: string, root: string): Promise<DataSte
     try {
       queued = await queueFindings(db);
       if (queued.error !== undefined) return { exitCode: 2, error: queued.error };
-      const contentConfig = await contentDefaultConfig(root);
-      counts = contentConfig === undefined ? {} : await underscoreFieldCounts(copy, db, contentConfig);
+      const contentModel = await activeDataModel(root, plugins);
+      counts = contentModel === undefined ? {} : await underscoreFieldCounts(copy, db, contentModel);
     } finally {
       db.close();
     }

@@ -6,8 +6,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createPersistenceSqlite } from "@michaelthielemann/kestrel-persistence-sqlite/impl";
 import { runDataStep } from "./data.ts";
+import { runUpgradeCli } from "./plugin.ts";
+import type { UpgradePlugin } from "./plugin.ts";
+import type { UpgradeReport } from "./report.ts";
 
 const createdCopyDirs: string[] = [];
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -54,6 +58,13 @@ async function contentProjectRoot(config: Record<string, unknown>): Promise<stri
   projectRoots.push(root);
   await writeFile(join(root, "package.json"), JSON.stringify({ name: "tmp", type: "module" }));
   await writeFile(join(root, "kestrel.config.ts"), `export default { modules: [{ use: "@michaelthielemann/kestrel-content-default", config: ${JSON.stringify(config)} }], triggers: [] };\n`);
+  return root;
+}
+
+async function pluginProjectRoot(): Promise<string> {
+  const root = await mkdtemp(join(PROJECT_ROOT, "__fixtures__", ".tmp-data-plugin-test-"));
+  projectRoots.push(root);
+  await writeFile(join(root, "package.json"), JSON.stringify({ name: "tmp", type: "module" }));
   return root;
 }
 
@@ -231,5 +242,80 @@ describe("runDataStep: underscore-field counts", () => {
     expect(result.exitCode).toBe(0);
     expect(result.report?.underscoreFields).toEqual({ "page._hint": { unlocalized: 1 } });
     expect(result.report?.findings).toEqual([expect.objectContaining({ rule: "data/underscore-field-stored", where: { path: "page._hint" } })]);
+  });
+});
+
+describe("runDataStep: underscore-field counts for a plugin project", () => {
+  it("counts stored values using a plugin's dataModel hook, without a content-default module", async () => {
+    const root = await pluginProjectRoot();
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { _hint: "string" });
+    await db.createOne("page", { id: "1", _hint: "legacy value" });
+    db.close();
+    const plugin: UpgradePlugin = {
+      kind: "test-plugin",
+      detect: (candidate) => candidate === root,
+      load: () => Promise.resolve({ issues: [] }),
+      dataModel: () => Promise.resolve({ types: { page: { fields: { _hint: {} } } } }),
+    };
+    const result = await runDataStep(file, root, [plugin]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.underscoreFields).toEqual({ "page._hint": { unlocalized: 1 } });
+    expect(result.report?.findings).toEqual([expect.objectContaining({ rule: "data/underscore-field-stored" })]);
+  });
+
+  it("skips underscore-field counting when the plugin's dataModel hook returns undefined", async () => {
+    const root = await pluginProjectRoot();
+    const file = join(dir, "kestrel.db");
+    await makeDb(file, [{ id: "1", name: "page.created", pipeline: "publishPage", state: "done" }]);
+    const plugin: UpgradePlugin = {
+      kind: "test-plugin",
+      detect: (candidate) => candidate === root,
+      load: () => Promise.resolve({ issues: [] }),
+      dataModel: () => Promise.resolve(undefined),
+    };
+    const result = await runDataStep(file, root, [plugin]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.underscoreFields).toEqual({});
+  });
+
+  it("falls back to the built-in content-default search when the active plugin declares no dataModel hook", async () => {
+    const root = await contentProjectRoot({ types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } });
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { _hint: "string" });
+    await db.createOne("page", { id: "1", _hint: "legacy value" });
+    db.close();
+    const plugin: UpgradePlugin = {
+      kind: "test-plugin",
+      detect: (candidate) => candidate === root,
+      load: () => Promise.resolve({ issues: [] }),
+    };
+    const result = await runDataStep(file, root, [plugin]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.underscoreFields).toEqual({ "page._hint": { unlocalized: 1 } });
+  });
+});
+
+describe("the data CLI command with a registered plugin", () => {
+  it("passes registered plugins through to runDataStep, so a plugin's dataModel hook is consulted", async () => {
+    const root = await pluginProjectRoot();
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { _hint: "string" });
+    await db.createOne("page", { id: "1", _hint: "legacy value" });
+    db.close();
+    const plugin: UpgradePlugin = {
+      kind: "test-plugin",
+      detect: (candidate) => candidate === root,
+      load: () => Promise.resolve({ issues: [] }),
+      dataModel: () => Promise.resolve({ types: { page: { fields: { _hint: {} } } } }),
+    };
+    const lines: string[] = [];
+    const code = await runUpgradeCli(["data", "--root", root, "--db", file, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
+    expect(code).toBe(0);
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    expect(report.underscoreFields).toEqual({ "page._hint": { unlocalized: 1 } });
   });
 });
