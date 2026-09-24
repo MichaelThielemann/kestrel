@@ -688,7 +688,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         continue;
       }
       const rendered = await renderVariant(mediaRow, size, row, original, touch);
-      if (isErr(rendered)) return rendered;
+      if (isErr(rendered)) {
+        if ([...byName.values()].some((stored) => stored.state === "planned")) schedulePlacement(mediaId);
+        return rendered;
+      }
       if (rendered.value !== null) results.push(rendered.value);
     }
 
@@ -700,27 +703,32 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const mediaId = mediaRow.id;
     const attempt = await renderWithin(original, size, { width: row.width, height: row.height, format: row.format });
     const attempts = row.attempts + 1;
-    if (isErr(attempt)) {
-      const patch: Partial<Variant> = row.state === "planned" ? { error: attempt.error.message } : { state: attempts >= maxAttempts ? "failed" : "error", attempts, error: attempt.error.message, updatedAt: now() };
+    const recordFailure = async (message: string): Promise<Result<Variant, KestrelError>> => {
+      const patch: Partial<Variant> = row.state === "planned" ? { error: message } : { state: attempts >= maxAttempts ? "failed" : "error", attempts, error: message, updatedAt: now() };
       const recorded = await db.updateMany<Variant>(VARIANTS, { id: row.id, key: row.key, spec: row.spec, state: row.state }, patch);
       if (isErr(recorded)) return recorded;
       const next: Variant = { ...row, ...patch };
       if (next.state === "error") logger.error(`images: variant ${size.name} for media/${mediaId} failed, attempt ${next.attempts}`, { mediaId, size: size.name, error: next.error });
       if (next.state === "failed") logger.error(`images: variant ${size.name} for media/${mediaId} gave up after ${next.attempts} attempts`, { mediaId, size: size.name, error: next.error });
       return ok(next);
-    }
+    };
+    if (isErr(attempt)) return recordFailure(attempt.error.message);
 
     touch();
     const rendered = attempt.value;
     const file = fileOf(row);
+    const failWrite = async (error: KestrelError): Promise<Result<Variant | null, KestrelError>> => {
+      const recorded = await recordFailure(error.message);
+      return isErr(recorded) ? recorded : err(error);
+    };
     const stored = await blobs.put(row.key, rendered.data, { contentType: rendered.contentType });
-    if (isErr(stored)) return stored;
+    if (isErr(stored)) return failWrite(stored.error);
     const writeCopy = async (): Promise<Result<void, KestrelError>> => {
       if (config.publicCopy === undefined) return ok(undefined);
       return blobs.put(copyKey(mediaId, file), rendered.data, { contentType: rendered.contentType });
     };
     const copied = await writeCopy();
-    if (isErr(copied)) return copied;
+    if (isErr(copied)) return failWrite(copied.error);
 
     const donePatch: Partial<Variant> = { state: "done", bytes: rendered.data.byteLength, attempts, error: null, updatedAt: now() };
     const committed = await db.updateMany<Variant>(VARIANTS, { id: row.id, key: row.key, spec: row.spec, state: row.state }, donePatch);
@@ -1032,12 +1040,14 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   }
 
   async function readyEligibleCount(): Promise<Result<number, KestrelError>> {
-    let n = 0;
-    const walked = await eachRow<MediaRow>(config.media.collection, { status: "ready" }, async (row) => {
-      if (eligible(row.contentType)) n += 1;
-      return ok(undefined);
-    });
-    if (isErr(walked)) return walked;
+    const images = await db.count(config.media.collection, { status: "ready", contentType: { like: "image/%" } });
+    if (isErr(images)) return images;
+    let n = images.value;
+    for (const excluded of ["image/svg+xml", "image/gif"]) {
+      const count = await db.count(config.media.collection, { status: "ready", contentType: excluded });
+      if (isErr(count)) return count;
+      n -= count.value;
+    }
     return ok(n);
   }
 
@@ -1139,19 +1149,14 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const stalePlanned = await db.findMany<Variant>(VARIANTS, { state: "planned" }, { limit: REPAIR_SAMPLE, sort: { updatedAt: "asc" } });
       if (isErr(stalePlanned)) return stalePlanned;
       const ids = new Set(stalePlanned.value.items.map((row) => row.mediaId));
-      const orphanCutoff = now() - NEW_ITEM_WINDOW_MS;
-      for (let offset = 0; ids.size < REPAIR_SAMPLE; offset += PAGE) {
-        const page = await db.findMany<MediaRow & { createdAt?: number }>(config.media.collection, { status: "ready" }, { sort: { id: "asc" }, limit: PAGE, offset });
-        if (isErr(page)) return page;
-        for (const row of page.value.items) {
-          if (!eligible(row.contentType)) continue;
-          if (typeof row.createdAt === "number" && row.createdAt < orphanCutoff) continue;
-          const has = await db.count(VARIANTS, { mediaId: row.id });
-          if (isErr(has)) return has;
-          if (has.value === 0) ids.add(row.id);
-        }
-        if (page.value.items.length < PAGE) break;
-      }
+      const recent = await eachRow<MediaRow>(config.media.collection, { status: "ready", createdAt: { gte: now() - NEW_ITEM_WINDOW_MS } }, async (row) => {
+        if (ids.size >= REPAIR_SAMPLE || !eligible(row.contentType)) return ok(undefined);
+        const has = await db.count(VARIANTS, { mediaId: row.id });
+        if (isErr(has)) return has;
+        if (has.value === 0) ids.add(row.id);
+        return ok(undefined);
+      });
+      if (isErr(recent)) return recent;
       const list = [...ids].slice(0, REPAIR_SAMPLE);
       const placedIds: string[] = [];
       const changedIds: string[] = [];

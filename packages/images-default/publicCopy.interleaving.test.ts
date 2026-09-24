@@ -309,6 +309,16 @@ describe("images/default publicCopy: images.syncPublic against the lifecycle", {
     expect(hero.map((row) => nameOf(row.key)), label).toEqual(["hero.webp"]);
   };
 
+  async function reformattableWithStrayAtTheNewPath(): Promise<World> {
+    const w = await reformattable();
+    w.blobs.blobs.set(`site/media/${w.id}/variants/hero.webp`, { data: new Uint8Array([3, 3]), contentType: "image/webp" });
+    return w;
+  }
+
+  it("a format change onto a path that held a stray file keeps its new path answering whichever gap of the sync it lands in", async () => {
+    await forEveryGap(reformattableWithStrayAtTheNewPath, syncByWriter, planByOther, answersOldAndNewPaths);
+  });
+
   it("a format change keeps the old path answering whichever gap of the sync it lands in", async () => {
     await forEveryGap(reformattable, syncByWriter, planByOther, answersOldAndNewPaths);
   });

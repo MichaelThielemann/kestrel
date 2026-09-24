@@ -43,11 +43,11 @@ interface World {
   open(overrides?: Partial<Config>, render?: Renderer): Promise<Images>;
 }
 
-async function world(config: Partial<Config> = {}, render: Renderer = fixedRenderer): Promise<World> {
+async function world(config: Partial<Config> = {}, render: Renderer = fixedRenderer, clock: () => number = () => 1000): Promise<World> {
   const blobs = memoryBlobstore();
   const db = createFakePersistence();
   expectOk(await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", size: "number", width: "number", height: "number", createdAt: "number" }));
-  const open = (overrides: Partial<Config> = {}, r: Renderer = render): Promise<Images> => createImages({ ...baseConfig, ...config, ...overrides }, { blobs, db, logger: noLogger, render: r }, () => 1000);
+  const open = (overrides: Partial<Config> = {}, r: Renderer = render): Promise<Images> => createImages({ ...baseConfig, ...config, ...overrides }, { blobs, db, logger: noLogger, render: r }, clock);
   return { blobs, db, images: await open(), open };
 }
 
@@ -386,5 +386,88 @@ describe("images/default: one item with a missing original", () => {
     const job = expectOk(await w.db.findMany<Job>(JOBS, {})).items[0]!;
     expect(job.state).toBe("done");
     expect(job.failed).toBe(1);
+  });
+});
+
+describe("images/default: a variant write that fails", () => {
+  it("counts an attempt each time its copy cannot be written, so the size gives up after maxAttempts", async () => {
+    const w = await world({ maxAttempts: 2 });
+    await seed(w, "m1", await jpeg(1000, 600));
+    expectOk(await w.images.plan(["m1"]));
+    const put = w.blobs.put.bind(w.blobs);
+    w.blobs.put = async (k, d, o) => (k.startsWith("site/") ? err(failure("TRANSIENT", "down")) : put(k, d, o));
+    expectErr(await w.images.generate("m1"), "TRANSIENT");
+    expect((await rowsOf(w, "m1")).map((r) => [r.state, r.attempts])).toEqual([["error", 1]]);
+    expectErr(await w.images.generate("m1"), "TRANSIENT");
+    expect((await rowsOf(w, "m1")).map((r) => [r.state, r.attempts])).toEqual([["failed", 2]]);
+    expect(expectOk(await w.images.generate("m1")).map((r) => r.state)).toEqual(["failed"]);
+    expect(w.blobs.blobs.get("site/media/m1/variants/thumb.webp")?.contentType).toBe("image/jpeg");
+  });
+
+  it("an inline render whose copy cannot be written leaves the size to the background loop, which places it", async () => {
+    const w = await world();
+    await seed(w, "m1", await jpeg(1000, 600));
+    const put = w.blobs.put.bind(w.blobs);
+    let failing = true;
+    w.blobs.put = async (k, d, o) => (failing && k.startsWith("site/") ? err(failure("TRANSIENT", "down")) : put(k, d, o));
+    expectErr(await w.images.generate("m1"), "TRANSIENT");
+    expect((await rowsOf(w, "m1")).map((r) => r.state)).toEqual(["planned"]);
+    failing = false;
+    await whenIdle(w.images);
+    expect((await rowsOf(w, "m1")).map((r) => r.state)).toEqual(["pending"]);
+    expect(w.blobs.blobs.has("site/media/m1/variants/thumb.webp")).toBe(true);
+  });
+});
+
+describe("images/default: reading the media table", () => {
+  function recordMediaReads(w: World): Array<Record<string, unknown>> {
+    const filters: Array<Record<string, unknown>> = [];
+    const findMany = w.db.findMany.bind(w.db);
+    w.db.findMany = async (collection, filter, options) => {
+      if (collection === MEDIA) filters.push(filter);
+      return findMany(collection, filter, options);
+    };
+    return filters;
+  }
+
+  it("checks the size set against the stored rows with counts, without reading every media item", async () => {
+    const w = await world();
+    for (const id of ["a", "b", "c"]) {
+      await seed(w, id, await jpeg(400, 300));
+      expectOk(await w.images.plan([id]));
+    }
+    const filters = recordMediaReads(w);
+    const reopened = await w.open({ sizes: [{ ...THUMB, width: 300 }] });
+    expectOk(await reopened.register([{ name: "extra", width: 100 }]));
+    expect(filters).toEqual([]);
+    await whenIdle(reopened);
+    expect((await rowsOf(w, "a")).map((r) => [r.size, r.width]).sort()).toEqual([["extra", 100], ["thumb", 300]]);
+  });
+
+  it("the repair pass reads only the media items created in the last 24 hours and leaves older ones to the nightly sync", async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const w = await world({}, fixedRenderer, () => 10 * day);
+    await seed(w, "old", await jpeg(400, 300), { createdAt: 8 * day });
+    await seed(w, "fresh", await jpeg(400, 300), { createdAt: 10 * day - 1000 });
+    const filters = recordMediaReads(w);
+    expectOk(await w.images.resume());
+    expect(filters.length).toBeGreaterThan(0);
+    for (const filter of filters) expect(filter).toHaveProperty("createdAt");
+    expect(await rowsOf(w, "old")).toEqual([]);
+    expect((await rowsOf(w, "fresh")).map((r) => r.state)).toEqual(["done"]);
+  });
+});
+
+describe("images/default: images.syncPublic touches only <id>/variants/<file>", () => {
+  it("leaves a key with a deeper id path, and a depth-1 file, alone", async () => {
+    const w = await world();
+    await seed(w, "m1", await jpeg(400, 300));
+    expectOk(await w.images.plan(["m1"]));
+    for (const key of ["site/media/x/y/variants/z.webp", "site/media/m1/variants/deep/z.webp", "site/media/m1/photo.jpg", "site/media/stray.webp"]) {
+      expectOk(await w.blobs.put(key, new Uint8Array([1]), { contentType: "image/webp" }));
+    }
+    const synced = expectOk(await w.images.syncPublic());
+    expect(synced.removed).toBe(0);
+    for (const key of ["site/media/x/y/variants/z.webp", "site/media/m1/variants/deep/z.webp", "site/media/m1/photo.jpg", "site/media/stray.webp"]) expect(w.blobs.blobs.has(key)).toBe(true);
   });
 });
