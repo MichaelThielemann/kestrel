@@ -293,14 +293,22 @@ export default defineModule({
     get: { summary: "Media metadata", reads: ["params.id"], writes: ["result"], query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "unknown locale", 404: "not found" } },
     list: { summary: "List media, newest first; anonymous callers may only fetch by ids", reads: ["identity?"], writes: ["result"], query: { folder: { type: "string" }, recursive: { type: "boolean" }, q: { type: "string" }, sort: { type: "string" }, limit: { type: "integer" }, offset: { type: "integer" }, ids: { type: "string" }, locale: { type: "string" } }, output: { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, total: { type: "number" } }, required: ["items", "total"] }, errors: { 400: "invalid folder or unknown locale", 401: "no identity and no ids (unless anonymousList is \"all\")" } },
     download: { summary: "The file itself", reads: ["params.id"], writes: ["result"], binary: true, errors: { 404: "not found" } },
-    serve: {
-      summary: "The file at its public URL (params.id, params.name); the name must be the one it was uploaded under",
-      reads: ["params.id", "params.name"],
-      writes: ["result"],
-      binary: true,
-      errors: { 404: "not found, not ready, or not the name the file was uploaded under" },
-      ...(media.publicCopyEnabled() ? { anonymous: "required" as const } : {}),
-    },
+    serve: media.publicCopyEnabled()
+      ? {
+          summary: "The file at its public URL (params.id, params.name); the name must be the one it was uploaded under",
+          reads: ["params.id", "params.name"],
+          writes: ["result"],
+          binary: true,
+          errors: { 404: "not found, not ready, or not the name the file was uploaded under" },
+          anonymous: "required" as const,
+        }
+      : {
+          summary: "The file at its public URL (params.id, params.name); the name must be the one it was uploaded under",
+          reads: ["params.id", "params.name"],
+          writes: ["result"],
+          binary: true,
+          errors: { 404: "not found, not ready, or not the name the file was uploaded under" },
+        },
     listFolders: { summary: "Folders (persistent and implied) with item counts; anonymous callers are refused", reads: ["identity?"], writes: ["result"], output: { type: "array", items: { type: "object", properties: { folder: { type: "string" }, count: { type: "number" } }, required: ["folder", "count"] } }, errors: { 401: "no identity (unless anonymousList is \"all\")" } },
     update: { summary: "Rename, move, set provenance or texts (alt/title/description per locale); the file's key and path never change", reads: ["params.id"], writes: ["result"], input: { type: "object", properties: { filename: { type: "string" }, folder: { type: "string" }, provenance: PROVENANCE, locale: { type: "string" }, alt: { type: ["string", "null"] }, title: { type: ["string", "null"] }, description: { type: ["string", "null"] } }, additionalProperties: false }, query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "invalid name, folder or text (texts are plain text, max 2000 chars)", 404: "not found", 409: "the folder already has a file with that name, `details.field: \"location\"`" } },
     remove: { summary: "Delete file and metadata (copy, blob, row, then a final sweep)", reads: ["params.id"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 400: "missing id" } },

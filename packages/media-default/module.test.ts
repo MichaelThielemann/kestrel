@@ -1,6 +1,7 @@
+import { appendFileSync, mkdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
@@ -16,6 +17,13 @@ import { validateSchema } from "@michaelthielemann/kestrel/schema";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import module, { configSchema } from "./module.ts";
 import { createMediaDefault, type Config, type Media } from "./impl.ts";
+
+const OBJECT_BINDING_PROOF_FILE = join(process.cwd(), "node_modules", ".cache", "kestrel-object-binding-proofs.ndjson");
+
+function provesObjectBinding(moduleName: string, step: string): void {
+  mkdirSync(dirname(OBJECT_BINDING_PROOF_FILE), { recursive: true });
+  appendFileSync(OBJECT_BINDING_PROOF_FILE, `${moduleName}#${step}\n`);
+}
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
   const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
@@ -385,6 +393,17 @@ describe("media/default steps via runPipeline", () => {
     const res = await runPipeline(pipeline("media.serve"), { params: { id: item.id, name: item.filename } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
     expect(res.result).toMatchObject({ binary: true });
+  });
+
+  it("serve: does not return another media item's file for a different name", async () => {
+    const { media } = await makeInstance();
+    const a = expectOk(await media.upload({ filename: "one.png", contentType: "image/png", data: new Uint8Array([1]) })).item;
+    const b = expectOk(await media.upload({ filename: "two.png", contentType: "image/png", data: new Uint8Array([2]) })).item;
+    const own = await runPipeline(pipeline("media.serve"), { params: { id: a.id, name: a.filename } }, { modules: [{ module, instance: media }] });
+    expect(own.result).toMatchObject({ binary: true });
+    const crossed = await runPipeline(pipeline("media.serve"), { params: { id: a.id, name: b.filename } }, { modules: [{ module, instance: media }] });
+    expect(crossed.status).toBe(404);
+    provesObjectBinding("media/default", "serve");
   });
 
   it("listFolders: with an identity, returns folders", async () => {

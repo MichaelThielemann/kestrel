@@ -280,14 +280,22 @@ export default defineModule({
       writes: ["result.available?", "result.variants?", "result.variantCounts?"],
       extendsItems: { type: "object", properties: { available: { type: "boolean" }, variants: { type: "array", items: ATTACHED_VARIANT_SCHEMA }, variantCounts: VARIANT_COUNTS_SCHEMA }, required: ["available", "variants", "variantCounts"] },
     },
-    serve: {
-      summary: "The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback",
-      reads: ["params.id", "params.file"],
-      writes: ["result"],
-      binary: true,
-      errors: { 400: "missing id or file", 404: "media item not found, not ready, or the file is neither a current nor a retired size" },
-      ...(images.publicCopyEnabled() ? { anonymous: "required" as const } : {}),
-    },
+    serve: images.publicCopyEnabled()
+      ? {
+          summary: "The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback",
+          reads: ["params.id", "params.file"],
+          writes: ["result"],
+          binary: true,
+          errors: { 400: "missing id or file", 404: "media item not found, not ready, or the file is neither a current nor a retired size" },
+          anonymous: "required" as const,
+        }
+      : {
+          summary: "The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback",
+          reads: ["params.id", "params.file"],
+          writes: ["result"],
+          binary: true,
+          errors: { 400: "missing id or file", 404: "media item not found, not ready, or the file is neither a current nor a retired size" },
+        },
     syncPublic: {
       summary: "Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
       reads: [],
