@@ -107,6 +107,87 @@ describe("media/default", () => {
     it("still caps the result at 200 bytes", () => {
       expect(Buffer.byteLength(nameFor(`${"a".repeat(500)}.tif`, "image/png"))).toBe(200);
     });
+
+    it("never names a file like the variants directory or the download route next to it", () => {
+      expect(nameFor("variants", "application/x-unknown")).toBe("variants-upload");
+      expect(nameFor("Variants", "application/x-unknown")).toBe("Variants-upload");
+      expect(nameFor("file", "application/x-unknown")).toBe("file-upload");
+      expect(nameFor("", "application/x-unknown")).toBe("file-upload");
+      expect(nameFor("variants.png", "image/png")).toBe("variants.png");
+      expect(nameFor("file", "image/png")).toBe("file.png");
+    });
+  });
+
+  it("matches allowed and denied types on the media type alone, whatever its parameters or case", async () => {
+    const { media } = await make();
+    expect(expectErr(await media.upload({ ...png, contentType: "image/svg+xml; charset=utf-8" }), "UNSUPPORTED").status).toBe(415);
+    expect(expectErr(await media.upload({ ...png, contentType: "IMAGE/SVG+XML" }), "UNSUPPORTED").status).toBe(415);
+    expectOk(await media.upload({ ...png, contentType: "image/png; x=1" }));
+    const { media: exact } = await make({ ...BASE_CONFIG, allowedTypes: ["application/pdf"], deniedTypes: [] });
+    expectOk(await exact.upload({ ...png, filename: "a.pdf", contentType: "Application/PDF; version=1.7" }));
+  });
+
+  describe("an upload abandoned while it stalls", () => {
+    it("answers TRANSIENT and leaves neither a ready row nor its files when syncPublic abandoned it meanwhile", async () => {
+      const blobs = fakeBlobstore();
+      const db = createFakePersistence();
+      let clock = 0;
+      const media = await createMediaDefault({ ...BASE_CONFIG, publicCopy: { prefix: "site/" }, uploadStaleAfterMs: 60000 }, blobs, db, noLogger, () => clock);
+      const put = blobs.put.bind(blobs);
+      let release: () => void = () => {};
+      const stalled = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let reached: () => void = () => {};
+      const atCopy = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      blobs.put = async (key, data, options) => {
+        if (key.startsWith("site/")) {
+          reached();
+          await stalled;
+        }
+        return put(key, data, options);
+      };
+      const uploading = media.upload(png);
+      await atCopy;
+      clock = 61000;
+      expectOk(await media.syncPublic());
+      release();
+      expectErr(await uploading, "TRANSIENT");
+      const rows = expectOk(await db.findMany<{ status: string; key: string; id: string }>(COLLECTION, {})).items;
+      expect(rows.map((row) => row.status)).toEqual(["failed"]);
+      expect([...blobs.blobs.keys()]).toEqual([]);
+      blobs.put = put;
+      clock = 62000;
+      const retried = expectOk(await media.upload(png)).item;
+      expect(retried.status).toBe("ready");
+      expect(expectOk(await db.count(COLLECTION, {}))).toBe(1);
+    });
+
+    it("a syncPublic that finds a stale upload finished meanwhile keeps it ready with its copy and blob", async () => {
+      const blobs = fakeBlobstore();
+      const db = createFakePersistence();
+      const media = await createMediaDefault({ ...BASE_CONFIG, publicCopy: { prefix: "site/" }, uploadStaleAfterMs: 60000 }, blobs, db, noLogger, () => 61000);
+      const row = expectOk(await db.createOne<Document>(COLLECTION, { filename: "a.png", folder: "", location: "a.png", contentType: "image/png", size: 3, key: "media/u1/a.png", checksum: "x", status: "uploading", createdAt: 0, updatedAt: 0, provenance: { origin: "unknown" }, width: null, height: null, alt: {}, title: {}, description: {}, id: "u1" }));
+      expectOk(await blobs.put("media/u1/a.png", new Uint8Array([1, 2, 3]), { contentType: "image/png" }));
+      expectOk(await blobs.put("site/media/u1/a.png", new Uint8Array([1, 2, 3]), { contentType: "image/png" }));
+      const updateMany = db.updateMany.bind(db);
+      let finished = false;
+      db.updateMany = async (collection, filter, patch) => {
+        if (!finished && collection === COLLECTION && (patch as { status?: string }).status === "failed") {
+          finished = true;
+          expect(expectOk(await updateMany(COLLECTION, { id: row.id, status: "uploading" }, { status: "ready" }))).toBe(1);
+        }
+        return updateMany(collection, filter, patch);
+      };
+      expectOk(await media.syncPublic());
+      expect(finished).toBe(true);
+      const after = expectOk(await db.findOne<{ id: string; status: string }>(COLLECTION, { id: row.id }));
+      expect(after?.status).toBe("ready");
+      expect(blobs.blobs.has("media/u1/a.png")).toBe(true);
+      expect(blobs.blobs.has("site/media/u1/a.png")).toBe(true);
+    });
   });
 
   it("urlNameOf reads the last path segment of a key", () => {

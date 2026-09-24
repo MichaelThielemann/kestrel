@@ -164,8 +164,16 @@ function parentsOf(folder: string): string[] {
   return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
 }
 
+function mediaTypeOf(contentType: string): string {
+  return contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+}
+
 function typeAllowed(allowed: string[], contentType: string): boolean {
-  return allowed.some((pattern) => pattern === "*" || pattern === contentType || (pattern.endsWith("/*") && contentType.startsWith(pattern.slice(0, -1))));
+  const mediaType = mediaTypeOf(contentType);
+  return allowed.some((entry) => {
+    const pattern = entry.toLowerCase();
+    return pattern === "*" || pattern === mediaType || (pattern.endsWith("/*") && mediaType.startsWith(pattern.slice(0, -1)));
+  });
 }
 
 const ORIGINS = new Set<string>(["human", "ai", "mixed", "unknown"]);
@@ -239,12 +247,14 @@ export function safeName(filename: string): string {
   return named.replace(/\.meta\.json$/i, "-meta.json");
 }
 
-/** The upload-time name for a file: `safeName(filename)` with the extension of `contentType` when it is known, so a host that derives Content-Type from the extension serves the right one; an unknown type keeps the uploaded extension. */
+/** Names an upload never receives as they are, because they collide with a path next to the file's own: `variants` is the directory of an image's variants, `file` the download route of an item. */
+export const RESERVED_NAMES: ReadonlySet<string> = new Set(["file", "variants"]);
+
+/** The upload-time name for a file: `safeName(filename)` with the extension of `contentType` when it is known, so a host that derives Content-Type from the extension serves the right one; an unknown type keeps the uploaded extension. A reserved name gets `-upload` appended. */
 export function nameFor(filename: string, contentType: string): string {
   const base = safeName(filename);
-  const mediaType = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
-  const ext = EXTENSION_BY_TYPE[mediaType];
-  if (ext === undefined) return base;
+  const ext = EXTENSION_BY_TYPE[mediaTypeOf(contentType)];
+  if (ext === undefined) return RESERVED_NAMES.has(base.toLowerCase()) ? `${base}-upload` : base;
   const baseExt = extname(base);
   const stem = baseExt === "" ? base : base.slice(0, -baseExt.length);
   const named = capName(`${stem === "" ? "file" : stem}.${ext}`);
@@ -527,9 +537,19 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
           return copied;
         }
       }
-      const ready = await db.updateOne<Document>(COLLECTION, id, { status: "ready", updatedAt: now() });
+      const readyAt = now();
+      const ready = await db.updateMany<Document>(COLLECTION, { id, status: "uploading" }, { status: "ready", updatedAt: readyAt });
       if (isErr(ready)) return ready;
-      return ok({ item: resolveWith(ready.value, fallbackLocale), created: true });
+      if (ready.value === 0) {
+        if (config.publicCopy !== undefined) {
+          const droppedCopy = await blobs.remove(copyKey(id, name));
+          if (isErr(droppedCopy)) logger.error(`media/default: could not delete the copy of abandoned upload ${id}`, { id, key, error: droppedCopy.error.message });
+        }
+        const droppedBlob = await blobs.remove(key);
+        if (isErr(droppedBlob)) logger.error(`media/default: could not delete blob ${key} of abandoned upload ${id}`, { id, key, error: droppedBlob.error.message });
+        return err(failure("TRANSIENT", `media/default: the upload of ${name} took longer than uploadStaleAfterMs and was abandoned – upload it again`));
+      }
+      return ok({ item: resolveWith({ ...created.value, status: "ready", updatedAt: readyAt }, fallbackLocale), created: true });
     },
     async get(id, locale) {
       const row = await db.findOne<Document>(COLLECTION, { id });
@@ -823,16 +843,24 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         if (depth1.delete(key)) removed += 1;
         return blobs.remove(key);
       };
-      const processed = await eachItem({}, async (item) => {
+      const processed = await eachItem({}, async (visited) => {
+        let item = visited;
         let status = item.status;
         if (status === "uploading") {
           if (now() - item.updatedAt < config.uploadStaleAfterMs) {
             protect.add(item.id);
             return ok();
           }
-          const marked = await db.updateOne<MediaItem>(COLLECTION, item.id, { status: "failed", updatedAt: now() });
+          const marked = await db.updateMany<MediaItem>(COLLECTION, { id: item.id, status: "uploading" }, { status: "failed", updatedAt: now() });
           if (isErr(marked)) return marked;
-          status = "failed";
+          if (marked.value === 1) status = "failed";
+          else {
+            const current = await db.findOne<MediaItem>(COLLECTION, { id: item.id });
+            if (isErr(current)) return current;
+            if (current.value === null) return ok();
+            item = current.value;
+            status = item.status;
+          }
         }
         if (status === "failed") {
           const droppedCopy = await removeCopyIfListed(copyKey(item.id, urlNameOf(item.key)));
@@ -869,9 +897,6 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (isErr(processed)) return processed;
       for (const [key, entry] of depth1) {
         if (protect.has(entry.id) || expected.has(key)) continue;
-        const owner = await db.findOne<MediaItem>(COLLECTION, { id: entry.id });
-        if (isErr(owner)) return owner;
-        if (owner.value !== null && (owner.value.status === "uploading" || (owner.value.status === "ready" && copyKey(entry.id, urlNameOf(owner.value.key)) === key))) continue;
         const dropped = await blobs.remove(key);
         if (isErr(dropped)) return dropped;
         removed += 1;
