@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { findPackageJSON } from "node:module";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { isRecord, isString } from "./guards.ts";
 
@@ -12,8 +11,8 @@ export interface InstalledVersions {
 
 function packageVersion(root: string, name: string): string | undefined {
   try {
-    const require = createRequire(pathToFileURL(resolve(root, "package.json")).href);
-    const pkgFile = require.resolve(`${name}/package.json`);
+    const pkgFile = findPackageJSON(name, resolve(root, "package.json"));
+    if (pkgFile === undefined) return undefined;
     const pkg = boundaryCast<unknown>(JSON.parse(readFileSync(pkgFile, "utf8")), "json");
     return isRecord(pkg) && isString(pkg.version) ? pkg.version : undefined;
   } catch {
