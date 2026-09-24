@@ -11,9 +11,9 @@ import { createScratchCopy } from "./scratch.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(HERE, "..", "__fixtures__", "minimal-5.8");
 
-async function runJson(argv: string[]): Promise<{ code: number; report: UpgradeReport }> {
+async function runJson(argv: string[], forceInstalledMajor?: number): Promise<{ code: number; report: UpgradeReport }> {
   const lines: string[] = [];
-  const code = await runUpgradeCli(argv, { stdout: (line) => lines.push(line), stderr: () => undefined });
+  const code = await runUpgradeCli(argv, { stdout: (line) => lines.push(line), stderr: () => undefined, ...(forceInstalledMajor === undefined ? {} : { forceInstalledMajor }) });
   return { code, report: boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json") };
 }
 
@@ -30,6 +30,16 @@ describe("kestrel-upgrade check against the minimal-5.8 fixture", () => {
     expect(report.tiers.boot).toBe("not-run");
     const rules = report.findings.map((f) => f.rule).sort();
     expect(rules).toEqual(expect.arrayContaining(["config/sqlite-acquire-timeout", "deps/kestrel-range", "modules/event-delivery", "steps/removed"]));
+    expect(code).toBe(1);
+  });
+
+  it("opens the load and boot tiers end-to-end once forceInstalledMajor makes the gate see a 6.x install", async () => {
+    const { code, report } = await runJson(["check", "--root", FIXTURE, "--json"], 6);
+    expect(report.tiers).toEqual({ source: "done", load: "done", boot: "done", data: "not-run" });
+    const byRule = new Map(report.findings.map((f) => [f.rule, f]));
+    expect(byRule.get("boot/unknown-step")?.tier).toBe("boot");
+    expect(byRule.get("boot/unknown-step")?.message).toContain("authn.requireUser");
+    expect(byRule.get("boot/not-checked")?.tier).toBe("boot");
     expect(code).toBe(1);
   });
 });
