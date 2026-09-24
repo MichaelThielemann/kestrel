@@ -29,7 +29,7 @@ describe("kestrel-upgrade check against the minimal-5.8 fixture", () => {
     expect(report.tiers.load).toBe("not-run");
     expect(report.tiers.boot).toBe("not-run");
     const rules = report.findings.map((f) => f.rule).sort();
-    expect(rules).toEqual(expect.arrayContaining(["config/sqlite-acquire-timeout", "deps/kestrel-range", "modules/event-delivery", "steps/removed"]));
+    expect(rules).toEqual(expect.arrayContaining(["deps/kestrel-range", "modules/event-delivery", "steps/removed"]));
     expect(code).toBe(1);
   });
 
@@ -54,7 +54,7 @@ describe("kestrel-upgrade fix --write against a copy of the fixture", () => {
 
     const configText = readFileSync(join(scratch.dir, "kestrel.config.ts"), "utf8");
     expect(configText).toContain("@michaelthielemann/kestrel-events-direct");
-    expect(configText).toContain("acquireTimeoutMs: 18000");
+    expect(configText).not.toContain("acquireTimeoutMs");
 
     const pipelineText = readFileSync(join(scratch.dir, "pipelines", "deleteMediaFolder.ts"), "utf8");
     expect(pipelineText).toContain("media.listFolderItems");

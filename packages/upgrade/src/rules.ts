@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { insertModuleListEntry, insertModulesTsEntry, renameStringLiterals, setModuleConfigProperties } from "./edits.ts";
+import { insertModuleListEntry, insertModulesTsEntry, renameStringLiterals } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { setDependencyRange } from "./packageJson.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
@@ -84,41 +84,6 @@ export const eventBusRule: Rule = {
   },
 };
 
-function timeoutValue(config: unknown, key: string): number | undefined {
-  const value = isRecord(config) ? config[key] : undefined;
-  return typeof value === "number" ? value : undefined;
-}
-
-/** persistence-sqlite defaults acquireTimeoutMs from busyTimeoutMs on its own, so this only fires on a contradiction the consumer wrote explicitly. */
-export const sqliteAcquireTimeoutRule: Rule = {
-  id: "config/sqlite-acquire-timeout",
-  check(ctx) {
-    const entry = moduleEntry(ctx, "persistence-sqlite");
-    if (!entry) return [];
-    const acquire = timeoutValue(entry.config, "acquireTimeoutMs");
-    const busy = timeoutValue(entry.config, "busyTimeoutMs");
-    if (acquire === undefined || busy === undefined || acquire > busy) return [];
-    const value = `${busy + 10000}`;
-    const source = ctx.readFile(ctx.project.configFile);
-    const edits: Edit[] = [];
-    if (source !== undefined) {
-      const configEdits = setModuleConfigProperties(ctx.project.configFile, source, { use: entry.use, assignments: { acquireTimeoutMs: value } });
-      if (configEdits) edits.push(...configEdits);
-    }
-    return [
-      finding(
-        "config/sqlite-acquire-timeout",
-        "config/sqlite-acquire-timeout",
-        "persistence-sqlite requires acquireTimeoutMs to exceed busyTimeoutMs; both are set explicitly and contradict",
-        `raise acquireTimeoutMs to ${value}`,
-        { file: ctx.project.configFile, module: entry.use },
-        edits,
-        "docs/upgrading.md#config-sqlite-acquire-timeout",
-      ),
-    ];
-  },
-};
-
 const REMOVED_STEPS: Record<string, string> = { "media.folderItems": "media.listFolderItems" };
 
 export const removedStepsRule: Rule = {
@@ -177,7 +142,6 @@ export const kestrelRangeRule: Rule = {
 export const DEFAULT_RULES: readonly Rule[] = [
   eventDeliveryRule,
   eventBusRule,
-  sqliteAcquireTimeoutRule,
   removedStepsRule,
   kestrelRangeRule,
   verifiedUserRule,

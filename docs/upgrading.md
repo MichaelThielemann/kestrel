@@ -119,7 +119,6 @@ Every finding's `docs` field links to one of the anchors below.
 |---|---|---|---|
 | [`modules/event-delivery`](#modules-event-delivery) | load | auto | `events-inmemory` with no delivery module next to it |
 | [`modules/event-bus`](#modules-event-bus) | load | auto | `events-queue` with no `events-inmemory` next to it |
-| [`config/sqlite-acquire-timeout`](#config-sqlite-acquire-timeout) | load | auto | `acquireTimeoutMs` does not exceed `busyTimeoutMs` |
 | [`steps/removed`](#steps-removed) | source | auto | a string-literal reference to a removed step |
 | [`pipelines/verified-user`](#pipelines-verified-user) | load | auto / ask / manual | `revisions.reassignAuthor` with no verify step ahead of it |
 | [`steps/undeclared-output`](#steps-undeclared-output) | boot | ask | a step writes `result` without declaring its shape |
@@ -154,12 +153,6 @@ An event trigger or `events.emit` needs exactly one delivery module (`events-dir
 #### modules-event-bus
 `events-queue` requires `events@1` instead of providing it; the fix inserts `events-inmemory` next
 to it.
-
-#### config-sqlite-acquire-timeout
-`persistence-sqlite` rejects a config where `acquireTimeoutMs` does not exceed `busyTimeoutMs`, but
-defaults `acquireTimeoutMs` itself when it is left unset, so this only fires when a project sets
-both explicitly and they contradict. The fix raises `acquireTimeoutMs` past `busyTimeoutMs`; it
-never adds `acquireTimeoutMs` to a config that did not already set it.
 
 #### steps-removed
 A step removed in 6.0.0 (for example `media.folderItems`) is renamed to its replacement.

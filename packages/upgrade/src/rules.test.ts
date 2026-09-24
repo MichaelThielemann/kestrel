@@ -6,7 +6,7 @@ import type { BootCheck } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { applyEdits } from "./apply.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
-import { eventBusRule, eventDeliveryRule, kestrelRangeRule, readFileOrUndefined, removedStepsRule, sqliteAcquireTimeoutRule } from "./rules.ts";
+import { eventBusRule, eventDeliveryRule, kestrelRangeRule, readFileOrUndefined, removedStepsRule } from "./rules.ts";
 
 const EMPTY_CHECK: BootCheck = { errors: [], warnings: [], notChecked: [] };
 
@@ -103,42 +103,6 @@ describe("modules/event-bus", () => {
     const configEdit = edits.find((e) => e.file === project.configFile)!;
     const { text } = applyEdits(source, [configEdit]);
     expect(text).toContain('modules: [{ use: "@michaelthielemann/kestrel-events-inmemory", config: {} }, { use: "@michaelthielemann/kestrel-events-queue"');
-  });
-});
-
-describe("config/sqlite-acquire-timeout", () => {
-  it("does not fire when neither timeout is set explicitly, since the module now defaults acquireTimeoutMs itself", async () => {
-    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "./data/kestrel.db" } }], triggers: [] });\n';
-    const project = await projectWithConfig(source, ["@michaelthielemann/kestrel-persistence-sqlite"]);
-    expect(await sqliteAcquireTimeoutRule.check(contextFor(project))).toEqual([]);
-  });
-
-  it("does not fire when only busyTimeoutMs is set explicitly", async () => {
-    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "./data/kestrel.db", busyTimeoutMs: 8000 } }], triggers: [] });\n';
-    const project = await projectWithModules(source, [{ use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "./data/kestrel.db", busyTimeoutMs: 8000 } }]);
-    expect(await sqliteAcquireTimeoutRule.check(contextFor(project))).toEqual([]);
-  });
-
-  it("does not fire when only acquireTimeoutMs is set explicitly", async () => {
-    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "x", acquireTimeoutMs: 15000 } }], triggers: [] });\n';
-    const project = await projectWithModules(source, [{ use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "x", acquireTimeoutMs: 15000 } }]);
-    expect(await sqliteAcquireTimeoutRule.check(contextFor(project))).toEqual([]);
-  });
-
-  it("fires when both are set explicitly and contradict, raising acquireTimeoutMs to busyTimeoutMs + 10000", async () => {
-    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "x", acquireTimeoutMs: 5000, busyTimeoutMs: 8000 } }], triggers: [] });\n';
-    const project = await projectWithModules(source, [{ use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "x", acquireTimeoutMs: 5000, busyTimeoutMs: 8000 } }]);
-    const findings = await sqliteAcquireTimeoutRule.check(contextFor(project));
-    expect(findings).toHaveLength(1);
-    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
-    const { text } = applyEdits(source, edits);
-    expect(text).toContain("acquireTimeoutMs: 18000");
-  });
-
-  it("does not fire when both are set explicitly and acquireTimeoutMs already exceeds busyTimeoutMs", async () => {
-    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "x", acquireTimeoutMs: 15000, busyTimeoutMs: 8000 } }], triggers: [] });\n';
-    const project = await projectWithModules(source, [{ use: "@michaelthielemann/kestrel-persistence-sqlite", config: { file: "x", acquireTimeoutMs: 15000, busyTimeoutMs: 8000 } }]);
-    expect(await sqliteAcquireTimeoutRule.check(contextFor(project))).toEqual([]);
   });
 });
 
