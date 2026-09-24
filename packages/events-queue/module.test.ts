@@ -24,7 +24,7 @@ function jsonCopy(value: unknown): EventData {
 
 async function eventDeliveryFixture(): Promise<EventDeliveryFixture> {
   const db = createFakePersistence();
-  const queue = await createEventsQueue({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000, relayPipelines: "all" }, { db, logger: silentLogger });
+  const queue = await createEventsQueue({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000, relayPipelines: "all", lanes: {} }, { db, logger: silentLogger });
   const deliveryEntries = [{ event: "x.happened", pipeline: "onX1" }, { event: "x.happened", pipeline: "onX2" }];
   queue.setDelivery(deliveryEntries, async () => ({ runId: "r", status: 200 }));
   const pipelineCountOf = (name: string) => deliveryEntries.filter((entry) => entry.event === name).length;
@@ -103,8 +103,15 @@ describe("events/queue module shape", () => {
 
 describe("events/queue module steps via runPipeline", () => {
   it("parses an empty config with defaults and rejects unknown keys", () => {
-    expect(configSchema.parse({})).toEqual({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5, 30, 120, 600], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000, relayPipelines: "all" });
+    expect(configSchema.parse({})).toEqual({ pollMs: 500, batch: 20, maxAttempts: 5, backoffSeconds: [5, 30, 120, 600], lockTtlSeconds: 300, retentionDays: 7, relayMs: 5000, relayPipelines: "all", lanes: {} });
     expect(configSchema.safeParse({ extra: 1 }).success).toBe(false);
+  });
+
+  it("rejects a malformed lane name and the reserved name \"main\"", () => {
+    expect(configSchema.safeParse({ lanes: { Pages: ["x"] } }).success).toBe(false);
+    expect(configSchema.safeParse({ lanes: { "0pages": ["x"] } }).success).toBe(false);
+    expect(configSchema.safeParse({ lanes: { main: ["x"] } }).success).toBe(false);
+    expect(configSchema.safeParse({ lanes: { pages: ["x"] } }).success).toBe(true);
   });
 
   it("emit queues the envelope and answers ok before the pipeline ran", async () => {
@@ -133,7 +140,7 @@ describe("events/queue module steps via runPipeline", () => {
     const { instance } = await setup();
     const res = await run(["events.readQueueStatus"], {}, instance);
     expect(res.status).toBe(200);
-    expect(res.result).toEqual({ pending: 0, running: 0, dead: 0, done24h: 0, oldestPendingAt: null, worker: { running: false, lastTickAt: null } });
+    expect(res.result).toEqual({ pending: 0, running: 0, dead: 0, done24h: 0, oldestPendingAt: null, worker: { running: false, lastTickAt: null }, lanes: {} });
   });
 
   it("listDead honours ?limit and rejects an invalid one", async () => {
@@ -560,6 +567,154 @@ describe("events/queue in a booted instance", () => {
     }
     expect(String(caught)).toContain("relayPipelines");
     expect(String(caught)).toContain("notAPipeline");
+  });
+
+  it("a booted instance: a lane pipeline's job runs while a blocked main-lane job is still pending", async () => {
+    const order: string[] = [];
+    let releaseMain: (() => void) | undefined;
+    const mainGate = new Promise<void>((r) => {
+      releaseMain = r;
+    });
+    const probe = defineModule({
+      name: "probe/test",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({
+        blockMain: async (ctx: Context) => {
+          order.push("start:main");
+          await mainGate;
+          order.push("done:main");
+          return ok(ctx);
+        },
+        quick: async (ctx: Context) => {
+          order.push("lane");
+          return ok(ctx);
+        },
+      }),
+      describe: () => ({ blockMain: { summary: "b", reads: [], writes: [] }, quick: { summary: "q", reads: [], writes: [] } }),
+    });
+    const kestrel = await boot({
+      config: {
+        modules: [
+          { use: "./persistence.ts", config: {} },
+          { use: "./events.ts", config: {} },
+          { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: 2, relayMs: 0, lanes: { render: ["onRender"] } } },
+          { use: "./probe.ts", config: {} },
+        ],
+        triggers: [{ event: "main.due", pipeline: "onMain" }, { event: "render.due", pipeline: "onRender" }],
+        http: null,
+      },
+      modules: [persistence, bus, module, probe],
+      pipelines: [definePipeline({ name: "onMain", steps: ["probe.blockMain"] }), definePipeline({ name: "onRender", steps: ["probe.quick"] })],
+      logger: silentLogger,
+    });
+    await kestrel.start();
+    const eventsBus = kestrel.contracts.get(EVENTS);
+    await eventsBus.emit("main.due", {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(order).toEqual(["start:main"]);
+
+    await eventsBus.emit("render.due", {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(order).toEqual(["start:main", "lane"]);
+
+    releaseMain?.();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(order).toEqual(["start:main", "lane", "done:main"]);
+
+    await kestrel.stop();
+  });
+});
+
+describe("events/queue lanes: attach guards", () => {
+  const persistenceFakeForLanes = defineModule({
+    name: "persistence/fake",
+    provides: [PERSISTENCE],
+    requires: [],
+    configSchema: z.object({}).strict(),
+    async setup() {
+      return createFakePersistence();
+    },
+  });
+  const busForLanes = defineModule({
+    name: "events/fake",
+    provides: [EVENTS],
+    requires: [],
+    configSchema: z.object({}).strict(),
+    async setup() {
+      return createEventsInmemory();
+    },
+  });
+  const probeForLanes = defineModule({
+    name: "probe/test",
+    provides: [],
+    requires: [],
+    configSchema: z.object({}).strict(),
+    async setup() {
+      return {};
+    },
+    steps: () => ({ render: async (ctx: Context) => ok(ctx), plan: async (ctx: Context) => ok(ctx) }),
+    describe: () => ({ render: { summary: "r", reads: [], writes: [] }, plan: { summary: "p", reads: [], writes: [] } }),
+  });
+
+  function bootWithLanes(lanes: Record<string, string[]>, relayPipelines?: string[] | "all") {
+    return boot({
+      config: {
+        modules: [
+          { use: "./persistence.ts", config: {} },
+          { use: "./events.ts", config: {} },
+          { use: "@michaelthielemann/kestrel-events-queue", config: { lanes, ...(relayPipelines === undefined ? {} : { relayPipelines }) } },
+          { use: "./probe.ts", config: {} },
+        ],
+        triggers: [{ event: "render.due", pipeline: "onRender" }, { event: "plan.due", pipeline: "onPlan" }],
+        http: null,
+      },
+      modules: [persistenceFakeForLanes, busForLanes, module, probeForLanes],
+      pipelines: [definePipeline({ name: "onRender", steps: ["probe.render"] }), definePipeline({ name: "onPlan", steps: ["probe.plan"] })],
+      logger: silentLogger,
+    });
+  }
+
+  it("refuses a lane naming an unknown pipeline", async () => {
+    let caught: unknown;
+    try {
+      await bootWithLanes({ pages: ["notAPipeline"] });
+    } catch (error) {
+      caught = error;
+    }
+    expect(String(caught)).toContain("pages");
+    expect(String(caught)).toContain("notAPipeline");
+  });
+
+  it("refuses a pipeline in two lanes", async () => {
+    let caught: unknown;
+    try {
+      await bootWithLanes({ pages: ["onRender"], variants: ["onRender"] });
+    } catch (error) {
+      caught = error;
+    }
+    expect(String(caught)).toContain("onRender");
+    expect(String(caught)).toContain("two lanes");
+  });
+
+  it("refuses a pipeline that is in a lane and named in relayPipelines", async () => {
+    let caught: unknown;
+    try {
+      await bootWithLanes({ pages: ["onRender"] }, ["onRender"]);
+    } catch (error) {
+      caught = error;
+    }
+    expect(String(caught)).toContain("onRender");
+    expect(String(caught)).toContain("relayPipelines");
+  });
+
+  it("boots fine with a lane pipeline and the default relayPipelines (\"all\")", async () => {
+    const kestrel = await bootWithLanes({ pages: ["onRender"] });
+    await kestrel.stop();
   });
 });
 

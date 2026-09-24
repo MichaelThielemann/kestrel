@@ -8,7 +8,7 @@ import { err } from "@michaelthielemann/kestrel/result";
 import type { RunResult, Runner } from "@michaelthielemann/kestrel/runner";
 import { createEventsQueue, QUEUE, QueueWriteError, retryTarget, type Config, type QueueRow } from "./impl.ts";
 
-const CONFIG: Config = { pollMs: 5, batch: 2, maxAttempts: 3, backoffSeconds: [10, 100], lockTtlSeconds: 60, retentionDays: 1, relayMs: 5000, relayPipelines: "all" };
+const CONFIG: Config = { pollMs: 5, batch: 2, maxAttempts: 3, backoffSeconds: [10, 100], lockTtlSeconds: 60, retentionDays: 1, relayMs: 5000, relayPipelines: "all", lanes: {} };
 
 async function make(overrides: Partial<Config> = {}) {
   const db = createFakePersistence();
@@ -235,7 +235,7 @@ describe("events/queue worker", () => {
 
   it("claims no rows at all on a tick before setDelivery is ever called", async () => {
     const { db, queue, rows } = await make();
-    await db.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "p1", state: "pending", attempts: 0, createdAt: 1_000_000, availableAt: 1_000_000, lockedAt: null, lockedBy: null, finishedAt: null, error: null });
+    await db.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "p1", state: "pending", attempts: 0, createdAt: 1_000_000, availableAt: 1_000_000, lockedAt: null, lockedBy: null, finishedAt: null, error: null, coalesceKey: null, lane: "main" });
     expect(await queue.tick()).toBe(0);
     expect((await rows())[0]).toMatchObject({ state: "pending", attempts: 0 });
   });
@@ -296,7 +296,7 @@ describe("events/queue worker", () => {
     const runsByInstance: Record<string, number> = { a: 0, b: 0 };
     const queueA = await createEventsQueue(CONFIG, { db, logger: silentLogger, now: () => clock.t, instanceId: "a@host" });
     const queueB = await createEventsQueue(CONFIG, { db, logger: silentLogger, now: () => clock.t, instanceId: "b@host" });
-    await realDb.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "p1", state: "pending", attempts: 0, createdAt: 1_000_000, availableAt: 1_000_000, lockedAt: null, lockedBy: null, finishedAt: null, error: null });
+    await realDb.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "p1", state: "pending", attempts: 0, createdAt: 1_000_000, availableAt: 1_000_000, lockedAt: null, lockedBy: null, finishedAt: null, error: null, coalesceKey: null, lane: "main" });
     queueA.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
       runsByInstance.a = (runsByInstance.a ?? 0) + 1;
       return OK;
@@ -338,7 +338,7 @@ describe("events/queue admin", () => {
     await queue.enqueue("x", {});
     clock.t += 5;
     await queue.enqueue("x", { later: true });
-    expect(expectOk(await queue.status())).toEqual({ pending: 3, running: 0, dead: 0, done24h: 0, oldestPendingAt: 1_000_000, worker: { running: false, lastTickAt: null } });
+    expect(expectOk(await queue.status())).toEqual({ pending: 3, running: 0, dead: 0, done24h: 0, oldestPendingAt: 1_000_000, worker: { running: false, lastTickAt: null }, lanes: {} });
     await queue.tick();
     await queue.tick();
     expect(expectOk(await queue.status())).toMatchObject({ pending: 1, done24h: 2, oldestPendingAt: 1_010_005, worker: { lastTickAt: 1_000_005 } });
@@ -642,5 +642,390 @@ describe("events/queue relay: a run with two emits relays both", () => {
     expect(report.pipelines).toContainEqual({ event: "x", pipeline: "p1", status: "done", attempts: 0, dead: false, error: null });
     expect(report.pipelines).toContainEqual({ event: "y", pipeline: "p2", status: "done", attempts: 0, dead: false, error: null });
     expect((await rows()).every((r) => r.state === "done")).toBe(true);
+  });
+});
+
+describe("events/queue coalescing", () => {
+  it("a duplicate coalesceKey while the earlier row is pending writes only one row", async () => {
+    const { queue, rows } = await make();
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    const stored = await rows();
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ coalesceKey: "p1:doc-1", state: "pending" });
+  });
+
+  it("coalescing is per pipeline: the same key for two subscribed pipelines writes one row each", async () => {
+    const { queue, rows } = await make();
+    queue.setDelivery([{ event: "x", pipeline: "p1" }, { event: "x", pipeline: "p2" }], async () => OK);
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    const stored = await rows();
+    expect(stored.map((r) => r.pipeline).sort()).toEqual(["p1", "p2"]);
+  });
+
+  it("an event without a coalesceKey is never coalesced", async () => {
+    const { queue, rows } = await make();
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await queue.enqueue("x", {});
+    await queue.enqueue("x", {});
+    expect(await rows()).toHaveLength(2);
+  });
+
+  it("a unique conflict on another column still fails", async () => {
+    const { db, queue } = await make();
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    const originalCreateOne = db.createOne.bind(db);
+    let calls = 0;
+    db.createOne = boundaryCast<typeof db.createOne>(async (collection: string, data: unknown) => {
+      calls++;
+      if (calls === 1) return err(failure("CONFLICT", "boom", { details: { collection, field: "id" } }));
+      return originalCreateOne(collection, boundaryCast<Parameters<typeof originalCreateOne>[1]>(data, "host"));
+    }, "host");
+    await expect(queue.enqueue("x", { coalesceKey: "doc-1" })).rejects.toBeInstanceOf(QueueWriteError);
+  });
+
+  it("claim clears coalesceKey, so a finished job's key no longer blocks a new one", async () => {
+    const { queue, rows } = await make();
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    expect(await queue.tick()).toBe(1);
+    expect((await rows())[0]).toMatchObject({ state: "done", coalesceKey: null });
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    expect(await rows()).toHaveLength(2);
+  });
+
+  it("a mark while the job runs enqueues one more row, deterministically at the claim", async () => {
+    const { db, queue, rows } = await make();
+    let releaseRun: (() => void) | undefined;
+    const runGate = new Promise<void>((resolve) => {
+      releaseRun = resolve;
+    });
+    let claimSeen: (() => void) | undefined;
+    const claimSeenPromise = new Promise<void>((resolve) => {
+      claimSeen = resolve;
+    });
+    const originalUpdateMany = db.updateMany.bind(db);
+    let sawClaim = false;
+    db.updateMany = boundaryCast<typeof db.updateMany>(async (collection: string, filter: Record<string, unknown>, patch: Record<string, unknown>) => {
+      const result = await originalUpdateMany(collection, boundaryCast<Parameters<typeof originalUpdateMany>[1]>(filter, "host"), boundaryCast<Parameters<typeof originalUpdateMany>[2]>(patch, "host"));
+      if (!sawClaim && patch.state === "running") {
+        sawClaim = true;
+        claimSeen?.();
+      }
+      return result;
+    }, "host");
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => {
+      await runGate;
+      return OK;
+    });
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    const tickPromise = queue.tick();
+    await claimSeenPromise;
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    expect(await rows()).toHaveLength(2);
+    releaseRun?.();
+    await tickPromise;
+  });
+
+  it("the relay's claim also clears coalesceKey", async () => {
+    const { queue, rows } = await make({ relayMs: 1000 });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    await queue.enqueue("x", { runId: "run-1", coalesceKey: "doc-1" });
+    await queue.relay("run-1");
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    expect(await rows()).toHaveLength(2);
+  });
+
+  it("the fan-out carries the coalesceKey: two unfanned events with the same key collapse to one row per pipeline", async () => {
+    const { queue, rows } = await make();
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    await queue.enqueue("x", { coalesceKey: "doc-1" });
+    expect(await rows()).toHaveLength(2);
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => OK);
+    expect(await queue.tick()).toBe(1);
+    const stored = await rows();
+    expect(stored.filter((r) => r.pipeline === "p1")).toHaveLength(1);
+  });
+});
+
+describe("events/queue lanes: set at enqueue and fan-out", () => {
+  it("a lane pipeline's row carries its lane; an unlisted pipeline's row carries \"main\"", async () => {
+    const { queue, rows } = await make({ lanes: { pages: ["render"] } });
+    queue.setDelivery([{ event: "x", pipeline: "render" }, { event: "y", pipeline: "other" }], async () => OK);
+    await queue.enqueue("x", {});
+    await queue.enqueue("y", {});
+    const stored = await rows();
+    expect(stored.find((r) => r.pipeline === "render")).toMatchObject({ lane: "pages" });
+    expect(stored.find((r) => r.pipeline === "other")).toMatchObject({ lane: "main" });
+  });
+
+  it("a row fanned out from an unfanned row carries the lane of its pipeline", async () => {
+    const { queue, rows } = await make({ lanes: { pages: ["render"] } });
+    await queue.enqueue("x", {});
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => OK);
+    expect(await queue.fanOutUnfanned()).toBe(1);
+    expect((await rows())[0]).toMatchObject({ pipeline: "render", lane: "pages" });
+  });
+
+  it("gives an existing row with no lane \"main\" at setup", async () => {
+    const db = createFakePersistence();
+    await db.ensureCollection(QUEUE, { name: "string", payload: "json", pipeline: "string", state: "string", attempts: "number", createdAt: "number", availableAt: "number", lockedAt: "number", lockedBy: "string", finishedAt: "number", error: "string", runId: "string" });
+    await db.createOne(QUEUE, { id: "pre-lanes", name: "x", payload: {}, pipeline: "p1", state: "pending", attempts: 0, createdAt: 1, availableAt: 1, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: null });
+    await createEventsQueue(CONFIG, { db, logger: silentLogger, instanceId: "test@host" });
+    const row = expectOk(await db.findOne<QueueRow>(QUEUE, { id: "pre-lanes" }));
+    expect(row).toMatchObject({ lane: "main" });
+  });
+});
+
+describe("events/queue lanes: status per lane", () => {
+  it("readQueueStatus reports pending/running/oldestPendingAt per configured lane; totals still count every lane", async () => {
+    const { queue } = await make({ lanes: { pages: ["render"], variants: ["generate"] } });
+    queue.setDelivery([{ event: "x", pipeline: "render" }, { event: "y", pipeline: "generate" }, { event: "z", pipeline: "other" }], async () => OK);
+    await queue.enqueue("x", { id: "1" });
+    await queue.enqueue("x", { id: "2" });
+    await queue.enqueue("z", {});
+    const status = expectOk(await queue.status());
+    expect(status.lanes).toEqual({ pages: { pending: 2, running: 0, oldestPendingAt: 1_000_000 }, variants: { pending: 0, running: 0, oldestPendingAt: null } });
+    expect(status.pending).toBe(3);
+  });
+});
+
+describe("events/queue lanes: no lane delays another", () => {
+  it("N blocked jobs in one lane never delay a job in the main lane or in another lane", async () => {
+    const { queue, rows } = await make({ lanes: { pages: ["render"], variants: ["generate"] } });
+    let releaseFirst: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const started: string[] = [];
+    let renderCalls = 0;
+    queue.setDelivery(
+      [{ event: "render.due", pipeline: "render" }, { event: "plan.due", pipeline: "plan" }, { event: "generate.due", pipeline: "generate" }],
+      async (pipeline) => {
+        started.push(pipeline);
+        if (pipeline === "render") {
+          renderCalls++;
+          if (renderCalls === 1) await gate;
+        }
+        return OK;
+      },
+    );
+
+    for (let i = 0; i < 50; i++) await queue.enqueue("render.due", { id: String(i) });
+    const pagesTick = queue.tickLane("pages");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(started).toEqual(["render"]);
+
+    await queue.enqueue("plan.due", {});
+    await queue.enqueue("generate.due", {});
+
+    expect(await queue.tick()).toBe(1);
+    expect(await queue.tickLane("variants")).toBe(1);
+
+    expect(started).toEqual(["render", "plan", "generate"]);
+    const stored = await rows();
+    expect(stored.filter((r) => r.pipeline === "render" && r.state === "pending")).toHaveLength(49);
+
+    releaseFirst?.();
+    await pagesTick;
+  });
+
+  it("control: without lanes, everything shares one loop and blocks behind the render in progress", async () => {
+    const { queue } = await make({ lanes: {}, batch: 1 });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started: string[] = [];
+    queue.setDelivery(
+      [{ event: "render.due", pipeline: "render" }, { event: "plan.due", pipeline: "plan" }, { event: "generate.due", pipeline: "generate" }],
+      async (pipeline) => {
+        started.push(pipeline);
+        if (pipeline === "render") await gate;
+        return OK;
+      },
+    );
+    await queue.enqueue("render.due", { id: "0" });
+    await queue.enqueue("plan.due", {});
+    await queue.enqueue("generate.due", {});
+    const tickPromise = queue.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(started).toEqual(["render"]);
+    release?.();
+    await tickPromise;
+  });
+
+  it("control: one shared lane makes generate wait for every render queued before it", async () => {
+    const { queue } = await make({ lanes: { pages: ["render", "generate"] } });
+    const order: string[] = [];
+    queue.setDelivery([{ event: "render.due", pipeline: "render" }, { event: "generate.due", pipeline: "generate" }], async (pipeline) => {
+      order.push(pipeline);
+      return OK;
+    });
+    for (let i = 0; i < 50; i++) await queue.enqueue("render.due", { id: String(i) });
+    await queue.enqueue("generate.due", {});
+    for (let i = 0; i < 50; i++) {
+      expect(await queue.tickLane("pages")).toBe(1);
+      expect(order).not.toContain("generate");
+    }
+    expect(await queue.tickLane("pages")).toBe(1);
+    expect(order[order.length - 1]).toBe("generate");
+  });
+});
+
+describe("events/queue lanes: crash recovery per lane", () => {
+  it("a lane row whose lock expired is reclaimed by the main tick's global sweep, then rerun by its own lane", async () => {
+    const { db, queue, clock, rows } = await make({ lanes: { pages: ["render"] } });
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => OK);
+    await queue.enqueue("x", {});
+    const [row] = await rows();
+    expectOk(await db.updateOne<QueueRow>(QUEUE, row!.id, { state: "running", lockedAt: clock.t, lockedBy: "dead@host" }));
+
+    expect(await queue.tickLane("pages")).toBe(0);
+    clock.t += 60_000;
+    expect(await queue.tick()).toBe(0);
+    expect(await queue.tickLane("pages")).toBe(1);
+    expect((await rows())[0]).toMatchObject({ state: "done" });
+  });
+});
+
+describe("events/queue lanes: two processes claiming", () => {
+  it("two processes' lane loops claim a row exactly once", async () => {
+    const realDb = createFakePersistence();
+    let findManyCalls = 0;
+    const waiters: Array<() => void> = [];
+    function isLaneClaimQuery(filter: Record<string, unknown>): boolean {
+      return filter.lane === "pages";
+    }
+    const db: typeof realDb = {
+      ...realDb,
+      findMany: boundaryCast<typeof realDb.findMany>(async (collection: string, filter: Record<string, unknown>, options?: Record<string, unknown>) => {
+        const result = await realDb.findMany<QueueRow>(collection, filter, options);
+        if (!isLaneClaimQuery(filter)) return result;
+        findManyCalls++;
+        if (findManyCalls === 1) {
+          await new Promise<void>((resolve) => waiters.push(resolve));
+        } else {
+          for (const release of waiters.splice(0)) release();
+        }
+        return result;
+      }, "host"),
+    };
+    const clock = { t: 1_000_000 };
+    const runsByInstance: Record<string, number> = { a: 0, b: 0 };
+    const queueA = await createEventsQueue({ ...CONFIG, lanes: { pages: ["render"] } }, { db, logger: silentLogger, now: () => clock.t, instanceId: "a@host" });
+    const queueB = await createEventsQueue({ ...CONFIG, lanes: { pages: ["render"] } }, { db, logger: silentLogger, now: () => clock.t, instanceId: "b@host" });
+    await realDb.createOne<QueueRow>(QUEUE, { name: "x", payload: {}, pipeline: "render", state: "pending", attempts: 0, createdAt: 1_000_000, availableAt: 1_000_000, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: null, coalesceKey: null, lane: "pages" });
+    queueA.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      runsByInstance.a = (runsByInstance.a ?? 0) + 1;
+      return OK;
+    });
+    queueB.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      runsByInstance.b = (runsByInstance.b ?? 0) + 1;
+      return OK;
+    });
+
+    const [handledA, handledB] = await Promise.all([queueA.tickLane("pages"), queueB.tickLane("pages")]);
+    expect(handledA + handledB).toBe(1);
+    expect((runsByInstance.a ?? 0) + (runsByInstance.b ?? 0)).toBe(1);
+  });
+});
+
+describe("events/queue lanes: the relay never claims a lane row", () => {
+  it("gives no head start and reports queued, whatever relayPipelines says", async () => {
+    const { queue, rows } = await make({ relayMs: 1000, lanes: { pages: ["render"] } });
+    let called = 0;
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      called++;
+      return OK;
+    });
+    await queue.enqueue("x", { runId: "run-1" });
+    expect((await rows())[0]).toMatchObject({ availableAt: 1_000_000, lane: "pages" });
+
+    const report = await queue.relay("run-1");
+    expect(called).toBe(0);
+    expect(report).toEqual({ status: "pending", pipelines: [{ event: "x", pipeline: "render", status: "queued", attempts: 0, dead: false, error: null }] });
+
+    expect(await queue.tickLane("pages")).toBe(1);
+    expect(called).toBe(1);
+  });
+
+  it("still gives no head start even when relayPipelines explicitly names the lane pipeline", async () => {
+    const { queue, rows } = await make({ relayMs: 1000, relayPipelines: ["render"], lanes: { pages: ["render"] } });
+    let called = 0;
+    queue.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      called++;
+      return OK;
+    });
+    await queue.enqueue("x", { runId: "run-1" });
+    expect((await rows())[0]).toMatchObject({ availableAt: 1_000_000 });
+    const report = await queue.relay("run-1");
+    expect(called).toBe(0);
+    expect(report.status).toBe("pending");
+  });
+});
+
+describe("events/queue lanes: a pipeline moved out of a lane between two boots", () => {
+  it("keeps a loop, via startWorker, until its pending rows finish", async () => {
+    const db = createFakePersistence();
+    const queue1 = await createEventsQueue({ ...CONFIG, lanes: { pages: ["render"] } }, { db, logger: silentLogger, instanceId: "a@host" });
+    queue1.setDelivery([{ event: "x", pipeline: "render" }], async () => OK);
+    await queue1.enqueue("x", {});
+
+    const queue2 = await createEventsQueue({ ...CONFIG, lanes: {}, pollMs: 2 }, { db, logger: silentLogger, instanceId: "b@host" });
+    let calls = 0;
+    queue2.setDelivery([{ event: "x", pipeline: "render" }], async () => {
+      calls++;
+      return OK;
+    });
+    queue2.startWorker();
+    await new Promise((r) => setTimeout(r, 60));
+    expect(calls).toBe(1);
+    await queue2.stopWorker();
+  });
+});
+
+describe("events/queue lanes: stopWorker awaits every loop", () => {
+  it("awaits the main loop and every lane loop before resolving", async () => {
+    const { queue } = await make({ lanes: { pages: ["render"] }, pollMs: 2 });
+    let releaseMain: (() => void) | undefined;
+    let releaseLane: (() => void) | undefined;
+    const mainGate = new Promise<void>((r) => {
+      releaseMain = r;
+    });
+    const laneGate = new Promise<void>((r) => {
+      releaseLane = r;
+    });
+    let mainDone = false;
+    let laneDone = false;
+    queue.setDelivery([{ event: "x", pipeline: "other" }, { event: "y", pipeline: "render" }], async (pipeline) => {
+      if (pipeline === "other") {
+        await mainGate;
+        mainDone = true;
+      } else {
+        await laneGate;
+        laneDone = true;
+      }
+      return OK;
+    });
+    await queue.enqueue("x", {});
+    await queue.enqueue("y", {});
+    queue.startWorker();
+    await new Promise((r) => setTimeout(r, 20));
+    const stopping = queue.stopWorker();
+    let stopped = false;
+    void stopping.then(() => {
+      stopped = true;
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(stopped).toBe(false);
+    releaseMain?.();
+    releaseLane?.();
+    await stopping;
+    expect(mainDone).toBe(true);
+    expect(laneDone).toBe(true);
   });
 });

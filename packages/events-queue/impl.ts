@@ -11,6 +11,8 @@ export const QUEUE = "events_queue";
 
 export type QueueState = "pending" | "running" | "done" | "dead";
 
+export const MAIN_LANE = "main";
+
 export interface QueueRow extends Document {
   name: string;
   payload: EventData;
@@ -26,6 +28,10 @@ export interface QueueRow extends Document {
   error: string | null;
   /** The run whose `events.emit` wrote this row; `null` for a row raised through `events@1` outside a pipeline. */
   runId: string | null;
+  /** `"<pipeline>:<coalesceKey>"` from the event's `data.coalesceKey`, or `null`. Unique; cleared when a claim starts the row. */
+  coalesceKey: string | null;
+  /** The worker loop that claims this row: `"main"`, or a name from the `lanes` config. */
+  lane: string;
 }
 
 export interface Config {
@@ -39,6 +45,14 @@ export interface Config {
   relayMs: number;
   /** Pipelines whose rows the relay claims and delivers in the request; `"all"` (the default) means every subscribed pipeline. A row of a pipeline left out gets no head start and is reported `queued`. */
   relayPipelines: string[] | "all";
+  /** Named worker loops: each lane claims and runs only the pipelines it names, one row at a time, never waiting for another lane or the main loop. Every pipeline not listed here runs in the implicit `"main"` lane. */
+  lanes: Record<string, string[]>;
+}
+
+export interface LaneStatus {
+  pending: number;
+  running: number;
+  oldestPendingAt: number | null;
 }
 
 export interface QueueStatus {
@@ -48,6 +62,8 @@ export interface QueueStatus {
   done24h: number;
   oldestPendingAt: number | null;
   worker: { running: boolean; lastTickAt: number | null };
+  /** Per configured lane (never `"main"`): its own pending/running counts and oldest pending row. */
+  lanes: Record<string, LaneStatus>;
 }
 
 export interface DeadEntry {
@@ -76,8 +92,10 @@ export interface EventsQueue {
   listDead(limit: number): Promise<Result<{ items: DeadEntry[] }, PersistenceError>>;
   retryDead(id: string): Promise<Result<{ retried: number }, PersistenceError>>;
   purgeDone(): Promise<Result<{ removed: number }, PersistenceError>>;
-  /** Processes one batch: fans out unfanned rows, reclaims expired locks, claims due rows, runs one pipeline per row. Returns how many rows it handled. */
+  /** Processes one batch of the main lane: fans out unfanned rows, reclaims expired locks of every lane, claims due main-lane rows, runs one pipeline per row. Returns how many rows it handled. */
   tick(): Promise<number>;
+  /** Claims and runs one due row of the named lane; single-flight per lane, the way `tick()` is single-flight for the main lane. */
+  tickLane(name: string): Promise<number>;
   startWorker(): void;
   stopWorker(): Promise<void>;
   workerRunning(): boolean;
@@ -102,9 +120,15 @@ export interface QueueDeps {
 }
 
 const DAY_MS = 24 * 3600 * 1000;
+const ACTIVE_STATES = ["pending", "running"] as const;
+const DISCOVERY_PAGE = 200;
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isCoalesceConflict(error: PersistenceError): boolean {
+  return error.code === "CONFLICT" && error.details?.field === "coalesceKey";
 }
 
 export async function createEventsQueue(config: Config, deps: QueueDeps): Promise<EventsQueue> {
@@ -125,16 +149,54 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     finishedAt: "number",
     error: "string",
     runId: "string",
+    coalesceKey: { type: "string", unique: true },
+    lane: "string",
   });
   if (isErr(ensured)) throw new Error(`events/queue: cannot create the queue collection: ${ensured.error.message}`);
+
+  const migrated = await db.updateMany<QueueRow>(QUEUE, { lane: null }, { lane: MAIN_LANE });
+  if (isErr(migrated)) throw new Error(`events/queue: cannot migrate rows without a lane to "${MAIN_LANE}": ${migrated.error.message}`);
+
+  const pipelineLane = new Map<string, string>();
+  for (const [lane, pipelines] of Object.entries(config.lanes)) for (const pipeline of pipelines) pipelineLane.set(pipeline, lane);
+
+  function laneOf(pipeline: string | null): string {
+    if (pipeline === null) return MAIN_LANE;
+    return pipelineLane.get(pipeline) ?? MAIN_LANE;
+  }
+
+  async function discoverExtraLanes(): Promise<string[]> {
+    const configured = new Set(Object.keys(config.lanes));
+    const extra = new Set<string>();
+    try {
+      let offset = 0;
+      for (;;) {
+        const page = await db.findMany<QueueRow>(QUEUE, { state: { in: [...ACTIVE_STATES] } }, { sort: { createdAt: "asc" }, limit: DISCOVERY_PAGE, offset });
+        if (isErr(page)) {
+          logger.error("events/queue: cannot discover lanes still holding pending rows from an earlier configuration", { error: page.error.message });
+          return [];
+        }
+        for (const row of page.value.items) if (row.lane !== MAIN_LANE && !configured.has(row.lane)) extra.add(row.lane);
+        if (page.value.items.length < DISCOVERY_PAGE) break;
+        offset += DISCOVERY_PAGE;
+      }
+    } catch (error) {
+      logger.error("events/queue: cannot discover lanes still holding pending rows from an earlier configuration", { error: errorText(error) });
+      return [];
+    }
+    return [...extra];
+  }
 
   let timer: NodeJS.Timeout | undefined;
   let running = false;
   let ticking: Promise<number> | undefined;
   let lastTickAt: number | null = null;
   const pendingRelays = new Map<string, { ids: string[]; queued: RelayEntry[]; at: number }>();
+  const laneTimers = new Map<string, NodeJS.Timeout>();
+  const laneTicking = new Map<string, Promise<number>>();
 
   function relayEligible(pipeline: string | null): boolean {
+    if (pipeline !== null && laneOf(pipeline) !== MAIN_LANE) return false;
     if (config.relayPipelines === "all") return true;
     return pipeline !== null && config.relayPipelines.includes(pipeline);
   }
@@ -189,7 +251,8 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       }
       let allPresent = true;
       for (const pipeline of pipelines) {
-        const created = await db.createOne<QueueRow>(QUEUE, { id: `${row.id}:${pipeline}`, name: row.name, payload: row.payload, pipeline, state: "pending", attempts: 0, createdAt: row.createdAt, availableAt: now(), lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: row.runId });
+        const coalesceKey = typeof row.payload.coalesceKey === "string" ? `${pipeline}:${row.payload.coalesceKey}` : null;
+        const created = await db.createOne<QueueRow>(QUEUE, { id: `${row.id}:${pipeline}`, name: row.name, payload: row.payload, pipeline, state: "pending", attempts: 0, createdAt: row.createdAt, availableAt: now(), lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId: row.runId, coalesceKey, lane: laneOf(pipeline) });
         if (isErr(created) && created.error.code !== "CONFLICT") {
           allPresent = false;
           logger.error("events/queue: cannot fan out a stored event, leaving the original for the next tick", { id: row.id, event: row.name, pipeline, error: created.error.message });
@@ -209,21 +272,38 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     return fanned;
   }
 
-  async function claim(): Promise<QueueRow[]> {
-    if (!delivery) return [];
+  async function reclaimExpiredLocks(): Promise<void> {
     const at = now();
     const expired = await db.updateMany<QueueRow>(QUEUE, { state: "running", lockedAt: { lte: at - config.lockTtlSeconds * 1000 } }, { state: "pending", lockedAt: null, lockedBy: null });
     if (isErr(expired)) throw new Error(expired.error.message);
     if (expired.value > 0) logger.info("events/queue: reclaimed expired locks", { count: expired.value });
-    const due = await db.findMany<QueueRow>(QUEUE, { state: "pending", pipeline: { ne: null }, availableAt: { lte: at } }, { sort: { availableAt: "asc", createdAt: "asc" }, limit: config.batch });
+  }
+
+  async function claim(): Promise<QueueRow[]> {
+    if (!delivery) return [];
+    const at = now();
+    await reclaimExpiredLocks();
+    const due = await db.findMany<QueueRow>(QUEUE, { state: "pending", pipeline: { ne: null }, lane: MAIN_LANE, availableAt: { lte: at } }, { sort: { availableAt: "asc", createdAt: "asc" }, limit: config.batch });
     if (isErr(due)) throw new Error(due.error.message);
     const claimed: QueueRow[] = [];
     for (const row of due.value.items) {
-      const won = await db.updateMany<QueueRow>(QUEUE, { id: row.id, state: "pending" }, { state: "running", lockedAt: at, lockedBy: instanceId });
+      const won = await db.updateMany<QueueRow>(QUEUE, { id: row.id, state: "pending" }, { state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null });
       if (isErr(won) || won.value !== 1) continue;
-      claimed.push({ ...row, state: "running", lockedAt: at, lockedBy: instanceId });
+      claimed.push({ ...row, state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null });
     }
     return claimed;
+  }
+
+  async function claimLane(name: string): Promise<QueueRow | undefined> {
+    if (!delivery) return undefined;
+    const at = now();
+    const due = await db.findMany<QueueRow>(QUEUE, { state: "pending", lane: name, availableAt: { lte: at } }, { sort: { availableAt: "asc", createdAt: "asc" }, limit: 1 });
+    if (isErr(due)) throw new Error(due.error.message);
+    const row = due.value.items[0];
+    if (!row) return undefined;
+    const won = await db.updateMany<QueueRow>(QUEUE, { id: row.id, state: "pending" }, { state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null });
+    if (isErr(won) || won.value !== 1) return undefined;
+    return { ...row, state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null };
   }
 
   function sweepPendingRelays(): void {
@@ -240,8 +320,15 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     return rows.length;
   }
 
+  async function tickLaneOnce(name: string): Promise<number> {
+    const row = await claimLane(name);
+    if (!row) return 0;
+    await settle(row, await runRow(row));
+    return 1;
+  }
+
   async function claimForRelay(row: QueueRow, at: number): Promise<boolean> {
-    const won = await db.updateMany<QueueRow>(QUEUE, { id: row.id, state: "pending" }, { state: "running", lockedAt: at, lockedBy: instanceId });
+    const won = await db.updateMany<QueueRow>(QUEUE, { id: row.id, state: "pending" }, { state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null });
     return !isErr(won) && won.value === 1;
   }
 
@@ -280,7 +367,7 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
             pipelines.push(pendingEntryOf(row));
             continue;
           }
-          const claimed: QueueRow = { ...row, state: "running", lockedAt: at, lockedBy: instanceId };
+          const claimed: QueueRow = { ...row, state: "running", lockedAt: at, lockedBy: instanceId, coalesceKey: null };
           const error = await runRow(claimed);
           await settle(claimed, error);
           pipelines.push(relayEntryOf(row, error));
@@ -310,6 +397,21 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     return ticking;
   }
 
+  function tickLane(name: string): Promise<number> {
+    const inFlight = laneTicking.get(name);
+    if (inFlight) return inFlight;
+    const started = tickLaneOnce(name)
+      .catch((error: unknown) => {
+        logger.error("events/queue: lane tick failed", { lane: name, error: errorText(error) });
+        return 0;
+      })
+      .finally(() => {
+        laneTicking.delete(name);
+      });
+    laneTicking.set(name, started);
+    return started;
+  }
+
   function schedule(delay: number): void {
     if (!running) return;
     timer = setTimeout(() => {
@@ -319,10 +421,21 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
     timer.unref();
   }
 
+  function scheduleLane(name: string, delay: number): void {
+    if (!running) return;
+    const t = setTimeout(() => {
+      laneTimers.delete(name);
+      void tickLane(name).then((handled) => scheduleLane(name, handled > 0 ? 0 : config.pollMs));
+    }, delay);
+    t.unref();
+    laneTimers.set(name, t);
+  }
+
   return {
     async enqueue(name, data) {
       const at = now();
       const runId = typeof data.runId === "string" ? data.runId : null;
+      const coalesce = typeof data.coalesceKey === "string" ? data.coalesceKey : null;
       const pipelines = delivery?.table.get(name);
       if (delivery && (!pipelines || pipelines.length === 0)) return;
       const targets = pipelines ?? [null];
@@ -331,8 +444,12 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       for (const pipeline of targets) {
         const eligible = runId !== null && relayEligible(pipeline);
         const availableAt = eligible ? at + config.relayMs : at;
-        const created = await db.createOne<QueueRow>(QUEUE, { name, payload: { ...data }, pipeline, state: "pending", attempts: 0, createdAt: at, availableAt, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId });
-        if (isErr(created)) throw new QueueWriteError(created.error);
+        const coalesceKey = pipeline !== null && coalesce !== null ? `${pipeline}:${coalesce}` : null;
+        const created = await db.createOne<QueueRow>(QUEUE, { name, payload: { ...data }, pipeline, state: "pending", attempts: 0, createdAt: at, availableAt, lockedAt: null, lockedBy: null, finishedAt: null, error: null, runId, coalesceKey, lane: laneOf(pipeline) });
+        if (isErr(created)) {
+          if (isCoalesceConflict(created.error)) continue;
+          throw new QueueWriteError(created.error);
+        }
         if (eligible) ids.push(created.value.id);
         else if (runId !== null && pipeline !== null) queued.push({ event: name, pipeline, status: "queued", attempts: 0, dead: false, error: null });
       }
@@ -359,12 +476,20 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       for (const c of counts) if (isErr(c)) return c;
       const oldest = await db.findMany<QueueRow>(QUEUE, { state: "pending" }, { sort: { availableAt: "asc" }, limit: 1 });
       if (isErr(oldest)) return oldest;
+      const lanes: Record<string, LaneStatus> = {};
+      for (const name of Object.keys(config.lanes)) {
+        const [lanePending, laneRunning, laneOldest] = await Promise.all([db.count(QUEUE, { state: "pending", lane: name }), db.count(QUEUE, { state: "running", lane: name }), db.findMany<QueueRow>(QUEUE, { state: "pending", lane: name }, { sort: { availableAt: "asc" }, limit: 1 })]);
+        if (isErr(lanePending)) return lanePending;
+        if (isErr(laneRunning)) return laneRunning;
+        if (isErr(laneOldest)) return laneOldest;
+        lanes[name] = { pending: lanePending.value, running: laneRunning.value, oldestPendingAt: laneOldest.value.items[0]?.availableAt ?? null };
+      }
       const [pendingCount, runningCount, deadCount, done24hCount] = counts;
       const pending = pendingCount.ok ? pendingCount.value : 0;
       const running_ = runningCount.ok ? runningCount.value : 0;
       const dead = deadCount.ok ? deadCount.value : 0;
       const done24h = done24hCount.ok ? done24hCount.value : 0;
-      return ok({ pending, running: running_, dead, done24h, oldestPendingAt: oldest.value.items[0]?.availableAt ?? null, worker: { running, lastTickAt } });
+      return ok({ pending, running: running_, dead, done24h, oldestPendingAt: oldest.value.items[0]?.availableAt ?? null, worker: { running, lastTickAt }, lanes });
     },
     async deliveryStatus() {
       const dead = await db.count(QUEUE, { state: "dead" });
@@ -398,16 +523,24 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       return ok({ removed: removed.value });
     },
     tick,
+    tickLane,
     startWorker() {
       if (running) return;
       running = true;
       schedule(0);
+      for (const name of Object.keys(config.lanes)) scheduleLane(name, 0);
+      void discoverExtraLanes().then((names) => {
+        for (const name of names) if (running && !laneTimers.has(name)) scheduleLane(name, 0);
+      });
     },
     async stopWorker() {
       running = false;
       if (timer) clearTimeout(timer);
       timer = undefined;
       if (ticking) await ticking;
+      for (const t of laneTimers.values()) clearTimeout(t);
+      laneTimers.clear();
+      await Promise.all([...laneTicking.values()]);
     },
     workerRunning: () => running,
     relay,

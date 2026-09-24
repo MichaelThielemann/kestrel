@@ -11,7 +11,7 @@ import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import type { Runner } from "@michaelthielemann/kestrel/runner";
 import type { Unsubscribe } from "@michaelthielemann/kestrel-contracts/events";
-import { createEventsQueue, persistenceFailure, retryTarget, type EventsQueue } from "./impl.ts";
+import { createEventsQueue, MAIN_LANE, persistenceFailure, retryTarget, type EventsQueue } from "./impl.ts";
 
 export const configSchema = z
   .object({
@@ -23,8 +23,14 @@ export const configSchema = z
     retentionDays: z.number().int().positive().default(7),
     relayMs: z.number().int().nonnegative().default(5000),
     relayPipelines: z.union([z.literal("all"), z.array(z.string())]).default("all"),
+    lanes: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/), z.array(z.string())).default({}),
   })
-  .strict();
+  .strict()
+  .superRefine((config, ctx) => {
+    if (MAIN_LANE in config.lanes) {
+      ctx.addIssue({ code: "custom", path: ["lanes", MAIN_LANE], message: `lane name "${MAIN_LANE}" is reserved for the pipelines no lane names` });
+    }
+  });
 
 const NULLABLE_NUMBER: JsonSchema = { type: ["number", "null"] };
 export const STATUS_SCHEMA: JsonSchema = {
@@ -36,8 +42,9 @@ export const STATUS_SCHEMA: JsonSchema = {
     done24h: { type: "number" },
     oldestPendingAt: NULLABLE_NUMBER,
     worker: { type: "object", properties: { running: { type: "boolean" }, lastTickAt: NULLABLE_NUMBER }, required: ["running", "lastTickAt"] },
+    lanes: { type: "object", additionalProperties: { type: "object", properties: { pending: { type: "number" }, running: { type: "number" }, oldestPendingAt: NULLABLE_NUMBER }, required: ["pending", "running", "oldestPendingAt"] } },
   },
-  required: ["pending", "running", "dead", "done24h", "oldestPendingAt", "worker"],
+  required: ["pending", "running", "dead", "done24h", "oldestPendingAt", "worker", "lanes"],
 };
 export const DEAD_SCHEMA: JsonSchema = {
   type: "object",
@@ -54,7 +61,7 @@ const DEFAULT_DEAD_LIMIT = 50;
 const MAX_DEAD_LIMIT = 500;
 const NO_SUBSCRIBER_RUN: Runner = () => Promise.reject(new Error("events/queue: no pipeline is subscribed to any event"));
 
-type Instance = EventsQueue & { offs: Unsubscribe[]; logger: Logger; relayPipelines: string[] | "all" };
+type Instance = EventsQueue & { offs: Unsubscribe[]; logger: Logger; relayPipelines: string[] | "all"; lanes: Record<string, string[]> };
 
 export default defineModule({
   name: "events/queue",
@@ -72,7 +79,7 @@ export default defineModule({
         await queue.enqueue(event, withEventIdentity(event, data));
       }),
     );
-    return { ...queue, offs, logger: deps.logger, relayPipelines: config.relayPipelines };
+    return { ...queue, offs, logger: deps.logger, relayPipelines: config.relayPipelines, lanes: config.lanes };
   },
 
   triggers: {
@@ -84,10 +91,23 @@ export default defineModule({
   },
 
   attach: (instance, kestrel) => {
-    if (instance.relayPipelines === "all") return;
     const known = new Set(kestrel.describe().pipelines.map((p) => p.name));
-    const unknown = instance.relayPipelines.filter((name) => !known.has(name));
-    if (unknown.length > 0) throw new Error(`events/queue: relayPipelines names unknown pipeline(s): ${unknown.join(", ")}`);
+    if (instance.relayPipelines !== "all") {
+      const unknown = instance.relayPipelines.filter((name) => !known.has(name));
+      if (unknown.length > 0) throw new Error(`events/queue: relayPipelines names unknown pipeline(s): ${unknown.join(", ")}`);
+    }
+    const laneOfPipeline = new Map<string, string>();
+    for (const [lane, pipelines] of Object.entries(instance.lanes)) {
+      for (const pipeline of pipelines) {
+        if (!known.has(pipeline)) throw new Error(`events/queue: lane "${lane}" names unknown pipeline "${pipeline}"`);
+        const already = laneOfPipeline.get(pipeline);
+        if (already !== undefined) throw new Error(`events/queue: pipeline "${pipeline}" is in two lanes: "${already}" and "${lane}"`);
+        laneOfPipeline.set(pipeline, lane);
+        if (instance.relayPipelines !== "all" && instance.relayPipelines.includes(pipeline)) {
+          throw new Error(`events/queue: pipeline "${pipeline}" is in lane "${lane}" and in relayPipelines`);
+        }
+      }
+    }
   },
 
   teardown: async (instance) => {
@@ -152,7 +172,7 @@ export default defineModule({
 
   describe: () => ({
     emit: (spec: string) => ({ summary: `Queue event "${spec}" for the subscribed handler pipelines; the worker delivers it after this run`, reads: [], writes: [], errors: { 503: "the event could not be persisted" }, atomicSafe: true }),
-    readQueueStatus: { summary: "Queue counters per state, the oldest pending event and the worker state of this process", reads: [], writes: ["result"], output: STATUS_SCHEMA, atomicSafe: true },
+    readQueueStatus: { summary: "Queue counters per state, the oldest pending event, the worker state of this process, and pending/running/oldestPendingAt per configured lane", reads: [], writes: ["result"], output: STATUS_SCHEMA, atomicSafe: true },
     readDeliveryStatus: { summary: "Dead-letter rows of the queue across every process: deliveries that used up maxAttempts and wait for events.retryDead", reads: [], writes: ["result"], output: DELIVERY_STATUS_SCHEMA, errors: { 503: "the queue could not be read" } },
     listDead: { summary: "Dead-letter events, most recently failed first", reads: [], writes: ["result"], query: { limit: { type: "integer", minimum: 1, maximum: MAX_DEAD_LIMIT } }, output: DEAD_SCHEMA, atomicSafe: true },
     retryDead: (arg: string) =>
