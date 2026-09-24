@@ -2,13 +2,13 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { BootProblem } from "@michaelthielemann/kestrel";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
-import { insertStepAfterEmitOutsideGroup, replaceModuleListEntry, replaceModulesTsEntry } from "./edits.ts";
+import { emitStepIsLocatable, insertStepAfterEmitOutsideGroup, replaceModuleListEntry, replaceModulesTsEntry } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { replaceDependency } from "./packageJson.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { AskFix, Edit, Finding } from "./report.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
-import { KESTREL_RANGE, infoFinding, moduleEntry, packageJsonPath } from "./ruleHelpers.ts";
+import { KESTREL_RANGE, combineEditParts, infoFinding, moduleEntry, packageJsonPath } from "./ruleHelpers.ts";
 
 const RULE_ID = "offer/event-queue";
 const SERVERLESS_MARKERS = ["vercel.json", "netlify.toml", "wrangler.toml", "serverless.yml", "template.yaml"];
@@ -39,6 +39,9 @@ function switchBlockers(ctx: RuleContext): string[] {
   const directEntry = moduleEntry(ctx, "events-direct");
   if (directEntry === undefined) return [];
   const blockers: string[] = [];
+  const configSource = ctx.readFile(ctx.project.configFile);
+  const configLocatable = configSource !== undefined && replaceModuleListEntry(ctx.project.configFile, configSource, { use: directEntry.use, newUse: EVENTS_QUEUE_PACKAGE, config: "{}" }) !== undefined;
+  if (!configLocatable) blockers.push(ctx.project.configFile);
   const modulesTsPath = modulesTsFile(ctx);
   const modulesTsSource = ctx.readFile(modulesTsPath);
   if (modulesTsSource !== undefined && importsPackage(modulesTsSource, directEntry.use)) {
@@ -136,6 +139,51 @@ function switchEdits(ctx: RuleContext, relayPipelines: readonly string[]): Edit[
     if (edit) edits.push(edit);
   }
   return edits;
+}
+
+function verifiedSwitchEdits(ctx: RuleContext, relayPipelines: readonly string[]): { edits: Edit[]; missing: string[] } {
+  const directEntry = moduleEntry(ctx, "events-direct");
+  const configSource = directEntry === undefined ? undefined : ctx.readFile(ctx.project.configFile);
+  const relayLiteral = `{ relayPipelines: [${relayPipelines.map((p) => `"${p}"`).join(", ")}] }`;
+  const configEdit = configSource === undefined || directEntry === undefined ? undefined : replaceModuleListEntry(ctx.project.configFile, configSource, { use: directEntry.use, newUse: EVENTS_QUEUE_PACKAGE, config: relayLiteral });
+
+  const pkgFile = packageJsonPath(ctx);
+  const pkgSource = ctx.readFile(pkgFile);
+  const pkgEdit = pkgSource === undefined || directEntry === undefined ? undefined : replaceDependency(pkgFile, pkgSource, "dependencies", directEntry.use, EVENTS_QUEUE_PACKAGE, KESTREL_RANGE);
+
+  const modulesTsPath = modulesTsFile(ctx);
+  const modulesTsSource = ctx.readFile(modulesTsPath);
+  const modulesTsResult: Edit[] | undefined =
+    directEntry !== undefined && modulesTsSource !== undefined && importsPackage(modulesTsSource, directEntry.use)
+      ? replaceModulesTsEntry(modulesTsPath, modulesTsSource, directEntry.use, EVENTS_QUEUE_PACKAGE)
+      : [];
+
+  const parts: Record<string, Edit[] | undefined> = {
+    "kestrel.config.ts's modules list": configEdit === undefined ? undefined : [configEdit],
+    "package.json's dependencies": pkgEdit,
+    "modules.ts's array": modulesTsResult,
+  };
+
+  const relayEvents = new Set(ctx.project.input.config.triggers.flatMap((t) => ("event" in t && relayPipelines.includes(t.pipeline) ? [t.event] : [])));
+  for (const def of ctx.project.input.pipelines) {
+    const file = ctx.project.pipelineFiles.get(def.name);
+    const source = file === undefined ? undefined : ctx.readFile(file);
+    if (file === undefined || source === undefined) continue;
+    const steps = pipelineSteps(def.steps);
+    const emitsOfInterest = steps.filter((s) => s.startsWith("events.emit:") && relayEvents.has(s.slice("events.emit:".length).split("?")[0]!));
+    const lastEmit = emitsOfInterest.at(-1);
+    if (lastEmit === undefined) continue;
+    const options = { pipelineName: def.name, emitStep: lastEmit, newStep: "events.relay" };
+    const label = `pipelines/${def.name}'s events.relay step`;
+    if (!emitStepIsLocatable(source, options)) {
+      parts[label] = undefined;
+      continue;
+    }
+    const edit = insertStepAfterEmitOutsideGroup(file, source, options);
+    parts[label] = edit ? [edit] : [];
+  }
+
+  return combineEditParts(parts);
 }
 
 const CONSEQUENCES = "uploads and other requests answer at once; a subscriber not named in relayPipelines runs in the worker moments later, retried with backoff, so it can be missing for a few seconds; a failing subscriber no longer fails the request that emitted the event; every event may reach a pipeline more than once; programmatic events.on subscribers stop seeing pipeline-emitted events; the queue lives in the database and switching back later needs it drained first";
@@ -245,7 +293,7 @@ export const queueOfferRule: Rule = {
       ];
     }
 
-    const edits = switchEdits(ctx, relayPipelines);
+    const { edits, missing } = verifiedSwitchEdits(ctx, relayPipelines);
     return [
       {
         id: RULE_ID,
@@ -254,7 +302,10 @@ export const queueOfferRule: Rule = {
         tier: "source",
         where: {},
         message: "switching event delivery to the queue",
-        suggestion: `events-queue replaces events-direct with relayPipelines: [${relayPipelines.join(", ")}]; run pnpm install afterwards`,
+        suggestion:
+          missing.length > 0
+            ? `events-queue replaces events-direct with relayPipelines: [${relayPipelines.join(", ")}] by hand; could not locate: ${missing.join(", ")}`
+            : `events-queue replaces events-direct with relayPipelines: [${relayPipelines.join(", ")}]; run pnpm install afterwards`,
         fix: edits.length > 0 ? { kind: "auto", edits } : { kind: "manual" },
         docs: "docs/upgrading.md#offer-event-queue",
       },

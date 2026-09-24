@@ -168,6 +168,17 @@ describe("offer/event-queue", () => {
     expect(createPageText).toContain('"events.emit:page.created", "events.relay"');
   });
 
+  it("blocks the write, never a partial one, when a relay pipeline's emit step cannot be located", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const createPageFile = join(dir, "createPage.ts");
+    await writeFile(createPageFile, 'const STEPS = ["content.create", "events.emit:page.created"];\ndefinePipeline({ name: "createPage", steps: STEPS });\n');
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
+    const findings = await queueOfferRule.check(contextFor(p, answers));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).not.toBe("auto");
+    expect(findings[0]?.suggestion).toContain("createPage");
+  });
+
   it("also swaps events-direct for events-queue in a sibling modules.ts", async () => {
     const p = await directProject({ publishPipeline: true });
     const modulesTsFile = join(dir, "modules.ts");
@@ -206,6 +217,19 @@ export const definePipeline = pipelineDefiner<KnownStep>();
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).not.toBe("ask");
     expect(findings[0]?.message).toContain("createPage.ts");
+  });
+
+  it("blocks the offer, never a partial write, when the config's use is a constant the switch cannot rewrite", async () => {
+    const p = await directProject();
+    await writeFile(
+      p.configFile,
+      'const DELIVERY = "@michaelthielemann/kestrel-events-direct";\nexport default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-events-inmemory" }, { use: DELIVERY }, { use: "@michaelthielemann/kestrel-persistence-sqlite" }], triggers: [] });\n',
+    );
+    const findings = await queueOfferRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).not.toBe("ask");
+    expect(findings[0]?.fix.kind).not.toBe("auto");
+    expect(findings[0]?.message).toContain(p.configFile);
   });
 
   it("produces valid, parseable JSON when events-direct was appended last in an unsorted package.json", async () => {

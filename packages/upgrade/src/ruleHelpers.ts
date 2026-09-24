@@ -15,6 +15,19 @@ export function finding(id: string, rule: string, message: string, suggestion: s
   return { id, rule, severity, tier: "source", where, message, suggestion, fix: edits && edits.length > 0 ? { kind: "auto", edits } : { kind: "manual" }, docs };
 }
 
+/**
+ * Combines the parts of a multi-part edit into one all-or-nothing set: `undefined` for a part means it could not be
+ * located, and the whole result becomes manual (`edits: []`), naming every such part; a part that legitimately has
+ * nothing to do returns `[]`, not `undefined`, and never blocks the others.
+ */
+export function combineEditParts(parts: Record<string, Edit[] | undefined>): { edits: Edit[]; missing: string[] } {
+  const missing = Object.entries(parts)
+    .filter(([, edits]) => edits === undefined)
+    .map(([label]) => label);
+  if (missing.length > 0) return { edits: [], missing };
+  return { edits: Object.values(parts).flatMap((edits) => edits ?? []), missing };
+}
+
 export function infoFinding(id: string, rule: string, message: string, suggestion: string, where: FindingLocation, docs: string): Finding {
   return { id, rule, severity: "info", tier: "source", where, message, suggestion, fix: { kind: "none" }, docs };
 }

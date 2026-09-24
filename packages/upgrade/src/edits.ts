@@ -232,13 +232,13 @@ export interface InsertAfterEmitOptions {
   newStep: string;
 }
 
-/**
- * Inserts `newStep` after `emitStep` in the named pipeline — after the whole atomic group in the
- * top-level step list when the emit sits inside one, never inside it, since a step placed there
- * must declare `atomicSafe` and a relay is not. `undefined` when the pipeline, the step or the
- * array cannot be found, or `newStep` is already in place.
- */
-export function insertStepAfterEmitOutsideGroup(file: string, source: string, options: InsertAfterEmitOptions): Edit | undefined {
+interface EmitAnchor {
+  top: AstNode;
+  el: AstNode;
+  alreadyPresent: boolean;
+}
+
+function locateEmitAnchor(source: string, options: InsertAfterEmitOptions): EmitAnchor | undefined {
   const root = parseTs(source);
   for (const top of pipelineStepsArrays(root, options.pipelineName)) {
     const topElements = elements(top);
@@ -251,12 +251,29 @@ export function insertStepAfterEmitOutsideGroup(file: string, source: string, op
       }
       if (!matched) continue;
       const next = topElements[i + 1];
-      if (next !== undefined && stringValue(next) === options.newStep) return undefined;
-      const quote = quoteOf(source, topElements.find((e) => stringValue(e) !== undefined));
-      return insertRelativeToAnchor(file, source, top, el, "after", `${quote}${options.newStep}${quote}`);
+      return { top, el, alreadyPresent: next !== undefined && stringValue(next) === options.newStep };
     }
   }
   return undefined;
+}
+
+/**
+ * Inserts `newStep` after `emitStep` in the named pipeline — after the whole atomic group in the
+ * top-level step list when the emit sits inside one, never inside it, since a step placed there
+ * must declare `atomicSafe` and a relay is not. `undefined` when the pipeline, the step or the
+ * array cannot be found, or `newStep` is already in place.
+ */
+export function insertStepAfterEmitOutsideGroup(file: string, source: string, options: InsertAfterEmitOptions): Edit | undefined {
+  const anchor = locateEmitAnchor(source, options);
+  if (anchor === undefined || anchor.alreadyPresent) return undefined;
+  const topElements = elements(anchor.top);
+  const quote = quoteOf(source, topElements.find((e) => stringValue(e) !== undefined));
+  return insertRelativeToAnchor(file, source, anchor.top, anchor.el, "after", `${quote}${options.newStep}${quote}`);
+}
+
+/** True once `emitStep` itself can be found in the named pipeline, whether or not `newStep` still needs inserting after it — unlike the `undefined` `insertStepAfterEmitOutsideGroup` returns for either reason, this tells the two apart. */
+export function emitStepIsLocatable(source: string, options: InsertAfterEmitOptions): boolean {
+  return locateEmitAnchor(source, options) !== undefined;
 }
 
 /** Adds `events` to a local module's `emits: [...]`, creating the property when it has none; already-listed events are skipped. `undefined` when there is nothing left to add, or no `defineModule({...})` call is found. */

@@ -91,6 +91,15 @@ export const definePipeline = pipelineDefiner<KnownStep>();
     expect(text).toContain('import eventsDirect from "@michaelthielemann/kestrel-events-direct";');
     expect(text).toContain("const modules = [eventsInmemory, eventsDirect] as const;");
   });
+
+  it("goes manual, naming the config file, when the anchor's use is a constant the source cannot match", async () => {
+    const source = 'const BUS = "@michaelthielemann/kestrel-events-inmemory";\nexport default defineConfig({ modules: [{ use: BUS }], triggers: [] });\n';
+    const project = await projectWithConfig(source, ["@michaelthielemann/kestrel-events-inmemory"]);
+    const findings = await eventDeliveryRule.check(contextFor(project));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+    expect(findings[0]?.suggestion).toContain("kestrel.config.ts's modules list");
+  });
 });
 
 describe("modules/event-bus", () => {
@@ -103,6 +112,15 @@ describe("modules/event-bus", () => {
     const configEdit = edits.find((e) => e.file === project.configFile)!;
     const { text } = applyEdits(source, [configEdit]);
     expect(text).toContain('modules: [{ use: "@michaelthielemann/kestrel-events-inmemory", config: {} }, { use: "@michaelthielemann/kestrel-events-queue"');
+  });
+
+  it("goes manual, naming the config file, when the anchor's use is a constant the source cannot match", async () => {
+    const source = 'const QUEUE = "@michaelthielemann/kestrel-events-queue";\nexport default defineConfig({ modules: [{ use: QUEUE }], triggers: [] });\n';
+    const project = await projectWithConfig(source, ["@michaelthielemann/kestrel-events-queue"]);
+    const findings = await eventBusRule.check(contextFor(project));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+    expect(findings[0]?.suggestion).toContain("kestrel.config.ts's modules list");
   });
 });
 

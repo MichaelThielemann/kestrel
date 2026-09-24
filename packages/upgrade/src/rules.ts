@@ -6,7 +6,7 @@ import { isRecord } from "./guards.ts";
 import { setDependencyRange } from "./packageJson.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
-import { finding, KESTREL_RANGE, moduleEntry, packageJsonPath } from "./ruleHelpers.ts";
+import { combineEditParts, finding, KESTREL_RANGE, moduleEntry, packageJsonPath } from "./ruleHelpers.ts";
 import { bootWrapRules } from "./ruleBootWraps.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { INFO_RULES } from "./ruleInfo.ts";
@@ -15,11 +15,25 @@ import { underscoreFieldRules } from "./ruleUnderscoreField.ts";
 import { verifiedUserRule } from "./ruleVerifiedUser.ts";
 import { useToken } from "./useToken.ts";
 
-function modulesTsEdits(ctx: RuleContext, packageName: string): Edit[] {
+function modulesTsEdits(ctx: RuleContext, packageName: string): Edit[] | undefined {
   const file = join(dirname(ctx.project.configFile), "modules.ts");
   const source = ctx.readFile(file);
   if (source === undefined) return [];
-  return insertModulesTsEntry(file, source, packageName) ?? [];
+  return insertModulesTsEntry(file, source, packageName);
+}
+
+function addDeliveryModuleFinding(ctx: RuleContext, ruleId: string, anchor: { use: string }, position: "before" | "after", newUse: string, message: string, suggestion: string, docs: string): Finding {
+  const source = ctx.readFile(ctx.project.configFile);
+  const configEdit = source === undefined ? undefined : insertModuleListEntry(ctx.project.configFile, source, { anchorUse: anchor.use, position, use: newUse, config: "{}" });
+  const pkgFile = packageJsonPath(ctx);
+  const pkgSource = ctx.readFile(pkgFile);
+  const pkgEdit = pkgSource === undefined ? undefined : [setDependencyRange(pkgFile, pkgSource, "dependencies", newUse, KESTREL_RANGE)];
+  const { edits, missing } = combineEditParts({
+    "kestrel.config.ts's modules list": configEdit === undefined ? undefined : [configEdit],
+    "package.json's dependencies": pkgEdit,
+    "modules.ts's array": modulesTsEdits(ctx, newUse),
+  });
+  return finding(ruleId, ruleId, message, missing.length > 0 ? `${suggestion} by hand; could not locate: ${missing.join(", ")}` : suggestion, { file: ctx.project.configFile, module: anchor.use }, edits, docs);
 }
 
 export const eventDeliveryRule: Rule = {
@@ -29,24 +43,15 @@ export const eventDeliveryRule: Rule = {
     const bus = moduleEntry(ctx, "events-inmemory");
     const hasDelivery = modules.some((m) => ["events-direct", "events-queue"].includes(useToken(m.use)));
     if (!bus || hasDelivery) return [];
-    const source = ctx.readFile(ctx.project.configFile);
-    const edits: Edit[] = [];
-    if (source !== undefined) {
-      const edit = insertModuleListEntry(ctx.project.configFile, source, { anchorUse: bus.use, position: "after", use: "@michaelthielemann/kestrel-events-direct", config: "{}" });
-      if (edit) edits.push(edit);
-    }
-    const pkgFile = packageJsonPath(ctx);
-    const pkgSource = ctx.readFile(pkgFile);
-    if (pkgSource !== undefined) edits.push(setDependencyRange(pkgFile, pkgSource, "dependencies", "@michaelthielemann/kestrel-events-direct", KESTREL_RANGE));
-    edits.push(...modulesTsEdits(ctx, "@michaelthielemann/kestrel-events-direct"));
     return [
-      finding(
+      addDeliveryModuleFinding(
+        ctx,
         "modules/event-delivery",
-        "modules/event-delivery",
+        bus,
+        "after",
+        "@michaelthielemann/kestrel-events-direct",
         "an event trigger or events.emit needs exactly one delivery module (events-direct or events-queue) next to events-inmemory",
         "add @michaelthielemann/kestrel-events-direct after kestrel-events-inmemory",
-        { file: ctx.project.configFile, module: bus.use },
-        edits,
         "docs/upgrading.md#modules-event-delivery",
       ),
     ];
@@ -60,24 +65,15 @@ export const eventBusRule: Rule = {
     const queue = moduleEntry(ctx, "events-queue");
     const hasBus = modules.some((m) => useToken(m.use) === "events-inmemory");
     if (!queue || hasBus) return [];
-    const source = ctx.readFile(ctx.project.configFile);
-    const edits: Edit[] = [];
-    if (source !== undefined) {
-      const edit = insertModuleListEntry(ctx.project.configFile, source, { anchorUse: queue.use, position: "before", use: "@michaelthielemann/kestrel-events-inmemory", config: "{}" });
-      if (edit) edits.push(edit);
-    }
-    const pkgFile = packageJsonPath(ctx);
-    const pkgSource = ctx.readFile(pkgFile);
-    if (pkgSource !== undefined) edits.push(setDependencyRange(pkgFile, pkgSource, "dependencies", "@michaelthielemann/kestrel-events-inmemory", KESTREL_RANGE));
-    edits.push(...modulesTsEdits(ctx, "@michaelthielemann/kestrel-events-inmemory"));
     return [
-      finding(
+      addDeliveryModuleFinding(
+        ctx,
         "modules/event-bus",
-        "modules/event-bus",
+        queue,
+        "before",
+        "@michaelthielemann/kestrel-events-inmemory",
         "events-queue requires events@1 instead of providing it; the bus module must be configured next to it",
         "add @michaelthielemann/kestrel-events-inmemory before kestrel-events-queue",
-        { file: ctx.project.configFile, module: queue.use },
-        edits,
         "docs/upgrading.md#modules-event-bus",
       ),
     ];
