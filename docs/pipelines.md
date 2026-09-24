@@ -563,10 +563,12 @@ real schemas apply to a representative payload.
 A step whose `writes` touches `result` declares the shape of what it produces: `output` (a JSON
 Schema, replacing whatever the pipeline's result schema was so far), `extendsOutput` (merges into
 it — becomes the output if there was none yet), `extendsItems` (merges into
-`properties.items.items` of a list output, or at the root otherwise), or `binary: true` for a step
-whose result is a binary body rather than JSON (`media.download`, `images.serve`). A step that
-writes `result` with none of the four fails `boot()`, naming the pipeline and the step
-(`"step writes result without declaring output, extendsOutput, extendsItems or binary: true"`).
+`properties.items.items` of a list output, or at the root otherwise), `binary: true` for a step
+whose result is a binary body rather than JSON (`media.download`, `images.serve`), or — only when
+the step's sole `result` write is optional (`result?`) — `terminalOutput` alone (see below). A step
+that writes `result` with none of these fails `boot()`, naming the pipeline and the step
+(`"step writes result without declaring output, extendsOutput, extendsItems or binary: true
+(terminalOutput alone only covers an optional "result?" write)"`).
 
 An object schema inside `output`, `extendsOutput` or `extendsItems` — the schema itself, a nested
 property, an array's `items`, an object-valued `additionalProperties` or a `oneOf`/`anyOf`/`allOf`
@@ -605,9 +607,9 @@ route's 200 when a pipeline can end more than one way, for example `redirects.lo
 `validateOutput`, a `ctx.done()` without a matching `terminalOutput` fails the run naming the step,
 and a step that declares only `terminalOutput` (no `output`) but changes `result` without calling
 `ctx.done()` fails as well. **Boot cannot see a `ctx.done()` call; a missing or wrong
-`terminalOutput` is found only at run time under `validateOutput` and by the upgrade assistant's
-source scan.** Boot does reject `terminalOutput` on a step with no write to `result`, and
-`terminalOutput` together with a `binary` step in the same pipeline.
+`terminalOutput` is found only at run time under `validateOutput` and by
+`@michaelthielemann/kestrel-upgrade`'s source scan.** Boot does reject `terminalOutput` on a step
+with no write to `result`, and `terminalOutput` together with a `binary` step in the same pipeline.
 
 These checks, like the dataflow check above, run after every module's `setup()` has already
 run, so a boot that fails on one of them can still leave behind what `setup()` created — a database

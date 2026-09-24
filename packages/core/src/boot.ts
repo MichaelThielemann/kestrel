@@ -152,7 +152,7 @@ function checkUndeclaredOutput(pipelines: ReadonlyMap<string, ResolvedPipeline>)
   for (const pipeline of pipelines.values()) {
     for (const step of pipeline.steps) {
       if (!step.description.writes.some((path) => writeRoot(path) === "result") || declaresOutput(step.description)) continue;
-      throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" writes result without declaring output, extendsOutput, extendsItems or binary: true`);
+      throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" writes result without declaring output, extendsOutput, extendsItems or binary: true (terminalOutput alone only covers an optional "result?" write)`);
     }
   }
 }

@@ -45,7 +45,7 @@ export interface StepDescription {
   output?: JsonSchema;
   /** Merges into the currently active output schema (properties + required union) instead of replacing it; becomes the output if there was none yet. */
   extendsOutput?: JsonSchema;
-  /** Like extendsOutput, but merges into `properties.items.items` of the active output when it is a list result; falls back to a root merge otherwise. */
+  /** Like extendsOutput, but merges into `properties.items.items` of the active output when it is a list result; falls back to a root merge otherwise. Never applies to a step's `terminalOutput`. */
   extendsItems?: JsonSchema;
   /**
    * The complete shape of `result` when this step ends the run with `ctx.done()`. Not folded: no other

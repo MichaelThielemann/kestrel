@@ -13,10 +13,11 @@ today's members are `{ code: "unemitted-event", message, pipeline, event }` and 
 no step of any booted pipeline writes and no trigger provides — almost always a typo), and a
 future minor release may add further codes, so code reading `kestrel.warnings` must handle a
 `code` it does not recognize. A step that writes `result` without declaring `output`,
-`extendsOutput`, `extendsItems` or `binary: true`, an object schema among those that declares
-`properties` without a `required` key, and a step's `extendsOutput` merging onto an active output
-schema whose declared type is not `object` each fail `boot()` outright with a `KestrelBootError`
-naming the pipeline and the step.
+`extendsOutput`, `extendsItems`, `binary: true` or, when its sole `result` write is optional
+(`result?`), `terminalOutput`; an object schema among those that declares `properties` without a
+`required` key; and an `extendsOutput`/`extendsItems` that cannot fold onto the active output
+schema (another type, a type array, a union with a non-object branch, and more — naming the reason)
+each fail `boot()` outright with a `KestrelBootError` naming the pipeline and the step.
 The `kestrel` binary loads `kestrel.config.ts`, the modules named in `use` and `pipelines/*.ts`
 from the current directory. `testing/runPipeline` runs a pipeline against fake steps or, with
 `modules: [{ module, instance }]`, against a module's real steps and schemas. Before every step
@@ -26,7 +27,8 @@ parameters against `describe().query` (coerced from strings), answering `VALIDAT
 off) and `testing/runPipeline` (always on) additionally validate `ctx.result` after every step
 that writes it against the pipeline's output schema folded up to that point
 (`@michaelthielemann/kestrel/schema`'s `resolveOutputSchema`), failing with the step name and the
-JSON path on a mismatch.
+JSON path on a mismatch. A step that ends the run with `ctx.done()` declares that result's shape as
+`terminalOutput` instead — never folded — and the same validation checks it against that schema.
 
 ## Introspection
 `kestrel.describe()` is the static manifest of the booted instance, computed once: every module

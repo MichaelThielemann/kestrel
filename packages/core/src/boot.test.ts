@@ -827,7 +827,7 @@ describe("boot", () => {
     const probeOnly = definePipeline({ name: "probeOnly", steps: ["mandatory.probe"] });
     const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./mandatory", config: {} }] };
     await expect(boot({ config, modules: [...modules, mandatory], pipelines: [...pipelines, probeOnly], logger: silentLogger })).rejects.toThrow(
-      /\[pipelines\/probeOnly\] step "mandatory\.probe" writes result without declaring output, extendsOutput, extendsItems or binary: true/,
+      /\[pipelines\/probeOnly\] step "mandatory\.probe" writes result without declaring output, extendsOutput, extendsItems or binary: true \(terminalOutput alone only covers an optional "result\?" write\)/,
     );
   });
 
