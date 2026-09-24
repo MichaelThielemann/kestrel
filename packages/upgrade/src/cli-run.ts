@@ -301,7 +301,8 @@ async function runData(args: ParsedArgs, stdout: (line: string) => void, stderr:
     stderr("data requires --db <sqlite file>");
     return 2;
   }
-  const result = await runDataStep(resolve(db));
+  const root = resolve(stringFlag(args, "root") ?? ".");
+  const result = await runDataStep(resolve(db), root);
   if (result.error !== undefined) {
     stderr(result.error);
     return result.exitCode;

@@ -698,6 +698,12 @@ importers:
       '@michaelthielemann/kestrel':
         specifier: workspace:*
         version: link:../core
+      '@michaelthielemann/kestrel-contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@michaelthielemann/kestrel-persistence-sqlite':
+        specifier: workspace:*
+        version: link:../persistence-sqlite
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@22.20.1)
