@@ -39,7 +39,7 @@ describe("kestrel-upgrade fix --write against a copy of the fixture", () => {
     const scratch = await createScratchCopy(FIXTURE);
     cleanupDirs.push(scratch.dir);
 
-    const code = await runUpgradeCli(["fix", "--root", scratch.dir, "--write"], { stdout: () => undefined, stderr: (line) => { throw new Error(line); } });
+    const code = await runUpgradeCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: (line) => { throw new Error(line); } });
     expect(code).toBe(1);
 
     const configText = readFileSync(join(scratch.dir, "kestrel.config.ts"), "utf8");
@@ -60,9 +60,9 @@ describe("kestrel-upgrade fix --write against a copy of the fixture", () => {
   it("makes no further edit on a second run", async () => {
     const scratch = await createScratchCopy(FIXTURE);
     cleanupDirs.push(scratch.dir);
-    await runUpgradeCli(["fix", "--root", scratch.dir, "--write"], { stdout: () => undefined, stderr: () => undefined });
+    await runUpgradeCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined });
     const before = readFileSync(join(scratch.dir, "kestrel.config.ts"), "utf8");
-    const code = await runUpgradeCli(["fix", "--root", scratch.dir, "--write"], { stdout: () => undefined, stderr: () => undefined });
+    const code = await runUpgradeCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined });
     const after = readFileSync(join(scratch.dir, "kestrel.config.ts"), "utf8");
     expect(after).toBe(before);
     expect(code).toBe(0);

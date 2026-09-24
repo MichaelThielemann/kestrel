@@ -1,0 +1,10 @@
+{
+  "name": "upgrade-fixture-verified-user",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@michaelthielemann/kestrel": "^5.8.0",
+    "@michaelthielemann/kestrel-authn-multi": "^5.8.0",
+    "@michaelthielemann/kestrel-revisions-default": "^5.8.0"
+  }
+}

@@ -1,0 +1,244 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
+import type { BootCheck, BootProblem, BootWarning, ModuleDefinition, PipelineDefinition } from "@michaelthielemann/kestrel";
+import { applyEdits } from "./apply.ts";
+import type { LoadedProject, RuleContext } from "./plugin.ts";
+import { readFileOrUndefined } from "./rules.ts";
+import { busHandlerThrowsRule, busSubscriberQueueRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule } from "./ruleInfo.ts";
+import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
+import { undeclaredOutputRule, undeclaredRequiredRule } from "./ruleBootWraps.ts";
+import { underscoreFieldRule } from "./ruleUnderscoreField.ts";
+import { verifiedUserRule } from "./ruleVerifiedUser.ts";
+
+function fakeModule(name: string, emits: readonly string[] = []): ModuleDefinition {
+  return { name, provides: [], requires: [], emits, configSchema: z.object({}), async setup() { return {}; } };
+}
+
+let dir: string;
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-newrules-"));
+});
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true });
+});
+
+function bootCheck(errors: BootProblem[] = [], warnings: BootWarning[] = []): BootCheck {
+  return { errors, warnings, notChecked: [] };
+}
+
+function contextFor(project: LoadedProject, options: { check?: BootCheck; answers?: ReadonlyMap<string, string>; data?: Record<string, unknown> } = {}): RuleContext {
+  const withData = options.data === undefined ? project : { ...project, data: options.data };
+  return { root: dir, scratch: dir, project: withData, bootCheck: options.check ?? bootCheck(), readFile: readFileOrUndefined, answers: options.answers ?? new Map() };
+}
+
+async function project(options: { configModules?: Array<{ use: string; config?: Record<string, unknown> }>; triggers?: unknown[]; pipelines?: PipelineDefinition[]; pipelineFiles?: Record<string, string>; modules?: ModuleDefinition[]; moduleFiles?: Record<string, string> }): Promise<LoadedProject> {
+  const configFile = join(dir, "kestrel.config.ts");
+  await writeFile(configFile, "export default defineConfig({});\n");
+  return {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+    input: { config: { modules: options.configModules ?? [], triggers: (options.triggers ?? []) as never }, modules: options.modules ?? [], pipelines: options.pipelines ?? [] },
+    kind: "backend",
+    configFile,
+    moduleFiles: new Map(Object.entries(options.moduleFiles ?? {})),
+    pipelineFiles: new Map(Object.entries(options.pipelineFiles ?? {})),
+  };
+}
+
+describe("pipelines/verified-user", () => {
+  it("auto-inserts authn.verifyUser:reassignTo for an http-only pipeline with authn-multi", async () => {
+    const file = join(dir, "retry.ts");
+    const source = 'definePipeline({ name: "retry", steps: ["authn.requireUser", "revisions.reassignAuthor"] });\n';
+    await writeFile(file, source);
+    const p = await project({
+      configModules: [{ use: "@michaelthielemann/kestrel-authn-multi" }],
+      triggers: [{ http: "POST /retry", pipeline: "retry" }],
+      pipelines: [{ name: "retry", steps: ["authn.requireUser", "revisions.reassignAuthor"] }],
+      pipelineFiles: { retry: file },
+    });
+    const findings = await verifiedUserRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const { text } = applyEdits(source, edits);
+    expect(text).toContain('"authn.verifyUser:reassignTo", "revisions.reassignAuthor"');
+  });
+
+  it("asks when a pipeline has both http and event triggers", async () => {
+    const p = await project({
+      configModules: [{ use: "@michaelthielemann/kestrel-authn-multi" }],
+      triggers: [{ http: "POST /retry", pipeline: "retry" }, { event: "revision.retry", pipeline: "retry" }],
+      pipelines: [{ name: "retry", steps: ["revisions.reassignAuthor"] }],
+    });
+    const findings = await verifiedUserRule.check(contextFor(p));
+    expect(findings[0]?.fix.kind).toBe("ask");
+  });
+
+  it("is manual without authn-multi", async () => {
+    const p = await project({
+      configModules: [{ use: "@michaelthielemann/kestrel-authn-single" }],
+      triggers: [{ http: "POST /retry", pipeline: "retry" }],
+      pipelines: [{ name: "retry", steps: ["revisions.reassignAuthor"] }],
+    });
+    const findings = await verifiedUserRule.check(contextFor(p));
+    expect(findings[0]?.fix.kind).toBe("manual");
+  });
+
+  it("does not fire once authn.verifyUser already precedes the step", async () => {
+    const p = await project({
+      configModules: [{ use: "@michaelthielemann/kestrel-authn-multi" }],
+      triggers: [{ http: "POST /retry", pipeline: "retry" }],
+      pipelines: [{ name: "retry", steps: ["authn.verifyUser:reassignTo", "revisions.reassignAuthor"] }],
+    });
+    expect(await verifiedUserRule.check(contextFor(p))).toEqual([]);
+  });
+});
+
+describe("steps/undeclared-output (boot wrap)", () => {
+  it("asks binary:<module>.<step> and applies binary: true on yes", async () => {
+    const file = join(dir, "notes.ts");
+    const source = 'export default defineModule({ describe: () => ({ create: { summary: "x", reads: [], writes: ["result"] } }) });\n';
+    await writeFile(file, source);
+    const p = await project({ modules: [fakeModule("notes/local")], moduleFiles: { "notes/local": file } });
+    const problem: BootProblem = { code: "undeclared-output", owner: "pipelines/p", reason: 'step "notes.create" writes result without declaring output', pipeline: "p", step: "notes.create" };
+    const ctxAsk = contextFor(p, { check: bootCheck([problem]) });
+    const asked = await undeclaredOutputRule.check(ctxAsk);
+    expect(asked[0]?.fix.kind).toBe("ask");
+
+    const ctxYes = contextFor(p, { check: bootCheck([problem]), answers: new Map([["binary:notes/local.create", "yes"]]) });
+    const applied = await undeclaredOutputRule.check(ctxYes);
+    expect(applied[0]?.fix.kind).toBe("auto");
+    const edits = applied[0]!.fix.kind === "auto" ? applied[0]!.fix.edits : [];
+    const { text } = applyEdits(source, edits);
+    expect(text).toContain("binary: true");
+  });
+});
+
+describe("steps/undeclared-required (boot wrap)", () => {
+  it("asks required:<module>.<step>:<path> and applies the listed properties", async () => {
+    const file = join(dir, "notes.ts");
+    const source = 'export default defineModule({ describe: () => ({ create: { summary: "x", reads: [], writes: ["result"], output: { type: "object", properties: { id: { type: "string" } } } } }) });\n';
+    await writeFile(file, source);
+    const p = await project({ modules: [fakeModule("notes/local")], moduleFiles: { "notes/local": file } });
+    const problem: BootProblem = { code: "undeclared-required", owner: "pipelines/p", reason: "declares properties without required", pipeline: "p", step: "notes.create", path: "$.output" };
+    const ctxYes = contextFor(p, { check: bootCheck([problem]), answers: new Map([["required:notes/local.create:$.output", "id"]]) });
+    const applied = await undeclaredRequiredRule.check(ctxYes);
+    expect(applied[0]?.fix.kind).toBe("auto");
+    const edits = applied[0]!.fix.kind === "auto" ? applied[0]!.fix.edits : [];
+    const { text } = applyEdits(source, edits);
+    expect(text).toContain('required: ["id"]');
+  });
+
+  it("has no default answer (a question without one)", async () => {
+    const file = join(dir, "notes.ts");
+    await writeFile(file, 'export default defineModule({ describe: () => ({ create: { summary: "x", reads: [], writes: ["result"], output: { type: "object", properties: { id: { type: "string" } } } } }) });\n');
+    const p = await project({ modules: [fakeModule("notes/local")], moduleFiles: { "notes/local": file } });
+    const problem: BootProblem = { code: "undeclared-required", owner: "pipelines/p", reason: "x", pipeline: "p", step: "notes.create", path: "$.output" };
+    const findings = await undeclaredRequiredRule.check(contextFor(p, { check: bootCheck([problem]) }));
+    expect(findings[0]?.fix.kind).toBe("ask");
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
+  });
+});
+
+describe("model/underscore-field", () => {
+  it("asks by default, with the leading underscores stripped as the default answer", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
+    const findings = await underscoreFieldRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("ask");
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : undefined).toBe("hint");
+  });
+
+  it("auto-renames once the data report shows no stored value", async () => {
+    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }], triggers: [] });\n';
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
+    await writeFile(p.configFile, source);
+    const findings = await underscoreFieldRule.check(contextFor(p, { data: { "page._hint": false } }));
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const { text } = applyEdits(source, edits);
+    expect(text).toContain("fields: { hint:");
+  });
+});
+
+describe("modules/emits", () => {
+  it("asks which events a module raises from setup(), heuristically finding .emit( calls", async () => {
+    const file = join(dir, "migrations.ts");
+    await writeFile(file, 'export default defineModule({ name: "migrations/default", async setup(config, deps) { await deps.get(EVENTS).emit("migrations.applied", {}); return {}; } });\n');
+    const p = await project({ modules: [fakeModule("migrations/default")], moduleFiles: { "migrations/default": file } });
+    const findings = await emitsRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("ask");
+  });
+
+  it("does not fire once the event is already declared", async () => {
+    const file = join(dir, "migrations.ts");
+    await writeFile(file, 'export default defineModule({ async setup(config, deps) { await deps.get(EVENTS).emit("migrations.applied", {}); return {}; } });\n');
+    const p = await project({ modules: [fakeModule("migrations/default", ["migrations.applied"])], moduleFiles: { "migrations/default": file } });
+    expect(await emitsRule.check(contextFor(p))).toEqual([]);
+  });
+});
+
+describe("steps/closed-event-input", () => {
+  it("reports a closed input schema on a step used by an event-triggered pipeline", async () => {
+    const file = join(dir, "notes.ts");
+    await writeFile(file, 'export default defineModule({ describe: () => ({ create: { summary: "x", reads: [], writes: [], input: { type: "object", additionalProperties: false, properties: { title: { type: "string" } } } } }) });\n');
+    const p = await project({
+      triggers: [{ event: "note.created", pipeline: "onNote" }],
+      pipelines: [{ name: "onNote", steps: ["notes.create"] }],
+      moduleFiles: { "notes/local": file },
+    });
+    const findings = await eventPayloadRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+  });
+
+  it("does not fire for a step not used on an event trigger", async () => {
+    const file = join(dir, "notes.ts");
+    await writeFile(file, 'export default defineModule({ describe: () => ({ create: { summary: "x", reads: [], writes: [], input: { type: "object", additionalProperties: false, properties: {} } } }) });\n');
+    const p = await project({ triggers: [], pipelines: [], moduleFiles: { "notes/local": file } });
+    expect(await eventPayloadRule.check(contextFor(p))).toEqual([]);
+  });
+});
+
+describe("info rules", () => {
+  it("responses/delivery-members fires for an HTTP pipeline running a delivery step", async () => {
+    const p = await project({ triggers: [{ http: "POST /pages", pipeline: "createPage" }], pipelines: [{ name: "createPage", steps: ["delivery.publish:pages"] }] });
+    const findings = await deliveryMembersRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe("info");
+  });
+
+  it("runtime/bus-handler-throws fires when events-direct is configured and a module subscribes with .on(", async () => {
+    const file = join(dir, "audit.ts");
+    await writeFile(file, 'bus.on("page.created", async () => {});\n');
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-events-direct" }], moduleFiles: { "audit/local": file } });
+    expect(await busHandlerThrowsRule.check(contextFor(p))).toHaveLength(1);
+  });
+
+  it("runtime/bus-subscriber-queue fires only when the subscribed event is also an event trigger", async () => {
+    const file = join(dir, "audit.ts");
+    await writeFile(file, 'bus.on("page.created", async () => {});\n');
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-events-queue" }], triggers: [{ event: "page.created", pipeline: "onCreated" }], moduleFiles: { "audit/local": file } });
+    expect(await busSubscriberQueueRule.check(contextFor(p))).toHaveLength(1);
+  });
+
+  it("tests/run-pipeline-validates fires for a file importing testing/runPipeline", async () => {
+    const file = join(dir, "module.test.ts");
+    await writeFile(file, 'import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";\n');
+    const p = await project({ moduleFiles: { "notes/local": file } });
+    expect(await runPipelineValidatesRule.check(contextFor(p))).toHaveLength(1);
+  });
+
+  it("runtime/restore-freshness fires when restoreOnStart defaults on", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-replication-sqlite" }] });
+    expect(await restoreFreshnessRule.check(contextFor(p))).toHaveLength(1);
+  });
+
+  it("runtime/restore-freshness stays quiet when restoreOnStart is off", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-replication-sqlite", config: { restoreOnStart: false } }] });
+    expect(await restoreFreshnessRule.check(contextFor(p))).toEqual([]);
+  });
+});

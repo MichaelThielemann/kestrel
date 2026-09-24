@@ -35,7 +35,7 @@ export function askFindings(findings: readonly Finding[]): Array<{ finding: Find
 }
 
 export interface ResolveOptions {
-  fromFile?: ReadonlyMap<string, string>;
+  fromFile?: ReadonlyMap<string, string> | undefined;
   yes: boolean;
   interactive: boolean;
   prompt: PromptFn;

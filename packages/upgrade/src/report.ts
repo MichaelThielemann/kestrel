@@ -57,6 +57,13 @@ export interface UpgradeReport {
   applied?: AppliedEdit[];
 }
 
+type MaybeLocation = { [K in keyof FindingLocation]?: FindingLocation[K] | undefined };
+
+/** Builds a `FindingLocation`, dropping every field given as `undefined` instead of assigning it (required under `exactOptionalPropertyTypes`). */
+export function whereOf(fields: MaybeLocation): FindingLocation {
+  return Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
+}
+
 export function summarize(findings: readonly Finding[]): UpgradeReport["summary"] {
   const summary = { error: 0, warning: 0, info: 0, auto: 0, ask: 0, manual: 0 };
   for (const f of findings) {

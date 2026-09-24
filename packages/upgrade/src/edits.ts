@@ -232,18 +232,36 @@ export function addModuleEmits(file: string, source: string, events: readonly st
   return { file, start: insertAt, end: insertAt, text: `${indent}emits: ${literal},\n` };
 }
 
-function describeStepObject(root: AstNode, stepName: string): AstNode | undefined {
-  let found: AstNode | undefined;
+function describeObjectsOf(root: AstNode): AstNode[] {
+  const bodies: AstNode[] = [];
   walk(root, (node) => {
-    if (found || node.type !== "ObjectProperty" || propertyKeyName(node) !== "describe") return;
+    if (node.type !== "ObjectProperty" || propertyKeyName(node) !== "describe") return;
     const value = node.value;
     if (!isAstNode(value)) return;
     const body = value.type === "ArrowFunctionExpression" && isAstNode(value.body) ? value.body : value;
-    if (body.type !== "ObjectExpression") return;
-    const entry = objectProperty(body, stepName);
-    if (entry?.type === "ObjectExpression") found = entry;
+    if (body.type === "ObjectExpression") bodies.push(body);
   });
-  return found;
+  return bodies;
+}
+
+function describeStepObject(root: AstNode, stepName: string): AstNode | undefined {
+  for (const body of describeObjectsOf(root)) {
+    const entry = objectProperty(body, stepName);
+    if (entry?.type === "ObjectExpression") return entry;
+  }
+  return undefined;
+}
+
+/** Every step key and its (non-factory) describe object literal, across every `describe: () => ({...})` in the file. */
+export function allDescribedSteps(source: string): Array<{ key: string; node: AstNode }> {
+  const out: Array<{ key: string; node: AstNode }> = [];
+  for (const body of describeObjectsOf(parseTs(source))) {
+    for (const prop of objectPropertyNodes(body)) {
+      const key = propertyKeyName(prop);
+      if (key !== undefined && isAstNode(prop.value) && prop.value.type === "ObjectExpression") out.push({ key, node: prop.value });
+    }
+  }
+  return out;
 }
 
 function appendProperty(source: string, obj: AstNode, file: string, text: string): Edit {

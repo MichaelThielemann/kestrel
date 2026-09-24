@@ -1,26 +1,17 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { insertModuleListEntry, renameStringLiterals, setModuleConfigProperties } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { setDependencyRange } from "./packageJson.ts";
-import type { Rule, RuleContext } from "./plugin.ts";
+import type { Rule } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
+import { finding, KESTREL_RANGE, moduleEntry, packageJsonPath } from "./ruleHelpers.ts";
+import { bootWrapRules } from "./ruleBootWraps.ts";
+import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
+import { INFO_RULES } from "./ruleInfo.ts";
+import { underscoreFieldRules } from "./ruleUnderscoreField.ts";
+import { verifiedUserRule } from "./ruleVerifiedUser.ts";
 import { useToken } from "./useToken.ts";
-
-const KESTREL_RANGE = "^6.0.0";
-
-function packageJsonPath(ctx: RuleContext): string {
-  return join(ctx.root, "package.json");
-}
-
-function finding(id: string, rule: string, message: string, suggestion: string, where: Finding["where"], edits: Edit[] | undefined, docs: string): Finding {
-  return { id, rule, severity: "error", tier: "source", where, message, suggestion, fix: edits && edits.length > 0 ? { kind: "auto", edits } : { kind: "manual" }, docs };
-}
-
-function moduleEntry(ctx: RuleContext, token: string) {
-  return ctx.project.input.config.modules.find((m) => useToken(m.use) === token);
-}
 
 export const eventDeliveryRule: Rule = {
   id: "modules/event-delivery",
@@ -172,7 +163,19 @@ export const kestrelRangeRule: Rule = {
   },
 };
 
-export const DEFAULT_RULES: readonly Rule[] = [eventDeliveryRule, eventBusRule, sqliteAcquireTimeoutRule, removedStepsRule, kestrelRangeRule];
+export const DEFAULT_RULES: readonly Rule[] = [
+  eventDeliveryRule,
+  eventBusRule,
+  sqliteAcquireTimeoutRule,
+  removedStepsRule,
+  kestrelRangeRule,
+  verifiedUserRule,
+  ...bootWrapRules,
+  ...underscoreFieldRules,
+  emitsRule,
+  eventPayloadRule,
+  ...INFO_RULES,
+];
 
 export function readFileOrUndefined(file: string): string | undefined {
   try {

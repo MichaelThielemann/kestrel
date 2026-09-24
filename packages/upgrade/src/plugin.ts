@@ -1,4 +1,5 @@
 import type { BootCheck, BootInput } from "@michaelthielemann/kestrel";
+import type { PromptFn } from "./answers.ts";
 import type { Edit, Finding } from "./report.ts";
 import { runCli } from "./cli-run.ts";
 
@@ -52,6 +53,10 @@ export interface RunUpgradeCliOptions {
   plugins?: readonly UpgradePlugin[];
   stdout?: (line: string) => void;
   stderr?: (line: string) => void;
+  /** Overrides TTY detection (`process.stdin.isTTY`), for a host that knows better or a test. */
+  isInteractive?: boolean;
+  /** Overrides the real `node:readline` prompt, for a host with its own UI or a test. */
+  prompt?: PromptFn;
 }
 
 /** Runs the `check` / `fix` / `data` CLI against `argv`, returning the process exit code. A host bin (the layer's own) passes its plugin here instead of shipping a second copy of the engine. */
