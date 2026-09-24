@@ -23,6 +23,10 @@ public view of content (`site-default`'s `resolve`/`resolveLinks`, `delivery-sta
 `delivery.publish`/`exportLlms`, `content-default`'s own `get`/`list` steps). `satisfiesFilter`
 decides membership through `content.list` itself, so a `Condition` entry (`{ in: [...] }`,
 `{ ne: ... }`, …) is evaluated with the store's own semantics — never reimplemented, and never
-turns into a false negative or a thrown error at request time.
+turns into a false negative or a thrown error at request time — including when `filter` names a
+field the type does not declare, which is simply unserved rather than an error. Correctness costs
+reads: `publishedLocale` decides every locale's filter membership fresh, on the store, and never
+caches or reuses one call's result for another (`site-default`'s README states the count this comes
+to for `resolve`).
 Consumers may define their own contracts with `defineContract` from the core; the core treats
 them exactly like these.
