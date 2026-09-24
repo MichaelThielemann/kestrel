@@ -5,6 +5,7 @@ import type { Content } from "@michaelthielemann/kestrel-contracts/content";
 import { publishedLocale } from "@michaelthielemann/kestrel-contracts/content-locale";
 import { err, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
 import type { Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
 import type { Site } from "@michaelthielemann/kestrel-contracts/site";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
@@ -386,7 +387,11 @@ export async function createDeliveryStatic(config: Config, deps: { content: Cont
       return ok({ documents, live, errors });
     },
     async exportLlms() {
-      const exported = await exportLlms(config.llms, { content, blobs, logger, prefix: config.prefix, fallback: config.fallback, defaultLocale: model.defaultLocale, hasLocales: locales.length > 0, types: Object.keys(config.types), sources: liveSources });
+      const filterFor = (type: string): Filter => {
+        const tc = typeConfig(type);
+        return { [tc.statusField]: tc.publishedValue };
+      };
+      const exported = await exportLlms(config.llms, { content, blobs, logger, prefix: config.prefix, fallback: config.fallback, defaultLocale: model.defaultLocale, hasLocales: locales.length > 0, types: Object.keys(config.types), filterFor, sources: liveSources });
       if (isErr(exported)) return err(transientOnly(exported.error, "llms export"));
       return ok(exported.value);
     },

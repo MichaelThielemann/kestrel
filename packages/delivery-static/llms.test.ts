@@ -168,6 +168,18 @@ describe("delivery/static llms export", () => {
     expect(blobs.text("site/llms-full.txt")).toBeUndefined();
   });
 
+  it("never fills a page's title or description from a default locale that is only a draft", async () => {
+    const { delivery, blobs, put } = await setup({ ...base, llms: { ...llms, siteUrl: "https://example.org" } });
+    put("pages", "p5", { slug__de: "versteckt", title__de: "Versteckt", status__de: "draft", seo__de: { title: "DE SEO", description: "DE Beschreibung" } });
+    put("pages", "p5", { slug__en: "hidden", title__en: "Hidden", status__en: "published" });
+    expectOk(await delivery.publish("pages", "p5"));
+    expectOk(await delivery.exportLlms());
+    const txt = blobs.text("site/llms.txt")!;
+    expect(txt).toContain("[Hidden](https://example.org/en/hidden)");
+    expect(txt).not.toContain("DE SEO");
+    expect(txt).not.toContain("DE Beschreibung");
+  });
+
   it("emits paths without siteUrl and falls back to the type name and 'Website'", async () => {
     const { delivery, blobs, put } = await setup({ ...base, llms });
     put("settings", "settings", { title__de: "", description__de: "" });

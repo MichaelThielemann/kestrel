@@ -1,7 +1,9 @@
 import TurndownService from "turndown";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentDocument, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
+import { defaultLocaleSatisfiesFilter } from "@michaelthielemann/kestrel-contracts/content-locale";
 import { isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
+import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 
@@ -155,6 +157,7 @@ export interface LlmsDeps {
   defaultLocale: string | undefined;
   hasLocales: boolean;
   types: string[];
+  filterFor(type: string): Filter;
   sources(type: string): Promise<Result<LlmsSource[], KestrelError>>;
 }
 
@@ -176,7 +179,6 @@ function isNonNullObject(value: unknown): value is Record<string, unknown> {
 
 export async function exportLlms(config: LlmsConfig, deps: LlmsDeps): Promise<Result<{ entries: number; full: boolean }, KestrelError>> {
   const siteUrl = config.siteUrl?.replace(/\/+$/, "");
-  const localeOptions = (locale: string) => (locale === "" ? {} : { locale, fallback: deps.fallback });
   let settingsDoc: ContentDocument | null = null;
   if (config.settings.type in deps.content.model().types) {
     const read = await deps.content.get(config.settings.type, undefined, deps.hasLocales && deps.defaultLocale !== undefined ? { locale: deps.defaultLocale, fallback: deps.fallback } : {});
@@ -196,8 +198,17 @@ export async function exportLlms(config: LlmsConfig, deps: LlmsDeps): Promise<Re
     const sources = await deps.sources(type);
     if (isErr(sources)) return sources;
     for (const source of sources.value) {
-      const read = await deps.content.get(type, source.docId, localeOptions(source.locale));
+      let read = await deps.content.get(type, source.docId, source.locale === "" ? {} : { locale: source.locale });
       if (isErr(read)) return read;
+      if (deps.fallback && source.locale !== "" && source.locale !== deps.defaultLocale) {
+        const defaultOk = await defaultLocaleSatisfiesFilter(deps.content, deps.defaultLocale, type, source.docId, deps.filterFor(type));
+        if (isErr(defaultOk)) return defaultOk;
+        if (defaultOk.value) {
+          const merged = await deps.content.get(type, source.docId, { locale: source.locale, fallback: true });
+          if (isErr(merged)) return merged;
+          read = merged;
+        }
+      }
       const doc = read.value;
       if (!doc) continue;
       const seo = doc[config.seoField];

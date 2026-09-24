@@ -26,7 +26,9 @@ never matches `thumb.webp`. Unresolved references are logged and left untouched.
 `delivery.exportLlms` (always on; `llms` defaults to paths instead of URLs and no full file) (no argument; append it after `delivery.publish`/`unpublish`/`publishAll`
 and after saving the settings) writes `<prefix>llms.txt` per [llmstxt.org](https://llmstxt.org) from the `live` status rows
 of every delivered type: `# <settings title>`, `> <settings description>`, one `## <headings[type] ?? type>` section with
-`- [<seo.title || title>](<siteUrl><path>): <seo.description>` per page; `seo.noindex === true` excludes a page. `full: true`
+`- [<seo.title || title>](<siteUrl><path>): <seo.description>` per page; `seo.noindex === true` excludes a page.
+An empty `seo`/title field is filled from the default locale only when the default locale's own
+values equal `publishedValue` too, the same rule `delivery.publish` applies. `full: true`
 also writes `<prefix>llms-full.txt` – the stored HTML of every page, restricted to `<main>` (matched
 greedily up to the last `</main>` tag, so a nested `<main>` does not cut it short), converted with turndown
 (headings shifted three levels, so a page's own top-level heading becomes `####` under its `###` page
