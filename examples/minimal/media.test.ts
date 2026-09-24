@@ -6,6 +6,7 @@ import { crc32, deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, definePipeline } from "@michaelthielemann/kestrel";
+import { assertAnonymousAccess } from "@michaelthielemann/kestrel-authz-roles/impl";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context } from "@michaelthielemann/kestrel/context";
@@ -276,6 +277,21 @@ describe("examples/minimal media: a published page and the public copies", () =>
 describe("examples/minimal media: public copies need anonymous read", () => {
   it("does not boot when anonymous callers may not read media, naming the serve pipeline", async () => {
     await expect(bootExample({ anonymous: [] })).rejects.toThrow(/pipeline "serve(MediaFile|ImageVariant)" runs (media|images)\.serve.*anonymous callers lack "media.read"/);
+  });
+
+  it("each of the two public serve pipelines on its own fails that check without anonymous media.read", async () => {
+    const example = await bootExample();
+    try {
+      const pipelines = example.kestrel.describe().pipelines;
+      for (const [name, step] of [["serveMediaFile", "media.serve"], ["serveImageVariant", "images.serve"]] as const) {
+        const only = { pipelines: pipelines.filter((pipeline) => pipeline.name === name) };
+        expect(only.pipelines).toHaveLength(1);
+        expect(() => assertAnonymousAccess({ roles: {}, roleClaim: "roles", anonymous: [] }, only)).toThrow(`pipeline "${name}" runs ${step}, whose output is also published without an access check, but anonymous callers lack "media.read"`);
+        expect(() => assertAnonymousAccess({ roles: {}, roleClaim: "roles", anonymous: ["media.read"] }, only)).not.toThrow();
+      }
+    } finally {
+      await example.dispose();
+    }
   });
 });
 
