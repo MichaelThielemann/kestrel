@@ -11,7 +11,7 @@ import { unifiedDiff } from "./diff.ts";
 import { runDataStep } from "./data.ts";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { isRecord } from "./guards.ts";
-import { loadBackendProject, loadIssuesAsFindings, type LoadIssue } from "./project.ts";
+import { loadBackendProject, loadIssuesAsFindings, type LoadIssue, type LoadResult } from "./project.ts";
 import type { LoadedProject, Rule, RunUpgradeCliOptions, UpgradePlugin } from "./plugin.ts";
 import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity, type UpgradeReport } from "./report.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
@@ -24,7 +24,7 @@ interface ResolvedProject {
   issues: LoadIssue[];
   rules: readonly Rule[];
   sandboxEntries?: SandboxTable;
-  reload: (scratchDir: string) => Promise<LoadedProject | undefined>;
+  reload: (scratchDir: string) => Promise<LoadResult>;
 }
 
 async function detectPlugin(plugins: readonly UpgradePlugin[], root: string): Promise<UpgradePlugin | undefined> {
@@ -42,16 +42,16 @@ async function resolveProject(root: string, entry: string | undefined, scratchDi
   const plugin = await detectPlugin(plugins, root);
   if (plugin === undefined) {
     const { project, issues } = await loadBackendProject(scratchDir, entry === undefined ? undefined : resolve(root, entry));
-    const reload = async (dir: string): Promise<LoadedProject | undefined> => (await loadBackendProject(dir, entry === undefined ? undefined : resolve(root, entry))).project;
+    const reload = (dir: string): Promise<LoadResult> => loadBackendProject(dir, entry === undefined ? undefined : resolve(root, entry));
     return { ...(project === undefined ? {} : { project }), issues, rules: DEFAULT_RULES, reload };
   }
   const rules = [...DEFAULT_RULES, ...(plugin.rules ?? [])];
   const sandboxEntries = plugin.sandbox === undefined ? {} : { sandboxEntries: plugin.sandbox };
-  const reload = async (dir: string): Promise<LoadedProject | undefined> => {
+  const reload = async (dir: string): Promise<LoadResult> => {
     try {
-      return await plugin.load(root, dir);
-    } catch {
-      return undefined;
+      return { project: await plugin.load(root, dir), issues: [] };
+    } catch (err) {
+      return { issues: [{ message: err instanceof Error ? err.message : String(err) }] };
     }
   };
   try {
@@ -130,9 +130,14 @@ function groupByFile(edits: readonly Edit[]): Map<string, Edit[]> {
   return grouped;
 }
 
+interface BootPreview {
+  bootCheck: BootCheck;
+  issues: LoadIssue[];
+}
+
 interface BuildResult {
   report: UpgradeReport;
-  previewBoot?: (edits: readonly Edit[]) => Promise<BootCheck | undefined>;
+  previewBoot?: (edits: readonly Edit[]) => Promise<BootPreview | undefined>;
 }
 
 async function buildReport(root: string, entry: string | undefined, options: BuildOptions): Promise<BuildResult> {
@@ -163,6 +168,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
     let bootCheck: Awaited<ReturnType<typeof checkBoot>> = { errors: [], warnings: [], notChecked: [] };
     let outside: readonly string[] = [];
 
+    let previewBootRaw: ((edits: readonly Edit[]) => Promise<BootPreview | undefined>) | undefined;
     let previewBoot: ((edits: readonly Edit[]) => Promise<BootCheck | undefined>) | undefined;
 
     if (project) {
@@ -175,7 +181,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         bootCheck = await checkBoot(box.input, { setup: box.setup });
         tiers = { ...tiers, boot: "done" };
 
-        previewBoot = async (edits) => {
+        previewBootRaw = async (edits) => {
           const preview = await createScratchCopy(root);
           try {
             const grouped = groupByFile(edits);
@@ -184,13 +190,18 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
               if (!existsSync(target)) continue;
               writeFileSync(target, applyEdits(readFileSync(target, "utf8"), fileEdits).text);
             }
-            const reloadedProject = await reload(preview.dir);
+            const { project: reloadedProject, issues: reloadIssues } = await reload(preview.dir);
             if (!reloadedProject) return undefined;
             const previewSandbox = sandboxBootInput(reloadedProject.input, { dir: preview.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
-            return await checkBoot(previewSandbox.input, { setup: previewSandbox.setup });
+            const bootCheck = await checkBoot(previewSandbox.input, { setup: previewSandbox.setup });
+            return { bootCheck, issues: reloadIssues };
           } finally {
             await removeScratchCopy(preview);
           }
+        };
+        previewBoot = async (edits) => {
+          const raw = await previewBootRaw!(edits);
+          return raw === undefined || raw.issues.length > 0 ? undefined : raw.bootCheck;
         };
       } else if (kestrelMajor !== undefined && kestrelMajor < 6) {
         findings.push({
@@ -241,7 +252,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       summary: summarize(remapped),
       findings: remapped,
     };
-    const boundPreviewBoot = previewBoot === undefined ? undefined : (edits: readonly Edit[]): Promise<BootCheck | undefined> => previewBoot(edits.map((e) => ({ ...e, file: resolve(scratch.dir, relative(root, e.file)) })));
+    const boundPreviewBoot = previewBootRaw === undefined ? undefined : (edits: readonly Edit[]): Promise<BootPreview | undefined> => previewBootRaw(edits.map((e) => ({ ...e, file: resolve(scratch.dir, relative(root, e.file)) })));
     return { report, ...(boundPreviewBoot === undefined ? {} : { previewBoot: boundPreviewBoot }) };
   } finally {
     await removeScratchCopy(scratch);
@@ -347,7 +358,7 @@ function downgradeRejected(findings: readonly Finding[], rejectedIds: ReadonlySe
 interface AskLoopResult {
   report: UpgradeReport;
   answers: Map<string, string>;
-  previewBoot?: (edits: readonly Edit[]) => Promise<BootCheck | undefined>;
+  previewBoot?: (edits: readonly Edit[]) => Promise<BootPreview | undefined>;
 }
 
 async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined, plugins: readonly UpgradePlugin[] | undefined): Promise<AskLoopResult & { unknownIds: string[] }> {
@@ -448,10 +459,22 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     const isRawBootError = (f: Finding): boolean => f.rule.startsWith("boot/");
     const finalEdits = adjustedFindings.flatMap((f) => (f.fix.kind === "auto" ? f.fix.edits : []));
     const preview = previewBoot ? await previewBoot(finalEdits) : undefined;
-    const nonBootRemaining = adjustedFindings.filter((f) => f.fix.kind !== "auto" && !isRawBootError(f));
-    const bootRemaining = preview ? preview.errors.map(bootErrorFinding) : adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto");
-    const afterEdits = summarize([...nonBootRemaining, ...bootRemaining]);
-    stdout(`after these edits: ${afterEdits.error} errors remain (${afterEdits.ask} need your answer, ${afterEdits.manual} manual)`);
+    if (preview && preview.issues.length > 0) {
+      const missingPackages = [...new Set(preview.issues.map((i) => i.use).filter((use): use is string => use !== undefined))];
+      if (missingPackages.length > 0) {
+        const plural = missingPackages.length > 1;
+        stdout(`could not verify the boot result: ${missingPackages.join(", ")} ${plural ? "are" : "is"} added by these edits but not installed yet; install ${plural ? "them" : "it"}, then run \`fix\` again to verify`);
+      }
+      for (const issue of preview.issues.filter((i) => i.use === undefined)) {
+        stdout(`could not verify the boot result: ${issue.file ?? "a file"} failed to load: ${issue.message}`);
+      }
+      for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);
+    } else {
+      const nonBootRemaining = adjustedFindings.filter((f) => f.fix.kind !== "auto" && !isRawBootError(f));
+      const bootRemaining = preview ? preview.bootCheck.errors.map(bootErrorFinding) : adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto");
+      const afterEdits = summarize([...nonBootRemaining, ...bootRemaining]);
+      stdout(`after these edits: ${afterEdits.error} errors remain (${afterEdits.ask} need your answer, ${afterEdits.manual} manual)`);
+    }
   }
   if (write && saveAnswersFile !== undefined) writeFileSync(resolve(saveAnswersFile), JSON.stringify(Object.fromEntries(answers), null, 2));
   return exitCodeFor(adjustedReport.findings, failOn);
