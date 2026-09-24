@@ -181,34 +181,54 @@ function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
   return merged;
 }
 
+function hasCombinator(schema: JsonSchema): boolean {
+  return Array.isArray(schema.oneOf) || Array.isArray(schema.anyOf) || Array.isArray(schema.allOf);
+}
+
 function isObjectSchema(schema: JsonSchema): boolean {
-  return schema.type === "object";
+  return schema.type === "object" && !hasCombinator(schema);
+}
+
+function isObjectSchemaValue(value: unknown): value is JsonSchema {
+  return isRecord(value) && isObjectSchema(value);
+}
+
+function isAmbiguousUnion(schema: JsonSchema): boolean {
+  return schema.type === undefined && Array.isArray(schema.oneOf) && Array.isArray(schema.anyOf);
 }
 
 interface Union {
   keyword: "oneOf" | "anyOf";
-  branches: JsonSchema[];
+  branches: unknown[];
 }
 
 function unionOf(schema: JsonSchema): Union | undefined {
   if (schema.type !== undefined) return undefined;
-  if (Array.isArray(schema.oneOf)) return { keyword: "oneOf", branches: schema.oneOf.filter(isRecord) };
-  if (Array.isArray(schema.anyOf)) return { keyword: "anyOf", branches: schema.anyOf.filter(isRecord) };
+  if (Array.isArray(schema.oneOf)) return { keyword: "oneOf", branches: schema.oneOf };
+  if (Array.isArray(schema.anyOf)) return { keyword: "anyOf", branches: schema.anyOf };
   return undefined;
 }
 
 function typeReason(schema: JsonSchema): string {
   if (Array.isArray(schema.type)) return `a type array (${schema.type.map((t) => JSON.stringify(t)).join(", ")})`;
+  if (schema.type === "object" && hasCombinator(schema)) return `type "object" together with oneOf/anyOf/allOf`;
   if (typeof schema.type === "string") return `type "${schema.type}", not "object"`;
   if (Array.isArray(schema.allOf)) return "an allOf schema";
   return "a schema without a declared type";
 }
 
-function isListShaped(schema: JsonSchema): boolean {
+function hasItemsArray(schema: JsonSchema): boolean {
   if (!isObjectSchema(schema)) return false;
   const properties = isRecord(schema.properties) ? schema.properties : undefined;
   const list = subSchema(properties?.items);
-  return list !== undefined && list.type === "array" && isRecord(list.items);
+  return list !== undefined && list.type === "array";
+}
+
+function isListShaped(schema: JsonSchema): boolean {
+  if (!hasItemsArray(schema)) return false;
+  const properties = isRecord(schema.properties) ? schema.properties : {};
+  const list = subSchema(properties.items)!;
+  return isObjectSchemaValue(list.items);
 }
 
 function mergeIntoListBranch(branch: JsonSchema, extension: JsonSchema): JsonSchema {
@@ -277,10 +297,12 @@ export function resolveOutputSchema(
         sourceIndex = index;
       } else if (isObjectSchema(current)) {
         current = mergeObjects([current, extension]);
+      } else if (isAmbiguousUnion(current)) {
+        fail(index, "extendsOutput", "a schema with both oneOf and anyOf");
       } else {
         const union = unionOf(current);
         if (union === undefined) fail(index, "extendsOutput", typeReason(current));
-        else if (!union.branches.every(isObjectSchema)) fail(index, "extendsOutput", "a union with a non-object branch");
+        else if (!union.branches.every(isObjectSchemaValue)) fail(index, "extendsOutput", "a union with a non-object branch");
         else current = { ...current, [union.keyword]: union.branches.map((b) => mergeObjects([b, extension])) };
       }
     }
@@ -293,12 +315,17 @@ export function resolveOutputSchema(
         sourceIndex = index;
       } else if (isListShaped(current)) {
         current = mergeIntoListBranch(current, extension);
+      } else if (hasItemsArray(current)) {
+        fail(index, "extendsItems", "list items are not an object schema");
       } else if (isObjectSchema(current)) {
         current = mergeObjects([current, extension]);
+      } else if (isAmbiguousUnion(current)) {
+        fail(index, "extendsItems", "a schema with both oneOf and anyOf");
       } else {
         const union = unionOf(current);
         if (union === undefined) fail(index, "extendsItems", typeReason(current));
-        else if (!union.branches.every(isObjectSchema)) fail(index, "extendsItems", "a union with a non-object branch");
+        else if (!union.branches.every(isObjectSchemaValue)) fail(index, "extendsItems", "a union with a non-object branch");
+        else if (union.branches.some((b) => hasItemsArray(b) && !isListShaped(b))) fail(index, "extendsItems", "a union branch's list items are not an object schema");
         else if (!union.branches.some(isListShaped)) fail(index, "extendsItems", "a union with no list-shaped branch");
         else current = { ...current, [union.keyword]: union.branches.map((b) => (isListShaped(b) ? mergeIntoListBranch(b, extension) : mergeObjects([b, extension]))) };
       }
@@ -325,11 +352,12 @@ function sameSchema(a: JsonSchema, b: JsonSchema): boolean {
  */
 export function resolveResultSchema(descriptions: readonly StepDescription[]): JsonSchema | undefined {
   const fold = resolveOutputSchema(descriptions);
-  const shapes: JsonSchema[] = fold === undefined ? [] : [fold];
+  if (fold === undefined) return undefined;
+  const shapes: JsonSchema[] = [fold];
   for (const d of descriptions) {
     const terminal = d.terminalOutput;
     if (terminal === undefined || shapes.some((s) => sameSchema(s, terminal))) continue;
     shapes.push(terminal);
   }
-  return shapes.length < 2 ? shapes[0] : { anyOf: shapes };
+  return shapes.length < 2 ? fold : { anyOf: shapes };
 }

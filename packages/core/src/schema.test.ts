@@ -309,6 +309,58 @@ describe("resolveOutputSchema fold contradictions", () => {
     resolveOutputSchema([step({ output: a }), step({ extendsItems: extension })], collect);
     expect(hits).toEqual([]);
   });
+
+  it("reports type: object combined with oneOf/anyOf/allOf instead of merging and losing the combinator", () => {
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    const cases = [
+      { type: "object", oneOf: [{ properties: { a: { type: "string" } } }] },
+      { type: "object", anyOf: [{ properties: { a: { type: "string" } } }] },
+      { type: "object", allOf: [{ properties: { a: { type: "string" } } }] },
+    ];
+    for (const active of cases) {
+      const hits: string[] = [];
+      resolveOutputSchema([step({ output: active }), step({ extendsOutput: extension })], (_i, _k, reason) => hits.push(reason));
+      expect(hits).toEqual([`type "object" together with oneOf/anyOf/allOf`]);
+    }
+  });
+
+  it("reports a schema with both oneOf and anyOf at the root instead of silently merging only oneOf", () => {
+    const branch = { type: "object", properties: { a: { type: "string" } }, required: ["a"] };
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    const hits: string[] = [];
+    resolveOutputSchema([step({ output: { oneOf: [branch], anyOf: [branch] } }), step({ extendsOutput: extension })], (_i, _k, reason) => hits.push(reason));
+    expect(hits).toEqual(["a schema with both oneOf and anyOf"]);
+  });
+
+  it("reports a boolean union branch instead of silently dropping it from the merge", () => {
+    const branch = { type: "object", properties: { a: { type: "string" } }, required: ["a"] };
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    const hits: string[] = [];
+    resolveOutputSchema([step({ output: { oneOf: [branch, true] } }), step({ extendsOutput: extension })], (_i, keyword, reason) => hits.push(`${keyword}: ${reason}`));
+    expect(hits).toEqual(["extendsOutput: a union with a non-object branch"]);
+  });
+
+  it("reports extendsItems onto a schema whose items are not an object schema, instead of coercing them", () => {
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    const stringItems = { type: "object", properties: { items: { type: "array", items: { type: "string" } } }, required: ["items"] };
+    const hitsA: string[] = [];
+    resolveOutputSchema([step({ output: stringItems }), step({ extendsItems: extension })], (_i, keyword, reason) => hitsA.push(`${keyword}: ${reason}`));
+    expect(hitsA).toEqual(["extendsItems: list items are not an object schema"]);
+
+    const unionItems = { type: "object", properties: { items: { type: "array", items: { oneOf: [{ type: "object" }, { type: "string" }] } } }, required: ["items"] };
+    const hitsB: string[] = [];
+    resolveOutputSchema([step({ output: unionItems }), step({ extendsItems: extension })], (_i, keyword, reason) => hitsB.push(`${keyword}: ${reason}`));
+    expect(hitsB).toEqual(["extendsItems: list items are not an object schema"]);
+  });
+
+  it("reports a union branch whose items are not an object schema", () => {
+    const extension = { type: "object", properties: { tag: { type: "string" } }, required: ["tag"] };
+    const listBranch = { type: "object", properties: { items: { type: "array", items: { type: "string" } }, total: { type: "integer" } }, required: ["items", "total"] };
+    const singleBranch = { type: "object", properties: { id: { type: "string" } }, required: ["id"] };
+    const hits: string[] = [];
+    resolveOutputSchema([step({ output: { oneOf: [listBranch, singleBranch] } }), step({ extendsItems: extension })], (_i, keyword, reason) => hits.push(`${keyword}: ${reason}`));
+    expect(hits).toEqual(["extendsItems: a union branch's list items are not an object schema"]);
+  });
 });
 
 describe("resolveResultSchema", () => {
@@ -332,8 +384,8 @@ describe("resolveResultSchema", () => {
     expect(resolveResultSchema([step({}), step({})])).toBeUndefined();
   });
 
-  it("returns the sole terminalOutput when there is no fold", () => {
-    expect(resolveResultSchema([step({ terminalOutput: terminal })])).toEqual(terminal);
+  it("returns undefined when there is a terminalOutput but no fold", () => {
+    expect(resolveResultSchema([step({ terminalOutput: terminal })])).toBeUndefined();
   });
 });
 
