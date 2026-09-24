@@ -79,26 +79,35 @@ has not started — a later `enqueue` with the same key hits a `CONFLICT` on the
 `coalesceKey` column and writes nothing, instead of failing the run. A claim, whether by the
 worker, a lane's own loop or the relay, clears the row's `coalesceKey` the moment it starts
 running, so a fresh event with the same key can be enqueued again once that row is merely running,
-before it has finished. An event with no `coalesceKey` is never coalesced, and a `CONFLICT` on any
-other column still fails `emit` as before. `coalesceKey` is a plain string on the event's data;
-this module attaches no meaning to it beyond the key.
+before it has finished. If the key's holder is found to be some other, non-pending state (for
+example a row a pre-6.0 process claimed without knowing the column), `enqueue` clears it and
+writes the row instead of silently doing nothing. An event with no `coalesceKey` is never
+coalesced, and a `CONFLICT` on any other column still fails `emit` as before. `coalesceKey` is a
+plain string on the event's data; this module attaches no meaning to it beyond the key.
 
 `lanes` (default `{}`) gives named pipelines their own worker loop: `{ "<lane>": ["<pipeline>",
-…] }`. A lane name matches `^[a-z][a-z0-9-]*$`; `main` is reserved for the pipelines no lane names,
-and a pipeline may be in at most one lane and never also in `relayPipelines`. Every pipeline not
-listed runs in the implicit `main` lane, together with the worker's fan-out of unfanned rows and
-its reclaim of every lane's expired locks. Each named lane runs its own single-flight loop that
-claims and runs one due row of its own pipelines at a time, on the same `pollMs`; the relay never
-claims a lane row, whatever `relayPipelines` says. **A due row of one lane never waits for a row of
-another lane or of the main loop** — each loop claims independently, so however many rows are
-blocked in one lane, every other lane and the main loop keep claiming and running theirs at their
-own pace. The cost: every running loop shares the process's CPU, and each lane, like the main loop,
-still runs one row at a time, so a lane's own throughput is unaffected by another lane only in that
-it is never made to wait for it. `events.readQueueStatus` reports each configured lane's `pending`,
-`running` and `oldestPendingAt` under `lanes`; the top-level counters keep counting every row
-regardless of lane. Moving a pipeline out of a lane, or dropping the lane from the config, changes
-only where new rows land — a lane with rows still `pending` or `running` from an earlier
-configuration keeps a loop, discovered once at start, until those rows finish.
+…] }`. A lane name matches `^[a-z][a-z0-9-]*$` (checked in the config schema; `main` is reserved
+there for the pipelines no lane names), and `attach()` rejects a pipeline in two lanes or in both a
+lane and `relayPipelines`. Every pipeline not listed runs in the implicit `main` lane, together
+with the worker's fan-out of unfanned rows and a sweep that reclaims every lane's expired locks;
+each lane's own claim also reclaims that lane's expired locks first, so a crashed process's row is
+retried by its own lane without waiting for the main loop. Each named lane runs its own
+single-flight loop that claims and runs one due row of its own pipelines at a time, on the same
+`pollMs`, and retries at once rather than waiting `pollMs` when it loses a claim race to another
+process; the relay never claims a lane row, whatever `relayPipelines` says. **A due row of one lane
+never waits for a row of another lane or of the main loop** — each loop claims independently, so
+however many rows are blocked in one lane, every other lane and the main loop keep claiming and
+running theirs. The cost: every running loop shares the process's CPU and, like the main loop,
+still runs one row at a time, so two lanes together are no faster than either alone — only never
+slower because of each other. `events.readQueueStatus` reports every lane this process currently
+knows of — configured, or found holding a row — with `pending`, `running` and `oldestPendingAt`
+under `lanes`; the top-level counters keep counting every row regardless of lane. Moving a pipeline
+out of a lane, or dropping the lane from the config, changes only where new rows land: the main
+loop re-scans for a lane it does not know of holding a `pending` or `running` row, at most every 30
+seconds and again right after `events.retryDead`, and starts that lane's loop, so no row is left
+without a loop to serve it. Every process sharing one queue should run the same `lanes`; a process
+missing a lane runs its pipelines in its own main loop instead, and its relay (with `"all"`) gives
+them a head start the other processes' lanes never would.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
