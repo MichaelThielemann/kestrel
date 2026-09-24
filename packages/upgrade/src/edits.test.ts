@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { applyEdits } from "./apply.ts";
-import { addModuleEmits, insertModuleListEntry, insertPipelineStep, markStepBinary, renameContentField, renameStringLiterals, replaceModuleListEntry, setModuleConfigProperties, setStepRequired } from "./edits.ts";
+import { addModuleEmits, insertModuleListEntry, insertPipelineStep, insertStepAfterEmitOutsideGroup, markStepBinary, renameContentField, renameStringLiterals, replaceModuleListEntry, setModuleConfigProperties, setStepRequired } from "./edits.ts";
 import { removeDependency, setDependencyRange } from "./packageJson.ts";
 
 function parsePkg(text: string): { dependencies: Record<string, string> } {
@@ -240,5 +240,34 @@ describe("replaceModuleListEntry", () => {
   it("returns undefined when the entry is not found", () => {
     const source = 'export default defineConfig({ modules: [{ use: "kestrel-events-inmemory" }], triggers: [] });\n';
     expect(replaceModuleListEntry("kestrel.config.ts", source, { use: "kestrel-events-direct", newUse: "kestrel-events-queue" })).toBeUndefined();
+  });
+});
+
+describe("insertStepAfterEmitOutsideGroup", () => {
+  it("inserts right after the emit when it is not in a group", () => {
+    const source = 'definePipeline({ name: "createPage", steps: ["content.create", "events.emit:page.created"] });\n';
+    const edit = insertStepAfterEmitOutsideGroup("p.ts", source, { pipelineName: "createPage", emitStep: "events.emit:page.created", newStep: "events.relay" });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('"content.create", "events.emit:page.created", "events.relay"');
+  });
+
+  it("inserts after the whole atomic group, not inside it, when the emit is grouped", () => {
+    const source = 'definePipeline({ name: "createPage", steps: [{ atomic: ["content.create", "events.emit:page.created"] }, "delivery.publish:pages"] });\n';
+    const edit = insertStepAfterEmitOutsideGroup("p.ts", source, { pipelineName: "createPage", emitStep: "events.emit:page.created", newStep: "events.relay" });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('steps: [{ atomic: ["content.create", "events.emit:page.created"] }, "events.relay", "delivery.publish:pages"]');
+  });
+
+  it("is idempotent for the grouped case", () => {
+    const source = 'definePipeline({ name: "createPage", steps: [{ atomic: ["content.create", "events.emit:page.created"] }] });\n';
+    const first = insertStepAfterEmitOutsideGroup("p.ts", source, { pipelineName: "createPage", emitStep: "events.emit:page.created", newStep: "events.relay" });
+    const { text: fixed } = applyEdits(source, [first!]);
+    expect(insertStepAfterEmitOutsideGroup("p.ts", fixed, { pipelineName: "createPage", emitStep: "events.emit:page.created", newStep: "events.relay" })).toBeUndefined();
+  });
+
+  it("returns undefined for an unknown pipeline or emit step", () => {
+    const source = 'definePipeline({ name: "createPage", steps: ["events.emit:page.created"] });\n';
+    expect(insertStepAfterEmitOutsideGroup("p.ts", source, { pipelineName: "nope", emitStep: "events.emit:page.created", newStep: "events.relay" })).toBeUndefined();
+    expect(insertStepAfterEmitOutsideGroup("p.ts", source, { pipelineName: "createPage", emitStep: "events.emit:nope", newStep: "events.relay" })).toBeUndefined();
   });
 });

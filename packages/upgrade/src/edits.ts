@@ -176,6 +176,22 @@ function stepArraysOf(top: AstNode): AstNode[] {
   return arrays;
 }
 
+function insertRelativeToAnchor(file: string, source: string, array: AstNode, anchor: AstNode, position: "before" | "after", literal: string): Edit {
+  if (!isMultiline(source, array)) {
+    const { start, end } = span(anchor);
+    return position === "after" ? { file, start: end, end, text: `, ${literal}` } : { file, start, end: start, text: `${literal}, ` };
+  }
+  const { indent } = lineOf(source, span(anchor).start);
+  if (position === "after") {
+    const { end } = span(anchor);
+    const lineEnd = source.indexOf("\n", end);
+    const insertAt = lineEnd === -1 ? end : lineEnd + 1;
+    return { file, start: insertAt, end: insertAt, text: `${indent}${literal},\n` };
+  }
+  const { lineStart } = lineOf(source, span(anchor).start);
+  return { file, start: lineStart, end: lineStart, text: `${indent}${literal},\n` };
+}
+
 export interface InsertStepOptions {
   pipelineName: string;
   anchorStep: string;
@@ -195,19 +211,40 @@ export function insertPipelineStep(file: string, source: string, options: Insert
       const anchor = stepElements[anchorIndex]!;
       const quote = quoteOf(source, stepElements.find((e) => stringValue(e) !== undefined));
       const literal = `${quote}${options.newStep}${quote}`;
-      if (!isMultiline(source, array)) {
-        const { start, end } = span(anchor);
-        return options.position === "after" ? { file, start: end, end, text: `, ${literal}` } : { file, start, end: start, text: `${literal}, ` };
+      return insertRelativeToAnchor(file, source, array, anchor, options.position, literal);
+    }
+  }
+  return undefined;
+}
+
+export interface InsertAfterEmitOptions {
+  pipelineName: string;
+  emitStep: string;
+  newStep: string;
+}
+
+/**
+ * Inserts `newStep` after `emitStep` in the named pipeline — after the whole atomic group in the
+ * top-level step list when the emit sits inside one, never inside it, since a step placed there
+ * must declare `atomicSafe` and a relay is not. `undefined` when the pipeline, the step or the
+ * array cannot be found, or `newStep` is already in place.
+ */
+export function insertStepAfterEmitOutsideGroup(file: string, source: string, options: InsertAfterEmitOptions): Edit | undefined {
+  const root = parseTs(source);
+  for (const top of pipelineStepsArrays(root, options.pipelineName)) {
+    const topElements = elements(top);
+    for (let i = topElements.length - 1; i >= 0; i--) {
+      const el = topElements[i]!;
+      let matched = stringValue(el) === options.emitStep;
+      if (!matched && el.type === "ObjectExpression") {
+        const atomic = objectProperty(el, "atomic");
+        matched = isArray(atomic) && elements(atomic).some((e) => stringValue(e) === options.emitStep);
       }
-      const { indent } = lineOf(source, span(anchor).start);
-      if (options.position === "after") {
-        const { end } = span(anchor);
-        const lineEnd = source.indexOf("\n", end);
-        const insertAt = lineEnd === -1 ? end : lineEnd + 1;
-        return { file, start: insertAt, end: insertAt, text: `${indent}${literal},\n` };
-      }
-      const { lineStart } = lineOf(source, span(anchor).start);
-      return { file, start: lineStart, end: lineStart, text: `${indent}${literal},\n` };
+      if (!matched) continue;
+      const next = topElements[i + 1];
+      if (next !== undefined && stringValue(next) === options.newStep) return undefined;
+      const quote = quoteOf(source, topElements.find((e) => stringValue(e) !== undefined));
+      return insertRelativeToAnchor(file, source, top, el, "after", `${quote}${options.newStep}${quote}`);
     }
   }
   return undefined;
