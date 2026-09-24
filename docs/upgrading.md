@@ -127,11 +127,12 @@ Every finding's `docs` field links to one of the anchors below.
 | [`steps/terminal-output`](#steps-terminal-output) | boot | manual | a misplaced or misdeclared `terminalOutput` |
 | [`pipelines/optional-read-order`](#pipelines-optional-read-order) | boot | manual | an optional read only a later step in the same pipeline writes |
 | [`pipelines/unwritten-optional-read`](#pipelines-unwritten-optional-read) | boot | none (warning) | an optional read nothing writes and no trigger provides |
-| [`model/underscore-field`](#model-underscore-field) | load | ask | a content field name starting with `_` |
+| [`model/underscore-field`](#model-underscore-field) | load | ask / auto | a content field name starting with `_` |
 | [`responses/delivery-members`](#responses-delivery-members) | load | none (info) | an HTTP pipeline running a delivery step |
 | [`runtime/bus-handler-throws`](#runtime-bus-handler-throws) | source | none (info) | a local `events.on` subscriber under `events-direct` |
 | [`runtime/bus-subscriber-queue`](#runtime-bus-subscriber-queue) | source | none (info) | a local `events.on` subscriber under `events-queue` |
 | [`data/queue-unfanned`](#cutover), [`data/queue-dead-unassigned`](#cutover) | data | none (warning / info) | stored queue rows the `data` command finds |
+| [`data/underscore-field-stored`](#model-underscore-field) | data | none (warning) | the `data` command counted a stored value under a `_`-prefixed content field |
 | [`steps/closed-event-input`](#steps-closed-event-input) | source | manual | an event-triggered pipeline's step closes its input schema |
 | [`modules/emits`](#modules-emits) | source | ask | a local module's heuristic `.emit(` calls, undeclared in `emits` |
 | [`types/breaking-signatures`](#types-breaking-signatures) | source | none (info), always | type-level members a hand-built implementation must add |
@@ -186,11 +187,18 @@ A step optionally reads a key only a *later* step in the same pipeline writes.
 A step optionally reads a key nothing writes and no trigger provides — almost always a typo.
 
 #### model-underscore-field
-A content type field name starts with `_`, which fails boot on 6.0.0. The tool cannot see stored
-values — `data` reads queue rows, not content documents — so it always asks, with no default,
-unless `--data-report <file>` supplies a hand-written `{ "<type>.<field>": false }` entry you have
-independently confirmed by hand (for example, that the field was added after the last write path
-that could have populated it, or by querying the content collection directly).
+A content type field name starts with `_`, which fails boot on 6.0.0. `data --db <file>` opens a
+copy of the store and, through `persistence@1`, counts non-null stored values for the field: one
+count per locale column for a localized field (`{ ne: null }` on `<field>__<locale>`), one count for
+an unlocalized field. `--out <report>.json` writes these counts alongside its other findings; feed
+that file back with `check --data-report <report>.json` / `fix --data-report <report>.json`:
+
+- Zero everywhere — the rename is a data-verified auto edit, applied like any other automatic fix.
+- A stored value in at least one locale — the rule still asks, with no default, reporting the counts
+  it saw so you can judge which locales need a migration.
+- No data report at all — the rule asks, with no default, and points at `kestrel-upgrade data`.
+- An explicit rename answer given without a data report proving the field empty is still applied,
+  but stays a visible warning in the report until a later data report counts zero everywhere for it.
 
 Where a stored value can exist, rename it in two phases instead of trusting a mechanical edit:
 

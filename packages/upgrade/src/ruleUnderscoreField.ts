@@ -24,12 +24,20 @@ function typeNames(config: unknown): string[] {
   return Object.keys(config.types);
 }
 
-function hasStoredValues(ctx: { project: { data?: Record<string, unknown> } }, typeName: string, field: string): boolean | undefined {
-  const report = ctx.project.data;
-  if (report === undefined) return undefined;
-  const key = `${typeName}.${field}`;
-  const value = report[key];
-  return typeof value === "boolean" ? value : undefined;
+function storedCounts(ctx: { project: { data?: Record<string, unknown> } }, typeName: string, field: string): Record<string, number> | undefined {
+  const underscoreFields = ctx.project.data?.underscoreFields;
+  if (!isRecord(underscoreFields)) return undefined;
+  const counts = underscoreFields[`${typeName}.${field}`];
+  if (!isRecord(counts)) return undefined;
+  const out: Record<string, number> = {};
+  for (const [locale, n] of Object.entries(counts)) if (typeof n === "number") out[locale] = n;
+  return out;
+}
+
+function describeCounts(counts: Record<string, number>): string {
+  return Object.entries(counts)
+    .map(([locale, n]) => (locale === "unlocalized" ? `${n} stored value(s)` : `${n} in "${locale}"`))
+    .join(", ");
 }
 
 /** A content model field starting with `_` fails boot in 6.0.0; content migrations run through `content@1`, so a stored value must move before the model drops the old key. */
@@ -43,18 +51,21 @@ export const underscoreFieldRule: Rule = {
       for (const field of fieldsOf(entry.config, typeName)) {
         const id = `${RULE_ID}:${typeName}.${field}`;
         const where = { module: entry.use, path: `types.${typeName}.fields.${field}` };
-        const stored = hasStoredValues(ctx, typeName, field);
+        const counts = storedCounts(ctx, typeName, field);
+        const verifiedEmpty = counts !== undefined && Object.values(counts).every((n) => n === 0);
+        const hasStoredData = counts !== undefined && Object.values(counts).some((n) => n > 0);
         const defaultName = field.replace(/^_+/, "");
         const answer = ctx.answers.get(questionId(typeName, field));
+        const target = answer === "remove" ? undefined : (answer ?? (verifiedEmpty ? defaultName : undefined));
 
-        if (stored === false && (answer === undefined || answer === defaultName)) {
+        if (verifiedEmpty && target !== undefined) {
           const source = ctx.readFile(ctx.project.configFile);
           const edits: Edit[] = [];
           if (source !== undefined) {
-            const edit = renameContentField(ctx.project.configFile, source, { use: entry.use, typeName, from: field, to: defaultName });
+            const edit = renameContentField(ctx.project.configFile, source, { use: entry.use, typeName, from: field, to: target });
             if (edit) edits.push(edit);
           }
-          findings.push(finding(id, RULE_ID, `"${field}" on content type "${typeName}" starts with "_"; the supplied data report shows no stored value`, `rename to "${defaultName}"`, where, edits, "docs/upgrading.md#model-underscore-field"));
+          findings.push(finding(id, RULE_ID, `"${field}" on content type "${typeName}" starts with "_"; a data report counted zero stored values (${describeCounts(counts)})`, `rename to "${target}"`, where, edits, "docs/upgrading.md#model-underscore-field"));
           continue;
         }
         if (answer !== undefined && answer !== "remove") {
@@ -64,14 +75,26 @@ export const underscoreFieldRule: Rule = {
             const edit = renameContentField(ctx.project.configFile, source, { use: entry.use, typeName, from: field, to: answer });
             if (edit) edits.push(edit);
           }
-          findings.push(finding(id, RULE_ID, `"${field}" on content type "${typeName}" starts with "_"`, `renamed to "${answer}" — a stored value under the old key still needs a migration on the running 5.8.x instance before it upgrades`, where, edits, "docs/upgrading.md#model-underscore-field"));
+          const proof = counts === undefined ? "no data report was supplied" : `a data report counted stored values (${describeCounts(counts)})`;
+          findings.push(
+            finding(
+              id,
+              RULE_ID,
+              `"${field}" on content type "${typeName}" starts with "_"`,
+              `renamed to "${answer}" — ${proof}, not a proving zero count; add a migration on the running 5.8.x instance before it upgrades, then run \`data\` again to clear this warning`,
+              where,
+              edits,
+              "docs/upgrading.md#model-underscore-field",
+              "warning",
+            ),
+          );
           continue;
         }
 
         const fix: AskFix = {
           kind: "ask",
           question: questionId(typeName, field),
-          prompt: stored === undefined ? `rename "${field}" on "${typeName}" to (the tool cannot see stored values; see docs/upgrading.md#model-underscore-field)` : `rename "${field}" on "${typeName}" to`,
+          prompt: counts === undefined ? `rename "${field}" on "${typeName}" to (no data report supplied; run \`kestrel-upgrade data\` first, or see docs/upgrading.md#model-underscore-field)` : `rename "${field}" on "${typeName}" to`,
           choices: [defaultName, "remove"],
         };
         findings.push({
@@ -80,8 +103,13 @@ export const underscoreFieldRule: Rule = {
           severity: "error",
           tier: "source",
           where,
-          message: `"${field}" on content type "${typeName}" starts with "_", which fails boot on 6.0.0`,
-          suggestion: stored === undefined ? "the tool cannot see stored values; the rename is left to you unless you have independently confirmed by hand that none can exist — see docs/upgrading.md#model-underscore-field" : "a stored value exists; add a migration on the running 5.8.x instance (defineMigration) copying it to the new key before upgrading",
+          message: hasStoredData
+            ? `"${field}" on content type "${typeName}" starts with "_", which fails boot on 6.0.0; a data report counted stored values (${describeCounts(counts)})`
+            : `"${field}" on content type "${typeName}" starts with "_", which fails boot on 6.0.0`,
+          suggestion:
+            counts === undefined
+              ? "run `kestrel-upgrade data --db <file> --out <report>.json` against a copy of the store, then check again with --data-report <report>.json — see docs/upgrading.md#model-underscore-field"
+              : "a stored value exists in at least one locale; add a migration on the running 5.8.x instance (defineMigration) copying it to the new key before upgrading",
           fix,
           docs: "docs/upgrading.md#model-underscore-field",
         });

@@ -5,13 +5,16 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { loadConfig } from "@michaelthielemann/kestrel/load";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { isErr } from "@michaelthielemann/kestrel/result";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { trackTempDir, untrackTempDir } from "./cleanup.ts";
+import { isRecord } from "./guards.ts";
 import type { Finding, UpgradeReport } from "./report.ts";
 import { summarize } from "./report.ts";
+import { useToken } from "./useToken.ts";
 
 export interface DataStepResult {
   exitCode: number;
@@ -80,52 +83,115 @@ async function loadProjectPersistenceSqlite(root: string): Promise<PersistenceSq
   }
 }
 
-async function queueFindings(root: string, copy: string): Promise<{ findings: Finding[]; error?: string }> {
-  const mod = await loadProjectPersistenceSqlite(root);
-  if (mod === undefined) return { findings: [], error: "the project's own @michaelthielemann/kestrel-persistence-sqlite could not be resolved; install the project's dependencies first" };
-  const db = mod.createPersistenceSqlite({ file: copy }, { logger: silentLogger });
-  try {
-    const ensured = await db.ensureCollection("events_queue", QUEUE_SCHEMA);
-    if (isErr(ensured)) return { findings: [], error: `could not read the events_queue collection: ${ensured.error.message}` };
+async function queueFindings(db: Persistence): Promise<{ findings: Finding[]; error?: string }> {
+  const ensured = await db.ensureCollection("events_queue", QUEUE_SCHEMA);
+  if (isErr(ensured)) return { findings: [], error: `could not read the events_queue collection: ${ensured.error.message}` };
 
-    const unfanned = await db.findMany<QueueRow>("events_queue", { pipeline: null, state: { in: ["pending", "running"] } }, { limit: 10_000 });
-    if (isErr(unfanned)) return { findings: [], error: `could not read pending/running rows from events_queue: ${unfanned.error.message}` };
-    const dead = await db.findMany<QueueRow>("events_queue", { pipeline: null, state: "dead" }, { limit: 10_000 });
-    if (isErr(dead)) return { findings: [], error: `could not read dead rows from events_queue: ${dead.error.message}` };
+  const unfanned = await db.findMany<QueueRow>("events_queue", { pipeline: null, state: { in: ["pending", "running"] } }, { limit: 10_000 });
+  if (isErr(unfanned)) return { findings: [], error: `could not read pending/running rows from events_queue: ${unfanned.error.message}` };
+  const dead = await db.findMany<QueueRow>("events_queue", { pipeline: null, state: "dead" }, { limit: 10_000 });
+  if (isErr(dead)) return { findings: [], error: `could not read dead rows from events_queue: ${dead.error.message}` };
 
-    const byEvent = new Map<string, number>();
-    for (const row of unfanned.value.items) byEvent.set(row.name, (byEvent.get(row.name) ?? 0) + 1);
+  const byEvent = new Map<string, number>();
+  for (const row of unfanned.value.items) byEvent.set(row.name, (byEvent.get(row.name) ?? 0) + 1);
 
-    const findings: Finding[] = [...byEvent.entries()].map(([event, n]) => ({
-      id: `data/queue-unfanned:${event}`,
-      rule: "data/queue-unfanned",
-      severity: "warning",
+  const findings: Finding[] = [...byEvent.entries()].map(([event, n]) => ({
+    id: `data/queue-unfanned:${event}`,
+    rule: "data/queue-unfanned",
+    severity: "warning",
+    tier: "data",
+    where: { path: event },
+    message: `${n} stored event(s) named "${event}" are not yet fanned out to a pipeline`,
+    suggestion: "at the first 6.0 tick these fan out to every pipeline subscribed then; drain the queue at cutover",
+    fix: { kind: "none" },
+    docs: "docs/upgrading.md#cutover",
+  }));
+
+  const deadRows = dead.value.items;
+  if (deadRows.length > 0) {
+    findings.push({
+      id: "data/queue-dead-unassigned",
+      rule: "data/queue-dead-unassigned",
+      severity: "info",
       tier: "data",
-      where: { path: event },
-      message: `${n} stored event(s) named "${event}" are not yet fanned out to a pipeline`,
-      suggestion: "at the first 6.0 tick these fan out to every pipeline subscribed then; drain the queue at cutover",
+      where: {},
+      message: `${deadRows.length} dead-letter row(s) have no pipeline assigned`,
+      suggestion: "a retry re-fans them out to every pipeline currently subscribed",
       fix: { kind: "none" },
       docs: "docs/upgrading.md#cutover",
-    }));
-
-    const deadRows = dead.value.items;
-    if (deadRows.length > 0) {
-      findings.push({
-        id: "data/queue-dead-unassigned",
-        rule: "data/queue-dead-unassigned",
-        severity: "info",
-        tier: "data",
-        where: {},
-        message: `${deadRows.length} dead-letter row(s) have no pipeline assigned`,
-        suggestion: "a retry re-fans them out to every pipeline currently subscribed",
-        fix: { kind: "none" },
-        docs: "docs/upgrading.md#cutover",
-      });
-    }
-    return { findings };
-  } finally {
-    db.close();
+    });
   }
+  return { findings };
+}
+
+async function contentDefaultConfig(root: string): Promise<unknown> {
+  try {
+    const config = await loadConfig(join(root, "kestrel.config.ts"));
+    return config.modules.find((m) => useToken(m.use) === "content-default")?.config;
+  } catch {
+    return undefined;
+  }
+}
+
+function underscoreFieldsOf(config: unknown): Array<{ typeName: string; field: string; localized: boolean }> {
+  const out: Array<{ typeName: string; field: string; localized: boolean }> = [];
+  if (!isRecord(config) || !isRecord(config.types)) return out;
+  for (const [typeName, type] of Object.entries(config.types)) {
+    if (!isRecord(type) || !isRecord(type.fields)) continue;
+    for (const [field, def] of Object.entries(type.fields)) {
+      if (field.startsWith("_")) out.push({ typeName, field, localized: isRecord(def) && def.localized === true });
+    }
+  }
+  return out;
+}
+
+function localesOf(config: unknown): string[] {
+  const locales = isRecord(config) ? config.locales : undefined;
+  return Array.isArray(locales) ? locales.filter((l): l is string => typeof l === "string") : [];
+}
+
+async function underscoreFieldCounts(db: Persistence, contentConfig: unknown): Promise<{ counts: Record<string, Record<string, number>>; error?: string }> {
+  const fields = underscoreFieldsOf(contentConfig);
+  const locales = localesOf(contentConfig);
+  const counts: Record<string, Record<string, number>> = {};
+  for (const { typeName, field, localized } of fields) {
+    const columnsOf = localized ? locales.map((locale) => ({ locale, column: `${field}__${locale}` })) : [{ locale: "unlocalized", column: field }];
+    const perLocale: Record<string, number> = {};
+    for (const { locale, column } of columnsOf) {
+      const ensured = await db.ensureCollection(typeName, { [column]: "string" });
+      if (isErr(ensured)) return { counts, error: `could not read collection "${typeName}": ${ensured.error.message}` };
+      const counted = await db.count(typeName, { [column]: { ne: null } });
+      if (isErr(counted)) return { counts, error: `could not count "${typeName}.${column}": ${counted.error.message}` };
+      perLocale[locale] = counted.value;
+    }
+    counts[`${typeName}.${field}`] = perLocale;
+  }
+  return { counts };
+}
+
+function describeCounts(counts: Record<string, number>): string {
+  return Object.entries(counts)
+    .map(([locale, n]) => (locale === "unlocalized" ? `${n} stored value(s)` : `${n} in "${locale}"`))
+    .join(", ");
+}
+
+function underscoreFieldFindings(counts: Record<string, Record<string, number>>): Finding[] {
+  const findings: Finding[] = [];
+  for (const [key, perLocale] of Object.entries(counts)) {
+    if (Object.values(perLocale).every((n) => n === 0)) continue;
+    findings.push({
+      id: `data/underscore-field-stored:${key}`,
+      rule: "data/underscore-field-stored",
+      severity: "warning",
+      tier: "data",
+      where: { path: key },
+      message: `"${key}" has stored values (${describeCounts(perLocale)})`,
+      suggestion: "add a migration on the running 5.8.x instance (defineMigration) copying it to the new key before upgrading",
+      fix: { kind: "none" },
+      docs: "docs/upgrading.md#model-underscore-field",
+    });
+  }
+  return findings;
 }
 
 /** Copies `dbFile` (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_check`, then reads it through the project's own persistence-sqlite; the given file is never opened after the copy. The copy directory is always removed before returning, whether the step succeeds or refuses. */
@@ -142,8 +208,22 @@ export async function runDataStep(dbFile: string, root: string): Promise<DataSte
     if (!quickCheckOk(copy)) {
       return { exitCode: 2, error: `the copy of "${dbFile}" did not pass PRAGMA quick_check; take a consistent snapshot (persistence.snapshot, a replication snapshot, or "sqlite3 <db> .backup <copy>") and try again` };
     }
-    const { findings, error } = await queueFindings(root, copy);
-    if (error !== undefined) return { exitCode: 2, error };
+    const mod = await loadProjectPersistenceSqlite(root);
+    if (mod === undefined) return { exitCode: 2, error: "the project's own @michaelthielemann/kestrel-persistence-sqlite could not be resolved; install the project's dependencies first" };
+    const db = mod.createPersistenceSqlite({ file: copy }, { logger: silentLogger });
+    let queued: { findings: Finding[]; error?: string };
+    let counts: Record<string, Record<string, number>>;
+    try {
+      queued = await queueFindings(db);
+      if (queued.error !== undefined) return { exitCode: 2, error: queued.error };
+      const contentConfig = await contentDefaultConfig(root);
+      const counted = contentConfig === undefined ? { counts: {} } : await underscoreFieldCounts(db, contentConfig);
+      if (counted.error !== undefined) return { exitCode: 2, error: counted.error };
+      counts = counted.counts;
+    } finally {
+      db.close();
+    }
+    const findings = [...queued.findings, ...underscoreFieldFindings(counts)];
     const report: UpgradeReport = {
       schema: 1,
       tool: { name: "kestrel-upgrade", version: "0.0.0" },
@@ -152,6 +232,7 @@ export async function runDataStep(dbFile: string, root: string): Promise<DataSte
       tiers: { source: "not-run", load: "not-run", boot: "not-run", data: "done" },
       summary: summarize(findings),
       findings,
+      underscoreFields: counts,
     };
     const exitCode = findings.some((f) => f.severity === "error") ? 1 : 0;
     return { exitCode, report };

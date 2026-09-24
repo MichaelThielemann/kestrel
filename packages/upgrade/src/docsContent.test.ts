@@ -32,18 +32,17 @@ describe("the cutover docs state the real drain condition", () => {
   });
 });
 
-describe("the underscore-field docs do not overstate what the tool can prove", () => {
-  it("does not claim kestrel-upgrade data proves no stored value exists", () => {
+describe("the underscore-field docs describe the counted, data-verified behaviour", () => {
+  it("describes counting stored values per locale column through persistence@1, not a check by hand", () => {
     const section = underscoreFieldSection(readFileSync(DOCS_FILE, "utf8"));
-    expect(section).not.toMatch(/kestrel-upgrade data.*proves/s);
-    expect(section).toMatch(/cannot see stored\s+values/);
+    expect(section).toMatch(/persistence@1/);
+    expect(section).not.toMatch(/by hand/);
   });
 
-  it("lists the model rule as ask, not ask / auto, in the rule reference table", () => {
+  it("lists the model rule as ask / auto in the rule reference table", () => {
     const markdown = readFileSync(DOCS_FILE, "utf8");
     const row = markdown.split("\n").find((line) => line.includes("model/underscore-field"));
     expect(row).toBeDefined();
-    expect(row).not.toContain("ask / auto");
-    expect(row).toContain("| ask |");
+    expect(row).toContain("ask / auto");
   });
 });

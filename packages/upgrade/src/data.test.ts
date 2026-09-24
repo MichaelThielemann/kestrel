@@ -40,12 +40,22 @@ const QUEUE_SCHEMA = {
 } as const;
 
 let dir: string;
+const projectRoots: string[] = [];
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-data-test-"));
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+  for (const root of projectRoots.splice(0)) await rm(root, { recursive: true, force: true });
 });
+
+async function contentProjectRoot(config: Record<string, unknown>): Promise<string> {
+  const root = await mkdtemp(join(PROJECT_ROOT, "__fixtures__", ".tmp-data-test-"));
+  projectRoots.push(root);
+  await writeFile(join(root, "package.json"), JSON.stringify({ name: "tmp", type: "module" }));
+  await writeFile(join(root, "kestrel.config.ts"), `export default { modules: [{ use: "@michaelthielemann/kestrel-content-default", config: ${JSON.stringify(config)} }], triggers: [] };\n`);
+  return root;
+}
 
 async function makeDb(file: string, rows: Array<{ id: string; name: string; pipeline: string | null; state: string }>): Promise<void> {
   const db = createPersistenceSqlite({ file });
@@ -112,5 +122,55 @@ describe("runDataStep", () => {
     await runDataStep(badFile, PROJECT_ROOT);
     expect(createdCopyDirs.length).toBeGreaterThan(0);
     for (const copyDir of createdCopyDirs) expect(existsSync(copyDir)).toBe(false);
+  });
+});
+
+describe("runDataStep: underscore-field counts", () => {
+  it("counts zero for a field with no stored values", async () => {
+    const root = await contentProjectRoot({ types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } });
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { _hint: "string" });
+    db.close();
+    const result = await runDataStep(file, root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.underscoreFields).toEqual({ "page._hint": { unlocalized: 0 } });
+    expect(result.report?.findings).toEqual([]);
+  });
+
+  it("counts a stored value for an unlocalized field and reports it as a finding", async () => {
+    const root = await contentProjectRoot({ types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } });
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { _hint: "string" });
+    await db.createOne("page", { id: "1", _hint: "legacy value" });
+    await db.createOne("page", { id: "2", _hint: null });
+    db.close();
+    const result = await runDataStep(file, root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.underscoreFields).toEqual({ "page._hint": { unlocalized: 1 } });
+    expect(result.report?.findings).toEqual([expect.objectContaining({ rule: "data/underscore-field-stored", message: expect.stringContaining("1 stored value(s)") as unknown })]);
+  });
+
+  it("counts per locale column for a localized field", async () => {
+    const root = await contentProjectRoot({ locales: ["de", "en"], types: { page: { kind: "multi", fields: { _hint: { type: "string", localized: true } } } } });
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { _hint__de: "string", _hint__en: "string" });
+    await db.createOne("page", { id: "1", _hint__de: "wert", _hint__en: null });
+    await db.createOne("page", { id: "2", _hint__de: null, _hint__en: "value" });
+    db.close();
+    const result = await runDataStep(file, root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.underscoreFields).toEqual({ "page._hint": { de: 1, en: 1 } });
+    expect(result.report?.findings).toEqual([expect.objectContaining({ rule: "data/underscore-field-stored", message: expect.stringMatching(/1 in "de".*1 in "en"/) as unknown })]);
+  });
+
+  it("finds nothing to count when the project has no content-default module", async () => {
+    const file = join(dir, "kestrel.db");
+    await makeDb(file, [{ id: "1", name: "page.created", pipeline: "publishPage", state: "done" }]);
+    const result = await runDataStep(file, PROJECT_ROOT);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.underscoreFields).toEqual({});
   });
 });

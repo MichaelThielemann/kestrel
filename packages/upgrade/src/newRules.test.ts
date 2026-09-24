@@ -246,31 +246,74 @@ describe("model/underscore-field", () => {
     expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
   });
 
-  it("never claims kestrel-upgrade data can prove no stored value exists", async () => {
+  it("points at kestrel-upgrade data when no data report was given", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
     const findings = await underscoreFieldRule.check(contextFor(p));
     expect(findings).toHaveLength(1);
-    expect(findings[0]?.suggestion).not.toMatch(/kestrel-upgrade data.*prove/);
-    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.prompt : "n/a").not.toMatch(/kestrel-upgrade data/);
+    expect(findings[0]?.suggestion).toMatch(/kestrel-upgrade data/);
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.prompt : "n/a").toMatch(/kestrel-upgrade data/);
   });
 
-  it("asks with no default when the data report proves a stored value exists", async () => {
+  it("asks with no default and reports the counts when the data report counted a stored value", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
-    const findings = await underscoreFieldRule.check(contextFor(p, { data: { "page._hint": true } }));
+    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 3 } } } }));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");
     expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
+    expect(findings[0]?.message).toContain("3 stored value(s)");
   });
 
-  it("auto-renames once the data report shows no stored value", async () => {
+  it("asks and reports counts per locale for a localized field with some stored values", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string", localized: true } } } } } }] });
+    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { de: 2, en: 0 } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("ask");
+    expect(findings[0]?.message).toContain('2 in "de"');
+  });
+
+  it("auto-renames once the data report counts zero everywhere", async () => {
     const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }], triggers: [] });\n';
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
     await writeFile(p.configFile, source);
-    const findings = await underscoreFieldRule.check(contextFor(p, { data: { "page._hint": false } }));
+    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 0 } } } }));
     expect(findings[0]?.fix.kind).toBe("auto");
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
     const { text } = applyEdits(source, edits);
     expect(text).toContain("fields: { hint:");
+  });
+
+  it("auto-renames once every locale of a localized field counts zero", async () => {
+    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string", localized: true } } } } } }], triggers: [] });\n';
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string", localized: true } } } } } }] });
+    await writeFile(p.configFile, source);
+    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { de: 0, en: 0 } } } }));
+    expect(findings[0]?.fix.kind).toBe("auto");
+  });
+
+  it("keeps an explicit rename answer without a proving count as a visible warning", async () => {
+    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }], triggers: [] });\n';
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
+    await writeFile(p.configFile, source);
+    const answers = new Map([["underscore-field:page._hint", "hint"]]);
+    const findings = await underscoreFieldRule.check(contextFor(p, { answers }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe("warning");
+    expect(findings[0]?.fix.kind).toBe("auto");
+    expect(findings[0]?.suggestion).toMatch(/no data report was supplied/);
+  });
+
+  it("stops warning once a data report proves the field empty, even for a custom rename target", async () => {
+    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }], triggers: [] });\n';
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
+    await writeFile(p.configFile, source);
+    const answers = new Map([["underscore-field:page._hint", "renamedHint"]]);
+    const findings = await underscoreFieldRule.check(contextFor(p, { answers, data: { underscoreFields: { "page._hint": { unlocalized: 0 } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe("error");
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const { text } = applyEdits(source, edits);
+    expect(text).toContain("fields: { renamedHint:");
   });
 });
 
