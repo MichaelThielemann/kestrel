@@ -139,6 +139,26 @@ runs no module code beyond `configSchema`, `"all"` runs every module's `setup()`
 covered by semver from 6.0.0 and a reader must handle one it does not recognize; `reason` and every
 message text are not covered and may change in any release.
 
+### Error codes
+
+Every `BootProblem.code` `boot()` and `checkBoot()` can produce, grouped by what finds it. A future
+minor release may add one; code reading `kestrel.warnings` or a `checkBoot()` result must handle a
+code it does not recognize rather than assume this list is complete.
+
+| Group | Codes |
+|---|---|
+| Config | `invalid-config`, `module-count`, `module-listed-twice`, `module-entry-mismatch` |
+| Module order | `contract-provided-twice`, `before-and-requires`, `missing-provider`, `provides-itself`, `dependency-cycle`, `module-name-contract` |
+| Module setup | `invalid-module-config`, `setup-failed`, `missing-methods` |
+| Step registration | `invalid-read-path`, `invalid-write-path`, `step-not-function`, `step-registered-twice`, `step-undescribed`, `describe-shape`, `describe-threw`, `describe-unknown-step` |
+| Pipeline resolution | `pipeline-defined-twice`, `pipeline-empty`, `unknown-step`, `step-argument`, `atomic-unsafe-step` |
+| Triggers | `svg-without-sanitizer`, `invalid-allowlist`, `unknown-trigger-pipeline`, `invalid-trigger`, `duplicate-route` |
+| Dataflow | `unsatisfied-read`, `optional-read-order` |
+| Hooks | `event-hooks-twice`, `event-hook-missing`, `atomic-scope-twice`, `atomic-scope-missing` |
+| Output declarations | `undeclared-output`, `undeclared-required`, `output-fold-contradiction`, `terminal-output-misplaced` |
+| Attach | `attach-failed` |
+| Loading (`loadConfig`/`loadModule`/`loadPipelineFile`) | `load-failed`, `no-default-export`, `not-a-module`, `not-a-pipeline`, `module-unresolved`, `config-not-object`, `pipelines-not-directory` |
+
 `@michaelthielemann/kestrel-upgrade` (`docs/upgrading.md`) builds on this: its exported
 `sandboxBootInput()` rewrites a loaded project's storage modules to write into a scratch directory,
 so a CI gate can call `checkBoot()` on a real project without touching it:

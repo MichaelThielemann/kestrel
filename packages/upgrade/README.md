@@ -1,8 +1,9 @@
 # @michaelthielemann/kestrel-upgrade
 
 **What.** A CLI (`kestrel-upgrade`) and a small library that find the breaks a 5.8 project meets on
-6.0.0, preview a fix for the ones that can be edited mechanically, and read a copy of a project's
-database for the checks only stored data can answer.
+6.0.0, preview and apply a fix for the ones that can be edited mechanically, ask about the ones a
+person must decide, offer switching event delivery to the queue where the project can support it,
+and read a copy of a project's database for the checks only stored data can answer.
 
 **Why.** Every break in `CHANGELOG.md`'s Breaking section is real, but a consumer should not have
 to read the whole file and grep their own project for each item by hand. This package turns that
@@ -13,18 +14,23 @@ it) and a fix class (auto, ask, manual). It shares its check engine with `@micha
 **Commands.**
 
 ```
-kestrel-upgrade check [--root <dir>] [--entry <file>] [--json] [--fail-on error|warning|info] [--run-setup <use>]...
-kestrel-upgrade fix   [--write] [--allow-dirty] [--run-setup <use>]... (+ the check flags)
-kestrel-upgrade data  --db <sqlite file> [--json] [--out <file>]
+kestrel-upgrade check [--root <dir>] [--entry <file>] [--json] [--fail-on error|warning|info]
+                      [--run-setup <use>]... [--data-report <file>]
+kestrel-upgrade fix   [--write] [--yes] [--answers <file>] [--save-answers <file>] [--allow-dirty]
+                      [--data-report <file>] (+ the check flags)
+kestrel-upgrade data  --db <sqlite file> --root <dir> [--json] [--out <file>]
 ```
 
-`check` never writes anything. `fix` without `--write` previews every automatic edit as a finding;
-`--write` applies them to the project, refusing a file with uncommitted changes unless
-`--allow-dirty`. `data` copies the given SQLite file (and any `-wal`/`-shm` siblings), verifies the
-copy with `PRAGMA quick_check` before reading anything else, and reports what only stored rows can
-answer (an unfanned 5.x event queue, so far). Exit codes: `0` nothing at or above `--fail-on`
+`check` never writes anything. `fix` without `--write` previews every finding, showing a unified
+diff for each automatic edit; `--write` shows the same diff per file and asks `y`/`n`/`d` on a
+terminal, or needs `--yes` without one (never silent). A question a finding's fix needs is asked
+over `node:readline` in order, resolved from `--answers` first, then the prompt, then `--yes`'s
+default; a question with no safe default stays open under `--yes`. `data` copies the given SQLite
+file (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_check` — the only SQL
+the tool issues itself — then reads it through the project's own installed `persistence-sqlite`, so
+the storage layout stays that module's knowledge. Exit codes: `0` nothing at or above `--fail-on`
 (default `error`), `1` at least one finding, `2` the tool could not run (bad arguments, a dirty
-write target, a copy that fails `quick_check`).
+write target, a copy that fails `quick_check`, an unknown `--answers` id).
 
 **Config.** No `kestrel.config.ts` of its own; every option is a CLI flag or a call to the library
 functions below.
@@ -32,13 +38,16 @@ functions below.
 **Library.** The root export carries the report types (`Finding`, `UpgradeReport`) and
 `runUpgradeCli(argv, options?)`, the same function the bin calls, so a host CLI (a layer's own
 bin) can register its own project loader and rules as a plugin and delegate to this engine instead
-of shipping a second copy of it. `./plugin` carries the plugin API
-(`UpgradePlugin`, `Rule`, `RuleContext`, `Question`). `./sandbox` carries `sandboxBootInput()`,
-which rewrites a loaded project's storage modules to write into a scratch directory instead of the
+of shipping a second copy of it; `options.prompt`/`options.isInteractive` let a host supply its own
+UI instead of a terminal. `./plugin` carries the plugin API (`UpgradePlugin`, `Rule` — with its
+optional `applyAnswer`, `RuleContext`, `Question`). `./sandbox` carries `sandboxBootInput()`, which
+rewrites a loaded project's storage modules to write into a scratch directory instead of the
 project's own files, for a CI gate that wants `checkBoot()` without a full `kestrel-upgrade` run.
 
 **Not included.** Installing, committing, pushing or reaching the network — the tool prints the next
-command and lets the consumer run it. An interactive TTY prompt: every rule shipped in this release
-fixes automatically or stays manual, so none needs one; `--run-setup <use>` is the one way to let a
-module outside the sandbox table run its `setup()`. Draining a queue, renaming a stored column or
-any other write to a live database — the `data` command only reads.
+command and lets the consumer run it. Draining a queue, renaming a stored column or any other write
+to a live database — the `data` command only reads. The design's boot-tier re-verification of the
+queue offer's own switch (re-running `checkBoot()` on a sandboxed preview before offering it): this
+release checks the offer's other conditions and asks the question, but does not additionally re-run
+`checkBoot()` on the switched config first — `fix`'s ordinary preview still shows the boot result of
+whatever the switch produced.

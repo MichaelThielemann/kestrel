@@ -291,11 +291,16 @@ Net changes since 5.8.1.
   keep going after one failure.
 - A new package, `@michaelthielemann/kestrel-upgrade` (bin `kestrel-upgrade`, commands `check`,
   `fix`, `data`), finds the 5.8 -> 6.0 breaks a project meets, previews a mechanical fix for the
-  ones it can edit, and reads a database copy for the one check only stored data answers. It never
-  installs, commits, pushes or reaches the network; see `docs/upgrading.md`. It exports a sandbox
-  helper (`@michaelthielemann/kestrel-upgrade/sandbox`) that composes with `checkBoot()` for a CI
-  gate, and a plugin API (`@michaelthielemann/kestrel-upgrade/plugin`) a host CLI registers its own
-  project loader and rules through instead of shipping a second copy of the engine.
+  ones it can edit, asks about the ones a person must decide, offers switching event delivery to
+  the queue where the project can support it, and reads a database copy for the checks only stored
+  data answers. `fix` shows a unified diff per file and asks `y`/`n`/`d` before writing; without a
+  terminal, `--write` needs `--yes` or is refused. Questions are answered over a real
+  `node:readline` prompt, from `--answers <file>`, or from `--yes`'s defaults — a question with no
+  safe default stays open regardless. It never installs, commits, pushes or reaches the network;
+  see `docs/upgrading.md`. It exports a sandbox helper (`@michaelthielemann/kestrel-upgrade/sandbox`)
+  that composes with `checkBoot()` for a CI gate, and a plugin API
+  (`@michaelthielemann/kestrel-upgrade/plugin`) a host CLI registers its own project loader and
+  rules through instead of shipping a second copy of the engine.
 
 ### Changed
 
