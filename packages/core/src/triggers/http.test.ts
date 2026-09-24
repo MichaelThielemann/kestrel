@@ -75,13 +75,19 @@ describe("http routes", () => {
     expect(disposition("application/pdf", "Bärenbericht.pdf")).toBe("attachment; filename=\"B_renbericht.pdf\"; filename*=UTF-8''B%C3%A4renbericht.pdf");
   });
 
-  it("caller headers on a binary result may add but not weaken the mandatory ones", () => {
+  it("a binary result's own cache-control wins, but not the other mandatory headers", () => {
     const body = { ...binaryResult(new Uint8Array([1]), "image/png", "a.png"), headers: { "Cache-Control": "public, max-age=31536000", "x-content-type-options": "", "x-content-provenance": "human" } };
     const { headers } = buildResponse(200, body, { runId: "run-1" });
-    expect(headers["cache-control"]).toBe("no-store");
+    expect(headers["cache-control"]).toBe("public, max-age=31536000");
     expect(headers["x-content-type-options"]).toBe("nosniff");
     expect(headers["x-kestrel-run-id"]).toBe("run-1");
     expect(headers["x-content-provenance"]).toBe("human");
+  });
+
+  it("defaults a binary result with no cache-control of its own to no-store", () => {
+    const body = binaryResult(new Uint8Array([1]), "image/png", "a.png");
+    const { headers } = buildResponse(200, body);
+    expect(headers["cache-control"]).toBe("no-store");
   });
 
   it("also serves configured extra content types inline", () => {

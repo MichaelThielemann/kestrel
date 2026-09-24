@@ -102,6 +102,33 @@ describe("insights/default module steps via runPipeline", () => {
     await kestrel.stop();
   });
 
+  it("readManifest's schema accepts a step declaring anonymous: \"required\"", async () => {
+    const withAnonymous = defineModule({
+      name: "withanonymous/test",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ serve: async (ctx: Context) => ok(ctx) }),
+      describe: () => ({ serve: { summary: "serves a public file", reads: [], writes: [], anonymous: "required" } }),
+    });
+    const kestrel = await boot({
+      config: { modules: [{ use: "./withanonymous.ts", config: {} }, { use: "@michaelthielemann/kestrel-insights", config: {} }], triggers: [], http: null },
+      modules: [withAnonymous, module],
+      pipelines: [definePipeline({ name: "serveIt", steps: ["withanonymous.serve"] }), manifestPipeline],
+      logger: silentLogger,
+      validateOutput: true,
+    });
+    const manifest = await kestrel.run("insightsManifest", { trigger: { kind: "http", name: "GET /x" } });
+    expect(manifest.status).toBe(200);
+    const result = boundaryCast<{ pipelines: Array<{ name: string; steps: Array<{ description: Record<string, unknown> }> }> }>(manifest.result, "json");
+    const servePipeline = result.pipelines.find((p) => p.name === "serveIt");
+    expect(servePipeline?.steps[0]?.description).toMatchObject({ anonymous: "required" });
+    await kestrel.stop();
+  });
+
   it("readManifest answers the boot warnings and matches its output schema", async () => {
     const probeOptional = defineModule({
       name: "probe2/test",

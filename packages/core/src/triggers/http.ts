@@ -156,11 +156,13 @@ export function buildResponse(status: number, body: unknown, meta: ResponseMeta 
   if (meta.requestId !== undefined) headers["x-request-id"] = meta.requestId;
   if (meta.retryable === true && (status === 429 || status === 503)) headers["retry-after"] = String(retryAfterSecondsOf(meta));
   if (isBinaryResult(body)) {
+    const own = Object.fromEntries(Object.entries(body.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
     return {
       status,
       headers: {
-        ...Object.fromEntries(Object.entries(body.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v])),
+        ...own,
         ...headers,
+        ...(own["cache-control"] === undefined ? {} : { "cache-control": own["cache-control"] }),
         "content-type": body.contentType,
         "content-length": String(body.data.byteLength),
         "content-disposition": disposition(body.contentType, body.filename, extraInline),

@@ -65,6 +65,13 @@ export interface StepDescription {
    * work it does is bounded by the request rather than by the size of a collection. Default: false.
    */
   atomicSafe?: boolean;
+  /**
+   * The data this step returns is also published where no access check applies, so every pipeline that runs
+   * the step must let an anonymous caller through. `authz-roles` checks this when the instance is attached
+   * and fails boot otherwise. Boot itself does not evaluate grants, and `authz@1` has no anonymous verdict:
+   * another `authz@1` provider must perform the same check itself, or the flag goes unchecked.
+   */
+  anonymous?: "required";
 }
 
 type DescriptionOf<F> = F extends StepFactory ? (arg: string) => StepDescription : StepDescription;

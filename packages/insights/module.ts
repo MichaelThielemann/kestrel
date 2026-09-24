@@ -27,6 +27,7 @@ const STEP_DESCRIPTION: JsonSchema = {
     multipart: { type: "boolean" },
     binary: { type: "boolean" },
     atomicSafe: { type: "boolean" },
+    anonymous: { type: "string", enum: ["required"] },
   },
   required: ["summary", "reads", "writes"],
 };
