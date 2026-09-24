@@ -7,9 +7,9 @@ import type { BootCheck, BootProblem, BootWarning, ModuleDefinition, PipelineDef
 import { applyEdits } from "./apply.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
 import { readFileOrUndefined } from "./rules.ts";
-import { busHandlerThrowsRule, busSubscriberQueueRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule } from "./ruleInfo.ts";
+import { busHandlerThrowsRule, busSubscriberQueueRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule, typeSignaturesRule } from "./ruleInfo.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
-import { undeclaredOutputRule, undeclaredRequiredRule } from "./ruleBootWraps.ts";
+import { dependencyCycleRule, optionalReadOrderRule, outputFoldRule, terminalOutputRule, undeclaredOutputRule, undeclaredRequiredRule } from "./ruleBootWraps.ts";
 import { underscoreFieldRule } from "./ruleUnderscoreField.ts";
 import { verifiedUserRule } from "./ruleVerifiedUser.ts";
 
@@ -139,6 +139,76 @@ describe("steps/undeclared-required (boot wrap)", () => {
     const findings = await undeclaredRequiredRule.check(contextFor(p, { check: bootCheck([problem]) }));
     expect(findings[0]?.fix.kind).toBe("ask");
     expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
+  });
+});
+
+describe("the generic boot wraps (output-fold, terminal-output, optional-read-order, dependency-cycle)", () => {
+  it("steps/output-fold reports the boot error's own reason as a manual finding", async () => {
+    const p = await project({});
+    const problem: BootProblem = { code: "output-fold-contradiction", owner: "pipelines/p", reason: "step \"a.b\" folds a property two steps disagree on the type of", pipeline: "p", step: "a.b" };
+    const findings = await outputFoldRule.check(contextFor(p, { check: bootCheck([problem]) }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+    expect(findings[0]?.message).toBe(problem.reason);
+    expect(findings[0]?.where.pipeline).toBe("p");
+    expect(findings[0]?.docs).toBe("docs/upgrading.md#steps-output-fold");
+  });
+
+  it("steps/terminal-output reports terminal-output-misplaced as a manual finding", async () => {
+    const p = await project({});
+    const problem: BootProblem = { code: "terminal-output-misplaced", owner: "pipelines/p", reason: "step \"a.b\" is not last but writes the terminal output field", pipeline: "p", step: "a.b" };
+    const findings = await terminalOutputRule.check(contextFor(p, { check: bootCheck([problem]) }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+    expect(findings[0]?.message).toBe(problem.reason);
+    expect(findings[0]?.docs).toBe("docs/upgrading.md#steps-terminal-output");
+  });
+
+  it("pipelines/optional-read-order reports optional-read-order as a manual finding", async () => {
+    const p = await project({});
+    const problem: BootProblem = { code: "optional-read-order", owner: "pipelines/p", reason: "step \"a.b\" optionally reads a key no earlier step writes or a trigger provides", pipeline: "p", step: "a.b" };
+    const findings = await optionalReadOrderRule.check(contextFor(p, { check: bootCheck([problem]) }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+    expect(findings[0]?.message).toBe(problem.reason);
+    expect(findings[0]?.docs).toBe("docs/upgrading.md#pipelines-optional-read-order");
+  });
+
+  it("boot/dependency-cycle reports dependency-cycle as a manual finding", async () => {
+    const p = await project({});
+    const problem: BootProblem = { code: "dependency-cycle", owner: "a", module: "a", reason: "module dependency cycle: a -> b -> a" };
+    const findings = await dependencyCycleRule.check(contextFor(p, { check: bootCheck([problem]) }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+    expect(findings[0]?.message).toBe(problem.reason);
+    expect(findings[0]?.where.module).toBe("a");
+    expect(findings[0]?.docs).toBe("docs/upgrading.md#boot-dependency-cycle");
+  });
+
+  it("reports nothing when no boot error of its own code is present", async () => {
+    const p = await project({});
+    const ctx = contextFor(p, { check: bootCheck([{ code: "dependency-cycle", owner: "a", reason: "x" }]) });
+    expect(await outputFoldRule.check(ctx)).toEqual([]);
+    expect(await terminalOutputRule.check(ctx)).toEqual([]);
+    expect(await optionalReadOrderRule.check(ctx)).toEqual([]);
+  });
+});
+
+describe("types/breaking-signatures", () => {
+  it("always fires, regardless of the project", async () => {
+    const empty = await project({});
+    const findings = await typeSignaturesRule.check(contextFor(empty));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe("info");
+    expect(findings[0]?.fix.kind).toBe("none");
+    expect(findings[0]?.docs).toBe("docs/upgrading.md#types-breaking-signatures");
+
+    const full = await project({
+      configModules: [{ use: "@michaelthielemann/kestrel-authn-multi" }],
+      triggers: [{ http: "POST /x", pipeline: "p" }],
+      pipelines: [{ name: "p", steps: ["authn.requireUser"] }],
+    });
+    expect(await typeSignaturesRule.check(contextFor(full))).toEqual(findings);
   });
 });
 
