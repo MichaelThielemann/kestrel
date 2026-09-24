@@ -78,7 +78,7 @@ async function buildReport(root: string, entry: string | undefined, runSetupUses
 
   if (project) {
     tiers = { ...tiers, source: "done" };
-    const ctx = { root: scratch.dir, scratch: scratch.dir, project, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined };
+    const ctx = { root: scratch.dir, scratch: scratch.dir, project, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map<string, string>() };
     for (const rule of DEFAULT_RULES) findings.push(...(await rule.check(ctx)));
 
     if (kestrelMajor === 6 && !versions.mixedMajors) {

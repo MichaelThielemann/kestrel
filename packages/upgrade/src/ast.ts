@@ -14,9 +14,10 @@ export function parseTs(source: string): AstNode {
   return boundaryCast<AstNode>(file, "host");
 }
 
-function isNode(value: unknown): value is AstNode {
+export function isAstNode(value: unknown): value is AstNode {
   return typeof value === "object" && value !== null && typeof (value as { type?: unknown }).type === "string";
 }
+const isNode = isAstNode;
 
 /** Depth-first, pre-order walk over every node in the tree, skipping location bookkeeping fields. */
 export function walk(root: AstNode, visit: (node: AstNode, parent: AstNode | undefined) => void): void {
@@ -69,6 +70,30 @@ export function objectProperty(obj: AstNode, key: string): AstNode | undefined {
     return isNode(prop.value) ? prop.value : undefined;
   }
   return undefined;
+}
+
+export function propertyKeyNode(prop: AstNode): AstNode | undefined {
+  return isNode(prop.key) ? prop.key : undefined;
+}
+
+export function isArrayExpression(node: unknown): node is AstNode {
+  return isAstNode(node) && node.type === "ArrayExpression";
+}
+
+export function arrayElements(node: AstNode): AstNode[] {
+  return isArrayExpression(node) && Array.isArray(node.elements) ? node.elements.filter((e): e is AstNode => isAstNode(e)) : [];
+}
+
+/** Every `<calleeName>(...)` call in the file, by the callee's plain identifier name. */
+export function findCalls(root: AstNode, calleeName: string): AstNode[] {
+  return findAll(root, "CallExpression").filter((node) => {
+    const callee = node.callee;
+    return isAstNode(callee) && callee.type === "Identifier" && callee.name === calleeName;
+  });
+}
+
+export function firstArgument(call: AstNode): AstNode | undefined {
+  return Array.isArray(call.arguments) && isAstNode(call.arguments[0]) ? call.arguments[0] : undefined;
 }
 
 export function span(node: AstNode): { start: number; end: number } {

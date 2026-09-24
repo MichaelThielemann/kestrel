@@ -1,5 +1,5 @@
 import type { Edit } from "./report.ts";
-import { findAll, objectProperty, objectPropertyNodes, parseTs, propertyKeyName, span, stringValue, walk, type AstNode } from "./ast.ts";
+import { findAll, findCalls, firstArgument, isAstNode, objectProperty, objectPropertyNodes, parseTs, propertyKeyName, propertyKeyNode, span, stringValue, walk, type AstNode } from "./ast.ts";
 
 function isArray(node: AstNode | undefined): node is AstNode {
   return node?.type === "ArrayExpression";
@@ -135,4 +135,172 @@ export function renameStringLiterals(file: string, source: string, from: string,
     const quote = source[start] === "'" ? "'" : '"';
     return { file, start, end, text: `${quote}${to}${quote}` };
   });
+}
+
+function pipelineStepsArrays(root: AstNode, pipelineName: string): AstNode[] {
+  const arrays: AstNode[] = [];
+  for (const call of findCalls(root, "definePipeline")) {
+    const arg = firstArgument(call);
+    if (arg === undefined || arg.type !== "ObjectExpression") continue;
+    if (stringValue(objectProperty(arg, "name")) !== pipelineName) continue;
+    const steps = objectProperty(arg, "steps");
+    if (isArray(steps)) arrays.push(steps);
+  }
+  return arrays;
+}
+
+function stepArraysOf(top: AstNode): AstNode[] {
+  const arrays = [top];
+  for (const el of elements(top)) {
+    if (el.type !== "ObjectExpression") continue;
+    const atomic = objectProperty(el, "atomic");
+    if (isArray(atomic)) arrays.push(atomic);
+  }
+  return arrays;
+}
+
+export interface InsertStepOptions {
+  pipelineName: string;
+  anchorStep: string;
+  position: "before" | "after";
+  newStep: string;
+}
+
+/** Inserts `newStep` next to `anchorStep` in the named pipeline's step list, including inside an atomic group; `undefined` when the pipeline, the array or the anchor cannot be found, or `newStep` is already there. */
+export function insertPipelineStep(file: string, source: string, options: InsertStepOptions): Edit | undefined {
+  const root = parseTs(source);
+  for (const top of pipelineStepsArrays(root, options.pipelineName)) {
+    for (const array of stepArraysOf(top)) {
+      const stepElements = elements(array);
+      if (stepElements.some((e) => stringValue(e) === options.newStep)) return undefined;
+      const anchorIndex = stepElements.findIndex((e) => stringValue(e) === options.anchorStep);
+      if (anchorIndex === -1) continue;
+      const anchor = stepElements[anchorIndex]!;
+      const quote = quoteOf(source, stepElements.find((e) => stringValue(e) !== undefined));
+      const literal = `${quote}${options.newStep}${quote}`;
+      if (!isMultiline(source, array)) {
+        const { start, end } = span(anchor);
+        return options.position === "after" ? { file, start: end, end, text: `, ${literal}` } : { file, start, end: start, text: `${literal}, ` };
+      }
+      const { indent } = lineOf(source, span(anchor).start);
+      if (options.position === "after") {
+        const { end } = span(anchor);
+        const lineEnd = source.indexOf("\n", end);
+        const insertAt = lineEnd === -1 ? end : lineEnd + 1;
+        return { file, start: insertAt, end: insertAt, text: `${indent}${literal},\n` };
+      }
+      const { lineStart } = lineOf(source, span(anchor).start);
+      return { file, start: lineStart, end: lineStart, text: `${indent}${literal},\n` };
+    }
+  }
+  return undefined;
+}
+
+/** Adds `events` to a local module's `emits: [...]`, creating the property when it has none; already-listed events are skipped. `undefined` when there is nothing left to add, or no `defineModule({...})` call is found. */
+export function addModuleEmits(file: string, source: string, events: readonly string[]): Edit | undefined {
+  const root = parseTs(source);
+  const calls = findCalls(root, "defineModule");
+  const arg = calls[0] && firstArgument(calls[0]);
+  if (arg === undefined || arg.type !== "ObjectExpression") return undefined;
+  const existing = objectProperty(arg, "emits");
+  if (existing !== undefined && isArray(existing)) {
+    const already = new Set(elements(existing).flatMap((e) => (stringValue(e) !== undefined ? [stringValue(e)!] : [])));
+    const toAdd = events.filter((e) => !already.has(e));
+    if (toAdd.length === 0) return undefined;
+    const quote = quoteOf(source, elements(existing)[0]);
+    const insertion = toAdd.map((e) => `${quote}${e}${quote}`).join(", ");
+    const existingElements = elements(existing);
+    if (existingElements.length === 0) {
+      const { start, end } = span(existing);
+      return { file, start: start + 1, end: end - 1, text: insertion };
+    }
+    const { end } = span(existingElements[existingElements.length - 1]!);
+    return { file, start: end, end, text: `, ${insertion}` };
+  }
+  const props = objectPropertyNodes(arg);
+  const literal = `[${events.map((e) => `"${e}"`).join(", ")}]`;
+  if (props.length === 0) {
+    const { start, end } = span(arg);
+    return { file, start: start + 1, end: end - 1, text: `emits: ${literal}` };
+  }
+  const first = props[0]!;
+  const { end } = span(first);
+  if (!isMultiline(source, arg)) return { file, start: end, end, text: `, emits: ${literal}` };
+  const { indent } = lineOf(source, span(first).start);
+  const lineEnd = source.indexOf("\n", end);
+  const insertAt = lineEnd === -1 ? end : lineEnd + 1;
+  return { file, start: insertAt, end: insertAt, text: `${indent}emits: ${literal},\n` };
+}
+
+function describeStepObject(root: AstNode, stepName: string): AstNode | undefined {
+  let found: AstNode | undefined;
+  walk(root, (node) => {
+    if (found || node.type !== "ObjectProperty" || propertyKeyName(node) !== "describe") return;
+    const value = node.value;
+    if (!isAstNode(value)) return;
+    const body = value.type === "ArrowFunctionExpression" && isAstNode(value.body) ? value.body : value;
+    if (body.type !== "ObjectExpression") return;
+    const entry = objectProperty(body, stepName);
+    if (entry?.type === "ObjectExpression") found = entry;
+  });
+  return found;
+}
+
+function appendProperty(source: string, obj: AstNode, file: string, text: string): Edit {
+  const props = objectPropertyNodes(obj);
+  if (props.length === 0) {
+    const { start, end } = span(obj);
+    return { file, start: start + 1, end: end - 1, text };
+  }
+  const { end } = span(props[props.length - 1]!);
+  return { file, start: end, end, text: `, ${text}` };
+}
+
+/** Adds `binary: true` to a non-factory step's `describe()` entry; `undefined` when the step, its describe object or the module cannot be located, or `binary` is already set. */
+export function markStepBinary(file: string, source: string, stepName: string): Edit | undefined {
+  const obj = describeStepObject(parseTs(source), stepName);
+  if (obj === undefined || objectProperty(obj, "binary") !== undefined) return undefined;
+  return appendProperty(source, obj, file, "binary: true");
+}
+
+/** Sets (or adds) `required` on a non-factory step's `output` schema; `undefined` when the step or its `output` object cannot be located this way — a nested schema path stays manual. */
+export function setStepRequired(file: string, source: string, stepName: string, properties: readonly string[]): Edit | undefined {
+  const obj = describeStepObject(parseTs(source), stepName);
+  const output = obj && objectProperty(obj, "output");
+  if (output === undefined || output.type !== "ObjectExpression") return undefined;
+  const literal = `[${properties.map((p) => `"${p}"`).join(", ")}]`;
+  const existing = objectProperty(output, "required");
+  if (existing !== undefined) {
+    const { start, end } = span(existing);
+    return { file, start, end, text: literal };
+  }
+  return appendProperty(source, output, file, `required: ${literal}`);
+}
+
+export interface RenameContentFieldOptions {
+  use: string;
+  typeName: string;
+  from: string;
+  to: string;
+}
+
+/** Renames a content type's field key, `config.types.<typeName>.fields.<from>`, on a module-list entry named `use`. */
+export function renameContentField(file: string, source: string, options: RenameContentFieldOptions): Edit | undefined {
+  const array = moduleListArray(source);
+  if (array === undefined) return undefined;
+  const entry = elements(array).find((e) => entryUse(e) === options.use);
+  const config = entry && objectProperty(entry, "config");
+  const types = config?.type === "ObjectExpression" ? objectProperty(config, "types") : undefined;
+  const typeObj = types?.type === "ObjectExpression" ? objectProperty(types, options.typeName) : undefined;
+  const fields = typeObj?.type === "ObjectExpression" ? objectProperty(typeObj, "fields") : undefined;
+  if (fields === undefined || fields.type !== "ObjectExpression") return undefined;
+  const prop = objectPropertyNodes(fields).find((p) => propertyKeyName(p) === options.from);
+  const key = prop && propertyKeyNode(prop);
+  if (key === undefined) return undefined;
+  const { start, end } = span(key);
+  if (key.type === "StringLiteral") {
+    const quote = source[start] === "'" ? "'" : '"';
+    return { file, start, end, text: `${quote}${options.to}${quote}` };
+  }
+  return { file, start, end, text: options.to };
 }

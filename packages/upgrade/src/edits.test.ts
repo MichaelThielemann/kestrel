@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { applyEdits } from "./apply.ts";
-import { insertModuleListEntry, renameStringLiterals, setModuleConfigProperties } from "./edits.ts";
+import { addModuleEmits, insertModuleListEntry, insertPipelineStep, markStepBinary, renameContentField, renameStringLiterals, setModuleConfigProperties, setStepRequired } from "./edits.ts";
 import { removeDependency, setDependencyRange } from "./packageJson.ts";
 
 function parsePkg(text: string): { dependencies: Record<string, string> } {
@@ -125,5 +125,105 @@ describe("package.json dependency edits", () => {
     const parsed = parsePkg(text);
     expect(parsed.dependencies["@michaelthielemann/kestrel-events-inmemory"]).toBeUndefined();
     expect(parsed.dependencies["zod"]).toBe("^3.23.8");
+  });
+});
+
+describe("insertPipelineStep", () => {
+  const PIPELINE = `definePipeline({ name: "retryReassignRevisionAuthor", steps: ["authn.requireUser", "revisions.reassignAuthor"] });\n`;
+
+  it("inserts a step before the anchor in a flat step list", () => {
+    const edit = insertPipelineStep("p.ts", PIPELINE, { pipelineName: "retryReassignRevisionAuthor", anchorStep: "revisions.reassignAuthor", position: "before", newStep: "authn.verifyUser:reassignTo" });
+    const { text } = applyEdits(PIPELINE, [edit!]);
+    expect(text).toContain('"authn.requireUser", "authn.verifyUser:reassignTo", "revisions.reassignAuthor"');
+  });
+
+  it("inserts inside an atomic group when the anchor is grouped", () => {
+    const source = `definePipeline({ name: "p", steps: [{ atomic: ["content.set", "revisions.reassignAuthor"] }] });\n`;
+    const edit = insertPipelineStep("p.ts", source, { pipelineName: "p", anchorStep: "revisions.reassignAuthor", position: "before", newStep: "authn.verifyUser:result.reassignTo" });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('{ atomic: ["content.set", "authn.verifyUser:result.reassignTo", "revisions.reassignAuthor"] }');
+  });
+
+  it("is idempotent", () => {
+    const first = insertPipelineStep("p.ts", PIPELINE, { pipelineName: "retryReassignRevisionAuthor", anchorStep: "revisions.reassignAuthor", position: "before", newStep: "authn.verifyUser:reassignTo" });
+    const { text: fixed } = applyEdits(PIPELINE, [first!]);
+    expect(insertPipelineStep("p.ts", fixed, { pipelineName: "retryReassignRevisionAuthor", anchorStep: "revisions.reassignAuthor", position: "before", newStep: "authn.verifyUser:reassignTo" })).toBeUndefined();
+  });
+
+  it("returns undefined for an unknown pipeline or anchor", () => {
+    expect(insertPipelineStep("p.ts", PIPELINE, { pipelineName: "nope", anchorStep: "revisions.reassignAuthor", position: "before", newStep: "x" })).toBeUndefined();
+    expect(insertPipelineStep("p.ts", PIPELINE, { pipelineName: "retryReassignRevisionAuthor", anchorStep: "nope.step", position: "before", newStep: "x" })).toBeUndefined();
+  });
+});
+
+describe("renameContentField", () => {
+  const CONFIG = `export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" }, title: { type: "string" } } } } } }], triggers: [] });\n`;
+
+  it("renames an unquoted field key", () => {
+    const edit = renameContentField("kestrel.config.ts", CONFIG, { use: "@michaelthielemann/kestrel-content-default", typeName: "page", from: "_hint", to: "hint" });
+    const { text } = applyEdits(CONFIG, [edit!]);
+    expect(text).toContain("fields: { hint: { type: \"string\" }, title:");
+  });
+
+  it("returns undefined for an unknown field or type", () => {
+    expect(renameContentField("kestrel.config.ts", CONFIG, { use: "@michaelthielemann/kestrel-content-default", typeName: "page", from: "_nope", to: "nope" })).toBeUndefined();
+    expect(renameContentField("kestrel.config.ts", CONFIG, { use: "@michaelthielemann/kestrel-content-default", typeName: "nope", from: "_hint", to: "hint" })).toBeUndefined();
+  });
+});
+
+describe("addModuleEmits", () => {
+  it("adds emits: [...] to a module literal with none", () => {
+    const source = `export default defineModule({ name: "migrations/default", provides: [], requires: [], configSchema, setup });\n`;
+    const edit = addModuleEmits("module.ts", source, ["migrations.applied"]);
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('defineModule({ name: "migrations/default", emits: ["migrations.applied"], provides:');
+  });
+
+  it("extends an existing emits array without duplicating an already-listed event", () => {
+    const source = `export default defineModule({ name: "m/one", emits: ["a.one"], provides: [], requires: [], configSchema, setup });\n`;
+    const edit = addModuleEmits("module.ts", source, ["a.one", "a.two"]);
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('emits: ["a.one", "a.two"]');
+  });
+
+  it("returns undefined once every event is already listed", () => {
+    const source = `export default defineModule({ name: "m/one", emits: ["a.one"], provides: [], requires: [], configSchema, setup });\n`;
+    expect(addModuleEmits("module.ts", source, ["a.one"])).toBeUndefined();
+  });
+});
+
+describe("markStepBinary", () => {
+  const MODULE = `export default defineModule({ name: "notes/local", describe: () => ({ create: { summary: "create", reads: [], writes: ["result"] } }) });\n`;
+
+  it("adds binary: true to the named step's describe entry", () => {
+    const edit = markStepBinary("module.ts", MODULE, "create");
+    const { text } = applyEdits(MODULE, [edit!]);
+    expect(text).toContain('writes: ["result"], binary: true');
+  });
+
+  it("returns undefined once binary is already set", () => {
+    const withBinary = `export default defineModule({ describe: () => ({ create: { summary: "x", reads: [], writes: ["result"], binary: true } }) });\n`;
+    expect(markStepBinary("module.ts", withBinary, "create")).toBeUndefined();
+  });
+
+  it("returns undefined for an unknown step", () => {
+    expect(markStepBinary("module.ts", MODULE, "nope")).toBeUndefined();
+  });
+});
+
+describe("setStepRequired", () => {
+  const MODULE = `export default defineModule({ describe: () => ({ create: { summary: "create", reads: [], writes: ["result"], output: { type: "object", properties: { id: { type: "string" } } } } }) });\n`;
+
+  it("adds required to the step's output schema", () => {
+    const edit = setStepRequired("module.ts", MODULE, "create", ["id"]);
+    const { text } = applyEdits(MODULE, [edit!]);
+    expect(text).toContain('properties: { id: { type: "string" } }, required: ["id"]');
+  });
+
+  it("replaces an existing required array", () => {
+    const withRequired = `export default defineModule({ describe: () => ({ create: { summary: "x", reads: [], writes: ["result"], output: { type: "object", properties: {}, required: ["old"] } } }) });\n`;
+    const edit = setStepRequired("module.ts", withRequired, "create", []);
+    const { text } = applyEdits(withRequired, [edit!]);
+    expect(text).toContain('required: []');
   });
 });

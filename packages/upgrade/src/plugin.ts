@@ -1,8 +1,8 @@
 import type { BootCheck, BootInput } from "@michaelthielemann/kestrel";
-import type { Finding } from "./report.ts";
+import type { Edit, Finding } from "./report.ts";
 import { runCli } from "./cli-run.ts";
 
-export type { Edit, Finding, FindingFix, FindingLocation, Severity, Tier, UpgradeReport } from "./report.ts";
+export type { AskFix, Edit, Finding, FindingFix, FindingLocation, Severity, Tier, UpgradeReport } from "./report.ts";
 
 /** A project a plugin knows how to find and load; the layer registers one of these for its own project shape. */
 export interface LoadedProject {
@@ -20,12 +20,16 @@ export interface RuleContext {
   project: LoadedProject;
   bootCheck: BootCheck;
   readFile(file: string): string | undefined;
+  /** Answers already known for this run (from `--answers`, a TTY prompt, or a `--yes` default), so a rule whose question only makes sense after another one's answer can look it up. */
+  answers: ReadonlyMap<string, string>;
 }
 
 /** One 5.8 -> 6.0 rule: turns a loaded project (plus the boot check it produced) into findings. */
 export interface Rule {
   id: string;
   check(ctx: RuleContext): readonly Finding[] | Promise<readonly Finding[]>;
+  /** Turns a chosen answer to one of this rule's `ask` questions into edits; `undefined` when the answer needs no edit or the id is not this rule's. */
+  applyAnswer?(questionId: string, value: string, ctx: RuleContext): Edit[] | undefined;
 }
 
 export interface Question {

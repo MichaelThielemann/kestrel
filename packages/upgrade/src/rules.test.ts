@@ -22,8 +22,8 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-function contextFor(project: LoadedProject): RuleContext {
-  return { root: dir, scratch: dir, project, bootCheck: EMPTY_CHECK, readFile: readFileOrUndefined };
+function contextFor(project: LoadedProject, answers: ReadonlyMap<string, string> = new Map()): RuleContext {
+  return { root: dir, scratch: dir, project, bootCheck: EMPTY_CHECK, readFile: readFileOrUndefined, answers };
 }
 
 async function projectWithModules(source: string, modules: Array<{ use: string; config?: Record<string, unknown> }>): Promise<LoadedProject> {

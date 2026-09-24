@@ -8,7 +8,15 @@ export interface Edit {
   text: string;
 }
 
-export type FindingFix = { kind: "auto"; edits: Edit[] } | { kind: "ask"; question: string } | { kind: "manual" } | { kind: "none" };
+export interface AskFix {
+  kind: "ask";
+  question: string;
+  prompt: string;
+  choices: readonly string[];
+  defaultValue?: string;
+}
+
+export type FindingFix = { kind: "auto"; edits: Edit[] } | AskFix | { kind: "manual" } | { kind: "none" };
 
 export interface FindingLocation {
   file?: string;
