@@ -77,6 +77,7 @@ interface Options {
   holdVariantWrites?: Gate;
   noteMediaDeleted?: boolean;
   extraRoles?: Record<string, string[]>;
+  anonymous?: string[];
 }
 
 interface Example {
@@ -94,9 +95,9 @@ async function bootExample(options: Options = {}): Promise<Example> {
     if (m.use === "@michaelthielemann/kestrel-persistence-sqlite") return { ...m, config: { ...(m.config as object), file: ":memory:" } };
     if (m.use === "@michaelthielemann/kestrel-replication-sqlite") return { ...m, config: { ...(m.config as object), file: join(dataDir, "replication.db") } };
     if (m.use === "@michaelthielemann/kestrel-blobstore-filesystem") return { ...m, config: { ...(m.config as object), root: join(dataDir, "blobs") } };
-    if (m.use === "@michaelthielemann/kestrel-authz-roles" && options.extraRoles !== undefined) {
-      const authz = boundaryCast<{ roles: Record<string, string[]> }>(m.config, "host");
-      return { ...m, config: { ...authz, roles: { ...authz.roles, ...options.extraRoles } } };
+    if (m.use === "@michaelthielemann/kestrel-authz-roles" && (options.extraRoles !== undefined || options.anonymous !== undefined)) {
+      const authz = boundaryCast<{ roles: Record<string, string[]>; anonymous: string[] }>(m.config, "host");
+      return { ...m, config: { ...authz, roles: { ...authz.roles, ...options.extraRoles }, anonymous: options.anonymous ?? authz.anonymous } };
     }
     if (queue && m.use === "@michaelthielemann/kestrel-events-direct") return { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: 10, maxAttempts: 1, relayMs: 5000, relayPipelines: ["publishPage", "unpublishPage"], lanes: options.lanes } };
     return m;
@@ -249,7 +250,7 @@ describe("examples/minimal media: a published page and the public copies", () =>
     }
   });
 
-  it("a signed-in caller whose roles lack media.read gets the public file and its variants like an anonymous one", async () => {
+  it("a signed-in caller whose roles lack media.read, which anonymous callers have, gets the public file and its variants", async () => {
     const example = await bootExample({ extraRoles: { viewer: ["pages.read"] } });
     try {
       const token = await adminToken(example);
@@ -263,10 +264,18 @@ describe("examples/minimal media: a published page and the public copies", () =>
       const listed = await getItem(example, item.id);
       for (const variant of listed.variants) expect((await serveVariant(example, item.id, fileOf(variant.path), bearer(viewer))).status).toBe(200);
       const read = await example.kestrel.run("downloadMedia", { trigger, headers: bearer(viewer), params: { id: item.id } });
-      expect(read.status).toBe(403);
+      expect(read.status).toBe(200);
+      const write = await example.kestrel.run("updateMedia", { trigger, headers: bearer(viewer), params: { id: item.id }, payload: { alt: "x" }, body: { alt: "x" } });
+      expect(write.status).toBe(403);
     } finally {
       await example.dispose();
     }
+  });
+});
+
+describe("examples/minimal media: public copies need anonymous read", () => {
+  it("does not boot when anonymous callers may not read media, naming the serve pipeline", async () => {
+    await expect(bootExample({ anonymous: [] })).rejects.toThrow(/pipeline "serve(MediaFile|ImageVariant)" runs (media|images)\.serve.*anonymous callers lack "media.read"/);
   });
 });
 

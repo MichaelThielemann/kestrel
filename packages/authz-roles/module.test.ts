@@ -56,6 +56,13 @@ describe("authz/roles module steps via runPipeline", () => {
     expect(res.code).toBe("FORBIDDEN");
   });
 
+  it("passes a signed-in caller whose roles lack a permission that anonymous callers have", async () => {
+    const instance = await boot();
+    const pipeline = definePipeline({ name: "requireReadSignedIn", steps: ["identity.set", "authz.require:pages.read"] });
+    const res = await runPipeline(pipeline, {}, { modules: [{ module, instance }], steps: { "identity.set": withIdentity({ id: "v", claims: { roles: ["visitor"] } }) }, writes: setsIdentity });
+    expect(res.status).toBe(200);
+  });
+
   it("passes when the identity has the permission", async () => {
     const instance = await boot();
     const res = await runPipeline(requireWritePipeline, {}, { modules: [{ module, instance }], steps: { "identity.set": withIdentity({ id: "e", claims: { roles: ["editor"] } }) }, writes: setsIdentity });
@@ -166,14 +173,14 @@ const customGateModule = defineModule({
 const ROLES = { chef: ["*"], autor: ["pages.*"] };
 const trigger = { kind: "http" as const, name: "test" };
 
-async function bootWithGatedPipelines(identity: Identity) {
+async function bootWithGatedPipelines(identity: Identity, anonymous: string[] = []) {
   const probe = identityModule(identity);
   return bootKestrel({
     config: {
       modules: [
         { use: "./probe.ts", config: {} },
         { use: "./custom.ts", config: {} },
-        { use: "@michaelthielemann/kestrel-authz-roles", config: { roles: ROLES, anonymous: [] } },
+        { use: "@michaelthielemann/kestrel-authz-roles", config: { roles: ROLES, anonymous } },
       ],
       triggers: [],
       http: null,
@@ -209,6 +216,15 @@ describe("authz/roles: describePipelineAccess against a booted instance", () => 
     const access = await kestrel.run("access", { trigger });
     const pipelineAccess = boundaryCast<{ pipelineAccess: Record<string, string> }>(access.result, "json").pipelineAccess;
     expect(pipelineAccess.mixed).toBe("denied");
+    await kestrel.stop();
+  });
+
+  it("answers granted for a signed-in caller when anonymous callers have the permission its roles lack", async () => {
+    const kestrel = await bootWithGatedPipelines({ id: "g", claims: { roles: [] } }, ["pages.manage"]);
+    const access = await kestrel.run("access", { trigger });
+    const pipelineAccess = boundaryCast<{ pipelineAccess: Record<string, string> }>(access.result, "json").pipelineAccess;
+    expect(pipelineAccess.gated).toBe("granted");
+    expect((await kestrel.run("gated", { trigger })).status).toBe(200);
     await kestrel.stop();
   });
 

@@ -9047,12 +9047,14 @@
     "/media/{id}/{name}": {
       "get": {
         "operationId": "serveMediaFile",
-        "summary": "The file at its public URL (params.id, params.name); the name must be the one it was uploaded under",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The file at its public URL (params.id, params.name); the name must be the one it was uploaded under",
         "tags": [
           "media"
         ],
         "x-kestrel-pipeline": "serveMediaFile",
         "x-kestrel-steps": [
+          "authn.identifyUser",
+          "authz.require:media.read",
           "media.serve"
         ],
         "parameters": [
@@ -9081,6 +9083,26 @@
                 "schema": {
                   "type": "string",
                   "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission media.read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -9123,7 +9145,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/media/{id}/file": {
@@ -9230,12 +9257,14 @@
     "/media/{id}/variants/{file}": {
       "get": {
         "operationId": "serveImageVariant",
-        "summary": "The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback",
         "tags": [
           "media"
         ],
         "x-kestrel-pipeline": "serveImageVariant",
         "x-kestrel-steps": [
+          "authn.identifyUser",
+          "authz.require:media.read",
           "images.serve"
         ],
         "parameters": [
@@ -9270,6 +9299,26 @@
           },
           "400": {
             "description": "missing id or file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission media.read",
             "content": {
               "application/json": {
                 "schema": {
@@ -9316,7 +9365,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/media/folders": {

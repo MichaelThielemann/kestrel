@@ -67,17 +67,18 @@ export function requiredPermissions(pipeline: PipelineManifest): string[] {
 export interface AuthzRoles extends Authz {
   canAnonymous(permission: string): boolean;
   attach(kestrel: Introspection): Detach;
-  /** Per booted pipeline: `granted` when the caller passes every `authz.require` step, `denied` when it fails one, `unknown` when the pipeline has none. Without an identity the `anonymous` grants decide, as in `authz.require`. */
+  /** Per booted pipeline: `granted` when the caller passes every `authz.require` step, `denied` when it fails one, `unknown` when the pipeline has none. Without an identity the `anonymous` grants decide, as in `authz.require`; a signed-in caller holds its roles' grants and the `anonymous` ones. */
   describePipelineAccess(identity: Identity | undefined): Record<string, PipelineVerdict>;
   listRoles(): string[];
 }
 
+/** `can` grants a permission to a signed-in caller whose roles grant it, and to every signed-in caller when `anonymous` grants it: what an anonymous caller may do, a signed-in one may do too. */
 export function createAuthzRoles(config: Config): AuthzRoles {
   const roles = new Map(Object.entries(config.roles));
   let gates: ReadonlyMap<string, readonly string[]> | undefined;
 
   function holds(identity: Identity, permission: string): boolean {
-    return rolesOf(identity, config.roleClaim).some((role) => (roles.get(role) ?? []).some((granted) => matches(granted, permission)));
+    return anonymousCan(config, permission) || rolesOf(identity, config.roleClaim).some((role) => (roles.get(role) ?? []).some((granted) => matches(granted, permission)));
   }
 
   return {

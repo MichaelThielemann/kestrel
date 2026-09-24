@@ -34,8 +34,16 @@ describe("authz/roles", () => {
   it("accepts a single role as string and ignores unknown roles", async () => {
     const authz = createAuthzRoles(config);
     expect(expectOk(await authz.can({ id: "a", claims: { roles: "admin" } }, "media.delete"))).toBe(true);
-    expect(expectOk(await authz.can({ id: "b", claims: { roles: ["ghost"] } }, "pages.read"))).toBe(false);
-    expect(expectOk(await authz.can({ id: "c", claims: {} }, "pages.read"))).toBe(false);
+    expect(expectOk(await authz.can({ id: "b", claims: { roles: ["ghost"] } }, "pages.write"))).toBe(false);
+    expect(expectOk(await authz.can({ id: "c", claims: {} }, "pages.write"))).toBe(false);
+  });
+
+  it("grants every signed-in caller what anonymous callers may do, whatever their roles", async () => {
+    const authz = createAuthzRoles(config);
+    expect(expectOk(await authz.can({ id: "b", claims: { roles: ["ghost"] } }, "pages.read"))).toBe(true);
+    expect(expectOk(await authz.can({ id: "c", claims: {} }, "pages.read"))).toBe(true);
+    expect(expectOk(await authz.can({ id: "c", claims: {} }, "pages.write"))).toBe(false);
+    expect(expectOk(await createAuthzRoles({ ...config, anonymous: [] }).can({ id: "c", claims: {} }, "pages.read"))).toBe(false);
   });
 
   it("two boots keep their own anonymous config; the first instance is unaffected by a later boot", async () => {
