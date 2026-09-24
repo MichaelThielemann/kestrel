@@ -4905,6 +4905,30 @@
                       },
                       "updatedAt": {
                         "type": "number"
+                      },
+                      "stale": {
+                        "type": "boolean"
+                      },
+                      "staleSince": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "staleFailed": {
+                        "type": "boolean"
+                      },
+                      "staleError": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "dependencies": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
                       }
                     },
                     "required": [
@@ -4912,7 +4936,12 @@
                       "docId",
                       "locale",
                       "state",
-                      "updatedAt"
+                      "updatedAt",
+                      "stale",
+                      "staleSince",
+                      "staleFailed",
+                      "staleError",
+                      "dependencies"
                     ]
                   }
                 }
@@ -12244,7 +12273,7 @@
       },
       "put": {
         "operationId": "setSettings",
-        "summary": "Require a valid session → Requires permission settings.write → Validate payload field settings.navigation against its JSON Schema → Replace the settings document → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
+        "summary": "Require a valid session → Requires permission settings.write → Validate payload field settings.navigation against its JSON Schema → Replace the settings document → Emit event \"settings.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "settings"
         ],
@@ -12254,7 +12283,8 @@
           "authz.require:settings.write",
           "validate.check:settings.navigation",
           "content.set:settings",
-          "delivery.exportLlms"
+          "events.emit:settings.updated",
+          "events.relay"
         ],
         "parameters": [],
         "responses": {
@@ -12316,24 +12346,70 @@
                       },
                       "description": "per locale: required localized fields present"
                     },
-                    "_llms": {
+                    "_events": {
                       "type": "object",
                       "properties": {
-                        "entries": {
-                          "type": "integer"
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "done",
+                            "error",
+                            "pending",
+                            "queued"
+                          ]
                         },
-                        "full": {
-                          "type": "boolean"
+                        "pipelines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "event": {
+                                "type": "string"
+                              },
+                              "pipeline": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "done",
+                                  "error",
+                                  "pending",
+                                  "queued"
+                                ]
+                              },
+                              "attempts": {
+                                "type": "integer"
+                              },
+                              "dead": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "pipeline",
+                              "status",
+                              "attempts",
+                              "dead",
+                              "error"
+                            ]
+                          }
                         }
                       },
                       "required": [
-                        "entries",
-                        "full"
+                        "status",
+                        "pipelines"
                       ]
                     }
                   },
                   "required": [
-                    "_llms",
+                    "_events",
                     "createdAt",
                     "id",
                     "updatedAt"
@@ -12373,7 +12449,7 @@
             }
           },
           "500": {
-            "description": "internal error",
+            "description": "a subscribed handler failed",
             "content": {
               "application/json": {
                 "schema": {

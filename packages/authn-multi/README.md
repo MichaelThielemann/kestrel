@@ -84,6 +84,6 @@ concerns), an e-mail field.
 | `authn.activateUser` | Activate a user | `params.id` | `result` | – | { ok: boolean, … } | 404 user not found | beside | no |
 | `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed: number, … } | – | beside | no |
 
-Used by 74 of 89 pipelines in `examples/minimal`.
+Used by 74 of 93 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

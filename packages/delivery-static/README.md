@@ -63,7 +63,7 @@ Not included: sitemap, CDN invalidation.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
-`@michaelthielemann/kestrel-delivery-static` – module `delivery/static`: provides no contract; requires `content@1`, `renderer@1`, `blobstore@1`, `persistence@1`, `site@1`.
+`@michaelthielemann/kestrel-delivery-static` – module `delivery/static`: provides no contract; requires `content@1`, `renderer@1`, `blobstore@1`, `persistence@1`, `site@1`; optional `events@1`.
 
 | Config | Type | Required | Default |
 |---|---|---|---|
@@ -83,6 +83,15 @@ Not included: sitemap, CDN invalidation.
 | `llms.titleField` | string | no | `"title"` |
 | `llms.seoField` | string | no | `"seo"` |
 | `llms.headings` | record | no | `{}` |
+| `dependencies` | object | no | `{}` |
+| `dependencies.render` | enum | no | `"background"` |
+| `dependencies.rendererReadsDocument` | boolean | no | `false` |
+| `dependencies.maxPerRender` | integer | no | `1000` |
+| `dependencies.renderTimeoutSeconds` | integer | no | `60` |
+| `dependencies.maxAttempts` | integer | no | `5` |
+| `dependencies.backoffSeconds` | array | no | `[60,300,900,3600]` |
+| `dependencies.claimTtlSeconds` | integer | no | `300` |
+| `dependencies.maxAgeSeconds` | integer | no | `null` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
@@ -91,13 +100,24 @@ Not included: sitemap, CDN invalidation.
 | `delivery.readStatus:<arg>` | Publish status per locale of a <arg> | `params.id` | `result` | – | object[] | 400 missing id | – | yes |
 | `delivery.publishAll:<arg>` | Re-render every <arg> | – | `result` | – | { documents: number, live: number, errors: number, … } | – | – | no |
 | `delivery.exportLlms` | Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) | – | `result._llms` | – | { _llms: object, … } | – | – | no |
+| `delivery.markDependents:<arg>` | Mark every published output whose last render read the changed <arg> (payload id and ids) for a re-render, and start it outside the request (adds `_dependents: { marked }` to the result) | `payload` | `result._dependents` | object | { _dependents: object, … } | 503 the marks or their jobs could not be written | – | no |
+| `delivery.markAll:<arg>` | Mark every <arg> output for a re-render in the background, including documents that were never delivered (adds `marked` to the result) | – | `result` | – | { marked: integer, … } | 503 the marks or their jobs could not be written | – | no |
+| `delivery.checkBuild` | Mark every delivered output for a re-render when payload.build differs from the stored build, then store it | `payload` | `result` | { build: string, … } | { changed: boolean, marked: integer, … } | 400 payload.build is missing; 503 the marks could not be written; the build is not stored | – | no |
+| `delivery.republishOutput` | Render one marked output (payload type, docId, locale) under a claim; a failed render is recorded on the output and answered as an error so the event delivery retries it | `payload` | `result` | { type: string, docId: string, locale: string, … } | { rendered: boolean, state: "live" \| "error" \| "draft" \| null, … } | 400 payload needs type, docId and locale; 503 the render failed or another render holds the output | – | no |
+| `delivery.requestLlms` | Ask for an llms.txt export after the pending re-renders, without running it here | – | – | – | – | 503 the request could not be queued | – | no |
+| `delivery.resumeStale` | Release expired render claims, remove old tombstones and orphaned dependency sets, and start the re-renders a stopped process or a lost job left marked | – | `result` | – | { released: integer, swept: integer, dispatched: integer, aged: integer, … } | – | – | no |
+| `delivery.retryStale` | Reset the attempts of every output whose re-render failed maxAttempts times and start it again (adds `retried` to the result) | – | `result` | – | { retried: integer, … } | – | – | no |
+| `delivery.readStaleStatus` | How many outputs wait for a re-render, failed it, are rendering or have unknown dependencies, the oldest mark, and the renders this process abandoned at the timeout | – | `result` | – | { stale: integer, failed: integer, rendering: integer, unknown: integer, oldestStaleAt: number \| null, abandoned: integer, … } | – | – | yes |
 
 Pipelines in `examples/minimal` using these steps:
 
+- **mediaDependents** (event media.updated, event media.deleted): **`delivery.markDependents:media`**
+- **pageDependents** (event page.created, event page.updated, event page.restored, event page.translationRemoved, event page.deleted): **`delivery.markDependents:pages`**
 - **pagePublishStatus** (GET /admin/publish-status/pages/:id): `authn.requireUser` → `authz.require:pages.manage` → **`delivery.readStatus:pages`**
 - **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.require:pages.manage` → **`delivery.publishAll:pages`** → `redirects.export` → **`delivery.exportLlms`**
-- **publishPage** (event page.created, event page.updated, event page.restored, event page.translationRemoved): **`delivery.publish:pages`** → **`delivery.exportLlms`**
-- **setSettings** (PUT /settings): `authn.requireUser` → `authz.require:settings.write` → `validate.check:settings.navigation` → `content.set:settings` → **`delivery.exportLlms`**
-- **unpublishPage** (event page.deleted): **`delivery.unpublish:pages`** → **`delivery.exportLlms`**
+- **publishPage** (event page.created, event page.updated, event page.restored, event page.translationRemoved): **`delivery.publish:pages`** → **`delivery.requestLlms`**
+- **resumeStalePages** (cron */5 * * * *): **`delivery.resumeStale`**
+- **settingsDependents** (event settings.updated): **`delivery.markDependents:settings`** → **`delivery.requestLlms`**
+- **unpublishPage** (event page.deleted): **`delivery.unpublish:pages`** → **`delivery.requestLlms`**
 
 <!-- kestrel-docs:end -->

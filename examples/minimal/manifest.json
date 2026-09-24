@@ -2081,7 +2081,9 @@
         "persistence@1",
         "site@1"
       ],
-      "optional": [],
+      "optional": [
+        "events@1"
+      ],
       "config": {
         "schema": {
           "type": "object",
@@ -2186,6 +2188,71 @@
                     "type": "string"
                   },
                   "default": {}
+                }
+              },
+              "additionalProperties": false,
+              "default": {}
+            },
+            "dependencies": {
+              "type": "object",
+              "properties": {
+                "render": {
+                  "type": "string",
+                  "enum": [
+                    "events",
+                    "background"
+                  ],
+                  "default": "background"
+                },
+                "rendererReadsDocument": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "maxPerRender": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "default": 1000
+                },
+                "renderTimeoutSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "default": 60
+                },
+                "maxAttempts": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "default": 5
+                },
+                "backoffSeconds": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "minItems": 1,
+                  "default": [
+                    60,
+                    300,
+                    900,
+                    3600
+                  ]
+                },
+                "claimTtlSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "default": 300
+                },
+                "maxAgeSeconds": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null
                 }
               },
               "additionalProperties": false,
@@ -2402,6 +2469,129 @@
             },
             "redacted": false,
             "default": {}
+          },
+          {
+            "path": "dependencies",
+            "type": "object",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": {
+              "render": "background",
+              "rendererReadsDocument": false,
+              "maxPerRender": 1000,
+              "renderTimeoutSeconds": 60,
+              "maxAttempts": 5,
+              "backoffSeconds": [
+                60,
+                300,
+                900,
+                3600
+              ],
+              "claimTtlSeconds": 300,
+              "maxAgeSeconds": null
+            },
+            "redacted": false,
+            "default": {}
+          },
+          {
+            "path": "dependencies.render",
+            "type": "enum",
+            "required": false,
+            "secret": false,
+            "set": true,
+            "status": "set",
+            "value": "background",
+            "redacted": false,
+            "default": "background"
+          },
+          {
+            "path": "dependencies.rendererReadsDocument",
+            "type": "boolean",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": false,
+            "redacted": false,
+            "default": false
+          },
+          {
+            "path": "dependencies.maxPerRender",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 1000,
+            "redacted": false,
+            "default": 1000
+          },
+          {
+            "path": "dependencies.renderTimeoutSeconds",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 60,
+            "redacted": false,
+            "default": 60
+          },
+          {
+            "path": "dependencies.maxAttempts",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 5,
+            "redacted": false,
+            "default": 5
+          },
+          {
+            "path": "dependencies.backoffSeconds",
+            "type": "array",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": [
+              60,
+              300,
+              900,
+              3600
+            ],
+            "redacted": false,
+            "default": [
+              60,
+              300,
+              900,
+              3600
+            ]
+          },
+          {
+            "path": "dependencies.claimTtlSeconds",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 300,
+            "redacted": false,
+            "default": 300
+          },
+          {
+            "path": "dependencies.maxAgeSeconds",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": null,
+            "redacted": false,
+            "default": null
           }
         ]
       },
@@ -2410,11 +2600,22 @@
         "delivery.unpublish",
         "delivery.readStatus",
         "delivery.publishAll",
-        "delivery.exportLlms"
+        "delivery.exportLlms",
+        "delivery.markDependents",
+        "delivery.markAll",
+        "delivery.checkBuild",
+        "delivery.republishOutput",
+        "delivery.requestLlms",
+        "delivery.resumeStale",
+        "delivery.retryStale",
+        "delivery.readStaleStatus"
       ],
       "eventHook": false,
       "atomicScope": false,
-      "emits": []
+      "emits": [
+        "delivery.outputStale",
+        "delivery.llmsStale"
+      ]
     },
     {
       "name": "redirects/default",
@@ -8747,6 +8948,30 @@
                   },
                   "updatedAt": {
                     "type": "number"
+                  },
+                  "stale": {
+                    "type": "boolean"
+                  },
+                  "staleSince": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "staleFailed": {
+                    "type": "boolean"
+                  },
+                  "staleError": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "dependencies": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -8754,7 +8979,12 @@
                   "docId",
                   "locale",
                   "state",
-                  "updatedAt"
+                  "updatedAt",
+                  "stale",
+                  "staleSince",
+                  "staleFailed",
+                  "staleError",
+                  "dependencies"
                 ]
               }
             }
@@ -8842,6 +9072,30 @@
               },
               "updatedAt": {
                 "type": "number"
+              },
+              "stale": {
+                "type": "boolean"
+              },
+              "staleSince": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "staleFailed": {
+                "type": "boolean"
+              },
+              "staleError": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dependencies": {
+                "type": [
+                  "number",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -8849,7 +9103,12 @@
               "docId",
               "locale",
               "state",
-              "updatedAt"
+              "updatedAt",
+              "stale",
+              "staleSince",
+              "staleFailed",
+              "staleError",
+              "dependencies"
             ]
           }
         },
@@ -8923,6 +9182,298 @@
             "_llms"
           ]
         }
+      }
+    },
+    {
+      "name": "delivery.markDependents",
+      "module": "delivery/static",
+      "factory": true,
+      "description": {
+        "summary": "Mark every published output whose last render read the changed <arg> (payload id and ids) for a re-render, and start it outside the request (adds `_dependents: { marked }` to the result)",
+        "reads": [
+          "payload"
+        ],
+        "writes": [
+          "result._dependents"
+        ],
+        "input": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "_dependents": {
+              "type": "object",
+              "properties": {
+                "marked": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "marked"
+              ]
+            }
+          },
+          "required": [
+            "_dependents"
+          ]
+        },
+        "errors": {
+          "503": "the marks or their jobs could not be written"
+        }
+      }
+    },
+    {
+      "name": "delivery.markAll",
+      "module": "delivery/static",
+      "factory": true,
+      "description": {
+        "summary": "Mark every <arg> output for a re-render in the background, including documents that were never delivered (adds `marked` to the result)",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "marked": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "marked"
+          ]
+        },
+        "errors": {
+          "503": "the marks or their jobs could not be written"
+        }
+      }
+    },
+    {
+      "name": "delivery.checkBuild",
+      "module": "delivery/static",
+      "factory": false,
+      "description": {
+        "summary": "Mark every delivered output for a re-render when payload.build differs from the stored build, then store it",
+        "reads": [
+          "payload"
+        ],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "build": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "build"
+          ],
+          "additionalProperties": true
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "changed": {
+              "type": "boolean"
+            },
+            "marked": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "changed",
+            "marked"
+          ]
+        },
+        "errors": {
+          "400": "payload.build is missing",
+          "503": "the marks could not be written; the build is not stored"
+        }
+      }
+    },
+    {
+      "name": "delivery.republishOutput",
+      "module": "delivery/static",
+      "factory": false,
+      "description": {
+        "summary": "Render one marked output (payload type, docId, locale) under a claim; a failed render is recorded on the output and answered as an error so the event delivery retries it",
+        "reads": [
+          "payload"
+        ],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "docId": {
+              "type": "string"
+            },
+            "locale": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "docId",
+            "locale"
+          ],
+          "additionalProperties": true
+        },
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "rendered": {
+              "type": "boolean"
+            },
+            "state": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "live",
+                "error",
+                "draft",
+                null
+              ]
+            }
+          },
+          "required": [
+            "rendered",
+            "state"
+          ]
+        },
+        "errors": {
+          "400": "payload needs type, docId and locale",
+          "503": "the render failed or another render holds the output"
+        }
+      }
+    },
+    {
+      "name": "delivery.requestLlms",
+      "module": "delivery/static",
+      "factory": false,
+      "description": {
+        "summary": "Ask for an llms.txt export after the pending re-renders, without running it here",
+        "reads": [],
+        "writes": [],
+        "errors": {
+          "503": "the request could not be queued"
+        }
+      }
+    },
+    {
+      "name": "delivery.resumeStale",
+      "module": "delivery/static",
+      "factory": false,
+      "description": {
+        "summary": "Release expired render claims, remove old tombstones and orphaned dependency sets, and start the re-renders a stopped process or a lost job left marked",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "released": {
+              "type": "integer"
+            },
+            "swept": {
+              "type": "integer"
+            },
+            "dispatched": {
+              "type": "integer"
+            },
+            "aged": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "released",
+            "swept",
+            "dispatched",
+            "aged"
+          ]
+        }
+      }
+    },
+    {
+      "name": "delivery.retryStale",
+      "module": "delivery/static",
+      "factory": false,
+      "description": {
+        "summary": "Reset the attempts of every output whose re-render failed maxAttempts times and start it again (adds `retried` to the result)",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "retried": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "retried"
+          ]
+        }
+      }
+    },
+    {
+      "name": "delivery.readStaleStatus",
+      "module": "delivery/static",
+      "factory": false,
+      "description": {
+        "summary": "How many outputs wait for a re-render, failed it, are rendering or have unknown dependencies, the oldest mark, and the renders this process abandoned at the timeout",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "stale": {
+              "type": "integer"
+            },
+            "failed": {
+              "type": "integer"
+            },
+            "rendering": {
+              "type": "integer"
+            },
+            "unknown": {
+              "type": "integer"
+            },
+            "oldestStaleAt": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "abandoned": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "stale",
+            "failed",
+            "rendering",
+            "unknown",
+            "oldestStaleAt",
+            "abandoned"
+          ]
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -16485,6 +17036,51 @@
       ]
     },
     {
+      "name": "mediaDependents",
+      "steps": [
+        {
+          "spec": "delivery.markDependents:media",
+          "name": "delivery.markDependents",
+          "module": "delivery/static",
+          "description": {
+            "summary": "Mark every published output whose last render read the changed media (payload id and ids) for a re-render, and start it outside the request (adds `_dependents: { marked }` to the result)",
+            "reads": [
+              "payload"
+            ],
+            "writes": [
+              "result._dependents"
+            ],
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_dependents": {
+                  "type": "object",
+                  "properties": {
+                    "marked": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "marked"
+                  ]
+                }
+              },
+              "required": [
+                "_dependents"
+              ]
+            },
+            "errors": {
+              "503": "the marks or their jobs could not be written"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "mediaReferrers",
       "steps": [
         {
@@ -16661,6 +17257,51 @@
       ]
     },
     {
+      "name": "pageDependents",
+      "steps": [
+        {
+          "spec": "delivery.markDependents:pages",
+          "name": "delivery.markDependents",
+          "module": "delivery/static",
+          "description": {
+            "summary": "Mark every published output whose last render read the changed pages (payload id and ids) for a re-render, and start it outside the request (adds `_dependents: { marked }` to the result)",
+            "reads": [
+              "payload"
+            ],
+            "writes": [
+              "result._dependents"
+            ],
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_dependents": {
+                  "type": "object",
+                  "properties": {
+                    "marked": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "marked"
+                  ]
+                }
+              },
+              "required": [
+                "_dependents"
+              ]
+            },
+            "errors": {
+              "503": "the marks or their jobs could not be written"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "pagePublishStatus",
       "steps": [
         {
@@ -16749,6 +17390,30 @@
                   },
                   "updatedAt": {
                     "type": "number"
+                  },
+                  "stale": {
+                    "type": "boolean"
+                  },
+                  "staleSince": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "staleFailed": {
+                    "type": "boolean"
+                  },
+                  "staleError": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "dependencies": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -16756,7 +17421,12 @@
                   "docId",
                   "locale",
                   "state",
-                  "updatedAt"
+                  "updatedAt",
+                  "stale",
+                  "staleSince",
+                  "staleFailed",
+                  "staleError",
+                  "dependencies"
                 ]
               }
             },
@@ -17655,6 +18325,30 @@
                       },
                       "updatedAt": {
                         "type": "number"
+                      },
+                      "stale": {
+                        "type": "boolean"
+                      },
+                      "staleSince": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "staleFailed": {
+                        "type": "boolean"
+                      },
+                      "staleError": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "dependencies": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
                       }
                     },
                     "required": [
@@ -17662,7 +18356,12 @@
                       "docId",
                       "locale",
                       "state",
-                      "updatedAt"
+                      "updatedAt",
+                      "stale",
+                      "staleSince",
+                      "staleFailed",
+                      "staleError",
+                      "dependencies"
                     ]
                   }
                 }
@@ -17677,37 +18376,15 @@
           }
         },
         {
-          "spec": "delivery.exportLlms",
-          "name": "delivery.exportLlms",
+          "spec": "delivery.requestLlms",
+          "name": "delivery.requestLlms",
           "module": "delivery/static",
           "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
+            "summary": "Ask for an llms.txt export after the pending re-renders, without running it here",
             "reads": [],
-            "writes": [
-              "result._llms"
-            ],
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "_llms": {
-                  "type": "object",
-                  "properties": {
-                    "entries": {
-                      "type": "integer"
-                    },
-                    "full": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "entries",
-                    "full"
-                  ]
-                }
-              },
-              "required": [
-                "_llms"
-              ]
+            "writes": [],
+            "errors": {
+              "503": "the request could not be queued"
             }
           }
         }
@@ -20056,6 +20733,46 @@
       ]
     },
     {
+      "name": "resumeStalePages",
+      "steps": [
+        {
+          "spec": "delivery.resumeStale",
+          "name": "delivery.resumeStale",
+          "module": "delivery/static",
+          "description": {
+            "summary": "Release expired render claims, remove old tombstones and orphaned dependency sets, and start the re-renders a stopped process or a lost job left marked",
+            "reads": [],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "object",
+              "properties": {
+                "released": {
+                  "type": "integer"
+                },
+                "swept": {
+                  "type": "integer"
+                },
+                "dispatched": {
+                  "type": "integer"
+                },
+                "aged": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "released",
+                "swept",
+                "dispatched",
+                "aged"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "retryAnonymizeAuditUser",
       "steps": [
         {
@@ -20999,40 +21716,158 @@
               "400": "validation failed"
             },
             "atomicSafe": true
+          },
+          "atomic": 1
+        },
+        {
+          "spec": "events.emit:settings.updated",
+          "name": "events.emit",
+          "module": "events/direct",
+          "description": {
+            "summary": "Emit event \"settings.updated\" to every subscribed handler pipeline and wait for them",
+            "reads": [],
+            "writes": [],
+            "errors": {
+              "500": "a subscribed handler failed"
+            }
           }
         },
         {
-          "spec": "delivery.exportLlms",
-          "name": "delivery.exportLlms",
-          "module": "delivery/static",
+          "spec": "events.relay",
+          "name": "events.relay",
+          "module": "events/direct",
           "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
+            "summary": "Report how the events this run raised were delivered (adds `_events` to the result)",
             "reads": [],
             "writes": [
-              "result._llms"
+              "result._events"
             ],
             "extendsOutput": {
               "type": "object",
               "properties": {
-                "_llms": {
+                "_events": {
                   "type": "object",
                   "properties": {
-                    "entries": {
-                      "type": "integer"
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "done",
+                        "error",
+                        "pending",
+                        "queued"
+                      ]
                     },
-                    "full": {
-                      "type": "boolean"
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "pipeline": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "error",
+                              "pending",
+                              "queued"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "dead": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "event",
+                          "pipeline",
+                          "status",
+                          "attempts",
+                          "dead",
+                          "error"
+                        ]
+                      }
                     }
                   },
                   "required": [
-                    "entries",
-                    "full"
+                    "status",
+                    "pipelines"
                   ]
                 }
               },
               "required": [
-                "_llms"
+                "_events"
               ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "settingsDependents",
+      "steps": [
+        {
+          "spec": "delivery.markDependents:settings",
+          "name": "delivery.markDependents",
+          "module": "delivery/static",
+          "description": {
+            "summary": "Mark every published output whose last render read the changed settings (payload id and ids) for a re-render, and start it outside the request (adds `_dependents: { marked }` to the result)",
+            "reads": [
+              "payload"
+            ],
+            "writes": [
+              "result._dependents"
+            ],
+            "input": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_dependents": {
+                  "type": "object",
+                  "properties": {
+                    "marked": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "marked"
+                  ]
+                }
+              },
+              "required": [
+                "_dependents"
+              ]
+            },
+            "errors": {
+              "503": "the marks or their jobs could not be written"
+            }
+          }
+        },
+        {
+          "spec": "delivery.requestLlms",
+          "name": "delivery.requestLlms",
+          "module": "delivery/static",
+          "description": {
+            "summary": "Ask for an llms.txt export after the pending re-renders, without running it here",
+            "reads": [],
+            "writes": [],
+            "errors": {
+              "503": "the request could not be queued"
             }
           }
         }
@@ -21288,37 +22123,15 @@
           }
         },
         {
-          "spec": "delivery.exportLlms",
-          "name": "delivery.exportLlms",
+          "spec": "delivery.requestLlms",
+          "name": "delivery.requestLlms",
           "module": "delivery/static",
           "description": {
-            "summary": "Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
+            "summary": "Ask for an llms.txt export after the pending re-renders, without running it here",
             "reads": [],
-            "writes": [
-              "result._llms"
-            ],
-            "extendsOutput": {
-              "type": "object",
-              "properties": {
-                "_llms": {
-                  "type": "object",
-                  "properties": {
-                    "entries": {
-                      "type": "integer"
-                    },
-                    "full": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "entries",
-                    "full"
-                  ]
-                }
-              },
-              "required": [
-                "_llms"
-              ]
+            "writes": [],
+            "errors": {
+              "503": "the request could not be queued"
             }
           }
         }
@@ -23390,6 +24203,38 @@
         "pipeline": "unpublishPage"
       },
       {
+        "event": "page.created",
+        "pipeline": "pageDependents"
+      },
+      {
+        "event": "page.updated",
+        "pipeline": "pageDependents"
+      },
+      {
+        "event": "page.restored",
+        "pipeline": "pageDependents"
+      },
+      {
+        "event": "page.translationRemoved",
+        "pipeline": "pageDependents"
+      },
+      {
+        "event": "page.deleted",
+        "pipeline": "pageDependents"
+      },
+      {
+        "event": "settings.updated",
+        "pipeline": "settingsDependents"
+      },
+      {
+        "event": "media.updated",
+        "pipeline": "mediaDependents"
+      },
+      {
+        "event": "media.deleted",
+        "pipeline": "mediaDependents"
+      },
+      {
         "event": "media.uploaded",
         "pipeline": "generateImageVariants"
       },
@@ -23426,6 +24271,10 @@
       {
         "expression": "*/5 * * * *",
         "pipeline": "sweepRateLimits"
+      },
+      {
+        "expression": "*/5 * * * *",
+        "pipeline": "resumeStalePages"
       },
       {
         "expression": "15 3 * * *",

@@ -155,20 +155,24 @@ describe("examples/minimal llms.txt wiring", () => {
     expect(content.types.settings!.fields.description).toEqual({ type: "text", localized: true });
     expect(content.types.pages!.fields.seo).toEqual({ type: "json", localized: true });
   });
-  it("re-exports llms.txt after every publish, unpublish, settings change and publish-all", async () => {
+  it("asks for an llms.txt export after every publish, unpublish and settings change, and exports it after publish-all", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    for (const [name, after] of [["publishPage", "delivery.publish:pages"], ["unpublishPage", "delivery.unpublish:pages"], ["setSettings", "content.set:settings"], ["publishAllPages", "redirects.export"]] as const) {
+    for (const [name, after] of [["publishPage", "delivery.publish:pages"], ["unpublishPage", "delivery.unpublish:pages"], ["settingsDependents", "delivery.markDependents:settings"]] as const) {
       const steps = pipelines.get(name)!;
-      expect(steps.indexOf("delivery.exportLlms"), name).toBe(steps.indexOf(after) + 1);
+      expect(steps.indexOf("delivery.requestLlms"), name).toBe(steps.indexOf(after) + 1);
+      expect(steps, name).not.toContain("delivery.exportLlms");
     }
+    expect(pipelines.get("setSettings")).not.toContain("delivery.exportLlms");
+    const publishAll = pipelines.get("publishAllPages")!;
+    expect(publishAll.indexOf("delivery.exportLlms")).toBe(publishAll.indexOf("redirects.export") + 1);
   });
 });
 
 describe("examples/minimal delivery event pipelines", () => {
   it("moves publish and unpublish out of the write pipelines and into two event pipelines", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("publishPage")).toEqual(["delivery.publish:pages", "delivery.exportLlms"]);
-    expect(pipelines.get("unpublishPage")).toEqual(["delivery.unpublish:pages", "delivery.exportLlms"]);
+    expect(pipelines.get("publishPage")).toEqual(["delivery.publish:pages", "delivery.requestLlms"]);
+    expect(pipelines.get("unpublishPage")).toEqual(["delivery.unpublish:pages", "delivery.requestLlms"]);
     for (const name of ["createPage", "updatePage", "deletePage", "deletePageTranslation", "restorePageRevision"]) {
       const steps = pipelines.get(name)!;
       expect(steps, name).not.toContain("delivery.publish:pages");
@@ -207,7 +211,8 @@ describe("write pipelines validate their payload", () => {
       "authz.require:settings.write",
       "validate.check:settings.navigation",
       "content.set:settings",
-      "delivery.exportLlms",
+      "events.emit:settings.updated",
+      "events.relay",
     ]);
   });
 
