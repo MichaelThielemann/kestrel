@@ -179,6 +179,12 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
         expect(page.body).toContain("kestrel:pages:");
       });
 
+      it("resolves a kestrel: reference held by any field, also one the model does not declare", async () => {
+        const stub: ContentDocument = { id: "", createdAt: 0, updatedAt: 0, ref: `kestrel:pages:${ids.kontakt}` };
+        expect(expectOk(await site.resolveLinks("pages", stub, { locale: "en", rules }))._links).toEqual({ [ids.kontakt]: { path: "/en/kontakt", locale: "en" } });
+        expect(expectOk(await site.resolveLinks("pages", { ...stub, ref: `kestrel:pages:${ids.entwurf}` }, { locale: "de", rules }))._links).toEqual({ [ids.entwurf]: { broken: true } });
+      });
+
       it("resolves in the requested locale", async () => {
         expectOk(await content.update("pages", page.id, { slug: "links", title: "Links", status: "published" }, { locale: "en" }));
         const en = expectOk(await site.resolveLinks("pages", page, { locale: "en", rules }));

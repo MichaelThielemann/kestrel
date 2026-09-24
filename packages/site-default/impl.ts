@@ -5,6 +5,7 @@ import type { LinkTarget } from "@michaelthielemann/kestrel-contracts/links";
 import { INTERNAL_REF, collectInternalRefs } from "@michaelthielemann/kestrel-contracts/links";
 import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
 import type { Site, SiteError, SiteRules } from "@michaelthielemann/kestrel-contracts/site";
+import { noteRead, unobserved } from "@michaelthielemann/kestrel/reads";
 
 interface Rules {
   home: string;
@@ -101,20 +102,30 @@ export function createSiteDefault(content: Content): SiteDefault {
       const read: LocaleOptions = {};
       if (parsed.locale !== undefined) read.locale = parsed.locale;
       const slug = parsed.slug === "" ? rules.home : parsed.slug;
-      const page = await content.list(type, { ...rules.filter, [rules.slugField]: slug }, { ...read, limit: 1 });
-      if (isErr(page)) return err(transientOnly(page.error));
-      let candidate: ContentDocument | undefined = page.value.items[0];
-      if (!candidate && rules.fallback && read.locale !== undefined && read.locale !== model.defaultLocale) {
-        const viaDefaultPage = await content.list(type, { ...rules.filter, [rules.slugField]: slug }, { limit: 1 });
-        if (isErr(viaDefaultPage)) return err(transientOnly(viaDefaultPage.error));
-        candidate = viaDefaultPage.value.items[0];
-      }
-      if (!candidate) return ok(null);
-      const viewResult = await publishedLocale(content, type, candidate.id, read.locale, rules.filter, { fallback: rules.fallback });
-      if (isErr(viewResult)) return err(transientOnly(viewResult.error));
-      const doc = viewResult.value;
-      if (!doc) return ok(null);
+      const lookup = { ...rules.filter, [rules.slugField]: slug };
       const effective = parsed.locale ?? model.defaultLocale;
+      const missed: Array<string | undefined> = [];
+      const answered = await unobserved(async (): Promise<Result<{ candidate: string | null; doc: ContentDocument | null }, SiteError>> => {
+        const page = await content.list(type, lookup, { ...read, limit: 1 });
+        if (isErr(page)) return err(transientOnly(page.error));
+        let candidate: ContentDocument | undefined = page.value.items[0];
+        if (!candidate) missed.push(effective);
+        if (!candidate && rules.fallback && read.locale !== undefined && read.locale !== model.defaultLocale) {
+          const viaDefaultPage = await content.list(type, lookup, { limit: 1 });
+          if (isErr(viaDefaultPage)) return err(transientOnly(viaDefaultPage.error));
+          candidate = viaDefaultPage.value.items[0];
+          if (!candidate) missed.push(model.defaultLocale);
+        }
+        if (!candidate) return ok({ candidate: null, doc: null });
+        const viewResult = await publishedLocale(content, type, candidate.id, read.locale, rules.filter, { fallback: rules.fallback });
+        if (isErr(viewResult)) return err(transientOnly(viewResult.error));
+        return ok({ candidate: candidate.id, doc: viewResult.value });
+      });
+      if (isErr(answered)) return answered;
+      for (const locale of missed) noteRead({ kind: "query", type, filter: structuredClone(lookup), ...(locale === undefined ? {} : { locale }) });
+      const { candidate, doc } = answered.value;
+      if (candidate !== null) noteRead({ kind: "document", type, id: candidate, ...(effective === undefined ? {} : { locale: effective }) });
+      if (!doc) return ok(null);
       return ok(effective === undefined ? doc : { ...doc, _locale: effective });
     },
 
@@ -144,10 +155,11 @@ export function createSiteDefault(content: Content): SiteDefault {
         const id = ref.slice(at + 1);
         let path: string | null = null;
         if (model.types[t]) {
-          const viewResult = await publishedLocale(content, t, id, locale, rules.filter, { fallback: rules.fallback, translations: false });
+          const viewResult = await unobserved(() => publishedLocale(content, t, id, locale, rules.filter, { fallback: rules.fallback, translations: false }));
           if (isErr(viewResult)) return err(transientOnly(viewResult.error));
           const slug = viewResult.value?.[rules.slugField];
           if (typeof slug === "string" && slug !== "") path = publicPath(slug, locale, model.defaultLocale, rules.home, rules.prefixPrimary);
+          noteRead({ kind: "path", type: t, id, locale: locale ?? "", rules: structuredClone({ ...rules }), path });
         }
         paths.set(ref, path);
         links[id] = path ? { path, locale: locale ?? "" } : { broken: true };

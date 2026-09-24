@@ -23,6 +23,7 @@
     "./errors": "./src/errors.ts",
     "./load": "./src/load.ts",
     "./logger": "./src/logger.ts",
+    "./reads": "./src/reads.ts",
     "./result": "./src/result.ts",
     "./runner": "./src/runner.ts",
     "./schema": "./src/schema.ts",
@@ -77,6 +78,10 @@
       "./logger": {
         "types": "./dist/logger.d.ts",
         "default": "./dist/logger.js"
+      },
+      "./reads": {
+        "types": "./dist/reads.d.ts",
+        "default": "./dist/reads.js"
       },
       "./result": {
         "types": "./dist/result.d.ts",

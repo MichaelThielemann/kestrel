@@ -7,6 +7,7 @@ import type { Document, FindOptions, Persistence } from "@michaelthielemann/kest
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
+import { noteRead } from "@michaelthielemann/kestrel/reads";
 import { EXTENSION_BY_TYPE } from "./extensions.ts";
 import { imageSize } from "./imageSize.ts";
 
@@ -119,6 +120,9 @@ export interface Upload {
   item: MediaItem;
   created: boolean;
 }
+
+/** The type name media reads are noted under in a read scope (`@michaelthielemann/kestrel/reads`). */
+export const MEDIA_READ_TYPE = "media";
 
 export interface Media {
   upload(file: { filename: string; contentType: string; data: Uint8Array }, folder?: string, provenance?: unknown): Promise<Result<Upload, MediaError>>;
@@ -552,6 +556,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       return ok({ item: resolveWith({ ...created.value, status: "ready", updatedAt: readyAt }, fallbackLocale), created: true });
     },
     async get(id, locale) {
+      noteRead({ kind: "document", type: MEDIA_READ_TYPE, id });
       const row = await db.findOne<Document>(COLLECTION, { id });
       if (isErr(row)) return row;
       if (row.value === null) return ok(null);
@@ -561,6 +566,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       return ok(item.status === "ready" ? item : null);
     },
     async list(options = {}) {
+      noteRead({ kind: "type", type: MEDIA_READ_TYPE });
       const { folder, recursive, q, sortBy, direction, locale, ...find } = options;
       const key = localeKey(locale);
       if (isErr(key)) return key;
@@ -599,6 +605,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       return ok({ items: page.value.items.map((i) => resolveWith(i, key.value)), total: page.value.total });
     },
     async byIds(ids, locale) {
+      for (const id of ids) noteRead({ kind: "document", type: MEDIA_READ_TYPE, id });
       if (ids.length === 0) return ok([]);
       const key = localeKey(locale);
       if (isErr(key)) return key;

@@ -2,6 +2,7 @@ import type { Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contr
 import type { Content, ContentError } from "@michaelthielemann/kestrel-contracts/content";
 import { err, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
+import { unobserved } from "@michaelthielemann/kestrel/reads";
 import { compilePublishableRedirects, compileRedirects, matchRedirect, serializeRedirects, RedirectRuleError, type RedirectRule } from "./rules.ts";
 
 export interface Config {
@@ -75,7 +76,7 @@ export function createRedirects(config: Config, deps: { content: Content; blobs:
       compileRedirects(rules);
     },
     async lookup(path) {
-      const rules = await current();
+      const rules = await unobserved(current);
       if (isErr(rules)) return rules;
       const hit = matchRedirect(rules.value, path);
       return ok(hit ? { to: hit.target, status: hit.status } : null);

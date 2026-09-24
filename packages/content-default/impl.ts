@@ -1,6 +1,7 @@
 import type { Content, ContentDocument, ContentError, ContentModel, FieldDefinition, FieldError, FieldType, LocaleOptions, TypeDefinition, Validation } from "@michaelthielemann/kestrel-contracts/content";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { noteRead } from "@michaelthielemann/kestrel/reads";
 import type { Err } from "@michaelthielemann/kestrel/result";
 import type { Document, FieldType as StorageType, Filter, FindOptions, Persistence, PersistenceError, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
 
@@ -218,11 +219,13 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
       if (isErr(locale)) return locale;
       const fallback = options?.fallback ?? false;
       if (type.kind === "single") {
+        noteRead({ kind: "type", type: typeName });
         const row = await single(typeName);
         if (isErr(row)) return row;
         return ok(row.value ? fromRow(typeName, row.value, locale.value, fallback) : null);
       }
       if (id === undefined) throw new Error(`content/default: get("${typeName}") needs an id for multi types`);
+      noteRead({ kind: "document", type: typeName, id, ...(locale.value === undefined ? {} : { locale: locale.value }) });
       const row = await db.findOne<Document>(typeName, { id });
       if (isErr(row)) return row;
       return ok(row.value ? fromRow(typeName, row.value, locale.value, fallback) : null);
@@ -240,8 +243,12 @@ export async function createContentDefault(model: ContentModel, db: Persistence,
         }
         query.sort = Object.fromEntries(boundaryCast<Array<[string, "asc" | "desc"]>>(Object.entries(toFilter(typeName, find.sort, locale.value)), "host"));
       }
+      const at = locale.value === undefined ? {} : { locale: locale.value };
+      const singleType = typeOf(typeName).kind === "single";
+      noteRead(singleType ? { kind: "type", type: typeName } : { kind: "query", type: typeName, filter: structuredClone(filter), ...at });
       const page = await db.findMany<Document>(typeName, toFilter(typeName, filter, locale.value), query);
       if (isErr(page)) return page;
+      if (!singleType) for (const row of page.value.items) noteRead({ kind: "document", type: typeName, id: row.id, ...at });
       return ok({ items: page.value.items.map((row) => fromRow(typeName, row, locale.value, fallback)), total: page.value.total });
     },
 
