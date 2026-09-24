@@ -38,6 +38,13 @@ stored document can miss; `list:<t>` or
 `offset` and `sort=-field` from the payload. `limit` and `offset` must be integers (`limit` ≥ 1,
 `offset` ≥ 0), `limit` at most `maxLimit` (config, default 200), `sort` a known field; anything
 else is `VALIDATION` (400). An unknown `?locale=` is `VALIDATION` too, on every step.
+A fixed filter also narrows `_translations`: a locale counts only once its own values satisfy the
+same filter too (`get` through `@michaelthielemann/kestrel-contracts/content-locale`'s
+`publishedLocale`, `list` through its `narrowListTranslations`, one query per other locale for the
+whole page, not per item). A fixed filter together with `?fallback=true` fails to boot, naming the
+step: `fallback` fills a field from the default locale whatever its own status, so a filtered read
+must never use it — read the requested locale strictly instead, or resolve the page through
+`site.resolve`.
 The field type set is closed. An unknown `type` fails the config schema at boot, naming the field
 (`types.pages.fields.accent: Invalid input`), so a consumer-defined field type is declared here as
 the `content/default` type it is *stored* as – a colour as `text`, a link object as `json`. Its

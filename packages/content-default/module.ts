@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CONTENT, type Content, type ContentModel } from "@michaelthielemann/kestrel-contracts/content";
+import { narrowListTranslations, publishedLocale } from "@michaelthielemann/kestrel-contracts/content-locale";
 import { documentSchema, fieldSchema } from "@michaelthielemann/kestrel-contracts/content-schema";
 import type { JsonSchema } from "@michaelthielemann/kestrel/defineModule";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
@@ -85,6 +86,12 @@ function listOptions(ctx: Context, maxLimit: number): Result<ListOptions, Kestre
     options.sort = { [desc ? sort.slice(1) : sort]: desc ? "desc" : "asc" };
   }
   return ok(options);
+}
+
+function assertNoFallbackWithFilter(arg: string, fallbackFlag: unknown, filter: Record<string, unknown>): void {
+  if (fallbackFlag === true && Object.keys(filter).length > 0) {
+    throw new Error(`content/default: content.get/list:${arg} combines a fixed filter with fallback=true; fallback fills a field from any default locale, whatever its status, so a filtered read must not use it — resolve the page through site.resolve instead`);
+  }
 }
 
 function emptyDocument(model: ContentModel, type: string, fallback?: boolean): Record<string, unknown> {
@@ -217,31 +224,32 @@ export default defineModule({
     }),
     get: stepFactory((arg: string) => {
       const { type, fixed } = parseTarget(arg);
-      const { fallback: _fallback, ...filter } = fixed;
-      void _fallback;
+      const { fallback: fallbackFlag, ...filter } = fixed;
+      assertNoFallbackWithFilter(arg, fallbackFlag, filter);
       return async (ctx: Context) => {
         const notFound = () => ctx.fail("NOT_FOUND", `${type}${ctx.params.id ? `/${ctx.params.id}` : ""} not found`);
         const options = localeOf(ctx, fixed);
-        const stored = await content.get(type, ctx.params.id, options);
-        if (isErr(stored)) return ctx.fail(stored.error);
-        const doc = stored.value ?? (content.model().types[type]?.kind === "single" ? emptyDocument(content.model(), type, options.fallback) : null);
+        const model = content.model();
+        const viewResult = await publishedLocale(content, type, ctx.params.id, options.locale, filter, { fallback: options.fallback ?? false });
+        if (isErr(viewResult)) return ctx.fail(viewResult.error);
+        const doc = viewResult.value ?? (model.types[type]?.kind === "single" && Object.keys(filter).length === 0 ? emptyDocument(model, type, options.fallback) : null);
         if (!doc) return notFound();
-        for (const [key, value] of Object.entries(filter)) {
-          if (doc[key] !== value) return notFound();
-        }
         return ok({ ...ctx, result: doc });
       };
     }),
     list: stepFactory((arg: string) => {
       const { type, fixed } = parseTarget(arg);
-      const { fallback: _fallback, ...filter } = fixed;
-      void _fallback;
+      const { fallback: fallbackFlag, ...filter } = fixed;
+      assertNoFallbackWithFilter(arg, fallbackFlag, filter);
       return async (ctx: Context) => {
         const parsed = listOptions(ctx, content.maxLimit);
         if (isErr(parsed)) return parsed;
-        const page = await content.list(type, filter, { ...parsed.value, ...localeOf(ctx, fixed) });
+        const locale = localeOf(ctx, fixed);
+        const page = await content.list(type, filter, { ...parsed.value, ...locale });
         if (isErr(page)) return ctx.fail(page.error);
-        return ok({ ...ctx, result: page.value });
+        const narrowed = await narrowListTranslations(content, type, page.value.items, filter, locale.locale);
+        if (isErr(narrowed)) return ctx.fail(narrowed.error);
+        return ok({ ...ctx, result: { items: narrowed.value, total: page.value.total } });
       };
     }),
     update: stepFactory((type: string) => async (ctx: Context) => {

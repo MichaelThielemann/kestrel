@@ -150,6 +150,94 @@ describe("content/default module steps", () => {
   });
 });
 
+const PUBLISH_MODEL = {
+  locales: ["de", "en"],
+  defaultLocale: "de",
+  types: {
+    pages: {
+      kind: "multi",
+      fields: {
+        slug: { type: "slug", required: true, unique: true, localized: true },
+        title: { type: "text", required: true, localized: true },
+        status: { type: "enum", options: ["draft", "published"], required: true, localized: true },
+      },
+    },
+  },
+};
+
+async function bootPublish() {
+  const db = createFakePersistence();
+  const providers = new Map<string, unknown>([[PERSISTENCE.name, db]]);
+  const deps: Deps = {
+    get<T>(contract: Contract<T>): T {
+      if (!providers.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
+      return boundaryCast<T>(providers.get(contract.name), "host");
+    },
+    find: <T>(contract: Contract<T>): T | undefined => boundaryCast<T | undefined>(providers.get(contract.name), "host"),
+    logger: silentLogger,
+    root: process.cwd(),
+    eventTriggers: [],
+  };
+  const instance = await module.setup(configSchema.parse(PUBLISH_MODEL), deps);
+  return { instance };
+}
+
+describe("content/default: a fixed filter on get/list narrows _translations to it too", () => {
+  it("get narrows _translations to the locales that pass the fixed filter", async () => {
+    const { instance } = await bootPublish();
+    const created = await run(["content.create:pages"], { body: { slug: "oeffentlich", title: "Oeffentlich", status: "published" } }, instance);
+    const id = boundaryCast<ContentDocument>(created.result, "host").id;
+    await run(["content.update:pages"], { params: { id }, query: { locale: "en" }, body: { slug: "secret-en", title: "Secret EN", status: "draft" } }, instance);
+
+    const res = await run(["content.get:pages?status=published"], { params: { id } }, instance);
+    expect(res.status).toBe(200);
+    expect(boundaryCast<ContentDocument>(res.result, "host")._translations).toEqual({ de: true, en: false });
+  });
+
+  it("list narrows _translations per item, in one query per other locale", async () => {
+    const { instance } = await bootPublish();
+    const created = await run(["content.create:pages"], { body: { slug: "oeffentlich", title: "Oeffentlich", status: "published" } }, instance);
+    const id = boundaryCast<ContentDocument>(created.result, "host").id;
+    await run(["content.update:pages"], { params: { id }, query: { locale: "en" }, body: { slug: "secret-en", title: "Secret EN", status: "draft" } }, instance);
+    await run(["content.create:pages"], { body: { slug: "zweite", title: "Zweite", status: "published" } }, instance);
+
+    const res = await run(["content.list:pages?status=published"], {}, instance);
+    expect(res.status).toBe(200);
+    const items = boundaryCast<{ items: ContentDocument[]; total: number }>(res.result, "host");
+    expect(items.total).toBe(2);
+    expect(items.items.find((d) => d.id === id)?._translations).toEqual({ de: true, en: false });
+  });
+
+  it("leaves _translations untouched without a fixed filter", async () => {
+    const { instance } = await bootPublish();
+    const created = await run(["content.create:pages"], { body: { slug: "oeffentlich", title: "Oeffentlich", status: "published" } }, instance);
+    const id = boundaryCast<ContentDocument>(created.result, "host").id;
+    await run(["content.update:pages"], { params: { id }, query: { locale: "en" }, body: { slug: "secret-en", title: "Secret EN", status: "published" } }, instance);
+    const res = await run(["content.get:pages"], { params: { id } }, instance);
+    expect(boundaryCast<ContentDocument>(res.result, "host")._translations).toEqual({ de: true, en: true });
+  });
+});
+
+describe("content/default: a fixed filter together with fallback=true is refused", () => {
+  it("refuses to build content.get combining a fixed filter with fallback=true", async () => {
+    const { instance } = await bootPublish();
+    expect(() => run(["content.get:pages?status=published&fallback=true"], { params: { id: "x" } }, instance)).toThrow(/fallback/);
+  });
+
+  it("refuses to build content.list combining a fixed filter with fallback=true", async () => {
+    const { instance } = await bootPublish();
+    expect(() => run(["content.list:pages?status=published&fallback=true"], {}, instance)).toThrow(/fallback/);
+  });
+
+  it("still allows fallback=true alone and a fixed filter alone", async () => {
+    const { instance } = await bootPublish();
+    const created = await run(["content.create:pages"], { body: { slug: "oeffentlich", title: "Oeffentlich", status: "published" } }, instance);
+    const id = boundaryCast<ContentDocument>(created.result, "host").id;
+    await expect(run(["content.get:pages?fallback=true"], { params: { id } }, instance)).resolves.toMatchObject({ status: 200 });
+    await expect(run(["content.get:pages?status=published"], { params: { id } }, instance)).resolves.toMatchObject({ status: 200 });
+  });
+});
+
 const CUSTOM_TYPE_MODEL = {
   locales: ["de", "en"],
   defaultLocale: "de",
