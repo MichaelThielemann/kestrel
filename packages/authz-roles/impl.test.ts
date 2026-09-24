@@ -60,6 +60,7 @@ function manifestOf(specs: string[]): Manifest {
     steps: [],
     pipelines: [{ name: "p", steps: specs.map((spec) => step(spec)) }],
     triggers: { http: [], events: [], crons: [] },
+    warnings: [],
   };
 }
 

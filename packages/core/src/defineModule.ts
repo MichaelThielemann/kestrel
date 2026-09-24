@@ -91,6 +91,9 @@ export interface ModuleTriggers<P> {
  * service). `ok: false` names the `reason` and whether the process needs a restart before the
  * module can serve again; a module never reports transient contention (a busy lock, a retryable
  * timeout) through this hook.
+ *
+ * A count of failed work (a dead letter, a failed delivery) is never health: it does not stop this
+ * instance from serving.
  */
 export type ModuleHealth = { ok: true; note?: string } | { ok: false; reason: string; restartRequired: boolean };
 

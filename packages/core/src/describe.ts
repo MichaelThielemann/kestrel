@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Triggers } from "./boot.ts";
+import type { BootWarning, Triggers } from "./boot.ts";
 import { boundaryCast } from "./cast.ts";
 import type { JsonSchema, ModuleDefinition, StepDescription } from "./defineModule.ts";
 import { PLACEHOLDER_ARG, type StepRegistry } from "./registry.ts";
@@ -62,6 +62,11 @@ export interface Manifest {
   steps: StepManifest[];
   pipelines: PipelineManifest[];
   triggers: TriggersManifest;
+  /**
+   * The non-fatal conditions boot found, the same entries as `kestrel.warnings`. A reader must handle a
+   * `code` it does not recognize.
+   */
+  warnings: BootWarning[];
 }
 
 export interface ManifestInput {
@@ -75,6 +80,8 @@ export interface ManifestInput {
   steps: StepRegistry;
   pipelines: ReadonlyMap<string, ResolvedPipeline>;
   triggers: Triggers;
+  /** The warnings of the boot that builds this manifest; absent outside a boot, where the manifest carries `[]`. */
+  warnings?: readonly BootWarning[];
 }
 
 export function coreVersion(): string {
@@ -155,5 +162,6 @@ export function buildManifest(input: ManifestInput): Manifest {
       events: input.triggers.events.map((e) => ({ event: e.event, pipeline: e.pipeline })),
       crons: input.triggers.crons.map((c) => ({ expression: c.expression, pipeline: c.pipeline })),
     },
+    warnings: [...(input.warnings ?? [])],
   };
 }

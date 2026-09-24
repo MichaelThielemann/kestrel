@@ -53,6 +53,8 @@ export interface StopResult {
  * {@link UnwrittenOptionalReadWarning}. A minor release may add further codes, so code reading
  * `kestrel.warnings` must handle a `code` it does not recognize instead of assuming the shape of
  * this union's current members.
+ *
+ * Every field besides `code` and `message` names the context of the condition and is a string.
  */
 export type BootWarning = UnemittedEventWarning | UnwrittenOptionalReadWarning;
 
@@ -437,7 +439,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     const triggers: Triggers = { http: routes, events, crons };
     let manifest: Manifest | undefined;
     const describe = (): Manifest => {
-      manifest ??= buildManifest({ root, modules: input.modules, uses: config.modules.map((m) => m.use), rawConfigs: configByModule, parsedConfigs: parsedByModule, contracts: contracts.names(), steps, pipelines, triggers });
+      manifest ??= buildManifest({ root, modules: input.modules, uses: config.modules.map((m) => m.use), rawConfigs: configByModule, parsedConfigs: parsedByModule, contracts: contracts.names(), steps, pipelines, triggers, warnings });
       return manifest;
     };
     const health = (): InstanceHealth => {

@@ -1,7 +1,7 @@
 import { Server } from "node:http";
-import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { describe, it, expect, expectTypeOf, afterEach, beforeEach, vi } from "vitest";
 import { z } from "zod";
-import { boot, type Kestrel } from "./boot.ts";
+import { boot, type Kestrel, type UnemittedEventWarning, type UnwrittenOptionalReadWarning } from "./boot.ts";
 import { boundaryCast } from "./cast.ts";
 import { binaryResult, stepFactory, type Context } from "./context.ts";
 import { defineContract } from "./defineContract.ts";
@@ -561,6 +561,22 @@ describe("boot", () => {
     expect(warnings[0]?.message).toMatch(/no pipeline emits via events\.emit and no module declares in emits/);
     expect(warnings[0]?.data).toEqual({ event: "page.creted", pipeline: "onCreated" });
     expect(kestrel.warnings).toEqual([{ code: "unemitted-event", message: warnings[0]?.message, pipeline: "onCreated", event: "page.creted" }]);
+  });
+
+  it("describe() carries the same boot warnings as kestrel.warnings", async () => {
+    kestrel = await boot({ config: { ...baseConfig, triggers: [{ event: "page.creted", pipeline: "onCreated" }] }, modules, pipelines, logger: silentLogger });
+    expect(kestrel.describe().warnings).toEqual(kestrel.warnings);
+    expect(kestrel.describe().warnings).not.toEqual([]);
+  });
+
+  it("describe() carries no warnings for a clean boot", async () => {
+    kestrel = await boot({ config: baseConfig, modules, pipelines, logger: silentLogger });
+    expect(kestrel.describe().warnings).toEqual([]);
+  });
+
+  it("every boot warning field besides code is a string", () => {
+    expectTypeOf<Omit<UnemittedEventWarning, "code">>().toMatchTypeOf<Record<string, string>>();
+    expectTypeOf<Omit<UnwrittenOptionalReadWarning, "code">>().toMatchTypeOf<Record<string, string>>();
   });
 
   it("fails to boot for a step that writes result without declaring output, extendsOutput, extendsItems or binary: true", async () => {
