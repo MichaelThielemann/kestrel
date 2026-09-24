@@ -78,8 +78,7 @@ function previousResult(ctx: Context): Record<string, unknown> {
 
 type Instance = Delivery & { render: "events" | "background" };
 
-/** With `dependencies.render: "events"`, boot needs the two job triggers and a queue as the event delivery module. */
-export function checkEventsWiring(kestrel: Introspection): void {
+function checkEventsWiring(kestrel: Introspection): void {
   const manifest = kestrel.describe();
   const stepsOf = new Map(manifest.pipelines.map((p) => [p.name, p.steps.map((s) => s.name)]));
   const subscribed = (event: string, step: string): boolean => manifest.triggers.events.some((t) => t.event === event && (stepsOf.get(t.pipeline) ?? []).includes(step));

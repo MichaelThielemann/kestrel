@@ -142,21 +142,25 @@ interface DependencyRow extends Document {
   path: string | null;
 }
 
+type SetState = "pending" | "current" | "retired";
+
 interface DependencySet extends Document {
   output: string;
   keys: string[];
   createdAt: number;
+  state: SetState | null;
+  replaces: string | null;
 }
 
 interface ChangeRow extends Document {
   type: string;
   ids: string[];
-  at: number;
 }
 
-interface BuildState extends Document {
-  value: string;
-  updatedAt: number;
+interface StateRow extends Document {
+  value: string | null;
+  seq: number | null;
+  updatedAt: number | null;
 }
 
 interface Target {
@@ -180,8 +184,7 @@ interface Change {
 }
 
 interface Flight {
-  startedAt: number;
-  known: Set<string> | null;
+  since: number;
 }
 
 interface RenderOutcome {
@@ -196,8 +199,13 @@ const LOOP_BATCH = 5;
 const RESUME_MIN_AGE_MS = 60_000;
 const UNPUBLISH_TRIES = 5;
 const LLMS_COALESCE_KEY = "llms";
-const CHANGE_WINDOW_MS = 60_000;
-const CHANGE_PAGE = 1000;
+const SEQUENCE = "changes";
+const SEQUENCE_WIDTH = 16;
+const SEQUENCE_TRIES = 100;
+const CHANGE_PAGE = 200;
+const CHANGE_KEEP = 10_000;
+const CHANGE_PRUNE_EVERY = 100;
+const PATH_CHANGE = "/";
 const MARKABLE: RowState[] = ["live", "error"];
 const ALL_OUTPUTS: RowState[] = ["live", "error", "draft"];
 
@@ -230,9 +238,16 @@ function readsOf(plan: SetPlan): readonly ObservedRead[] {
   return plan.kind === "known" || plan.kind === "failure" ? plan.reads : [];
 }
 
-function touches(reads: readonly ObservedRead[], changes: readonly Change[]): boolean {
-  if (changes.length === 0) return false;
-  return reads.some((read) => changes.some((change) => read.type === change.type && (read.kind === "type" || read.kind === "query" || change.ids.includes(read.id))));
+function sequenceId(n: number): string {
+  return String(n).padStart(SEQUENCE_WIDTH, "0");
+}
+
+function touches(reads: readonly ObservedRead[] | null, change: Change, self: OutputRef, livePath: string | null): boolean {
+  if (change.type === PATH_CHANGE) return livePath !== null && change.ids.includes(livePath);
+  const ids = change.type === self.type ? change.ids.filter((id) => id !== self.docId) : change.ids;
+  if (change.ids.length > 0 && ids.length === 0) return false;
+  if (reads === null) return true;
+  return reads.some((read) => read.type === change.type && (read.kind === "type" || read.kind === "query" || ids.length === 0 || ids.includes(read.id)));
 }
 
 function chunks<T>(values: readonly T[], size: number): T[][] {
@@ -300,9 +315,9 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       claimedAt: "number",
     }),
     await db.ensureCollection(DEPENDENCIES, { type: "string", docId: "string", locale: "string", output: "string", kind: "string", depType: "string", depId: "string", depLocale: "string", filter: "json", rules: "json", path: "string" }),
-    await db.ensureCollection(DEPENDENCY_SETS, { output: "string", keys: "json", createdAt: "number" }),
-    await db.ensureCollection(STATE, { value: "string", updatedAt: "number" }),
-    await db.ensureCollection(CHANGES, { type: "string", ids: "json", at: "number" }),
+    await db.ensureCollection(DEPENDENCY_SETS, { output: "string", keys: "json", createdAt: "number", state: "string", replaces: "string" }),
+    await db.ensureCollection(STATE, { value: "string", seq: "number", updatedAt: "number" }),
+    await db.ensureCollection(CHANGES, { type: "string", ids: "json" }),
   ];
   for (const p of prepared) if (isErr(p)) throw new Error(`delivery/static: cannot prepare its collections: ${p.error.message}`);
   const versioned = await db.updateMany<StatusRow>(STATUS, { version: null }, { version: 0 });
@@ -384,9 +399,16 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     const owned = await pathOwned(path);
     if (isErr(owned)) return owned;
     if (owned.value) return ok();
-    const removed = await removeKeys(pathKeys(path));
+    return removeFiles(path, pathKeys(path));
+  };
+
+  const removeFiles = async (path: string, keys: readonly string[]): Promise<Result<void, DeliveryError>> => {
+    const removed = await removeKeys(keys);
     if (isErr(removed)) return removed;
-    return markOwners(path);
+    const recorded = await recordChange(PATH_CHANGE, [path]);
+    const marked = await markOwners(path);
+    if (isErr(recorded)) return recorded;
+    return marked;
   };
 
   const deleteDependencyRows = async (ids: readonly string[]): Promise<Result<void, DeliveryError>> => {
@@ -408,6 +430,61 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     }
     const deleted = await db.deleteMany(DEPENDENCY_SETS, { id: setId });
     if (isErr(deleted)) return err(dbFailure(deleted.error));
+    return ok();
+  };
+
+  const setState = async (setId: string, state: SetState): Promise<Result<void, DeliveryError>> => {
+    const updated = await db.updateMany<DependencySet>(DEPENDENCY_SETS, { id: setId }, { state });
+    if (isErr(updated)) return err(dbFailure(updated.error));
+    return ok();
+  };
+
+  const retireSet = async (setId: string, keepRows: boolean): Promise<Result<void, DeliveryError>> => {
+    const retired = await setState(setId, "retired");
+    if (isErr(retired)) return retired;
+    return deleteSet(setId, keepRows);
+  };
+
+  const readSequence = async (): Promise<Result<number, DeliveryError>> => {
+    const row = await db.findOne<StateRow>(STATE, { id: SEQUENCE });
+    if (isErr(row)) return err(dbFailure(row.error));
+    return ok(row.value?.seq ?? 0);
+  };
+
+  const nextSequence = async (): Promise<Result<number, DeliveryError>> => {
+    for (let tries = 0; tries < SEQUENCE_TRIES; tries++) {
+      const row = await db.findOne<StateRow>(STATE, { id: SEQUENCE });
+      if (isErr(row)) return err(dbFailure(row.error));
+      if (row.value === null) {
+        const created = await db.createOne<StateRow>(STATE, { id: SEQUENCE, value: null, seq: 1, updatedAt: null });
+        if (!isErr(created)) return ok(1);
+        if (created.error.code !== "CONFLICT") return err(dbFailure(created.error));
+        continue;
+      }
+      const current = row.value.seq;
+      const bumped = await db.updateMany<StateRow>(STATE, { id: SEQUENCE, seq: current }, { seq: (current ?? 0) + 1 });
+      if (isErr(bumped)) return err(dbFailure(bumped.error));
+      if (bumped.value === 1) return ok((current ?? 0) + 1);
+    }
+    return err(transient("delivery/static: the change sequence kept moving – try again"));
+  };
+
+  const pruneChanges = async (newest: number): Promise<Result<void, DeliveryError>> => {
+    if (newest <= CHANGE_KEEP) return ok();
+    const pruned = await db.deleteMany(CHANGES, { id: { lte: sequenceId(newest - CHANGE_KEEP) } });
+    if (isErr(pruned)) return err(dbFailure(pruned.error));
+    return ok();
+  };
+
+  const recordChange = async (type: string, ids: readonly string[]): Promise<Result<void, DeliveryError>> => {
+    const seq = await nextSequence();
+    if (isErr(seq)) return seq;
+    const written = await db.createOne<ChangeRow>(CHANGES, { id: sequenceId(seq.value), type, ids: [...ids] });
+    if (isErr(written)) return err(dbFailure(written.error));
+    if (seq.value % CHANGE_PRUNE_EVERY === 0) {
+      const pruned = await pruneChanges(seq.value);
+      if (isErr(pruned)) logger.error("delivery/static: could not prune the change log, the next prune removes the rows", { error: pruned.error.message });
+    }
     return ok();
   };
 
@@ -441,16 +518,32 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return ok(count);
   };
 
-  const markRows = async (ids: readonly string[], states: RowState[]): Promise<Result<number, DeliveryError>> => {
-    const unique = [...new Set(ids)];
-    if (unique.length === 0) return ok(0);
+  const writeMarks = async (ids: readonly string[], states: RowState[]): Promise<Result<string, DeliveryError>> => {
     const token = randomUUID();
     const at = now();
-    for (const chunk of chunks(unique, MARK_CHUNK)) {
+    for (const chunk of chunks([...new Set(ids)], MARK_CHUNK)) {
       const marked = await db.updateMany<StatusRow>(STATUS, { id: { in: chunk }, state: { in: states }, type: { in: deliveredTypes }, locale: { in: deliveredLocales } }, { staleAt: at, staleToken: token, staleRetryAt: at, staleAttempts: 0, staleError: null });
       if (isErr(marked)) return err(dbFailure(marked.error));
     }
-    return dispatchToken(token);
+    return ok(token);
+  };
+
+  const markRows = async (ids: readonly string[], states: RowState[]): Promise<Result<number, DeliveryError>> => {
+    if (ids.length === 0) return ok(0);
+    const token = await writeMarks(ids, states);
+    if (isErr(token)) return token;
+    return dispatchToken(token.value);
+  };
+
+  const remark = async (rowId: string, output: OutputRef, why: string): Promise<Result<void, DeliveryError>> => {
+    const token = await writeMarks([rowId], MARKABLE);
+    if (isErr(token)) {
+      logger.error(`delivery/static: could not mark an output ${why}`, { ...output, error: token.error.message });
+      return err(transient(`delivery/static: could not mark ${output.type}/${output.docId}/${output.locale} ${why} – try again (${token.error.message})`));
+    }
+    const dispatched = await dispatchToken(token.value);
+    if (isErr(dispatched)) logger.error(`delivery/static: marked an output ${why} but could not raise its job; it stays marked and the recovery pass raises it`, { ...output, error: dispatched.error.message });
+    return ok();
   };
 
   const markOwners = async (path: string): Promise<Result<void, DeliveryError>> => {
@@ -462,12 +555,12 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return ok();
   };
 
-  const writeSet = async (output: OutputRef, outputId: string, renderId: string, specs: DependencySpec[], inherited: string[]): Promise<{ setId: string; created: string[]; count: number } | null> => {
+  const writeSet = async (output: OutputRef, outputId: string, renderId: string, specs: DependencySpec[], inherited: string[], replaces: string | null): Promise<{ setId: string; created: string[]; count: number } | null> => {
     const rows: DependencyRow[] = specs.map((spec, n) => ({ id: dependencyRowId(spec, output, renderId, n), type: output.type, docId: output.docId, locale: output.locale, output: outputId, ...spec }));
     const created = rows.map((row) => row.id);
     const setId = setIdOf(output.type, output.docId, output.locale, renderId);
     const keys = [...inherited, ...created];
-    const set = await db.createOne<DependencySet>(DEPENDENCY_SETS, { id: setId, output: outputId, keys, createdAt: now() });
+    const set = await db.createOne<DependencySet>(DEPENDENCY_SETS, { id: setId, output: outputId, keys, createdAt: now(), state: "pending", replaces });
     if (isErr(set)) {
       logger.error("delivery/static: could not record the dependencies of a render, the output is marked by every change until its next render", { ...output, error: set.error.message });
       return null;
@@ -491,7 +584,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       case "none":
         return null;
       case "empty": {
-        const written = await writeSet(output, outputId, renderId, [], []);
+        const written = await writeSet(output, outputId, renderId, [], [], before?.depSet ?? null);
         return written === null ? null : { ...written, inheritsPrevious: false };
       }
       case "known": {
@@ -504,7 +597,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         }
         const specs = normalizeReads(plan.reads, output, dependencies.maxPerRender);
         if (specs === null) return null;
-        const written = await writeSet(output, outputId, renderId, specs, []);
+        const written = await writeSet(output, outputId, renderId, specs, [], before?.depSet ?? null);
         return written === null ? null : { ...written, inheritsPrevious: false };
       }
       case "failure": {
@@ -513,7 +606,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         if (isErr(previous) || previous.value === null) return null;
         const specs = normalizeReads(plan.reads, output, dependencies.maxPerRender);
         if (specs === null) return null;
-        const written = await writeSet(output, outputId, renderId, specs, previous.value.keys);
+        const written = await writeSet(output, outputId, renderId, specs, previous.value.keys, before.depSet);
         return written === null ? null : { ...written, inheritsPrevious: true };
       }
     }
@@ -583,15 +676,23 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       const ownId = before?.id ?? statusIdOf(output.type, output.docId, output.locale);
       const oldPath = before === null ? null : before.path;
       if (oldPath !== null && oldPath !== target.path) logged("could not remove the files of a path this output left", { ...output, path: oldPath })(await removePathUnlessOwned(oldPath));
-      if (before?.depSet && before.depSet !== set?.setId) logged("could not remove the previous dependency set, the sweep removes it", output)(await deleteSet(before.depSet, set?.inheritsPrevious === true));
-      if (work.failure === null && before?.staleToken) {
+      const previousSet = before?.depSet ?? null;
+      if (previousSet !== null && previousSet !== set?.setId) logged("could not retire the previous dependency set, the sweep removes it", output)(await setState(previousSet, "retired"));
+      if (set !== null) logged("could not adopt the new dependency set, the sweep adopts it", output)(await setState(set.setId, "current"));
+      if (previousSet !== null && previousSet !== set?.setId) logged("could not remove the previous dependency set, the sweep removes it", output)(await deleteSet(previousSet, set?.inheritsPrevious === true));
+      const keepsItsMark = work.failure !== null && typeof before?.staleToken === "string";
+      let overlaps = false;
+      if (target.state !== "draft" && !keepsItsMark) {
+        const checked = await overlapped(flight, output, set === null ? null : readsOf(work.set), target.state === "live" ? target.path : null);
+        if (isErr(checked)) logger.error("delivery/static: could not read the change log, the output is marked again to be safe", { ...output, error: checked.error.message });
+        overlaps = isErr(checked) || checked.value;
+      }
+      if (overlaps) {
+        const remarked = await remark(ownId, output, "whose render overlapped a change");
+        if (isErr(remarked)) return remarked;
+      } else if (work.failure === null && before?.staleToken) {
         const cleared = await db.updateMany<StatusRow>(STATUS, { id: ownId, staleToken: before.staleToken }, { staleToken: null, staleAt: null, staleRetryAt: null, staleAttempts: 0, staleError: null });
         if (isErr(cleared)) return err(dbFailure(cleared.error));
-      }
-      const revivedDuringRemoval = before?.state === "deleted" && before.path !== null;
-      if (target.state !== "draft" && (revivedDuringRemoval || (await overlapped(flight, set === null ? null : readsOf(work.set))))) {
-        const remarked = await markRows([ownId], MARKABLE);
-        if (isErr(remarked)) logger.error("delivery/static: could not mark an output whose render overlapped a change, the recovery pass marks it", { ...output, error: remarked.error.message });
       }
       const after = await db.findOne<StatusRow>(STATUS, { id: ownId });
       if (isErr(after)) return err(dbFailure(after.error));
@@ -609,38 +710,37 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     if (work.written.length > 0 && work.renderPath !== null && !(stillServed && current.path === work.renderPath)) {
       const owned = await pathOwned(work.renderPath);
       if (isErr(owned)) return owned;
-      if (!owned.value) logged("could not remove the files of a render that lost", { ...output, path: work.renderPath })(await removeKeys(work.written));
-    }
-    if (stillServed) {
-      const remarked = await markRows([current.id], MARKABLE);
-      if (isErr(remarked)) logger.error("delivery/static: could not mark an output a newer write raced, the recovery pass marks it", { ...output, error: remarked.error.message });
+      if (!owned.value) logged("could not remove the files of a render that lost", { ...output, path: work.renderPath })(await removeFiles(work.renderPath, work.written));
     }
     await dropOwnSet();
+    if (stillServed) {
+      const remarked = await remark(current.id, output, "after a newer write won against its render");
+      if (isErr(remarked)) return remarked;
+    }
     const reread = await readRow(output.type, output.docId, output.locale);
     if (isErr(reread)) return reread;
     return ok({ status: reread.value === null || reread.value.state === "deleted" ? null : toPublic(reread.value), failure: work.failure });
   };
 
-  const changesSince = async (startedAt: number): Promise<ChangeRow[] | null> => {
-    const page = await db.findMany<ChangeRow>(CHANGES, { at: { gte: startedAt - CHANGE_WINDOW_MS } }, { limit: CHANGE_PAGE });
-    if (isErr(page) || page.value.items.length >= CHANGE_PAGE) return null;
-    return page.value.items;
-  };
-
   const startFlight = async (): Promise<Result<Flight, DeliveryError>> => {
-    const startedAt = now();
-    const page = await db.findMany<ChangeRow>(CHANGES, { at: { gte: startedAt - CHANGE_WINDOW_MS } }, { limit: CHANGE_PAGE });
-    if (isErr(page)) return err(dbFailure(page.error));
-    return ok({ startedAt, known: page.value.items.length >= CHANGE_PAGE ? null : new Set(page.value.items.map((c) => c.id)) });
+    const since = await readSequence();
+    if (isErr(since)) return since;
+    return ok({ since: since.value });
   };
 
-  const overlapped = async (flight: Flight, reads: readonly ObservedRead[] | null): Promise<boolean> => {
-    const current = await changesSince(flight.startedAt);
-    if (current === null || flight.known === null) return true;
-    const known = flight.known;
-    const fresh: Change[] = current.filter((c) => !known.has(c.id));
-    if (fresh.length === 0) return false;
-    return reads === null || touches(reads, fresh);
+  const overlapped = async (flight: Flight, self: OutputRef, reads: readonly ObservedRead[] | null, livePath: string | null): Promise<Result<boolean, DeliveryError>> => {
+    let last = sequenceId(flight.since);
+    for (;;) {
+      const page = await db.findMany<ChangeRow>(CHANGES, { id: { gt: last } }, { sort: { id: "asc" }, limit: CHANGE_PAGE });
+      if (isErr(page)) return err(dbFailure(page.error));
+      for (const change of page.value.items) if (touches(reads, change, self, livePath)) return ok(true);
+      const tail = page.value.items.at(-1);
+      if (page.value.items.length < CHANGE_PAGE || tail === undefined) break;
+      last = tail.id;
+    }
+    const newest = await readSequence();
+    if (isErr(newest)) return newest;
+    return ok(newest.value - CHANGE_KEEP > flight.since);
   };
 
   const renderWithTimeout = async (input: RenderInput): Promise<Result<RenderOutput, RendererError> | "timeout"> => {
@@ -867,7 +967,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       for (const row of mine.value.items) {
         try {
           if (row.staleToken !== null && !stopping) {
-            await db.updateMany<StatusRow>(STATUS, { id: row.id, claimedBy: token }, { claimedAt: now() });
+            const renewed = await db.updateMany<StatusRow>(STATUS, { id: row.id, claimedBy: token }, { claimedAt: now() });
+            if (isErr(renewed) || renewed.value !== 1) continue;
             await renderMarked(row);
             llmsRequested = true;
           }
@@ -896,8 +997,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
 
   const markDependents: Delivery["markDependents"] = async (type, ids) => {
     const changed = [...new Set(ids)];
-    const recorded = await db.createOne<ChangeRow>(CHANGES, { id: randomUUID(), type, ids: changed, at: now() });
-    if (isErr(recorded)) return err(dbFailure(recorded.error));
+    const recorded = await recordChange(type, changed);
+    if (isErr(recorded)) return recorded;
     const outputs = new Set<string>();
     const isModelType = model.types[type] !== undefined;
     for (const id of changed) {
@@ -958,6 +1059,39 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return ok({ marked: marked.value });
   };
 
+  const sweepSets = async (filter: Filter): Promise<Result<number, DeliveryError>> => {
+    let swept = 0;
+    let last: string | undefined;
+    for (;;) {
+      const sets = await db.findMany<DependencySet>(DEPENDENCY_SETS, last === undefined ? filter : { ...filter, id: { gt: last } }, { sort: { id: "asc" }, limit: ROW_PAGE });
+      if (isErr(sets)) return err(dbFailure(sets.error));
+      for (const set of sets.value.items) {
+        const owner = await db.findOne<StatusRow>(STATUS, { id: set.output });
+        if (isErr(owner)) return err(dbFailure(owner.error));
+        if (owner.value?.depSet === set.id) {
+          const adopted = await setState(set.id, "current");
+          if (isErr(adopted)) return adopted;
+          if (set.replaces !== null && set.replaces !== set.id) {
+            const replaced = await setState(set.replaces, "retired");
+            if (isErr(replaced)) return replaced;
+          }
+          continue;
+        }
+        const shared = owner.value?.depSet ? await db.findOne<DependencySet>(DEPENDENCY_SETS, { id: owner.value.depSet }) : undefined;
+        if (shared !== undefined && isErr(shared)) return err(dbFailure(shared.error));
+        if (shared !== undefined && shared.value === null) continue;
+        const keep = new Set(shared?.value?.keys ?? []);
+        const rows = await deleteDependencyRows(set.keys.filter((k) => !keep.has(k)));
+        if (isErr(rows)) return rows;
+        const removed = await db.deleteMany(DEPENDENCY_SETS, { id: set.id });
+        if (isErr(removed)) return err(dbFailure(removed.error));
+        swept += 1;
+      }
+      last = sets.value.items.at(-1)?.id;
+      if (sets.value.items.length < ROW_PAGE || last === undefined) return ok(swept);
+    }
+  };
+
   const markAll: Delivery["markAll"] = async (type) => {
     typeConfig(type);
     const token = randomUUID();
@@ -971,9 +1105,12 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       if (isErr(page)) return err(transientOnly(page.error, "content@1"));
       const docIds = page.value.items.map((d) => d.id);
       if (docIds.length > 0) {
-        const rows = await db.findMany<StatusRow>(STATUS, { type, docId: { in: docIds } }, { limit: docIds.length * targets.length + 1 });
-        if (isErr(rows)) return err(dbFailure(rows.error));
-        const have = new Set(rows.value.items.map((r) => `${r.docId}\u0000${r.locale}`));
+        const have = new Set<string>();
+        const listed = await pagedRows({ type, docId: { in: docIds }, locale: { in: targets } }, (rows) => {
+          for (const r of rows) have.add(`${r.docId}\u0000${r.locale}`);
+          return ok();
+        });
+        if (isErr(listed)) return listed;
         for (const docId of docIds) {
           for (const locale of targets) {
             if (have.has(`${docId}\u0000${locale}`)) continue;
@@ -1047,7 +1184,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
           const cleared = await db.updateMany<StatusRow>(STATUS, { id: current.id, state: "deleted" }, { path: null });
           if (isErr(cleared)) return err(dbFailure(cleared.error));
         }
-        if (tombstoned && current.depSet !== null) logged("could not remove the dependency set of an unpublished output, the sweep removes it", output)(await deleteSet(current.depSet, false));
+        if (tombstoned && current.depSet !== null) logged("could not remove the dependency set of an unpublished output, the sweep removes it", output)(await retireSet(current.depSet, false));
       }
       return ok(count);
     },
@@ -1083,7 +1220,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     markDependents,
     markAll,
     async checkBuild(build) {
-      const stored = await db.findOne<BuildState>(STATE, { id: "build" });
+      const stored = await db.findOne<StateRow>(STATE, { id: "build" });
       if (isErr(stored)) return err(dbFailure(stored.error));
       if (stored.value?.value === build) return ok({ changed: false, marked: 0 });
       let marked = 0;
@@ -1092,7 +1229,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         if (isErr(all)) return all;
         marked += all.value.marked;
       }
-      const written = stored.value === null ? await db.createOne<BuildState>(STATE, { id: "build", value: build, updatedAt: now() }) : await db.updateOne<BuildState>(STATE, "build", { value: build, updatedAt: now() });
+      const written = stored.value === null ? await db.createOne<StateRow>(STATE, { id: "build", value: build, seq: null, updatedAt: now() }) : await db.updateOne<StateRow>(STATE, "build", { value: build, updatedAt: now() });
       if (isErr(written) && written.error.code !== "CONFLICT") return err(dbFailure(written.error));
       return ok({ changed: true, marked });
     },
@@ -1141,29 +1278,15 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         if (isErr(deleted)) return err(dbFailure(deleted.error));
         swept += deleted.value;
       }
-      let lastSet: string | undefined;
-      for (;;) {
-        const sets = await db.findMany<DependencySet>(DEPENDENCY_SETS, lastSet === undefined ? { createdAt: { lte: at - claimTtlMs } } : { createdAt: { lte: at - claimTtlMs }, id: { gt: lastSet } }, { sort: { id: "asc" }, limit: ROW_PAGE });
-        if (isErr(sets)) return err(dbFailure(sets.error));
-        for (const set of sets.value.items) {
-          const owner = await db.findOne<StatusRow>(STATUS, { id: set.output });
-          if (isErr(owner)) return err(dbFailure(owner.error));
-          if (owner.value?.depSet === set.id) continue;
-          const shared = owner.value?.depSet ? await db.findOne<DependencySet>(DEPENDENCY_SETS, { id: owner.value.depSet }) : undefined;
-          if (shared !== undefined && isErr(shared)) return err(dbFailure(shared.error));
-          if (shared !== undefined && shared.value === null) continue;
-          const keep = new Set(shared?.value?.keys ?? []);
-          const rows = await deleteDependencyRows(set.keys.filter((k) => !keep.has(k)));
-          if (isErr(rows)) return rows;
-          const removed = await db.deleteMany(DEPENDENCY_SETS, { id: set.id });
-          if (isErr(removed)) return err(dbFailure(removed.error));
-          swept += 1;
-        }
-        lastSet = sets.value.items.at(-1)?.id;
-        if (sets.value.items.length < ROW_PAGE || lastSet === undefined) break;
-      }
-      const pruned = await db.deleteMany(CHANGES, { at: { lt: at - claimTtlMs - CHANGE_WINDOW_MS } });
-      if (isErr(pruned)) return err(dbFailure(pruned.error));
+      const pending = await sweepSets({ state: "pending", createdAt: { lte: at - claimTtlMs } });
+      if (isErr(pending)) return pending;
+      const retired = await sweepSets({ state: "retired" });
+      if (isErr(retired)) return retired;
+      swept += pending.value + retired.value;
+      const newest = await readSequence();
+      if (isErr(newest)) return newest;
+      const pruned = await pruneChanges(newest.value);
+      if (isErr(pruned)) return pruned;
       let aged = 0;
       if (dependencies.maxAgeSeconds !== null) {
         const old: string[] = [];

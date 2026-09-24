@@ -4,7 +4,7 @@ import type { Content, ContentModel } from "@michaelthielemann/kestrel-contracts
 import { createContentDefault } from "@michaelthielemann/kestrel-content-default/impl";
 import { err, failure, ok } from "@michaelthielemann/kestrel-contracts/errors";
 import type { EventData, Events } from "@michaelthielemann/kestrel-contracts/events";
-import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Document, Filter, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { renderFailed, type Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
@@ -12,7 +12,7 @@ import { createSiteDefault } from "@michaelthielemann/kestrel-site-default/impl"
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { observeReads } from "@michaelthielemann/kestrel/reads";
-import { DEPENDENCIES, DEPENDENCY_SETS, LLMS_STALE, OUTPUT_STALE, STATE, STATUS, createDeliveryStatic, keyFor, type Delivery, type StatusRow } from "./impl.ts";
+import { CHANGES, DEPENDENCIES, DEPENDENCY_SETS, LLMS_STALE, OUTPUT_STALE, STATE, STATUS, createDeliveryStatic, keyFor, type Delivery, type StatusRow } from "./impl.ts";
 import { configSchema } from "./module.ts";
 
 const model: ContentModel = {
@@ -65,7 +65,15 @@ function blocksOf(value: unknown): Block[] {
 function readingRenderer(content: Content) {
   const calls: string[] = [];
   const holds = new Map<string, ReturnType<typeof gate>>();
+  const nextHolds: Array<ReturnType<typeof gate>> = [];
   let delayMs = 0;
+  const pause = async (id: string): Promise<void> => {
+    const hold = holds.get(id) ?? nextHolds.shift();
+    if (hold === undefined) return;
+    holds.delete(id);
+    hold.arrive();
+    await hold.wait;
+  };
   const renderer: Renderer = {
     formats: () => ["html"],
     async render(input) {
@@ -79,7 +87,10 @@ function readingRenderer(content: Content) {
           for (const speakerId of boundaryCast<string[]>(lineup?.speakers ?? [], "json")) {
             const speaker = expectOk(await content.get("speakers", speakerId));
             if (speaker?.status !== "published") continue;
-            if (speaker.name === "FAIL") return err(renderFailed("a speaker made the block fail"));
+            if (speaker.name === "FAIL") {
+              await pause(input.id);
+              return err(renderFailed("a speaker made the block fail"));
+            }
             if (speaker.name === "HANG") await new Promise(() => {});
             names.push(String(speaker.name));
           }
@@ -93,12 +104,7 @@ function readingRenderer(content: Content) {
           names.push(...listed.items.map((s) => String(s.name)));
         }
       }
-      const hold = holds.get(input.id);
-      if (hold !== undefined) {
-        holds.delete(input.id);
-        hold.arrive();
-        await hold.wait;
-      }
+      await pause(input.id);
       if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
       const links = JSON.stringify(input.document._links ?? {});
       return ok({ data: `<h1>${String(input.document.title)}</h1><p>${typeof settings?.title === "string" ? settings.title : ""}</p><ul>${names.join(",")}</ul><nav>${links}</nav>`, contentType: "text/html", extension: "html" });
@@ -110,6 +116,11 @@ function readingRenderer(content: Content) {
     hold(id: string): Gate {
       const g = gate();
       holds.set(id, g);
+      return g;
+    },
+    holdNext(): Gate {
+      const g = gate();
+      nextHolds.push(g);
       return g;
     },
     delay(ms: number) {
@@ -1439,3 +1450,374 @@ describe("delivery/static dependencies: restores, sweeps and shared paths", () =
     expect(h.html("/kontakt")).toContain("Kontakt");
   });
 });
+
+async function newlyReadSpeakerDuringRender(marker: Harness, renderer: Harness, ids: Awaited<ReturnType<typeof seed>>) {
+  const fresh = expectOk(await marker.content.create("speakers", { name: "Hedy", status: "published" })).id;
+  const lineup = expectOk(await marker.content.create("lineups", { title: "Late", speakers: [fresh] })).id;
+  expectOk(await marker.content.update("pages", ids.kontakt, { body: [{ type: "lineup", id: lineup }] }, { locale: "de" }));
+  const held = renderer.reading.hold(ids.kontakt);
+  const publishing = renderer.delivery.publish("pages", ids.kontakt);
+  await held.reached;
+  expectOk(await marker.content.update("speakers", fresh, { name: "Hedy L." }));
+  expect(expectOk(await marker.delivery.markDependents("speakers", [fresh])).marked).toBe(0);
+  return { fresh, held, publishing };
+}
+
+describe("delivery/static dependencies: overlapping changes need no clock", () => {
+  for (const [label, rendererAheadMs, markerAheadMs] of [
+    ["the same clock", 0, 0],
+    ["a renderer clock 120 s ahead", 120_000, 0],
+    ["a marker clock 120 s ahead", 0, 120_000],
+  ] as const) {
+    it(`with ${label}, a newly read document changed and marked in another process marks the output`, async () => {
+      const marker = await harness();
+      const ids = await seed(marker);
+      const renderer = await harness({ db: marker.db, content: marker.content, blobs: marker.blobs });
+      renderer.advance(rendererAheadMs);
+      marker.advance(markerAheadMs);
+      const { held, publishing } = await newlyReadSpeakerDuringRender(marker, renderer, ids);
+      held.release();
+      expectOk(await publishing);
+      expect(marker.html("/kontakt")).not.toContain("Hedy L.");
+      expect(await marker.marked()).toContain(`${ids.kontakt}/de`);
+      expectOk(await marker.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" }));
+      expect(marker.html("/kontakt")).toContain("Hedy L.");
+    });
+  }
+
+  it("a change recorded before a render started never marks that render's output again, whatever the clocks say", async () => {
+    const marker = await harness();
+    const ids = await seed(marker);
+    const renderer = await harness({ db: marker.db, content: marker.content, blobs: marker.blobs });
+    renderer.advance(-600_000);
+    expectOk(await marker.content.update("speakers", ids.grace, { name: "Grace H." }));
+    expectOk(await marker.delivery.markDependents("speakers", [ids.grace]));
+    expectOk(await renderer.delivery.republishOutput({ type: "pages", docId: ids.programm, locale: "de" }));
+    expectOk(await renderer.delivery.republishOutput({ type: "pages", docId: ids.programm, locale: "en" }));
+    expect(await marker.marked()).toEqual([]);
+  });
+});
+
+describe("delivery/static dependencies: an output's own document", () => {
+  it("a change of the output's own document during its render leaves it to that document's own publish", async () => {
+    const h = await harness();
+    const ids = await seed(h);
+    const held = h.reading.hold(ids.kontakt);
+    const publishing = h.delivery.publish("pages", ids.kontakt);
+    await held.reached;
+    expectOk(await h.content.update("pages", ids.kontakt, { title: "Kontakt 2" }, { locale: "de" }));
+    expectOk(await h.delivery.markDependents("pages", [ids.kontakt]));
+    held.release();
+    expectOk(await publishing);
+    expect(await h.marked()).toEqual([]);
+    expectOk(await h.delivery.publish("pages", ids.kontakt));
+    expect(h.html("/kontakt")).toContain("Kontakt 2");
+  });
+
+  it("a change of the same type that also touches a document the render read still marks it", async () => {
+    const h = await harness();
+    const ids = await seed(h);
+    const shown = await h.page({ slug: "gezeigt", title: "Gezeigt", status: "published", body: [] });
+    expectOk(await h.content.update("pages", ids.kontakt, { body: [{ type: "page", id: shown }] }, { locale: "de" }));
+    const held = h.reading.hold(ids.kontakt);
+    const publishing = h.delivery.publish("pages", ids.kontakt);
+    await held.reached;
+    expectOk(await h.content.update("pages", shown, { title: "Gezeigt 2" }, { locale: "de" }));
+    expectOk(await h.delivery.markDependents("pages", [ids.kontakt, shown]));
+    held.release();
+    expectOk(await publishing);
+    expect(await h.marked()).toContain(`${ids.kontakt}/de`);
+  });
+});
+
+describe("delivery/static dependencies: a burst of changes", () => {
+  async function burst(h: Harness, count: number): Promise<void> {
+    for (let i = 0; i < count; i++) expectOk(await h.delivery.markDependents("speakers", [`imported-${i}`]));
+  }
+
+  it("more than a thousand changes during a render that touch nothing it read leave its output unmarked", async () => {
+    const h = await harness();
+    const ids = await seed(h);
+    const held = h.reading.hold(ids.programm);
+    expectOk(await h.content.update("speakers", ids.grace, { name: "Grace H." }));
+    expectOk(await h.delivery.markDependents("speakers", [ids.grace]));
+    const rendering = h.delivery.republishOutput({ type: "pages", docId: ids.programm, locale: "de" });
+    await held.reached;
+    await burst(h, 1100);
+    held.release();
+    expect(expectOk(await rendering)).toEqual({ rendered: true, state: "live" });
+    expect(await h.marked()).toEqual([`${ids.programm}/en`]);
+  }, 30_000);
+
+  it("a failing output keeps its attempt count and backoff through a burst", async () => {
+    const h = await harness({ dependencies: { backoffSeconds: [600] } });
+    const ids = await seed(h);
+    expectOk(await h.content.update("speakers", ids.grace, { name: "FAIL" }));
+    expectOk(await h.delivery.markDependents("speakers", [ids.grace]));
+    const held = h.reading.hold(ids.programm);
+    const rendering = h.delivery.republishOutput({ type: "pages", docId: ids.programm, locale: "de" });
+    await held.reached;
+    await burst(h, 1100);
+    held.release();
+    expectErr(await rendering, "TRANSIENT");
+    const row = (await h.row(ids.programm))!;
+    expect(row.staleAttempts).toBe(1);
+    expect(row.staleRetryAt! - Date.now()).toBeGreaterThan(590_000);
+  }, 30_000);
+
+  it("a change a failing render newly read keeps its attempt count and backoff: the output stays marked for its retry", async () => {
+    const h = await harness({ dependencies: { backoffSeconds: [600] } });
+    const ids = await seed(h);
+    const hedy = expectOk(await h.content.create("speakers", { name: "Hedy", status: "published" })).id;
+    const broken = expectOk(await h.content.create("speakers", { name: "FAIL", status: "published" })).id;
+    const late = expectOk(await h.content.create("lineups", { title: "Late", speakers: [hedy, broken] })).id;
+    expectOk(await h.content.update("pages", ids.kontakt, { body: [{ type: "lineup", id: late }] }, { locale: "de" }));
+    expectOk(await h.delivery.markDependents("settings", []));
+    const held = h.reading.hold(ids.kontakt);
+    const rendering = h.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" });
+    await held.reached;
+    expectOk(await h.content.update("speakers", hedy, { name: "Hedy L." }));
+    expect(expectOk(await h.delivery.markDependents("speakers", [hedy])).marked).toBe(0);
+    held.release();
+    expectErr(await rendering, "TRANSIENT");
+    const row = (await h.row(ids.kontakt))!;
+    expect(row.staleToken).not.toBeNull();
+    expect(row.staleAttempts).toBe(1);
+    expect(row.staleRetryAt! - Date.now()).toBeGreaterThan(590_000);
+  });
+
+  it("keeps a bounded change log: rows far below the newest sequence are pruned, and a render that started before the pruned range marks its output", async () => {
+    const h = await harness();
+    const ids = await seed(h);
+    expectOk(await h.delivery.markDependents("lineups", ["warm-up"]));
+    const counter = expectOk(await h.db.findOne<{ id: string; seq: number }>(STATE, { id: "changes" }));
+    const start = counter!.seq;
+    const held = h.reading.hold(ids.kontakt);
+    const publishing = h.delivery.publish("pages", ids.kontakt);
+    await held.reached;
+    const newest = Math.ceil((start + 10_050) / 100) * 100;
+    expectOk(await h.db.updateMany(STATE, { id: "changes" }, { seq: newest - 1 }));
+    expectOk(await h.delivery.markDependents("lineups", ["unrelated"]));
+    const kept = expectOk(await h.db.findMany<{ id: string }>(CHANGES, {}, { sort: { id: "asc" } })).items.map((r) => Number(r.id));
+    expect(kept).toEqual([newest]);
+    held.release();
+    expectOk(await publishing);
+    expect(await h.marked()).toContain(`${ids.kontakt}/de`);
+    expectOk(await h.db.createOne(CHANGES, { id: "0000000000000002", type: "lineups", ids: ["old"] }));
+    expectOk(await h.delivery.resumeStale());
+    expect(expectOk(await h.db.findOne(CHANGES, { id: "0000000000000002" }))).toBeNull();
+  }, 30_000);
+});
+
+describe("delivery/static dependencies: a re-mark that cannot be written", () => {
+  function failingMarks(fake: FakePersistence): Persistence & { armed: boolean } {
+    const wrapped: Persistence & { armed: boolean } = {
+      ...fake,
+      armed: false,
+      updateMany: (c, f, p) => {
+        if (wrapped.armed && c === STATUS && typeof p.staleToken === "string") {
+          wrapped.armed = false;
+          fake.failNext("TRANSIENT");
+        }
+        return fake.updateMany(c, f, p);
+      },
+    };
+    return wrapped;
+  }
+
+  it("an overlapping render whose re-mark fails answers an error and keeps the mark it had", async () => {
+    const fake = createFakePersistence();
+    const db = failingMarks(fake);
+    const h = await harness({ db, content: await createContentDefault(model, fake) });
+    const ids = await seed(h);
+    expectOk(await h.delivery.markDependents("settings", []));
+    const before = (await h.row(ids.kontakt))!.staleToken;
+    const fresh = expectOk(await h.content.create("speakers", { name: "Hedy", status: "published" })).id;
+    const lineup = expectOk(await h.content.create("lineups", { title: "Late", speakers: [fresh] })).id;
+    expectOk(await h.content.update("pages", ids.kontakt, { body: [{ type: "lineup", id: lineup }] }, { locale: "de" }));
+    const held = h.reading.hold(ids.kontakt);
+    const rendering = h.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" });
+    await held.reached;
+    expectOk(await h.content.update("speakers", fresh, { name: "Hedy L." }));
+    expectOk(await h.delivery.markDependents("speakers", [fresh]));
+    db.armed = true;
+    held.release();
+    expectErr(await rendering, "TRANSIENT");
+    expect((await h.row(ids.kontakt))?.staleToken).toBe(before);
+    expect(h.logger.errors.join("\n")).not.toContain("the recovery pass marks it");
+  });
+
+  it("a losing render whose re-mark fails answers an error", async () => {
+    const fake = createFakePersistence();
+    const db = failingMarks(fake);
+    const h = await harness({ db, content: await createContentDefault(model, fake) });
+    const ids = await seed(h);
+    expectOk(await h.delivery.markDependents("speakers", [ids.grace]));
+    const held = h.reading.hold(ids.programm);
+    const rerender = h.delivery.republishOutput({ type: "pages", docId: ids.programm, locale: "de" });
+    await held.reached;
+    expectOk(await h.content.update("speakers", ids.grace, { name: "Grace New" }));
+    expectOk(await h.delivery.publish("pages", ids.programm));
+    db.armed = true;
+    held.release();
+    expectErr(await rerender, "TRANSIENT");
+  });
+});
+
+describe("delivery/static dependencies: two outputs racing for one path", () => {
+  it("a page that moves onto a path while another page leaves it keeps its file or is marked", async () => {
+    const fake = createFakePersistence();
+    const db = pausingSwaps(fake);
+    const h = await harness({ db, content: await createContentDefault(model, fake) });
+    const ids = await seed(h);
+    const successor = await h.page({ slug: "kontakt-neu", title: "Neuer Kontakt", status: "published", body: [] });
+    expectOk(await h.delivery.publish("pages", successor));
+    expectOk(await h.content.update("pages", ids.kontakt, { slug: "kontakt-alt" }, { locale: "de" }));
+    expectOk(await h.content.update("pages", successor, { slug: "kontakt" }, { locale: "de" }));
+    const held = h.reading.hold(successor);
+    const moving = h.delivery.publish("pages", successor);
+    await held.reached;
+    const swap = db.pauseNextSwap();
+    held.release();
+    await swap.reached;
+    expect(h.html("/kontakt")).toContain("Neuer Kontakt");
+    expectOk(await h.delivery.publish("pages", ids.kontakt));
+    expect(h.html("/kontakt")).toBeNull();
+    swap.release();
+    expectOk(await moving);
+    expect((await h.row(successor))).toMatchObject({ state: "live", path: "/kontakt" });
+    expect(h.html("/kontakt") !== null || (await h.marked()).includes(`${successor}/de`)).toBe(true);
+    expectOk(await h.delivery.republishOutput({ type: "pages", docId: successor, locale: "de" }));
+    expect(h.html("/kontakt")).toContain("Neuer Kontakt");
+  });
+});
+
+describe("delivery/static dependencies: a failed render inherits the previous reads", () => {
+  it("a document the previous render read, and the failing render never reached, still marks the output", async () => {
+    const h = await harness();
+    const ids = await seed(h);
+    const broken = expectOk(await h.content.create("speakers", { name: "FAIL", status: "published" })).id;
+    const early = expectOk(await h.content.create("lineups", { title: "Early", speakers: [broken] })).id;
+    expectOk(await h.content.update("pages", ids.programm, { body: [{ type: "lineup", id: early }, { type: "lineup", id: ids.lineup }] }, { locale: "de" }));
+    const [de] = expectOk(await h.delivery.publish("pages", ids.programm));
+    expect(de).toMatchObject({ state: "error" });
+    expectOk(await h.delivery.markDependents("speakers", [ids.ada]));
+    expect(await h.marked()).toContain(`${ids.programm}/de`);
+  });
+});
+
+describe("delivery/static dependencies: the loop's claims", () => {
+  it("renews the claim before each render of a pass and skips a row whose claim another process took", async () => {
+    const h = await harness({ render: "background" });
+    await seed(h);
+    const first = h.reading.holdNext();
+    const at = Date.now();
+    const callsBefore = h.reading.calls.length;
+    expectOk(await h.delivery.markDependents("settings", []));
+    await first.reached;
+    const claimed = expectOk(await h.db.findMany<StatusRow>(STATUS, { claimedBy: { ne: null } })).items;
+    expect(claimed.length).toBe(4);
+    const rendering = h.reading.calls.at(-1)!;
+    const victim = claimed.find((r) => `${r.docId}/${r.locale}` !== rendering)!;
+    expectOk(await h.db.updateMany<StatusRow>(STATUS, { id: victim.id }, { claimedBy: "elsewhere", claimedAt: at }));
+    h.advance(100_000);
+    const second = h.reading.holdNext();
+    first.release();
+    await second.reached;
+    const next = h.reading.calls.at(-1)!;
+    const nextRow = claimed.find((r) => `${r.docId}/${r.locale}` === next)!;
+    expect(expectOk(await h.db.findOne<StatusRow>(STATUS, { id: nextRow.id }))!.claimedAt! - at).toBeGreaterThanOrEqual(100_000);
+    second.release();
+    await pollUntilOk(async () => expectOk(await h.db.count(STATUS, { claimedBy: { ne: null } })) === 1);
+    expect(h.reading.calls.slice(callsBefore)).toHaveLength(3);
+    expect(h.reading.calls.slice(callsBefore)).not.toContain(`${victim.docId}/${victim.locale}`);
+    expect(expectOk(await h.db.findOne<StatusRow>(STATUS, { id: victim.id }))?.claimedBy).toBe("elsewhere");
+  });
+});
+
+describe("delivery/static dependencies: markAll and rows with older ids", () => {
+  it("never creates a second row for an output whose row has an older id, however many rows of removed locales exist", async () => {
+    const h = await harness();
+    await seed(h);
+    const late = await h.page({ slug: "spaet", title: "Spät", status: "published" });
+    const at = Date.now();
+    const row = (locale: string, id: string): StatusRow => ({ id, type: "pages", docId: late, locale, state: "draft", path: null, error: null, publishedAt: null, updatedAt: at, version: 0, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null });
+    for (const locale of ["fr", "it", "es", "nl", "pl", "pt", "sv", "da", "fi", "cs", "hu", "ro"]) expectOk(await h.db.createOne<StatusRow>(STATUS, row(locale, `old-${locale}`)));
+    expectOk(await h.db.createOne<StatusRow>(STATUS, row("de", "zz-older-random-id")));
+    expectOk(await h.delivery.markAll("pages"));
+    expect(expectOk(await h.db.count(STATUS, { docId: late, locale: "de" }))).toBe(1);
+  });
+});
+
+describe("delivery/static dependencies: the orphan sweep", () => {
+  it("reads no dependency set that is in use", async () => {
+    const fake = createFakePersistence();
+    const h = await harness({ db: fake, dependencies: { claimTtlSeconds: 120 } });
+    await seed(h);
+    h.advance(121_000);
+    let setsRead = 0;
+    const counting: Persistence = {
+      ...fake,
+      findMany: async <T extends Document>(c: string, f: Filter, o?: FindOptions) => {
+        const page = await fake.findMany<T>(c, f, o);
+        if (c === DEPENDENCY_SETS && page.ok) setsRead += page.value.items.length;
+        return page;
+      },
+      findOne: async <T extends Document>(c: string, f: Filter) => {
+        const found = await fake.findOne<T>(c, f);
+        if (c === DEPENDENCY_SETS && found.ok && found.value !== null) setsRead += 1;
+        return found;
+      },
+    };
+    const sweeper = await harness({ db: counting, content: h.content, blobs: h.blobs, dependencies: { claimTtlSeconds: 120 } });
+    sweeper.advance(121_000);
+    expectOk(await sweeper.delivery.resumeStale());
+    expect(setsRead).toBe(0);
+  });
+
+  it("a process that stops right after its swap leaves the new set to be adopted and the replaced one to be removed", async () => {
+    const fake = createFakePersistence();
+    const h0 = await harness({ db: fake, dependencies: { claimTtlSeconds: 120 } });
+    const ids = await seed(h0);
+    const before = (await h0.row(ids.programm))!;
+    let armed = true;
+    const stopping: Persistence = {
+      ...fake,
+      updateMany: (c, f, p) => {
+        if (armed && c === DEPENDENCY_SETS) {
+          armed = false;
+          return Promise.reject(new Error("process stopped"));
+        }
+        return fake.updateMany(c, f, p);
+      },
+    };
+    const h = await harness({ db: stopping, content: h0.content, blobs: h0.blobs, dependencies: { claimTtlSeconds: 120 } });
+    await expect(h.delivery.publish("pages", ids.programm)).rejects.toThrow("process stopped");
+    const after = (await h0.row(ids.programm))!;
+    expect(after.depSet).not.toBe(before.depSet);
+    h0.advance(121_000);
+    expectOk(await h0.delivery.resumeStale());
+    expect(expectOk(await fake.findMany<{ id: string }>(DEPENDENCY_SETS, { output: after.id })).items.map((s) => s.id)).toEqual([after.depSet]);
+    expect(await setKeysExist(fake, after.depSet!)).toBe(true);
+    h0.advance(121_000);
+    expect(expectOk(await h0.delivery.resumeStale()).swept).toBe(0);
+    expect(await setKeysExist(fake, after.depSet!)).toBe(true);
+  });
+});
+
+describe("delivery/static dependencies: links by internal object reference", () => {
+  it("a broken link to a document whose id a kestrel: string cannot carry marks its reader once the target is published", async () => {
+    const h = await harness();
+    await seed(h);
+    const targetId = "ziel_1";
+    expectOk(await h.db.createOne(pagesTable, { id: targetId, slug__de: "ziel", title__de: "Ziel", status__de: "draft", createdAt: 1, updatedAt: 1 }));
+    const linker = await h.page({ slug: "verweis", title: "Verweis", status: "published", body: [{ type: "teaser", link: { type: "internal", collection: "pages", id: targetId } }] });
+    expectOk(await h.delivery.publish("pages", linker));
+    expect(h.html("/verweis")).toContain('"broken":true');
+    expectOk(await h.content.update("pages", targetId, { status: "published" }, { locale: "de" }));
+    expectOk(await h.delivery.markDependents("pages", [targetId]));
+    expect(await h.marked()).toContain(`${linker}/de`);
+  });
+});
+
+const pagesTable = "pages";

@@ -16,7 +16,7 @@ import { ok as okStep } from "@michaelthielemann/kestrel/result";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import type { Delivery } from "./impl.ts";
 import type { Introspection, Manifest } from "@michaelthielemann/kestrel";
-import module, { checkEventsWiring, configSchema } from "./module.ts";
+import module, { configSchema } from "./module.ts";
 
 const model: ContentModel = {
   locales: ["de", "en"],
@@ -261,6 +261,10 @@ function introspection(parts: { pipelines: Array<{ name: string; steps: string[]
   return { describe: () => manifest, observe: () => () => {}, health: () => ({ ok: true, restartRequired: false, modules: [] }) };
 }
 
+function checkEventsWiring(kestrel: Introspection): void {
+  module.attach!(boundaryCast<Delivery>({ render: "events" }, "host"), kestrel);
+}
+
 describe("delivery/static: dependencies config and the events wiring", () => {
   const wired = {
     pipelines: [
@@ -304,6 +308,15 @@ describe("delivery/static: dependencies config and the events wiring", () => {
 
   it("refuses render \"events\" under events/direct, which would render inside the marking request", () => {
     expect(() => checkEventsWiring(introspection({ ...wired, hook: "events/direct" }))).toThrow(/events\/direct/);
+  });
+
+  it("attaches without a wiring check in background mode", () => {
+    expect(() => module.attach!(boundaryCast<Delivery>({ render: "background" }, "host"), introspection({ pipelines: [], events: [], hook: "events/direct" }))).not.toThrow();
+  });
+
+  it("exports only the module and its config schema", async () => {
+    const exported = await import("./module.ts");
+    expect(Object.keys(exported).sort()).toEqual(["configSchema", "default"]);
   });
 
   it("refuses render \"events\" without an events@1 provider at setup", async () => {
