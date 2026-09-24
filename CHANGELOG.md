@@ -250,7 +250,8 @@ Net changes since 5.8.1.
   - Media stored by 5.x are not converted. The start-up key migration is removed, and setup fails when
     a stored item's key is not `<prefix><id>/<name>`, naming the first such item. Start 6.0.0 with an
     empty media store, and with empty `images_variants` and `images_retired` collections: rows written
-    before 6.0.0 have no `slot`, so the one-row-per-size rule below does not cover them.
+    before 6.0.0 have no `slot`, which this version needs to find them, so `images-default`'s setup
+    fails while either collection holds such a row, naming the collection and the count.
   - New step `media.serve` answers a file at its public URL (`params.id`, `params.name`), cacheable
     for a year as `immutable`; any other name is 404. `media.download` is unchanged.
   - `media.remove` and `media.removeFolder` delete the copy and the blob first and the row last, then
@@ -293,6 +294,10 @@ Net changes since 5.8.1.
   - A failed write of a rendered variant, private or public, counts an attempt like a failed render,
     so a size whose copy cannot be written gives up after `maxAttempts` instead of being retried for
     good.
+  - Whether an item gets variants, and the format of an `original` size, are decided by the media type
+    without parameters, ignoring case: `image/svg+xml; charset=utf-8` gets no variants.
+  - `images.remove` stops a render of the same item in this process after the size it is rendering,
+    instead of waiting for every size.
   - `images-default` raises `media.updated` with `ids` through `events@1` for items it made available,
     after `images.prune`, and for items whose variants changed because a size was added or its spec
     changed. It declares the event in `emits` and uses `events@1` optionally.
@@ -336,9 +341,13 @@ Net changes since 5.8.1.
   rename), so a reader never sees a partly written file. Keys ending in `.kestrel-tmp` are rejected.
   The temporary name has a fixed length, so a key's last segment may still use the file system's
   whole name limit.
-- `examples/minimal` serves `GET /media/:id/:name` and `GET /media/:id/variants/:file` with
-  `media.serve` and `images.serve` alone. `authz.require` checks a signed-in caller's roles only, so a
-  signed-in user whose roles lack `media.read` was refused a file that is published to everyone.
+- **`authz-roles`: what anonymous callers may do, every signed-in caller may do too.** `can`, and with
+  it `authz.require` and `authz.describePipelineAccess`, grants a permission to a signed-in caller when
+  its roles grant it or when `anonymous` grants it. A signed-in user whose roles lack `media.read` was
+  refused (403) a medium that an anonymous visitor could read; it is now served. A deployment that
+  relied on signed-in users being refused something anonymous callers may do must remove that
+  permission from `anonymous`. `authn-multi`'s last-admin guard asks the same `can`, so granting its
+  `adminPermission` to `anonymous` makes every user an administrator.
 
 ### Added
 
