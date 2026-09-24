@@ -420,12 +420,15 @@ stop the rest (partial success still answers 200); `ids` lists only the newly st
 
 The blob key is `<prefix><id>/<name>` (the `media/` prefix is configurable and separates media from
 replication snapshots, the site export and `redirects.json`), so on disk e.g.
-`data/blobs/media/3f2e…-…/photo.jpg`. `<name>` is `filename` reduced to `[A-Za-z0-9_-]`, with one
-extension, taken from the content type the file is stored under and never from the uploaded name
-(`Photo 1.JPG` sent as `image/jpeg` becomes `Photo-1.jpg`), so that a static host deriving
-`Content-Type` from the extension serves the type the upload was checked as; a type outside
-`media-default`'s list becomes `.bin` (`x.html` sent as `image/x-foo` becomes `x-html.bin`) and is
-published as `application/octet-stream`. `<name>` is fixed at upload and never
+`data/blobs/media/3f2e…-…/photo.jpg`. The declared content type must be exactly one media type
+(`type/subtype`, optionally with `;` parameters, no comma); a list such as `image/png, text/html` or
+an empty type answers 415 (`UNSUPPORTED`), and only the lower-cased `type/subtype` is stored
+(`IMAGE/PNG; x=1` is stored as `image/png`). `<name>` is `filename` reduced to `[A-Za-z0-9_-]`, with
+one extension, taken from that stored type and never from the uploaded name (`Photo 1.JPG` sent as
+`image/jpeg` becomes `Photo-1.jpg`), so that a static host deriving `Content-Type` from the extension
+serves the type the upload was checked as; a type outside the list in
+`@michaelthielemann/kestrel-contracts/mediaType` becomes `.bin` (`x.html` sent as `image/x-foo` becomes
+`x-html.bin`) and is published as `application/octet-stream`. `<name>` is fixed at upload and never
 changes again — renaming the item only changes the display `filename`, never the key or `path`. The
 same display name in the same folder answers 409 (`details: { collection: "media_items", field:
 "location" }`; for multi-file uploads, as an entry in `errors` rather than an HTTP status) — the same
@@ -439,10 +442,16 @@ prolog and comments are dropped; > 2 MB → 413 (`PAYLOAD_TOO_LARGE`), no `<svg>
 (`VALIDATION`). Sanitized SVGs are served `inline` on `GET /media/:id/file` and `GET /media/:id/:name`
 (`http.inlineTypes: ["image/svg+xml"]`), every other non-image type remains `attachment`. The two
 are linked: `image/svg+xml` in `http.inlineTypes` without a module that registers `sanitize.svg`
-aborts boot, and so does `publicCopy` with SVG uploads allowed unless `sanitize.svg` runs before
-`media.upload` — unsanitized SVGs are never served inline, neither here nor from the public copy. A
-file's public name takes its extension from its stored type; a type outside the list in
-`media-default`'s README is published as `<name>.bin` with `application/octet-stream`. `folder` is a path label (`2026/press`), not
+aborts boot, and so does `publicCopy` with SVG uploads allowed unless every pipeline that runs
+`media.upload` runs `sanitize.svg` before it, with no step in between that writes the uploaded files.
+Each stored SVG records whether its bytes passed `sanitize.svg` that way — `media.upload` knows it
+from the pipeline it runs in, never from the request. Only such an SVG is stored as `<name>.svg` and
+served as `image/svg+xml`, on `GET /media/:id/:name`, on `GET /media/:id/file` and in the public
+copy. Every other SVG — one uploaded through a pipeline without `sanitize.svg` while `publicCopy` was
+off, for instance — is served like a type outside the list, as `<name>.bin` with
+`application/octet-stream`, and stays so after `publicCopy` and `sanitize.svg` are turned on; each
+write of its public copy logs a warning naming its id. So an unsanitized SVG is never served inline,
+neither here nor from the public copy. `folder` is a path label (`2026/press`), not
 a directory: segments only `[A-Za-z0-9._-]`, separated by `/`, leading/trailing `/` are stripped,
 `.`/`..` → 400. `filename` starts out as the public name (see above) and is sanitized on rename
 (basename only, characters outside `[A-Za-z0-9._-]` → `-`, leading `.`/`-` stripped, empty → `file`)

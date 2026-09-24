@@ -19,18 +19,42 @@ script) is the one that knows.
 ## One public URL per file
 
 Every item has exactly one public URL, `path`: `<publicPath>/<id>/<name>` (default `publicPath`:
-`/media`). `<name>` is decided once, at upload, and never changes again. Its extension comes from
-the content type the file is stored under, never from the uploaded name, so the checks on the type
-(`allowedTypes`, `deniedTypes`, `sanitize.svg`) and the type a static host serves by the extension
-are always the same one:
+`/media`). `<name>` is decided once, at upload, and never changes again.
 
-- a listed type (images, PDF, audio, video, `text/plain`, `text/csv`, JSON, ZIP; see
-  `extensions.ts`) gets its own extension, replacing the uploaded one: `Photo 1.JPG` sent as
-  `image/jpeg` becomes `Photo-1.jpg`, `x.html.png` sent as `image/png` becomes `x-html.png`;
+The declared content type has to be exactly one media type: `type/subtype` of RFC 9110 token
+characters, optionally followed by `;` parameters, with no comma. Anything else — a list such as
+`image/png; x=1, text/html` (a browser uses the last type of a list), or an empty type — is refused
+as `UNSUPPORTED` (415). Only the lower-cased `type/subtype` is stored, checked against
+`allowedTypes`/`deniedTypes` and written to the blob store: `IMAGE/PNG; x=1` is stored as
+`image/png`.
+
+`<name>`'s extension comes from that stored type, never from the uploaded name, so the checks on the
+type (`allowedTypes`, `deniedTypes`, `sanitize.svg`) and the type a static host serves by the
+extension are always the same one:
+
+- a listed type (images, PDF, audio, video, `text/plain`, `text/csv`, JSON, office documents such as
+  DOCX, XLSX, PPTX, ODT, ODS and ODP, and archives such as ZIP; see `EXTENSION_BY_TYPE` in
+  `@michaelthielemann/kestrel-contracts/mediaType`) gets its own extension, replacing the uploaded
+  one: `Photo 1.JPG` sent as `image/jpeg` becomes `Photo-1.jpg`, `x.html.png` sent as `image/png`
+  becomes `x-html.png`. None of them is a type a browser runs as a document;
 - every other type gets `.bin` and keeps the uploaded extension in the stem: `x.html` sent as
   `image/x-foo` or `text/html` becomes `x-html.bin`, `app.js` sent as `text/javascript` becomes
   `app-js.bin`. Its public copy is stored as `application/octet-stream`, and `media.serve` answers
-  with that type too, so every host offers it as a download and no browser runs it.
+  with that type too, so every host offers it as a download and no browser runs it;
+- an SVG is listed, but only an SVG whose bytes passed `sanitize.svg` is stored as `<name>.svg` and
+  served as `image/svg+xml`. `media.upload` records that per row, from what `attach()` found out
+  about the pipeline it runs in: `sanitize.svg` runs before it, and no step in between declares a
+  write to `files`. Nothing in the request can set it. Every other SVG is stored and served like an
+  unlisted type (`logo.svg` becomes `logo-svg.bin`, `application/octet-stream`, also on
+  `media.download`).
+
+Every writer of a public copy — this module's upload and `media.syncPublic`, and `images-default`'s
+variants and placeholders — takes the `Content-Type` from `publicFormOf` in the same helper, never
+from the stored value as it is. A row that already holds a type this version refuses (a list, an
+empty type) is therefore published as `application/octet-stream`. A row whose key's name does not end
+in the extension of its published type — such a row, or an SVG stored without the `sanitize.svg`
+record — is published under that name with every `.` turned into `-` plus the right extension
+(`logo.svg` as `logo-svg.bin`); `path` and `media.serve` follow that name.
 
 The stem is the uploaded name reduced to `[A-Za-z0-9_-]`: any other dot becomes `-`, so a name
 carries exactly one extension and a host that maps several extensions (`x.html.png`) sees only the
@@ -56,9 +80,12 @@ build step for media. New step `media.syncPublic` reconciles that copy tree with
 handled, writes a missing or mismatched copy, and removes a copy whose item is gone or whose file no
 longer matches — never touching anything deeper than one path segment under `<id>/`, since that is
 where `images-default`'s own variant copies live. An SVG, the one listed type a browser can run
-script in, reaches the copy only after `sanitize.svg`: with `publicCopy` set and SVG uploads allowed
-by `allowedTypes`/`deniedTypes`, boot fails unless every pipeline that runs `media.upload` runs
-`sanitize.svg` before it. Serve the copy tree with `X-Content-Type-Options: nosniff` and
+script in, reaches the copy as `image/svg+xml` only after `sanitize.svg`: with `publicCopy` set and
+SVG uploads allowed by `allowedTypes`/`deniedTypes`, boot fails unless every pipeline that runs
+`media.upload` runs `sanitize.svg` before it, with no step in between that declares a write to
+`files`. An SVG stored without it — uploaded while `publicCopy` was off, through a pipeline without
+`sanitize.svg` — keeps its `.bin` name and `application/octet-stream` type after `publicCopy` is
+turned on, and every write of its copy logs a warning naming the row's id. Serve the copy tree with `X-Content-Type-Options: nosniff` and
 `Content-Security-Policy: sandbox`, as the Node origin does, so a host never guesses a type or runs
 a document from it. It pages through the items by id, so an item
 deleted or added during the run never makes it skip another, and re-reads an item after writing its

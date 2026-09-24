@@ -7,7 +7,9 @@ files pass through untouched. Removed:
 `<script>`, `<style>`, `<foreignObject>`, `<image>`, `on*` handlers, `animate*`/`set`, and any
 `href`/`xlink:href` that is not an internal `#...` reference. Inline delivery of sanitized SVGs
 still needs `image/svg+xml` in core's `http.inlineTypes` – and the other way round: that entry
-without this module (or another one registering `sanitize.svg`) fails the boot.
+without this module (or another one registering `sanitize.svg`) fails the boot. `media-default`
+publishes an SVG as `image/svg+xml` only when this step ran before `media.upload` in the same
+pipeline, with no step in between that declares a write to `files`.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest

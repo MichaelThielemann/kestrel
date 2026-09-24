@@ -8,6 +8,7 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import type { Manifest, RunObserver } from "@michaelthielemann/kestrel";
 import { createContext, DONE, type Context } from "@michaelthielemann/kestrel/context";
 import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { failure } from "@michaelthielemann/kestrel/errors";
@@ -158,6 +159,36 @@ describe("media/default download and serve steps", () => {
     expect(served.filename).toBe("x-html.bin");
     const downloaded = boundaryCast<{ contentType: string }>(expectOk(await steps.download(fakeCtx([], {}, { id: item.id }))).result, "host");
     expect(downloaded.contentType).toBe("text/html");
+  });
+
+  it("upload and serve: an SVG is stored as one only in a run whose pipeline runs sanitize.svg before media.upload", async () => {
+    const { media, steps } = await make({ publicCopy: { prefix: "site/" } });
+    const observers: RunObserver[] = [];
+    const step = (module: string, name: string, writes: string[] = []) => ({ spec: name, name, module, description: { summary: "", reads: [], writes } });
+    const manifest = boundaryCast<Manifest>({ pipelines: [
+      { name: "serveMediaFile", steps: [step("media/default", "media.serve")] },
+      { name: "uploadMedia", steps: [step("sanitize/svg", "sanitize.svg", ["files"]), step("media/default", "media.upload", ["result"])] },
+    ] }, "host");
+    media.attach({ describe: () => manifest, observe: (observer) => { observers.push(observer); return () => {}; }, health: () => ({ ok: true, restartRequired: false, modules: [] }) });
+    const svg = (filename: string): Context["files"][number] => ({ field: "file", filename, contentType: "image/svg+xml", data: new TextEncoder().encode("<svg/>") });
+
+    const sanitised = fakeCtx([svg("logo.svg")]);
+    for (const observer of observers) observer.stepStart?.({ runId: sanitised.runId, pipeline: "uploadMedia", step: "media.upload", at: 1 });
+    const stored = boundaryCast<{ id: string; path: string }>(expectOk(await steps.upload(sanitised)).result, "host");
+    expect(stored.path).toBe(`/media/${stored.id}/logo.svg`);
+    const served = boundaryCast<{ contentType: string }>(expectOk(await steps.serve(fakeCtx([], {}, { id: stored.id, name: "logo.svg" }))).result, "host");
+    expect(served.contentType).toBe("image/svg+xml");
+
+    const unsanitised = fakeCtx([svg("other.svg")]);
+    const raw = boundaryCast<{ id: string; path: string }>(expectOk(await steps.upload(unsanitised)).result, "host");
+    expect(raw.path).toBe(`/media/${raw.id}/other-svg.bin`);
+    const rawServed = boundaryCast<{ contentType: string }>(expectOk(await steps.serve(fakeCtx([], {}, { id: raw.id, name: "other-svg.bin" }))).result, "host");
+    expect(rawServed.contentType).toBe("application/octet-stream");
+    expect(expectErr(await steps.serve(fakeCtx([], {}, { id: raw.id, name: "other.svg" })), "NOT_FOUND").status).toBe(404);
+
+    const downloaded = async (id: string): Promise<string> => boundaryCast<{ contentType: string }>(expectOk(await steps.download(fakeCtx([], {}, { id }))).result, "host").contentType;
+    expect(await downloaded(stored.id)).toBe("image/svg+xml");
+    expect(await downloaded(raw.id)).toBe("application/octet-stream");
   });
 
   it("serve: immutable cache-control, private without publicCopy, public with it", async () => {

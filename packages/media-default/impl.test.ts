@@ -11,7 +11,7 @@ import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testin
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
-import type { Introspection, Manifest } from "@michaelthielemann/kestrel";
+import type { Introspection, Manifest, RunObserver } from "@michaelthielemann/kestrel";
 import { COLLECTION, FOLDERS, createMediaDefault, nameFor, parseProvenance, publicTreeOf, safeName, urlNameOf, type Config } from "./impl.ts";
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
@@ -36,7 +36,7 @@ const make = async (config: Config = BASE_CONFIG) => {
   const logger: Logger = { step() {}, info: (m) => infos.push(m), error: (m) => errors.push(m) };
   return { media: await createMediaDefault(config, blobs, db, logger, () => 7), blobs, db, infos, errors };
 };
-function manifestWithPipelines(names: Array<{ pipeline: string; module: string; step: string }>): Manifest {
+function manifestWithPipelines(names: Array<{ pipeline: string; module: string; step: string; writes?: string[] }>): Manifest {
   return {
     core: { version: "0.0.0" },
     contracts: [],
@@ -44,14 +44,32 @@ function manifestWithPipelines(names: Array<{ pipeline: string; module: string; 
     steps: [],
     pipelines: [...new Set(names.map((n) => n.pipeline))].map((pipeline) => ({
       name: pipeline,
-      steps: names.filter((n) => n.pipeline === pipeline).map((n) => ({ spec: n.step, name: n.step, module: n.module, description: { summary: "", reads: [], writes: [] } })),
+      steps: names.filter((n) => n.pipeline === pipeline).map((n) => ({ spec: n.step, name: n.step, module: n.module, description: { summary: "", reads: [], writes: n.writes ?? [] } })),
     })),
     triggers: { http: [], events: [], crons: [] },
     warnings: [],
   };
 }
-function introspectionOf(manifest: Manifest): Introspection {
-  return { describe: () => manifest, observe: () => () => {}, health: () => ({ ok: true, restartRequired: false, modules: [] }) };
+function introspectionOf(manifest: Manifest, observers: RunObserver[] = []): Introspection {
+  return {
+    describe: () => manifest,
+    observe: (observer) => {
+      observers.push(observer);
+      return () => observers.splice(observers.indexOf(observer), 1);
+    },
+    health: () => ({ ok: true, restartRequired: false, modules: [] }),
+  };
+}
+function atUpload(observers: RunObserver[], runId: string, pipeline: string, step = "media.upload"): () => void {
+  for (const observer of observers) observer.stepStart?.({ runId, pipeline, step, at: 1 });
+  return () => {
+    for (const observer of observers) observer.stepEnd?.({ runId, pipeline, step, at: 1, ms: 1, status: 200, outcome: "ok" });
+  };
+}
+async function seedRow(db: Persistence, blobs: Blobstore, row: { id: string; key: string; contentType: string }): Promise<void> {
+  const name = urlNameOf(row.key);
+  expectOk(await db.createOne<Document>(COLLECTION, { filename: name, folder: "", location: name, size: 3, checksum: "x", status: "ready", createdAt: 1, updatedAt: 1, provenance: { origin: "unknown" }, width: null, height: null, alt: {}, title: {}, description: {}, ...row }));
+  expectOk(await blobs.put(row.key, new Uint8Array([1, 2, 3]), { contentType: row.contentType }));
 }
 
 describe("media/default", () => {
@@ -119,8 +137,21 @@ describe("media/default", () => {
     it("is not fooled by case in the uploaded extension or the declared type", () => {
       expect(nameFor("X.HTML", "image/x-foo")).toBe("X-HTML.bin");
       expect(nameFor("x.HtMl", "IMAGE/PNG")).toBe("x.png");
-      expect(nameFor("drawing.SVG", "IMAGE/SVG+XML; charset=utf-8")).toBe("drawing.svg");
+      expect(nameFor("drawing.SVG", "IMAGE/SVG+XML; charset=utf-8", true)).toBe("drawing.svg");
       expect(nameFor("x.svg", "Image/Svg")).toBe("x-svg.bin");
+    });
+
+    it("gives an SVG its own extension only when its bytes passed sanitize.svg", () => {
+      expect(nameFor("logo.svg", "image/svg+xml", true)).toBe("logo.svg");
+      expect(nameFor("logo.svg", "image/svg+xml")).toBe("logo-svg.bin");
+      expect(nameFor("logo.svg", "image/svg+xml", false)).toBe("logo-svg.bin");
+    });
+
+    it("keeps the extension of a common document or archive type", () => {
+      expect(nameFor("Report Q3.DOCX", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")).toBe("Report-Q3.docx");
+      expect(nameFor("sheet.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).toBe("sheet.xlsx");
+      expect(nameFor("slides.odp", "application/vnd.oasis.opendocument.presentation")).toBe("slides.odp");
+      expect(nameFor("bundle.zip", "application/x-zip-compressed")).toBe("bundle.zip");
     });
 
     it("never names a file like the variants directory or the download route next to it", () => {
@@ -139,29 +170,30 @@ describe("media/default", () => {
 
   describe("the public copy of a file whose type is not a known inert one", () => {
     const allowAll = { ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: ["image/svg+xml"], maxBytes: 100, publicCopy: { prefix: "site/" } };
-    const cases: Array<[string, string, string]> = [
-      ["x.html", "image/x-foo", "x-html.bin"],
-      ["x.html", "text/html", "x-html.bin"],
-      ["X.XHTML", "application/xhtml+xml", "X-XHTML.bin"],
-      ["app.js", "text/javascript", "app-js.bin"],
-      ["feed.xml", "application/xml", "feed-xml.bin"],
-      ["x.svg.html", "text/html; charset=utf-8", "x-svg-html.bin"],
+    const cases: Array<[string, string, string, string]> = [
+      ["x.html", "image/x-foo", "image/x-foo", "x-html.bin"],
+      ["x.html", "text/html", "text/html", "x-html.bin"],
+      ["X.XHTML", "application/xhtml+xml", "application/xhtml+xml", "X-XHTML.bin"],
+      ["app.js", "text/javascript", "text/javascript", "app-js.bin"],
+      ["feed.xml", "application/xml", "application/xml", "feed-xml.bin"],
+      ["x.svg.html", "text/html; charset=utf-8", "text/html", "x-svg-html.bin"],
     ];
-    for (const [filename, contentType, name] of cases) {
+    for (const [filename, contentType, stored, name] of cases) {
       it(`${filename} sent as ${contentType} is published as ${name}, application/octet-stream`, async () => {
         const { media, blobs } = await make(allowAll);
         const item = expectOk(await media.upload({ filename, contentType, data: new TextEncoder().encode("<script>alert(1)</script>") })).item;
         expect(media.toPublicItem(item).path).toBe(`/media/${item.id}/${name}`);
         expect(blobs.blobs.get(`site/media/${item.id}/${name}`)?.contentType).toBe("application/octet-stream");
-        expect(blobs.blobs.get(item.key)?.contentType).toBe(contentType);
+        expect(item.contentType).toBe(stored);
+        expect(blobs.blobs.get(item.key)?.contentType).toBe(stored);
         expect([...blobs.blobs.keys()].filter((key) => key.startsWith(`site/media/${item.id}/`))).toEqual([`site/media/${item.id}/${name}`]);
       });
     }
 
-    it("a known inert type keeps its own type in the public copy", async () => {
+    it("a known inert type keeps its own type in the public copy, without parameters", async () => {
       const { media, blobs } = await make(allowAll);
       const item = expectOk(await media.upload({ filename: "notes.TXT", contentType: "text/plain; charset=utf-8", data: new Uint8Array([1]) })).item;
-      expect(blobs.blobs.get(`site/media/${item.id}/notes.txt`)?.contentType).toBe("text/plain; charset=utf-8");
+      expect(blobs.blobs.get(`site/media/${item.id}/notes.txt`)?.contentType).toBe("text/plain");
     });
 
     it("syncPublic rewrites such a copy with the neutral type too", async () => {
@@ -170,6 +202,134 @@ describe("media/default", () => {
       blobs.blobs.delete(`site/media/${item.id}/x-html.bin`);
       expectOk(await media.syncPublic());
       expect(blobs.blobs.get(`site/media/${item.id}/x-html.bin`)?.contentType).toBe("application/octet-stream");
+    });
+  });
+
+  describe("a declared type that is not exactly one media type", () => {
+    const withCopy = { ...BASE_CONFIG, maxBytes: 100, publicCopy: { prefix: "site/" } };
+
+    for (const contentType of ["image/png; x=1, text/html", "image/x-foo, text/html", ""]) {
+      it(`an upload declared as ${JSON.stringify(contentType)} is refused as UNSUPPORTED and stores nothing`, async () => {
+        const { media, blobs, db } = await make({ ...withCopy, allowedTypes: ["*"] });
+        expect(expectErr(await media.upload({ filename: "a.png", contentType, data: new Uint8Array([1]) }), "UNSUPPORTED").status).toBe(415);
+        expect(expectOk(await db.count(COLLECTION, {}))).toBe(0);
+        expect(blobs.blobs.size).toBe(0);
+      });
+    }
+
+    it("an upload stores and publishes only the lower-cased type/subtype, whatever its case or parameters", async () => {
+      const { media, blobs } = await make(withCopy);
+      for (const [filename, contentType] of [["upper.png", "IMAGE/PNG"], ["params.png", "image/png; x=1"]] as const) {
+        const item = expectOk(await media.upload({ filename, contentType, data: new Uint8Array([1]) })).item;
+        expect(item.contentType).toBe("image/png");
+        expect(blobs.blobs.get(item.key)?.contentType).toBe("image/png");
+        expect(blobs.blobs.get(`site/media/${item.id}/${filename}`)?.contentType).toBe("image/png");
+      }
+    });
+
+    const stored: Array<[string, string, string]> = [
+      ["image/png; x=1, text/html", "a-png.bin", "application/octet-stream"],
+      ["image/x-foo, text/html", "a-png.bin", "application/octet-stream"],
+      ["", "a-png.bin", "application/octet-stream"],
+      ["IMAGE/PNG", "a.png", "image/png"],
+      ["image/png; x=1", "a.png", "image/png"],
+    ];
+    for (const [contentType, name, published] of stored) {
+      it(`a row already stored as ${JSON.stringify(contentType)} is published as ${name}, ${published}`, async () => {
+        const blobs = fakeBlobstore();
+        const db = createFakePersistence();
+        const media = await createMediaDefault(withCopy, blobs, db, noLogger, () => 7);
+        await seedRow(db, blobs, { id: "r1", key: "media/r1/a.png", contentType });
+        if (name !== "a.png") expectOk(await blobs.put("site/media/r1/a.png", new Uint8Array([1, 2, 3]), { contentType }));
+        expectOk(await media.syncPublic());
+        expect([...blobs.blobs.keys()].filter((key) => key.startsWith("site/"))).toEqual([`site/media/r1/${name}`]);
+        expect(blobs.blobs.get(`site/media/r1/${name}`)?.contentType).toBe(published);
+        const item = expectOk(await media.get("r1"));
+        expect(item === null ? null : media.toPublicItem(item).path).toBe(`/media/r1/${name}`);
+        expect(expectOk(await media.serveFile("r1", name))).not.toBeNull();
+      });
+    }
+  });
+
+  describe("an SVG's public copy", () => {
+    const svgAllowed: Config = { ...BASE_CONFIG, allowedTypes: ["image/*"], deniedTypes: [], maxBytes: 1000 };
+    const svg = { filename: "logo.svg", contentType: "image/svg+xml", data: new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>') };
+    const serve = { pipeline: "serveMediaFile", module: "media/default", step: "media.serve" };
+    const sanitize = { pipeline: "uploadMedia", module: "sanitize/svg", step: "sanitize.svg", writes: ["files"] };
+    const upload = { pipeline: "uploadMedia", module: "media/default", step: "media.upload" };
+    const warningsInto = (warnings: Array<{ message: string; data: unknown }>): Logger => ({ step() {}, info() {}, warn: (message, data) => warnings.push({ message, data }), error() {} });
+
+    it("uploaded while publicCopy was off and unsanitised, it is published as .bin and application/octet-stream once publicCopy and sanitize.svg are on", async () => {
+      const blobs = fakeBlobstore();
+      const db = createFakePersistence();
+      const before = await createMediaDefault(svgAllowed, blobs, db, noLogger, () => 7);
+      const observers: RunObserver[] = [];
+      before.attach(introspectionOf(manifestWithPipelines([{ pipeline: "importMedia", module: "media/default", step: "media.upload" }]), observers));
+      const leave = atUpload(observers, "run-1", "importMedia");
+      const item = expectOk(await before.upload(svg, "", undefined, before.sanitizesSvg("run-1"))).item;
+      leave();
+      expect(item.svgSanitized).toBe(false);
+      const warnings: Array<{ message: string; data: unknown }> = [];
+      const after = await createMediaDefault({ ...svgAllowed, publicCopy: { prefix: "site/" } }, blobs, db, warningsInto(warnings), () => 8);
+      after.attach(introspectionOf(manifestWithPipelines([serve, sanitize, upload])));
+      expectOk(await after.syncPublic());
+      expect([...blobs.blobs.keys()].filter((key) => key.startsWith("site/"))).toEqual([`site/media/${item.id}/logo-svg.bin`]);
+      expect(blobs.blobs.get(`site/media/${item.id}/logo-svg.bin`)?.contentType).toBe("application/octet-stream");
+      expect(after.toPublicItem(item).path).toBe(`/media/${item.id}/logo-svg.bin`);
+      expect(warnings).toEqual([{ message: expect.stringContaining(item.id) as unknown, data: { id: item.id } }]);
+    });
+
+    it("a row that does not record sanitize.svg is published as .bin, and its raw .svg copy is removed", async () => {
+      const blobs = fakeBlobstore();
+      const db = createFakePersistence();
+      const warnings: Array<{ message: string; data: unknown }> = [];
+      const media = await createMediaDefault({ ...svgAllowed, publicCopy: { prefix: "site/" } }, blobs, db, warningsInto(warnings), () => 7);
+      media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, upload])));
+      await seedRow(db, blobs, { id: "s1", key: "media/s1/logo.svg", contentType: "image/svg+xml" });
+      expectOk(await blobs.put("site/media/s1/logo.svg", new Uint8Array([1, 2, 3]), { contentType: "image/svg+xml" }));
+      expectOk(await media.syncPublic());
+      expect([...blobs.blobs.keys()].filter((key) => key.startsWith("site/"))).toEqual(["site/media/s1/logo-svg.bin"]);
+      expect(blobs.blobs.get("site/media/s1/logo-svg.bin")?.contentType).toBe("application/octet-stream");
+      expect(expectOk(await media.serveFile("s1", "logo.svg"))).toBeNull();
+      expect(expectOk(await media.serveFile("s1", "logo-svg.bin"))).not.toBeNull();
+      expect(warnings.map((w) => w.data)).toEqual([{ id: "s1" }]);
+    });
+
+    it("uploaded through a pipeline that runs sanitize.svg before media.upload, it is published as image/svg+xml", async () => {
+      const { media, blobs } = await make({ ...svgAllowed, publicCopy: { prefix: "site/" } });
+      const observers: RunObserver[] = [];
+      media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, upload]), observers));
+      const leave = atUpload(observers, "run-1", "uploadMedia");
+      expect(media.sanitizesSvg("run-1")).toBe(true);
+      const item = expectOk(await media.upload(svg, "", undefined, media.sanitizesSvg("run-1"))).item;
+      leave();
+      expect(media.sanitizesSvg("run-1")).toBe(false);
+      expect(item.svgSanitized).toBe(true);
+      expect(media.toPublicItem(item).path).toBe(`/media/${item.id}/logo.svg`);
+      expect(blobs.blobs.get(`site/media/${item.id}/logo.svg`)?.contentType).toBe("image/svg+xml");
+      blobs.blobs.delete(`site/media/${item.id}/logo.svg`);
+      expectOk(await media.syncPublic());
+      expect(blobs.blobs.get(`site/media/${item.id}/logo.svg`)?.contentType).toBe("image/svg+xml");
+    });
+
+    it("counts a run as sanitising only at media.upload of a pipeline whose sanitize.svg no later step overwrites the files after", async () => {
+      const { media } = await make(svgAllowed);
+      const observers: RunObserver[] = [];
+      const rewrite = { pipeline: "rewriteMedia", module: "probe/files", step: "probe.rename", writes: ["files"] };
+      media.attach(introspectionOf(manifestWithPipelines([
+        sanitize, upload,
+        { pipeline: "importMedia", module: "media/default", step: "media.upload" },
+        { ...sanitize, pipeline: "rewriteMedia" }, rewrite, { ...upload, pipeline: "rewriteMedia" },
+        { ...sanitize, pipeline: "reportMedia" }, { pipeline: "reportMedia", module: "probe/files", step: "probe.count", writes: ["result"] }, { ...upload, pipeline: "reportMedia" },
+      ]), observers));
+      atUpload(observers, "a", "uploadMedia");
+      atUpload(observers, "b", "importMedia");
+      atUpload(observers, "c", "rewriteMedia");
+      atUpload(observers, "d", "reportMedia");
+      atUpload(observers, "e", "uploadMedia", "sanitize.svg");
+      expect(["a", "b", "c", "d", "e"].map((runId) => media.sanitizesSvg(runId))).toEqual([true, false, false, true, false]);
+      const png = expectOk(await media.upload({ filename: "x.png", contentType: "image/png", data: new Uint8Array([1]) }, "", undefined, true)).item;
+      expect(png.svgSanitized).toBe(false);
     });
   });
 
@@ -724,6 +884,19 @@ describe("media/default", () => {
       expect(() => pngOnly.media.attach(introspectionOf(manifestWithPipelines([serve, upload])))).not.toThrow();
       const noCopy = await make({ ...BASE_CONFIG, allowedTypes: ["image/*"], deniedTypes: [] });
       expect(() => noCopy.media.attach(introspectionOf(manifestWithPipelines([upload])))).not.toThrow();
+    });
+
+    it("attach throws when publicCopy is set, SVG uploads are allowed and a step between sanitize.svg and media.upload writes the files", async () => {
+      const serve = { pipeline: "serveMediaFile", module: "media/default", step: "media.serve" };
+      const sanitize = { pipeline: "uploadMedia", module: "sanitize/svg", step: "sanitize.svg", writes: ["files"] };
+      const upload = { pipeline: "uploadMedia", module: "media/default", step: "media.upload" };
+      const { media } = await make({ ...BASE_CONFIG, allowedTypes: ["image/*"], deniedTypes: [], publicCopy: { prefix: "site/" } });
+      const writer = (writes: string[]) => ({ pipeline: "uploadMedia", module: "probe/files", step: "probe.rename", writes });
+      expect(() => media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, writer(["files"]), upload])))).toThrow('media/default: publicCopy is set and SVG uploads are allowed, but pipeline "uploadMedia" runs probe.rename between sanitize.svg and media.upload, which writes the uploaded files again – an unsanitised SVG would be published; run sanitize.svg before media.upload or deny image/svg+xml');
+      expect(() => media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, writer(["files.0?"]), upload])))).toThrow(/runs probe\.rename between sanitize\.svg and media\.upload/);
+      expect(() => media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, upload, writer(["files"]), { ...upload, step: "media.upload" }])))).toThrow(/runs probe\.rename between sanitize\.svg and media\.upload/);
+      expect(() => media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, writer(["result", "filesSeen"]), upload])))).not.toThrow();
+      expect(() => media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, writer(["files"]), { ...sanitize }, upload])))).not.toThrow();
     });
 
     it("attach throws when a pipeline runs media.syncPublic without publicCopy", async () => {

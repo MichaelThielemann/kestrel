@@ -1,11 +1,11 @@
 import { z } from "zod";
 import "@michaelthielemann/kestrel-contracts/authn";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { mediaTypeEssence, NEUTRAL_TYPE, publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { binaryResult, first, stepFactory, type Context, type StepResult } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { publicFormOf } from "./extensions.ts";
 import { createMediaDefault, SORTABLE, type ListOptions, type Media, type MediaItem, type SortField } from "./impl.ts";
 
 export const configSchema = z
@@ -27,6 +27,8 @@ export const configSchema = z
     anonymousList: z.enum(["ids", "all"]).default("ids"),
   })
   .strict();
+
+const SVG = "image/svg+xml";
 
 function localeOf(ctx: Context): string | undefined {
   return ctx.params.locale ?? first(ctx.payload.locale);
@@ -135,7 +137,7 @@ export default defineModule({
       if (ctx.files.length === 1) {
         const [file] = ctx.files;
         if (!file) throw new Error("media/default: upload: expected exactly one file");
-        const uploaded = await media.upload(file, folder, ctx.payload.provenance);
+        const uploaded = await media.upload(file, folder, ctx.payload.provenance, media.sanitizesSvg(ctx.runId));
         if (isErr(uploaded)) return ctx.fail(uploaded.error);
         const item = media.toPublicItem(uploaded.value.item);
         return uploaded.value.created ? ok({ ...ctx, result: item }) : ctx.done(item);
@@ -144,7 +146,7 @@ export default defineModule({
       const ids: string[] = [];
       const errors: Array<{ filename: string; status: number; code: string; message: string }> = [];
       for (const file of ctx.files) {
-        const uploaded = await media.upload(file, folder, ctx.payload.provenance);
+        const uploaded = await media.upload(file, folder, ctx.payload.provenance, media.sanitizesSvg(ctx.runId));
         if (!isErr(uploaded)) {
           items.push(uploaded.value.item);
           if (uploaded.value.created) ids.push(uploaded.value.item.id);
@@ -232,7 +234,7 @@ export default defineModule({
       if (isErr(found)) return ctx.fail(found.error);
       if (found.value === null) return notFound();
       const { item, data } = found.value;
-      const result = binaryResult(data, item.contentType, item.filename);
+      const result = binaryResult(data, mediaTypeEssence(item.contentType) === SVG && !item.svgSanitized ? NEUTRAL_TYPE : item.contentType, item.filename);
       if (item.provenance.origin !== "human") result.headers = { "x-content-provenance": item.provenance.origin };
       return ok({ ...ctx, result });
     },
@@ -245,7 +247,7 @@ export default defineModule({
       if (isErr(found)) return ctx.fail(found.error);
       if (found.value === null) return notFound();
       const { item, data } = found.value;
-      const result = binaryResult(data, publicFormOf(item.contentType).contentType, name);
+      const result = binaryResult(data, publicFormOf(item.contentType, item.svgSanitized).contentType, name);
       const headers: Record<string, string> = { "cache-control": media.publicCopyEnabled() ? "public, max-age=31536000, immutable" : "private, max-age=31536000, immutable" };
       if (item.provenance.origin !== "human") headers["x-content-provenance"] = item.provenance.origin;
       result.headers = headers;
