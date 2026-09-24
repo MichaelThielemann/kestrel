@@ -70,6 +70,15 @@ export interface Question {
 export interface UpgradePlugin {
   kind: string;
   detect(root: string): boolean | Promise<boolean>;
+  /**
+   * Loads the project at `root` into `scratch`, a fresh, uniquely-named directory this call alone
+   * ever sees — `check`/`fix` calls `load()` again, with a new `scratch`, for every re-ask round and
+   * every edit preview, and a host processing several projects in one process calls it again for
+   * each `root`. If `load()` uses its own module loader with a cache keyed by a fixed path (one that
+   * does not vary with `scratch`, such as a bundled fallback file), that cache must be fresh per call
+   * or disabled — otherwise a later call can silently answer from an earlier project's or an earlier
+   * preview's cached module instead of the current files.
+   */
   load(root: string, scratch: string): Promise<LoadResult>;
   sandbox?: Record<string, (config: unknown, scratch: string) => unknown>;
   rules?: readonly Rule[];

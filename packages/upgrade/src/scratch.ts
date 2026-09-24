@@ -96,20 +96,26 @@ export interface ScratchCopy {
   root: string;
 }
 
-/** Copies the project's own files into a fresh temp directory and points a symlinked `node_modules` at the project's real one, so loading and any file writes it triggers never touch the project. */
+/** Copies the project's own files into a fresh temp directory and points a symlinked `node_modules` at the project's real one, so loading and any file writes it triggers never touch the project. Removes and untracks its own partial copy before rethrowing when a step fails partway through, instead of leaking the directory. */
 export async function createScratchCopy(root: string): Promise<ScratchCopy> {
   const dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-"));
   trackTempDir(dir);
-  const files = await projectFiles(root);
-  for (const file of files) {
-    const from = join(root, file);
-    const to = join(dir, file);
-    await mkdir(dirname(to), { recursive: true });
-    await copyFile(from, to);
+  try {
+    const files = await projectFiles(root);
+    for (const file of files) {
+      const from = join(root, file);
+      const to = join(dir, file);
+      await mkdir(dirname(to), { recursive: true });
+      await copyFile(from, to);
+    }
+    await symlinkNodeModules(root, dir);
+    await mkdir(join(dir, "sandbox"), { recursive: true });
+    return { dir, root };
+  } catch (err) {
+    untrackTempDir(dir);
+    await rm(dir, { recursive: true, force: true });
+    throw err;
   }
-  await symlinkNodeModules(root, dir);
-  await mkdir(join(dir, "sandbox"), { recursive: true });
-  return { dir, root };
 }
 
 /** Removes a scratch copy's directory; always call this once a scratch copy is no longer needed. */

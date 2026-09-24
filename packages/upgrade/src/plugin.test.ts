@@ -34,10 +34,14 @@ const customRule: Rule = {
   check: () => [{ id: "plugin/custom", rule: "plugin/custom", severity: "info", tier: "source", where: {}, message: "from the plugin", suggestion: "n/a", fix: { kind: "none" }, docs: "n/a" }],
 };
 
-async function runJson(plugins: readonly UpgradePlugin[]): Promise<{ code: number; report: UpgradeReport }> {
+async function runJsonAt(root: string, plugins: readonly UpgradePlugin[]): Promise<{ code: number; report: UpgradeReport }> {
   const lines: string[] = [];
-  const code = await runUpgradeCli(["check", "--root", dir, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined, plugins });
+  const code = await runUpgradeCli(["check", "--root", root, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined, plugins });
   return { code, report: boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json") };
+}
+
+async function runJson(plugins: readonly UpgradePlugin[]): Promise<{ code: number; report: UpgradeReport }> {
+  return runJsonAt(dir, plugins);
 }
 
 describe("a plugin registered through RunUpgradeCliOptions.plugins", () => {
@@ -182,5 +186,38 @@ describe("UpgradePlugin.overrides", () => {
     const issue = report.findings.find((f) => f.rule === "load/failed");
     expect(issue?.message).toContain("deps/kestrel-range");
     expect(issue?.message).toContain("more than one");
+  });
+});
+
+describe("loader isolation across two projects in one process", () => {
+  it("gives load() a fresh, unique scratch directory for every call, never reusing one across projects or rounds", async () => {
+    const dirA = await mkdtemp(join(tmpdir(), "kestrel-upgrade-plugin-a-"));
+    const dirB = await mkdtemp(join(tmpdir(), "kestrel-upgrade-plugin-b-"));
+    try {
+      await writeFile(join(dirA, "package.json"), JSON.stringify({ name: "app-a", dependencies: {} }));
+      await writeFile(join(dirB, "package.json"), JSON.stringify({ name: "app-b", dependencies: {} }));
+      const seenScratchDirs = new Set<string>();
+      const plugin: UpgradePlugin = {
+        kind: "custom-host",
+        detect: () => true,
+        load: (root, scratch) => {
+          seenScratchDirs.add(scratch);
+          return Promise.resolve({
+            project: { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: `project-at-${root}`, configFile: join(scratch, "host.config.ts"), moduleFiles: new Map(), pipelineFiles: new Map() },
+            issues: [],
+          });
+        },
+      };
+      const { report: reportA } = await runJsonAt(dirA, [plugin]);
+      const { report: reportB } = await runJsonAt(dirB, [plugin]);
+      const { report: reportAAgain } = await runJsonAt(dirA, [plugin]);
+      expect(reportA.project.kind).toBe(`project-at-${dirA}`);
+      expect(reportB.project.kind).toBe(`project-at-${dirB}`);
+      expect(reportAAgain.project.kind).toBe(`project-at-${dirA}`);
+      expect(seenScratchDirs.size).toBe(3);
+    } finally {
+      await rm(dirA, { recursive: true, force: true });
+      await rm(dirB, { recursive: true, force: true });
+    }
   });
 });
