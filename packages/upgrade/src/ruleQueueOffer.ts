@@ -5,10 +5,10 @@ import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
 import { emitStepIsLocatable, insertStepAfterEmitOutsideGroup, replaceModuleListEntry, replaceModulesTsEntry } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { replaceDependency } from "./packageJson.ts";
-import type { Rule, RuleContext } from "./plugin.ts";
+import type { Rule, RuleContext, SwitchEditsResult } from "./plugin.ts";
 import type { AskFix, Edit, Finding } from "./report.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
-import { KESTREL_RANGE, combineEditParts, infoFinding, moduleEntry, packageJsonPath } from "./ruleHelpers.ts";
+import { KESTREL_RANGE, combineEditParts, fileForPipeline, infoFinding, moduleEntry, packageJsonPath, verifyEditsWith } from "./ruleHelpers.ts";
 
 const RULE_ID = "offer/event-queue";
 const SERVERLESS_MARKERS = ["vercel.json", "netlify.toml", "wrangler.toml", "serverless.yml", "template.yaml"];
@@ -28,7 +28,7 @@ function otherFilesImporting(ctx: RuleContext, packageName: string): string[] {
     const source = ctx.readFile(file);
     if (source !== undefined) candidates.set(file, source);
   }
-  for (const file of ctx.project.pipelineFiles.values()) {
+  for (const { file } of ctx.project.pipelineFiles) {
     const source = ctx.readFile(file);
     if (source !== undefined) candidates.set(file, source);
   }
@@ -52,22 +52,31 @@ function switchBlockers(ctx: RuleContext): string[] {
   return blockers;
 }
 
-function errKey(e: BootProblem): string {
-  return [e.code, e.owner, e.reason, e.module, e.pipeline, e.step, e.path].join(":");
-}
-
 type SwitchVerification = { verified: true; newErrors: readonly BootProblem[] } | { verified: false; noBootTier: boolean };
 
-async function verifySwitch(ctx: RuleContext, relayPipelines: readonly string[]): Promise<SwitchVerification> {
-  if (!ctx.previewBoot) return { verified: false, noBootTier: true };
-  try {
-    const preview = await ctx.previewBoot(switchEdits(ctx, relayPipelines));
-    if (!preview) return { verified: false, noBootTier: false };
-    const baseline = new Set(ctx.bootCheck.errors.map(errKey));
-    return { verified: true, newErrors: preview.errors.filter((e) => !baseline.has(errKey(e))) };
-  } catch {
-    return { verified: false, noBootTier: false };
+function builtInBlockers(ctx: RuleContext): string[] {
+  const unmet: string[] = [];
+  const marker = SERVERLESS_MARKERS.find((m) => existsSync(join(ctx.root, m)));
+  if (marker !== undefined) unmet.push(`"${marker}" suggests the process does not stay alive between requests`);
+  const blockers = switchBlockers(ctx);
+  if (blockers.length > 0) unmet.push(`events-direct is imported where the switch cannot rewrite it: ${blockers.join(", ")}`);
+  return unmet;
+}
+
+async function switchAvailability(ctx: RuleContext, relayPipelines: readonly string[]): Promise<{ edits: Edit[]; blockers: string[] }> {
+  if (ctx.switchEdits !== undefined) {
+    const result: SwitchEditsResult = await ctx.switchEdits(ctx, relayPipelines);
+    return { edits: Object.values(result.parts).flatMap((edits) => edits ?? []), blockers: [...result.blockers] };
   }
+  return { edits: switchEdits(ctx, relayPipelines), blockers: builtInBlockers(ctx) };
+}
+
+async function verifySwitch(ctx: RuleContext, relayPipelines: readonly string[]): Promise<SwitchVerification> {
+  const previewBoot = ctx.previewBoot;
+  if (!previewBoot) return { verified: false, noBootTier: true };
+  const { edits } = await switchAvailability(ctx, relayPipelines);
+  const result = ctx.verifyEdits ? await ctx.verifyEdits(edits, { pipelines: relayPipelines }) : await verifyEditsWith(previewBoot, ctx.bootCheck, edits, relayPipelines);
+  return result.verified ? { verified: true, newErrors: result.newErrors } : { verified: false, noBootTier: false };
 }
 
 function unverifiedGuidance(noBootTier: boolean): { subject: string; instruction: string } {
@@ -82,12 +91,10 @@ async function offerGate(ctx: RuleContext): Promise<{ unmet: string[]; unverifie
   if (!ctx.project.input.modules.some((m) => m.provides.some((c) => c.name === "persistence@1"))) unmet.push("no loaded module provides persistence@1");
   const sqlite = moduleEntry(ctx, "persistence-sqlite");
   if (sqlite !== undefined && isRecord(sqlite.config) && sqlite.config.file === ":memory:") unmet.push("persistence-sqlite's file is :memory:; a queue that vanishes on restart gains nothing");
-  const marker = SERVERLESS_MARKERS.find((m) => existsSync(join(ctx.root, m)));
-  if (marker !== undefined) unmet.push(`"${marker}" suggests the process does not stay alive between requests`);
   if ((await eventPayloadRule.check(ctx)).length > 0) unmet.push("an open steps/closed-event-input finding exists");
   if ((await emitsRule.check(ctx)).some((f) => f.fix.kind === "ask")) unmet.push("an open modules/emits finding exists");
-  const blockers = switchBlockers(ctx);
-  if (blockers.length > 0) unmet.push(`events-direct is imported where the switch cannot rewrite it: ${blockers.join(", ")}`);
+  const { blockers } = await switchAvailability(ctx, defaultRelayPipelines(ctx));
+  unmet.push(...blockers);
   const verification = await verifySwitch(ctx, defaultRelayPipelines(ctx));
   if (!verification.verified) return { unmet, unverified: true, noBootTier: verification.noBootTier };
   if (verification.newErrors.length > 0) unmet.push(`the switched project fails to boot: ${verification.newErrors.map((e) => e.reason).join("; ")}`);
@@ -127,7 +134,7 @@ function switchEdits(ctx: RuleContext, relayPipelines: readonly string[]): Edit[
   }
   const relayEvents = new Set(ctx.project.input.config.triggers.flatMap((t) => ("event" in t && relayPipelines.includes(t.pipeline) ? [t.event] : [])));
   for (const def of ctx.project.input.pipelines) {
-    const file = ctx.project.pipelineFiles.get(def.name);
+    const file = fileForPipeline(ctx, def.name);
     if (file === undefined) continue;
     const source = ctx.readFile(file);
     if (source === undefined) continue;
@@ -166,7 +173,7 @@ function verifiedSwitchEdits(ctx: RuleContext, relayPipelines: readonly string[]
 
   const relayEvents = new Set(ctx.project.input.config.triggers.flatMap((t) => ("event" in t && relayPipelines.includes(t.pipeline) ? [t.event] : [])));
   for (const def of ctx.project.input.pipelines) {
-    const file = ctx.project.pipelineFiles.get(def.name);
+    const file = fileForPipeline(ctx, def.name);
     const source = file === undefined ? undefined : ctx.readFile(file);
     if (file === undefined || source === undefined) continue;
     const steps = pipelineSteps(def.steps);
@@ -293,7 +300,7 @@ export const queueOfferRule: Rule = {
       ];
     }
 
-    const { edits, missing } = verifiedSwitchEdits(ctx, relayPipelines);
+    const { edits, missing } = ctx.switchEdits === undefined ? verifiedSwitchEdits(ctx, relayPipelines) : combineEditParts((await ctx.switchEdits(ctx, relayPipelines)).parts);
     return [
       {
         id: RULE_ID,

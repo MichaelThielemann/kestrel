@@ -383,6 +383,27 @@ Net changes since 5.8.1.
   `DataContentField`) the `data` command's underscore-field counter needs for a project layout where
   it cannot be read from a `content-default` module's config on `kestrel.config.ts`; the counter
   itself, and the rest of the `data` command, stays SQLite-only either way.
+- `kestrel-upgrade`'s plugin API moves from wholesale rule replacement toward hooks the built-in rules
+  themselves consult, after a real host's plugin needed to re-implement two of them and missed later
+  fixes to both. `LoadedProject` gains `contentModel?: DataContentModel`, which `model/underscore-field`
+  (including its orphaned-column warning) reads directly when present, instead of a `content-default`
+  module's config on `kestrel.config.ts`; `check`/`fix` derives it from `UpgradePlugin.dataModel` when
+  `load()` did not set it directly, so a plugin need only describe its content model once.
+  `UpgradePlugin` gains `switchEdits?(ctx, relayPipelines)`, supplying `offer/event-queue`'s switch (its
+  edits as the same all-or-nothing parts `combineEditParts` takes, plus deployment markers that forbid
+  it) for a project layout where events-direct is not a `kestrel.config.ts` module-list entry; the
+  built-in rule keeps every one of its own gates (an open event-payload or emits finding, the boot
+  preview, no default when unverified) and only asks the hook for the edits and the markers, so a
+  plugin no longer has to replace this rule to support its own layout. `RuleContext` gains `verifyEdits(edits, { pipelines })`, the diffed,
+  higher-level form of `previewBoot` (now documented as the low-level one): it folds a boot-preview
+  error diff together with whether every named pipeline was actually checked, so a rule cannot mistake
+  an unchecked pipeline for a verified one; `offer/event-queue` now verifies its own switch this way.
+  `LoadedProject.pipelineFiles` is a list of `{ file, pipelines }` instead of one file per pipeline
+  name, so a project layout keeping several pipelines in one file is reported once per file by a rule
+  that walks every one, not once per pipeline sharing it. `UpgradePlugin.load()`'s TSDoc documents that
+  a cached value in its `cache` parameter must be path-independent, or rebased onto the current
+  `scratch` on every call, and that `load()` itself (a config import, a plugin's own prepare step) runs
+  unconditionally, before any consent question — `--run-setup` only ever gates a module's own `setup()`.
 
 - `events-queue` coalesces: an event whose data carries a string `coalesceKey` is queued at most
   once per subscribed pipeline and key while an earlier row of that key has not started; a claim,

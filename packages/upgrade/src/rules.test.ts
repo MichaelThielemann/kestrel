@@ -35,7 +35,7 @@ async function projectWithModules(source: string, modules: Array<{ use: string; 
     kind: "backend",
     configFile,
     moduleFiles: new Map(),
-    pipelineFiles: new Map(),
+    pipelineFiles: [],
   };
 }
 
@@ -129,7 +129,7 @@ describe("steps/removed", () => {
     const pipelineFile = join(dir, "deleteMediaFolder.ts");
     const source = 'export default definePipeline({ name: "deleteMediaFolder", steps: ["media.folderItems"] });\n';
     await writeFile(pipelineFile, source);
-    const project: LoadedProject = { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: "backend", configFile: join(dir, "kestrel.config.ts"), moduleFiles: new Map(), pipelineFiles: new Map([["deleteMediaFolder", pipelineFile]]) };
+    const project: LoadedProject = { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: "backend", configFile: join(dir, "kestrel.config.ts"), moduleFiles: new Map(), pipelineFiles: [{ file: pipelineFile, pipelines: ["deleteMediaFolder"] }] };
     const findings = await removedStepsRule.check(contextFor(project));
     expect(findings).toHaveLength(1);
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
@@ -140,8 +140,21 @@ describe("steps/removed", () => {
   it("does not fire when no pipeline uses the removed step", async () => {
     const pipelineFile = join(dir, "p.ts");
     await writeFile(pipelineFile, 'export default definePipeline({ name: "p", steps: ["media.upload"] });\n');
-    const project: LoadedProject = { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: "backend", configFile: join(dir, "kestrel.config.ts"), moduleFiles: new Map(), pipelineFiles: new Map([["p", pipelineFile]]) };
+    const project: LoadedProject = { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: "backend", configFile: join(dir, "kestrel.config.ts"), moduleFiles: new Map(), pipelineFiles: [{ file: pipelineFile, pipelines: ["p"] }] };
     expect(await removedStepsRule.check(contextFor(project))).toEqual([]);
+  });
+
+  it("reports the removed step once per file, even when several pipelines share it", async () => {
+    const pipelineFile = join(dir, "combined.ts");
+    const source = 'export const a = definePipeline({ name: "a", steps: ["media.folderItems"] });\nexport const b = definePipeline({ name: "b", steps: ["media.upload"] });\n';
+    await writeFile(pipelineFile, source);
+    const project: LoadedProject = { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: "backend", configFile: join(dir, "kestrel.config.ts"), moduleFiles: new Map(), pipelineFiles: [{ file: pipelineFile, pipelines: ["a", "b"] }] };
+    const findings = await removedStepsRule.check(contextFor(project));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.where).toEqual({ file: pipelineFile });
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const { text } = applyEdits(source, edits);
+    expect(text).toContain('"media.listFolderItems"');
   });
 });
 

@@ -2,7 +2,7 @@ import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
 import { insertPipelineStep } from "./edits.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding, FindingLocation } from "./report.ts";
-import { finding, hasModule } from "./ruleHelpers.ts";
+import { fileForPipeline, finding, hasModule } from "./ruleHelpers.ts";
 
 const RULE_ID = "pipelines/verified-user";
 
@@ -36,7 +36,7 @@ export const verifiedUserRule: Rule = {
       if (targetIndex === -1) continue;
       if (steps.slice(0, targetIndex).some((s) => s.startsWith("authn.verifyUser:"))) continue;
 
-      const file = ctx.project.pipelineFiles.get(def.name);
+      const file = fileForPipeline(ctx, def.name);
       const where = locationOf(def.name, file);
       const message = `pipeline "${def.name}" calls revisions.reassignAuthor without a preceding authn.verifyUser step`;
 
@@ -81,7 +81,7 @@ export const verifiedUserRule: Rule = {
   applyAnswer(id, value, ctx) {
     if (!id.startsWith("verified-user-path:") || value === "other" || value === "split manually") return undefined;
     const pipelineName = id.slice("verified-user-path:".length);
-    const file = ctx.project.pipelineFiles.get(pipelineName);
+    const file = fileForPipeline(ctx, pipelineName);
     const source = file === undefined ? undefined : ctx.readFile(file);
     if (file === undefined || source === undefined) return undefined;
     const edit = insertPipelineStep(file, source, { pipelineName, anchorStep: "revisions.reassignAuthor", position: "before", newStep: `authn.verifyUser:${value}`, ...(ctx.locateSteps === undefined ? {} : { locateSteps: ctx.locateSteps }) });

@@ -12,10 +12,11 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { loadBackendProject, loadIssuesAsFindings, type LoadIssue, type LoadResult } from "./project.ts";
-import type { LoadedProject, Rule, RunUpgradeCliOptions, UpgradePlugin } from "./plugin.ts";
+import type { LoadedProject, Rule, RuleContext, RunUpgradeCliOptions, SwitchEditsResult, UpgradePlugin } from "./plugin.ts";
 import { detectPlugin, mergeRules, overrideConflicts } from "./pluginRules.ts";
 import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity, type UpgradeReport } from "./report.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
+import { verifyEditsWith, type VerifyEditsResult } from "./ruleHelpers.ts";
 import { sandboxBootInput, type SandboxTable } from "./sandbox.ts";
 import { createScratchCopy, removeScratchCopy } from "./scratch.ts";
 import { verifiesAfterEdit } from "./verify.ts";
@@ -29,8 +30,19 @@ interface ResolvedProject {
   ownsPackages: readonly string[];
   locateSteps?: StepListLocator;
   locateModelFields?: ModelFieldsLocator;
+  switchEdits?: (ctx: RuleContext, relayPipelines: readonly string[]) => Promise<SwitchEditsResult>;
   notices: Finding[];
   reload: (scratchDir: string) => Promise<LoadResult>;
+}
+
+async function withDerivedContentModel(project: LoadedProject | undefined, plugin: UpgradePlugin, root: string): Promise<LoadedProject | undefined> {
+  if (project === undefined || project.contentModel !== undefined || plugin.dataModel === undefined) return project;
+  try {
+    const derived = await plugin.dataModel(root);
+    return derived === undefined ? project : { ...project, contentModel: derived };
+  } catch {
+    return project;
+  }
 }
 
 async function resolveProject(root: string, entry: string | undefined, scratchDir: string, plugins: readonly UpgradePlugin[], cache: Map<string, unknown>): Promise<ResolvedProject> {
@@ -47,7 +59,12 @@ async function resolveProject(root: string, entry: string | undefined, scratchDi
   const { rules, notices } = mergeRules(DEFAULT_RULES, plugin);
   const sandboxEntries = plugin.sandbox === undefined ? {} : { sandboxEntries: plugin.sandbox };
   const ownsPackages = plugin.ownsPackages ?? [];
-  const locators = { ...(plugin.locateSteps === undefined ? {} : { locateSteps: plugin.locateSteps }), ...(plugin.locateModelFields === undefined ? {} : { locateModelFields: plugin.locateModelFields }) };
+  const switchEditsHook = plugin.switchEdits;
+  const locators = {
+    ...(plugin.locateSteps === undefined ? {} : { locateSteps: plugin.locateSteps }),
+    ...(plugin.locateModelFields === undefined ? {} : { locateModelFields: plugin.locateModelFields }),
+    ...(switchEditsHook === undefined ? {} : { switchEdits: (ctx: RuleContext, relayPipelines: readonly string[]): Promise<SwitchEditsResult> => switchEditsHook(ctx, relayPipelines) }),
+  };
   const reload = async (dir: string): Promise<LoadResult> => {
     try {
       return await plugin.load(root, dir, cache);
@@ -56,7 +73,8 @@ async function resolveProject(root: string, entry: string | undefined, scratchDi
     }
   };
   try {
-    const { project, issues } = await plugin.load(root, scratchDir, cache);
+    const { project: loaded, issues } = await plugin.load(root, scratchDir, cache);
+    const project = await withDerivedContentModel(loaded, plugin, root);
     return { ...(project === undefined ? {} : { project }), issues: [...detectIssues, ...issues], rules, ownsPackages, notices, ...sandboxEntries, ...locators, reload };
   } catch (err) {
     return { issues: [...detectIssues, { message: err instanceof Error ? err.message : String(err) }], rules, ownsPackages, notices, ...sandboxEntries, ...locators, reload };
@@ -164,7 +182,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
     }
 
     const pluginCache = options.pluginCache ?? new Map<string, unknown>();
-    const { project, issues, rules, sandboxEntries, ownsPackages, locateSteps, locateModelFields, notices, reload } = await resolveProject(root, entry, scratch.dir, options.plugins ?? [], pluginCache);
+    const { project, issues, rules, sandboxEntries, ownsPackages, locateSteps, locateModelFields, switchEdits, notices, reload } = await resolveProject(root, entry, scratch.dir, options.plugins ?? [], pluginCache);
     findings.push(...loadIssuesAsFindings(issues), ...notices);
 
     let tiers: UpgradeReport["tiers"] = { source: "not-run", load: "not-run", boot: "not-run", data: "not-run" };
@@ -234,6 +252,11 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       }
 
       const projectWithData = options.dataReport === undefined ? project : { ...project, dataReport: options.dataReport };
+      const boundPreviewBoot = previewBoot;
+      const verifyEdits =
+        boundPreviewBoot === undefined
+          ? undefined
+          : (edits: readonly Edit[], verifyOptions?: { pipelines?: readonly string[] }): Promise<VerifyEditsResult> => verifyEditsWith(boundPreviewBoot, bootCheck, edits, verifyOptions?.pipelines ?? []);
       const ctx = {
         root: scratch.dir,
         scratch: scratch.dir,
@@ -244,7 +267,9 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         ownsPackages,
         ...(locateSteps === undefined ? {} : { locateSteps }),
         ...(locateModelFields === undefined ? {} : { locateModelFields }),
+        ...(switchEdits === undefined ? {} : { switchEdits }),
         ...(previewBoot === undefined ? {} : { previewBoot }),
+        ...(verifyEdits === undefined ? {} : { verifyEdits }),
       };
       for (const rule of rules) findings.push(...(await rule.check(ctx)));
 

@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { BootCheck, BootProblem } from "@michaelthielemann/kestrel";
 import type { RuleContext } from "./plugin.ts";
 import type { Edit, Finding, FindingLocation, Severity } from "./report.ts";
 import { useToken } from "./useToken.ts";
@@ -42,6 +43,41 @@ export function hasModule(ctx: RuleContext, token: string): boolean {
 
 export function localModuleFiles(ctx: RuleContext): Array<[string, string]> {
   return [...ctx.project.moduleFiles].filter(([, file]) => file.endsWith(".ts") || file.endsWith(".js"));
+}
+
+/** The file a named pipeline lives in, whichever `PipelineFile` entry lists it. */
+export function fileForPipeline(ctx: RuleContext, pipelineName: string): string | undefined {
+  return ctx.project.pipelineFiles.find((f) => f.pipelines.includes(pipelineName))?.file;
+}
+
+function errKey(e: BootProblem): string {
+  return [e.code, e.owner, e.reason, e.module, e.pipeline, e.step, e.path].join(":");
+}
+
+export interface VerifyEditsResult {
+  verified: boolean;
+  newErrors: readonly BootProblem[];
+  unchecked: readonly string[];
+}
+
+/**
+ * The shared implementation behind `RuleContext.verifyEdits`: runs `previewBoot(edits)`, diffs its
+ * errors against `baseline`'s, and folds in whether every name in `pipelines` was actually checked.
+ * A rule falls back to calling this directly with `ctx.previewBoot`/`ctx.bootCheck` when `ctx.verifyEdits`
+ * itself is absent (a hand-built context older than that field).
+ */
+export async function verifyEditsWith(previewBoot: ((edits: readonly Edit[]) => Promise<BootCheck | undefined>) | undefined, baseline: BootCheck, edits: readonly Edit[], pipelines: readonly string[]): Promise<VerifyEditsResult> {
+  if (previewBoot === undefined) return { verified: false, newErrors: [], unchecked: pipelines };
+  try {
+    const raw = await previewBoot(edits);
+    if (raw === undefined) return { verified: false, newErrors: [], unchecked: pipelines };
+    const unchecked = raw.notChecked.filter((item) => item.kind === "pipeline" && pipelines.includes(item.name)).map((item) => item.name);
+    const baselineKeys = new Set(baseline.errors.map(errKey));
+    const newErrors = raw.errors.filter((e) => !baselineKeys.has(errKey(e)));
+    return { verified: unchecked.length === 0, newErrors, unchecked };
+  } catch {
+    return { verified: false, newErrors: [], unchecked: pipelines };
+  }
 }
 
 export function pipelinesTriggeredBy(ctx: RuleContext, kind: "http" | "event" | "cron"): Set<string> {

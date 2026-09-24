@@ -1,8 +1,10 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { isString } from "./guards.ts";
 import { runUpgradeCli } from "./plugin.ts";
 import type { LoadResult, Rule, UpgradePlugin } from "./plugin.ts";
 import type { UpgradeReport } from "./report.ts";
@@ -23,7 +25,7 @@ function customProject(): LoadResult {
       kind: "custom-host",
       configFile: join(dir, "host.config.ts"),
       moduleFiles: new Map(),
-      pipelineFiles: new Map(),
+      pipelineFiles: [],
     },
     issues: [],
   };
@@ -203,7 +205,7 @@ describe("loader isolation across two projects in one process", () => {
         load: (root, scratch) => {
           seenScratchDirs.add(scratch);
           return Promise.resolve({
-            project: { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: `project-at-${root}`, configFile: join(scratch, "host.config.ts"), moduleFiles: new Map(), pipelineFiles: new Map() },
+            project: { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: `project-at-${root}`, configFile: join(scratch, "host.config.ts"), moduleFiles: new Map(), pipelineFiles: [] },
             issues: [],
           });
         },
@@ -257,6 +259,32 @@ describe("UpgradePlugin.load()'s cache parameter", () => {
     await runUpgradeCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
     await runUpgradeCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
     expect(prepareCount).toBe(2);
+  });
+
+  it("documents the failure mode of caching a scratch-dependent value under a fixed key: a later call gets a directory the engine already removed", async () => {
+    const seenScratchDirs: string[] = [];
+    let cachedConfigFile: string | undefined;
+    const plugin: UpgradePlugin = {
+      kind: "custom-host",
+      detect: () => true,
+      load: (_root, scratch, cache) => {
+        seenScratchDirs.push(scratch);
+        if (!cache.has("configFile")) cache.set("configFile", join(scratch, "host.config.ts"));
+        const cached = cache.get("configFile");
+        const configFile = isString(cached) ? cached : join(scratch, "host.config.ts");
+        cachedConfigFile = configFile;
+        return Promise.resolve({
+          project: { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: "custom-host", configFile, moduleFiles: new Map(), pipelineFiles: [] },
+          issues: [],
+        });
+      },
+    };
+    await runUpgradeCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    expect(seenScratchDirs.length).toBeGreaterThan(1);
+    expect(new Set(seenScratchDirs).size).toBeGreaterThan(1);
+    expect(cachedConfigFile).toBe(join(seenScratchDirs[0]!, "host.config.ts"));
+    expect(cachedConfigFile).not.toBe(join(seenScratchDirs.at(-1)!, "host.config.ts"));
+    expect(existsSync(seenScratchDirs[0]!)).toBe(false);
   });
 });
 

@@ -55,7 +55,7 @@ async function project(options: { configModules?: Array<{ use: string; config?: 
     kind: "backend",
     configFile,
     moduleFiles: new Map(Object.entries(options.moduleFiles ?? {})),
-    pipelineFiles: new Map(Object.entries(options.pipelineFiles ?? {})),
+    pipelineFiles: Object.entries(options.pipelineFiles ?? {}).map(([name, file]) => ({ file, pipelines: [name] })),
   };
 }
 
@@ -129,6 +129,38 @@ describe("pipelines/verified-user", () => {
     expect(text.indexOf('"authn.requireUser"')).toBeLessThan(text.indexOf("authn.verifyUser:reassignTo"));
     expect(text.indexOf("authz.require")).toBeLessThan(text.indexOf("authn.verifyUser:reassignTo"));
     expect(text.indexOf("authn.verifyUser:reassignTo")).toBeLessThan(text.indexOf("revisions.reassignAuthor"));
+  });
+
+  it("resolves the right pipeline's file among several PipelineFile entries, not just the first one", async () => {
+    const decoyFile = join(dir, "other.ts");
+    await writeFile(decoyFile, 'export default definePipeline({ name: "other", steps: ["content.create"] });\n');
+    const file = join(dir, "retry.ts");
+    const source = 'export default definePipeline({ name: "retry", steps: ["authn.requireUser", "revisions.reassignAuthor"] });\n';
+    await writeFile(file, source);
+    const p: LoadedProject = {
+      input: {
+        config: { modules: [{ use: "@michaelthielemann/kestrel-authn-multi" }], triggers: [{ http: "POST /retry", pipeline: "retry" }] },
+        modules: [],
+        pipelines: [
+          { name: "other", steps: ["content.create"] },
+          { name: "retry", steps: ["authn.requireUser", "revisions.reassignAuthor"] },
+        ],
+      },
+      kind: "backend",
+      configFile: join(dir, "kestrel.config.ts"),
+      moduleFiles: new Map(),
+      pipelineFiles: [
+        { file: decoyFile, pipelines: ["other"] },
+        { file, pipelines: ["retry"] },
+      ],
+    };
+    const findings = await verifiedUserRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    expect(edits.every((e) => e.file === file)).toBe(true);
+    const { text } = applyEdits(source, edits);
+    expect(text).toContain('"authn.verifyUser:reassignTo", "revisions.reassignAuthor"');
   });
 
   it("asks when a pipeline has both http and event triggers", async () => {
@@ -416,6 +448,31 @@ describe("model/underscore-field", () => {
     expect(findings.filter((f) => f.message.includes("current field is named"))).toEqual([]);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.where.path).toBe("types.page.fields._hint");
+  });
+
+  it("reads a plugin-supplied contentModel directly, with no content-default module in the project's own module list", async () => {
+    const source = 'export default defineConfig({ modules: [{ use: "custom-content", config: { types: { page: { fields: { _hint: { type: "string" } } } } } }], triggers: [] });\n';
+    const p = await project({});
+    await writeFile(p.configFile, source);
+    const contentModel = { use: "custom-content", types: { page: { fields: { _hint: {} } } } };
+    const findings = await underscoreFieldRule.check(contextFor({ ...p, contentModel }, { dataReport: { underscoreFields: { "page._hint": { unlocalized: 0 } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.where.module).toBe("custom-content");
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const { text } = applyEdits(source, edits);
+    expect(text).toContain("fields: { hint:");
+  });
+
+  it("still warns about an orphaned old column via a plugin-supplied contentModel", async () => {
+    const p = await project({});
+    const contentModel = { use: "custom-content", types: { page: { fields: { hint: {} } } } };
+    const findings = await underscoreFieldRule.check(contextFor({ ...p, contentModel }, { dataReport: { underscoreFields: { "page._hint": { unlocalized: 2 } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe("warning");
+    expect(findings[0]?.fix.kind).toBe("none");
+    expect(findings[0]?.message).toContain('"_hint"');
+    expect(findings[0]?.message).toContain("2 stored value(s)");
   });
 });
 

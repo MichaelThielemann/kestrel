@@ -25,11 +25,10 @@ kestrel-upgrade data  --db <sqlite file> --root <dir> [--json] [--out <file>]
 diff for each automatic edit; `--write` shows the same diff per file and asks `y`/`n`/`d` on a
 terminal, or needs `--yes` without one (never silent). A question a finding's fix needs is asked
 over `node:readline` in order, resolved from `--answers` first, then the prompt, then `--yes`'s
-default; a question with no safe default stays open under `--yes`. `--data-report <file>` is a
-hand-written `{ "<key>": <value> }` file a rule can read back through `RuleContext.project.data`
-(for example `model/underscore-field` reads `"<type>.<field>": false` as proof, checked by hand,
-that no stored value exists for that field) — nothing in this package generates that file itself
-yet. `data` copies the given SQLite
+default; a question with no safe default stays open under `--yes`. `--data-report <file>` is the
+JSON the `data` command's own `--out <file>` writes, read back through `RuleContext.project.dataReport`
+(`model/underscore-field` reads its `underscoreFields` counts from there, kept separate from a
+plugin's own `LoadedProject.data` so a report never overwrites it). `data` copies the given SQLite
 file (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_check` — the only SQL
 the tool issues itself — then reads it through the project's own installed `persistence-sqlite`, so
 the storage layout stays that module's knowledge. Exit codes: `0` nothing at or above `--fail-on`
@@ -44,9 +43,12 @@ functions below.
 bin) can register its own project loader and rules as a plugin and delegate to this engine instead
 of shipping a second copy of it; `options.prompt`/`options.isInteractive` let a host supply its own
 UI instead of a terminal. `./plugin` carries the plugin API (`UpgradePlugin`, `Rule` — with its
-optional `applyAnswer`, `RuleContext`, `Question`). `./sandbox` carries `sandboxBootInput()`, which
-rewrites a loaded project's storage modules to write into a scratch directory instead of the
-project's own files, for a CI gate that wants `checkBoot()` without a full `kestrel-upgrade` run.
+optional `applyAnswer`, `RuleContext`, `Question`). A registered plugin's own `load()` (its config
+import, any prepare step it runs) executes unconditionally, before any consent question — `--run-setup`
+and its consent list only ever gate a module's own `setup()`, at the later boot tier. `./sandbox`
+carries `sandboxBootInput()`, which rewrites a loaded project's storage modules to write into a
+scratch directory instead of the project's own files, for a CI gate that wants `checkBoot()` without
+a full `kestrel-upgrade` run.
 
 **Not included.** Installing, committing, pushing or reaching the network — the tool prints the next
 command and lets the consumer run it. Draining a queue, renaming a stored column or any other write

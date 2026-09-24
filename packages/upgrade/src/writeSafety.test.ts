@@ -27,7 +27,7 @@ function customProject(configFile: string): LoadedProject {
     kind: "custom-host",
     configFile,
     moduleFiles: new Map(),
-    pipelineFiles: new Map(),
+    pipelineFiles: [],
   };
 }
 

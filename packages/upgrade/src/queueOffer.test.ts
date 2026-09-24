@@ -76,7 +76,10 @@ async function directProject(options: { sqliteFile?: string; publishPipeline?: b
     kind: "backend",
     configFile,
     moduleFiles: new Map(),
-    pipelineFiles: new Map([["createPage", createPageFile], ["publishPage", publishPageFile]]),
+    pipelineFiles: [
+      { file: createPageFile, pipelines: ["createPage"] },
+      { file: publishPageFile, pipelines: ["publishPage"] },
+    ],
   };
 }
 
@@ -324,5 +327,66 @@ export const definePipeline = pipelineDefiner<KnownStep>();
     expect(findings[0]?.fix.kind).not.toBe("auto");
     expect(findings[0]?.severity).toBe("error");
     expect(findings[0]?.message).toContain("publishPaeg");
+  });
+});
+
+describe("offer/event-queue: UpgradePlugin.switchEdits", () => {
+  it("uses the plugin's own edits for the switch, keeping every built-in gate", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const markerFile = join(dir, "marker.ts");
+    const pluginSwitchEdits = async (): Promise<{ parts: Record<string, Edit[] | undefined>; blockers: readonly string[] }> => ({
+      parts: { "plugin's own module swap": [{ file: markerFile, start: 0, end: 0, text: "// switched\n" }] },
+      blockers: [],
+    });
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers, ownsPackages: [], previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    expect(edits).toEqual([{ file: markerFile, start: 0, end: 0, text: "// switched\n" }]);
+  });
+
+  it("blocks the offer using the plugin's own deployment markers, not the built-in SERVERLESS_MARKERS check", async () => {
+    const p = await directProject();
+    const pluginSwitchEdits = async (): Promise<{ parts: Record<string, Edit[] | undefined>; blockers: readonly string[] }> => ({ parts: {}, blockers: ['nitro.preset is "vercel" with no long-running worker'] });
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [], previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("none");
+    expect(findings[0]?.message).toContain("nitro.preset");
+  });
+
+  it("goes manual, naming the missing part, when the plugin's switchEdits cannot locate one", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const pluginSwitchEdits = async (): Promise<{ parts: Record<string, Edit[] | undefined>; blockers: readonly string[] }> => ({ parts: { "plugin's own module swap": undefined }, blockers: [] });
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers, ownsPackages: [], previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).not.toBe("auto");
+    expect(findings[0]?.suggestion).toContain("plugin's own module swap");
+  });
+});
+
+describe("offer/event-queue: verifyEdits' notChecked-awareness", () => {
+  it("treats a relay pipeline the boot preview did not check as unverified, even with no new errors", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const previewBoot = async (): Promise<BootCheck> => ({ errors: [], warnings: [], notChecked: [{ kind: "pipeline", name: "publishPage", because: "excluded by --run-setup" }] });
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [], previewBoot };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("ask");
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
+  });
+
+  it("still offers the switch when every relay pipeline was checked and no new error appeared", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const previewBoot = async (): Promise<BootCheck> => ({ errors: [], warnings: [], notChecked: [{ kind: "pipeline", name: "someOtherPipeline", because: "unrelated" }] });
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [], previewBoot };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("ask");
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBe("no");
   });
 });

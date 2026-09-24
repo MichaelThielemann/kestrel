@@ -87,13 +87,14 @@ export const removedStepsRule: Rule = {
   id: "steps/removed",
   check(ctx) {
     const findings: Finding[] = [];
-    for (const [pipelineName, file] of ctx.project.pipelineFiles) {
+    for (const { file, pipelines } of ctx.project.pipelineFiles) {
       const source = ctx.readFile(file);
       if (source === undefined) continue;
       for (const [from, to] of Object.entries(REMOVED_STEPS)) {
         const edits = renameStringLiterals(file, source, from, to);
         if (edits.length === 0) continue;
-        findings.push(finding(`steps/removed:${pipelineName}:${from}`, "steps/removed", `"${from}" was removed; "${to}" is the same handler`, `rename "${from}" to "${to}"`, { file, pipeline: pipelineName }, edits, "docs/upgrading.md#steps-removed"));
+        const where = pipelines.length === 1 ? { file, pipeline: pipelines[0]! } : { file };
+        findings.push(finding(`steps/removed:${file}:${from}`, "steps/removed", `"${from}" was removed; "${to}" is the same handler`, `rename "${from}" to "${to}"`, where, edits, "docs/upgrading.md#steps-removed"));
       }
     }
     return findings;

@@ -3,7 +3,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { BootInput, KestrelConfigInput, ModuleDefinition, PipelineDefinition } from "@michaelthielemann/kestrel";
 import { loadConfig, loadModule, loadPipelineFile, pipelineFiles } from "@michaelthielemann/kestrel/load";
-import type { LoadIssue, LoadResult } from "./plugin.ts";
+import type { LoadIssue, LoadResult, PipelineFile } from "./plugin.ts";
 import type { Finding } from "./report.ts";
 
 export type { LoadIssue, LoadResult } from "./plugin.ts";
@@ -38,19 +38,19 @@ export async function loadBackendProject(root: string, entry?: string): Promise<
 
   const files = await pipelineFiles(root, config.pipelinesDir ?? "./pipelines");
   const pipelines: PipelineDefinition[] = [];
-  const pipelineFileMap = new Map<string, string>();
+  const pipelineFileList: PipelineFile[] = [];
   for (const file of files) {
     try {
       const def = await loadPipelineFile(file);
       pipelines.push(def);
-      pipelineFileMap.set(def.name, file);
+      pipelineFileList.push({ file, pipelines: [def.name] });
     } catch (err) {
       issues.push({ file, message: err instanceof Error ? err.message : String(err) });
     }
   }
 
   const input: BootInput = { config, modules, pipelines, root };
-  return { project: { input, kind: "backend", configFile, moduleFiles, pipelineFiles: pipelineFileMap }, issues };
+  return { project: { input, kind: "backend", configFile, moduleFiles, pipelineFiles: pipelineFileList }, issues };
 }
 
 export function loadIssuesAsFindings(issues: readonly LoadIssue[]): Finding[] {

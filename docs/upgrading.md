@@ -326,20 +326,31 @@ directory) with only the built-in rules.
 - `kind: string` — the plugin's own project kind, shown as `report.project.kind`.
 - `detect(root): boolean | Promise<boolean>` — whether this plugin owns the project at `root`.
 - `load(root, scratch, cache): Promise<LoadResult>` — loads the project into `scratch`, a fresh,
-  uniquely-named directory this call alone ever sees. `LoadResult` is `{ project?, issues }`, the
-  same shape the built-in loader itself returns: one bad file becomes an `issues` entry (surfacing as
-  a `load/failed` finding) without stopping the rest of the load; `project` is absent only when
-  nothing could be loaded at all. `load()` runs again, with a new `scratch`, for every re-ask round
-  and every edit preview within one `check`/`fix` invocation, and again for each project a host
-  processing several in one process loads — a loader with its own module cache keyed by a fixed path
-  (one that does not vary with `scratch`) must make that cache fresh per call or disable it, or a
-  later call can silently answer from an earlier project's or an earlier preview's cached module.
-  `cache` is one plain `Map`, shared by every `load()` call for this one invocation only (never across
-  two different projects, or two separate invocations): a plugin whose own loading runs something as
-  expensive as a build tool's own prepare step can stash the result there and skip repeating it for
-  the same project's later scratch copies. `LoadedProject.data` is the plugin's own, in whatever shape
-  it likes — `check`/`fix` never reads or writes it, and `--data-report`'s parsed content lands in the
-  separate `LoadedProject.dataReport` instead, so a data report never overwrites what `load()` stored.
+  uniquely-named directory this call alone ever sees. This runs unconditionally, before any consent
+  question is asked: importing `kestrel.config.ts` (or a plugin's own equivalent) and any prepare
+  step a plugin's own loading performs is project code the tool executes just by being pointed at a
+  project, the same way the source-tier-only `check` in step 1 never does but every later one does.
+  `--run-setup <use>` and its consent list govern a module's own `setup()` only, at the later boot
+  tier — never whether `load()` itself runs. `LoadResult` is `{ project?, issues }`, the same shape
+  the built-in loader itself returns: one bad file becomes an `issues` entry (surfacing as a
+  `load/failed` finding) without stopping the rest of the load; `project` is absent only when nothing
+  could be loaded at all. `load()` runs again, with a new `scratch`, for every re-ask round and every
+  edit preview within one `check`/`fix` invocation, and again for each project a host processing
+  several in one process loads — a loader with its own module cache keyed by a fixed path (one that
+  does not vary with `scratch`) must make that cache fresh per call or disable it, or a later call can
+  silently answer from an earlier project's or an earlier preview's cached module. `cache` is one
+  plain `Map`, shared by every `load()` call for this one invocation only (never across two different
+  projects, or two separate invocations): a plugin whose own loading runs something as expensive as a
+  build tool's own prepare step can stash the result there and skip repeating it for the same
+  project's later scratch copies — but only a path-independent value (a parsed config object, a
+  computed flag); a cached path or handle into `scratch` itself must be rebased on every call, or a
+  later round silently reads through a directory an earlier round's cleanup already removed.
+  `LoadedProject.data` is the plugin's own, in whatever shape it likes — `check`/`fix` never reads or
+  writes it, and `--data-report`'s parsed content lands in the separate `LoadedProject.dataReport`
+  instead, so a data report never overwrites what `load()` stored. `LoadedProject.pipelineFiles` is a
+  list of `{ file, pipelines }` — more than one pipeline name per entry for a layout that keeps
+  several in one file — instead of one file per pipeline name, so a rule that walks every pipeline
+  file reports at most once per file even then.
 - `sandbox?: Record<string, (config, scratch) => unknown>` — extra sandbox config-rewrite entries,
   keyed like `DEFAULT_SANDBOX_ENTRIES` (see `sandbox-blobstore-standin` above), merged with the
   built-in table.
@@ -348,7 +359,12 @@ directory) with only the built-in rules.
   or disables it entirely (`null`). A replacement is reported as an info finding, `plugin/rule-replaced`
   naming the id and the plugin; a disable is reported the same way as `plugin/rule-disabled`. Two
   plugins registered in the same `plugins` array claiming the same id, whether or not both would ever
-  be the active one for the same project, is a load error — nothing loads until that's fixed.
+  be the active one for the same project, is a load error — nothing loads until that's fixed. Reach
+  for `overrides` for a rule that is genuinely project-specific; for a built-in rule that only needs a
+  different project layout, a locator or hook (`locateSteps`, `locateModelFields`, `dataModel`,
+  `switchEdits`) keeps the plugin on the built-in rule's own future fixes instead. A replaced rule is
+  entirely the plugin's own from then on — a later fix to the built-in rule's own logic never reaches
+  a project using the replacement.
 - `ownsPackages?: readonly string[]` — package names this plugin owns the versioning of. The built-in
   dependency rules (`deps/kestrel-range` and the mixed-majors check) only ever read or edit this
   repo's own backend packages; a plugin's own package range is never rewritten or counted as a
@@ -362,16 +378,35 @@ directory) with only the built-in rules.
   searching the built-in shape; absent, both fall back to the exact built-in search unchanged.
 - `dataModel?(root): Promise<DataContentModel | undefined>` — supplies the content model the `data`
   command's underscore-field counter needs (`types`, each with a `fields` map of `{ localized? }`,
-  plus optional `locales`), for a project layout where it cannot be read from a `content-default`
-  module's config on `kestrel.config.ts`. Consulted through the same `detect()` used for `check`/`fix`;
-  `undefined`, from the hook or its result, skips underscore-field counting for this project without
-  failing the rest of the `data` command, which stays SQLite-only either way.
+  plus optional `locales` and `use`), for a project layout where it cannot be read from a
+  `content-default` module's config on `kestrel.config.ts`. Consulted through the same `detect()` used
+  for `check`/`fix`; `undefined`, from the hook or its result, skips underscore-field counting for
+  this project without failing the rest of the `data` command, which stays SQLite-only either way.
+  `check`/`fix` also derives `LoadedProject.contentModel` from this hook when `load()` did not set it
+  directly, so `model/underscore-field` (including its orphaned-column warning) reads the same model a
+  plugin need only describe once, whichever of the two it implements.
+- `switchEdits?(ctx, relayPipelines): Promise<{ parts, blockers }>` — supplies `offer/event-queue`'s
+  switch for a project layout where events-direct is not a `kestrel.config.ts` module-list entry:
+  `parts` is the switch's edits as the same all-or-nothing `Record<label, Edit[] | undefined>` shape
+  `combineEditParts` takes, and `blockers` names deployment markers that forbid the switch outright (a
+  `nitro.preset` with no long-running worker, say), the same role the built-in SERVERLESS_MARKERS
+  check plays for a CLI/server backend project. The built-in rule keeps every gate (an open
+  event-payload or emits finding, the boot preview, no default when unverified) and only asks this
+  hook for the edits and the extra markers — a plugin never has to replace `offer/event-queue` itself;
+  absent, the built-in kestrel.config.ts-shaped switch runs unchanged.
 - `questions?: readonly Question[]` — reserved for a plugin's own standalone questions.
 
-`RuleContext` (passed to every `Rule.check()`) additionally carries `ownsPackages`, `locateSteps` and
-`locateModelFields` from the active plugin, and `previewBoot(edits)`, which applies the given edits to
-a scratch copy, reloads the project (through the active plugin's own `load()`, or the built-in loader)
-and runs `checkBoot()` on it — the mechanism `fix` itself uses to report what remains after writing.
+`RuleContext` (passed to every `Rule.check()`) additionally carries `ownsPackages`, `locateSteps`,
+`locateModelFields` and `switchEdits` from the active plugin, and two forms of boot verification.
+`previewBoot(edits)` is the low-level form: it applies the given edits to a scratch copy, reloads the
+project (through the active plugin's own `load()`, or the built-in loader) and runs `checkBoot()` on
+it, returning the raw `BootCheck` or `undefined` when the boot tier is not available — the mechanism
+`fix` itself uses to report what remains after writing. `verifyEdits(edits, { pipelines })` is the
+higher-level form built on it: it diffs the preview's errors against this run's own baseline and folds
+in whether every name in `pipelines` was actually checked, answering `{ verified, newErrors,
+unchecked }` — `verified` only when the preview booted and none of `pipelines` is in the result's
+`notChecked`, so a rule that only diffed errors cannot mistake an unchecked pipeline for a clean one.
+`offer/event-queue` verifies its own switch this way.
 
 `@michaelthielemann/kestrel-upgrade/codemods` exports the primitives a plugin's own `Rule` or locator
 writes edits with, so it never needs a second copy of this engine's own edit machinery:
