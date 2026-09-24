@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { BootCheck, BootProblem, ModuleDefinition, PipelineDefinition } from "@michaelthielemann/kestrel";
 import { defineContract } from "@michaelthielemann/kestrel/defineContract";
 import { applyEdits } from "./apply.ts";
@@ -153,6 +154,23 @@ describe("offer/event-queue", () => {
     const createPageEdits = edits.filter((e) => e.file === createPageFile);
     const { text: createPageText } = applyEdits(createPageSource, createPageEdits);
     expect(createPageText).toContain('"events.emit:page.created", "events.relay"');
+  });
+
+  it("produces valid, parseable JSON when events-direct was appended last in an unsorted package.json", async () => {
+    const p = await directProject({ publishPipeline: true });
+    const pkgFile = join(dir, "package.json");
+    await writeFile(pkgFile, '{\n  "name": "app",\n  "dependencies": {\n    "@michaelthielemann/kestrel": "^6.0.0",\n    "@michaelthielemann/kestrel-persistence-sqlite": "^6.0.0",\n    "@michaelthielemann/kestrel-insights": "^6.0.0",\n    "@michaelthielemann/kestrel-events-direct": "^6.0.0"\n  }\n}\n');
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
+    const findings = await queueOfferRule.check(contextFor(p, answers));
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const pkgSource = readFileOrUndefined(pkgFile)!;
+    const pkgEdits = edits.filter((e) => e.file === pkgFile);
+    const { text } = applyEdits(pkgSource, pkgEdits);
+    expect(text).not.toContain(",,");
+    const parsed = boundaryCast<{ dependencies: Record<string, string> }>(JSON.parse(text), "json");
+    expect(parsed.dependencies["@michaelthielemann/kestrel-events-direct"]).toBeUndefined();
+    expect(parsed.dependencies["@michaelthielemann/kestrel-events-queue"]).toBe("^6.0.0");
+    expect(parsed.dependencies["@michaelthielemann/kestrel-insights"]).toBe("^6.0.0");
   });
 
   it("places events.relay after the whole atomic group when the emit is grouped, never inside it", async () => {

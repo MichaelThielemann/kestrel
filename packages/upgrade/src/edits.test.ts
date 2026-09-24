@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { applyEdits } from "./apply.ts";
 import { addModuleEmits, insertModuleListEntry, insertPipelineStep, insertStepAfterEmitOutsideGroup, markStepBinary, renameContentField, renameStringLiterals, replaceModuleListEntry, setModuleConfigProperties, setStepRequired } from "./edits.ts";
-import { removeDependency, setDependencyRange } from "./packageJson.ts";
+import { removeDependency, replaceDependency, setDependencyRange } from "./packageJson.ts";
 
 function parsePkg(text: string): { dependencies: Record<string, string> } {
   return boundaryCast<{ dependencies: Record<string, string> }>(JSON.parse(text), "json");
@@ -125,6 +125,26 @@ describe("package.json dependency edits", () => {
     const { text } = applyEdits(unsorted, [edit]);
     const parsed = parsePkg(text);
     expect(parsed.dependencies["@michaelthielemann/kestrel-events-direct"]).toBe("^5.8.0");
+    expect(parsed.dependencies["@michaelthielemann/kestrel-events-queue"]).toBe("^6.0.0");
+  });
+
+  it("replaceDependency swaps an unsorted, last, newly-appended entry for a new one without a double comma", () => {
+    const unsorted = `{\n  "dependencies": {\n    "@michaelthielemann/kestrel": "^6.0.0",\n    "@michaelthielemann/kestrel-persistence-sqlite": "^6.0.0",\n    "@michaelthielemann/kestrel-insights": "^6.0.0",\n    "@michaelthielemann/kestrel-events-direct": "^6.0.0"\n  }\n}\n`;
+    const edits = replaceDependency("package.json", unsorted, "dependencies", "@michaelthielemann/kestrel-events-direct", "@michaelthielemann/kestrel-events-queue", "^6.0.0");
+    const { text } = applyEdits(unsorted, edits);
+    expect(text).not.toContain(",,");
+    const parsed = parsePkg(text);
+    expect(parsed.dependencies["@michaelthielemann/kestrel-events-direct"]).toBeUndefined();
+    expect(parsed.dependencies["@michaelthielemann/kestrel-events-queue"]).toBe("^6.0.0");
+    expect(parsed.dependencies["@michaelthielemann/kestrel-insights"]).toBe("^6.0.0");
+  });
+
+  it("replaceDependency falls back to remove-plus-set when the target name already has its own entry", () => {
+    const source = `{\n  "dependencies": {\n    "@michaelthielemann/kestrel-events-direct": "^6.0.0",\n    "@michaelthielemann/kestrel-events-queue": "^5.0.0"\n  }\n}\n`;
+    const edits = replaceDependency("package.json", source, "dependencies", "@michaelthielemann/kestrel-events-direct", "@michaelthielemann/kestrel-events-queue", "^6.0.0");
+    const { text } = applyEdits(source, edits);
+    const parsed = parsePkg(text);
+    expect(parsed.dependencies["@michaelthielemann/kestrel-events-direct"]).toBeUndefined();
     expect(parsed.dependencies["@michaelthielemann/kestrel-events-queue"]).toBe("^6.0.0");
   });
 

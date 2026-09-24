@@ -97,3 +97,34 @@ export function removeDependency(file: string, source: string, mapKey: "dependen
   if (!match) return undefined;
   return { file, start: block.openBrace + 1 + match.index, end: block.openBrace + 1 + match.index + match[0].length, text: "" };
 }
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Replaces one dependency with another in the named map, in a single edit that swaps the key and
+ * value text in place and never touches a neighbouring comma — a separate remove-this plus
+ * append-that computes both against the same unedited text and can leave two edits fighting over
+ * the same comma when the removed entry was the last one. Falls back to a plain remove-and-set
+ * when `to` already has its own entry elsewhere in the map, since an in-place swap would then
+ * create a duplicate key.
+ */
+export function replaceDependency(file: string, source: string, mapKey: "dependencies" | "devDependencies" | "peerDependencies", from: string, to: string, range: string): Edit[] {
+  const block = findObjectBlock(source, mapKey);
+  if (block === undefined) return [setDependencyRange(file, source, mapKey, to, range)];
+  const inner = source.slice(block.openBrace + 1, block.closeBrace);
+  if (!entries(inner).some((e) => e.name === to)) {
+    const pattern = new RegExp(`"${escapeRegExp(from)}"(\\s*:\\s*)"[^"]*"`);
+    const match = pattern.exec(inner);
+    if (match) {
+      const start = block.openBrace + 1 + match.index;
+      const end = start + match[0].length;
+      return [{ file, start, end, text: `"${to}"${match[1]}"${range}"` }];
+    }
+  }
+  const edits: Edit[] = [setDependencyRange(file, source, mapKey, to, range)];
+  const removed = removeDependency(file, source, mapKey, from);
+  if (removed) edits.push(removed);
+  return edits;
+}

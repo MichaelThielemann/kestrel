@@ -4,7 +4,7 @@ import type { BootProblem } from "@michaelthielemann/kestrel";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
 import { insertStepAfterEmitOutsideGroup, replaceModuleListEntry } from "./edits.ts";
 import { isRecord } from "./guards.ts";
-import { removeDependency, setDependencyRange } from "./packageJson.ts";
+import { replaceDependency } from "./packageJson.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { AskFix, Edit, Finding } from "./report.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
@@ -61,10 +61,8 @@ function switchEdits(ctx: RuleContext, relayPipelines: readonly string[]): Edit[
   }
   const pkgFile = packageJsonPath(ctx);
   const pkgSource = ctx.readFile(pkgFile);
-  if (pkgSource !== undefined) {
-    edits.push(setDependencyRange(pkgFile, pkgSource, "dependencies", "@michaelthielemann/kestrel-events-queue", KESTREL_RANGE));
-    const removed = removeDependency(pkgFile, pkgSource, "dependencies", "@michaelthielemann/kestrel-events-direct");
-    if (removed) edits.push(removed);
+  if (pkgSource !== undefined && directEntry !== undefined) {
+    edits.push(...replaceDependency(pkgFile, pkgSource, "dependencies", directEntry.use, "@michaelthielemann/kestrel-events-queue", KESTREL_RANGE));
   }
   const relayEvents = new Set(ctx.project.input.config.triggers.flatMap((t) => ("event" in t && relayPipelines.includes(t.pipeline) ? [t.event] : [])));
   for (const def of ctx.project.input.pipelines) {
