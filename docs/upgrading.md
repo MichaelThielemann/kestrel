@@ -87,22 +87,29 @@ cutover (a replication snapshot, or `sqlite3 <db> ".backup <copy>"`).
 ## Cutover
 
 Switching an already-running project's event delivery to `events-queue`, or draining it before a
-later switch back, moves stored events through the queue rather than losing them:
+later switch back, moves stored events through the queue rather than losing them. The order is:
+stop writes, drain, stop the 5.8 process, deploy 6.0.
 
 1. Take a consistent snapshot of the database close to the moment of cutover (a replication
    snapshot, or `sqlite3 <db> ".backup <copy>"` while the process keeps running).
 2. Run `kestrel-upgrade data --db <copy> --root <project>` against it. `data/queue-unfanned` names
    every event name with rows not yet delivered to any pipeline; `data/queue-dead-unassigned` names
    dead-letter rows with no pipeline assigned yet. Neither blocks a deploy — they describe what the
-   first tick after boot will do.
+   first tick after boot will do. Both count only rows with no pipeline assigned yet, so they stop
+   being useful once a row has been fanned out at least once; they are a pre-deploy heads-up, not
+   the drain condition below.
 3. Deploy. On `events-queue`'s first scheduled tick, it fans every unfanned row out to every
    pipeline currently subscribed to that event, and re-fans a dead-letter row the same way on its
    next retry.
 4. Take another snapshot after the first few ticks and run `data` again to confirm both counts have
    dropped to 0 (or are only events still arriving normally).
-5. To move back to `events-direct`, or to stop running `events-queue` at all, drain it first: wait
-   for `data/queue-unfanned` and `data/queue-dead-unassigned` to both report nothing, then swap the
-   module. A row still in the queue when the module is removed is never delivered.
+5. To move back to `events-direct`, or to stop running `events-queue` at all, stop writes first,
+   then drain: call `events.readQueueStatus` on the running project and wait for both `pending` and
+   `running` to reach 0. This counts every row regardless of pipeline assignment, so it is the
+   correct condition after the first tick has already given every row a pipeline — `data`'s
+   pipeline-less counts no longer see those rows. With several worker processes, poll each one;
+   `running` must be 0 on all of them. Only once drained, swap the module. A row still in the queue
+   when the module is removed is never delivered.
 
 ## Rule reference
 
