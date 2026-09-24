@@ -146,9 +146,13 @@ Net changes since 5.8.1.
   `extendsOutput` now merges into every branch of a `oneOf`/`anyOf` instead of silently collapsing
   it to the extension alone, and `extendsItems` merges into the list-shaped branches of a union and
   falls back to a root merge on the others; the error names the step, which of the two keywords it
-  used, the reason (another type, a type array, an `allOf` schema, a union with a non-object or,
-  for `extendsItems`, no list-shaped branch, or an extension that is itself not an object schema)
-  and, where relevant, the earlier step that set the active schema.
+  used, the reason, and, where relevant, the earlier step that set the active schema. The reason is
+  one of: another type, a type array, a schema without a declared type, an `allOf` schema, `type:
+  "object"` together with `oneOf`/`anyOf`/`allOf`, a schema with both `oneOf` and `anyOf`, a union
+  with a non-object branch (a boolean branch included), an extension that is itself not an object
+  schema, or, for `extendsItems` only, no list-shaped branch in the union, or list items that are
+  not an object schema (a plain type or a union) at the root or in a union branch. Every one of
+  these previously coerced silently instead of failing boot.
 - `core`: `StepDescription` gains `terminalOutput`, the complete shape of `result` when a step ends
   the run with `ctx.done()` — never folded with any other step's `output`, `extendsOutput` or
   `extendsItems`, and never applied to a run that continues past the step. With `validateOutput`
@@ -160,14 +164,17 @@ Net changes since 5.8.1.
   shape, and declare `writes: ["result?"]` with no `output` for a step that only ever writes
   `result` through `ctx.done()`. Boot fails for `terminalOutput` on a step with no write to
   `result`, and for `terminalOutput` together with a `binary` step in the same pipeline.
-- `redirects-default`: `redirects.lookup` describes its hit as `terminalOutput` instead of `output`,
-  with `status` narrowed to `301 | 302 | 307 | 308` and the schema closed
-  (`additionalProperties: false`). The 200 of a route running it is now `anyOf` the page and
-  `{ redirect: { to, status } }` instead of losing the page shape to the redirect one, and generated
-  types become a union.
-- `media-default`: `media.upload`'s 200 is an `anyOf` as well; its continuing branch, which the fold
-  used to collapse to `{ _events }` alone once `events.relay` ran, carries the item or list result
-  again, with `_events` now optional in it. Responses themselves are unchanged.
+- `redirects-default`: `redirects.lookup`, which declared no `output` at all, now describes its hit
+  as `terminalOutput`: `{ redirect: { to, status } }`, with `status` narrowed to
+  `301 | 302 | 307 | 308` and the schema closed (`additionalProperties: false`). The 200 of a route
+  running it already published the page; it now also documents this redirect shape, combined as
+  `anyOf`, and generated types become a union.
+- `media-default`: `media.upload`'s 200, `oneOf[item, list]`, is now `anyOf` as well: the continuing
+  branch (after `events.relay`) carries the item or list result plus `_events`, and the idempotent
+  `ctx.done()` paths — which never reach `events.relay` — carry the item or list result alone.
+  `_events` is therefore not on every member of the union; a client narrows with `'_events' in res`,
+  the only way TypeScript narrows a union like this, not `res._events`. Responses themselves are
+  unchanged.
 - `media-default`: the step `media.folderItems`, deprecated since 5.4.0 in favour of
   `media.listFolderItems`, is removed; call `media.listFolderItems` instead.
 - `revisions-default`: `revisions.reassignAuthor` no longer reads `reassignTo` from the payload or
@@ -292,9 +299,8 @@ Net changes since 5.8.1.
 - `revisions.read`/`restore`/`label` are now pinned to reject a revision id that belongs to another
   document or collection, and `images.serve`/`images.read` to never return another media item's
   variant for a matching size name.
-- `persistence-sqlite`, `redirects-default`, `site-default`: `createOne`/`findOne`/`updateOne` now
-  declare `output: { type: "object" }`; `redirects.lookup` declares its real
-  `{ redirect: { to, status } }`; `site.resolveLinks` restates the `_links` field as its own
+- `persistence-sqlite`, `site-default`: `createOne`/`findOne`/`updateOne` now declare
+  `output: { type: "object" }`; `site.resolveLinks` restates the `_links` field as its own
   `extendsOutput`, alongside `site.resolve`'s existing `output`.
 - `openapi`: the fold that derives a pipeline's response schema from its steps' `describe().output`
   moved into `@michaelthielemann/kestrel/schema` (`resolveOutputSchema`, subpath-only); the
