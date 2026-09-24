@@ -4,6 +4,7 @@ import { relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { checkBoot, type BootCheck } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
+import { parseTs } from "./ast.ts";
 import { askFindings, parseAnswersFile, resolveAnswer, ttyPrompt, unknownAnswerIds, type PromptFn } from "./answers.ts";
 import { boolFlag, parseArgs, stringFlag, type ParsedArgs } from "./args.ts";
 import { unifiedDiff } from "./diff.ts";
@@ -263,6 +264,74 @@ async function isDirty(file: string, root: string): Promise<boolean> {
   }
 }
 
+function reparses(file: string, text: string): boolean {
+  if (file.endsWith(".json")) {
+    try {
+      JSON.parse(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    parseTs(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+interface FileState {
+  source: string;
+  current: string;
+}
+
+function verifyAndApply(findings: readonly Finding[]): { states: Map<string, FileState>; rejectedIds: Set<string> } {
+  const sources = new Map<string, string>();
+  const accepted = new Map<string, Edit[]>();
+  const rejectedIds = new Set<string>();
+  const sourceFor = (file: string): string | undefined => {
+    const existing = sources.get(file);
+    if (existing !== undefined) return existing;
+    if (!existsSync(file)) return undefined;
+    const source = readFileSync(file, "utf8");
+    sources.set(file, source);
+    return source;
+  };
+  for (const finding of findings) {
+    if (finding.fix.kind !== "auto" || finding.fix.edits.length === 0) continue;
+    const perFile = groupByFile(finding.fix.edits);
+    let ok = true;
+    for (const [file, edits] of perFile) {
+      const source = sourceFor(file);
+      if (source === undefined) {
+        ok = false;
+        break;
+      }
+      const { text } = applyEdits(source, [...(accepted.get(file) ?? []), ...edits]);
+      if (!reparses(file, text)) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) {
+      rejectedIds.add(finding.id);
+      continue;
+    }
+    for (const [file, edits] of perFile) accepted.set(file, [...(accepted.get(file) ?? []), ...edits]);
+  }
+  const states = new Map<string, FileState>();
+  for (const [file, source] of sources) {
+    const { text } = applyEdits(source, accepted.get(file) ?? []);
+    states.set(file, { source, current: text });
+  }
+  return { states, rejectedIds };
+}
+
+function downgradeRejected(findings: readonly Finding[], rejectedIds: ReadonlySet<string>): Finding[] {
+  return findings.map((f) => (rejectedIds.has(f.id) ? { ...f, fix: { kind: "manual" as const }, suggestion: `${f.suggestion} (the edit did not verify after applying; do this by hand)` } : f));
+}
+
 interface AskLoopResult {
   report: UpgradeReport;
   answers: Map<string, string>;
@@ -329,36 +398,32 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     return 2;
   }
 
-  const byFile = new Map<string, Edit[]>();
-  for (const finding of report.findings) {
-    if (finding.fix.kind !== "auto") continue;
-    for (const edit of finding.fix.edits) {
-      const list = byFile.get(edit.file) ?? [];
-      list.push(edit);
-      byFile.set(edit.file, list);
+  const { states, rejectedIds } = verifyAndApply(report.findings);
+  const adjustedFindings = downgradeRejected(report.findings, rejectedIds);
+  const adjustedReport: UpgradeReport = { ...report, findings: adjustedFindings, summary: summarize(adjustedFindings) };
+  const changed = [...states].filter(([, state]) => state.current !== state.source);
+
+  if (write && !allowDirty) {
+    for (const [file] of changed) {
+      if (await isDirty(file, root)) {
+        stderr(`"${relative(root, file)}" has uncommitted changes; pass --allow-dirty or commit first`);
+        return 2;
+      }
     }
   }
 
   const saveAnswersFile = stringFlag(args, "save-answers");
   const applied: string[] = [];
   const skipConfirmation = yes || !interactive;
-  for (const [file, edits] of byFile) {
-    if (write && !allowDirty && (await isDirty(file, root))) {
-      stderr(`"${relative(root, file)}" has uncommitted changes; pass --allow-dirty or commit first`);
-      return 2;
-    }
-    const source = existsSync(file) ? readFileSync(file, "utf8") : undefined;
-    if (source === undefined) continue;
-    const { text, applied: appliedEdits } = applyEdits(source, edits);
-    if (appliedEdits.length === 0) continue;
+  for (const [file, state] of changed) {
     if (!write) {
-      const diff = unifiedDiff(relative(root, file), source, text);
+      const diff = unifiedDiff(relative(root, file), state.source, state.current);
       if (diff !== "") stdout(diff);
       continue;
     }
-    const proceed = skipConfirmation || (await confirmFile(file, root, source, text, prompt));
+    const proceed = skipConfirmation || (await confirmFile(file, root, state.source, state.current, prompt));
     if (!proceed) continue;
-    writeFileSync(file, text);
+    writeFileSync(file, state.current);
     applied.push(relative(root, file));
   }
 
@@ -366,11 +431,11 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     for (const file of applied) stdout(`wrote ${file}`);
     if (applied.length > 0) stdout("run `pnpm install` to pick up any dependency range changes");
   } else {
-    printReport(report, args, stdout);
-    stdout(`after these edits: ${report.summary.error} errors remain (${report.summary.ask} need your answer, ${report.summary.manual} manual)`);
+    printReport(adjustedReport, args, stdout);
+    stdout(`after these edits: ${adjustedReport.summary.error} errors remain (${adjustedReport.summary.ask} need your answer, ${adjustedReport.summary.manual} manual)`);
   }
   if (write && saveAnswersFile !== undefined) writeFileSync(resolve(saveAnswersFile), JSON.stringify(Object.fromEntries(answers), null, 2));
-  return exitCodeFor(report.findings, failOn);
+  return exitCodeFor(adjustedReport.findings, failOn);
 }
 
 async function runData(args: ParsedArgs, stdout: (line: string) => void, stderr: (line: string) => void): Promise<number> {
