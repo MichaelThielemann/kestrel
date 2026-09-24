@@ -154,9 +154,10 @@ would hold its slot for good and the sync job would never reach the next image. 
 whose render fails this way is left `planned`, not counted as an attempt, and handed to the
 background loop to place right after the request.
 
-**Repeated failure** is bounded by `maxAttempts`: the last failure sets `state: "failed"` instead of
-`"error"`, and generate/sync/resume skip the variant from then on, so one broken original cannot
-burn the whole budget of the job forever. `images.serve` does not hide such a variant behind the
+**Repeated failure** is bounded by `maxAttempts`, and a rendered variant whose private blob or
+public copy cannot be written counts as a failed attempt too: the last failure sets `state:
+"failed"` instead of `"error"`, and generate/sync/resume skip the variant from then on, so one broken
+original cannot burn the whole budget of the job forever. `images.serve` does not hide such a variant behind the
 original: it keeps answering with the original's bytes and type, marked `x-kestrel-variant: original`,
 exactly like a `pending` one — a variant never 404s once it has been placed.
 `images.readStatus` counts `failed` per size next to `done`/`pending`/`error`

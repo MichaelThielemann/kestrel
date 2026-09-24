@@ -22,7 +22,9 @@ Every item has exactly one public URL, `path`: `<publicPath>/<id>/<name>` (defau
 `/media`). `<name>` is decided once, at upload, from the sent filename reduced to
 `[A-Za-z0-9._-]` with the extension of the content type (`Photo 1.JPG` sent as `image/jpeg` becomes
 `Photo-1.jpg`, so a static host that derives `Content-Type` from the extension serves the right one);
-it never changes again. `media.update`'s `filename` only changes the *display* name from then on —
+it never changes again. The names `variants` and `file` would collide with the variants directory
+next to the file and with the download route `/media/:id/file`, so such an upload is stored as
+`variants-upload` or `file-upload`. `media.update`'s `filename` only changes the *display* name from then on —
 neither the blob key nor `path` ever move, so renaming or moving an item needs no republish anywhere
 it is linked. A name still has to be unique per folder: the check runs against an internal
 `location` column (`folder + display filename`), never against the id-based blob key; a clash
@@ -42,10 +44,13 @@ build step for media. New step `media.syncPublic` reconciles that copy tree with
 `uploadStaleAfterMs` (default 15 minutes, an abandoned upload) the same way a normal failure is
 handled, writes a missing or mismatched copy, and removes a copy whose item is gone or whose file no
 longer matches — never touching anything deeper than one path segment under `<id>/`, since that is
-where `images-default`'s own variant copies live. It pages through the items by id, re-reads an
-item after writing its copy and removes the copy again when the item was deleted meanwhile, and
-reads a file's item once more right before removing the file, so an upload or a delete running at
-the same time never leaves a deleted item's copy behind or costs a ready item its copy. Boot fails if the copy tree and this module's own
+where `images-default`'s own variant copies live. It pages through the items by id, so an item
+deleted or added during the run never makes it skip another, and re-reads an item after writing its
+copy and removes the copy again when the item was deleted meanwhile; an upload or a delete running at
+the same time therefore never leaves a deleted item's copy behind or costs a ready item its copy. It
+marks an upload `failed` only while the row is still `uploading`, and an upload turns its row `ready`
+only under the same condition: when the sync abandoned it first, the upload removes what it wrote and
+answers `TRANSIENT`. Boot fails if the copy tree and this module's own
 storage `prefix` overlap, if `publicCopy` is set but no pipeline runs `media.serve`, or if a pipeline
 runs `media.syncPublic` without `publicCopy` set.
 
@@ -83,7 +88,8 @@ adds the bookkeeping other modules (`delivery-static`, `references-default`) rel
 depending on an image library.
 
 Config: `allowedTypes` (`image/*`, `application/pdf`, `*`), `deniedTypes` (default
-`image/svg+xml`, `text/html`, `application/xhtml+xml` — they can carry scripts), `maxBytes`,
+`image/svg+xml`, `text/html`, `application/xhtml+xml` — they can carry scripts; both lists are matched
+against the media type without parameters, ignoring case), `maxBytes`,
 `prefix` (default `media/`, must end with `/`), `publicPath` (default `/media`), `publicCopy`
 (optional `{ prefix }`), `uploadStaleAfterMs` (default 15 minutes), `anonymousList` (`"ids"` default,
 or `"all"` for a public catalogue), `locales`/`defaultLocale`.

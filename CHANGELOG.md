@@ -236,14 +236,21 @@ Net changes since 5.8.1.
   moving an item and renaming a folder change metadata only: no blob moves, and neither the key nor
   `path` changes. `filename` starts out equal to `<name>` and is the display name from then on. A name
   is still unique within its folder; a clash answers 409 with `details.field: "location"` (was
-  `"key"`).
+  `"key"`). A name that would collide with a path next to the file — `variants`, the directory of an
+  image's variants, or `file`, the download route — is stored with `-upload` appended.
+  - `allowedTypes` and `deniedTypes` compare the media type without parameters and ignoring case, so
+    `image/svg+xml; charset=utf-8` is denied wherever `image/svg+xml` is.
+  - An upload turns its row `ready` only while the row is still `uploading`. When `media.syncPublic`
+    abandoned a stalled upload meanwhile, the upload removes what it wrote and answers `TRANSIENT`
+    (503); uploading the file again succeeds.
   - A media item in any output no longer carries `key`, `checksum` or `status`.
   - Anonymous callers read media by id only: `media.list` without `ids`, and `media.listFolders`,
     answer 401 to a caller without an identity. Set `anonymousList: "all"` to allow listing the
     library anonymously.
   - Media stored by 5.x are not converted. The start-up key migration is removed, and setup fails when
     a stored item's key is not `<prefix><id>/<name>`, naming the first such item. Start 6.0.0 with an
-    empty media store.
+    empty media store, and with empty `images_variants` and `images_retired` collections: rows written
+    before 6.0.0 have no `slot`, so the one-row-per-size rule below does not cover them.
   - New step `media.serve` answers a file at its public URL (`params.id`, `params.name`), cacheable
     for a year as `immutable`; any other name is 404. `media.download` is unchanged.
   - `media.remove` and `media.removeFolder` delete the copy and the blob first and the row last, then
@@ -281,7 +288,11 @@ Net changes since 5.8.1.
   - A missing original is a data problem: `images.plan` and `images.generate` answer `INTERNAL` (500)
     for it instead of `TRANSIENT`, unless the item was deleted meanwhile. The repair pass in
     `images.resume` and the sync job log an item they cannot place or render and go on with the next
-    one; `images.resume` resumes a stalled sync job either way.
+    one; `images.resume` resumes a stalled sync job either way. The repair pass reads only media items
+    created in the last 24 hours.
+  - A failed write of a rendered variant, private or public, counts an attempt like a failed render,
+    so a size whose copy cannot be written gives up after `maxAttempts` instead of being retried for
+    good.
   - `images-default` raises `media.updated` with `ids` through `events@1` for items it made available,
     after `images.prune`, and for items whose variants changed because a size was added or its spec
     changed. It declares the event in `emits` and uses `events@1` optionally.
@@ -296,9 +307,10 @@ Net changes since 5.8.1.
   reconcile the copies with the stored items and add `_publicMedia` / `_publicVariants` to the result;
   `media.syncPublic` also treats an upload stuck longer than the new `uploadStaleAfterMs` (default 15
   minutes) as failed, and `images.syncPublic` plans missing variants and starts a sync job that
-  renders unrendered ones. Both syncs page through their rows by id and check a file's owner again
-  right before they remove it, so a concurrent upload, plan or delete never costs a live item its
-  copy. Setup fails when the copy location overlaps the module's own `prefix`; boot fails
+  renders unrendered ones. Both syncs page through their rows by id, so rows deleted or added during
+  a run never make them skip another, and `images.syncPublic` also reads a file's owner again right
+  before it removes the file, so a concurrent upload, plan or delete never costs a live item its copy.
+  Setup fails when the copy location overlaps the module's own `prefix`; boot fails
   when `publicCopy` is set and no pipeline runs the module's serve step, or when a pipeline runs a
   `syncPublic` step without `publicCopy`.
 - `StepDescription` gains an optional `anonymous: "required"`: the step's output is also published
@@ -307,7 +319,8 @@ Net changes since 5.8.1.
   fails boot, naming the pipeline, the step and the permission anonymous callers lack, or the step
   that requires a signed-in caller. Another `authz@1` provider has to make the same check itself.
   `insights.readManifest`'s output schema follows the new field.
-- A binary step result may now set its own `cache-control`; without one, responses stay `no-store`.
+- A binary step result may now set its own `cache-control`; without one, or with an empty one,
+  responses stay `no-store`.
   `media.serve` uses it to mark an original `immutable`; `images.serve` keeps `no-store`, because a
   variant path changes content when its render replaces the original's bytes.
 - **`delivery-static` no longer handles media.** The `media` option is removed — a config that still
@@ -317,9 +330,15 @@ Net changes since 5.8.1.
   `contentTypeByExtension` are no longer exported from `./impl`. Pages reach media through the URLs the
   API returned; set `publicCopy` on the media modules instead. New option `reservedPaths`: a page, or a
   renderer asset, whose path equals or lies under one of them is not written, and the page's status is
-  `error`.
+  `error`. Every asset is checked before the page is written, so such a publish leaves the live page
+  as it was.
 - `blobstore-filesystem` replaces a file atomically (a temporary file in the same directory, then a
   rename), so a reader never sees a partly written file. Keys ending in `.kestrel-tmp` are rejected.
+  The temporary name has a fixed length, so a key's last segment may still use the file system's
+  whole name limit.
+- `examples/minimal` serves `GET /media/:id/:name` and `GET /media/:id/variants/:file` with
+  `media.serve` and `images.serve` alone. `authz.require` checks a signed-in caller's roles only, so a
+  signed-in user whose roles lack `media.read` was refused a file that is published to everyone.
 
 ### Added
 
