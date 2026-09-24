@@ -32,12 +32,33 @@ describe("kestrel-upgrade against the media-delivery-5.8 fixture (old delivery-s
     expect(finding?.message).toContain("/api/");
   });
 
-  it("reports the pipeline gap for media.serve and images.serve, manual", async () => {
+  it("reports the pipeline gap for media.serve and images.serve, auto-fixed since the fixture has a pipelines directory", async () => {
     const { report } = await runJson();
-    const mediaServe = report.findings.filter((f) => f.rule === "pipelines/media-serve");
-    expect(mediaServe.some((f) => f.id.endsWith("media.serve"))).toBe(true);
-    expect(mediaServe.some((f) => f.id.endsWith("images.serve"))).toBe(true);
-    expect(mediaServe.every((f) => f.fix.kind === "manual")).toBe(true);
+    const missing = report.findings.find((f) => f.rule === "pipelines/media-serve" && f.id.endsWith(":missing"));
+    expect(missing).toBeDefined();
+    expect(missing?.message).toContain("media.serve");
+    expect(missing?.message).toContain("images.serve");
+    expect(missing?.fix.kind).toBe("auto");
+    const edits = missing!.fix.kind === "auto" ? missing!.fix.edits : [];
+    expect(edits.some((e) => e.file.endsWith("serveMediaFile.ts") && e.create === true)).toBe(true);
+    expect(edits.some((e) => e.file.endsWith("serveImageVariant.ts") && e.create === true)).toBe(true);
+  });
+
+  it("reports the missing repair pipelines (media.syncPublic/images.syncPublic), auto-fixed", async () => {
+    const { report } = await runJson();
+    const finding = report.findings.find((f) => f.rule === "pipelines/media-repair");
+    expect(finding).toBeDefined();
+    expect(finding?.fix.kind).toBe("auto");
+    const edits = finding!.fix.kind === "auto" ? finding!.fix.edits : [];
+    expect(edits.some((e) => e.file.endsWith("repairPublicMedia.ts"))).toBe(true);
+    expect(edits.some((e) => e.file.endsWith("syncPublicMedia.ts"))).toBe(true);
+  });
+
+  it("reports images-default configured with no images.resume cron", async () => {
+    const { report } = await runJson();
+    const finding = report.findings.find((f) => f.rule === "pipelines/images-resume-cron");
+    expect(finding).toBeDefined();
+    expect(finding?.fix.kind).toBe("manual");
   });
 
   it("reports the missing anonymous media.read grant, since authz-roles is configured with anonymous: []", async () => {

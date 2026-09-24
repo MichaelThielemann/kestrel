@@ -234,8 +234,10 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
             const grouped = groupByFile(edits);
             for (const [file, fileEdits] of grouped) {
               const target = resolve(preview.dir, relative(scratch.dir, file));
-              if (!existsSync(target)) continue;
-              writeFileSync(target, applyEdits(readFileSync(target, "utf8"), fileEdits).text);
+              const creating = fileEdits.some((e) => e.create === true);
+              if (!existsSync(target) && !creating) continue;
+              const targetSource = creating ? "" : readFileSync(target, "utf8");
+              writeFileSync(target, applyEdits(targetSource, fileEdits).text);
             }
             const { project: reloadedProject, issues: reloadIssues } = await reload(preview.dir);
             if (!reloadedProject) return undefined;
@@ -336,8 +338,8 @@ async function runCheck(args: ParsedArgs, stdout: (line: string) => void, option
   const runSetupUses = args.repeated.get("run-setup") ?? [];
   const dataReport = readDataReport(stringFlag(args, "data-report"));
   const { report } = await buildReport(root, entry, { runSetupUses, answers: new Map(), dataReport, forceMajor: options.forceInstalledMajor, plugins: options.plugins });
-  const { rejectedIds, conflictsWith } = verifyAndApply(report.findings);
-  const findings = downgradeRejected(report.findings, rejectedIds, conflictsWith);
+  const { rejectedIds, conflictsWith, pathExists } = verifyAndApply(report.findings);
+  const findings = downgradeRejected(report.findings, rejectedIds, conflictsWith, pathExists);
   const verifiedReport: UpgradeReport = { ...report, findings, summary: summarize(findings) };
   printReport(verifiedReport, args, stdout);
   return exitCodeFor(verifiedReport.findings, failOn);
@@ -367,7 +369,7 @@ interface FileState {
   current: string;
 }
 
-function verifyAndApply(findings: readonly Finding[]): { states: Map<string, FileState>; rejectedIds: Set<string>; conflictsWith: Map<string, string[]> } {
+function verifyAndApply(findings: readonly Finding[]): { states: Map<string, FileState>; rejectedIds: Set<string>; conflictsWith: Map<string, string[]>; pathExists: Set<string> } {
   const sources = new Map<string, string>();
   const accepted = new Map<string, Edit[]>();
   const ownerOf = new Map<Edit, Finding>();
@@ -377,6 +379,7 @@ function verifyAndApply(findings: readonly Finding[]): { states: Map<string, Fil
   }
   const rejectedIds = new Set<string>();
   const conflictsWith = new Map<string, string[]>();
+  const pathExists = new Set<string>();
   const sourceFor = (file: string): string | undefined => {
     const existing = sources.get(file);
     if (existing !== undefined) return existing;
@@ -385,13 +388,35 @@ function verifyAndApply(findings: readonly Finding[]): { states: Map<string, Fil
     sources.set(file, source);
     return source;
   };
+  const ownersOfAccepted = (file: string, findingId: string): Set<string> => {
+    const rules = new Set<string>();
+    for (const e of accepted.get(file) ?? []) {
+      const owner = ownerOf.get(e);
+      if (owner !== undefined && owner.id !== findingId) rules.add(owner.rule);
+    }
+    return rules;
+  };
   for (const finding of findings) {
     if (finding.fix.kind !== "auto" || finding.fix.edits.length === 0) continue;
     const perFile = groupByFile(finding.fix.edits);
     let ok = true;
     const conflictingRules = new Set<string>();
+    let createdPathExists = false;
     for (const [file, edits] of perFile) {
-      const source = sourceFor(file);
+      const creating = edits.some((e) => e.create === true);
+      if (creating) {
+        if (existsSync(file)) {
+          ok = false;
+          createdPathExists = true;
+          break;
+        }
+        if (sources.has(file)) {
+          ok = false;
+          for (const rule of ownersOfAccepted(file, finding.id)) conflictingRules.add(rule);
+          break;
+        }
+      }
+      const source = creating ? "" : sourceFor(file);
       if (source === undefined) {
         ok = false;
         break;
@@ -413,24 +438,32 @@ function verifyAndApply(findings: readonly Finding[]): { states: Map<string, Fil
     }
     if (!ok) {
       rejectedIds.add(finding.id);
+      if (createdPathExists) pathExists.add(finding.id);
       if (conflictingRules.size > 0) conflictsWith.set(finding.id, [...conflictingRules]);
       continue;
     }
-    for (const [file, edits] of perFile) accepted.set(file, [...(accepted.get(file) ?? []), ...edits]);
+    for (const [file, edits] of perFile) {
+      if (edits.some((e) => e.create === true) && !sources.has(file)) sources.set(file, "");
+      accepted.set(file, [...(accepted.get(file) ?? []), ...edits]);
+    }
   }
   const states = new Map<string, FileState>();
   for (const [file, source] of sources) {
     const { text } = applyEdits(source, accepted.get(file) ?? []);
     states.set(file, { source, current: text });
   }
-  return { states, rejectedIds, conflictsWith };
+  return { states, rejectedIds, conflictsWith, pathExists };
 }
 
-function downgradeRejected(findings: readonly Finding[], rejectedIds: ReadonlySet<string>, conflictsWith: ReadonlyMap<string, string[]>): Finding[] {
+function downgradeRejected(findings: readonly Finding[], rejectedIds: ReadonlySet<string>, conflictsWith: ReadonlyMap<string, string[]>, pathExists: ReadonlySet<string>): Finding[] {
   return findings.map((f) => {
     if (!rejectedIds.has(f.id)) return f;
     const conflicting = conflictsWith.get(f.id);
-    const reason = conflicting && conflicting.length > 0 ? `conflicts with ${conflicting.join(", ")} on the same file span` : "the edit did not verify after applying";
+    const reason = pathExists.has(f.id)
+      ? "the file it would create already exists"
+      : conflicting && conflicting.length > 0
+        ? `conflicts with ${conflicting.join(", ")} on the same file span`
+        : "the edit did not verify after applying";
     return { ...f, fix: { kind: "manual" as const }, suggestion: `${f.suggestion} (${reason}; do this by hand)` };
   });
 }
@@ -503,8 +536,8 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     return 2;
   }
 
-  const { states, rejectedIds, conflictsWith } = verifyAndApply(report.findings);
-  const adjustedFindings = downgradeRejected(report.findings, rejectedIds, conflictsWith);
+  const { states, rejectedIds, conflictsWith, pathExists } = verifyAndApply(report.findings);
+  const adjustedFindings = downgradeRejected(report.findings, rejectedIds, conflictsWith, pathExists);
   const adjustedReport: UpgradeReport = { ...report, findings: adjustedFindings, summary: summarize(adjustedFindings) };
   const changed = [...states].filter(([, state]) => state.current !== state.source);
 

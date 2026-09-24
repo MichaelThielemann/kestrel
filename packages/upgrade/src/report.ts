@@ -6,6 +6,8 @@ export interface Edit {
   start: number;
   end: number;
   text: string;
+  /** This edit creates `file`, which must not already exist; `start`/`end` are `0`/`0` and `text` is the whole new file. Refused (the owning finding falls back to manual) when the path exists, or a second edit also tries to create it. */
+  create?: true;
 }
 
 export interface AskFix {

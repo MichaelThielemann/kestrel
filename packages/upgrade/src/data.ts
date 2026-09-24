@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -257,6 +257,166 @@ function underscoreFieldFindings(counts: Record<string, Record<string, number | 
   return findings;
 }
 
+async function moduleConfigOf(root: string, token: string): Promise<unknown> {
+  try {
+    const config = await loadConfig(join(root, "kestrel.config.ts"));
+    return config.modules.find((m) => useToken(m.use) === token)?.config;
+  } catch {
+    return undefined;
+  }
+}
+
+function isCanonicalMediaKey(key: string, id: string, prefix: string): boolean {
+  const want = `${prefix}${id}/`;
+  return key.startsWith(want) && key.length > want.length && !key.slice(want.length).includes("/");
+}
+
+interface MediaItemRow extends Document {
+  id: string;
+  key: string;
+}
+
+async function mediaItemsLayoutFindings(db: Persistence, prefix: string): Promise<Finding[]> {
+  try {
+    const ensured = await db.ensureCollection("media_items", { key: "string" });
+    if (isErr(ensured)) return [];
+    const rows = await db.findMany<MediaItemRow>("media_items", {}, { limit: 10_000 });
+    if (isErr(rows)) return [];
+    const offLayout = rows.value.items.filter((r) => !isCanonicalMediaKey(r.key, r.id, prefix));
+    if (offLayout.length === 0) return [];
+    return [
+      {
+        id: "data/media-layout:media_items",
+        rule: "data/media-layout",
+        severity: "error",
+        tier: "data",
+        where: { path: "media_items" },
+        message: `${offLayout.length} media_items row(s) use a blob key other than "${prefix}<id>/<name>" (first: ${offLayout[0]!.id} at "${offLayout[0]!.key}")`,
+        suggestion: "media-default's setup() refuses to start with these; start 6.0.0 with an empty media store, or migrate the blob keys to the new layout by hand before upgrading",
+        fix: { kind: "none" },
+        docs: "docs/upgrading.md#data-media-layout",
+      },
+    ];
+  } catch {
+    return [];
+  }
+}
+
+async function unslottedCollectionFinding(db: Persistence, collection: string): Promise<Finding | undefined> {
+  try {
+    const ensured = await db.ensureCollection(collection, { slot: "string" });
+    if (isErr(ensured)) return undefined;
+    const unslotted = await db.count(collection, { slot: { eq: null } });
+    if (isErr(unslotted) || unslotted.value === 0) return undefined;
+    return {
+      id: `data/media-layout:${collection}`,
+      rule: "data/media-layout",
+      severity: "error",
+      tier: "data",
+      where: { path: collection },
+      message: `${unslotted.value} row(s) in ${collection} have no slot; they were written before 6.0.0 and images-default's setup() refuses to start with any`,
+      suggestion: `start 6.0.0 with an empty "${collection}" collection`,
+      fix: { kind: "none" },
+      docs: "docs/upgrading.md#data-media-layout",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function mediaLayoutFindings(root: string, db: Persistence): Promise<Finding[]> {
+  const mediaConfig = await moduleConfigOf(root, "media-default");
+  const prefix = isRecord(mediaConfig) && typeof mediaConfig.prefix === "string" ? mediaConfig.prefix : "media/";
+  const findings = await mediaItemsLayoutFindings(db, prefix);
+  for (const collection of ["images_variants", "images_retired"]) {
+    const finding = await unslottedCollectionFinding(db, collection);
+    if (finding !== undefined) findings.push(finding);
+  }
+  return findings;
+}
+
+interface BlobstoreFilesystemInfo {
+  root: string;
+}
+
+async function blobstoreFilesystemConfig(root: string): Promise<BlobstoreFilesystemInfo | undefined> {
+  const config = await moduleConfigOf(root, "blobstore-filesystem");
+  return isRecord(config) && typeof config.root === "string" ? { root: config.root } : undefined;
+}
+
+async function siteMediaLeftoversFindings(root: string): Promise<Finding[]> {
+  const blobstore = await blobstoreFilesystemConfig(root);
+  if (blobstore === undefined) return [];
+  const deliveryConfig = await moduleConfigOf(root, "delivery-static");
+  if (!isRecord(deliveryConfig)) return [];
+  const deliveryPrefix = typeof deliveryConfig.prefix === "string" ? deliveryConfig.prefix : "";
+  const media = deliveryConfig.media;
+  const target = isRecord(media) && typeof media.target === "string" ? media.target : "media/";
+  const leftoversDir = resolve(root, blobstore.root, deliveryPrefix, target);
+  try {
+    const entries = await readdir(leftoversDir, { withFileTypes: true });
+    if (entries.length === 0) return [];
+    return [
+      {
+        id: "data/site-media-leftovers",
+        rule: "data/site-media-leftovers",
+        severity: "warning",
+        tier: "data",
+        where: { path: leftoversDir },
+        message: `${entries.length} entr${entries.length === 1 ? "y" : "ies"} found under "${leftoversDir}", the 5.x delivery-static media export directory`,
+        suggestion: 'review these by hand; media.syncPublic never touches this tree. Republish every page that might still link one of them, then delete the directory',
+        fix: { kind: "manual" },
+        docs: "docs/upgrading.md#data-site-media-leftovers",
+      },
+    ];
+  } catch {
+    return [];
+  }
+}
+
+const TMP_SUFFIX = ".kestrel-tmp";
+const TMP_SUFFIX_SCAN_LIMIT = 20_000;
+const TMP_SUFFIX_MAX_DEPTH = 8;
+
+async function collectTmpSuffixedFiles(dir: string, depth: number, visited: { count: number }, found: string[]): Promise<void> {
+  if (depth > TMP_SUFFIX_MAX_DEPTH || visited.count > TMP_SUFFIX_SCAN_LIMIT) return;
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    visited.count++;
+    if (visited.count > TMP_SUFFIX_SCAN_LIMIT) return;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) await collectTmpSuffixedFiles(full, depth + 1, visited, found);
+    else if (entry.name.endsWith(TMP_SUFFIX)) found.push(full);
+  }
+}
+
+async function blobstoreTmpSuffixFindings(root: string): Promise<Finding[]> {
+  const blobstore = await blobstoreFilesystemConfig(root);
+  if (blobstore === undefined) return [];
+  const storeRoot = resolve(root, blobstore.root);
+  const found: string[] = [];
+  await collectTmpSuffixedFiles(storeRoot, 0, { count: 0 }, found);
+  if (found.length === 0) return [];
+  return [
+    {
+      id: "data/blobstore-tmp-suffix",
+      rule: "data/blobstore-tmp-suffix",
+      severity: "info",
+      tier: "data",
+      where: { path: storeRoot },
+      message: `${found.length} stored key(s) already end in "${TMP_SUFFIX}" (first: "${found[0]}")`,
+      suggestion: "rename these keys by hand if they are meant to stay readable; 6.0.0 treats this suffix as its own atomic-write temp file and skips it",
+      fix: { kind: "none" },
+      docs: "docs/upgrading.md#data-blobstore-tmp-suffix",
+    },
+  ];
+}
+
 /** Copies `dbFile` (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_check`, then reads it through the project's own persistence-sqlite; the given file is never opened after the copy. The copy directory is always removed before returning, whether the step succeeds or refuses. */
 export async function runDataStep(dbFile: string, root: string, plugins: readonly UpgradePlugin[] = []): Promise<DataStepResult> {
   const dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-data-"));
@@ -276,15 +436,18 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
     const db = mod.createPersistenceSqlite({ file: copy }, { logger: silentLogger });
     let queued: { findings: Finding[]; error?: string };
     let counts: Record<string, Record<string, number | null>>;
+    let mediaLayout: Finding[];
     try {
       queued = await queueFindings(db);
       if (queued.error !== undefined) return { exitCode: 2, error: queued.error };
       const contentModel = await activeDataModel(root, plugins);
       counts = contentModel === undefined ? {} : await underscoreFieldCounts(copy, db, contentModel);
+      mediaLayout = await mediaLayoutFindings(root, db);
     } finally {
       db.close();
     }
-    const findings = [...queued.findings, ...underscoreFieldFindings(counts)];
+    const [siteMediaLeftovers, blobstoreTmpSuffix] = await Promise.all([siteMediaLeftoversFindings(root), blobstoreTmpSuffixFindings(root)]);
+    const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...siteMediaLeftovers, ...blobstoreTmpSuffix];
     const report: UpgradeReport = {
       schema: 1,
       tool: { name: "kestrel-upgrade", version: "0.0.0" },

@@ -572,6 +572,30 @@ Net changes since 5.8.1.
   retried dead row of one) never strands its rows.
   `events.readQueueStatus` reports every lane this process currently knows of — configured, or
   found holding a row — with `pending`, `running` and `oldestPendingAt` under `lanes`.
+- `kestrel-upgrade` closes the rest of the media/images/delivery-static/authz-roles rule table:
+  `modules/delivery-media`'s `pipelines/media-serve` now scaffolds `serveMediaFile.ts` /
+  `serveImageVariant.ts` and their HTTP triggers itself (auto), instead of always going manual, using
+  a new all-or-nothing `create` edit kind — a `create` edit's target file must not already exist, and
+  two edits racing to create the same one downgrade to manual naming the conflict, the same as any
+  other unresolved edit conflict. `pipelines/media-repair` (new, auto) scaffolds `repairPublicMedia.ts`
+  and `syncPublicMedia.ts` with their admin and cron triggers when `publicCopy` is set and neither
+  `media.syncPublic` nor `images.syncPublic` runs anywhere. `pipelines/images-resume-cron` (new,
+  manual) reports images-default configured without a cron-triggered `images.resume`.
+  `pipelines/media-delete-order` (new) auto-swaps `images.remove`/`images.removeMany` run before the
+  `media.remove`/`media.removeFolder` they depend on, and reports (info) a `media.removeFolder`
+  missing `events.emit:media.deleted` afterwards. `runtime/anonymous-media-list` (new, info) reports
+  an anonymous `media.read` grant while `anonymousList` stays at its `"ids"` default.
+  `responses/binary-cache-control` (new, info) points at a local module mentioning `cache-control`
+  near a binary step result. `pipelines/images-plan` (new, manual) reports a pipeline calling
+  `images.plan` directly, since the right replacement depends on delivery mode and lane adoption.
+  Three new `data` command checks: `data/media-layout` (error) reads `media_items` for an off-layout
+  key and `images_variants`/`images_retired` for a pre-6.0.0 row with no `slot`, both of which now
+  fail the matching module's `setup()`; `data/site-media-leftovers` (warning, manual) lists files
+  still sitting under the 5.x delivery-static media export directory; `data/blobstore-tmp-suffix`
+  (info) lists stored filesystem-blobstore keys already ending in the suffix 6.0.0 reserves for its
+  own atomic writes. New primitives published for the plugin API's own rule authors:
+  `insertTriggers`/`insertTrigger` (append one or more trigger literals to `triggers: [...]` in one
+  edit), `createPipelineFile`/`newPipelineFileContent` and `swapPipelineSteps`.
 
 ### Changed
 

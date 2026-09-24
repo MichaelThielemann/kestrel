@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type * as FsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -58,6 +58,15 @@ async function contentProjectRoot(config: Record<string, unknown>): Promise<stri
   projectRoots.push(root);
   await writeFile(join(root, "package.json"), JSON.stringify({ name: "tmp", type: "module" }));
   await writeFile(join(root, "kestrel.config.ts"), `export default { modules: [{ use: "@michaelthielemann/kestrel-content-default", config: ${JSON.stringify(config)} }], triggers: [] };\n`);
+  return root;
+}
+
+async function moduleProjectRoot(modules: Array<{ use: string; config?: unknown }>): Promise<string> {
+  const root = await mkdtemp(join(PROJECT_ROOT, "__fixtures__", ".tmp-data-media-test-"));
+  projectRoots.push(root);
+  await writeFile(join(root, "package.json"), JSON.stringify({ name: "tmp", type: "module" }));
+  const modulesText = modules.map((m) => `{ use: "${m.use}", config: ${JSON.stringify(m.config ?? {})} }`).join(", ");
+  await writeFile(join(root, "kestrel.config.ts"), `export default { modules: [${modulesText}], triggers: [] };\n`);
   return root;
 }
 
@@ -317,5 +326,105 @@ describe("the data CLI command with a registered plugin", () => {
     expect(code).toBe(0);
     const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
     expect(report.underscoreFields).toEqual({ "page._hint": { unlocalized: 1 } });
+  });
+});
+
+describe("runDataStep: data/media-layout", () => {
+  it("reports media_items rows whose key is off the <prefix><id>/<name> layout", async () => {
+    const root = await moduleProjectRoot([{ use: "@michaelthielemann/kestrel-media-default", config: { prefix: "media/" } }]);
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("media_items", { key: "string" });
+    await db.createOne("media_items", { id: "m1", key: "media/m1/hero.jpg" });
+    await db.createOne("media_items", { id: "m2", key: "off-layout-key" });
+    db.close();
+    const result = await runDataStep(file, root);
+    expect(result.exitCode).toBe(1);
+    const finding = result.report?.findings.find((f) => f.rule === "data/media-layout" && f.where.path === "media_items");
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe("error");
+    expect(finding?.message).toContain("m2");
+    expect(finding?.message).toContain("off-layout-key");
+  });
+
+  it("does not fire when every media_items key is canonical", async () => {
+    const root = await moduleProjectRoot([{ use: "@michaelthielemann/kestrel-media-default", config: { prefix: "media/" } }]);
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("media_items", { key: "string" });
+    await db.createOne("media_items", { id: "m1", key: "media/m1/hero.jpg" });
+    db.close();
+    const result = await runDataStep(file, root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report?.findings.filter((f) => f.rule === "data/media-layout")).toEqual([]);
+  });
+
+  it("reports images_variants/images_retired rows with no slot, and stays quiet once every row has one", async () => {
+    const root = await moduleProjectRoot([{ use: "@michaelthielemann/kestrel-images-default", config: {} }]);
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("images_variants", { slot: "string" });
+    await db.ensureCollection("images_retired", { slot: "string" });
+    await db.createOne("images_variants", { id: "v1", slot: null });
+    await db.createOne("images_retired", { id: "r1", slot: "m1/thumb" });
+    db.close();
+    const result = await runDataStep(file, root);
+    expect(result.exitCode).toBe(1);
+    const variants = result.report?.findings.find((f) => f.rule === "data/media-layout" && f.where.path === "images_variants");
+    const retired = result.report?.findings.find((f) => f.rule === "data/media-layout" && f.where.path === "images_retired");
+    expect(variants?.message).toContain("1 row(s)");
+    expect(retired).toBeUndefined();
+  });
+});
+
+describe("runDataStep: data/site-media-leftovers and data/blobstore-tmp-suffix", () => {
+  it("lists entries under the 5.x delivery-static media export directory", async () => {
+    const root = await moduleProjectRoot([
+      { use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: "./blobs" } },
+      { use: "@michaelthielemann/kestrel-delivery-static", config: { prefix: "site/", media: { target: "media/" } } },
+    ]);
+    const leftoverDir = join(root, "blobs", "site", "media");
+    await mkdir(leftoverDir, { recursive: true });
+    await writeFile(join(leftoverDir, "orphan.jpg"), "x");
+    const file = join(dir, "kestrel.db");
+    createPersistenceSqlite({ file }).close();
+    const result = await runDataStep(file, root);
+    const finding = result.report?.findings.find((f) => f.rule === "data/site-media-leftovers");
+    expect(finding).toBeDefined();
+    expect(finding?.fix.kind).toBe("manual");
+    expect(finding?.message).toContain("1 entry");
+  });
+
+  it("does not fire when the export directory is empty or missing", async () => {
+    const root = await moduleProjectRoot([
+      { use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: "./blobs" } },
+      { use: "@michaelthielemann/kestrel-delivery-static", config: { prefix: "site/", media: { target: "media/" } } },
+    ]);
+    const file = join(dir, "kestrel.db");
+    createPersistenceSqlite({ file }).close();
+    const result = await runDataStep(file, root);
+    expect(result.report?.findings.filter((f) => f.rule === "data/site-media-leftovers")).toEqual([]);
+  });
+
+  it("reports stored keys already ending in .kestrel-tmp", async () => {
+    const root = await moduleProjectRoot([{ use: "@michaelthielemann/kestrel-blobstore-filesystem", config: { root: "./blobs" } }]);
+    const blobDir = join(root, "blobs", "media", "m1");
+    await mkdir(blobDir, { recursive: true });
+    await writeFile(join(blobDir, "hero.jpg.kestrel-tmp"), "x");
+    const file = join(dir, "kestrel.db");
+    createPersistenceSqlite({ file }).close();
+    const result = await runDataStep(file, root);
+    const finding = result.report?.findings.find((f) => f.rule === "data/blobstore-tmp-suffix");
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe("info");
+    expect(finding?.message).toContain("hero.jpg.kestrel-tmp");
+  });
+
+  it("does not fire without a blobstore-filesystem module configured", async () => {
+    const root = await moduleProjectRoot([]);
+    const file = join(dir, "kestrel.db");
+    createPersistenceSqlite({ file }).close();
+    const result = await runDataStep(file, root);
+    expect(result.report?.findings.filter((f) => f.rule === "data/blobstore-tmp-suffix" || f.rule === "data/site-media-leftovers")).toEqual([]);
   });
 });

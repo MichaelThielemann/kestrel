@@ -4,11 +4,15 @@ import { applyEdits } from "./apply.ts";
 import { findCalls, firstArgument, isArrayExpression, objectProperty, parseTs, type AstNode } from "./ast.ts";
 import {
   addModuleEmits,
+  createPipelineFile,
   insertModuleListEntry,
   insertModulesTsEntry,
   insertPipelineStep,
   insertStepAfterEmitOutsideGroup,
+  insertTrigger,
+  insertTriggers,
   markStepBinary,
+  newPipelineFileContent,
   removeModuleConfigProperty,
   renameContentField,
   replaceModuleConfigProperty,
@@ -17,6 +21,7 @@ import {
   replaceModulesTsEntry,
   setModuleConfigProperties,
   setStepRequired,
+  swapPipelineSteps,
   type ModelFieldsLocator,
   type StepListLocator,
 } from "./edits.ts";
@@ -391,6 +396,36 @@ describe("insertPipelineStep", () => {
   });
 });
 
+describe("swapPipelineSteps", () => {
+  const PIPELINE = 'definePipeline({ name: "deleteMedia", steps: ["authn.requireUser", "images.remove", "media.remove", "events.emit:media.deleted"] });\n';
+
+  it("swaps the two steps' text so earlier ends up before later", () => {
+    const edits = swapPipelineSteps("p.ts", PIPELINE, { pipelineName: "deleteMedia", earlier: "media.remove", later: "images.remove" });
+    expect(edits).toBeDefined();
+    const { text } = applyEdits(PIPELINE, edits!);
+    expect(text).toContain('"authn.requireUser", "media.remove", "images.remove", "events.emit:media.deleted"');
+    expect(() => parseTs(text)).not.toThrow();
+  });
+
+  it("returns undefined when earlier is already before later", () => {
+    const source = 'definePipeline({ name: "deleteMedia", steps: ["media.remove", "images.remove"] });\n';
+    expect(swapPipelineSteps("p.ts", source, { pipelineName: "deleteMedia", earlier: "media.remove", later: "images.remove" })).toBeUndefined();
+  });
+
+  it("returns undefined for an unknown pipeline or step", () => {
+    expect(swapPipelineSteps("p.ts", PIPELINE, { pipelineName: "nope", earlier: "media.remove", later: "images.remove" })).toBeUndefined();
+    expect(swapPipelineSteps("p.ts", PIPELINE, { pipelineName: "deleteMedia", earlier: "media.remove", later: "nope.step" })).toBeUndefined();
+  });
+
+  it("swaps inside an atomic group", () => {
+    const source = 'definePipeline({ name: "p", steps: [{ atomic: ["images.remove", "media.remove"] }] });\n';
+    const edits = swapPipelineSteps("p.ts", source, { pipelineName: "p", earlier: "media.remove", later: "images.remove" });
+    expect(edits).toBeDefined();
+    const { text } = applyEdits(source, edits!);
+    expect(text).toContain('{ atomic: ["media.remove", "images.remove"] }');
+  });
+});
+
 describe("renameContentField", () => {
   const CONFIG = `export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" }, title: { type: "string" } } } } } }], triggers: [] });\n`;
 
@@ -651,5 +686,94 @@ export const definePipeline = pipelineDefiner<KnownStep>();
   it("returns undefined when the file is not the modules.ts array-of-identifiers shape", () => {
     const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-events-direct" }], triggers: [] });\n';
     expect(replaceModulesTsEntry("kestrel.config.ts", source, "@michaelthielemann/kestrel-events-direct", "@michaelthielemann/kestrel-events-queue")).toBeUndefined();
+  });
+});
+
+describe("insertTrigger", () => {
+  it("fills an empty triggers array", () => {
+    const source = 'export default defineConfig({ modules: [], triggers: [] });\n';
+    const edit = insertTrigger("kestrel.config.ts", source, { trigger: '{ http: "GET /media/:id/:name", pipeline: "serveMediaFile" }' });
+    expect(edit).toBeDefined();
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toBe('export default defineConfig({ modules: [], triggers: [{ http: "GET /media/:id/:name", pipeline: "serveMediaFile" }] });\n');
+    expect(() => parseTs(text)).not.toThrow();
+  });
+
+  it("appends after the last entry of a single-line, non-empty triggers array", () => {
+    const source = 'export default defineConfig({ modules: [], triggers: [{ http: "GET /me", pipeline: "me" }] });\n';
+    const edit = insertTrigger("kestrel.config.ts", source, { trigger: '{ cron: "*/5 * * * *", pipeline: "resumeImages" }' });
+    expect(edit).toBeDefined();
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toBe('export default defineConfig({ modules: [], triggers: [{ http: "GET /me", pipeline: "me" }, { cron: "*/5 * * * *", pipeline: "resumeImages" }] });\n');
+    expect(() => parseTs(text)).not.toThrow();
+  });
+
+  it("appends its own line after the last entry of a multiline triggers array", () => {
+    const source = `export default defineConfig({
+  modules: [],
+  triggers: [
+    { http: "GET /me", pipeline: "me" },
+  ],
+});
+`;
+    const edit = insertTrigger("kestrel.config.ts", source, { trigger: '{ cron: "*/5 * * * *", pipeline: "resumeImages" }' });
+    expect(edit).toBeDefined();
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('    { http: "GET /me", pipeline: "me" },\n    { cron: "*/5 * * * *", pipeline: "resumeImages" },\n');
+    expect(() => parseTs(text)).not.toThrow();
+  });
+
+  it("returns undefined when there is no triggers array", () => {
+    const source = "export default defineConfig({ modules: [] });\n";
+    expect(insertTrigger("kestrel.config.ts", source, { trigger: '{ http: "GET /me", pipeline: "me" }' })).toBeUndefined();
+  });
+});
+
+describe("insertTriggers", () => {
+  it("appends several trigger literals in one edit, never colliding with a second call against the same source", () => {
+    const source = `export default defineConfig({
+  modules: [],
+  triggers: [
+    { http: "GET /me", pipeline: "me" },
+  ],
+});
+`;
+    const edit = insertTriggers("kestrel.config.ts", source, ['{ http: "GET /media/:id/:name", pipeline: "serveMediaFile" }', '{ http: "GET /media/:id/variants/:file", pipeline: "serveImageVariant" }']);
+    expect(edit).toBeDefined();
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain(
+      '    { http: "GET /me", pipeline: "me" },\n' +
+        '    { http: "GET /media/:id/:name", pipeline: "serveMediaFile" },\n' +
+        '    { http: "GET /media/:id/variants/:file", pipeline: "serveImageVariant" },\n',
+    );
+    expect(() => parseTs(text)).not.toThrow();
+  });
+
+  it("returns undefined for an empty trigger list", () => {
+    const source = 'export default defineConfig({ modules: [], triggers: [] });\n';
+    expect(insertTriggers("kestrel.config.ts", source, [])).toBeUndefined();
+  });
+});
+
+describe("newPipelineFileContent / createPipelineFile", () => {
+  it("renders a pipeline file importing definePipeline from the package directly", () => {
+    const text = newPipelineFileContent({ name: "serveMediaFile", steps: ["authn.identifyUser", "authz.require:media.read", "media.serve"] });
+    expect(text).toBe(
+      'import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";\n\n' +
+        "export default definePipeline({\n" +
+        '  name: "serveMediaFile",\n' +
+        '  steps: ["authn.identifyUser", "authz.require:media.read", "media.serve"],\n' +
+        "});\n",
+    );
+    expect(() => parseTs(text)).not.toThrow();
+  });
+
+  it("builds a create edit at start 0/end 0", () => {
+    const edit = createPipelineFile("pipelines/serveMediaFile.ts", { name: "serveMediaFile", steps: ["media.serve"] });
+    expect(edit.file).toBe("pipelines/serveMediaFile.ts");
+    expect(edit.start).toBe(0);
+    expect(edit.end).toBe(0);
+    expect(edit.create).toBe(true);
+    expect(edit.text).toContain('name: "serveMediaFile"');
   });
 });

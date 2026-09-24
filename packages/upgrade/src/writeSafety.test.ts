@@ -1,5 +1,5 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -129,6 +129,108 @@ describe("fix never silently drops a conflicting edit from a different rule", ()
     expect(writeCode).toBe(1);
     const text = readFileSync(configFile, "utf8");
     expect(text).toBe("export default { a: 100, b: 2 };\n");
+  });
+});
+
+describe("fix can create a new file, all-or-nothing with the rest of the finding", () => {
+  it("writes a brand-new file whose edit is marked create", async () => {
+    const configFile = join(dir, "host.config.ts");
+    await writeFile(configFile, "export default {};\n");
+    const newFile = join(dir, "created.ts");
+    const rule: Rule = {
+      id: "plugin/create",
+      check: () => [{ id: "plugin/create", rule: "plugin/create", severity: "error", tier: "source", where: {}, message: "create", suggestion: "n/a", fix: { kind: "auto", edits: [{ file: newFile, start: 0, end: 0, text: "export const created = true;\n", create: true }] }, docs: "n/a" }],
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [rule] };
+    const code = await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin] });
+    expect(code).toBe(1);
+    expect(readFileSync(newFile, "utf8")).toBe("export const created = true;\n");
+  });
+
+  it("refuses (downgrades to manual) when the file a create edit targets already exists, and never overwrites it", async () => {
+    const configFile = join(dir, "host.config.ts");
+    await writeFile(configFile, "export default {};\n");
+    const existingFile = join(dir, "existing.ts");
+    await writeFile(existingFile, "export const original = true;\n");
+    const rule: Rule = {
+      id: "plugin/create-exists",
+      check: () => [{ id: "plugin/create-exists", rule: "plugin/create-exists", severity: "error", tier: "source", where: {}, message: "create", suggestion: "n/a", fix: { kind: "auto", edits: [{ file: existingFile, start: 0, end: 0, text: "export const overwritten = true;\n", create: true }] }, docs: "n/a" }],
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [rule] };
+
+    const lines: string[] = [];
+    await runUpgradeCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines[0]!), "json");
+    const f = report.findings.find((x) => x.rule === "plugin/create-exists");
+    expect(f?.fix.kind).toBe("manual");
+    expect(f?.suggestion).toContain("already exists");
+
+    const code = await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin] });
+    expect(code).toBe(1);
+    expect(readFileSync(existingFile, "utf8")).toBe("export const original = true;\n");
+  });
+
+  it("downgrades the later rule to manual, naming the conflicting rule, when two rules try to create the same new file", async () => {
+    const configFile = join(dir, "host.config.ts");
+    await writeFile(configFile, "export default {};\n");
+    const newFile = join(dir, "created.ts");
+    const ruleFirst: Rule = {
+      id: "plugin/create-first",
+      check: () => [{ id: "plugin/create-first", rule: "plugin/create-first", severity: "error", tier: "source", where: {}, message: "first", suggestion: "n/a", fix: { kind: "auto", edits: [{ file: newFile, start: 0, end: 0, text: "export const first = true;\n", create: true }] }, docs: "n/a" }],
+    };
+    const ruleSecond: Rule = {
+      id: "plugin/create-second",
+      check: () => [{ id: "plugin/create-second", rule: "plugin/create-second", severity: "error", tier: "source", where: {}, message: "second", suggestion: "n/a", fix: { kind: "auto", edits: [{ file: newFile, start: 0, end: 0, text: "export const second = true;\n", create: true }] }, docs: "n/a" }],
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [ruleFirst, ruleSecond] };
+
+    const lines: string[] = [];
+    await runUpgradeCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines[0]!), "json");
+    const findingFirst = report.findings.find((f) => f.rule === "plugin/create-first");
+    const findingSecond = report.findings.find((f) => f.rule === "plugin/create-second");
+    expect(findingFirst?.fix.kind).toBe("auto");
+    expect(findingSecond?.fix.kind).toBe("manual");
+    expect(findingSecond?.suggestion).toContain("plugin/create-first");
+
+    const code = await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin] });
+    expect(code).toBe(1);
+    expect(readFileSync(newFile, "utf8")).toBe("export const first = true;\n");
+  });
+
+  it("never creates the file when another part of the same all-or-nothing finding fails to verify", async () => {
+    const configFile = join(dir, "host.config.ts");
+    await writeFile(configFile, "export default {};\n");
+    const otherFile = join(dir, "other.ts");
+    await writeFile(otherFile, "export const x = 1;\n");
+    const newFile = join(dir, "created.ts");
+    const rule: Rule = {
+      id: "plugin/create-and-break",
+      check: () => [
+        {
+          id: "plugin/create-and-break",
+          rule: "plugin/create-and-break",
+          severity: "error",
+          tier: "source",
+          where: {},
+          message: "create and break",
+          suggestion: "n/a",
+          fix: {
+            kind: "auto",
+            edits: [
+              { file: newFile, start: 0, end: 0, text: "export const created = true;\n", create: true },
+              { file: otherFile, start: 0, end: 0, text: "}}}broken{{{" },
+            ],
+          },
+          docs: "n/a",
+        },
+      ],
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [rule] };
+    const code = await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin] });
+    expect(code).toBe(1);
+    expect(existsSync(newFile)).toBe(false);
+    expect(readFileSync(otherFile, "utf8")).toBe("export const x = 1;\n");
   });
 });
 

@@ -137,11 +137,20 @@ Every finding's `docs` field links to one of the anchors below.
 | [`modules/emits`](#modules-emits) | source | ask | a local module's heuristic `.emit(` calls, undeclared in `emits` |
 | [`modules/delivery-media`](#modules-delivery-media) | source | auto | `delivery-static`'s removed `media` option |
 | [`modules/media-public-path`](#modules-media-public-path) | source | auto (warning) | `images-default`'s `publicPath` not matching `media-default`'s |
-| [`pipelines/media-serve`](#pipelines-media-serve) | source | manual | `publicCopy` set with no pipeline serving it, or anonymous callers refused it |
+| [`pipelines/media-serve`](#pipelines-media-serve) | source | auto (pipeline files + trigger) / manual | `publicCopy` set with no pipeline serving it, or anonymous callers refused it |
+| [`pipelines/media-repair`](#pipelines-media-repair) | source | auto (info) | `publicCopy` set with no pipeline running the public-copy repair |
+| [`pipelines/images-resume-cron`](#pipelines-images-resume-cron) | source | manual (warning) | `images-default` configured with no cron-triggered `images.resume` |
+| [`pipelines/media-delete-order`](#pipelines-media-delete-order) | source | auto (warning) / none (info) | an images cleanup step running before the media delete it follows from, or a folder delete not raising `media.deleted` |
 | [`runtime/authz-anonymous-floor`](#runtime-authz-anonymous-floor) | source | none (info) | `authz-roles` with a non-empty `anonymous` |
+| [`runtime/anonymous-media-list`](#runtime-anonymous-media-list) | source | none (info) | anonymous `media.read` granted while `anonymousList` stays `"ids"` |
 | [`imports/removed-export`](#imports-removed-export) | source | manual | an import or call of a `delivery-static` export removed in 6.0.0 |
 | [`types/breaking-signatures`](#types-breaking-signatures) | source | none (info), always | type-level members a hand-built implementation must add |
 | [`responses/breaking-step-shapes`](#responses-breaking-step-shapes) | source | none (info) | a pipeline running a step whose response or manifest shape changed |
+| [`responses/binary-cache-control`](#responses-binary-cache-control) | source | none (info) | a local module mentioning `cache-control` near a binary step result |
+| [`pipelines/images-plan`](#pipelines-images-plan) | source | manual (warning) | a pipeline calling `images.plan` directly |
+| [`data/media-layout`](#data-media-layout) | data | none (error) | a stored `media_items` key off-layout, or a pre-6.0 `images_variants`/`images_retired` row with no `slot` |
+| [`data/site-media-leftovers`](#data-site-media-leftovers) | data | manual (warning) | a leftover 5.x static export copy `media.syncPublic` never touches |
+| [`data/blobstore-tmp-suffix`](#data-blobstore-tmp-suffix) | data | none (info) | a stored filesystem-blobstore key already ending in `.kestrel-tmp` |
 | [`steps/ctx-done-terminal-output`](#steps-ctx-done-terminal-output) | source | none (info) | a local module calling `ctx.done()` |
 | [`tests/run-pipeline-validates`](#tests-run-pipeline-validates) | source | none (info) | a file importing `testing/runPipeline` |
 | [`boot/dependency-cycle`](#boot-dependency-cycle) | boot | manual | a module dependency cycle |
@@ -259,16 +268,48 @@ entries the tool cannot safely merge into, or `media-default` is not configured 
 
 #### pipelines-media-serve
 `publicCopy` set on `media-default` or `images-default` (including one `modules/delivery-media`'s
-fix is about to add) needs a pipeline running `media.serve` / `images.serve`, or boot fails; the
-tool does not create pipeline files itself, so this stays manual, naming the steps and the HTTP
-trigger to add (`GET <publicPath>/:id/:name` and `GET <publicPath>/:id/variants/:file`). A separate
-finding fires when `authz-roles` is configured but its `anonymous` grants do not include
-`media.read`, since a pipeline declaring its serve step's output public then fails boot too.
+fix is about to add) needs a pipeline running `media.serve` / `images.serve`, or boot fails. Auto
+when the project has a pipelines directory to scaffold into: creates `serveMediaFile.ts` /
+`serveImageVariant.ts` (steps `authn.identifyUser`, `authz.require:media.read`, and the serve step)
+next to the project's other pipeline files, and adds the matching HTTP trigger(s)
+(`GET <publicPath>/:id/:name` and `GET <publicPath>/:id/variants/:file`) in one edit; falls back to
+manual, naming the steps and triggers to add by hand, when the directory or the config file cannot
+be found — the write is refused outright if either target file already exists. A separate finding
+fires when `authz-roles` is configured but its `anonymous` grants do not include `media.read`, since
+a pipeline declaring its serve step's output public then fails boot too; this one stays manual.
+
+#### pipelines-media-repair
+`publicCopy` set needs a pipeline running `media.syncPublic` / `images.syncPublic`, or the public
+copy tree drifts from what is stored without ever repairing itself. Auto when the project has a
+pipelines directory: creates `repairPublicMedia.ts` (steps `authn.requireUser`,
+`authz.require:media.manage`, `media.syncPublic`, `images.syncPublic`) behind an admin HTTP trigger,
+and `syncPublicMedia.ts` (steps `media.syncPublic`, `images.syncPublic`) on a nightly cron trigger,
+in one edit; falls back to manual otherwise.
+
+#### pipelines-images-resume-cron
+`images-default` configured with no pipeline running `images.resume` on a cron trigger: a failed
+placement, a missed plan or an idempotent re-upload now depends entirely on this background repair
+pass, so availability regresses silently without it. Always manual, naming the `resumeImages`
+pipeline and cron trigger to add — a pipeline that already runs `images.resume` without a cron
+trigger gets a finding naming that instead of "no pipeline runs it".
+
+#### pipelines-media-delete-order
+A pipeline running `images.remove` before `media.remove`, or `images.removeMany` before
+`media.removeFolder`: a render finishing in the gap between the two can leave a public copy or a
+private blob behind. Auto-swaps the two steps' own text in place when the pipeline's file can be
+read; manual otherwise. A separate, info-only finding fires when a pipeline runs
+`media.removeFolder` without `events.emit:media.deleted` afterwards, since a subscriber (the
+191 media-deleted-ids marking, for one) never sees the deleted ids.
 
 #### runtime-authz-anonymous-floor
 `authz-roles` with a non-empty `anonymous` list: a signed-in caller now also holds every permission
 `anonymous` grants, in `authz.require`, `can` and `describePipelineAccess` — a signed-in caller
 refused something an anonymous visitor could do before is served now.
+
+#### runtime-anonymous-media-list
+`authz-roles` grants anonymous `media.read`, but `media-default`'s own `anonymousList` stays at its
+`"ids"` default: an anonymous caller can still only fetch media by explicit ids, not browse the full
+listing or folders (401). Set `anonymousList: "all"` to restore that too, if intended.
 
 #### imports-removed-export
 `rewriteMedia`, `MediaMatch`, `MediaConfig` and `contentTypeByExtension` are no longer exported from
@@ -287,6 +328,42 @@ A pipeline runs a step whose 6.0.0 response or manifest shape differs from 5.8's
 `media.upload`, `media.get`, `media.list`, `media.update`, `media.listFolders`, `media.remove`,
 `media.removeFolder`, `media.renameFolder`, `images.attach`, `images.serve`, `images.prune`,
 `images.generate`, `insights.readManifest` or `events.listDead`; the finding names which one and how.
+`media.upload`'s own change also covers `allowedTypes`/`deniedTypes` now matching the media type
+before its `;` parameters, lower-cased (a parameterised type that passed a denylist before is now
+refused), and an upload whose sanitised base name is `file` or `variants` being stored as
+`…-upload` instead of colliding with a reserved route or directory name.
+
+#### responses-binary-cache-control
+A local module mentions `cache-control` in its own source, near a binary step result: 5.x silently
+replaced a binary result's own `cache-control` header with `no-store`; 6.0.0 sends it as given. Info
+only — the finding just points at the module to review by hand.
+
+#### pipelines-images-plan
+A pipeline calls `images.plan` directly. Always manual: with direct event delivery,
+`images.generate` now plans internally, so a standalone `images.plan` step can usually be dropped;
+with queue delivery and lane-based bulk pipelines, split it into a main-lane `planImageVariants` and
+a `generateImageVariants` triggered on `images.planned` instead — which one applies depends on the
+project's delivery mode and whether it has adopted lanes, so this tool does not guess.
+
+#### data-media-layout
+The `data` command's own SQL check: a `media_items` row whose key is not `<prefix><id>/<name>` makes
+setup stop in 6.0.0 (start with an empty media store instead); a pre-6.0.0 `images_variants` or
+`images_retired` row with no `slot` is invisible to the new `ownerOf` lookup — Node 404s it and a
+sync treats its copy as foreign — and setup requires both collections empty. Error, no fix: the
+project's own data determines whether this is even reachable.
+
+#### data-site-media-leftovers
+A file under the filesystem blobstore's own root (resolved from its `root` config, relative to the
+project root) that looks like a 5.x static export copy — `<folder>/<filename>` or
+`….<size>.<ext>` directly under the delivery prefix and the old `media.target` — that
+`media.syncPublic` never reaches, since it only ever considers depth-1 copies under the *new*
+public-copy tree. Manual: lists what it found and says to delete it once every page that might
+still link it has been republished.
+
+#### data-blobstore-tmp-suffix
+A stored filesystem-blobstore key already ending in `.kestrel-tmp`: 6.0.0 reserves that suffix for
+its own atomic-write temp files, so such a key is now unlisted and unreadable through the store.
+Info only, since a legitimate use of that literal suffix before 6.0.0 is unlikely but not impossible.
 
 #### steps-ctx-done-terminal-output
 A local module calls `ctx.done()`. A step whose early result does not match its `terminalOutput`

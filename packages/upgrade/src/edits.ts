@@ -30,14 +30,18 @@ function quoteOf(source: string, node: AstNode | undefined): '"' | "'" {
   return source[start] === "'" ? "'" : '"';
 }
 
-function findModuleArray(root: AstNode): AstNode | undefined {
+function findConfigArray(root: AstNode, key: string): AstNode | undefined {
   let found: AstNode | undefined;
   walk(root, (node) => {
     if (found || node.type !== "ObjectExpression") return;
-    const modules = objectProperty(node, "modules");
-    if (isArray(modules)) found = modules;
+    const value = objectProperty(node, key);
+    if (isArray(value)) found = value;
   });
   return found;
+}
+
+function findModuleArray(root: AstNode): AstNode | undefined {
+  return findConfigArray(root, "modules");
 }
 
 function entryUse(entry: AstNode): string | undefined {
@@ -289,6 +293,41 @@ export function insertPipelineStep(file: string, source: string, options: Insert
   return undefined;
 }
 
+export interface SwapPipelineStepsOptions {
+  pipelineName: string;
+  earlier: string;
+  later: string;
+  /** Same as `InsertStepOptions.locateSteps`. */
+  locateSteps?: StepListLocator;
+}
+
+/**
+ * Swaps two step string literals' own text in the named pipeline's step list, so `earlier` ends up
+ * before `later` — without moving array structure, commas or anything else between them. `undefined`
+ * when the pipeline, the array or either step cannot be found, or `earlier` is already before `later`.
+ */
+export function swapPipelineSteps(file: string, source: string, options: SwapPipelineStepsOptions): Edit[] | undefined {
+  const root = parseTs(source);
+  const located = options.locateSteps?.(root, options.pipelineName) ?? [];
+  const arrays = located.length > 0 ? located : pipelineStepsArrays(root, options.pipelineName).flatMap(stepArraysOf);
+  for (const array of arrays) {
+    const stepElements = elements(array);
+    const earlierIndex = stepElements.findIndex((e) => stringValue(e) === options.earlier);
+    const laterIndex = stepElements.findIndex((e) => stringValue(e) === options.later);
+    if (earlierIndex === -1 || laterIndex === -1 || earlierIndex < laterIndex) continue;
+    const earlierNode = stepElements[earlierIndex]!;
+    const laterNode = stepElements[laterIndex]!;
+    const quote = quoteOf(source, earlierNode);
+    const { start: es, end: ee } = span(earlierNode);
+    const { start: ls, end: le } = span(laterNode);
+    return [
+      { file, start: es, end: ee, text: `${quote}${options.later}${quote}` },
+      { file, start: ls, end: le, text: `${quote}${options.earlier}${quote}` },
+    ];
+  }
+  return undefined;
+}
+
 export interface InsertAfterEmitOptions {
   pipelineName: string;
   emitStep: string;
@@ -340,6 +379,72 @@ export function insertStepAfterEmitOutsideGroup(file: string, source: string, op
 /** True once `emitStep` itself can be found in the named pipeline, whether or not `newStep` still needs inserting after it — unlike the `undefined` `insertStepAfterEmitOutsideGroup` returns for either reason, this tells the two apart. */
 export function emitStepIsLocatable(source: string, options: InsertAfterEmitOptions): boolean {
   return locateEmitAnchor(parseTs(source), options) !== undefined;
+}
+
+/** Locates the `triggers: [...]` array of a `defineConfig({...})` call or a default-exported config object literal. */
+export function triggersArray(source: string): AstNode | undefined {
+  return findConfigArray(parseTs(source), "triggers");
+}
+
+/**
+ * Appends one or more trigger literals (e.g. `{ http: "GET /media/:id/:name", pipeline: "serveMediaFile" }`)
+ * to the end of the `triggers` array, all in one edit — never call this more than once against the same
+ * unedited source for triggers that must land together, since two separate append-after-the-last-element
+ * edits would both anchor on that same element and collide. `undefined` when the array cannot be found,
+ * or `triggers` is empty.
+ */
+export function insertTriggers(file: string, source: string, triggers: readonly string[]): Edit | undefined {
+  if (triggers.length === 0) return undefined;
+  const array = triggersArray(source);
+  if (array === undefined) return undefined;
+  const items = elements(array);
+  if (items.length === 0) {
+    const { start, end } = span(array);
+    if (source.slice(start + 1, end - 1).trim() !== "") return undefined;
+    return { file, start: start + 1, end: end - 1, text: triggers.join(", ") };
+  }
+  const anchor = items.at(-1)!;
+  const eol = eolOf(source);
+  if (!isMultiline(source, array)) {
+    const { end } = span(anchor);
+    return { file, start: end, end, text: `, ${triggers.join(", ")}` };
+  }
+  const { indent } = lineOf(source, span(anchor).start);
+  const { end } = span(anchor);
+  const nlIndex = source.indexOf("\n", end);
+  if (nlIndex === -1) return { file, start: end, end, text: `, ${triggers.join(", ")}` };
+  const lineEnd = source[nlIndex - 1] === "\r" ? nlIndex - 1 : nlIndex;
+  const insertAt = nlIndex + 1;
+  const restOfLine = source.slice(end, lineEnd);
+  const needsComma = !restOfLine.includes(",");
+  const lines = triggers.map((t) => `${indent}${t},${eol}`).join("");
+  return { file, start: end, end: insertAt, text: `${needsComma ? "," : ""}${restOfLine}${eol}${lines}` };
+}
+
+export interface InsertTriggerOptions {
+  trigger: string;
+}
+
+/** Appends a single trigger literal to the end of the `triggers` array; see `insertTriggers` when more than one must land in the same edit. */
+export function insertTrigger(file: string, source: string, options: InsertTriggerOptions): Edit | undefined {
+  return insertTriggers(file, source, [options.trigger]);
+}
+
+export interface NewPipelineFileOptions {
+  name: string;
+  steps: readonly string[];
+}
+
+/** The content of a brand-new pipeline file, importing `definePipeline` straight from the package — the safe default for a project without its own wrapper around it. */
+export function newPipelineFileContent(options: NewPipelineFileOptions): string {
+  const steps = options.steps.map((s) => JSON.stringify(s)).join(", ");
+  const lines = ['import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";', "", "export default definePipeline({", "  name: NAME,", "  steps: [STEPS],", "});", ""];
+  return lines.join("\n").replace("NAME", JSON.stringify(options.name)).replace("STEPS", steps);
+}
+
+/** A `create` edit for a brand-new pipeline file at `file`, which must not already exist; the caller places `file` itself, typically next to the project's other pipeline files. */
+export function createPipelineFile(file: string, options: NewPipelineFileOptions): Edit {
+  return { file, start: 0, end: 0, text: newPipelineFileContent(options), create: true };
 }
 
 /** Adds `events` to a local module's `emits: [...]`, creating the property when it has none; already-listed events are skipped. `undefined` when there is nothing left to add, or no `defineModule({...})` call is found. */
