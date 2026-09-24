@@ -98,13 +98,18 @@ describe("assertAnonymousAccess", () => {
     expect(() => assertAnonymousAccess(anonymous, manifest)).toThrow(/pipeline "serveMediaFile" runs media.serve.*authn.requireUser requires a signed-in caller/);
   });
 
-  it("passes with an exact, wildcard-scoped or full-wildcard grant, and for a pipeline without authz.require", () => {
+  it("passes with an exact, wildcard-scoped or full-wildcard grant", () => {
     for (const grant of ["media.read", "media.*", "*"]) {
       const manifest = manifestWith([pipelineWith("serveMediaFile", [{ spec: "authz.require:media.read", description: {} }, { spec: "media.serve", description: { anonymous: "required" } }])]);
       expect(() => assertAnonymousAccess({ ...anonymous, anonymous: [grant] }, manifest)).not.toThrow();
     }
+  });
+
+  it("throws for a pipeline without authz.require, whatever anonymous grants, since there is no permission to check", () => {
     const openManifest = manifestWith([pipelineWith("serveMediaFile", [{ spec: "media.serve", description: { anonymous: "required" } }])]);
-    expect(() => assertAnonymousAccess(anonymous, openManifest)).not.toThrow();
+    for (const grants of [[], ["media.read"], ["*"]]) {
+      expect(() => assertAnonymousAccess({ ...anonymous, anonymous: grants }, openManifest)).toThrow('authz/roles: pipeline "serveMediaFile" runs media.serve, whose output is also published without an access check, but has no authz.require step – gate it with authz.require:<permission> so that boot can check anonymous callers hold that permission');
+    }
   });
 
   it("leaves a pipeline without an anonymous: \"required\" step unaffected, even if it fully requires sign-in", () => {

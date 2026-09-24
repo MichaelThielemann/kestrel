@@ -30,8 +30,9 @@ export function anonymousCan(config: Config, permission: string): boolean {
 
 /**
  * Throws on the first pipeline that runs a step declaring `anonymous: "required"` without letting an
- * anonymous caller through: an authn step other than `authz.require` requires a signed-in caller, or the
- * pipeline's `authz.require` permissions are not all granted to `anonymous`.
+ * anonymous caller through: an authn step other than `authz.require` requires a signed-in caller, the
+ * pipeline has no `authz.require` step whose permission could be checked, or its `authz.require`
+ * permissions are not all granted to `anonymous`.
  */
 export function assertAnonymousAccess(config: Config, manifest: Pick<Manifest, "pipelines">): void {
   for (const pipeline of manifest.pipelines) {
@@ -41,7 +42,11 @@ export function assertAnonymousAccess(config: Config, manifest: Pick<Manifest, "
     if (authnGate) {
       throw new Error(`authz/roles: pipeline "${pipeline.name}" runs ${flagged.name}, whose output is also published without an access check, but ${authnGate.name} requires a signed-in caller`);
     }
-    const missing = requiredPermissions(pipeline).find((permission) => !anonymousCan(config, permission));
+    const required = requiredPermissions(pipeline);
+    if (required.length === 0) {
+      throw new Error(`authz/roles: pipeline "${pipeline.name}" runs ${flagged.name}, whose output is also published without an access check, but has no authz.require step – gate it with authz.require:<permission> so that boot can check anonymous callers hold that permission`);
+    }
+    const missing = required.find((permission) => !anonymousCan(config, permission));
     if (missing !== undefined) {
       throw new Error(`authz/roles: pipeline "${pipeline.name}" runs ${flagged.name}, whose output is also published without an access check, but anonymous callers lack "${missing}" – grant it in "anonymous" or stop publishing that step's output`);
     }

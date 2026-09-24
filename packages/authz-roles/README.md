@@ -27,11 +27,12 @@ see `module.test.ts` for the `boot()` pattern.
 At `attach()`, this module also checks every step across every booted pipeline that declares
 `anonymous: "required"` (`StepDescription`) — its output is published where no access check applies,
 so every pipeline that runs it must actually let an anonymous caller through. Boot fails, naming the
-pipeline, the step and either the permission anonymous callers lack or the authn step (other than
-`authz.require` itself) that requires a signed-in caller. This is a check by this module only:
-`authz@1` carries no anonymous verdict, so a different `authz@1` provider has to perform the same
-check itself, or the flag goes unchecked under it. Keep the `authz.require` step in such a pipeline:
-it is what this check reads, so a pipeline without one publishes whatever `anonymous` grants.
+pipeline, the step and either the permission anonymous callers lack, the authn step (other than
+`authz.require` itself) that requires a signed-in caller, or the missing `authz.require` step: a
+pipeline running such a step without any `authz.require` fails boot too, since it would publish
+whatever `anonymous` grants. This is a check by this module only: `authz@1` carries no anonymous
+verdict, so a different `authz@1` provider has to perform the same check itself, or the flag goes
+unchecked under it.
 Not included: ownership/resource checks (the `resource` argument is ignored), roles stored in a database.
 
 <!-- kestrel-docs:start -->
