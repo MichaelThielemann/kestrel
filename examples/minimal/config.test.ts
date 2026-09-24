@@ -1050,3 +1050,32 @@ describe("GET /site/*path never leaks a draft to an anonymous visitor", () => {
     }
   });
 });
+
+describe("GET /pages and GET /pages/:id never list a draft locale in _translations", () => {
+  it("narrows _translations to status=published, the same rule GET /site/*path follows", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const deFields = { slug: "oeffentlich", title: "Oeffentlich", status: "published" };
+      const created = await kestrel.run("createPage", { trigger, headers: bearer(admin.token), payload: deFields, body: deFields });
+      expect(created.status).toBe(200);
+      const { id } = boundaryCast<{ id: string }>(created.result, "json");
+
+      const enFields = { slug: "secret-en", title: "Secret EN", status: "draft" };
+      const updated = await kestrel.run("updatePage", { trigger, headers: bearer(admin.token), params: { id, locale: "en" }, payload: enFields, body: enFields });
+      expect(updated.status).toBe(200);
+
+      const listed = await kestrel.run("listPages", { trigger });
+      expect(listed.status).toBe(200);
+      const list = boundaryCast<{ items: { id: string; _translations?: Record<string, boolean> }[] }>(listed.result, "json");
+      expect(list.items.find((p) => p.id === id)?._translations).toEqual({ de: true, en: false });
+
+      const read = await kestrel.run("readPage", { trigger, params: { id } });
+      expect(read.status).toBe(200);
+      const doc = boundaryCast<{ _translations?: Record<string, boolean> }>(read.result, "json");
+      expect(doc._translations).toEqual({ de: true, en: false });
+    } finally {
+      await dispose();
+    }
+  });
+});
