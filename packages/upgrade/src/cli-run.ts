@@ -45,7 +45,7 @@ async function detectPlugin(plugins: readonly UpgradePlugin[], root: string): Pr
   return { issues };
 }
 
-async function resolveProject(root: string, entry: string | undefined, scratchDir: string, plugins: readonly UpgradePlugin[]): Promise<ResolvedProject> {
+async function resolveProject(root: string, entry: string | undefined, scratchDir: string, plugins: readonly UpgradePlugin[], cache: Map<string, unknown>): Promise<ResolvedProject> {
   const conflicts = overrideConflicts(plugins);
   const { plugin, issues: detectIssues } = await detectPlugin(plugins, root);
   if (plugin === undefined) {
@@ -62,13 +62,13 @@ async function resolveProject(root: string, entry: string | undefined, scratchDi
   const locators = { ...(plugin.locateSteps === undefined ? {} : { locateSteps: plugin.locateSteps }), ...(plugin.locateModelFields === undefined ? {} : { locateModelFields: plugin.locateModelFields }) };
   const reload = async (dir: string): Promise<LoadResult> => {
     try {
-      return await plugin.load(root, dir);
+      return await plugin.load(root, dir, cache);
     } catch (err) {
       return { issues: [{ message: err instanceof Error ? err.message : String(err) }] };
     }
   };
   try {
-    const { project, issues } = await plugin.load(root, scratchDir);
+    const { project, issues } = await plugin.load(root, scratchDir, cache);
     return { ...(project === undefined ? {} : { project }), issues: [...detectIssues, ...issues], rules, ownsPackages, notices, ...sandboxEntries, ...locators, reload };
   } catch (err) {
     return { issues: [...detectIssues, { message: err instanceof Error ? err.message : String(err) }], rules, ownsPackages, notices, ...sandboxEntries, ...locators, reload };
@@ -117,6 +117,7 @@ interface BuildOptions {
   dataReport?: Record<string, unknown> | undefined;
   forceMajor?: number | undefined;
   plugins?: readonly UpgradePlugin[] | undefined;
+  pluginCache?: Map<string, unknown>;
 }
 
 function bootErrorFinding(problem: BootProblem): Finding {
@@ -174,7 +175,8 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       });
     }
 
-    const { project, issues, rules, sandboxEntries, ownsPackages, locateSteps, locateModelFields, notices, reload } = await resolveProject(root, entry, scratch.dir, options.plugins ?? []);
+    const pluginCache = options.pluginCache ?? new Map<string, unknown>();
+    const { project, issues, rules, sandboxEntries, ownsPackages, locateSteps, locateModelFields, notices, reload } = await resolveProject(root, entry, scratch.dir, options.plugins ?? [], pluginCache);
     findings.push(...loadIssuesAsFindings(issues), ...notices);
 
     let tiers: UpgradeReport["tiers"] = { source: "not-run", load: "not-run", boot: "not-run", data: "not-run" };
@@ -394,9 +396,10 @@ interface AskLoopResult {
 async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined, plugins: readonly UpgradePlugin[] | undefined): Promise<AskLoopResult & { unknownIds: string[] }> {
   const answers = new Map<string, string>();
   const everAsked = new Set<string>();
+  const pluginCache = new Map<string, unknown>();
   let built: BuildResult | undefined;
   for (let round = 0; round < 8; round++) {
-    built = await buildReport(root, entry, { runSetupUses, answers, dataReport, forceMajor, plugins });
+    built = await buildReport(root, entry, { runSetupUses, answers, dataReport, forceMajor, plugins, pluginCache });
     const asks = askFindings(built.report.findings);
     for (const { fix } of asks) everAsked.add(fix.question);
     const unresolved = asks.filter(({ fix }) => !answers.has(fix.question));

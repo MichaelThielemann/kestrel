@@ -78,8 +78,14 @@ export interface UpgradePlugin {
    * does not vary with `scratch`, such as a bundled fallback file), that cache must be fresh per call
    * or disabled — otherwise a later call can silently answer from an earlier project's or an earlier
    * preview's cached module instead of the current files.
+   *
+   * `cache` is one plain `Map`, shared by every `load()` call for this one `check`/`fix` invocation
+   * only (never across two different projects, or two separate CLI invocations) — a plugin whose own
+   * loading involves an expensive, root-only step (running a build tool's own "prepare" step, say)
+   * can stash its result there under a key of its own choosing and skip repeating it for a later
+   * re-ask round's or a later edit preview's `scratch` copy of the same project.
    */
-  load(root: string, scratch: string): Promise<LoadResult>;
+  load(root: string, scratch: string, cache: Map<string, unknown>): Promise<LoadResult>;
   sandbox?: Record<string, (config: unknown, scratch: string) => unknown>;
   rules?: readonly Rule[];
   questions?: readonly Question[];

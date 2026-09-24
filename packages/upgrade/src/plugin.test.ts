@@ -221,3 +221,41 @@ describe("loader isolation across two projects in one process", () => {
     }
   });
 });
+
+describe("UpgradePlugin.load()'s cache parameter", () => {
+  it("is the same Map across every load() call within one fix invocation, so an expensive prepare step runs once", async () => {
+    let prepareCount = 0;
+    const plugin: UpgradePlugin = {
+      kind: "custom-host",
+      detect: () => true,
+      load: (_root, _scratch, cache) => {
+        if (!cache.has("prepared")) {
+          prepareCount++;
+          cache.set("prepared", true);
+        }
+        return Promise.resolve(customProject());
+      },
+    };
+    const code = await runUpgradeCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    expect(code === 0 || code === 1).toBe(true);
+    expect(prepareCount).toBe(1);
+  });
+
+  it("is a fresh Map for a separate fix invocation, even for the same project", async () => {
+    let prepareCount = 0;
+    const plugin: UpgradePlugin = {
+      kind: "custom-host",
+      detect: () => true,
+      load: (_root, _scratch, cache) => {
+        if (!cache.has("prepared")) {
+          prepareCount++;
+          cache.set("prepared", true);
+        }
+        return Promise.resolve(customProject());
+      },
+    };
+    await runUpgradeCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    await runUpgradeCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    expect(prepareCount).toBe(2);
+  });
+});
