@@ -224,6 +224,16 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
         const home = (await resolve(""))!;
         expect(expectOk(await site.resolveLinks("pages", home, { locale: "de", rules }))._links).toBeUndefined();
       });
+
+      it("marks a link to a type without the filter's fields as broken instead of failing", async () => {
+        const post = expectOk(await content.create("posts", { permalink: "ein-beitrag", title: "Ein Beitrag" }));
+        const linker = expectOk(
+          await content.create("pages", { slug: "mit-fremdlink", title: "Mit Fremdlink", status: "published", body: `<a href="kestrel:posts:${post.id}">Beitrag</a>` }),
+        );
+        const de = expectOk(await site.resolveLinks("pages", linker, { locale: "de", rules }));
+        expect(de.body).toBe(`<a href="#" data-kestrel-broken="posts:${post.id}">Beitrag</a>`);
+        expect(de._links).toEqual({ [post.id]: { broken: true } });
+      });
     });
   });
 }

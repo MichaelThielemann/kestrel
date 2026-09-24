@@ -135,6 +135,14 @@ describe("satisfiesFilter", () => {
     const routeWithNoIdParam = "";
     expect(await satisfiesFilter(content, "settings", routeWithNoIdParam, "de", { status: "published" })).toEqual({ ok: true, value: true });
   });
+
+  it("is false without a read when the filter names a field the type does not declare", async () => {
+    const content = fakeContent({ p1: { locales: { de: { status: "published" } } } });
+    const calls: unknown[] = [];
+    const spied: Content = { ...content, list: (...args) => (calls.push(args), content.list(...args)) };
+    expect(await satisfiesFilter(spied, "pages", "p1", "de", { onlyOnSettings: true })).toEqual({ ok: true, value: false });
+    expect(calls).toEqual([]);
+  });
 });
 
 describe("publishedLocale", () => {

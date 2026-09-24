@@ -233,7 +233,9 @@ Net changes since 5.8.1.
   builds a public view on top of `content@1`. `satisfiesFilter` decides membership through
   `content.list` itself, so a `Condition` entry (`{ in: [...] }`, `{ ne: ... }`, …) is evaluated
   with the store's own semantics instead of being reimplemented, and never turns into a false
-  negative or a thrown error at request time.
+  negative or a thrown error at request time — including when `filter` names a field the type does
+  not declare (an internal link to a type outside the filter's model, such as a settings singleton
+  with no `status` field, is simply unserved: `resolveLinks` marks it broken, the same as before).
 - `core`: `resolveResultSchema` (`@michaelthielemann/kestrel/schema`) reports every shape a
   pipeline's `result` can end in: the folded `output`, then each step's distinct `terminalOutput`,
   as one `anyOf`; `kestrel-openapi` publishes a route's 200 through it.

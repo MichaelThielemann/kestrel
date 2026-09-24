@@ -307,6 +307,23 @@ describe("delivery/static against site/default", () => {
     expect(second.map((s) => [s.locale, s.state, s.path])).toEqual([["de", "draft", null], ["en", "error", null]]);
     expect([...blobs.blobs.keys()].filter((k) => k.endsWith("index.html"))).toEqual([]);
   });
+
+  it("publishes a page that links to a type without the filter's fields instead of failing", async () => {
+    const withPosts: ContentModel = {
+      locales: ["de", "en"],
+      defaultLocale: "de",
+      types: {
+        ...model.types,
+        posts: { kind: "multi", fields: { permalink: { type: "slug", localized: true, required: true }, title: { type: "text", localized: true, required: true } } },
+      },
+    };
+    const content = await createContentDefault(withPosts, createFakePersistence());
+    const post = expectOk(await content.create("posts", { permalink: "ein-beitrag", title: "Ein Beitrag" }));
+    const doc = expectOk(await content.create("pages", { slug: "mit-fremdlink", title: "Mit Fremdlink", status: "published", body: `<a href="kestrel:posts:${post.id}">Beitrag</a>` }));
+    const delivery = await createDeliveryStatic(config, { content, site: createSiteDefault(content), renderer: fakeRenderer(), blobs: fakeBlobs(), db: createFakePersistence(), logger: fakeLogger() });
+    const status = expectOk(await delivery.publish("pages", doc.id));
+    expect(status.map((s) => [s.locale, s.state])).toEqual([["de", "live"], ["en", "draft"]]);
+  });
 });
 
 function fakeHtmlRenderer(html: string): Renderer {

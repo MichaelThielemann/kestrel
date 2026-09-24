@@ -2,16 +2,23 @@ import type { Content, ContentDocument, ContentError } from "./content.ts";
 import { isErr, ok, type Result } from "./errors.ts";
 import type { Filter } from "./query.ts";
 
+const RESERVED_FIELDS = new Set(["id", "createdAt", "updatedAt"]);
+
 /**
  * Whether `id`'s row at `locale` satisfies `filter`, decided by `content.list` itself: a
  * `Condition` entry (`{ in: [...] }`, `{ ne: ... }`, …) is evaluated with the store's own
  * semantics, never reimplemented here, so it can never turn into a false negative or a thrown
  * error at request time. `id` is ignored for a single type, which `content@1` itself never keys by
- * id either. A `filter` with no entries is always satisfied, without a read.
+ * id either. `false` without a read when `filter` names a field `type` does not declare (a link to
+ * another type that happens not to carry the filter's fields is simply unserved, not an error) or
+ * when `filter` has no entries to fail — an empty filter is always satisfied.
  */
 export async function satisfiesFilter(content: Content, type: string, id: string | undefined, locale: string | undefined, filter: Filter): Promise<Result<boolean, ContentError>> {
   if (Object.keys(filter).length === 0) return ok(true);
-  const single = content.model().types[type]?.kind === "single";
+  const definition = content.model().types[type];
+  const fields = definition?.fields ?? {};
+  if (!Object.keys(filter).every((f) => RESERVED_FIELDS.has(f) || f in fields)) return ok(false);
+  const single = definition?.kind === "single";
   const page = await content.list(type, { ...filter, ...(single || id === undefined ? {} : { id }) }, { ...(locale === undefined ? {} : { locale }), limit: 1 });
   if (isErr(page)) return page;
   return ok(page.value.total > 0);

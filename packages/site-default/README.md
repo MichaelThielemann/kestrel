@@ -15,6 +15,13 @@ locale only when the default locale's own values pass the filter too; with no su
 stays empty. `_translations` lists only the locales that pass the filter themselves. Every `site@1`
 implementation must follow this rule; the shared contract suite
 (`@michaelthielemann/kestrel-contracts/site.contract.test`) tests it.
+Cost: with `?fallback=true` and N locales configured, resolving a non-default locale reads up to two
+`content.get` calls (the requested locale's own values, the merged fallback read) and up to N+2
+`content.list` calls (the slug lookup, a filter check each for the requested and the default locale,
+one per remaining locale to narrow `_translations`) — one more list call when the requested locale
+has no slug of its own, so the default-locale slug lookup runs too. Measured at 4 locales: 8 calls
+for `resolve`. Every locale's filter membership is decided fresh at read time, on the store itself,
+never cached or reused across these calls; that correctness is preferred over the read count.
 Steps: `site.resolve:<t>?home=home&status=published&fallback=true` (`NOT_FOUND` otherwise) and
 `site.resolveLinks:<t>?…` with the same arguments. Config `{}`.
 Not included: rendering, storage, redirects (see delivery-static, redirects-default).
