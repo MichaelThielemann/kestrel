@@ -214,7 +214,10 @@ Net changes since 5.8.1.
   locales that pass that filter too. This is automatic wherever a public read pipeline's step
   argument already names the filter (as `content.list:pages?status=published` does); a consumer
   whose collection pipelines apply a public filter some other way (outside the step argument) must
-  move it into the step argument for the narrowing to see it. `site-default`'s slug-through-the-default-locale lookup now applies the
+  move it into the step argument for the narrowing to see it. The narrowing applies to every fixed
+  filter alike, not only a public one: an editorial step such as
+  `content.list:pages?status=draft` now reports `_translations` as "complete and matching that
+  filter" too, not just "complete". `site-default`'s slug-through-the-default-locale lookup now applies the
   full filter, not only its non-localized entries, so a locale whose only route to a path is a
   draft default locale's slug answers 404, the same as an unknown path, instead of 200.
   `delivery.exportLlms` re-checks a source locale's own current values instead of trusting its
@@ -235,7 +238,12 @@ Net changes since 5.8.1.
   with the store's own semantics instead of being reimplemented, and never turns into a false
   negative or a thrown error at request time — including when `filter` names a field the type does
   not declare (an internal link to a type outside the filter's model, such as a settings singleton
-  with no `status` field, is simply unserved: `resolveLinks` marks it broken, the same as before).
+  with no `status` field, is simply unserved: `resolveLinks` marks it broken, the same as before),
+  and when `id` is missing on a multi type, which is `false` rather than "does any document pass".
+  `narrowListTranslations` chunks its `in` list at 500 ids, so a page larger than that sends several
+  bounded queries per locale instead of one unbounded one. `publishedLocale` reads with `content@1`'s
+  own `fallback: true` once more at the default locale too when `fallback` is requested there, so
+  `_locales` (the per-field origin map) still comes back the same as a direct `content@1` read would.
 - `core`: `resolveResultSchema` (`@michaelthielemann/kestrel/schema`) reports every shape a
   pipeline's `result` can end in: the folded `output`, then each step's distinct `terminalOutput`,
   as one `anyOf`; `kestrel-openapi` publishes a route's 200 through it.

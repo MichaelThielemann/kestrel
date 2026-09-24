@@ -173,6 +173,13 @@ describe("content/default", () => {
       expect(error.message).toMatch(/unknown locale "fr"/);
     });
 
+    it("keeps _locales at the default locale too when fallback=true and no filter is fixed", async () => {
+      const content = await createContentDefault(model, createFakePersistence());
+      const doc = expectOk(await content.create("pages", { slug: "a", status: "published" }));
+      const result = resultOf(await module.steps!(content).get("pages?fallback=true")(ctx({ id: doc.id })));
+      expect(result._locales).toEqual({ status: "de" });
+    });
+
     it("returns an empty document instead of NOT_FOUND for a single type that was never set", async () => {
       const single = { ...model, types: { settings: { kind: "single" as const, fields: { title: { type: "text" as const, localized: true } } } } };
       const content = await createContentDefault(single, createFakePersistence());

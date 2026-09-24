@@ -143,6 +143,14 @@ describe("satisfiesFilter", () => {
     expect(await satisfiesFilter(spied, "pages", "p1", "de", { onlyOnSettings: true })).toEqual({ ok: true, value: false });
     expect(calls).toEqual([]);
   });
+
+  it("is false without a read when a multi type has no id, never 'does any document pass'", async () => {
+    const content = fakeContent({ p1: { locales: { de: { status: "published" } } } });
+    const calls: unknown[] = [];
+    const spied: Content = { ...content, list: (...args) => (calls.push(args), content.list(...args)) };
+    expect(await satisfiesFilter(spied, "pages", undefined, "de", { status: "published" })).toEqual({ ok: true, value: false });
+    expect(calls).toEqual([]);
+  });
 });
 
 describe("publishedLocale", () => {
@@ -254,6 +262,12 @@ describe("publishedLocale", () => {
     const result = await publishedLocale(content, "settings", undefined, undefined, {}, { fallback: false });
     expect(result.ok && result.value?.title).toBe("Site");
   });
+
+  it("returns null for a multi type read without an id, the shape exportLlms calls it with", async () => {
+    const content = fakeContent({ p1: { locales: { de: { status: "published" } } } });
+    const result = await publishedLocale(content, "pages", undefined, "de", { status: "published" }, { fallback: true, translations: false });
+    expect(result).toEqual({ ok: true, value: null });
+  });
 });
 
 describe("narrowListTranslations", () => {
@@ -314,5 +328,23 @@ describe("narrowListTranslations", () => {
     const items = [{ id: "p1", createdAt: 1, updatedAt: 1, _translations: { de: true, en: false } }];
     const result = await narrowListTranslations(content, "pages", items, { status: "published" }, "de");
     expect(result.ok && result.value[0]?._translations).toEqual({ de: true, en: false });
+  });
+
+  it("chunks a page larger than one id batch instead of sending one unbounded `in` list", async () => {
+    const docs: Record<string, FakeDoc> = {};
+    const items: ContentDocument[] = [];
+    for (let i = 0; i < 501; i++) {
+      const id = `p${i}`;
+      const enStatus = i === 500 ? "draft" : "published";
+      docs[id] = { locales: { de: { status: "published" }, en: { status: enStatus } }, translations: { de: true, en: true } };
+      items.push({ id, createdAt: 1, updatedAt: 1, _translations: { de: true, en: true } });
+    }
+    const content = fakeContent(docs);
+    const calls: unknown[] = [];
+    const spied: Content = { ...content, list: (...args) => (calls.push(args), content.list(...args)) };
+    const result = await narrowListTranslations(spied, "pages", items, { status: "published" }, "de");
+    expect(calls.length).toBe(2);
+    expect(result.ok && result.value.find((d) => d.id === "p0")?._translations).toEqual({ de: true, en: true });
+    expect(result.ok && result.value.find((d) => d.id === "p500")?._translations).toEqual({ de: true, en: false });
   });
 });
