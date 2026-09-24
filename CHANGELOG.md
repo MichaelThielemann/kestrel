@@ -229,15 +229,24 @@ Net changes since 5.8.1.
   must never use it. Every `site@1` implementation must follow the fallback/`_translations` rule now;
   the shared contract suite (`@michaelthielemann/kestrel-contracts/site.contract.test`) tests it.
 - **Every media file has exactly one public URL, and the API returns it.** `media-default` stores an
-  original under `<prefix><id>/<name>`. `<name>` is fixed at upload: the uploaded file name reduced
-  to `[A-Za-z0-9._-]`, with the extension of its content type (`Photo 1.JPG` sent as `image/jpeg` is
-  stored as `Photo-1.jpg`). `media.upload`, `media.get`, `media.list` and `media.update` return it as
+  original under `<prefix><id>/<name>`. `<name>` is fixed at upload, and its extension always comes
+  from the content type the file is stored under, never from the uploaded name: a listed inert type
+  (images, PDF, audio, video, plain text, CSV, JSON, ZIP, and SVG) replaces the uploaded extension
+  (`Photo 1.JPG` sent as `image/jpeg` is stored as `Photo-1.jpg`), every other type gets `.bin` and
+  keeps the uploaded extension in the stem (`x.html` sent as `image/x-foo` or `text/html` is stored as
+  `x-html.bin`). Every other dot becomes `-`, so a name has exactly one extension. `media.upload`, `media.get`, `media.list` and `media.update` return it as
   `path`, `<publicPath>/<id>/<name>` (new config key `publicPath`, default `"/media"`). Renaming or
   moving an item and renaming a folder change metadata only: no blob moves, and neither the key nor
   `path` changes. `filename` starts out equal to `<name>` and is the display name from then on. A name
   is still unique within its folder; a clash answers 409 with `details.field: "location"` (was
-  `"key"`). A name that would collide with a path next to the file — `variants`, the directory of an
-  image's variants, or `file`, the download route — is stored with `-upload` appended.
+  `"key"`).
+  - The public copy of a file whose type is not listed is stored as `application/octet-stream`, and
+    `media.serve` answers with that type too, so no host runs an HTML, JavaScript or XML file uploaded
+    under any type. With `publicCopy` set and SVG uploads allowed, boot fails unless every pipeline
+    that runs `media.upload` runs `sanitize.svg` before it.
+  - An upload stuck in `uploading` for longer than `uploadStaleAfterMs` — its `ready` update failed, or
+    the blob store threw — is released by the next upload of the same name, also without
+    `publicCopy`.
   - `allowedTypes` and `deniedTypes` compare the media type without parameters and ignoring case, so
     `image/svg+xml; charset=utf-8` is denied wherever `image/svg+xml` is.
   - An upload turns its row `ready` only while the row is still `uploading`. When `media.syncPublic`
@@ -295,7 +304,9 @@ Net changes since 5.8.1.
     so a size whose copy cannot be written gives up after `maxAttempts` instead of being retried for
     good.
   - Whether an item gets variants, and the format of an `original` size, are decided by the media type
-    without parameters, ignoring case: `image/svg+xml; charset=utf-8` gets no variants.
+    without parameters, ignoring case: `image/svg+xml; charset=utf-8` gets no variants, and neither
+    does any other XML image type (`image/foo+xml`), which a browser would open as a document.
+  - A sync job that cannot start after a size-set change is logged instead of being dropped.
   - `images.remove` stops a render of the same item in this process after the size it is rendering,
     instead of waiting for every size.
   - `images-default` raises `media.updated` with `ids` through `events@1` for items it made available,
@@ -321,8 +332,9 @@ Net changes since 5.8.1.
 - `StepDescription` gains an optional `anonymous: "required"`: the step's output is also published
   without an access check, so every pipeline running it must let an anonymous caller through. With
   `publicCopy`, `media.serve` and `images.serve` declare it. `authz-roles` checks it when attached and
-  fails boot, naming the pipeline, the step and the permission anonymous callers lack, or the step
-  that requires a signed-in caller. Another `authz@1` provider has to make the same check itself.
+  fails boot, naming the pipeline, the step and the permission anonymous callers lack, the step
+  that requires a signed-in caller, or the missing `authz.require` step: such a pipeline without any
+  `authz.require` fails boot as well. Another `authz@1` provider has to make the same check itself.
   `insights.readManifest`'s output schema follows the new field.
 - A binary step result may now set its own `cache-control`; without one, or with an empty one,
   responses stay `no-store`.
