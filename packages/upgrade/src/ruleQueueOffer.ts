@@ -45,8 +45,9 @@ function consumerEventPipelines(ctx: RuleContext): string[] {
 }
 
 function defaultRelayPipelines(ctx: RuleContext): string[] {
+  const eventTriggered = new Set(consumerEventPipelines(ctx));
   return ctx.project.input.pipelines
-    .filter((def) => pipelineSteps(def.steps).some((s) => s.startsWith("delivery.publish:") || s.startsWith("delivery.unpublish:")))
+    .filter((def) => eventTriggered.has(def.name) && pipelineSteps(def.steps).some((s) => s.startsWith("delivery.publish:") || s.startsWith("delivery.unpublish:")))
     .map((def) => def.name);
 }
 

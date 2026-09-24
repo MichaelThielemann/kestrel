@@ -128,6 +128,16 @@ describe("offer/event-queue", () => {
     expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : undefined).toBe("publishPage");
   });
 
+  it("does not default to a publishing pipeline the event does not trigger, only to event-triggered subscribers", async () => {
+    const p = await directProject();
+    p.input.pipelines = [...p.input.pipelines, { name: "adminRepublish", steps: ["delivery.publish:pages"] }];
+    p.input.config.triggers = [...p.input.config.triggers, { http: "POST /admin/republish", pipeline: "adminRepublish" }];
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"]]);
+    const findings = await queueOfferRule.check(contextFor(p, answers));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : undefined).toBe("publishPage");
+  });
+
   it("applies the codemod once relay-pipelines is answered: module swap, relayPipelines, events.relay after the emit", async () => {
     const p = await directProject({ publishPipeline: true });
     const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
