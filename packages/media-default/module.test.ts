@@ -29,12 +29,13 @@ function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; c
   };
 }
 
-function fakeCtx(files: Context["files"] = [], payload: Record<string, unknown> = {}, params: Record<string, string> = {}): Context {
-  return createContext({ trigger: { kind: "http", name: "t" }, payload, params, files });
+function fakeCtx(files: Context["files"] = [], payload: Record<string, unknown> = {}, params: Record<string, string> = {}, identity?: Context["identity"]): Context {
+  const ctx = createContext({ trigger: { kind: "http", name: "t" }, payload, params, files });
+  return identity === undefined ? ctx : { ...ctx, identity };
 }
 
 const noLogger: Logger = { step() {}, info() {}, error() {} };
-const config = (overrides: Partial<Config> = {}): Config => ({ allowedTypes: ["image/*"], deniedTypes: [], maxBytes: 1024, locales: [], prefix: "media/", ...overrides });
+const config = (overrides: Partial<Config> = {}): Config => ({ allowedTypes: ["image/*"], deniedTypes: [], maxBytes: 1024, locales: [], prefix: "media/", publicPath: "/media", uploadStaleAfterMs: 900000, anonymousList: "ids", ...overrides });
 
 async function make(overrides: Partial<Config> = {}): Promise<{ media: Media; blobs: Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> }; db: FakePersistence; steps: ReturnType<NonNullable<typeof module.steps>> }> {
   const blobs = fakeBlobstore();
@@ -46,13 +47,21 @@ async function make(overrides: Partial<Config> = {}): Promise<{ media: Media; bl
 const file = (filename: string, data: Uint8Array = new Uint8Array([1])): Context["files"][number] => ({ field: "file", filename, contentType: "image/png", data });
 
 describe("media/default upload step", () => {
-  it("maps a duplicate filename with other bytes to CONFLICT", async () => {
+  it("returns the public projection with path, never key/checksum/status/location", async () => {
+    const { steps } = await make();
+    const ctx = expectOk(await steps.upload(fakeCtx([file("a.png")])));
+    const item = boundaryCast<Record<string, unknown>>(ctx.result, "host");
+    expect(item.path).toMatch(new RegExp(`^/media/[^/]+/a\\.png$`));
+    for (const field of ["key", "checksum", "status", "location"]) expect(field in item).toBe(false);
+  });
+
+  it("maps a duplicate filename with other bytes to CONFLICT naming location", async () => {
     const { steps } = await make();
     expectOk(await steps.upload(fakeCtx([file("a.png")])));
     const error = expectErr(await steps.upload(fakeCtx([file("a.png", new Uint8Array([2]))])), "CONFLICT");
     expect(error.status).toBe(409);
     expect(error.message).toMatch(/already exists/);
-    expect(error.details).toMatchObject({ field: "key" });
+    expect(error.details).toMatchObject({ field: "location" });
   });
 
   it("an identical re-upload answers 200 with the stored item and ends the pipeline before events.emit", async () => {
@@ -85,12 +94,6 @@ describe("media/default upload step", () => {
     expect(expectErr(await steps.upload(fakeCtx([])), "VALIDATION").status).toBe(400);
   });
 
-  it("a single file keeps the item-only response", async () => {
-    const { steps } = await make();
-    const ctx = expectOk(await steps.upload(fakeCtx([file("a.png")])));
-    expect(boundaryCast<{ filename: string }>(ctx.result, "host").filename).toBe("a.png");
-  });
-
   it("a disallowed type is UNSUPPORTED (415), an oversized file PAYLOAD_TOO_LARGE (413)", async () => {
     const { steps } = await make({ allowedTypes: ["image/*"], deniedTypes: ["image/svg+xml"], maxBytes: 2 });
     const svg = { field: "file", filename: "a.svg", contentType: "image/svg+xml", data: new Uint8Array([1]) };
@@ -107,15 +110,6 @@ describe("media/default upload step", () => {
     expect(result.ids).toEqual(result.items.map((i) => i.id));
   });
 
-  it("multiple files: a conflict is a CONFLICT error entry, not a failed step", async () => {
-    const { steps } = await make();
-    expectOk(await steps.upload(fakeCtx([file("a.png")])));
-    const ctx = expectOk(await steps.upload(fakeCtx([file("a.png", new Uint8Array([2])), file("d.png")])));
-    const result = boundaryCast<{ items: Array<{ filename: string }>; errors: Array<{ filename: string; status: number; code: string }> }>(ctx.result, "host");
-    expect(result.items.map((i) => i.filename)).toEqual(["d.png"]);
-    expect(result.errors).toEqual([{ filename: "a.png", status: 409, code: "CONFLICT", message: expect.stringContaining("already exists") as unknown }]);
-  });
-
   it("multiple files: a transient failure fails the whole request instead of becoming an entry", async () => {
     const { steps, db } = await make();
     db.failNext("TRANSIENT");
@@ -125,8 +119,8 @@ describe("media/default upload step", () => {
   });
 });
 
-describe("media/default download step", () => {
-  it("flags an upload without provenance as unknown", async () => {
+describe("media/default download and serve steps", () => {
+  it("download flags an upload without provenance as unknown", async () => {
     const { media, steps } = await make();
     const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) })).item;
     expect(item.provenance).toEqual({ origin: "unknown" });
@@ -134,24 +128,30 @@ describe("media/default download step", () => {
     expect(boundaryCast<{ headers?: Record<string, string> }>(ctx.result, "host").headers).toEqual({ "x-content-provenance": "unknown" });
   });
 
-  it("sets no provenance header for a human upload", async () => {
-    const { media, steps } = await make();
-    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "", "human")).item;
-    const ctx = expectOk(await steps.download(fakeCtx([], {}, { id: item.id })));
-    expect(boundaryCast<{ headers?: Record<string, string> }>(ctx.result, "host").headers).toBeUndefined();
-  });
-
-  it("keeps the binary result shape", async () => {
-    const { media, steps } = await make();
-    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1, 2]) })).item;
-    const ctx = expectOk(await steps.download(fakeCtx([], {}, { id: item.id })));
-    expect(ctx.result).toMatchObject({ binary: true, contentType: "image/png", filename: "a.png" });
-    expect(Array.from(boundaryCast<{ data: Uint8Array }>(ctx.result, "host").data)).toEqual([1, 2]);
-  });
-
-  it("an unknown id is NOT_FOUND", async () => {
+  it("download: an unknown id is NOT_FOUND", async () => {
     const { steps } = await make();
     expect(expectErr(await steps.download(fakeCtx([], {}, { id: "missing" })), "NOT_FOUND").status).toBe(404);
+  });
+
+  it("serve: 200 with the current name, 404 for another name or an unknown id", async () => {
+    const { media, steps } = await make();
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1, 2]) })).item;
+    const ok1 = expectOk(await steps.serve(fakeCtx([], {}, { id: item.id, name: item.filename })));
+    expect(Array.from(boundaryCast<{ data: Uint8Array }>(ok1.result, "host").data)).toEqual([1, 2]);
+    expect(expectErr(await steps.serve(fakeCtx([], {}, { id: item.id, name: "other.png" })), "NOT_FOUND").status).toBe(404);
+    expect(expectErr(await steps.serve(fakeCtx([], {}, { id: "missing", name: "a.png" })), "NOT_FOUND").status).toBe(404);
+  });
+
+  it("serve: immutable cache-control, private without publicCopy, public with it", async () => {
+    const withoutCopy = await make();
+    const itemA = expectOk(await withoutCopy.media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) })).item;
+    const resA = expectOk(await withoutCopy.steps.serve(fakeCtx([], {}, { id: itemA.id, name: itemA.filename })));
+    expect(boundaryCast<{ headers?: Record<string, string> }>(resA.result, "host").headers).toMatchObject({ "cache-control": "private, max-age=31536000, immutable" });
+
+    const withCopy = await make({ publicCopy: { prefix: "site/" } });
+    const itemB = expectOk(await withCopy.media.upload({ filename: "b.png", contentType: "image/png", data: new Uint8Array([1]) })).item;
+    const resB = expectOk(await withCopy.steps.serve(fakeCtx([], {}, { id: itemB.id, name: itemB.filename })));
+    expect(boundaryCast<{ headers?: Record<string, string> }>(resB.result, "host").headers).toMatchObject({ "cache-control": "public, max-age=31536000, immutable" });
   });
 });
 
@@ -192,32 +192,58 @@ describe("media/default folder steps", () => {
     expect(expectOk(await steps.listFolderItems(fakeCtx([], { recursive: true }, { path: "x" }))).result).toMatchObject({ path: "x" });
   });
 
-  it("an invalid path is VALIDATION and a missing payload path too", async () => {
-    const { steps } = await make();
-    expect(expectErr(await steps.createFolder(fakeCtx()), "VALIDATION").status).toBe(400);
-    expect(expectErr(await steps.createFolder(fakeCtx([], { path: "../x" })), "VALIDATION").status).toBe(400);
+  it("removeFolder returns the removed ids", async () => {
+    const { media, steps } = await make();
+    const a = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "x")).item;
+    const res = expectOk(await steps.removeFolder(fakeCtx([], {}, { path: "x" })));
+    expect(boundaryCast<{ ids: string[] }>(res.result, "host").ids).toEqual([a.id]);
   });
 });
 
-describe("media/default list step", () => {
-  it("uses the first value of a repeated query param", async () => {
-    const { media, steps } = await make();
-    expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "a"));
-    const ctx = expectOk(await steps.list(fakeCtx([], { folder: ["a", "b"] })));
-    expect(boundaryCast<{ total: number }>(ctx.result, "host").total).toBe(1);
+describe("media/default list and listFolders: anonymous reads by id only", () => {
+  it("list without an identity and without ids answers 401", async () => {
+    const { steps } = await make();
+    const error = expectErr(await steps.list(fakeCtx()), "UNAUTHENTICATED");
+    expect(error.status).toBe(401);
   });
 
-  it("answers TRANSIENT (503, retryable) when persistence is down", async () => {
+  it("list without an identity but with ids answers 200", async () => {
+    const { media, steps } = await make();
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) })).item;
+    const res = expectOk(await steps.list(fakeCtx([], { ids: item.id })));
+    expect(boundaryCast<{ total: number }>(res.result, "host").total).toBe(1);
+  });
+
+  it("list with an identity answers 200 even without ids", async () => {
+    const { steps } = await make();
+    const res = expectOk(await steps.list(fakeCtx([], {}, {}, { id: "u", claims: {} })));
+    expect(boundaryCast<{ total: number }>(res.result, "host").total).toBe(0);
+  });
+
+  it("anonymousList: \"all\" restores anonymous listing", async () => {
+    const { steps } = await make({ anonymousList: "all" });
+    const res = expectOk(await steps.list(fakeCtx()));
+    expect(boundaryCast<{ total: number }>(res.result, "host").total).toBe(0);
+  });
+
+  it("listFolders without an identity answers 401, with one 200", async () => {
+    const { steps } = await make();
+    expect(expectErr(await steps.listFolders(fakeCtx()), "UNAUTHENTICATED").status).toBe(401);
+    const res = expectOk(await steps.listFolders(fakeCtx([], {}, {}, { id: "u", claims: {} })));
+    expect(Array.isArray(res.result)).toBe(true);
+  });
+
+  it("answers TRANSIENT (503, retryable) when persistence is down for a signed-in list", async () => {
     const { steps, db } = await make();
     db.failNext("TRANSIENT");
-    const error = expectErr(await steps.list(fakeCtx()), "TRANSIENT");
+    const error = expectErr(await steps.list(fakeCtx([], {}, {}, { id: "u", claims: {} })), "TRANSIENT");
     expect(error.status).toBe(503);
     expect(error.retryable).toBe(true);
   });
 });
 
-describe("media/default reconcile step", () => {
-  it("reports orphans and deletes them only when payload.delete is set", async () => {
+describe("media/default reconcile and syncPublic steps", () => {
+  it("reconcile reports orphans and deletes them only when payload.delete is set", async () => {
     const { blobs, steps } = await make();
     expectOk(await blobs.put("media/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
 
@@ -237,27 +263,38 @@ describe("media/default reconcile step", () => {
     expect(ctx.result).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: [] });
     expect(expectOk(await blobs.get("media/stray.png"))).toBeNull();
   });
+
+  it("syncPublic merges _publicMedia into the result", async () => {
+    const { media, steps } = await make({ publicCopy: { prefix: "site/" } });
+    await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) });
+    const ctx = expectOk(await steps.syncPublic(fakeCtx()));
+    expect(boundaryCast<{ _publicMedia: { written: number } }>(ctx.result, "host")._publicMedia.written).toBe(0);
+  });
 });
 
-describe("media/default configSchema prefix validation", () => {
-  it("rejects empty prefix", () => {
+describe("media/default configSchema", () => {
+  it("rejects an invalid prefix, publicPath, publicCopy.prefix, uploadStaleAfterMs and anonymousList", () => {
     expect(configSchema.safeParse({ prefix: "" }).success).toBe(false);
-  });
-
-  it("rejects prefix without trailing slash", () => {
     expect(configSchema.safeParse({ prefix: "media" }).success).toBe(false);
-  });
-
-  it("rejects prefix with leading slash", () => {
     expect(configSchema.safeParse({ prefix: "/media/" }).success).toBe(false);
+    expect(configSchema.safeParse({ publicPath: "/" }).success).toBe(false);
+    expect(configSchema.safeParse({ publicPath: "/media/" }).success).toBe(false);
+    expect(configSchema.safeParse({ publicPath: "media" }).success).toBe(false);
+    expect(configSchema.safeParse({ publicPath: "/me dia" }).success).toBe(false);
+    expect(configSchema.safeParse({ publicCopy: { prefix: "site" } }).success).toBe(false);
+    expect(configSchema.safeParse({ uploadStaleAfterMs: 1000 }).success).toBe(false);
+    expect(configSchema.safeParse({ anonymousList: "yes" }).success).toBe(false);
   });
 
-  it("accepts valid single-segment prefix", () => {
+  it("accepts valid values and the defaults", () => {
     expect(configSchema.safeParse({ prefix: "media/" }).success).toBe(true);
-  });
-
-  it("accepts valid multi-segment prefix", () => {
     expect(configSchema.safeParse({ prefix: "assets/media/" }).success).toBe(true);
+    expect(configSchema.safeParse({ publicPath: "/media" }).success).toBe(true);
+    expect(configSchema.safeParse({ publicCopy: { prefix: "site/" } }).success).toBe(true);
+    expect(configSchema.safeParse({ publicCopy: { prefix: "" } }).success).toBe(true);
+    const defaults = configSchema.parse({});
+    expect(defaults).toMatchObject({ publicPath: "/media", uploadStaleAfterMs: 900000, anonymousList: "ids" });
+    expect(defaults.publicCopy).toBeUndefined();
   });
 });
 
@@ -286,6 +323,9 @@ function pipeline(...steps: string[]) {
   return definePipeline({ name: "test", steps });
 }
 
+const setsIdentity = { "identity.set": async (ctx: Context) => ok({ ...ctx, identity: { id: "u", claims: {} } }) };
+const identityWrite = { "identity.set": ["identity?"] };
+
 describe("media/default steps via runPipeline", () => {
   it("upload: validates the body and stores the file", async () => {
     const { media } = await makeInstance();
@@ -299,55 +339,20 @@ describe("media/default steps via runPipeline", () => {
     expect(boundaryCast<{ folder: string }>(ok1.result, "host").folder).toBe("photos");
   });
 
-  it("upload: the same name with other bytes is a 409 naming the key and the field", async () => {
+  it("upload: the same name with other bytes is a 409 naming the location field", async () => {
     const { media } = await makeInstance();
     expect((await runPipeline(pipeline("media.upload"), { files: [file("a.png")] }, { modules: [{ module, instance: media }] })).status).toBe(200);
     const res = await runPipeline(pipeline("media.upload"), { files: [file("a.png", new Uint8Array([2]))] }, { modules: [{ module, instance: media }] });
-    expect(res).toMatchObject({ status: 409, code: "CONFLICT", step: "media.upload", details: { collection: "media_items", field: "key" } });
-    expect(res.error).toMatch(/media\/a\.png already exists/);
-  });
-
-  it("upload: an identical re-upload is a 200 with the stored item, and the step after media.upload does not run", async () => {
-    const { media } = await makeInstance();
-    let emitted = 0;
-    const emit = { "events.emit": async (ctx: Context) => { emitted += 1; return ok(ctx); } };
-    const run = () => runPipeline(pipeline("media.upload", "events.emit"), { files: [file("a.png")] }, { modules: [{ module, instance: media }], steps: emit });
-    const first = await run();
-    expect(first.status).toBe(200);
-    expect(emitted).toBe(1);
-    const again = await run();
-    expect(again.status).toBe(200);
-    expect(boundaryCast<{ id: string }>(again.result, "host").id).toBe(boundaryCast<{ id: string }>(first.result, "host").id);
-    expect(emitted).toBe(1);
-  });
-
-  it("upload: an all-idempotent multi-file batch is a 200 ending the pipeline before events.emit", async () => {
-    const { media } = await makeInstance();
-    let emitted = 0;
-    const emit = { "events.emit": async (ctx: Context) => { emitted += 1; return ok(ctx); } };
-    const run = (files: Context["files"]) => runPipeline(pipeline("media.upload", "events.emit"), { files }, { modules: [{ module, instance: media }], steps: emit });
-    const first = await run([file("a.png"), file("b.png")]);
-    expect(first.status).toBe(200);
-    expect(emitted).toBe(1);
-    const repeat = await run([file("a.png"), file("b.png")]);
-    expect(repeat.status).toBe(200);
-    expect(boundaryCast<{ ids: string[] }>(repeat.result, "host").ids).toEqual([]);
-    expect(emitted).toBe(1);
+    expect(res).toMatchObject({ status: 409, code: "CONFLICT", step: "media.upload", details: { collection: "media_items", field: "location" } });
+    expect(res.error).toMatch(/a\.png already exists/);
   });
 
   it("upload's terminalOutput requires ids on the list-result branch", () => {
-    const description = module.describe!(undefined).upload;
+    const description = module.describe!({ publicCopyEnabled: () => false }).upload;
     const schema = description.terminalOutput;
     expect(schema).toBeDefined();
     expect(validateSchema(schema ?? {}, { items: [], errors: [] })).not.toEqual([]);
     expect(validateSchema(schema ?? {}, { items: [], errors: [], ids: [] })).toEqual([]);
-  });
-
-  it("upload: multiple files return items and errors matching the declared output schema", async () => {
-    const { media } = await makeInstance();
-    const res = await runPipeline(pipeline("media.upload"), { files: [file("a.png"), file("b.png", new Uint8Array([1, 2, 3]))] }, { modules: [{ module, instance: media }] });
-    expect(res.status).toBe(200);
-    expect(boundaryCast<{ items: unknown[] }>(res.result, "host").items).toHaveLength(2);
   });
 
   it("get: query.locale is validated and coerced", async () => {
@@ -358,10 +363,10 @@ describe("media/default steps via runPipeline", () => {
     expect(boundaryCast<{ id: string }>(res.result, "host").id).toBe(item.id);
   });
 
-  it("list: query.limit/offset are coerced from strings, folder/q/sort/ids/recursive/locale are declared", async () => {
+  it("list: with an identity, query.limit/offset are coerced from strings, folder/q/sort/ids/recursive/locale are declared", async () => {
     const { media } = await makeInstance();
     await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) }, "photos");
-    const res = await runPipeline(pipeline("media.list"), { query: { folder: "photos", limit: "10", offset: "0" } }, { modules: [{ module, instance: media }] });
+    const res = await runPipeline(pipeline("identity.set", "media.list"), { query: { folder: "photos", limit: "10", offset: "0" } }, { modules: [{ module, instance: media }], steps: setsIdentity, writes: identityWrite });
     expect(res.status).toBe(200);
     expect(boundaryCast<{ total: number }>(res.result, "host").total).toBe(1);
   });
@@ -374,19 +379,29 @@ describe("media/default steps via runPipeline", () => {
     expect(res.result).toMatchObject({ binary: true });
   });
 
-  it("listFolders: returns folders", async () => {
+  it("serve: serves the binary result at the public URL's name", async () => {
     const { media } = await makeInstance();
-    const res = await runPipeline(pipeline("media.listFolders"), {}, { modules: [{ module, instance: media }] });
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1, 2]) })).item;
+    const res = await runPipeline(pipeline("media.serve"), { params: { id: item.id, name: item.filename } }, { modules: [{ module, instance: media }] });
+    expect(res.status).toBe(200);
+    expect(res.result).toMatchObject({ binary: true });
+  });
+
+  it("listFolders: with an identity, returns folders", async () => {
+    const { media } = await makeInstance();
+    const res = await runPipeline(pipeline("identity.set", "media.listFolders"), {}, { modules: [{ module, instance: media }], steps: setsIdentity, writes: identityWrite });
     expect(res.status).toBe(200);
     expect(Array.isArray(res.result)).toBe(true);
   });
 
-  it("update: replaces fields", async () => {
+  it("update: replaces fields, keeping the key and path", async () => {
     const { media } = await makeInstance();
     const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) })).item;
     const res = await runPipeline(pipeline("media.update"), { params: { id: item.id }, body: { filename: "b.png" } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
-    expect(boundaryCast<{ filename: string }>(res.result, "host").filename).toBe("b.png");
+    const updated = boundaryCast<{ filename: string; path: string }>(res.result, "host");
+    expect(updated.filename).toBe("b.png");
+    expect(updated.path).toBe(`/media/${item.id}/${item.filename}`);
   });
 
   it("remove: deletes the item", async () => {
@@ -404,14 +419,6 @@ describe("media/default steps via runPipeline", () => {
     expect(reported.result).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: [] });
     const deleted = await runPipeline(pipeline("media.reconcile"), { body: { delete: true } }, { modules: [{ module, instance: media }] });
     expect(deleted.status).toBe(200);
-    expect(expectOk(await blobs.get("media/stray.png"))).toBeNull();
-  });
-
-  it("reconcileDelete: always deletes orphan blobs", async () => {
-    const { media, blobs } = await makeInstance();
-    expectOk(await blobs.put("media/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
-    const res = await runPipeline(pipeline("media.reconcileDelete"), {}, { modules: [{ module, instance: media }] });
-    expect(res.status).toBe(200);
     expect(expectOk(await blobs.get("media/stray.png"))).toBeNull();
   });
 

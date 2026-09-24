@@ -68,6 +68,12 @@ export default tseslint.config(
     },
   },
   {
+    files: ["packages/*/*.interleaving.test.ts", "packages/*/*.permanence.test.ts"],
+    rules: {
+      "no-restricted-imports": "off",
+    },
+  },
+  {
     files: ["packages/core/**/*.ts"],
     rules: {
       "no-restricted-imports": [

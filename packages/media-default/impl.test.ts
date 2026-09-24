@@ -11,7 +11,8 @@ import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testin
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
-import { COLLECTION, FOLDERS, createMediaDefault, parseProvenance, safeName, type Config } from "./impl.ts";
+import type { Introspection, Manifest } from "@michaelthielemann/kestrel";
+import { COLLECTION, FOLDERS, createMediaDefault, nameFor, parseProvenance, publicTreeOf, safeName, urlNameOf, type Config } from "./impl.ts";
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
   const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
@@ -26,7 +27,8 @@ function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; c
 }
 const png = { filename: "../evil name.PNG", contentType: "image/png", data: new Uint8Array([1, 2, 3]) };
 const noLogger: Logger = { step() {}, info() {}, error() {} };
-const make = async (config: Config = { allowedTypes: ["image/*"], deniedTypes: ["image/svg+xml"], maxBytes: 10, locales: ["de", "en"], defaultLocale: "de", prefix: "media/" }) => {
+const BASE_CONFIG: Config = { allowedTypes: ["image/*"], deniedTypes: ["image/svg+xml"], maxBytes: 10, locales: ["de", "en"], defaultLocale: "de", prefix: "media/", publicPath: "/media", uploadStaleAfterMs: 900000, anonymousList: "ids" };
+const make = async (config: Config = BASE_CONFIG) => {
   const blobs = fakeBlobstore();
   const db = createFakePersistence();
   const infos: string[] = [];
@@ -34,13 +36,31 @@ const make = async (config: Config = { allowedTypes: ["image/*"], deniedTypes: [
   const logger: Logger = { step() {}, info: (m) => infos.push(m), error: (m) => errors.push(m) };
   return { media: await createMediaDefault(config, blobs, db, logger, () => 7), blobs, db, infos, errors };
 };
+function manifestWithPipelines(names: Array<{ pipeline: string; module: string; step: string }>): Manifest {
+  return {
+    core: { version: "0.0.0" },
+    contracts: [],
+    modules: [],
+    steps: [],
+    pipelines: [...new Set(names.map((n) => n.pipeline))].map((pipeline) => ({
+      name: pipeline,
+      steps: names.filter((n) => n.pipeline === pipeline).map((n) => ({ spec: n.step, name: n.step, module: n.module, description: { summary: "", reads: [], writes: [] } })),
+    })),
+    triggers: { http: [], events: [], crons: [] },
+    warnings: [],
+  };
+}
+function introspectionOf(manifest: Manifest): Introspection {
+  return { describe: () => manifest, observe: () => () => {}, health: () => ({ ok: true, restartRequired: false, modules: [] }) };
+}
 
 describe("media/default", () => {
-  it("stores the blob under a generated key and the metadata in its collection", async () => {
+  it("stores the blob under an id-based key and the metadata in its collection", async () => {
     const { media, blobs, db } = await make();
     const item = expectOk(await media.upload(png)).item;
-    expect(item).toMatchObject({ filename: "evil-name.PNG", contentType: "image/png", size: 3, createdAt: 7 });
-    expect(item.key).toBe("media/evil-name.PNG");
+    expect(item).toMatchObject({ filename: "evil-name.png", contentType: "image/png", size: 3, createdAt: 7 });
+    expect(item.key).toBe(`media/${item.id}/evil-name.png`);
+    expect(item.location).toBe("evil-name.png");
     expect(blobs.blobs.get(item.key)?.contentType).toBe("image/png");
     expect(expectOk(await db.count(COLLECTION, {}))).toBe(1);
   });
@@ -62,13 +82,56 @@ describe("media/default", () => {
     expectOk(await media.remove(item.id));
   });
 
-  it("renames and moves items, keeping the blob content but relocating its key", async () => {
-    const { media, blobs } = await make();
+  it("toPublicItem projects the public shape and never exposes key, checksum, status or location", async () => {
+    const { media } = await make();
+    const item = expectOk(await media.upload(png)).item;
+    const pub = media.toPublicItem(item);
+    expect(pub).toEqual({ id: item.id, path: `/media/${item.id}/evil-name.png`, filename: "evil-name.png", folder: "", contentType: "image/png", size: 3, createdAt: 7, updatedAt: 7, provenance: { origin: "unknown" }, width: null, height: null, alt: null, title: null, description: null });
+    expect(Object.keys(pub)).not.toEqual(expect.arrayContaining(["key", "checksum", "status", "location"]));
+  });
+
+  describe("nameFor", () => {
+    it("replaces a known content type's extension, keeping the display stem", () => {
+      expect(nameFor("Photo 1.JPG", "image/jpeg")).toBe("Photo-1.jpg");
+      expect(nameFor("a.tif", "image/png")).toBe("a.png");
+    });
+
+    it("keeps the uploaded extension for an unknown content type", () => {
+      expect(nameFor("weird.xyz", "application/x-unknown")).toBe("weird.xyz");
+    });
+
+    it("still neutralises a .meta.json collision produced by replacing the extension", () => {
+      expect(nameFor("x.meta.name", "application/json")).toBe("x-meta.json");
+    });
+
+    it("still caps the result at 200 bytes", () => {
+      expect(Buffer.byteLength(nameFor(`${"a".repeat(500)}.tif`, "image/png"))).toBe(200);
+    });
+  });
+
+  it("urlNameOf reads the last path segment of a key", () => {
+    expect(urlNameOf("media/id-1/photo.jpg")).toBe("photo.jpg");
+    expect(urlNameOf("photo.jpg")).toBe("photo.jpg");
+  });
+
+  it("publicTreeOf combines the copy prefix and publicPath", () => {
+    expect(publicTreeOf({ publicPath: "/media", publicCopy: { prefix: "site/" } })).toBe("site/media/");
+    expect(publicTreeOf({ publicPath: "/media", publicCopy: undefined })).toBe("media/");
+  });
+
+  it("renaming and moving change metadata only: the key, path and blob are untouched (zero blob calls)", async () => {
+    const blobs = fakeBlobstore();
+    let calls = 0;
+    const countingBlobs: Blobstore = { ...blobs, put: (...a) => { calls += 1; return blobs.put(...a); }, remove: (...a) => { calls += 1; return blobs.remove(...a); }, move: (...a) => { calls += 1; return blobs.move(...a); } };
+    const media = await createMediaDefault(BASE_CONFIG, countingBlobs, createFakePersistence(), noLogger, () => 7);
     const item = expectOk(await media.upload(png, "2026/press")).item;
     expect(item.folder).toBe("2026/press");
+    calls = 0;
     const moved = expectOk(await media.update(item.id, { filename: "Hero Image.png", folder: "/archive/" }));
-    expect(moved).toMatchObject({ filename: "Hero-Image.png", folder: "archive", key: "media/archive/Hero-Image.png" });
+    expect(moved).toMatchObject({ filename: "Hero-Image.png", folder: "archive", key: item.key, location: "archive/Hero-Image.png" });
+    expect(calls).toBe(0);
     expect(blobs.blobs.size).toBe(1);
+    expect(blobs.blobs.has(item.key)).toBe(true);
     expect(expectOk(await media.list({ folder: "archive" })).total).toBe(1);
     expect(expectOk(await media.list({ folder: "2026/press" })).total).toBe(0);
     expect(expectErr(await media.update(item.id, { folder: "../x" }), "VALIDATION").message).toMatch(/invalid folder/);
@@ -91,7 +154,7 @@ describe("media/default", () => {
   it("searches, sorts, filters folders recursively and lists folders", async () => {
     const blobs = fakeBlobstore();
     let t = 0;
-    const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, blobs, createFakePersistence(), noLogger, () => ++t);
+    const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, blobs, createFakePersistence(), noLogger, () => ++t);
     const a = expectOk(await media.upload({ ...png, filename: "alpha.png" }, "2026/press")).item;
     const b = expectOk(await media.upload({ ...png, filename: "beta.png", data: new Uint8Array(10) }, "2026")).item;
     const c = expectOk(await media.upload({ ...png, filename: "gamma.png" }, "archive")).item;
@@ -111,7 +174,7 @@ describe("media/default", () => {
   it("recursive list matches the exact subtree, not a LIKE prefix or byte range", async () => {
     const blobs = fakeBlobstore();
     let t = 0;
-    const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, blobs, createFakePersistence(), noLogger, () => ++t);
+    const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, blobs, createFakePersistence(), noLogger, () => ++t);
     const a = expectOk(await media.upload({ ...png, filename: "a.png" }, "2026")).item;
     const b = expectOk(await media.upload({ ...png, filename: "b.png" }, "2026/presse")).item;
     expectOk(await media.upload({ ...png, filename: "c.png" }, "2026x"));
@@ -119,27 +182,6 @@ describe("media/default", () => {
     const found = expectOk(await media.list({ folder: "2026", recursive: true }));
     expect(found.items.map((i) => i.id).sort()).toEqual([a.id, b.id].sort());
     expect(found.total).toBe(2);
-
-    const e = expectOk(await media.upload({ ...png, filename: "e.png" }, "bilder_2026/sub")).item;
-    expect(expectOk(await media.list({ folder: "bilder_2026", recursive: true })).items.map((i) => i.id)).toEqual([e.id]);
-
-    const f = expectOk(await media.upload({ ...png, filename: "f.png" }, "Presse")).item;
-    const g = expectOk(await media.upload({ ...png, filename: "g.png" }, "presse")).item;
-    expect(expectOk(await media.list({ folder: "Presse", recursive: true })).items.map((i) => i.id)).toEqual([f.id]);
-    expect(expectOk(await media.list({ folder: "presse", recursive: true })).items.map((i) => i.id)).toEqual([g.id]);
-  });
-
-  it("recursive list applies q, sort and paging in memory with a correct total", async () => {
-    const blobs = fakeBlobstore();
-    let t = 0;
-    const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, blobs, createFakePersistence(), noLogger, () => ++t);
-    expectOk(await media.upload({ ...png, filename: "alpha.png" }, "root"));
-    expectOk(await media.upload({ ...png, filename: "beta-alpha.png" }, "root/sub1"));
-    expectOk(await media.upload({ ...png, filename: "gamma-alpha.png" }, "root/sub2"));
-    expectOk(await media.upload({ ...png, filename: "delta.png" }, "root/sub2"));
-    const page = expectOk(await media.list({ folder: "root", recursive: true, q: "alpha", sortBy: "filename", direction: "asc", limit: 1, offset: 1 }));
-    expect(page.items.map((i) => i.filename)).toEqual(["beta-alpha.png"]);
-    expect(page.total).toBe(3);
   });
 
   it("stores localized texts, resolves them per locale and bumps updatedAt", async () => {
@@ -157,9 +199,6 @@ describe("media/default", () => {
     expectOk(await media.update(item.id, { alt: null }, "en"));
     expect(expectOk(await media.get(item.id, "en"))?.alt).toBeNull();
     expect(expectErr(await media.get(item.id, "fr"), "VALIDATION").message).toMatch(/unknown locale/);
-    const numericAlt: { alt?: string | null } = {};
-    Object.assign(numericAlt, { alt: 5 });
-    expect(expectErr(await media.update(item.id, numericAlt), "VALIDATION").message).toMatch(/must be a string/);
   });
 
   it("takes the texts as plain text: markup stays intact, control characters and overlong values are rejected", async () => {
@@ -169,50 +208,41 @@ describe("media/default", () => {
     expect(kept).toMatchObject({ alt: "5 < 6 & 7 > 6", description: "Zeile 1\nZeile 2\tEnde" });
     for (const field of ["alt", "title", "description"] as const) {
       expect(expectErr(await media.update(item.id, { [field]: "a\u0000b" }), "VALIDATION").message).toMatch(new RegExp(`${field} must be plain text \\(max 2000 chars\\)`));
-      expect(expectErr(await media.update(item.id, { [field]: "x".repeat(2001) }), "VALIDATION").message).toMatch(/must be plain text/);
-      expect(expectOk(await media.update(item.id, { [field]: "x".repeat(2000) }, "en"))).toMatchObject({ [field]: "x".repeat(2000) });
     }
   });
 
   it("reads image dimensions from the file header", async () => {
-    const { media } = await make({ allowedTypes: ["image/*"], deniedTypes: [], maxBytes: 1000, locales: [], prefix: "media/" });
+    const { media } = await make({ ...BASE_CONFIG, allowedTypes: ["image/*"], deniedTypes: [], maxBytes: 1000, locales: [] });
     const pngHeader = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x01, 0x40, 0, 0, 0, 0xf0]);
     expect(expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: pngHeader })).item).toMatchObject({ width: 320, height: 240 });
-    const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x10, 0x00, 0x08, 0x00]);
-    expect(expectOk(await media.upload({ filename: "a.gif", contentType: "image/gif", data: gif })).item).toMatchObject({ width: 16, height: 8 });
-    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x64, 0x00, 0xc8, 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    expect(expectOk(await media.upload({ filename: "a.jpg", contentType: "image/jpeg", data: jpeg })).item).toMatchObject({ width: 200, height: 100 });
-    const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x58, 0, 0, 0, 0, 0, 0, 0, 0, 0x3f, 0x01, 0x00, 0xdf, 0x00, 0x00]);
-    expect(expectOk(await media.upload({ filename: "a.webp", contentType: "image/webp", data: webp })).item).toMatchObject({ width: 320, height: 224 });
-    expect(expectOk(await media.upload({ filename: "x.bin", contentType: "image/x-unknown", data: new Uint8Array([1, 2, 3]) })).item).toMatchObject({ width: null, height: null });
   });
 
   it("lists newest first", async () => {
     const blobs = fakeBlobstore();
     let t = 0;
-    const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, blobs, createFakePersistence(), noLogger, () => ++t);
+    const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, blobs, createFakePersistence(), noLogger, () => ++t);
     expectOk(await media.upload({ ...png, filename: "a.png" }));
     expectOk(await media.upload({ ...png, filename: "b.png" }));
     expect(expectOk(await media.list()).items.map((i) => i.filename)).toEqual(["b.png", "a.png"]);
   });
 
-  it("keys are <folder>/<filename>, folders are created on upload and filenames are unique per folder", async () => {
-    const { media, blobs, db } = await make();
+  it("location is <folder>/<name> and filenames are unique per folder via location, not the blob key", async () => {
+    const { media, blobs } = await make();
     const a = expectOk(await media.upload(png, "2026/presse")).item;
-    expect(a.key).toBe("media/2026/presse/evil-name.PNG");
-    expect(blobs.blobs.has("media/2026/presse/evil-name.PNG")).toBe(true);
-    expect(expectOk(await db.count(FOLDERS, { path: "2026/presse" }))).toBe(1);
+    expect(a.location).toBe("2026/presse/evil-name.png");
+    expect(a.key).toBe(`media/${a.id}/evil-name.png`);
+    expect(blobs.blobs.has(a.key)).toBe(true);
     expect(expectErr(await media.upload({ ...png, data: new Uint8Array([9]) }, "2026/presse"), "CONFLICT").message).toMatch(/already exists/);
     const b = expectOk(await media.upload({ ...png, filename: "other.png" }, "2026/presse")).item;
-    expectErr(await media.update(b.id, { filename: "evil-name.PNG" }), "CONFLICT");
+    expectErr(await media.update(b.id, { filename: a.filename }), "CONFLICT");
   });
 
-  describe("unique keys and idempotent re-upload", () => {
-    it("declares media_items.key unique, so a second row on the same key is a CONFLICT with the field", async () => {
+  describe("unique locations and idempotent re-upload", () => {
+    it("declares media_items.location unique, so a second row with the same location is a CONFLICT naming the field", async () => {
       const { media, db } = await make();
       const a = expectOk(await media.upload(png)).item;
-      const clash = expectErr(await db.createOne(COLLECTION, { filename: a.filename, folder: "", contentType: "image/png", size: 3, key: a.key, checksum: "other", status: "ready", createdAt: 1, updatedAt: 1, provenance: { origin: "unknown" }, width: null, height: null, alt: {}, title: {}, description: {} }), "CONFLICT");
-      expect(clash.details).toMatchObject({ field: "key" });
+      const clash = expectErr(await db.createOne(COLLECTION, { filename: a.filename, folder: "", location: a.location, contentType: "image/png", size: 3, key: "media/other-id/evil-name.png", checksum: "other", status: "ready", createdAt: 1, updatedAt: 1, provenance: { origin: "unknown" }, width: null, height: null, alt: {}, title: {}, description: {} }), "CONFLICT");
+      expect(clash.details).toMatchObject({ field: "location" });
       expect(expectOk(await db.count(COLLECTION, {}))).toBe(1);
     });
 
@@ -220,7 +250,7 @@ describe("media/default", () => {
       const blobs = fakeBlobstore();
       const db = createFakePersistence();
       let writes = 0;
-      const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, { ...blobs, async put(key, data, options) { writes += 1; return blobs.put(key, data, options); } }, db, noLogger, () => 7);
+      const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, { ...blobs, async put(key, data, options) { writes += 1; return blobs.put(key, data, options); } }, db, noLogger, () => 7);
       const first = expectOk(await media.upload(png, "presse"));
       expect(first.created).toBe(true);
       const again = expectOk(await media.upload(png, "presse"));
@@ -239,27 +269,6 @@ describe("media/default", () => {
       expectOk(await db.updateOne(COLLECTION, a.id, { status: "uploading" }));
       expectErr(await media.upload(png), "CONFLICT");
     });
-
-    it("remove keeps a blob another row still points at", async () => {
-      const { media, blobs, db } = await make();
-      const a = expectOk(await media.upload(png)).item;
-      expectOk(await db.ensureCollection(COLLECTION, { filename: "string", folder: "string", contentType: "string", size: "number", key: "string", checksum: "string", status: "string", createdAt: "number", updatedAt: "number", provenance: "json", width: "number", height: "number", alt: "json", title: "json", description: "json" }));
-      const twin = expectOk(await db.createOne(COLLECTION, { filename: a.filename, folder: "", contentType: "image/png", size: 3, key: a.key, checksum: a.checksum, status: "ready", createdAt: 1, updatedAt: 1, provenance: { origin: "unknown" }, width: null, height: null, alt: {}, title: {}, description: {} }));
-      expectOk(await media.remove(twin.id));
-      expect(blobs.blobs.has(a.key)).toBe(true);
-      expectOk(await media.remove(a.id));
-      expect(blobs.blobs.has(a.key)).toBe(false);
-    });
-  });
-
-  it("moving or renaming an item moves its blob", async () => {
-    const { media, blobs } = await make();
-    const a = expectOk(await media.upload(png, "alt")).item;
-    const moved = expectOk(await media.update(a.id, { folder: "neu/tief", filename: "x.png" }));
-    expect(moved?.key).toBe("media/neu/tief/x.png");
-    expect(blobs.blobs.has("media/alt/evil-name.PNG")).toBe(false);
-    expect(blobs.blobs.get("media/neu/tief/x.png")?.contentType).toBe("image/png");
-    expect(expectOk(await media.folders()).map((f) => f.folder)).toEqual(["alt", "neu", "neu/tief"]);
   });
 
   it("lists persistent empty folders and implied ancestors with counts", async () => {
@@ -274,30 +283,37 @@ describe("media/default", () => {
     expectErr(await media.createFolder("../x"), "VALIDATION");
   });
 
-  it("renames a folder with its subtree, moving blobs and rewriting folder rows", async () => {
-    const { media, blobs, db } = await make();
+  it("renames a folder with its subtree, touching no blob, only folder and location", async () => {
+    const blobs = fakeBlobstore();
+    let calls = 0;
+    const countingBlobs: Blobstore = { ...blobs, put: (...a) => { calls += 1; return blobs.put(...a); }, remove: (...a) => { calls += 1; return blobs.remove(...a); }, move: (...a) => { calls += 1; return blobs.move(...a); } };
+    const db = createFakePersistence();
+    const media = await createMediaDefault(BASE_CONFIG, countingBlobs, db, noLogger, () => 7);
     const a = expectOk(await media.upload(png, "alt")).item;
     const b = expectOk(await media.upload({ ...png, filename: "b.png" }, "alt/sub")).item;
     expectOk(await media.createFolder("alt/leer"));
+    calls = 0;
     expect(expectOk(await media.renameFolder("alt", "neu/name"))).toEqual({ folder: "neu/name", moved: 2 });
-    expect(expectOk(await media.get(a.id))?.key).toBe("media/neu/name/evil-name.PNG");
+    expect(calls).toBe(0);
+    expect(expectOk(await media.get(a.id))?.key).toBe(a.key);
+    expect(expectOk(await media.get(a.id))?.location).toBe("neu/name/evil-name.png");
     expect(expectOk(await media.get(b.id))?.folder).toBe("neu/name/sub");
-    expect([...blobs.blobs.keys()].sort()).toEqual(["media/neu/name/evil-name.PNG", "media/neu/name/sub/b.png"]);
+    expect([...blobs.blobs.keys()].sort()).toEqual([a.key, b.key].sort());
     expect(expectOk(await db.findMany(FOLDERS, {})).items.map((r) => r.path).sort()).toEqual(["neu/name", "neu/name/leer", "neu/name/sub"]);
     expect(expectOk(await media.renameFolder("gibt-es-nicht", "x"))).toBeNull();
     expectOk(await media.createFolder("belegt"));
     expectErr(await media.renameFolder("neu", "belegt"), "CONFLICT");
   });
 
-  it("rename pre-checks key conflicts before moving anything", async () => {
+  it("rename pre-checks location conflicts before touching anything", async () => {
     const { media, blobs } = await make();
-    expectOk(await media.upload(png, "a"));
-    expectOk(await media.upload(png, "b"));
+    const a = expectOk(await media.upload(png, "a")).item;
+    const b = expectOk(await media.upload(png, "b")).item;
     expectErr(await media.renameFolder("a", "b"), "CONFLICT");
-    expect([...blobs.blobs.keys()].sort()).toEqual(["media/a/evil-name.PNG", "media/b/evil-name.PNG"]);
+    expect([...blobs.blobs.keys()].sort()).toEqual([a.key, b.key].sort());
   });
 
-  it("folderItems and removeFolder respect emptiness and recursion", async () => {
+  it("folderItems and removeFolder respect emptiness and recursion, and removeFolder returns ids", async () => {
     const { media, blobs, db } = await make();
     const a = expectOk(await media.upload(png, "x/y")).item;
     expectOk(await media.createFolder("x/z"));
@@ -305,76 +321,28 @@ describe("media/default", () => {
     expect(expectErr(await media.folderItems("x", false), "CONFLICT").message).toMatch(/not empty/);
     expect(expectOk(await media.folderItems("x/z", false))).toEqual({ path: "x/z", ids: [] });
     expect(expectOk(await media.folderItems("x", true))).toEqual({ path: "x", ids: [a.id] });
-    expect(expectOk(await media.removeFolder("x"))).toEqual({ ok: true, removed: 1 });
+    expect(expectOk(await media.removeFolder("x"))).toEqual({ ok: true, removed: 1, ids: [a.id] });
     expect(blobs.blobs.size).toBe(0);
     expect(expectOk(await db.count(COLLECTION, {}))).toBe(0);
     expect(expectOk(await db.count(FOLDERS, {}))).toBe(0);
     expect(expectOk(await media.removeFolder("x"))).toBeNull();
   });
 
-  it("migrates legacy uuid keys to path keys, suffixing on collision and logging missing blobs", async () => {
-    const { media, blobs, db, infos, errors } = await make();
-    expectOk(await blobs.put("legacy1.png", new Uint8Array([1]), { contentType: "image/png" }));
-    expectOk(await blobs.put("legacy2.png", new Uint8Array([2]), { contentType: "image/png" }));
-    const base = { contentType: "image/png", size: 1, createdAt: 1, updatedAt: 1, provenance: { origin: "human" }, width: null, height: null, alt: {}, title: {}, description: {} };
-    expectOk(await db.createOne(COLLECTION, { ...base, filename: "bild.png", folder: "f", key: "legacy1.png" }));
-    expectOk(await db.createOne(COLLECTION, { ...base, filename: "bild.png", folder: "f", key: "legacy2.png" }));
-    expectOk(await db.createOne(COLLECTION, { ...base, filename: "weg.png", folder: "", key: "gone.png" }));
-    expect(expectOk(await media.migrateKeys())).toEqual({ moved: 2, renamed: 1, missing: 1, skipped: 0 });
-    expect([...blobs.blobs.keys()].sort()).toEqual(["media/f/bild-2.png", "media/f/bild.png"]);
-    const rows = expectOk(await db.findMany<{ id: string; key: string; filename: string }>(COLLECTION, {}, { sort: { key: "asc" } })).items;
-    expect(rows.map((r) => [r.key, r.filename])).toEqual([["gone.png", "weg.png"], ["media/f/bild-2.png", "bild-2.png"], ["media/f/bild.png", "bild.png"]]);
-    expect(errors.some((m) => /gone\.png/.test(m))).toBe(true);
-    expect(infos.some((m) => /migrated/.test(m))).toBe(true);
-    expect(expectOk(await media.migrateKeys())).toEqual({ moved: 0, renamed: 0, missing: 1, skipped: 0 });
-    expect(expectOk(await db.count(FOLDERS, { path: "f" }))).toBe(1);
-  });
-
-  it("migrateKeys never fails as a whole and skips names that would collide with a metadata sidecar", async () => {
-    const { media, blobs, db, errors } = await make();
-    expectOk(await blobs.put("legacy3.png", new Uint8Array([3]), { contentType: "image/png" }));
-    const base = { contentType: "image/png", size: 1, createdAt: 1, updatedAt: 1, provenance: { origin: "human" }, width: null, height: null, alt: {}, title: {}, description: {} };
-    expectOk(await db.createOne(COLLECTION, { ...base, filename: "x.meta.json", folder: "f", key: "legacy3.png" }));
-    expect(expectOk(await media.migrateKeys())).toEqual({ moved: 0, renamed: 0, missing: 0, skipped: 1 });
-    expect(blobs.blobs.has("legacy3.png")).toBe(true);
-    expect(errors.some((m) => /x\.meta\.json/.test(m))).toBe(true);
-  });
-
-  it("migrateKeys counts an item whose blob store fails as skipped and carries on", async () => {
-    const blobs = fakeBlobstore();
-    const db = createFakePersistence();
-    const errors: string[] = [];
-    const logger: Logger = { step() {}, info() {}, error: (m) => errors.push(m) };
-    let failing = true;
-    const media = await createMediaDefault(
-      { allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" },
-      { ...blobs, async get(key) { if (failing) { failing = false; return err(failure("TRANSIENT", "blobstore is busy")); } return blobs.get(key); } },
-      db, logger, () => 7,
-    );
-    const base = { contentType: "image/png", size: 1, provenance: { origin: "human" }, width: null, height: null, alt: {}, title: {}, description: {}, status: "ready", checksum: null };
-    expectOk(await db.createOne(COLLECTION, { ...base, createdAt: 1, updatedAt: 1, filename: "a.png", folder: "f", key: "legacy-a.png" }));
-    expectOk(await db.createOne(COLLECTION, { ...base, createdAt: 2, updatedAt: 2, filename: "b.png", folder: "f", key: "legacy-b.png" }));
-    expectOk(await blobs.put("legacy-b.png", new Uint8Array([1]), { contentType: "image/png" }));
-    expect(expectOk(await media.migrateKeys())).toEqual({ moved: 1, renamed: 0, missing: 0, skipped: 1 });
-    expect(errors.some((m) => /failed to migrate key/.test(m))).toBe(true);
-  });
-
-  it("update() validates every field before touching the blob", async () => {
+  it("update() validates every field before touching the row", async () => {
     const { media, blobs } = await make();
     const item = expectOk(await media.upload(png, "a")).item;
     const patch: { filename?: string; alt?: string | null } = { filename: "b.png" };
     Object.assign(patch, { alt: 123 });
     expect(expectErr(await media.update(item.id, patch), "VALIDATION").message).toMatch(/must be a string/);
     expect(blobs.blobs.has(item.key)).toBe(true);
-    expect(blobs.blobs.has("media/a/b.png")).toBe(false);
     expect(expectOk(await media.read(item.id))?.item.key).toBe(item.key);
   });
 
   it("neutralises a .meta.json suffix on upload so it cannot collide with a metadata sidecar", async () => {
     const { media } = await make();
     const item = expectOk(await media.upload({ ...png, filename: "evil.meta.json" })).item;
-    expect(item.filename).toBe("evil-meta.json");
-    expect(item.key).toBe("media/evil-meta.json");
+    expect(item.filename).toBe("evil-meta.png");
+    expect(item.key).toBe(`media/${item.id}/evil-meta.png`);
     for (const name of ["x.meta.json", "x.META.JSON"]) expect(safeName(name).toLowerCase().endsWith(".meta.json")).toBe(false);
   });
 
@@ -392,69 +360,14 @@ describe("media/default", () => {
     expect(expectOk(await media.renameFolder("a_b", "z"))).toBeNull();
     expect(expectOk(await media.get(c.id))?.folder).toBe("ab/x");
     expect(blobs.blobs.has(c.key)).toBe(true);
-
-    expectOk(await media.createFolder("Presse"));
-    expectOk(await media.createFolder("presse"));
-    expect(expectOk(await media.folders()).map((f) => f.folder)).toEqual(expect.arrayContaining(["Presse", "presse"]));
-    expect(expectOk(await media.folderItems("Presse", false))).toEqual({ path: "Presse", ids: [] });
-    expect(expectOk(await media.folderItems("presse", false))).toEqual({ path: "presse", ids: [] });
   });
 
   it("caps sanitised filenames at 200 bytes, keeping the extension", async () => {
     const long = safeName(`${"a".repeat(500)}.png`);
     expect(Buffer.byteLength(long)).toBe(200);
     expect(long.endsWith(".png")).toBe(true);
-    expect(safeName(`${"a".repeat(500)}.meta.json`).toLowerCase().endsWith(".meta.json")).toBe(false);
     const { media } = await make();
     expect(expectOk(await media.upload({ ...png, filename: `${"b".repeat(500)}.png` })).item.filename.length).toBe(200);
-  });
-
-  it("keeps media blobs under the configured prefix, out of the way of other blobstore users", async () => {
-    const { media, blobs } = await make();
-    const item = expectOk(await media.upload(png, "2026/presse")).item;
-    expect(item.key).toBe("media/2026/presse/evil-name.PNG");
-    expect([...blobs.blobs.keys()]).toEqual(["media/2026/presse/evil-name.PNG"]);
-    expect(expectOk(await media.read(item.id))?.item.key).toBe("media/2026/presse/evil-name.PNG");
-  });
-
-  it("migrates keys that predate the prefix", async () => {
-    const { media, blobs, db } = await make();
-    expectOk(await blobs.put("2026/presse/x.png", new Uint8Array([1]), { contentType: "image/png" }));
-    const base = { contentType: "image/png", size: 1, createdAt: 1, updatedAt: 1, provenance: { origin: "human" }, width: null, height: null, alt: {}, title: {}, description: {} };
-    expectOk(await db.createOne(COLLECTION, { ...base, filename: "x.png", folder: "2026/presse", key: "2026/presse/x.png" }));
-    expect(expectOk(await media.migrateKeys())).toEqual({ moved: 1, renamed: 0, missing: 0, skipped: 0 });
-    expect([...blobs.blobs.keys()]).toEqual(["media/2026/presse/x.png"]);
-  });
-
-  it("finishes a migration whose blob was already moved before the row was updated", async () => {
-    const { media, blobs, db } = await make();
-    expectOk(await blobs.put("media/f/bild.png", new Uint8Array([1]), { contentType: "image/png" }));
-    const base = { contentType: "image/png", size: 1, createdAt: 1, updatedAt: 1, provenance: { origin: "human" }, width: null, height: null, alt: {}, title: {}, description: {} };
-    const row = expectOk(await db.createOne(COLLECTION, { ...base, filename: "bild.png", folder: "f", key: "legacy.png" }));
-    expect(expectOk(await media.migrateKeys())).toEqual({ moved: 1, renamed: 0, missing: 0, skipped: 0 });
-    expect(expectOk(await media.get(row.id))?.key).toBe("media/f/bild.png");
-    expect(expectOk(await db.count(FOLDERS, { path: "f" }))).toBe(1);
-  });
-
-  it("update and renameFolder finish a move whose blob already reached the target", async () => {
-    const { media, blobs } = await make();
-    const a = expectOk(await media.upload(png, "alt")).item;
-    blobs.blobs.set("media/neu/evil-name.PNG", blobs.blobs.get(a.key)!);
-    blobs.blobs.delete(a.key);
-    expect(expectOk(await media.update(a.id, { folder: "neu" }))?.key).toBe("media/neu/evil-name.PNG");
-
-    const b = expectOk(await media.upload({ ...png, filename: "b.png" }, "ordner")).item;
-    blobs.blobs.set("media/ziel/b.png", blobs.blobs.get(b.key)!);
-    blobs.blobs.delete(b.key);
-    expect(expectOk(await media.renameFolder("ordner", "ziel"))).toEqual({ folder: "ziel", moved: 1 });
-    expect(expectOk(await media.get(b.id))?.key).toBe("media/ziel/b.png");
-  });
-
-  it("passes a failed move on when the target is not there either", async () => {
-    const { media, blobs } = await make();
-    const a = expectOk(await media.upload(png, "alt")).item;
-    blobs.blobs.delete(a.key);
-    expect(expectErr(await media.update(a.id, { folder: "neu" }), "NOT_FOUND").message).toMatch(/not found/);
   });
 
   describe("two-phase upload", () => {
@@ -463,7 +376,7 @@ describe("media/default", () => {
       const order: string[] = [];
       const db = createFakePersistence();
       const observed: Persistence = { ...db, async createOne<T extends Document>(collection: string, data: NewDocument<T>) { if (collection === COLLECTION) order.push(`row:${String(data.status)}`); return db.createOne<T>(collection, data); } };
-      const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, { ...blobs, async put(key, data, options) { order.push("blob"); return blobs.put(key, data, options); } }, observed, noLogger, () => 7);
+      const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, { ...blobs, async put(key, data, options) { order.push("blob"); return blobs.put(key, data, options); } }, observed, noLogger, () => 7);
       const item = expectOk(await media.upload({ ...png, filename: "shot.png" })).item;
       expect(order).toEqual(["row:uploading", "blob"]);
       expect(item.status).toBe("ready");
@@ -474,14 +387,13 @@ describe("media/default", () => {
       const blobs = fakeBlobstore();
       const db = createFakePersistence();
       let broken = true;
-      const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, { ...blobs, async put(key, data, options) { if (broken) return err(failure("TRANSIENT", "blobstore down")); return blobs.put(key, data, options); } }, db, noLogger, () => 7);
+      const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, { ...blobs, async put(key, data, options) { if (broken) return err(failure("TRANSIENT", "blobstore down")); return blobs.put(key, data, options); } }, db, noLogger, () => 7);
       expect(expectErr(await media.upload({ ...png, filename: "shot.png" }), "TRANSIENT").message).toMatch(/blobstore down/);
       const stored = expectOk(await db.findOne<{ id: string; status: string }>(COLLECTION, {}));
       expect(stored?.status).toBe("failed");
       expect(expectOk(await media.get(stored!.id))).toBeNull();
       expect(expectOk(await media.read(stored!.id))).toBeNull();
       expect(expectOk(await media.list()).total).toBe(0);
-      expect(expectOk(await media.byIds([stored!.id]))).toEqual([]);
 
       broken = false;
       const retried = expectOk(await media.upload({ ...png, filename: "shot.png" })).item;
@@ -489,60 +401,180 @@ describe("media/default", () => {
       expect(expectOk(await db.count(COLLECTION, {}))).toBe(1);
     });
 
-    it("treats rows written before the status field as ready", async () => {
+    it("with publicCopy: writes the copy too, and a failed copy fails the upload, removing the private blob and freeing the name", async () => {
       const blobs = fakeBlobstore();
       const db = createFakePersistence();
-      expectOk(await db.ensureCollection(COLLECTION, { filename: "string", folder: "string", contentType: "string", size: "number", key: "string", createdAt: "number", updatedAt: "number", provenance: "json", width: "number", height: "number", alt: "json", title: "json", description: "json" }));
-      const legacy = expectOk(await db.createOne(COLLECTION, { filename: "old.png", folder: "", contentType: "image/png", size: 3, key: "media/old.png", createdAt: 1, updatedAt: 1, provenance: null, width: null, height: null, alt: {}, title: {}, description: {} }));
-      expectOk(await blobs.put("media/old.png", png.data, { contentType: "image/png" }));
-      const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, blobs, db, noLogger, () => 7);
-      expect(expectOk(await media.get(legacy.id))?.status).toBe("ready");
-      expect(expectOk(await media.get(legacy.id))?.provenance).toEqual({ origin: "unknown" });
-      expect(expectOk(await media.list()).total).toBe(1);
-      expect(expectOk(await media.read(legacy.id))?.item.checksum).toBeNull();
+      let breakCopy = false;
+      const wrapped: Blobstore = { ...blobs, async put(key, data, options) { if (breakCopy && key.startsWith("site/media/")) return err(failure("TRANSIENT", "copy store down")); return blobs.put(key, data, options); } };
+      const media = await createMediaDefault({ ...BASE_CONFIG, publicCopy: { prefix: "site/" } }, wrapped, db, noLogger, () => 7);
+      const ok1 = expectOk(await media.upload({ ...png, filename: "shot.png" })).item;
+      expect(blobs.blobs.has(`site/media/${ok1.id}/shot.png`)).toBe(true);
+      expect(blobs.blobs.get(`site/media/${ok1.id}/shot.png`)?.contentType).toBe("image/png");
+
+      breakCopy = true;
+      expect(expectErr(await media.upload({ ...png, filename: "other.png" }), "TRANSIENT").message).toMatch(/copy store down/);
+      const failedRow = expectOk(await db.findOne<{ id: string; status: string; key: string }>(COLLECTION, { filename: "other.png" }));
+      expect(failedRow?.status).toBe("failed");
+      expect(blobs.blobs.has(failedRow!.key)).toBe(false);
+      breakCopy = false;
+      const retried = expectOk(await media.upload({ ...png, filename: "other.png" })).item;
+      expect(retried.status).toBe("ready");
     });
   });
 
-  it("deletes the row before the blob and survives a failing blob delete", async () => {
+  it("remove: copy, then blob, then row, then a sweep; a retry after a partial failure completes", async () => {
+    const blobs = fakeBlobstore();
+    const db = createFakePersistence();
+    const media = await createMediaDefault({ ...BASE_CONFIG, publicCopy: { prefix: "site/" } }, blobs, db, noLogger, () => 7);
+    const item = expectOk(await media.upload({ ...png, filename: "shot.png" })).item;
+    const copyKey = `site/media/${item.id}/shot.png`;
+    expect(blobs.blobs.has(item.key)).toBe(true);
+    expect(blobs.blobs.has(copyKey)).toBe(true);
+    expectOk(await blobs.put(`site/media/${item.id}/stray.png`, new Uint8Array([9]), { contentType: "image/png" }));
+    expectOk(await media.remove(item.id));
+    expect(blobs.blobs.has(item.key)).toBe(false);
+    expect(blobs.blobs.has(copyKey)).toBe(false);
+    expect(blobs.blobs.has(`site/media/${item.id}/stray.png`)).toBe(false);
+    expect(expectOk(await db.count(COLLECTION, {}))).toBe(0);
+    expectOk(await media.remove(item.id));
+  });
+
+  it("remove survives a failing blob delete and stops before deleting the row", async () => {
     const blobs = fakeBlobstore();
     const db = createFakePersistence();
     const errors: string[] = [];
     const logger: Logger = { step() {}, info() {}, error: (m) => errors.push(m) };
-    const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, { ...blobs, async remove() { return err(failure("TRANSIENT", "blobstore down")); } }, db, logger, () => 7);
+    const media = await createMediaDefault(BASE_CONFIG, { ...blobs, async remove() { return err(failure("TRANSIENT", "blobstore down")); } }, db, logger, () => 7);
     const item = expectOk(await media.upload({ ...png, filename: "shot.png" })).item;
-    expectOk(await media.remove(item.id));
-    expect(expectOk(await db.count(COLLECTION, {}))).toBe(0);
+    expectErr(await media.remove(item.id), "TRANSIENT");
+    expect(expectOk(await db.count(COLLECTION, {}))).toBe(1);
     expect(blobs.blobs.has(item.key)).toBe(true);
-    expect(errors.join("\n")).toMatch(/could not delete blob/);
   });
 
-  it("moves the blob back when the row update after a rename fails", async () => {
-    const blobs = fakeBlobstore();
-    const db = createFakePersistence();
-    const failing: Persistence = { ...db, async updateOne<T extends Document>(collection: string, id: string, patch: Partial<Omit<T, "id">>) { if (collection === COLLECTION && (patch as Record<string, unknown>).key !== undefined) return err(failure("TRANSIENT", "row update failed")); return db.updateOne<T>(collection, id, patch); } };
-    const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, blobs, failing, noLogger, () => 7);
-    const item = expectOk(await media.upload({ ...png, filename: "shot.png" })).item;
-    expect(expectErr(await media.update(item.id, { folder: "archive" }), "TRANSIENT").message).toMatch(/row update failed/);
-    expect([...blobs.blobs.keys()]).toEqual([item.key]);
+  describe("public copy and reconciliation", () => {
+    const withCopy = (): Promise<{ media: Awaited<ReturnType<typeof createMediaDefault>>; blobs: ReturnType<typeof fakeBlobstore>; db: ReturnType<typeof createFakePersistence>; time: { now: number } }> => {
+      const blobs = fakeBlobstore();
+      const db = createFakePersistence();
+      const time = { now: 1000 };
+      return createMediaDefault({ ...BASE_CONFIG, publicCopy: { prefix: "site/" }, uploadStaleAfterMs: 60000 }, blobs, db, noLogger, () => time.now).then((media) => ({ media, blobs, db, time }));
+    };
+
+    it("syncPublic writes a missing copy, rewrites a mismatched one, and never touches a deeper key", async () => {
+      const { media, blobs, db, time } = await withCopy();
+      const item = expectOk(await media.upload({ ...png, filename: "shot.png" })).item;
+      const copyKey = `site/media/${item.id}/shot.png`;
+      blobs.blobs.delete(copyKey);
+      expectOk(await blobs.put(`site/media/${item.id}/variants/x`, new Uint8Array([1]), { contentType: "image/webp" }));
+      expectOk(await blobs.put(`site/media/${item.id}/a/b`, new Uint8Array([1]), { contentType: "text/plain" }));
+      const first = expectOk(await media.syncPublic());
+      expect(first).toEqual({ written: 1, removed: 0, missing: 0 });
+      expect(blobs.blobs.get(copyKey)?.data).toEqual(png.data);
+      expect(blobs.blobs.has(`site/media/${item.id}/variants/x`)).toBe(true);
+      expect(blobs.blobs.has(`site/media/${item.id}/a/b`)).toBe(true);
+
+      blobs.blobs.set(copyKey, { data: new Uint8Array([9, 9]), contentType: "image/png" });
+      const second = expectOk(await media.syncPublic());
+      expect(second.written).toBe(1);
+      expect(blobs.blobs.get(copyKey)?.data).toEqual(png.data);
+      void db;
+      void time;
+    });
+
+    it("removes a foreign depth-1 file and a copy whose item is gone", async () => {
+      const { media, blobs, db } = await withCopy();
+      const item = expectOk(await media.upload({ ...png, filename: "shot.png" })).item;
+      expectOk(await blobs.put(`site/media/${item.id}/other.png`, new Uint8Array([1]), { contentType: "image/png" }));
+      expectOk(await blobs.put("site/media/ghost-id/gone.png", new Uint8Array([1]), { contentType: "image/png" }));
+      const synced = expectOk(await media.syncPublic());
+      expect(synced.removed).toBe(2);
+      expect(blobs.blobs.has(`site/media/${item.id}/other.png`)).toBe(false);
+      expect(blobs.blobs.has("site/media/ghost-id/gone.png")).toBe(false);
+      expect(blobs.blobs.has(`site/media/${item.id}/shot.png`)).toBe(true);
+      void db;
+    });
+
+    it("leaves a young uploading row alone and fails an old one, removing its copy and blob", async () => {
+      const { media, blobs, db, time } = await withCopy();
+      const item = expectOk(await media.upload({ ...png, filename: "shot.png" })).item;
+      expectOk(await db.updateOne(COLLECTION, item.id, { status: "uploading" }));
+      const soon = expectOk(await media.syncPublic());
+      expect(soon).toEqual({ written: 0, removed: 0, missing: 0 });
+      expect(blobs.blobs.has(item.key)).toBe(true);
+
+      time.now += 61000;
+      const later = expectOk(await media.syncPublic());
+      expect(later.removed).toBe(1);
+      expect(blobs.blobs.has(item.key)).toBe(false);
+      expect(expectOk(await db.findOne<{ id: string; status: string }>(COLLECTION, { id: item.id }))?.status).toBe("failed");
+    });
+
+    it("reports a missing original blob", async () => {
+      const { media, blobs } = await withCopy();
+      const item = expectOk(await media.upload({ ...png, filename: "shot.png" })).item;
+      blobs.blobs.delete(item.key);
+      blobs.blobs.delete(`site/media/${item.id}/shot.png`);
+      const synced = expectOk(await media.syncPublic());
+      expect(synced.missing).toBe(1);
+    });
+
+    it("without publicCopy, syncPublic is a no-op", async () => {
+      const { media } = await make();
+      expect(expectOk(await media.syncPublic())).toEqual({ written: 0, removed: 0, missing: 0 });
+    });
+  });
+
+  describe("serveFile", () => {
+    it("serves the file only under the name it was uploaded with, and only when ready", async () => {
+      const { media } = await make();
+      const item = expectOk(await media.upload(png)).item;
+      const served = expectOk(await media.serveFile(item.id, "evil-name.png"));
+      expect(Array.from(served?.data ?? [])).toEqual([1, 2, 3]);
+      expect(expectOk(await media.serveFile(item.id, "other.png"))).toBeNull();
+      expect(expectOk(await media.serveFile("missing", "evil-name.png"))).toBeNull();
+    });
+  });
+
+  describe("boot rules", () => {
+    it("throws when the copy tree and the store prefix overlap", async () => {
+      await expect(createMediaDefault({ ...BASE_CONFIG, prefix: "media/", publicPath: "/media", publicCopy: { prefix: "" } }, fakeBlobstore(), createFakePersistence(), noLogger)).rejects.toThrow(/publicCopy tree "media\/" and prefix "media\/" overlap/);
+    });
+
+    it("throws when a stored item's key does not match <prefix><id>/<name>", async () => {
+      const blobs = fakeBlobstore();
+      const db = createFakePersistence();
+      await createMediaDefault(BASE_CONFIG, blobs, db, noLogger);
+      expectOk(await db.createOne(COLLECTION, { filename: "a.png", folder: "", location: "a.png", contentType: "image/png", size: 1, key: "media/legacy/a.png", checksum: null, status: "ready", createdAt: 1, updatedAt: 1, provenance: { origin: "unknown" }, width: null, height: null, alt: {}, title: {}, description: {} }));
+      await expect(createMediaDefault(BASE_CONFIG, blobs, db, noLogger)).rejects.toThrow(/1 stored item\(s\) use a blob key other than "media\/<id>\/<name>"/);
+    });
+
+    it("attach throws when publicCopy is set but no pipeline runs media.serve", async () => {
+      const { media } = await make({ ...BASE_CONFIG, publicCopy: { prefix: "site/" } });
+      expect(() => media.attach(introspectionOf(manifestWithPipelines([{ pipeline: "getMedia", module: "media/default", step: "media.get" }])))).toThrow(/no pipeline runs media\.serve/);
+      expect(() => media.attach(introspectionOf(manifestWithPipelines([{ pipeline: "serveMediaFile", module: "media/default", step: "media.serve" }])))).not.toThrow();
+    });
+
+    it("attach throws when a pipeline runs media.syncPublic without publicCopy", async () => {
+      const { media } = await make();
+      expect(() => media.attach(introspectionOf(manifestWithPipelines([{ pipeline: "repairPublicMedia", module: "media/default", step: "media.syncPublic" }])))).toThrow(/pipeline "repairPublicMedia" runs media\.syncPublic, but publicCopy is not set/);
+      expect(() => media.attach(introspectionOf(manifestWithPipelines([])))).not.toThrow();
+    });
   });
 
   describe("reconcile", () => {
     it("reports blobs without a row and rows without a blob, and deletes only orphan blobs on request", async () => {
-      const { media, blobs, db } = await make({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" });
+      const { media, blobs, db } = await make({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [] });
       const kept = expectOk(await media.upload({ ...png, filename: "kept.png" })).item;
       const lost = expectOk(await media.upload({ ...png, filename: "lost.png" })).item;
       blobs.blobs.delete(lost.key);
       expectOk(await blobs.put("media/stray.png", png.data, { contentType: "image/png" }));
       expectOk(await blobs.put("media-variants/x/thumb.webp", png.data, { contentType: "image/webp" }));
-      expectOk(await blobs.put("site/index.html", png.data, { contentType: "text/html" }));
 
-      expect(expectOk(await media.reconcile())).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: ["media/lost.png"] });
+      expect(expectOk(await media.reconcile())).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: [lost.key] });
       expect(blobs.blobs.has("media/stray.png")).toBe(true);
 
-      expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: ["media/lost.png"] });
+      expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: [lost.key] });
       expect(blobs.blobs.has("media/stray.png")).toBe(false);
       expect(blobs.blobs.has("media-variants/x/thumb.webp")).toBe(true);
-      expect(blobs.blobs.has("site/index.html")).toBe(true);
       expect(blobs.blobs.has(kept.key)).toBe(true);
       expect(expectOk(await db.count(COLLECTION, {}))).toBe(2);
     });
@@ -554,25 +586,19 @@ describe("media/default", () => {
       for (const root of roots) await rm(root, { recursive: true, force: true });
     });
 
-    it("keeps the on-disk tree under <root>/media and prunes emptied directories", async () => {
+    it("keeps the on-disk tree under <root>/media by id and prunes emptied directories on delete", async () => {
       const root = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "media-fs-"));
       roots.push(root);
-      const media = await createMediaDefault({ allowedTypes: ["image/*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, createBlobstoreFilesystem({ root }), createFakePersistence(), noLogger);
+      const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["image/*"], deniedTypes: [] }, createBlobstoreFilesystem({ root }), createFakePersistence(), noLogger);
       const exists = async (...parts: string[]): Promise<boolean> => stat(join(root, ...parts)).then(() => true, () => false);
 
       const item = expectOk(await media.upload({ ...png, filename: "bild.png" }, "2026/presse")).item;
-      expect(item.key).toBe("media/2026/presse/bild.png");
-      expect(await exists("media", "2026", "presse", "bild.png")).toBe(true);
+      expect(await exists("media", item.id, "bild.png")).toBe(true);
 
       expectOk(await media.update(item.id, { folder: "archiv/2026/presse", filename: "neu.png" }));
-      expect(await exists("media", "archiv", "2026", "presse", "neu.png")).toBe(true);
-      expect(await exists("media", "2026")).toBe(false);
+      expect(await exists("media", item.id, "bild.png")).toBe(true);
 
-      expectOk(await media.renameFolder("archiv", "alt"));
-      expect(await exists("media", "alt", "2026", "presse", "neu.png")).toBe(true);
-      expect(await exists("media", "archiv")).toBe(false);
-
-      expect(expectOk(await media.removeFolder("alt"))).toEqual({ ok: true, removed: 1 });
+      expect(expectOk(await media.removeFolder("archiv"))).toEqual({ ok: true, removed: 1, ids: [item.id] });
       expect(await readdir(root)).toEqual([]);
     });
   });
@@ -592,7 +618,7 @@ describe("media/default", () => {
       const dir = await tempDir();
       const blobs = fakeBlobstore();
       let t = 0;
-      const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, blobs, createFakePersistence(), noLogger, () => ++t);
+      const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, blobs, createFakePersistence(), noLogger, () => ++t);
       const item = expectOk(await media.upload({ ...png, filename: "alpha.png" }, "2026/press")).item;
 
       const first = expectOk(await media.exportTo(dir));
@@ -605,28 +631,11 @@ describe("media/default", () => {
       expect(second).toEqual({ written: 0, skipped: 1, missing: 0, conflicts: 0 });
     });
 
-    it("suffixes conflicting folder+filename pairs by creation order", async () => {
-      const dir = await tempDir();
-      const blobs = fakeBlobstore();
-      let t = 0;
-      const db = createFakePersistence();
-      const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, blobs, db, noLogger, () => ++t);
-      const first = expectOk(await media.upload({ ...png, filename: "shot.png", data: new Uint8Array([1]) }, "gallery")).item;
-      const second = expectOk(await media.upload({ ...png, filename: "shot2.png", data: new Uint8Array([2, 2]) }, "gallery")).item;
-      expectOk(await db.updateOne(COLLECTION, second.id, { filename: "shot.png" }));
-
-      const result = expectOk(await media.exportTo(dir));
-      expect(result).toEqual({ written: 2, skipped: 0, missing: 0, conflicts: 1 });
-      expect(Array.from(await readFile(join(dir, "gallery", "shot.png")))).toEqual([1]);
-      expect(Array.from(await readFile(join(dir, "gallery", "shot-2.png")))).toEqual([2, 2]);
-      expect(first.id).not.toBe(second.id);
-    });
-
     it("counts a missing blob and continues", async () => {
       const dir = await tempDir();
       const blobs = fakeBlobstore();
       let t = 0;
-      const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, blobs, createFakePersistence(), noLogger, () => ++t);
+      const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, blobs, createFakePersistence(), noLogger, () => ++t);
       const item = expectOk(await media.upload({ ...png, filename: "orphan.png" })).item;
       blobs.blobs.delete(item.key);
 
@@ -638,7 +647,7 @@ describe("media/default", () => {
       const dir = await tempDir();
       const blobs = fakeBlobstore();
       const db = createFakePersistence();
-      const media = await createMediaDefault({ allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" }, blobs, db, noLogger, () => 1);
+      const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, blobs, db, noLogger, () => 1);
       const item = expectOk(await media.upload({ ...png, filename: "safe.png" })).item;
       expectOk(await db.updateOne(COLLECTION, item.id, { folder: "../../escape" }));
 

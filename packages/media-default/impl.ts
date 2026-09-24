@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, stat, utimes, writeFile } from "node:fs/promises";
 import { dirname, extname, relative, resolve as resolvePath, sep } from "node:path";
+import type { Introspection } from "@michaelthielemann/kestrel";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Document, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
+import { EXTENSION_BY_TYPE } from "./extensions.ts";
 import { imageSize } from "./imageSize.ts";
 
 export const COLLECTION = "media_items";
@@ -30,11 +32,30 @@ export type MediaStatus = "uploading" | "ready" | "failed";
 export interface MediaItem extends Document {
   filename: string;
   folder: string;
+  location: string;
   contentType: string;
   size: number;
   key: string;
   checksum: string | null;
   status: MediaStatus;
+  createdAt: number;
+  updatedAt: number;
+  provenance: Provenance;
+  width: number | null;
+  height: number | null;
+  alt: string | null;
+  title: string | null;
+  description: string | null;
+}
+
+/** The item's public shape: no storage key, checksum, status or location. */
+export interface PublicMediaItem {
+  id: string;
+  path: string;
+  filename: string;
+  folder: string;
+  contentType: string;
+  size: number;
   createdAt: number;
   updatedAt: number;
   provenance: Provenance;
@@ -54,6 +75,10 @@ export interface TextPatch {
   description?: string | null;
 }
 
+export interface PublicCopyConfig {
+  prefix: string;
+}
+
 export interface Config {
   allowedTypes: string[];
   deniedTypes: string[];
@@ -61,6 +86,10 @@ export interface Config {
   locales: string[];
   defaultLocale?: string | undefined;
   prefix: string;
+  publicPath: string;
+  publicCopy?: PublicCopyConfig | undefined;
+  uploadStaleAfterMs: number;
+  anonymousList: "ids" | "all";
 }
 
 export const SORTABLE = ["createdAt", "filename", "size"] as const;
@@ -79,6 +108,12 @@ export interface Reconciliation {
   rowsWithoutBlob: string[];
 }
 
+export interface PublicSync {
+  written: number;
+  removed: number;
+  missing: number;
+}
+
 /** `created` is false when the upload was idempotent: same folder, same filename, same checksum, so `item` is the row that was already there. */
 export interface Upload {
   item: MediaItem;
@@ -93,14 +128,19 @@ export interface Media {
   folders(): Promise<Result<Array<{ folder: string; count: number }>, MediaError>>;
   update(id: string, patch: { filename?: string; folder?: string; provenance?: unknown } & TextPatch, locale?: string): Promise<Result<MediaItem | null, MediaError>>;
   read(id: string): Promise<Result<{ item: MediaItem; data: Uint8Array } | null, MediaError>>;
+  serveFile(id: string, name: string): Promise<Result<{ item: MediaItem; data: Uint8Array } | null, MediaError>>;
   remove(id: string): Promise<Result<void, MediaError>>;
   exportTo(dir: string): Promise<Result<{ written: number; skipped: number; missing: number; conflicts: number }, MediaError>>;
   createFolder(path: string): Promise<Result<{ folder: string; count: number }, MediaError>>;
   renameFolder(from: string, to: string): Promise<Result<{ folder: string; moved: number } | null, MediaError>>;
   folderItems(path: string, recursive: boolean): Promise<Result<{ path: string; ids: string[] } | null, MediaError>>;
-  removeFolder(path: string): Promise<Result<{ ok: true; removed: number } | null, MediaError>>;
-  migrateKeys(): Promise<Result<{ moved: number; renamed: number; missing: number; skipped: number }, MediaError>>;
+  removeFolder(path: string): Promise<Result<{ ok: true; removed: number; ids: string[] } | null, MediaError>>;
   reconcile(options?: { delete?: boolean }): Promise<Result<Reconciliation, MediaError>>;
+  syncPublic(): Promise<Result<PublicSync, MediaError>>;
+  toPublicItem(item: MediaItem): PublicMediaItem;
+  publicCopyEnabled(): boolean;
+  anonymousListAllowed(): boolean;
+  attach(kestrel: Introspection): void;
 }
 
 export function sortItems(items: MediaItem[], sortBy: SortField | undefined, direction: "asc" | "desc" | undefined): MediaItem[] {
@@ -122,12 +162,6 @@ export function keyFor(folder: string, filename: string): string {
 function parentsOf(folder: string): string[] {
   const parts = folder.split("/");
   return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
-}
-
-function withSuffix(filename: string, n: number): string {
-  const ext = extname(filename);
-  const stem = ext === "" ? filename : filename.slice(0, -ext.length);
-  return `${stem}-${n}${ext}`;
 }
 
 function typeAllowed(allowed: string[], contentType: string): boolean {
@@ -186,7 +220,6 @@ function exportTargetPath(base: string, folder: string, filename: string, used: 
   return { path, conflict: attempt > 1 };
 }
 
-const META_SUFFIX = ".meta.json";
 const MAX_NAME_BYTES = 200;
 const VARIANTS_PREFIX = "media-variants/";
 
@@ -206,9 +239,45 @@ export function safeName(filename: string): string {
   return named.replace(/\.meta\.json$/i, "-meta.json");
 }
 
+/** The upload-time name for a file: `safeName(filename)` with the extension of `contentType` when it is known, so a host that derives Content-Type from the extension serves the right one; an unknown type keeps the uploaded extension. */
+export function nameFor(filename: string, contentType: string): string {
+  const base = safeName(filename);
+  const mediaType = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  const ext = EXTENSION_BY_TYPE[mediaType];
+  if (ext === undefined) return base;
+  const baseExt = extname(base);
+  const stem = baseExt === "" ? base : base.slice(0, -baseExt.length);
+  const named = capName(`${stem === "" ? "file" : stem}.${ext}`);
+  return named.replace(/\.meta\.json$/i, "-meta.json");
+}
+
+/** The last path segment of a blob key: for `<prefix><id>/<name>` this is the upload-time `<name>`. */
+export function urlNameOf(key: string): string {
+  const slash = key.lastIndexOf("/");
+  return slash === -1 ? key : key.slice(slash + 1);
+}
+
+function isCanonicalKey(key: string, id: string, prefix: string): boolean {
+  const want = `${prefix}${id}/`;
+  return key.startsWith(want) && key.length > want.length && !key.slice(want.length).includes("/");
+}
+
+/** `<publicCopy.prefix><publicPath without its leading "/">/`: the root under which the public copy of every original lives. */
+export function publicTreeOf(config: Pick<Config, "publicPath" | "publicCopy">): string {
+  return `${config.publicCopy?.prefix ?? ""}${config.publicPath.slice(1)}/`;
+}
+
+export function publicUrlOf(config: Pick<Config, "publicPath">, id: string, name: string): string {
+  return `${config.publicPath}/${id}/${name}`;
+}
+
+function copyKeyOf(config: Pick<Config, "publicPath" | "publicCopy">, id: string, name: string): string {
+  return `${publicTreeOf(config)}${id}/${name}`;
+}
+
 export async function createMediaDefault(config: Config, blobs: Blobstore, db: Persistence, logger: Logger, now: () => number = Date.now): Promise<Media> {
   const items = await db.ensureCollection(COLLECTION, {
-    filename: "string", folder: "string", contentType: "string", size: "number", key: { type: "string", unique: true }, checksum: "string", status: "string", createdAt: "number", updatedAt: "number",
+    filename: "string", folder: "string", location: { type: "string", unique: true }, contentType: "string", size: "number", key: { type: "string", unique: true }, checksum: "string", status: "string", createdAt: "number", updatedAt: "number",
     provenance: "json", width: "number", height: "number", alt: "json", title: "json", description: "json",
   });
   if (isErr(items)) throw new Error(`media/default: cannot prepare collection "${COLLECTION}": ${items.error.message}`);
@@ -217,37 +286,38 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
   const backfilled = await db.updateMany(COLLECTION, { status: { eq: null } }, { status: "ready" });
   if (isErr(backfilled)) throw new Error(`media/default: cannot backfill the status of "${COLLECTION}": ${backfilled.error.message}`);
 
-  const blobKey = (folder: string, filename: string): string => config.prefix + keyFor(folder, filename);
-  const moveBlob = async (from: string, to: string): Promise<Result<void, MediaError>> => {
-    const moved = await blobs.move(from, to);
-    if (!isErr(moved) || moved.error.code !== "NOT_FOUND") return moved;
-    const target = await blobs.get(to);
-    if (isErr(target)) return target;
-    return target.value === null ? moved : ok();
-  };
-  const keyTaken = async (key: string, exceptId?: string): Promise<Result<boolean, MediaError>> => {
-    const row = await db.findOne<MediaItem>(COLLECTION, { key });
+  const idKey = (id: string, name: string): string => `${config.prefix}${id}/${name}`;
+  const copyKey = (id: string, name: string): string => copyKeyOf(config, id, name);
+  const locationTaken = async (location: string, exceptId?: string): Promise<Result<boolean, MediaError>> => {
+    const row = await db.findOne<MediaItem>(COLLECTION, { location });
     if (isErr(row)) return row;
     return ok(row.value !== null && row.value.id !== exceptId);
   };
-  const keyConflict = (key: string): MediaError => failure("CONFLICT", `media/default: ${key} already exists`, { details: { collection: COLLECTION, field: "key" } });
-  const assertFree = async (key: string, exceptId?: string): Promise<Result<void, MediaError>> => {
-    const taken = await keyTaken(key, exceptId);
+  const locationConflict = (location: string): MediaError => failure("CONFLICT", `media/default: ${location} already exists`, { details: { collection: COLLECTION, field: "location" } });
+  const assertFreeLocation = async (location: string, exceptId?: string): Promise<Result<void, MediaError>> => {
+    const taken = await locationTaken(location, exceptId);
     if (isErr(taken)) return taken;
-    return taken.value ? err(keyConflict(key)) : ok();
+    return taken.value ? err(locationConflict(location)) : ok();
   };
-  const existingFor = async (key: string, checksum: string): Promise<Result<MediaItem | null, MediaError>> => {
-    const row = await db.findOne<Document>(COLLECTION, { key });
+  const existingFor = async (location: string, checksum: string): Promise<Result<MediaItem | null, MediaError>> => {
+    const row = await db.findOne<Document>(COLLECTION, { location });
     if (isErr(row)) return row;
     if (row.value === null) return ok(null);
     const item = resolveWith(row.value, fallbackLocale);
-    return item.status === "ready" && item.checksum === checksum ? ok(item) : err(keyConflict(key));
+    return item.status === "ready" && item.checksum === checksum ? ok(item) : err(locationConflict(location));
   };
-  const releaseFailed = async (key: string): Promise<Result<void, MediaError>> => {
-    const row = await db.findOne<MediaItem>(COLLECTION, { key });
+  const releaseFailed = async (location: string): Promise<Result<void, MediaError>> => {
+    const row = await db.findOne<MediaItem>(COLLECTION, { location });
     if (isErr(row)) return row;
     if (row.value === null || row.value.status !== "failed") return ok();
-    return db.deleteOne(COLLECTION, row.value.id);
+    const item = row.value;
+    if (config.publicCopy !== undefined) {
+      const droppedCopy = await blobs.remove(copyKey(item.id, urlNameOf(item.key)));
+      if (isErr(droppedCopy)) return droppedCopy;
+    }
+    const droppedBlob = await blobs.remove(item.key);
+    if (isErr(droppedBlob)) return droppedBlob;
+    return db.deleteOne(COLLECTION, item.id);
   };
   const ensureFolder = async (path: string): Promise<Result<void, MediaError>> => {
     if (path === "") return ok();
@@ -354,40 +424,105 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     return boundaryCast<MediaItem>(item, "host");
   };
 
-  return {
+  const removeItem = async (id: string): Promise<Result<void, MediaError>> => {
+    const found = await db.findOne<MediaItem>(COLLECTION, { id });
+    if (isErr(found)) return found;
+    if (found.value !== null) {
+      const item = found.value;
+      if (config.publicCopy !== undefined) {
+        const droppedCopy = await blobs.remove(copyKey(id, urlNameOf(item.key)));
+        if (isErr(droppedCopy)) return droppedCopy;
+      }
+      const droppedBlob = await blobs.remove(item.key);
+      if (isErr(droppedBlob)) return droppedBlob;
+      const deleted = await db.deleteOne(COLLECTION, id);
+      if (isErr(deleted)) return deleted;
+    }
+    if (config.publicCopy !== undefined) {
+      const treePrefix = `${publicTreeOf(config)}${id}/`;
+      const listedCopy = await blobs.list(treePrefix);
+      if (isErr(listedCopy)) return listedCopy;
+      for (const info of listedCopy.value) {
+        if (info.key.slice(treePrefix.length).includes("/")) continue;
+        const removed = await blobs.remove(info.key);
+        if (isErr(removed)) return removed;
+      }
+    }
+    const privatePrefix = `${config.prefix}${id}/`;
+    const listedBlob = await blobs.list(privatePrefix);
+    if (isErr(listedBlob)) return listedBlob;
+    for (const info of listedBlob.value) {
+      const removed = await blobs.remove(info.key);
+      if (isErr(removed)) return removed;
+    }
+    return ok();
+  };
+
+  if (config.publicCopy !== undefined) {
+    const tree = publicTreeOf(config);
+    if (tree.startsWith(config.prefix) || config.prefix.startsWith(tree)) {
+      throw new Error(`media/default: publicCopy tree "${tree}" and prefix "${config.prefix}" overlap – the public copies must not share a prefix with the stored files`);
+    }
+  }
+  let layoutViolations = 0;
+  let firstViolation: { id: string; key: string } | undefined;
+  const layoutChecked = await eachItem({}, async (item) => {
+    if (!isCanonicalKey(item.key, item.id, config.prefix)) {
+      layoutViolations += 1;
+      firstViolation ??= { id: item.id, key: item.key };
+    }
+    return ok();
+  });
+  if (isErr(layoutChecked)) throw new Error(`media/default: could not check the stored key layout: ${layoutChecked.error.message}`);
+  if (layoutViolations > 0) {
+    throw new Error(`media/default: ${layoutViolations} stored item(s) use a blob key other than "${config.prefix}<id>/<name>" (first: ${firstViolation!.id} at "${firstViolation!.key}") – this version reads no other layout; start with an empty media store`);
+  }
+
+  const api: Media = {
     async upload(file, folder = "", provenance) {
       if (!typeAllowed(config.allowedTypes, file.contentType) || typeAllowed(config.deniedTypes, file.contentType)) {
         return err(failure("UNSUPPORTED", `media/default: type ${file.contentType} is not allowed`));
       }
       if (file.data.byteLength > config.maxBytes) return err(failure("PAYLOAD_TOO_LARGE", `media/default: file exceeds ${config.maxBytes} bytes`));
-      const id = randomUUID();
-      const filename = safeName(file.filename);
       const folderPath = safeFolder(folder);
       if (isErr(folderPath)) return folderPath;
-      const key = blobKey(folderPath.value, filename);
-      const released = await releaseFailed(key);
+      const name = nameFor(file.filename, file.contentType);
+      const location = keyFor(folderPath.value, name);
+      const released = await releaseFailed(location);
       if (isErr(released)) return released;
       const checksum = createHash("sha256").update(file.data).digest("hex");
-      const taken = await existingFor(key, checksum);
-      if (isErr(taken)) return taken;
-      if (taken.value !== null) return ok({ item: taken.value, created: false });
+      const existing = await existingFor(location, checksum);
+      if (isErr(existing)) return existing;
+      if (existing.value !== null) return ok({ item: existing.value, created: false });
       const parsedProvenance = parseProvenance(provenance);
       if (isErr(parsedProvenance)) return parsedProvenance;
       const size = file.contentType.startsWith("image/") ? imageSize(file.data) : null;
+      const id = randomUUID();
+      const key = idKey(id, name);
       const at = now();
       const folderReady = await ensureFolder(folderPath.value);
       if (isErr(folderReady)) return folderReady;
       const created = await db.createOne<Document>(COLLECTION, {
-        id, filename, folder: folderPath.value, contentType: file.contentType, size: file.data.byteLength, key,
+        id, filename: name, folder: folderPath.value, location, contentType: file.contentType, size: file.data.byteLength, key,
         checksum, status: "uploading", createdAt: at, updatedAt: at,
         provenance: parsedProvenance.value, width: size?.width ?? null, height: size?.height ?? null, alt: {}, title: {}, description: {},
       });
-      if (isErr(created)) return created.error.code === "CONFLICT" ? err(keyConflict(key)) : created;
+      if (isErr(created)) return created.error.code === "CONFLICT" ? err(locationConflict(location)) : created;
       const stored = await blobs.put(key, file.data, { contentType: file.contentType });
       if (isErr(stored)) {
         const marked = await db.updateOne(COLLECTION, id, { status: "failed", updatedAt: now() });
         if (isErr(marked)) logger.error(`media/default: could not mark ${id} as failed`, { id, key, error: marked.error.message });
         return stored;
+      }
+      if (config.publicCopy !== undefined) {
+        const copied = await blobs.put(copyKey(id, name), file.data, { contentType: file.contentType });
+        if (isErr(copied)) {
+          const removedBlob = await blobs.remove(key);
+          if (isErr(removedBlob)) logger.error(`media/default: could not delete blob ${key} after a failed public copy`, { id, key, error: removedBlob.error.message });
+          const marked = await db.updateOne(COLLECTION, id, { status: "failed", updatedAt: now() });
+          if (isErr(marked)) logger.error(`media/default: could not mark ${id} as failed`, { id, key, error: marked.error.message });
+          return copied;
+        }
       }
       const ready = await db.updateOne<Document>(COLLECTION, id, { status: "ready", updatedAt: now() });
       if (isErr(ready)) return ready;
@@ -501,30 +636,20 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         else texts[key.value] = value;
         fields[field] = texts;
       }
-      let moved: { from: string; to: string } | null = null;
       if (patch.filename !== undefined || patch.folder !== undefined) {
         const nextFolder = boundaryCast<string | undefined>(fields.folder, "host") ?? boundaryCast<string>(existing.folder, "host");
         const nextName = boundaryCast<string | undefined>(fields.filename, "host") ?? boundaryCast<string>(existing.filename, "host");
-        const nextKey = blobKey(nextFolder, nextName);
-        if (nextKey !== existing.key) {
-          const free = await assertFree(nextKey, id);
+        const nextLocation = keyFor(nextFolder, nextName);
+        if (nextLocation !== existing.location) {
+          const free = await assertFreeLocation(nextLocation, id);
           if (isErr(free)) return free;
-          const relocated = await moveBlob(boundaryCast<string>(existing.key, "host"), nextKey);
-          if (isErr(relocated)) return relocated;
           const folderReady = await ensureFolder(nextFolder);
           if (isErr(folderReady)) return folderReady;
-          fields.key = nextKey;
-          moved = { from: boundaryCast<string>(existing.key, "host"), to: nextKey };
+          fields.location = nextLocation;
         }
       }
       const row = await db.updateOne<Document>(COLLECTION, id, fields);
-      if (isErr(row)) {
-        if (moved !== null) {
-          const back = await moveBlob(moved.to, moved.from);
-          if (isErr(back)) logger.error(`media/default: could not move ${moved.to} back to ${moved.from} after a failed row update`, { id, error: back.error.message });
-        }
-        return row;
-      }
+      if (isErr(row)) return row;
       return ok(resolveWith(row.value, key.value));
     },
     async read(id) {
@@ -538,23 +663,18 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (blob.value === null) throw new Error(`media/default: blob ${item.key} for ${id} is missing`);
       return ok({ item, data: blob.value });
     },
-    async remove(id) {
-      const found = await db.findOne<MediaItem>(COLLECTION, { id });
-      if (isErr(found)) return found;
-      if (found.value === null) return ok();
-      const item = found.value;
-      const deleted = await db.deleteOne(COLLECTION, id);
-      if (isErr(deleted)) return deleted;
-      const shared = await db.count(COLLECTION, { key: item.key });
-      if (isErr(shared)) {
-        logger.error(`media/default: could not check whether blob ${item.key} of removed item ${id} is still referenced, keeping it`, { id, key: item.key, error: shared.error.message });
-        return ok();
-      }
-      if (shared.value > 0) return ok();
-      const dropped = await blobs.remove(item.key);
-      if (isErr(dropped)) logger.error(`media/default: could not delete blob ${item.key} of removed item ${id}`, { id, key: item.key, error: dropped.error.message });
-      return ok();
+    async serveFile(id, name) {
+      const row = await db.findOne<Document>(COLLECTION, { id });
+      if (isErr(row)) return row;
+      if (row.value === null) return ok(null);
+      const item = resolveWith(row.value, fallbackLocale);
+      if (item.status !== "ready" || urlNameOf(item.key) !== name) return ok(null);
+      const blob = await blobs.get(item.key);
+      if (isErr(blob)) return blob;
+      if (blob.value === null) throw new Error(`media/default: blob ${item.key} for ${id} is missing`);
+      return ok({ item, data: blob.value });
     },
+    remove: removeItem,
     async createFolder(path) {
       const clean = safeFolder(path);
       if (isErr(clean)) return clean;
@@ -582,15 +702,13 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (isErr(found)) return found;
       const retarget = (folder: string): string => target.value + folder.slice(source.value.length);
       for (const item of found.value) {
-        const free = await assertFree(blobKey(retarget(item.folder), item.filename), item.id);
+        const free = await assertFreeLocation(keyFor(retarget(item.folder), item.filename), item.id);
         if (isErr(free)) return free;
       }
       for (const item of found.value) {
         const folder = retarget(item.folder);
-        const key = blobKey(folder, item.filename);
-        const relocated = await moveBlob(item.key, key);
-        if (isErr(relocated)) return relocated;
-        const updated = await db.updateOne(COLLECTION, item.id, { folder, key, updatedAt: now() });
+        const location = keyFor(folder, item.filename);
+        const updated = await db.updateOne(COLLECTION, item.id, { folder, location, updatedAt: now() });
         if (isErr(updated)) return updated;
       }
       const page = await db.findMany<{ id: string; path: string }>(FOLDERS, { path: source.value }, { limit: 1 });
@@ -636,11 +754,11 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (!exists.value) return ok(null);
       const found = await subtreeItems(clean.value);
       if (isErr(found)) return found;
+      const ids: string[] = [];
       for (const item of found.value) {
-        const dropped = await blobs.remove(item.key);
-        if (isErr(dropped)) return dropped;
-        const deleted = await db.deleteOne(COLLECTION, item.id);
-        if (isErr(deleted)) return deleted;
+        const removed = await removeItem(item.id);
+        if (isErr(removed)) return removed;
+        ids.push(item.id);
       }
       const subfolderIds: string[] = [];
       const nested = await eachInSubtree<{ id: string; path: string }>(FOLDERS, "path", clean.value, async (row) => {
@@ -654,71 +772,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         const removedSubfolders = await db.deleteMany(FOLDERS, { id: { in: subfolderIds } });
         if (isErr(removedSubfolders)) return removedSubfolders;
       }
-      return ok({ ok: true, removed: found.value.length });
-    },
-    async migrateKeys() {
-      let moved = 0;
-      let renamed = 0;
-      let missing = 0;
-      let skipped = 0;
-      const migrate = async (item: MediaItem): Promise<Result<void, MediaError>> => {
-        let filename = item.filename;
-        let key = blobKey(item.folder, filename);
-        const desired = key;
-        if (key === item.key) return ok();
-        const cleanFolder = safeFolder(item.folder);
-        if (isErr(cleanFolder) || cleanFolder.value !== item.folder || safeName(item.filename) !== item.filename || key.endsWith(META_SUFFIX)) {
-          skipped += 1;
-          logger.error(`media/default: item ${item.id} (${item.folder}/${item.filename}) cannot be safely migrated, skipped`, { id: item.id, key: item.key });
-          return ok();
-        }
-        const current = await blobs.get(item.key);
-        if (isErr(current)) return current;
-        if (current.value === null) {
-          const already = await blobs.get(desired);
-          if (isErr(already)) return already;
-          if (already.value !== null) {
-            const folderReady = await ensureFolder(item.folder);
-            if (isErr(folderReady)) return folderReady;
-            const updated = await db.updateOne(COLLECTION, item.id, { key: desired, filename });
-            if (isErr(updated)) return updated;
-            moved += 1;
-            return ok();
-          }
-          missing += 1;
-          logger.error(`media/default: blob ${item.key} for ${item.id} is missing, key not migrated`, { id: item.id, key: item.key });
-          return ok();
-        }
-        for (let n = 2; ; n += 1) {
-          const taken = await keyTaken(key, item.id);
-          if (isErr(taken)) return taken;
-          const present = await blobs.get(key);
-          if (isErr(present)) return present;
-          if (!taken.value && present.value === null) break;
-          filename = withSuffix(item.filename, n);
-          key = blobKey(item.folder, filename);
-        }
-        if (filename !== item.filename) renamed += 1;
-        const relocated = await moveBlob(item.key, key);
-        if (isErr(relocated)) return relocated;
-        const folderReady = await ensureFolder(item.folder);
-        if (isErr(folderReady)) return folderReady;
-        const updated = await db.updateOne(COLLECTION, item.id, { key, filename });
-        if (isErr(updated)) return updated;
-        moved += 1;
-        return ok();
-      };
-      const walked = await eachItem({}, async (item) => {
-        const migrated = await migrate(item);
-        if (isErr(migrated)) {
-          skipped += 1;
-          logger.error(`media/default: failed to migrate key for ${item.id}`, { id: item.id, key: item.key, error: migrated.error.message });
-        }
-        return ok();
-      });
-      if (isErr(walked)) return walked;
-      if (moved > 0 || missing > 0 || skipped > 0) logger.info("media/default: migrated blob keys to <prefix><folder>/<filename>", { moved, renamed, missing, skipped });
-      return ok({ moved, renamed, missing, skipped });
+      return ok({ ok: true, removed: ids.length, ids });
     },
     async reconcile(options = {}) {
       const stored = new Set<string>();
@@ -743,6 +797,116 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         logger.info("media/default: blobstore and media_items disagree", { blobsWithoutRow: blobsWithoutRow.length, rowsWithoutBlob: rowsWithoutBlob.length, deleted: options.delete === true ? blobsWithoutRow.length : 0 });
       }
       return ok({ blobsWithoutRow, rowsWithoutBlob: rowsWithoutBlob.sort() });
+    },
+    async syncPublic() {
+      if (config.publicCopy === undefined) return ok({ written: 0, removed: 0, missing: 0 });
+      const tree = publicTreeOf(config);
+      const listed = await blobs.list(tree);
+      if (isErr(listed)) return listed;
+      const depth1 = new Map<string, { id: string; size: number }>();
+      for (const info of listed.value) {
+        const rest = info.key.slice(tree.length);
+        const slash = rest.indexOf("/");
+        if (slash === -1) continue;
+        if (rest.slice(slash + 1).includes("/")) continue;
+        depth1.set(info.key, { id: rest.slice(0, slash), size: info.size });
+      }
+      let written = 0;
+      let removed = 0;
+      let missing = 0;
+      const protect = new Set<string>();
+      const expected = new Set<string>();
+      const removeCopyIfListed = async (key: string): Promise<Result<void, MediaError>> => {
+        if (depth1.delete(key)) removed += 1;
+        return blobs.remove(key);
+      };
+      const processed = await eachItem({}, async (item) => {
+        let status = item.status;
+        if (status === "uploading") {
+          if (now() - item.updatedAt < config.uploadStaleAfterMs) {
+            protect.add(item.id);
+            return ok();
+          }
+          const marked = await db.updateOne<MediaItem>(COLLECTION, item.id, { status: "failed", updatedAt: now() });
+          if (isErr(marked)) return marked;
+          status = "failed";
+        }
+        if (status === "failed") {
+          const droppedCopy = await removeCopyIfListed(copyKey(item.id, urlNameOf(item.key)));
+          if (isErr(droppedCopy)) return droppedCopy;
+          const droppedBlob = await blobs.remove(item.key);
+          if (isErr(droppedBlob)) return droppedBlob;
+          return ok();
+        }
+        const name = urlNameOf(item.key);
+        const key = copyKey(item.id, name);
+        expected.add(key);
+        const entry = depth1.get(key);
+        if (entry !== undefined && entry.size === item.size) return ok();
+        const original = await blobs.get(item.key);
+        if (isErr(original)) return original;
+        if (original.value === null) {
+          missing += 1;
+          logger.error(`media/default: blob ${item.key} for ${item.id} is missing, its public copy was not written`, { id: item.id, key: item.key });
+          return ok();
+        }
+        const put = await blobs.put(key, original.value, { contentType: item.contentType });
+        if (isErr(put)) return put;
+        const reread = await db.findOne<MediaItem>(COLLECTION, { id: item.id });
+        if (isErr(reread)) return reread;
+        if (reread.value === null || reread.value.status !== "ready") {
+          const undone = await blobs.remove(key);
+          if (isErr(undone)) return undone;
+          expected.delete(key);
+          return ok();
+        }
+        written += 1;
+        return ok();
+      });
+      if (isErr(processed)) return processed;
+      for (const [key, entry] of depth1) {
+        if (protect.has(entry.id) || expected.has(key)) continue;
+        const dropped = await blobs.remove(key);
+        if (isErr(dropped)) return dropped;
+        removed += 1;
+      }
+      return ok({ written, removed, missing });
+    },
+    toPublicItem(item) {
+      return {
+        id: item.id,
+        path: publicUrlOf(config, item.id, urlNameOf(item.key)),
+        filename: item.filename,
+        folder: item.folder,
+        contentType: item.contentType,
+        size: item.size,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        provenance: item.provenance,
+        width: item.width,
+        height: item.height,
+        alt: item.alt,
+        title: item.title,
+        description: item.description,
+      };
+    },
+    publicCopyEnabled() {
+      return config.publicCopy !== undefined;
+    },
+    anonymousListAllowed() {
+      return config.anonymousList === "all";
+    },
+    attach(kestrel) {
+      const pipelines = kestrel.describe().pipelines;
+      const runs = (name: string): boolean => pipelines.some((p) => p.steps.some((s) => s.module === "media/default" && s.name === name));
+      if (config.publicCopy === undefined) {
+        const offender = pipelines.find((p) => p.steps.some((s) => s.module === "media/default" && s.name === "media.syncPublic"));
+        if (offender) throw new Error(`media/default: pipeline "${offender.name}" runs media.syncPublic, but publicCopy is not set`);
+        return;
+      }
+      if (!runs("media.serve")) {
+        throw new Error(`media/default: publicCopy is set, but no pipeline runs media.serve – the public URL ${config.publicPath}/<id>/<name> must also resolve on this origin`);
+      }
     },
     async exportTo(dir) {
       const base = resolvePath(dir);
@@ -784,4 +948,6 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       return ok({ written, skipped, missing, conflicts });
     },
   };
+
+  return api;
 }

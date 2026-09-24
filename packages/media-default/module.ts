@@ -1,4 +1,5 @@
 import { z } from "zod";
+import "@michaelthielemann/kestrel-contracts/authn";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { binaryResult, first, stepFactory, type Context, type StepResult } from "@michaelthielemann/kestrel/context";
@@ -14,6 +15,15 @@ export const configSchema = z
     locales: z.array(z.string().min(1)).default([]),
     defaultLocale: z.string().min(1).optional(),
     prefix: z.string().regex(/^([A-Za-z0-9._-]+\/)+$/, 'prefix must be one or more "<segment>/" parts, e.g. "media/"').default("media/"),
+    publicPath: z.string().regex(/^(\/[A-Za-z0-9._-]+)+$/, 'publicPath must be "/" followed by path segments, without a trailing "/", e.g. "/media"').default("/media"),
+    publicCopy: z
+      .object({
+        prefix: z.string().regex(/^([A-Za-z0-9._-]+\/)*$/, 'publicCopy.prefix must be "" or one or more "<segment>/" parts, e.g. "site/"'),
+      })
+      .strict()
+      .optional(),
+    uploadStaleAfterMs: z.number().int().min(60000).default(900000),
+    anonymousList: z.enum(["ids", "all"]).default("ids"),
   })
   .strict();
 
@@ -56,9 +66,36 @@ function listOptions(payload: Record<string, unknown>): ListOptions & { locale?:
   return options;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const ANONYMOUS_LIST_MESSAGE = "media/default: anonymous callers read media by id only – sign in to list the library";
+
 const PROVENANCE = { type: "object", properties: { origin: { type: "string", enum: ["human", "ai", "mixed", "unknown"] }, tool: { type: "string" }, model: { type: "string" }, at: { type: "number" } }, required: ["origin"], description: "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown" };
-const MEDIA_ITEM_SCHEMA = { type: "object", properties: { id: { type: "string" }, filename: { type: "string" }, folder: { type: "string" }, contentType: { type: "string" }, size: { type: "number" }, key: { type: "string" }, checksum: { type: ["string", "null"], description: "sha256 of the uploaded bytes, hex; null for items uploaded before checksums were recorded" }, status: { type: "string", enum: ["uploading", "ready", "failed"], description: "only ready items are listed, readable and downloadable" }, createdAt: { type: "number" }, updatedAt: { type: "number" }, provenance: PROVENANCE, width: { type: ["number", "null"] }, height: { type: ["number", "null"] }, alt: { type: ["string", "null"] }, title: { type: ["string", "null"] }, description: { type: ["string", "null"] } }, required: ["id", "filename", "folder", "contentType", "size", "key", "checksum", "status", "createdAt", "updatedAt", "provenance", "width", "height", "alt", "title", "description"] };
+const MEDIA_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    path: { type: "string", description: "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it" },
+    filename: { type: "string" },
+    folder: { type: "string" },
+    contentType: { type: "string" },
+    size: { type: "number" },
+    createdAt: { type: "number" },
+    updatedAt: { type: "number" },
+    provenance: PROVENANCE,
+    width: { type: ["number", "null"] },
+    height: { type: ["number", "null"] },
+    alt: { type: ["string", "null"] },
+    title: { type: ["string", "null"] },
+    description: { type: ["string", "null"] },
+  },
+  required: ["id", "path", "filename", "folder", "contentType", "size", "createdAt", "updatedAt", "provenance", "width", "height", "alt", "title", "description"],
+  additionalProperties: false,
+};
 const RECONCILE_SCHEMA = { type: "object", properties: { blobsWithoutRow: { type: "array", items: { type: "string" } }, rowsWithoutBlob: { type: "array", items: { type: "string" } } }, required: ["blobsWithoutRow", "rowsWithoutBlob"] };
+const PUBLIC_SYNC_SCHEMA = { type: "object", properties: { written: { type: "number" }, removed: { type: "number" }, missing: { type: "number" } }, required: ["written", "removed", "missing"] };
 const UPLOAD_RESULT_SCHEMA = {
   oneOf: [
     MEDIA_ITEM_SCHEMA,
@@ -85,11 +122,10 @@ export default defineModule({
 
   async setup(config, deps): Promise<Media> {
     if (config.defaultLocale !== undefined && !config.locales.includes(config.defaultLocale)) throw new Error("media/default: defaultLocale must be one of locales");
-    const media = await createMediaDefault(config, deps.get(BLOBSTORE), deps.get(PERSISTENCE), deps.logger);
-    const migrated = await media.migrateKeys();
-    if (isErr(migrated)) throw new Error(`media/default: could not migrate blob keys: ${migrated.error.message}`);
-    return media;
+    return createMediaDefault(config, deps.get(BLOBSTORE), deps.get(PERSISTENCE), deps.logger);
   },
+
+  attach: (media, kestrel) => media.attach(kestrel),
 
   steps: (media) => ({
     upload: async (ctx: Context): Promise<StepResult> => {
@@ -100,7 +136,8 @@ export default defineModule({
         if (!file) throw new Error("media/default: upload: expected exactly one file");
         const uploaded = await media.upload(file, folder, ctx.payload.provenance);
         if (isErr(uploaded)) return ctx.fail(uploaded.error);
-        return uploaded.value.created ? ok({ ...ctx, result: uploaded.value.item }) : ctx.done(uploaded.value.item);
+        const item = media.toPublicItem(uploaded.value.item);
+        return uploaded.value.created ? ok({ ...ctx, result: item }) : ctx.done(item);
       }
       const items: MediaItem[] = [];
       const ids: string[] = [];
@@ -115,7 +152,7 @@ export default defineModule({
         if (uploaded.error.code === "TRANSIENT") return ctx.fail(uploaded.error);
         errors.push({ filename: file.filename, status: uploaded.error.status, code: uploaded.error.code, message: uploaded.error.message });
       }
-      const result = { items, errors, ids };
+      const result = { items: items.map((item) => media.toPublicItem(item)), errors, ids };
       return ids.length === 0 ? ctx.done(result) : ok({ ...ctx, result });
     },
     update: async (ctx: Context): Promise<StepResult> => {
@@ -133,7 +170,7 @@ export default defineModule({
       const item = await media.update(ctx.params.id, patch, localeOf(ctx));
       if (isErr(item)) return ctx.fail(item.error);
       if (item.value === null) return ctx.fail("NOT_FOUND", `media/${ctx.params.id} not found`);
-      return ok({ ...ctx, result: item.value });
+      return ok({ ...ctx, result: media.toPublicItem(item.value) });
     },
     get: async (ctx: Context): Promise<StepResult> => {
       const notFound = () => ctx.fail("NOT_FOUND", `media/${ctx.params.id ?? ""} not found`);
@@ -141,20 +178,24 @@ export default defineModule({
       const item = await media.get(ctx.params.id, localeOf(ctx));
       if (isErr(item)) return ctx.fail(item.error);
       if (item.value === null) return notFound();
-      return ok({ ...ctx, result: item.value });
+      return ok({ ...ctx, result: media.toPublicItem(item.value) });
     },
     list: async (ctx: Context): Promise<StepResult> => {
       const ids = idsFrom(ctx.payload.ids);
+      if (ids.length === 0 && !ctx.identity && !media.anonymousListAllowed()) {
+        return ctx.fail("UNAUTHENTICATED", ANONYMOUS_LIST_MESSAGE);
+      }
       if (ids.length > 0) {
         const items = await media.byIds(ids.slice(0, 200), localeOf(ctx));
         if (isErr(items)) return ctx.fail(items.error);
-        return ok({ ...ctx, result: { items: items.value, total: items.value.length } });
+        return ok({ ...ctx, result: { items: items.value.map((i) => media.toPublicItem(i)), total: items.value.length } });
       }
       const page = await media.list(listOptions(ctx.payload));
       if (isErr(page)) return ctx.fail(page.error);
-      return ok({ ...ctx, result: page.value });
+      return ok({ ...ctx, result: { items: page.value.items.map((i) => media.toPublicItem(i)), total: page.value.total } });
     },
     listFolders: async (ctx: Context): Promise<StepResult> => {
+      if (!ctx.identity && !media.anonymousListAllowed()) return ctx.fail("UNAUTHENTICATED", ANONYMOUS_LIST_MESSAGE);
       const folders = await media.folders();
       if (isErr(folders)) return ctx.fail(folders.error);
       return ok({ ...ctx, result: folders.value });
@@ -194,6 +235,21 @@ export default defineModule({
       if (item.provenance.origin !== "human") result.headers = { "x-content-provenance": item.provenance.origin };
       return ok({ ...ctx, result });
     },
+    serve: async (ctx: Context): Promise<StepResult> => {
+      const id = ctx.params.id;
+      const name = ctx.params.name;
+      const notFound = () => ctx.fail("NOT_FOUND", `media/${id ?? ""} not found, not ready, or not the name the file was uploaded under`);
+      if (!id || !name) return notFound();
+      const found = await media.serveFile(id, name);
+      if (isErr(found)) return ctx.fail(found.error);
+      if (found.value === null) return notFound();
+      const { item, data } = found.value;
+      const result = binaryResult(data, item.contentType, name);
+      const headers: Record<string, string> = { "cache-control": media.publicCopyEnabled() ? "public, max-age=31536000, immutable" : "private, max-age=31536000, immutable" };
+      if (item.provenance.origin !== "human") headers["x-content-provenance"] = item.provenance.origin;
+      result.headers = headers;
+      return ok({ ...ctx, result });
+    },
     remove: async (ctx: Context): Promise<StepResult> => {
       if (!ctx.params.id) return ctx.fail("VALIDATION", "missing id");
       const removed = await media.remove(ctx.params.id);
@@ -210,6 +266,12 @@ export default defineModule({
       if (isErr(report)) return ctx.fail(report.error);
       return ok({ ...ctx, result: report.value });
     },
+    syncPublic: async (ctx: Context): Promise<StepResult> => {
+      const synced = await media.syncPublic();
+      if (isErr(synced)) return ctx.fail(synced.error);
+      const previous = isRecord(ctx.result) ? ctx.result : {};
+      return ok({ ...ctx, result: { ...previous, _publicMedia: synced.value } });
+    },
     export: stepFactory((dir: string) => async (ctx: Context): Promise<StepResult> => {
       const exported = await media.exportTo(dir);
       if (isErr(exported)) return ctx.fail(exported.error);
@@ -217,7 +279,7 @@ export default defineModule({
     }),
   }),
 
-  describe: () => ({
+  describe: (media) => ({
     upload: {
       summary: "Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing",
       reads: ["files"],
@@ -226,20 +288,34 @@ export default defineModule({
       input: { type: "object", properties: { folder: { type: "string" }, provenance: { type: "string", description: "origin (human|ai|mixed|unknown) or JSON of the provenance object, applied to every file; omitted means unknown" } }, additionalProperties: false },
       output: UPLOAD_RESULT_SCHEMA,
       terminalOutput: UPLOAD_RESULT_SCHEMA,
-      errors: { 400: "no file or invalid folder/provenance (per-file for a multi-file request)", 409: "filename already exists in that folder with different bytes, `details.field: \"key\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict", 413: "file exceeds maxBytes (per-file for a multi-file request)", 415: "type not allowed (per-file for a multi-file request)" },
+      errors: { 400: "no file or invalid folder/provenance (per-file for a multi-file request)", 409: "the folder already has a file with that name, `details.field: \"location\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict", 413: "file exceeds maxBytes (per-file for a multi-file request)", 415: "type not allowed (per-file for a multi-file request)" },
     },
     get: { summary: "Media metadata", reads: ["params.id"], writes: ["result"], query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "unknown locale", 404: "not found" } },
-    list: { summary: "List media, newest first", reads: [], writes: ["result"], query: { folder: { type: "string" }, recursive: { type: "boolean" }, q: { type: "string" }, sort: { type: "string" }, limit: { type: "integer" }, offset: { type: "integer" }, ids: { type: "string" }, locale: { type: "string" } }, output: { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, total: { type: "number" } }, required: ["items", "total"] }, errors: { 400: "invalid folder or unknown locale" } },
+    list: { summary: "List media, newest first; anonymous callers may only fetch by ids", reads: ["identity?"], writes: ["result"], query: { folder: { type: "string" }, recursive: { type: "boolean" }, q: { type: "string" }, sort: { type: "string" }, limit: { type: "integer" }, offset: { type: "integer" }, ids: { type: "string" }, locale: { type: "string" } }, output: { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, total: { type: "number" } }, required: ["items", "total"] }, errors: { 400: "invalid folder or unknown locale", 401: "no identity and no ids (unless anonymousList is \"all\")" } },
     download: { summary: "The file itself", reads: ["params.id"], writes: ["result"], binary: true, errors: { 404: "not found" } },
-    listFolders: { summary: "Folders (persistent and implied) with item counts", reads: [], writes: ["result"], output: { type: "array", items: { type: "object", properties: { folder: { type: "string" }, count: { type: "number" } }, required: ["folder", "count"] } } },
-    update: { summary: "Rename, move, set provenance or texts (alt/title/description per locale)", reads: ["params.id"], writes: ["result"], input: { type: "object", properties: { filename: { type: "string" }, folder: { type: "string" }, provenance: PROVENANCE, locale: { type: "string" }, alt: { type: ["string", "null"] }, title: { type: ["string", "null"] }, description: { type: ["string", "null"] } }, additionalProperties: false }, query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "invalid name, folder or text (texts are plain text, max 2000 chars)", 404: "not found", 409: "filename already exists in that folder" } },
-    remove: { summary: "Delete file and metadata", reads: ["params.id"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 400: "missing id" } },
+    serve: {
+      summary: "The file at its public URL (params.id, params.name); the name must be the one it was uploaded under",
+      reads: ["params.id", "params.name"],
+      writes: ["result"],
+      binary: true,
+      errors: { 404: "not found, not ready, or not the name the file was uploaded under" },
+      ...(media.publicCopyEnabled() ? { anonymous: "required" as const } : {}),
+    },
+    listFolders: { summary: "Folders (persistent and implied) with item counts; anonymous callers are refused", reads: ["identity?"], writes: ["result"], output: { type: "array", items: { type: "object", properties: { folder: { type: "string" }, count: { type: "number" } }, required: ["folder", "count"] } }, errors: { 401: "no identity (unless anonymousList is \"all\")" } },
+    update: { summary: "Rename, move, set provenance or texts (alt/title/description per locale); the file's key and path never change", reads: ["params.id"], writes: ["result"], input: { type: "object", properties: { filename: { type: "string" }, folder: { type: "string" }, provenance: PROVENANCE, locale: { type: "string" }, alt: { type: ["string", "null"] }, title: { type: ["string", "null"] }, description: { type: ["string", "null"] } }, additionalProperties: false }, query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "invalid name, folder or text (texts are plain text, max 2000 chars)", 404: "not found", 409: "the folder already has a file with that name, `details.field: \"location\"`" } },
+    remove: { summary: "Delete file and metadata (copy, blob, row, then a final sweep)", reads: ["params.id"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 400: "missing id" } },
     reconcile: { summary: "Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted)", reads: [], writes: ["result"], input: { type: "object", properties: { delete: { type: "boolean" } }, additionalProperties: false }, output: RECONCILE_SCHEMA },
     reconcileDelete: { summary: "Like media.reconcile, but always deletes the orphan blobs – the deletion is in the pipeline, not in the request", reads: [], writes: ["result"], output: RECONCILE_SCHEMA },
+    syncPublic: {
+      summary: "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result)",
+      reads: [],
+      writes: ["result._publicMedia"],
+      extendsOutput: { type: "object", properties: { _publicMedia: PUBLIC_SYNC_SCHEMA }, required: ["_publicMedia"] },
+    },
     export: (dir: string) => ({ summary: `Copy every media item to ${dir}/<folder>/<filename>`, reads: [], writes: ["result"], output: { type: "object", properties: { written: { type: "number" }, skipped: { type: "number" }, missing: { type: "number" }, conflicts: { type: "number" } }, required: ["written", "skipped", "missing", "conflicts"] } }),
     createFolder: { summary: "Create a folder (idempotent: an existing folder is returned unchanged)", reads: [], writes: ["result"], input: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, output: { type: "object", properties: { folder: { type: "string" }, count: { type: "number" } }, required: ["folder", "count"] }, errors: { 400: "missing or invalid path" } },
-    renameFolder: { summary: "Rename or move a folder, moving its blobs", reads: ["params.path"], writes: ["result"], input: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, output: { type: "object", properties: { folder: { type: "string" }, moved: { type: "number" } }, required: ["folder", "moved"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "target folder already exists" } },
+    renameFolder: { summary: "Rename or move a folder (metadata only: keys and paths do not change)", reads: ["params.path"], writes: ["result"], input: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, output: { type: "object", properties: { folder: { type: "string" }, moved: { type: "number" } }, required: ["folder", "moved"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "target folder already exists" } },
     listFolderItems: { summary: FOLDER_ITEMS_SUMMARY, reads: ["params.path"], writes: ["result"], query: { recursive: { type: "boolean" } }, output: { type: "object", properties: { path: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, required: ["path", "ids"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "folder not empty (without `recursive`)" } },
-    removeFolder: { summary: "Delete a folder and everything in it", reads: ["params.path"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" }, removed: { type: "number" } }, required: ["ok", "removed"] }, errors: { 400: "invalid path", 404: "folder not found", 409: "folder not empty or still referenced" } },
+    removeFolder: { summary: "Delete a folder and everything in it (each item as media.remove)", reads: ["params.path"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" }, removed: { type: "number" }, ids: { type: "array", items: { type: "string" } } }, required: ["ok", "removed", "ids"] }, errors: { 400: "invalid path", 404: "folder not found", 409: "folder not empty or still referenced" } },
   }),
 });
