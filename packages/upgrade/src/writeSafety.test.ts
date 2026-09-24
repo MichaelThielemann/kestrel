@@ -142,4 +142,82 @@ describe("fix --write runs the dirty guard for every touched file before writing
     expect(errored).toContain("dirty.ts");
     expect(readFileSync(cleanFile, "utf8")).toBe("export const clean = 1;\n");
   });
+
+  it("refuses (exit 2), never overwrites, when git itself cannot run inside a real repository", async () => {
+    await run("git", ["init"], { cwd: dir });
+    await run("git", ["config", "user.email", "t@example.com"], { cwd: dir });
+    await run("git", ["config", "user.name", "t"], { cwd: dir });
+    const touchedFile = join(dir, "touched.ts");
+    await writeFile(touchedFile, "export const touched = 1;\n");
+    await run("git", ["add", "-A"], { cwd: dir });
+    await run("git", ["commit", "-m", "initial"], { cwd: dir });
+
+    const configFile = join(dir, "host.config.ts");
+    await writeFile(configFile, "export default {};\n");
+    const rule: Rule = {
+      id: "plugin/one-file",
+      check: () => [
+        {
+          id: "plugin/one-file",
+          rule: "plugin/one-file",
+          severity: "error",
+          tier: "source",
+          where: {},
+          message: "touches the file",
+          suggestion: "n/a",
+          fix: { kind: "auto", edits: [{ file: touchedFile, start: 13, end: 20, text: "changed" }] },
+          docs: "n/a",
+        },
+      ],
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject(configFile)), rules: [rule] };
+
+    const originalPath = process.env.PATH;
+    process.env.PATH = "/nonexistent";
+    let errored = "";
+    let code: number;
+    try {
+      code = await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: () => undefined, stderr: (l) => { errored = l; }, plugins: [plugin] });
+    } finally {
+      process.env.PATH = originalPath;
+    }
+    expect(code).toBe(2);
+    expect(errored).toContain("touched.ts");
+    expect(readFileSync(touchedFile, "utf8")).toBe("export const touched = 1;\n");
+  });
+
+  it("still writes when git cannot run at all outside any git tree", async () => {
+    const touchedFile = join(dir, "touched.ts");
+    await writeFile(touchedFile, "export const touched = 1;\n");
+    const configFile = join(dir, "host.config.ts");
+    await writeFile(configFile, "export default {};\n");
+    const rule: Rule = {
+      id: "plugin/one-file",
+      check: () => [
+        {
+          id: "plugin/one-file",
+          rule: "plugin/one-file",
+          severity: "error",
+          tier: "source",
+          where: {},
+          message: "touches the file",
+          suggestion: "n/a",
+          fix: { kind: "auto", edits: [{ file: touchedFile, start: 13, end: 20, text: "changed" }] },
+          docs: "n/a",
+        },
+      ],
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject(configFile)), rules: [rule] };
+
+    const originalPath = process.env.PATH;
+    process.env.PATH = "/nonexistent";
+    let code: number;
+    try {
+      code = await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin] });
+    } finally {
+      process.env.PATH = originalPath;
+    }
+    expect(code).toBe(1);
+    expect(readFileSync(touchedFile, "utf8")).toBe("export const changed = 1;\n");
+  });
 });

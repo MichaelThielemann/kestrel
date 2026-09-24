@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
-import { relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { checkBoot, type BootCheck, type BootProblem } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
@@ -278,13 +278,22 @@ async function runCheck(args: ParsedArgs, stdout: (line: string) => void, option
   return exitCodeFor(verifiedReport.findings, failOn);
 }
 
-async function isDirty(file: string, root: string): Promise<boolean> {
+function isInsideGitTree(dir: string): boolean {
+  for (let current = resolve(dir); ; ) {
+    if (existsSync(join(current, ".git"))) return true;
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+}
+
+async function isDirty(file: string, root: string): Promise<boolean | undefined> {
   try {
     const relFile = relative(root, file);
     const { stdout } = await execFileAsync("git", ["status", "--porcelain", "--", relFile], { cwd: root });
     return stdout.trim() !== "";
   } catch {
-    return false;
+    return isInsideGitTree(root) ? undefined : false;
   }
 }
 
@@ -429,7 +438,12 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
 
   if (write && !allowDirty) {
     for (const [file] of changed) {
-      if (await isDirty(file, root)) {
+      const dirty = await isDirty(file, root);
+      if (dirty === undefined) {
+        stderr(`could not check "${relative(root, file)}" for uncommitted changes; pass --allow-dirty once you have confirmed it by hand`);
+        return 2;
+      }
+      if (dirty) {
         stderr(`"${relative(root, file)}" has uncommitted changes; pass --allow-dirty or commit first`);
         return 2;
       }
