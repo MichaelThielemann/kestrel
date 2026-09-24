@@ -1170,7 +1170,7 @@ describe("boot", () => {
 
   it("module config is validated by its schema", async () => {
     const config = { ...baseConfig, modules: [{ use: "./guard", config: {} }, { use: "./auth", config: {} }, { use: "./store", config: { file: 42 } }, { use: "./events", config: {} }] };
-    await expect(boot({ config, modules, pipelines: [], logger: silentLogger })).rejects.toThrow(new KestrelBootError("store/memory", "invalid config: file: Expected string, received number"));
+    await expect(boot({ config, modules, pipelines: [], logger: silentLogger })).rejects.toThrow(new KestrelBootError("store/memory", "invalid config: file: Expected string, received number", "invalid-module-config"));
   });
 
   it("missing provider names module and contract", async () => {
@@ -1676,7 +1676,7 @@ describe("boot", () => {
       });
       const config = { modules: [{ use: "./db" }, { use: "./blobstore" }, { use: "./restore" }], triggers: [], http: null };
       await expect(boot({ config, modules: [dbModule, blobstoreModule, dependentRestoreModule], pipelines: [], logger: silentLogger })).rejects.toThrow(
-        new KestrelBootError("db/store", "dependency cycle: db/store -> restore/dependent -> blobstore/consumer -> db/store"),
+        new KestrelBootError("db/store", "dependency cycle: db/store -> restore/dependent -> blobstore/consumer -> db/store", "dependency-cycle"),
       );
     });
   });

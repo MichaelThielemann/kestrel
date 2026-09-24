@@ -70,10 +70,11 @@ describe("isKestrelError", () => {
 });
 
 describe("KestrelBootError", () => {
-  it("names the module and the reason", () => {
-    const error = new KestrelBootError("pipelines/createPage", 'unknown step "nope"');
+  it("names the module, the reason and the code", () => {
+    const error = new KestrelBootError("pipelines/createPage", 'unknown step "nope"', "unknown-step");
     expect(error.message).toBe('[pipelines/createPage] unknown step "nope"');
     expect(error.module).toBe("pipelines/createPage");
     expect(error.reason).toBe('unknown step "nope"');
+    expect(error.code).toBe("unknown-step");
   });
 });

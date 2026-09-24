@@ -55,14 +55,14 @@ describe("boot: atomic groups", () => {
   it("a step inside a group without atomicSafe fails boot, naming pipeline and step", async () => {
     const pipelines = [definePipeline({ name: "p", steps: [{ atomic: ["store.safe", "store.unsafe"] }] })];
     await expect(boot({ config: { modules: [{ use: "store" }], triggers: [] }, modules: [store], pipelines, logger: silentLogger })).rejects.toThrow(
-      new KestrelBootError("pipelines/p", 'step "store.unsafe" is in an atomic group but does not declare atomicSafe'),
+      new KestrelBootError("pipelines/p", 'step "store.unsafe" is in an atomic group but does not declare atomicSafe', "atomic-unsafe-step"),
     );
   });
 
   it("a grouped pipeline with no scope provider fails boot, naming the pipeline", async () => {
     const pipelines = [definePipeline({ name: "p", steps: [{ atomic: ["store.safe"] }] })];
     await expect(boot({ config: { modules: [{ use: "store" }], triggers: [] }, modules: [storeNoScope], pipelines, logger: silentLogger })).rejects.toThrow(
-      new KestrelBootError("kestrel", 'pipeline "p" has an atomic group but no module provides an atomic scope'),
+      new KestrelBootError("kestrel", 'pipeline "p" has an atomic group but no module provides an atomic scope', "atomic-scope-missing"),
     );
   });
 
@@ -71,7 +71,7 @@ describe("boot: atomic groups", () => {
     const pipelines = [definePipeline({ name: "p", steps: [{ atomic: ["store.safe"] }] })];
     await expect(
       boot({ config: { modules: [{ use: "store" }, { use: "second" }], triggers: [] }, modules: [store, second], pipelines, logger: silentLogger }),
-    ).rejects.toThrow(new KestrelBootError("kestrel", 'modules "store/memory" and "second/memory" both provide an atomic scope'));
+    ).rejects.toThrow(new KestrelBootError("kestrel", 'modules "store/memory" and "second/memory" both provide an atomic scope', "atomic-scope-twice"));
   });
 
   it("no group, no scope provider, no behaviour change", async () => {
@@ -91,7 +91,7 @@ describe("boot: atomic groups", () => {
         pipelines,
         logger: silentLogger,
       }),
-    ).rejects.toThrow(new KestrelBootError("pipelines/p", 'step "store.unsafe" is in an atomic group but does not declare atomicSafe'));
+    ).rejects.toThrow(new KestrelBootError("pipelines/p", 'step "store.unsafe" is in an atomic group but does not declare atomicSafe', "atomic-unsafe-step"));
   });
 
   it("the normal case: one provider, a grouped pipeline runs through the scope", async () => {

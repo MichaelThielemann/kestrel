@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { isAbsolute, resolve } from "node:path";
+import { basename, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { boundaryCast } from "./cast.ts";
 import type { KestrelConfigInput } from "./defineConfig.ts";
@@ -26,16 +26,16 @@ async function importDefault(file: string, owner: string): Promise<unknown> {
   try {
     mod = await import(pathToFileURL(file).href);
   } catch (err) {
-    throw new KestrelBootError(owner, `cannot load ${file}: ${err instanceof Error ? err.message : String(err)}`);
+    throw new KestrelBootError(owner, `cannot load ${file}: ${err instanceof Error ? err.message : String(err)}`, "load-failed");
   }
   const def = boundaryCast<{ default?: unknown }>(mod, "host").default;
-  if (def === undefined) throw new KestrelBootError(owner, `${file} has no default export`);
+  if (def === undefined) throw new KestrelBootError(owner, `${file} has no default export`, "no-default-export");
   return def;
 }
 
 export async function loadConfig(file: string): Promise<KestrelConfigInput> {
   const def = await importDefault(file, "kestrel.config");
-  if (typeof def !== "object" || def === null) throw new KestrelBootError("kestrel.config", "default export is not an object");
+  if (typeof def !== "object" || def === null) throw new KestrelBootError("kestrel.config", "default export is not an object", "config-not-object");
   return boundaryCast<KestrelConfigInput>(def, "host");
 }
 
@@ -44,40 +44,53 @@ export function resolveModuleFile(root: string, use: string): string {
   return createRequire(pathToFileURL(resolve(root, "package.json")).href).resolve(use);
 }
 
+/** Loads the module a single `kestrel.config` module entry names. One failure names that entry's `use` and nothing else. */
+export async function loadModule(root: string, entry: { use: string }): Promise<ModuleDefinition> {
+  let file: string;
+  try {
+    file = resolveModuleFile(root, entry.use);
+  } catch (err) {
+    throw new KestrelBootError(entry.use, `cannot resolve module: ${err instanceof Error ? err.message : String(err)}`, "module-unresolved");
+  }
+  const def = await importDefault(file, entry.use);
+  if (!isModuleDefinition(def)) {
+    throw new KestrelBootError(entry.use, "default export is not a defineModule() result", "not-a-module");
+  }
+  return def;
+}
+
 export async function loadModules(root: string, config: KestrelConfigInput): Promise<ModuleDefinition[]> {
   const out: ModuleDefinition[] = [];
-  for (const entry of config.modules) {
-    let file: string;
-    try {
-      file = resolveModuleFile(root, entry.use);
-    } catch (err) {
-      throw new KestrelBootError(entry.use, `cannot resolve module: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    const def = await importDefault(file, entry.use);
-    if (!isModuleDefinition(def)) {
-      throw new KestrelBootError(entry.use, "default export is not a defineModule() result");
-    }
-    out.push(def);
-  }
+  for (const entry of config.modules) out.push(await loadModule(root, entry));
   return out;
 }
 
-export async function loadPipelines(root: string, dir: string): Promise<PipelineDefinition[]> {
+/** Resolves a pipelines directory to its `.ts` files (sorted, tests excluded); `[]` when the directory does not exist. */
+export async function pipelineFiles(root: string, dir: string): Promise<string[]> {
   const abs = resolve(root, dir);
   try {
-    if (!(await stat(abs)).isDirectory()) throw new KestrelBootError("pipelines", `${abs} is not a directory`);
+    if (!(await stat(abs)).isDirectory()) throw new KestrelBootError("pipelines", `${abs} is not a directory`, "pipelines-not-directory");
   } catch (err) {
     if (isErrno(err) && err.code === "ENOENT") return [];
     throw err;
   }
   const files = (await readdir(abs)).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts")).sort();
-  const out: PipelineDefinition[] = [];
-  for (const file of files) {
-    const def = await importDefault(resolve(abs, file), `pipelines/${file}`);
-    if (!isPipelineDefinition(def)) {
-      throw new KestrelBootError(`pipelines/${file}`, "default export is not a definePipeline() result");
-    }
-    out.push(def);
+  return files.map((f) => resolve(abs, f));
+}
+
+/** Loads one pipeline file. One failure names that file and nothing else. */
+export async function loadPipelineFile(file: string): Promise<PipelineDefinition> {
+  const owner = `pipelines/${basename(file)}`;
+  const def = await importDefault(file, owner);
+  if (!isPipelineDefinition(def)) {
+    throw new KestrelBootError(owner, "default export is not a definePipeline() result", "not-a-pipeline");
   }
+  return def;
+}
+
+export async function loadPipelines(root: string, dir: string): Promise<PipelineDefinition[]> {
+  const files = await pipelineFiles(root, dir);
+  const out: PipelineDefinition[] = [];
+  for (const file of files) out.push(await loadPipelineFile(file));
   return out;
 }

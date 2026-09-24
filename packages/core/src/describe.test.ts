@@ -208,7 +208,7 @@ describe("attach hook", () => {
         torndown = true;
       },
     });
-    await expect(booted([broken])).rejects.toMatchObject(new KestrelBootError("broken/test", "attach() threw: nope"));
+    await expect(booted([broken])).rejects.toMatchObject(new KestrelBootError("broken/test", "attach() threw: nope", "attach-failed"));
     expect(torndown).toBe(true);
   });
 });

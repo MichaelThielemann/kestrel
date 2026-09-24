@@ -15,7 +15,7 @@ const modOpt = (name: string, provides: string[], requires: string[], optional: 
 describe("sortModules", () => {
   it("reports a missing provider with module and contract", () => {
     const authn = mod("authn/multi", ["authn@1"], ["persistence@1"]);
-    expect(() => sortModules([authn])).toThrow(new KestrelBootError("authn/multi", 'requires "persistence@1" but no active module provides it'));
+    expect(() => sortModules([authn])).toThrow(new KestrelBootError("authn/multi", 'requires "persistence@1" but no active module provides it', "missing-provider"));
   });
 
   it("reports duplicate providers", () => {
@@ -30,6 +30,6 @@ describe("sortModules", () => {
 
   it("optionally depending on a contract it provides itself is an error", () => {
     const authn = modOpt("authn/multi", ["authn@1"], [], ["authn@1"]);
-    expect(() => sortModules([authn])).toThrow(new KestrelBootError("authn/multi", 'optional "authn@1" which it provides itself'));
+    expect(() => sortModules([authn])).toThrow(new KestrelBootError("authn/multi", 'optional "authn@1" which it provides itself', "provides-itself"));
   });
 });

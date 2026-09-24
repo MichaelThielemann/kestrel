@@ -1,5 +1,5 @@
-import { KestrelBootError } from "./errors.ts";
 import type { ResolvedPipeline } from "./runner.ts";
+import { throwSink, type Sink } from "./sink.ts";
 import type { Route } from "./triggers/http.ts";
 import { CONTEXT_KEYS, overlaps, satisfied, stripOptional } from "./writes.ts";
 
@@ -27,7 +27,8 @@ function apply(write: string, sets: readonly Set<string>[]): void {
   }
 }
 
-export function checkDataflow(pipeline: ResolvedPipeline, httpRoutes: readonly Route[], hasCronTrigger: boolean, hasEventTrigger: boolean): void {
+/** Checks a pipeline's reads against what runs before them, reporting every bad read of every step through the sink. */
+export function checkDataflowCollecting(sink: Sink, pipeline: ResolvedPipeline, httpRoutes: readonly Route[], hasCronTrigger: boolean, hasEventTrigger: boolean): void {
   const available = new Set<string>(CONTEXT_KEYS);
   for (const param of commonParams(httpRoutes)) available.add(`params.${param}`);
   const written = new Set<string>();
@@ -50,15 +51,20 @@ export function checkDataflow(pipeline: ResolvedPipeline, httpRoutes: readonly R
         if (satisfied(key, optionallyWritten)) continue;
         const laterWriter = pipeline.steps.slice(i + 1).find((later) => later.description.writes.some((write) => overlaps(key, stripOptional(write))));
         if (laterWriter) {
-          throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" optionally reads "${key}" but step "${laterWriter.name}" writes it later`);
+          sink.fail("optional-read-order", `pipelines/${pipeline.name}`, `step "${step.name}" optionally reads "${key}" but step "${laterWriter.name}" writes it later`, { step: step.name });
         }
         continue;
       }
-      throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" reads "${read}" but no earlier step writes it (earlier writes: ${written.size === 0 ? "none" : [...written].join(", ")})`);
+      sink.fail("unsatisfied-read", `pipelines/${pipeline.name}`, `step "${step.name}" reads "${read}" but no earlier step writes it (earlier writes: ${written.size === 0 ? "none" : [...written].join(", ")})`, { step: step.name });
     }
     for (const write of step.description.writes) {
       if (write.endsWith("?")) optionallyWritten.add(stripOptional(write));
       apply(write, [available, written]);
     }
   }
+}
+
+/** Throws on the first bad read. */
+export function checkDataflow(pipeline: ResolvedPipeline, httpRoutes: readonly Route[], hasCronTrigger: boolean, hasEventTrigger: boolean): void {
+  checkDataflowCollecting(throwSink(), pipeline, httpRoutes, hasCronTrigger, hasEventTrigger);
 }

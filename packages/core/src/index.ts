@@ -1,4 +1,4 @@
-export { boot, type Kestrel, type BootInput, type BootWarning, type UnemittedEventWarning, type UnwrittenOptionalReadWarning, type Triggers } from "./boot.ts";
+export { boot, checkBoot, type Kestrel, type BootInput, type BootWarning, type UnemittedEventWarning, type UnwrittenOptionalReadWarning, type Triggers, type CheckBootOptions, type BootCheck, type BootProblem, type NotChecked } from "./boot.ts";
 export { matchRoute, routePattern, parseRequestBody, parseQuery, buildResponse, responseForRun, errorResponse, clientIp, BodyTooLarge, type Route, type ParsedBody, type HttpResponse, type HttpTimeouts, type ClientIpOptions, type ResponseMeta } from "./triggers/http.ts";
 export { defineConfig, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
 export { defineContract, type Contract } from "./defineContract.ts";
@@ -13,10 +13,10 @@ export { definePipeline, pipelineDefiner, isAtomicGroup, pipelineSteps, type Pip
 export type { AtomicScope, AtomicScopeInfo, AtomicVerdict, AtomicOutcome } from "./atomic.ts";
 export type { StepsOf, StepCatalogue } from "./catalogue.ts";
 export { createContext, binaryResult, isBinaryResult, first, requestIdOf, stepFactory, isStepFactory, type BinaryResult, type Context, type ContextInput, type Step, type StepFactory, type StepMap, type StepResult, type Trigger, type UploadedFile } from "./context.ts";
-export { KestrelBootError, STATUS_OF, failure, customFailure, isKestrelError, type CoreCode, type FailureOptions, type KestrelError } from "./errors.ts";
+export { KestrelBootError, STATUS_OF, failure, customFailure, isKestrelError, type BootErrorCode, type CoreCode, type FailureOptions, type KestrelError } from "./errors.ts";
 export { ok, err, isOk, isErr, match, unwrapOr, type Ok, type Err, type Result } from "./result.ts";
 export { boundaryCast, type Boundary } from "./cast.ts";
-export { loadConfig, loadModules, loadPipelines } from "./load.ts";
+export { loadConfig, loadModules, loadModule, loadPipelines, loadPipelineFile, pipelineFiles } from "./load.ts";
 export { consoleLogger, silentLogger, logWarn, type Logger, type StepLog } from "./logger.ts";
 export type { RunResult, Runner, RunTracker } from "./runner.ts";
 export { checkDataflow } from "./dataflow.ts";

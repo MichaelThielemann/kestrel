@@ -4,7 +4,7 @@ import type { AtomicScope } from "./atomic.ts";
 import { boundaryCast } from "./cast.ts";
 import type { ContextInput } from "./context.ts";
 import { missingMethods, type Contract } from "./defineContract.ts";
-import { checkDataflow } from "./dataflow.ts";
+import { checkDataflow, checkDataflowCollecting } from "./dataflow.ts";
 import { configSchema, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
 import { stepPrefix, type ContractLookup, type Deps, type EventEntry, type InstanceHealth, type Introspection, type ModuleDefinition, type StepDescription } from "./defineModule.ts";
 import { buildManifest, type Manifest } from "./describe.ts";
@@ -13,14 +13,18 @@ import { resolveEntries } from "./resolveEntries.ts";
 import { KestrelBootError } from "./errors.ts";
 import { consoleLogger, logWarn, type Logger } from "./logger.ts";
 import { createObserverHub } from "./observer.ts";
-import { PLACEHOLDER_ARG, StepRegistry } from "./registry.ts";
+import { PLACEHOLDER_ARG, StepRegistry, type ResolvedStep } from "./registry.ts";
 import { findMissingRequired, resolveOutputSchema } from "./schema.ts";
+import { ok } from "./result.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
+import { collectSink, throwSink, type BootProblem, type Sink } from "./sink.ts";
 import { CONTEXT_KEYS, satisfied, stripOptional, writeRoot } from "./writes.ts";
 import { sortModules } from "./sort.ts";
 import { createCronEntry, startCron, type CronEntry } from "./triggers/cron.ts";
 import { createAllowlist } from "./triggers/allowlist.ts";
 import { createHttpServer, listen, parseRoute, routePattern, type Route } from "./triggers/http.ts";
+
+export type { BootProblem } from "./sink.ts";
 
 export interface BootInput {
   config: KestrelConfigInput;
@@ -90,11 +94,33 @@ export interface Kestrel extends Introspection {
   stop(options?: StopOptions): Promise<StopResult>;
 }
 
+/** What `checkBoot()` selects to actually run: `setup()`, `attach()` and `teardown()` reach whatever storage the module's config names, so this has no default. */
+export interface CheckBootOptions {
+  setup: "none" | "all" | { only: readonly string[] };
+}
+
+/** A module, pipeline or the `attach` phase left unchecked because a problem it depends on made it impossible to check safely. */
+export interface NotChecked {
+  kind: "module" | "pipeline" | "attach";
+  name: string;
+  because: string;
+}
+
+export interface BootCheck {
+  /** Every problem that would have made `boot()` throw; `errors[0]` is the one it does throw. */
+  errors: BootProblem[];
+  /** What `boot()` would carry as `kestrel.warnings`. */
+  warnings: BootWarning[];
+  notChecked: NotChecked[];
+}
+
 const CORE = "kestrel";
 const SVG = "image/svg+xml";
 const SANITIZE_SVG = "sanitize.svg";
 const EVENTS_EMIT = "events.emit";
 const BARREL = new Set(["module", "index", "src", "dist"]);
+
+const DUMMY_STEP: ResolvedStep = { name: "", fn: async (ctx) => ok(ctx), description: { summary: "", reads: [], writes: [] } };
 
 function useTokens(use: string): string[] {
   const parts = (use.split(/[?#]/)[0] ?? use).split("/").filter((p) => p !== "" && p !== "." && p !== "..");
@@ -150,11 +176,11 @@ function declaresOutput(description: StepDescription): boolean {
   return description.terminalOutput !== undefined && solelyOptionalResultWrite(description);
 }
 
-function checkUndeclaredOutput(pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
+function checkUndeclaredOutput(sink: Sink, pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
   for (const pipeline of pipelines.values()) {
     for (const step of pipeline.steps) {
       if (!step.description.writes.some((path) => writeRoot(path) === "result") || declaresOutput(step.description)) continue;
-      throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" writes result without declaring output, extendsOutput, extendsItems or binary: true (terminalOutput alone only covers an optional "result?" write)`);
+      sink.fail("undeclared-output", `pipelines/${pipeline.name}`, `step "${step.name}" writes result without declaring output, extendsOutput, extendsItems or binary: true (terminalOutput alone only covers an optional "result?" write)`, { step: step.name });
     }
   }
 }
@@ -168,19 +194,19 @@ function declaredOutputSchemas(description: StepDescription): Array<{ key: strin
   return schemas;
 }
 
-function checkUndeclaredRequired(pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
+function checkUndeclaredRequired(sink: Sink, pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
   for (const pipeline of pipelines.values()) {
     for (const step of pipeline.steps) {
       for (const { key, schema } of declaredOutputSchemas(step.description)) {
         for (const path of findMissingRequired(schema, `$.${key}`)) {
-          throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}"'s output schema at ${path} declares properties without declaring required`);
+          sink.fail("undeclared-required", `pipelines/${pipeline.name}`, `step "${step.name}"'s output schema at ${path} declares properties without declaring required`, { step: step.name, path });
         }
       }
     }
   }
 }
 
-function checkOutputFold(pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
+function checkOutputFold(sink: Sink, pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
   for (const pipeline of pipelines.values()) {
     resolveOutputSchema(
       pipeline.steps.map((s) => s.description),
@@ -188,22 +214,22 @@ function checkOutputFold(pipelines: ReadonlyMap<string, ResolvedPipeline>): void
         const step = pipeline.steps[index]!;
         const earlier = sourceIndex === undefined ? undefined : pipeline.steps[sourceIndex];
         const detail = earlier === undefined ? reason : `${reason} (set by step "${earlier.name}")`;
-        throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}"'s ${keyword} cannot fold onto the active output schema: ${detail}`);
+        sink.fail("output-fold-contradiction", `pipelines/${pipeline.name}`, `step "${step.name}"'s ${keyword} cannot fold onto the active output schema: ${detail}`, { step: step.name });
       },
     );
   }
 }
 
-function checkTerminalOutputPlacement(pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
+function checkTerminalOutputPlacement(sink: Sink, pipelines: ReadonlyMap<string, ResolvedPipeline>): void {
   for (const pipeline of pipelines.values()) {
     const hasBinary = pipeline.steps.some((s) => s.description.binary === true);
     for (const step of pipeline.steps) {
       if (step.description.terminalOutput === undefined) continue;
       if (!step.description.writes.some((path) => writeRoot(path) === "result")) {
-        throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" declares terminalOutput without a write to result`);
+        sink.fail("terminal-output-misplaced", `pipelines/${pipeline.name}`, `step "${step.name}" declares terminalOutput without a write to result`, { step: step.name });
       }
       if (hasBinary) {
-        throw new KestrelBootError(`pipelines/${pipeline.name}`, `step "${step.name}" declares terminalOutput in a pipeline with a binary step`);
+        sink.fail("terminal-output-misplaced", `pipelines/${pipeline.name}`, `step "${step.name}" declares terminalOutput in a pipeline with a binary step`, { step: step.name });
       }
     }
   }
@@ -272,37 +298,112 @@ async function teardownAll(ordered: readonly ModuleDefinition[], instances: Read
   }
 }
 
-export async function boot(input: BootInput): Promise<Kestrel> {
+type SetupSelector = "all" | "none" | ReadonlySet<string>;
+
+interface EngineState {
+  ordered: ModuleDefinition[];
+  instances: Map<ModuleDefinition, unknown>;
+  notChecked: NotChecked[];
+}
+
+interface EngineCore {
+  introspection: Introspection;
+  contracts: Kestrel["contracts"];
+  steps: StepRegistry;
+  pipelines: Map<string, ResolvedPipeline>;
+  routes: Route[];
+  crons: CronEntry[];
+  events: readonly EventEntry[];
+  eventHook: ModuleDefinition | undefined;
+  atomicScope: AtomicScope | undefined;
+  warnings: BootWarning[];
+  config: KestrelConfig;
+  root: string;
+  hub: ReturnType<typeof createObserverHub>;
+  stoppers: Array<() => void>;
+}
+
+function isSelected(setup: SetupSelector, use: string): boolean {
+  if (setup === "all") return true;
+  if (setup === "none") return false;
+  return setup.has(use);
+}
+
+async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, errors: readonly BootProblem[], state: EngineState): Promise<EngineCore | undefined> {
   const bootStartedAt = Date.now();
   const logger = input.logger ?? consoleLogger;
   const root = input.root ?? process.cwd();
+  const notChecked = state.notChecked;
+
+  const markNotSetUp = (notSetUp: Map<ModuleDefinition, string>, mod: ModuleDefinition, because: string): void => {
+    if (notSetUp.has(mod)) return;
+    notSetUp.set(mod, because);
+    notChecked.push({ kind: "module", name: mod.name, because });
+  };
 
   const parsed = configSchema.safeParse(input.config);
-  if (!parsed.success) throw new KestrelBootError(CORE, `invalid kestrel.config: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+  if (!parsed.success) {
+    sink.fail("invalid-config", CORE, `invalid kestrel.config: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+    for (const mod of input.modules) notChecked.push({ kind: "module", name: mod.name, because: "kestrel.config is invalid" });
+    for (const p of input.pipelines) notChecked.push({ kind: "pipeline", name: p.name, because: "kestrel.config is invalid" });
+    return undefined;
+  }
   const config = parsed.data;
   const eventTriggers: readonly EventEntry[] = config.triggers.flatMap((t) => ("event" in t ? [{ event: t.event, pipeline: t.pipeline }] : []));
-  if (input.modules.length !== config.modules.length) throw new KestrelBootError(CORE, `config lists ${config.modules.length} modules but ${input.modules.length} were loaded`);
+  if (input.modules.length !== config.modules.length) {
+    sink.fail("module-count", CORE, `config lists ${config.modules.length} modules but ${input.modules.length} were loaded`);
+    for (const mod of input.modules) notChecked.push({ kind: "module", name: mod.name, because: "config.modules does not pair with the loaded modules" });
+    for (const p of input.pipelines) notChecked.push({ kind: "pipeline", name: p.name, because: "config.modules does not pair with the loaded modules" });
+    return undefined;
+  }
 
   const configByModule = new Map<ModuleDefinition, unknown>();
+  const useByModule = new Map<ModuleDefinition, string>();
   const seen = new Set<string>();
+  let entryProblem = false;
   for (const [i, mod] of input.modules.entries()) {
     const entry = config.modules[i];
-    if (entry === undefined) throw new KestrelBootError(CORE, `config.modules[${i}] is missing for module "${mod.name}"`);
-    if (seen.has(mod.name)) throw new KestrelBootError(mod.name, `listed twice in kestrel.config (${entry.use})`);
+    if (entry === undefined) {
+      sink.fail("module-entry-mismatch", CORE, `config.modules[${i}] is missing for module "${mod.name}"`);
+      entryProblem = true;
+      continue;
+    }
+    if (seen.has(mod.name)) {
+      sink.fail("module-listed-twice", mod.name, `listed twice in kestrel.config (${entry.use})`);
+      entryProblem = true;
+    }
     seen.add(mod.name);
     if (!entryNamesModule(entry.use, mod.name)) {
       const other = input.modules.find((m) => m !== mod && entryNamesModule(entry.use, m.name));
-      if (other) throw new KestrelBootError(CORE, `config.modules[${i}] "${entry.use}" names module "${other.name}", not "${mod.name}"; config entries and loaded modules must be in the same order`);
+      if (other) {
+        sink.fail("module-entry-mismatch", CORE, `config.modules[${i}] "${entry.use}" names module "${other.name}", not "${mod.name}"; config entries and loaded modules must be in the same order`);
+        entryProblem = true;
+      }
     }
     configByModule.set(mod, entry.config ?? {});
+    useByModule.set(mod, entry.use);
   }
-  const ordered = sortModules(input.modules);
+  if (entryProblem) {
+    for (const mod of input.modules) notChecked.push({ kind: "module", name: mod.name, because: "kestrel.config's module list does not pair reliably with the loaded modules" });
+    for (const p of input.pipelines) notChecked.push({ kind: "pipeline", name: p.name, because: "kestrel.config's module list does not pair reliably with the loaded modules" });
+    return undefined;
+  }
+
+  const { ordered, excluded } = sortModules(input.modules, sink);
+  state.ordered = ordered;
+  const notSetUp = new Map<ModuleDefinition, string>();
+  for (const [mod, reason] of excluded) markNotSetUp(notSetUp, mod, reason);
+
   for (const mod of ordered) {
     if (mod.provides.length === 0) continue;
     const prefix = stepPrefix(mod.name);
     if (mod.provides.some((c) => c.name.split("@")[0] === prefix)) continue;
-    throw new KestrelBootError(mod.name, `provides ${mod.provides.map((c) => `"${c.name}"`).join(", ")} but registers steps under "${prefix}."; a module must be named after a contract it provides`);
+    sink.fail("module-name-contract", mod.name, `provides ${mod.provides.map((c) => `"${c.name}"`).join(", ")} but registers steps under "${prefix}."; a module must be named after a contract it provides`);
+    markNotSetUp(notSetUp, mod, "provides a contract but is not named after it");
   }
+
+  const prefixToModule = new Map<string, ModuleDefinition>();
+  for (const mod of input.modules) prefixToModule.set(stepPrefix(mod.name), mod);
 
   const registered = new Map<string, unknown>();
   const contracts: Kestrel["contracts"] = {
@@ -319,211 +420,331 @@ export async function boot(input: BootInput): Promise<Kestrel> {
     bootStartedAt,
   };
   const deps: Deps = { ...contracts, eventTriggers };
-  const instances = new Map<ModuleDefinition, unknown>();
+  const instances = state.instances;
   const parsedByModule = new Map<ModuleDefinition, unknown>();
-  try {
-    for (const mod of ordered) {
-      const cfg = mod.configSchema.safeParse(configByModule.get(mod));
-      if (!cfg.success) throw new KestrelBootError(mod.name, `invalid config: ${cfg.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
-      parsedByModule.set(mod, cfg.data);
-      let instance: unknown;
+
+  for (const mod of ordered) {
+    if (notSetUp.has(mod)) continue;
+    const cfg = mod.configSchema.safeParse(configByModule.get(mod));
+    if (!cfg.success) {
+      sink.fail("invalid-module-config", mod.name, `invalid config: ${cfg.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
+      markNotSetUp(notSetUp, mod, "invalid config");
+      continue;
+    }
+    parsedByModule.set(mod, cfg.data);
+
+    const unmetRequire = mod.requires.find((c) => {
+      const provider = ordered.find((candidate) => candidate.provides.some((p) => p.name === c.name));
+      return provider !== undefined && notSetUp.has(provider);
+    });
+    if (unmetRequire) {
+      markNotSetUp(notSetUp, mod, `depends on "${unmetRequire.name}" whose provider was not set up`);
+      continue;
+    }
+
+    const use = useByModule.get(mod) ?? mod.name;
+    if (!isSelected(setup, use)) {
+      markNotSetUp(notSetUp, mod, "not selected to run setup()");
+      continue;
+    }
+
+    let instance: unknown;
+    try {
+      instance = await mod.setup(cfg.data, deps);
+    } catch (err) {
+      sink.fail("setup-failed", mod.name, `setup() threw: ${err instanceof Error ? err.message : String(err)}`);
+      markNotSetUp(notSetUp, mod, "setup() threw");
+      continue;
+    }
+    const allMissing = mod.provides.flatMap((c) => {
+      const missing = missingMethods(c, instance);
+      return missing.length > 0 ? [{ contract: c, missing }] : [];
+    });
+    if (allMissing.length > 0) {
+      const first = allMissing[0]!;
+      sink.fail("missing-methods", mod.name, `setup() result lacks ${first.contract.name} method(s): ${first.missing.join(", ")}`);
+      markNotSetUp(notSetUp, mod, "setup() result lacks required contract methods");
+      continue;
+    }
+    instances.set(mod, instance);
+    for (const contract of mod.provides) registered.set(contract.name, instance);
+  }
+
+  const steps = new StepRegistry();
+  for (const mod of ordered) {
+    if (notSetUp.has(mod) || !mod.steps) continue;
+    steps.register(mod.name, stepPrefix(mod.name), mod.steps(instances.get(mod)), mod.describe?.(instances.get(mod)) ?? {}, sink);
+  }
+
+  if (config.http?.inlineTypes.includes(SVG) && !steps.has(SANITIZE_SVG)) {
+    sink.fail("svg-without-sanitizer", CORE, `http.inlineTypes contains "${SVG}" but no module registers the step "${SANITIZE_SVG}"`);
+  }
+  if (config.http !== null) {
+    try {
+      createAllowlist(config.http.allow);
+    } catch (err) {
+      sink.fail("invalid-allowlist", CORE, `http.allow: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const definitions = new Map<string, PipelineDefinition>();
+  for (const p of input.pipelines) {
+    if (definitions.has(p.name)) {
+      sink.fail("pipeline-defined-twice", `pipelines/${p.name}`, "defined twice");
+      continue;
+    }
+    definitions.set(p.name, p);
+  }
+
+  const pipelines = new Map<string, ResolvedPipeline>();
+  const notCheckedPipelines = new Set<string>();
+  for (const def of definitions.values()) {
+    if (pipelineSteps(def.steps).length === 0) {
+      sink.fail("pipeline-empty", `pipelines/${def.name}`, "has no steps");
+      notCheckedPipelines.add(def.name);
+      notChecked.push({ kind: "pipeline", name: def.name, because: "has no steps" });
+      continue;
+    }
+    let cascadeModule: ModuleDefinition | undefined;
+    let failed = false;
+    const resolved = resolveEntries(def.steps, (s) => {
+      if (failed) return DUMMY_STEP;
       try {
-        instance = await mod.setup(cfg.data, deps);
+        return steps.resolve(s, `pipelines/${def.name}`);
       } catch (err) {
-        throw new KestrelBootError(mod.name, `setup() threw: ${err instanceof Error ? err.message : String(err)}`);
+        if (!(err instanceof KestrelBootError)) throw err;
+        if (!sink.collecting) throw err;
+        const prefix = s.split(":")[0]?.split(".")[0];
+        const owner = prefix === undefined ? undefined : prefixToModule.get(prefix);
+        if (err.code === "unknown-step" && owner !== undefined && notSetUp.has(owner)) {
+          cascadeModule = owner;
+        } else {
+          sink.fail(err.code, err.module, err.reason, { step: s });
+        }
+        failed = true;
+        return DUMMY_STEP;
       }
-      instances.set(mod, instance);
-      for (const contract of mod.provides) {
-        const missing = missingMethods(contract, instance);
-        if (missing.length > 0) throw new KestrelBootError(mod.name, `setup() result lacks ${contract.name} method(s): ${missing.join(", ")}`);
-        registered.set(contract.name, instance);
-      }
+    });
+    if (failed) {
+      const because = cascadeModule ? `depends on module "${cascadeModule.name}" which is not set up` : "a step failed to resolve";
+      notCheckedPipelines.add(def.name);
+      notChecked.push({ kind: "pipeline", name: def.name, because });
+      continue;
     }
+    pipelines.set(def.name, { name: def.name, steps: resolved });
+  }
 
-    const steps = new StepRegistry();
+  for (const [name, pipeline] of pipelines) {
+    for (const step of pipeline.steps) {
+      if (step.atomic === undefined || step.description.atomicSafe === true) continue;
+      sink.fail("atomic-unsafe-step", `pipelines/${name}`, `step "${step.name}" is in an atomic group but does not declare atomicSafe`, { step: step.name });
+    }
+  }
+
+  const routes: Route[] = [];
+  const events = eventTriggers;
+  const crons: CronEntry[] = [];
+  const byPattern = new Map<string, string>();
+  for (const t of config.triggers) {
+    if (!pipelines.has(t.pipeline) && !notCheckedPipelines.has(t.pipeline)) {
+      sink.fail("unknown-trigger-pipeline", CORE, `trigger references unknown pipeline "${t.pipeline}"`);
+      continue;
+    }
+    let route: Route | undefined;
+    try {
+      if ("http" in t) route = parseRoute(t.http, t.pipeline);
+      else if (!("event" in t)) crons.push(createCronEntry(t.cron, t.pipeline));
+    } catch (err) {
+      sink.fail("invalid-trigger", CORE, `invalid trigger for "${t.pipeline}": ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
+    if (route === undefined) continue;
+    const pattern = routePattern(route);
+    const other = byPattern.get(pattern);
+    if (other !== undefined) {
+      sink.fail("duplicate-route", CORE, `http triggers for pipelines "${other}" and "${t.pipeline}" both resolve to "${pattern}"`);
+      continue;
+    }
+    byPattern.set(pattern, t.pipeline);
+    routes.push(route);
+  }
+
+  for (const [name, pipeline] of pipelines) {
+    const pipelineRoutes = routes.filter((r) => r.pipeline === name);
+    const hasCron = crons.some((c) => c.pipeline === name);
+    const hasEvent = events.some((e) => e.pipeline === name);
+    if (sink.collecting) checkDataflowCollecting(sink, pipeline, pipelineRoutes, hasCron, hasEvent);
+    else checkDataflow(pipeline, pipelineRoutes, hasCron, hasEvent);
+  }
+
+  const eventHooks = ordered.filter((mod) => !notSetUp.has(mod) && mod.triggers?.event !== undefined);
+  if (eventHooks.length > 1) sink.fail("event-hooks-twice", CORE, `modules "${eventHooks[0]?.name ?? ""}" and "${eventHooks[1]?.name ?? ""}" both provide an event trigger hook`);
+  if (events.length > 0 && eventHooks.length === 0) sink.fail("event-hook-missing", CORE, "event triggers need a module that provides an event trigger hook");
+  const eventHook = eventHooks[0];
+
+  const scopeHooks = ordered.filter((mod) => !notSetUp.has(mod) && mod.atomicScope !== undefined);
+  if (scopeHooks.length > 1) sink.fail("atomic-scope-twice", CORE, `modules "${scopeHooks[0]?.name ?? ""}" and "${scopeHooks[1]?.name ?? ""}" both provide an atomic scope`);
+  const grouped = [...pipelines.values()].filter((p) => p.steps.some((s) => s.atomic !== undefined));
+  if (grouped.length > 0 && scopeHooks.length === 0) {
+    sink.fail("atomic-scope-missing", CORE, `pipeline "${grouped[0]?.name ?? ""}" has an atomic group but no module provides an atomic scope`);
+  }
+  const scopeHook = scopeHooks[0];
+  const atomicScope: AtomicScope | undefined = scopeHook ? (info, body) => scopeHook.atomicScope!(instances.get(scopeHook), info, body) : undefined;
+
+  checkUndeclaredOutput(sink, pipelines);
+  checkUndeclaredRequired(sink, pipelines);
+  checkOutputFold(sink, pipelines);
+  checkTerminalOutputPlacement(sink, pipelines);
+  const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUnwrittenOptionalReads(pipelines, steps, logger)];
+
+  const hub = createObserverHub(logger);
+  let manifest: Manifest | undefined;
+  const describe = (): Manifest => {
+    manifest ??= buildManifest({ root, modules: input.modules, uses: config.modules.map((m) => m.use), rawConfigs: configByModule, parsedConfigs: parsedByModule, contracts: contracts.names(), steps, pipelines, triggers: { http: routes, events, crons }, warnings });
+    return manifest;
+  };
+  const health = (): InstanceHealth => {
+    const modules = ordered.flatMap((mod) => (mod.health && !notSetUp.has(mod) ? [{ module: mod.name, ...mod.health(instances.get(mod)) }] : []));
+    return { ok: modules.every((m) => m.ok), restartRequired: modules.some((m) => m.ok === false && m.restartRequired), modules };
+  };
+  const introspection: Introspection = { describe, observe: hub.observe, health };
+
+  const shouldAttach = !sink.collecting || (errors.length === 0 && notSetUp.size === 0);
+  const stoppers: Array<() => void> = [];
+  if (shouldAttach) {
     for (const mod of ordered) {
-      if (!mod.steps) continue;
-      steps.register(mod.name, stepPrefix(mod.name), mod.steps(instances.get(mod)), mod.describe?.(instances.get(mod)) ?? {});
-    }
-
-    if (config.http?.inlineTypes.includes(SVG) && !steps.has(SANITIZE_SVG)) {
-      throw new KestrelBootError(CORE, `http.inlineTypes contains "${SVG}" but no module registers the step "${SANITIZE_SVG}"`);
-    }
-    if (config.http !== null) {
-      try {
-        createAllowlist(config.http.allow);
-      } catch (err) {
-        throw new KestrelBootError(CORE, `http.allow: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    const definitions = new Map<string, PipelineDefinition>();
-    for (const p of input.pipelines) {
-      if (definitions.has(p.name)) throw new KestrelBootError(`pipelines/${p.name}`, "defined twice");
-      definitions.set(p.name, p);
-    }
-    const pipelines = new Map<string, ResolvedPipeline>();
-    for (const def of definitions.values()) {
-      if (pipelineSteps(def.steps).length === 0) throw new KestrelBootError(`pipelines/${def.name}`, "has no steps");
-      const resolved = resolveEntries(def.steps, (s) => steps.resolve(s, `pipelines/${def.name}`));
-      pipelines.set(def.name, { name: def.name, steps: resolved });
-    }
-
-    for (const [name, pipeline] of pipelines) {
-      for (const step of pipeline.steps) {
-        if (step.atomic === undefined || step.description.atomicSafe === true) continue;
-        throw new KestrelBootError(`pipelines/${name}`, `step "${step.name}" is in an atomic group but does not declare atomicSafe`);
-      }
-    }
-
-    const routes: Route[] = [];
-    const events = eventTriggers;
-    const crons: CronEntry[] = [];
-    const byPattern = new Map<string, string>();
-    for (const t of config.triggers) {
-      if (!pipelines.has(t.pipeline)) throw new KestrelBootError(CORE, `trigger references unknown pipeline "${t.pipeline}"`);
-      let route: Route | undefined;
-      try {
-        if ("http" in t) route = parseRoute(t.http, t.pipeline);
-        else if (!("event" in t)) crons.push(createCronEntry(t.cron, t.pipeline));
-      } catch (err) {
-        throw new KestrelBootError(CORE, `invalid trigger for "${t.pipeline}": ${err instanceof Error ? err.message : String(err)}`);
-      }
-      if (route === undefined) continue;
-      const pattern = routePattern(route);
-      const other = byPattern.get(pattern);
-      if (other !== undefined) throw new KestrelBootError(CORE, `http triggers for pipelines "${other}" and "${t.pipeline}" both resolve to "${pattern}"`);
-      byPattern.set(pattern, t.pipeline);
-      routes.push(route);
-    }
-
-    for (const [name, pipeline] of pipelines) {
-      checkDataflow(
-        pipeline,
-        routes.filter((r) => r.pipeline === name),
-        crons.some((c) => c.pipeline === name),
-        events.some((e) => e.pipeline === name),
-      );
-    }
-
-    const eventHooks = ordered.filter((mod) => mod.triggers?.event !== undefined);
-    if (eventHooks.length > 1) throw new KestrelBootError(CORE, `modules "${eventHooks[0]?.name ?? ""}" and "${eventHooks[1]?.name ?? ""}" both provide an event trigger hook`);
-    if (events.length > 0 && eventHooks.length === 0) throw new KestrelBootError(CORE, "event triggers need a module that provides an event trigger hook");
-    const eventHook = eventHooks[0];
-
-    const scopeHooks = ordered.filter((mod) => mod.atomicScope !== undefined);
-    if (scopeHooks.length > 1) throw new KestrelBootError(CORE, `modules "${scopeHooks[0]?.name ?? ""}" and "${scopeHooks[1]?.name ?? ""}" both provide an atomic scope`);
-    const grouped = [...pipelines.values()].filter((p) => p.steps.some((s) => s.atomic !== undefined));
-    if (grouped.length > 0 && scopeHooks.length === 0) {
-      throw new KestrelBootError(CORE, `pipeline "${grouped[0]?.name ?? ""}" has an atomic group but no module provides an atomic scope`);
-    }
-    const scopeHook = scopeHooks[0];
-    const atomicScope: AtomicScope | undefined = scopeHook
-      ? (info, body) => scopeHook.atomicScope!(instances.get(scopeHook), info, body)
-      : undefined;
-
-    checkUndeclaredOutput(pipelines);
-    checkUndeclaredRequired(pipelines);
-    checkOutputFold(pipelines);
-    checkTerminalOutputPlacement(pipelines);
-    const warnings = [...warnUnemittedEvents(ordered, pipelines, events, logger), ...warnUnwrittenOptionalReads(pipelines, steps, logger)];
-
-    const runs = createRunTracker();
-    const hub = createObserverHub(logger);
-    const validateOutput = input.validateOutput ?? false;
-    const run = (name: string, ctxInput: ContextInput): Promise<RunResult> => {
-      const pipeline = pipelines.get(name);
-      if (!pipeline) throw new Error(`unknown pipeline "${name}"`);
-      return runs.track(() => runPipeline(pipeline, ctxInput, logger, hub.observer, { validateOutput, ...(atomicScope === undefined ? {} : { atomicScope }) }));
-    };
-    const triggers: Triggers = { http: routes, events, crons };
-    let manifest: Manifest | undefined;
-    const describe = (): Manifest => {
-      manifest ??= buildManifest({ root, modules: input.modules, uses: config.modules.map((m) => m.use), rawConfigs: configByModule, parsedConfigs: parsedByModule, contracts: contracts.names(), steps, pipelines, triggers, warnings });
-      return manifest;
-    };
-    const health = (): InstanceHealth => {
-      const modules = ordered.flatMap((mod) => (mod.health ? [{ module: mod.name, ...mod.health(instances.get(mod)) }] : []));
-      return { ok: modules.every((m) => m.ok), restartRequired: modules.some((m) => m.ok === false && m.restartRequired), modules };
-    };
-
-    let server: Server | undefined;
-    const stoppers: Array<() => void> = [];
-    let torndown = false;
-
-    const kestrel: Kestrel = {
-      config,
-      contracts,
-      steps,
-      pipelines,
-      triggers,
-      warnings,
-      describe,
-      observe: hub.observe,
-      health,
-      run,
-      async start() {
-        const started: { http?: AddressInfo } = {};
-        if (events.length > 0 && eventHook?.triggers?.event) stoppers.push(eventHook.triggers.event(instances.get(eventHook), events, run, logger));
-        if (crons.length > 0) stoppers.push(startCron(crons, run, logger));
-        const http = config.http;
-        if (http !== null) {
-          server = createHttpServer(routes, run, logger, {
-            maxBodyBytes: http.maxBodyBytes,
-            trustProxy: http.trustProxy,
-            proxyHops: http.proxyHops,
-            ...(http.trustedHeader === undefined ? {} : { trustedHeader: http.trustedHeader }),
-            allow: http.allow,
-            healthPath: http.healthPath,
-            inlineTypes: http.inlineTypes,
-            timeouts: http.timeouts,
-            ...(http.corsOrigin === undefined ? {} : { corsOrigin: http.corsOrigin }),
-          });
-          started.http = await listen(server, http.port, http.host);
-          logger.info(`http listening on ${started.http.address}:${started.http.port}`, { routes: routes.length });
-        }
-        return started;
-      },
-      async stop(options: StopOptions = {}) {
-        const deadline = Date.now() + (options.timeoutMs ?? config.shutdownTimeoutMs);
-        let httpError: Error | undefined;
-        const s = server;
-        server = undefined;
-        let closing: Promise<void> | undefined;
-        if (s) {
-          closing = new Promise<void>((resolve, reject) => s.close((err) => (err ? reject(err) : resolve()))).catch((err: unknown) => {
-            httpError = err instanceof Error ? err : new Error(String(err));
-          });
-        }
-        let drained = await runs.drain(deadline - Date.now());
-        if (s && closing) {
-          drained = (await drainConnections(s, closing, deadline)) && drained;
-          s.closeAllConnections();
-          await closing;
-        }
-        for (const stop of stoppers.splice(0)) stop();
-        if (!torndown) {
-          torndown = true;
-          await teardownAll(ordered, instances, logger);
-        }
-        if (httpError) throw httpError;
-        return { drained };
-      },
-    };
-
-    for (const mod of ordered) {
-      if (!mod.attach) continue;
+      if (!mod.attach || notSetUp.has(mod)) continue;
       let detach: ReturnType<NonNullable<ModuleDefinition["attach"]>>;
       try {
-        detach = mod.attach(instances.get(mod), { describe, observe: hub.observe, health });
+        detach = mod.attach(instances.get(mod), introspection);
       } catch (err) {
-        throw new KestrelBootError(mod.name, `attach() threw: ${err instanceof Error ? err.message : String(err)}`);
+        sink.fail("attach-failed", mod.name, `attach() threw: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
       }
       if (typeof detach === "function") stoppers.push(detach);
     }
-    return kestrel;
+  } else {
+    for (const mod of ordered) {
+      if (mod.attach) notChecked.push({ kind: "attach", name: mod.name, because: "a boot problem exists, or a module was not set up" });
+    }
+  }
+
+  return { introspection, contracts, steps, pipelines, routes, crons, events, eventHook, atomicScope, warnings, config, root, hub, stoppers };
+}
+
+export async function boot(input: BootInput): Promise<Kestrel> {
+  const logger = input.logger ?? consoleLogger;
+  const state: EngineState = { ordered: [], instances: new Map(), notChecked: [] };
+  let core: EngineCore | undefined;
+  try {
+    core = await runEngine(input, throwSink(), "all", [], state);
   } catch (err) {
-    await teardownAll(ordered, instances, logger);
+    await teardownAll(state.ordered, state.instances, logger);
     throw err;
   }
+  if (core === undefined) throw new Error("unreachable: boot() always either throws or fully resolves");
+
+  const { introspection, contracts, steps, pipelines, routes, crons, events, eventHook, atomicScope, warnings, config, hub, stoppers } = core;
+  const instances = state.instances;
+  const ordered = state.ordered;
+  const runs = createRunTracker();
+  const validateOutput = input.validateOutput ?? false;
+  const run = (name: string, ctxInput: ContextInput): Promise<RunResult> => {
+    const pipeline = pipelines.get(name);
+    if (!pipeline) throw new Error(`unknown pipeline "${name}"`);
+    return runs.track(() => runPipeline(pipeline, ctxInput, logger, hub.observer, { validateOutput, ...(atomicScope === undefined ? {} : { atomicScope }) }));
+  };
+  const triggers: Triggers = { http: routes, events, crons };
+
+  let server: Server | undefined;
+  let torndown = false;
+
+  const kestrel: Kestrel = {
+    config,
+    contracts,
+    steps,
+    pipelines,
+    triggers,
+    warnings,
+    describe: introspection.describe,
+    observe: introspection.observe,
+    health: introspection.health,
+    run,
+    async start() {
+      const started: { http?: AddressInfo } = {};
+      if (events.length > 0 && eventHook?.triggers?.event) stoppers.push(eventHook.triggers.event(instances.get(eventHook), events, run, logger));
+      if (crons.length > 0) stoppers.push(startCron(crons, run, logger));
+      const http = config.http;
+      if (http !== null) {
+        server = createHttpServer(routes, run, logger, {
+          maxBodyBytes: http.maxBodyBytes,
+          trustProxy: http.trustProxy,
+          proxyHops: http.proxyHops,
+          ...(http.trustedHeader === undefined ? {} : { trustedHeader: http.trustedHeader }),
+          allow: http.allow,
+          healthPath: http.healthPath,
+          inlineTypes: http.inlineTypes,
+          timeouts: http.timeouts,
+          ...(http.corsOrigin === undefined ? {} : { corsOrigin: http.corsOrigin }),
+        });
+        started.http = await listen(server, http.port, http.host);
+        logger.info(`http listening on ${started.http.address}:${started.http.port}`, { routes: routes.length });
+      }
+      return started;
+    },
+    async stop(options: StopOptions = {}) {
+      const deadline = Date.now() + (options.timeoutMs ?? config.shutdownTimeoutMs);
+      let httpError: Error | undefined;
+      const s = server;
+      server = undefined;
+      let closing: Promise<void> | undefined;
+      if (s) {
+        closing = new Promise<void>((resolve, reject) => s.close((err) => (err ? reject(err) : resolve()))).catch((err: unknown) => {
+          httpError = err instanceof Error ? err : new Error(String(err));
+        });
+      }
+      let drained = await runs.drain(deadline - Date.now());
+      if (s && closing) {
+        drained = (await drainConnections(s, closing, deadline)) && drained;
+        s.closeAllConnections();
+        await closing;
+      }
+      for (const stop of stoppers.splice(0)) stop();
+      if (!torndown) {
+        torndown = true;
+        await teardownAll(ordered, instances, logger);
+      }
+      if (httpError) throw httpError;
+      return { drained };
+    },
+  };
+  return kestrel;
+}
+
+/**
+ * Runs every check `boot()` runs and returns every problem instead of throwing at the first;
+ * shares its engine with `boot()`, so the two check the same things the same way. Never starts a
+ * trigger.
+ *
+ * `setup` has no default because it decides which modules' `setup()`, `attach()` and `teardown()`
+ * actually run, with whatever side effects their config names. `"none"` runs no module code
+ * beyond `configSchema`; anything that needs an instance is reported in `notChecked`. `{ only }`
+ * names the config `use` entries whose `setup()` may run; every other module counts as not set up.
+ */
+export async function checkBoot(input: BootInput, options: CheckBootOptions): Promise<BootCheck> {
+  const logger = input.logger ?? consoleLogger;
+  const selector: SetupSelector = options.setup === "all" || options.setup === "none" ? options.setup : new Set(options.setup.only);
+  const errors: BootProblem[] = [];
+  const sink = collectSink(errors);
+  const state: EngineState = { ordered: [], instances: new Map(), notChecked: [] };
+  let core: EngineCore | undefined;
+  try {
+    core = await runEngine(input, sink, selector, errors, state);
+  } catch (err) {
+    await teardownAll(state.ordered, state.instances, logger);
+    throw err;
+  }
+  for (const stop of core?.stoppers ?? []) stop();
+  await teardownAll(state.ordered, state.instances, logger);
+  return { errors, warnings: core?.warnings ?? [], notChecked: state.notChecked };
 }

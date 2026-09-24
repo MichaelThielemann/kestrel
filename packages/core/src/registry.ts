@@ -1,6 +1,7 @@
 import { isStepFactory, type Step, type StepFactory, type StepMap } from "./context.ts";
 import type { StepDescription, StepDescriptions } from "./defineModule.ts";
 import { KestrelBootError } from "./errors.ts";
+import { throwSink, type Sink } from "./sink.ts";
 
 export interface ResolvedStep {
   name: string;
@@ -38,14 +39,19 @@ function validPath(path: string): boolean {
   return CONTEXT_PATH.test(path.split(PLACEHOLDER_ARG).join("arg"));
 }
 
-function checkPaths(owner: string, name: string, description: StepDescription): StepDescription {
+function checkPaths(sink: Sink, owner: string, name: string, description: StepDescription): boolean {
+  let ok = true;
   for (const path of description.reads) {
-    if (!validPath(path)) throw new KestrelBootError(owner, `step "${name}" declares an invalid read path "${path}"`);
+    if (validPath(path)) continue;
+    sink.fail("invalid-read-path", owner, `step "${name}" declares an invalid read path "${path}"`, { step: name, path });
+    ok = false;
   }
   for (const path of description.writes) {
-    if (!validPath(path)) throw new KestrelBootError(owner, `step "${name}" declares an invalid write path "${path}"`);
+    if (validPath(path)) continue;
+    sink.fail("invalid-write-path", owner, `step "${name}" declares an invalid write path "${path}"`, { step: name, path });
+    ok = false;
   }
-  return description;
+  return ok;
 }
 
 type Entry =
@@ -55,32 +61,50 @@ type Entry =
 export class StepRegistry {
   private readonly entries = new Map<string, Entry>();
 
-  register(owner: string, prefix: string, steps: StepMap, descriptions: StepDescriptions = {}): void {
+  /**
+   * Registers every step of one module. Given a collecting sink, a problem with one step (not a
+   * function, a duplicate name, a missing or malformed `describe()` entry, an invalid path) skips
+   * only that step and keeps registering the others; the default sink throws on the first one.
+   */
+  register(owner: string, prefix: string, steps: StepMap, descriptions: StepDescriptions = {}, sink: Sink = throwSink()): void {
     for (const key of stepKeys(steps)) {
       const fn = steps[key];
       const name = `${prefix}.${key}`;
-      if (typeof fn !== "function") throw new KestrelBootError(owner, `step "${name}" is not a function`);
+      if (typeof fn !== "function") {
+        sink.fail("step-not-function", owner, `step "${name}" is not a function`, { step: name });
+        continue;
+      }
       const existing = this.entries.get(name);
-      if (existing) throw new KestrelBootError(owner, `step "${name}" is already registered by ${existing.owner}`);
+      if (existing) {
+        sink.fail("step-registered-twice", owner, `step "${name}" is already registered by ${existing.owner}`, { step: name });
+        continue;
+      }
       const describe = descriptions[key];
-      if (describe === undefined) throw new KestrelBootError(owner, `step "${name}" has no describe() entry`);
+      if (describe === undefined) {
+        sink.fail("step-undescribed", owner, `step "${name}" has no describe() entry`, { step: name });
+        continue;
+      }
       if (typeof describe === "function") {
-        if (!isStepFactory(fn)) throw new KestrelBootError(owner, `step "${name}" takes no argument but its describe() entry is a function`);
+        if (!isStepFactory(fn)) {
+          sink.fail("describe-shape", owner, `step "${name}" takes no argument but its describe() entry is a function`, { step: name });
+          continue;
+        }
         let placeholder: StepDescription;
         try {
           placeholder = describe(PLACEHOLDER_ARG);
         } catch (err) {
-          throw new KestrelBootError(owner, `step "${name}" describe() threw for the placeholder argument "${PLACEHOLDER_ARG}": ${err instanceof Error ? err.message : String(err)}`);
+          sink.fail("describe-threw", owner, `step "${name}" describe() threw for the placeholder argument "${PLACEHOLDER_ARG}": ${err instanceof Error ? err.message : String(err)}`, { step: name });
+          continue;
         }
-        checkPaths(owner, name, placeholder);
+        if (!checkPaths(sink, owner, name, placeholder)) continue;
         this.entries.set(name, { owner, factory: true, fn, describe });
       } else {
-        checkPaths(owner, name, describe);
+        if (!checkPaths(sink, owner, name, describe)) continue;
         this.entries.set(name, isStepFactory(fn) ? { owner, factory: true, fn, describe } : { owner, factory: false, fn, describe });
       }
     }
     for (const key of Object.keys(descriptions)) {
-      if (!(key in steps)) throw new KestrelBootError(owner, `describe() names step "${prefix}.${key}" which does not exist`);
+      if (!(key in steps)) sink.fail("describe-unknown-step", owner, `describe() names step "${prefix}.${key}" which does not exist`, { step: `${prefix}.${key}` });
     }
   }
 
@@ -105,16 +129,21 @@ export class StepRegistry {
     const name = colon === -1 ? spec : spec.slice(0, colon);
     const arg = colon === -1 ? undefined : spec.slice(colon + 1);
     const entry = this.entries.get(name);
-    if (!entry) throw new KestrelBootError(owner, `unknown step "${name}"`);
+    if (!entry) throw new KestrelBootError(owner, `unknown step "${name}"`, "unknown-step");
     if (arg === undefined) {
-      if (entry.factory) throw new KestrelBootError(owner, `step "${name}" requires an argument`);
+      if (entry.factory) throw new KestrelBootError(owner, `step "${name}" requires an argument`, "step-argument");
       return { name: spec, fn: entry.fn, description: entry.describe };
     }
-    if (arg === "") throw new KestrelBootError(owner, `step "${name}" has an empty argument`);
-    if (!entry.factory) throw new KestrelBootError(owner, `step "${name}" does not accept an argument`);
+    if (arg === "") throw new KestrelBootError(owner, `step "${name}" has an empty argument`, "step-argument");
+    if (!entry.factory) throw new KestrelBootError(owner, `step "${name}" does not accept an argument`, "step-argument");
     const built = entry.fn(arg);
-    if (typeof built !== "function") throw new KestrelBootError(owner, `step "${name}" returned ${typeof built} instead of a step`);
-    const description = typeof entry.describe === "function" ? checkPaths(entry.owner, spec, entry.describe(arg)) : entry.describe;
+    if (typeof built !== "function") throw new KestrelBootError(owner, `step "${name}" returned ${typeof built} instead of a step`, "step-not-function");
+    const description = typeof entry.describe === "function" ? checkPathsOrThrow(entry.owner, spec, entry.describe(arg)) : entry.describe;
     return { name: spec, fn: built, description };
   }
+}
+
+function checkPathsOrThrow(owner: string, name: string, description: StepDescription): StepDescription {
+  checkPaths(throwSink(), owner, name, description);
+  return description;
 }
