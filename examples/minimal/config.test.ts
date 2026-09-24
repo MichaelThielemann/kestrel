@@ -1005,3 +1005,48 @@ describe("terminal output shapes at the HTTP boundary", () => {
     }
   });
 });
+
+describe("GET /site/*path never leaks a draft to an anonymous visitor", () => {
+  it("never fills a field from a default locale that is itself a draft, and drops a draft locale from _translations", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const deFields = { slug: "versteckt", title: "Versteckt", status: "draft", seo: { title: "DE SEO" } };
+      const created = await kestrel.run("createPage", { trigger, headers: bearer(admin.token), payload: deFields, body: deFields });
+      expect(created.status).toBe(200);
+      const { id } = boundaryCast<{ id: string }>(created.result, "json");
+
+      const enFields = { slug: "hidden", title: "Hidden", status: "published" };
+      const updated = await kestrel.run("updatePage", { trigger, headers: bearer(admin.token), params: { id, locale: "en" }, payload: enFields, body: enFields });
+      expect(updated.status).toBe(200);
+
+      const hit = await kestrel.run("resolvePage", { trigger, params: { path: "en/hidden" } });
+      expect(hit.status).toBe(200);
+      const doc = boundaryCast<{ seo?: unknown; _translations?: Record<string, boolean> }>(hit.result, "json");
+      expect(doc.seo ?? null).toBeNull();
+      expect(doc._translations).toEqual({ de: false, en: true });
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("never serves an unpublished requested locale through another locale's content", async () => {
+    const { kestrel, dispose } = await bootIsolated();
+    try {
+      const admin = await login(kestrel, "admin", "kestrel-demo");
+      const deFields = { slug: "sichtbar", title: "Sichtbar", status: "published", seo: { title: "DE SEO" } };
+      const created = await kestrel.run("createPage", { trigger, headers: bearer(admin.token), payload: deFields, body: deFields });
+      expect(created.status).toBe(200);
+      const { id } = boundaryCast<{ id: string }>(created.result, "json");
+
+      const enFields = { slug: "visible", title: "Visible", status: "draft" };
+      const updated = await kestrel.run("updatePage", { trigger, headers: bearer(admin.token), params: { id, locale: "en" }, payload: enFields, body: enFields });
+      expect(updated.status).toBe(200);
+
+      const hit = await kestrel.run("resolvePage", { trigger, params: { path: "en/visible" } });
+      expect(hit.status).toBe(404);
+    } finally {
+      await dispose();
+    }
+  });
+});
