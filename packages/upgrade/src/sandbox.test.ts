@@ -50,6 +50,22 @@ describe("sandboxBootInput", () => {
     expect(result.setup.only).toContain("./modules/notes.ts");
   });
 
+  it("does not treat a local module whose bare file name matches a known-safe suffix as safe", () => {
+    const withLocalInsights: BootInput = { ...input(), config: { ...input().config, modules: [...input().config.modules, { use: "./modules/insights.ts", config: { apiKey: "secret" } }] } };
+    const result = sandboxBootInput(withLocalInsights, { dir: "/tmp/scratch-1" });
+    expect(result.outside).toContain("./modules/insights.ts");
+    expect(result.setup.only).not.toContain("./modules/insights.ts");
+  });
+
+  it("does not rewrite or run a third-party package whose bare name matches an official kestrel module", () => {
+    const withForkedSqlite: BootInput = { ...input(), config: { ...input().config, modules: [...input().config.modules, { use: "@acme/kestrel-persistence-sqlite", config: { file: "/etc/passwd" } }] } };
+    const result = sandboxBootInput(withForkedSqlite, { dir: "/tmp/scratch-1" });
+    const forked = result.input.config.modules.find((m) => m.use === "@acme/kestrel-persistence-sqlite");
+    expect(forked?.config).toEqual({ file: "/etc/passwd" });
+    expect(result.outside).toContain("@acme/kestrel-persistence-sqlite");
+    expect(result.setup.only).not.toContain("@acme/kestrel-persistence-sqlite");
+  });
+
   it("never mutates the original input", () => {
     const original = input();
     const before = JSON.stringify(original);

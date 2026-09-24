@@ -1,7 +1,13 @@
 import { join } from "node:path";
 import type { BootInput } from "@michaelthielemann/kestrel";
 import { isRecord } from "./guards.ts";
-import { useToken } from "./useToken.ts";
+
+const OFFICIAL_PREFIX = "@michaelthielemann/kestrel-";
+
+function officialModuleName(use: string): string | undefined {
+  const bare = use.split(/[?#]/)[0] ?? use;
+  return bare.startsWith(OFFICIAL_PREFIX) ? bare.slice(OFFICIAL_PREFIX.length) : undefined;
+}
 
 export type SandboxTable = Record<string, (config: unknown, scratch: string) => unknown>;
 
@@ -44,13 +50,13 @@ export function sandboxBootInput(input: BootInput, options: SandboxOptions): San
   const only: string[] = [];
   const outside: string[] = [];
   const modules = input.config.modules.map((entry) => {
-    const token = useToken(entry.use);
-    const rewrite = table[token];
+    const official = officialModuleName(entry.use);
+    const rewrite = official === undefined ? undefined : table[official];
     if (rewrite) {
       only.push(entry.use);
       return { ...entry, config: rewrite(entry.config, options.dir) };
     }
-    if (KNOWN_SAFE_SUFFIXES.includes(token) || consent.has(entry.use)) {
+    if ((official !== undefined && KNOWN_SAFE_SUFFIXES.includes(official)) || consent.has(entry.use)) {
       only.push(entry.use);
       return entry;
     }
