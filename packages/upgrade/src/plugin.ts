@@ -23,6 +23,12 @@ export interface RuleContext {
   readFile(file: string): string | undefined;
   /** Answers already known for this run (from `--answers`, a TTY prompt, or a `--yes` default), so a rule whose question only makes sense after another one's answer can look it up. */
   answers: ReadonlyMap<string, string>;
+  /**
+   * Applies the given edits to a scratch copy of the affected files, reloads the project and runs
+   * `checkBoot()` on it, then restores the copy — a rule uses this to verify an edit it is about to
+   * offer before offering it. `undefined` when the boot tier is not available in this run.
+   */
+  previewBoot?(edits: readonly Edit[]): Promise<BootCheck | undefined>;
 }
 
 /** One 5.8 -> 6.0 rule: turns a loaded project (plus the boot check it produced) into findings. */
@@ -57,6 +63,12 @@ export interface RunUpgradeCliOptions {
   isInteractive?: boolean;
   /** Overrides the real `node:readline` prompt, for a host with its own UI or a test. */
   prompt?: PromptFn;
+  /**
+   * Overrides the installed `@michaelthielemann/kestrel` major the load/boot tier gate reads, for a
+   * test running against a project whose own packages are not yet labelled 6.0.0. The report's
+   * `project.installed` field still shows what is actually on disk.
+   */
+  forceInstalledMajor?: number;
 }
 
 /** Runs the `check` / `fix` / `data` CLI against `argv`, returning the process exit code. A host bin (the layer's own) passes its plugin here instead of shipping a second copy of the engine. */

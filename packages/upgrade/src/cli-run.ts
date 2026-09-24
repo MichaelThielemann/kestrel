@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { checkBoot } from "@michaelthielemann/kestrel";
+import { checkBoot, type BootCheck } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
 import { askFindings, parseAnswersFile, resolveAnswer, ttyPrompt, unknownAnswerIds, type PromptFn } from "./answers.ts";
 import { boolFlag, parseArgs, stringFlag, type ParsedArgs } from "./args.ts";
@@ -58,12 +58,23 @@ interface BuildOptions {
   runSetupUses: readonly string[];
   answers: ReadonlyMap<string, string>;
   dataReport?: Record<string, unknown> | undefined;
+  forceMajor?: number | undefined;
+}
+
+function groupByFile(edits: readonly Edit[]): Map<string, Edit[]> {
+  const grouped = new Map<string, Edit[]>();
+  for (const edit of edits) {
+    const list = grouped.get(edit.file) ?? [];
+    list.push(edit);
+    grouped.set(edit.file, list);
+  }
+  return grouped;
 }
 
 async function buildReport(root: string, entry: string | undefined, options: BuildOptions): Promise<{ report: UpgradeReport }> {
   const versions = installedVersions(root);
   const kestrelVersion = versions.installed["@michaelthielemann/kestrel"];
-  const kestrelMajor = kestrelVersion === undefined ? undefined : majorOf(kestrelVersion);
+  const kestrelMajor = options.forceMajor ?? (kestrelVersion === undefined ? undefined : majorOf(kestrelVersion));
   const findings: Finding[] = [];
   const scratch = await createScratchCopy(root);
 
@@ -88,6 +99,8 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
   let bootCheck: Awaited<ReturnType<typeof checkBoot>> = { errors: [], warnings: [], notChecked: [] };
   let outside: readonly string[] = [];
 
+  let previewBoot: ((edits: readonly Edit[]) => Promise<BootCheck | undefined>) | undefined;
+
   if (project) {
     tiers = { ...tiers, source: "done" };
 
@@ -97,6 +110,27 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       outside = box.outside;
       bootCheck = await checkBoot(box.input, { setup: box.setup });
       tiers = { ...tiers, boot: "done" };
+
+      previewBoot = async (edits) => {
+        const grouped = groupByFile(edits);
+        const originals = new Map<string, string | undefined>();
+        try {
+          for (const [file, fileEdits] of grouped) {
+            const original = existsSync(file) ? readFileSync(file, "utf8") : undefined;
+            originals.set(file, original);
+            if (original === undefined) continue;
+            writeFileSync(file, applyEdits(original, fileEdits).text);
+          }
+          const reloaded = await loadBackendProject(scratch.dir, entry === undefined ? undefined : resolve(root, entry));
+          if (!reloaded.project) return undefined;
+          const previewSandbox = sandboxBootInput(reloaded.project.input, { dir: scratch.dir, consent: options.runSetupUses });
+          return await checkBoot(previewSandbox.input, { setup: previewSandbox.setup });
+        } finally {
+          for (const [file, original] of originals) {
+            if (original !== undefined) writeFileSync(file, original);
+          }
+        }
+      };
     } else if (kestrelMajor !== undefined && kestrelMajor < 6) {
       findings.push({
         id: "deps/pre-install",
@@ -112,7 +146,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
     }
 
     const projectWithData = options.dataReport === undefined ? project : { ...project, data: options.dataReport };
-    const ctx = { root: scratch.dir, scratch: scratch.dir, project: projectWithData, bootCheck, readFile: readFileOrUndefined, answers: options.answers };
+    const ctx = { root: scratch.dir, scratch: scratch.dir, project: projectWithData, bootCheck, readFile: readFileOrUndefined, answers: options.answers, ...(previewBoot === undefined ? {} : { previewBoot }) };
     for (const rule of DEFAULT_RULES) findings.push(...(await rule.check(ctx)));
 
     const claimed = new Set(findings.map((f) => `${f.where.module ?? ""}|${f.where.pipeline ?? ""}|${f.where.step ?? ""}`));
@@ -164,13 +198,13 @@ function printReport(report: UpgradeReport, args: ParsedArgs, stdout: (line: str
   else stdout(renderHuman(report));
 }
 
-async function runCheck(args: ParsedArgs, stdout: (line: string) => void): Promise<number> {
+async function runCheck(args: ParsedArgs, stdout: (line: string) => void, options: RunUpgradeCliOptions): Promise<number> {
   const root = resolve(stringFlag(args, "root") ?? ".");
   const entry = stringFlag(args, "entry");
   const failOn = failOnOf(args);
   const runSetupUses = args.repeated.get("run-setup") ?? [];
   const dataReport = readDataReport(stringFlag(args, "data-report"));
-  const { report } = await buildReport(root, entry, { runSetupUses, answers: new Map(), dataReport });
+  const { report } = await buildReport(root, entry, { runSetupUses, answers: new Map(), dataReport, forceMajor: options.forceInstalledMajor });
   printReport(report, args, stdout);
   return exitCodeFor(report.findings, failOn);
 }
@@ -190,12 +224,12 @@ interface AskLoopResult {
   answers: Map<string, string>;
 }
 
-async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn): Promise<AskLoopResult & { unknownIds: string[] }> {
+async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined): Promise<AskLoopResult & { unknownIds: string[] }> {
   const answers = new Map<string, string>();
   const everAsked = new Set<string>();
   let report: UpgradeReport | undefined;
   for (let round = 0; round < 8; round++) {
-    ({ report } = await buildReport(root, entry, { runSetupUses, answers, dataReport }));
+    ({ report } = await buildReport(root, entry, { runSetupUses, answers, dataReport, forceMajor }));
     const asks = askFindings(report.findings);
     for (const { fix } of asks) everAsked.add(fix.question);
     const unresolved = asks.filter(({ fix }) => !answers.has(fix.question));
@@ -245,7 +279,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     return 2;
   }
 
-  const { report, unknownIds, answers } = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt);
+  const { report, unknownIds, answers } = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor);
   if (unknownIds.length > 0) {
     stderr(`--answers names an id this run never asked: ${unknownIds.join(", ")}`);
     return 2;
@@ -322,7 +356,7 @@ export async function runCli(argv: readonly string[], options: RunUpgradeCliOpti
   const [command, ...rest] = argv;
   const args = parseArgs(rest);
   try {
-    if (command === "check") return await runCheck(args, stdout);
+    if (command === "check") return await runCheck(args, stdout, options);
     if (command === "fix") return await runFix(args, stdout, stderr, options);
     if (command === "data") return await runData(args, stdout, stderr);
   } catch (err) {
