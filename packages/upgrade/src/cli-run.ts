@@ -245,7 +245,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         });
       }
 
-      const projectWithData = options.dataReport === undefined ? project : { ...project, data: options.dataReport };
+      const projectWithData = options.dataReport === undefined ? project : { ...project, dataReport: options.dataReport };
       const ctx = {
         root: scratch.dir,
         scratch: scratch.dir,

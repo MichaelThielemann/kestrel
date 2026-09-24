@@ -259,3 +259,36 @@ describe("UpgradePlugin.load()'s cache parameter", () => {
     expect(prepareCount).toBe(2);
   });
 });
+
+describe("--data-report alongside a plugin that stores its own project.data", () => {
+  it("keeps the plugin's own data and carries --data-report separately, in project.dataReport", async () => {
+    const reportFile = join(dir, "data-report.json");
+    await writeFile(reportFile, JSON.stringify({ underscoreFields: { "page._hint": { unlocalized: 0 } } }));
+
+    let seenData: unknown;
+    let seenDataReport: unknown;
+    const probeRule: Rule = {
+      id: "plugin/data-probe",
+      check(ctx) {
+        seenData = ctx.project.data;
+        seenDataReport = ctx.project.dataReport;
+        return [];
+      },
+    };
+    const plugin: UpgradePlugin = {
+      kind: "custom-host",
+      detect: () => true,
+      load: () =>
+        Promise.resolve({
+          project: { ...customProject().project!, data: { pluginOwnKey: "plugin value" } },
+          issues: [],
+        }),
+      rules: [probeRule],
+    };
+    const lines: string[] = [];
+    await runUpgradeCli(["check", "--root", dir, "--json", "--data-report", reportFile], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
+
+    expect(seenData).toEqual({ pluginOwnKey: "plugin value" });
+    expect(seenDataReport).toEqual({ underscoreFields: { "page._hint": { unlocalized: 0 } } });
+  });
+});

@@ -14,7 +14,10 @@ export interface LoadedProject {
   configFile: string;
   moduleFiles: ReadonlyMap<string, string>;
   pipelineFiles: ReadonlyMap<string, string>;
+  /** A plugin's own project-specific data, in whatever shape it likes; `check`/`fix` never reads or writes this. */
   data?: Record<string, unknown>;
+  /** `--data-report`'s parsed content, kept separate from `data` so a `check`/`fix` run never overwrites what a plugin's own `load()` stored there. `model/underscore-field` reads its counts from here. */
+  dataReport?: Record<string, unknown>;
 }
 
 /** One file or module a plugin's `load()` (or the built-in loader) could not load; surfaces as a `load/failed` finding. */

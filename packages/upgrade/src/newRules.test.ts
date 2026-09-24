@@ -31,8 +31,8 @@ function bootCheck(errors: BootProblem[] = [], warnings: BootWarning[] = []): Bo
   return { errors, warnings, notChecked: [] };
 }
 
-function contextFor(project: LoadedProject, options: { check?: BootCheck; answers?: ReadonlyMap<string, string>; data?: Record<string, unknown>; locateSteps?: StepListLocator; locateModelFields?: ModelFieldsLocator } = {}): RuleContext {
-  const withData = options.data === undefined ? project : { ...project, data: options.data };
+function contextFor(project: LoadedProject, options: { check?: BootCheck; answers?: ReadonlyMap<string, string>; dataReport?: Record<string, unknown>; locateSteps?: StepListLocator; locateModelFields?: ModelFieldsLocator } = {}): RuleContext {
+  const withData = options.dataReport === undefined ? project : { ...project, dataReport: options.dataReport };
   return {
     root: dir,
     scratch: dir,
@@ -296,7 +296,7 @@ describe("model/underscore-field", () => {
 
   it("asks with no default and reports the counts when the data report counted a stored value", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
-    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 3 } } } }));
+    const findings = await underscoreFieldRule.check(contextFor(p, { dataReport: { underscoreFields: { "page._hint": { unlocalized: 3 } } } }));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");
     expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
@@ -305,7 +305,7 @@ describe("model/underscore-field", () => {
 
   it("asks and reports counts per locale for a localized field with some stored values", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string", localized: true } } } } } }] });
-    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { de: 2, en: 0 } } } }));
+    const findings = await underscoreFieldRule.check(contextFor(p, { dataReport: { underscoreFields: { "page._hint": { de: 2, en: 0 } } } }));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");
     expect(findings[0]?.message).toContain('2 in "de"');
@@ -315,7 +315,7 @@ describe("model/underscore-field", () => {
     const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }], triggers: [] });\n';
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
     await writeFile(p.configFile, source);
-    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 0 } } } }));
+    const findings = await underscoreFieldRule.check(contextFor(p, { dataReport: { underscoreFields: { "page._hint": { unlocalized: 0 } } } }));
     expect(findings[0]?.fix.kind).toBe("auto");
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
     const { text } = applyEdits(source, edits);
@@ -336,7 +336,7 @@ describe("model/underscore-field", () => {
       }
       return undefined;
     };
-    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 0 } } }, locateModelFields }));
+    const findings = await underscoreFieldRule.check(contextFor(p, { dataReport: { underscoreFields: { "page._hint": { unlocalized: 0 } } }, locateModelFields }));
     expect(findings[0]?.fix.kind).toBe("auto");
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
     const { text } = applyEdits(source, edits);
@@ -347,7 +347,7 @@ describe("model/underscore-field", () => {
     const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string", localized: true } } } } } }], triggers: [] });\n';
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string", localized: true } } } } } }] });
     await writeFile(p.configFile, source);
-    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { de: 0, en: 0 } } } }));
+    const findings = await underscoreFieldRule.check(contextFor(p, { dataReport: { underscoreFields: { "page._hint": { de: 0, en: 0 } } } }));
     expect(findings[0]?.fix.kind).toBe("auto");
   });
 
@@ -368,7 +368,7 @@ describe("model/underscore-field", () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
     await writeFile(p.configFile, source);
     const answers = new Map([["underscore-field:page._hint", "renamedHint"]]);
-    const findings = await underscoreFieldRule.check(contextFor(p, { answers, data: { underscoreFields: { "page._hint": { unlocalized: 0 } } } }));
+    const findings = await underscoreFieldRule.check(contextFor(p, { answers, dataReport: { underscoreFields: { "page._hint": { unlocalized: 0 } } } }));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.severity).toBe("error");
     expect(findings[0]?.fix.kind).toBe("auto");
@@ -379,7 +379,7 @@ describe("model/underscore-field", () => {
 
   it("keeps warning about an orphaned old column after the rename has already been written to the config", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { hint: { type: "string" } } } } } }] });
-    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 2 } } } }));
+    const findings = await underscoreFieldRule.check(contextFor(p, { dataReport: { underscoreFields: { "page._hint": { unlocalized: 2 } } } }));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.severity).toBe("warning");
     expect(findings[0]?.fix.kind).toBe("none");
@@ -389,21 +389,21 @@ describe("model/underscore-field", () => {
 
   it("keeps warning about the orphaned old column when it could not be counted", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { hint: { type: "string" } } } } } }] });
-    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: null } } } }));
+    const findings = await underscoreFieldRule.check(contextFor(p, { dataReport: { underscoreFields: { "page._hint": { unlocalized: null } } } }));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.severity).toBe("warning");
   });
 
   it("stops warning about the orphaned old column once a data report counts it empty", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { hint: { type: "string" } } } } } }] });
-    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 0 } } } }));
+    const findings = await underscoreFieldRule.check(contextFor(p, { dataReport: { underscoreFields: { "page._hint": { unlocalized: 0 } } } }));
     expect(findings).toEqual([]);
   });
 
   it("stays silent about a regular field with no data-report entry for an old column", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { hint: { type: "string" } } } } } }] });
     expect(await underscoreFieldRule.check(contextFor(p))).toEqual([]);
-    expect(await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: {} } }))).toEqual([]);
+    expect(await underscoreFieldRule.check(contextFor(p, { dataReport: { underscoreFields: {} } }))).toEqual([]);
   });
 
   it("does not treat a declared underscore field as an orphan of a same-named regular field", async () => {
@@ -412,7 +412,7 @@ describe("model/underscore-field", () => {
         { use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" }, hint: { type: "string" } } } } } },
       ],
     });
-    const findings = await underscoreFieldRule.check(contextFor(p, { data: { underscoreFields: { "page._hint": { unlocalized: 3 } } } }));
+    const findings = await underscoreFieldRule.check(contextFor(p, { dataReport: { underscoreFields: { "page._hint": { unlocalized: 3 } } } }));
     expect(findings.filter((f) => f.message.includes("current field is named"))).toEqual([]);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.where.path).toBe("types.page.fields._hint");

@@ -337,7 +337,9 @@ directory) with only the built-in rules.
   `cache` is one plain `Map`, shared by every `load()` call for this one invocation only (never across
   two different projects, or two separate invocations): a plugin whose own loading runs something as
   expensive as a build tool's own prepare step can stash the result there and skip repeating it for
-  the same project's later scratch copies.
+  the same project's later scratch copies. `LoadedProject.data` is the plugin's own, in whatever shape
+  it likes — `check`/`fix` never reads or writes it, and `--data-report`'s parsed content lands in the
+  separate `LoadedProject.dataReport` instead, so a data report never overwrites what `load()` stored.
 - `sandbox?: Record<string, (config, scratch) => unknown>` — extra sandbox config-rewrite entries,
   keyed like `DEFAULT_SANDBOX_ENTRIES` (see `sandbox-blobstore-standin` above), merged with the
   built-in table.

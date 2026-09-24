@@ -24,8 +24,8 @@ function typeNames(config: unknown): string[] {
   return Object.keys(config.types);
 }
 
-function storedCounts(ctx: { project: { data?: Record<string, unknown> } }, typeName: string, field: string): Record<string, number | null> | undefined {
-  const underscoreFields = ctx.project.data?.underscoreFields;
+function storedCounts(ctx: { project: { dataReport?: Record<string, unknown> } }, typeName: string, field: string): Record<string, number | null> | undefined {
+  const underscoreFields = ctx.project.dataReport?.underscoreFields;
   if (!isRecord(underscoreFields)) return undefined;
   const counts = underscoreFields[`${typeName}.${field}`];
   if (!isRecord(counts)) return undefined;
