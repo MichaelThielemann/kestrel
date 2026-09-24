@@ -167,6 +167,10 @@ interface Work {
   failure: string | null;
 }
 
+interface Flight {
+  changed: boolean;
+}
+
 interface RenderOutcome {
   status: PublishStatus | null;
   failure: string | null;
@@ -286,6 +290,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   let llmsRequested = false;
   let stopping = false;
   let loop: BackgroundLoop | undefined;
+  const inFlight = new Set<Flight>();
 
   const typeConfig = (type: string): TypeConfig => {
     const tc = config.types[type];
@@ -475,7 +480,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     }
   };
 
-  const commit = async (output: OutputRef, before: StatusRow | null, renderId: string, target: Target, work: Work): Promise<Result<RenderOutcome, DeliveryError>> => {
+  const commit = async (flight: Flight, output: OutputRef, before: StatusRow | null, renderId: string, target: Target, work: Work): Promise<Result<RenderOutcome, DeliveryError>> => {
     const set = await recordSet(output, before, renderId, work.set);
     const dropOwnSet = async (): Promise<void> => {
       if (set === null) return;
@@ -539,6 +544,10 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       if (work.failure === null && before?.staleToken) {
         const cleared = await db.updateMany<StatusRow>(STATUS, { id: ownId, staleToken: before.staleToken }, { staleToken: null, staleAt: null, staleRetryAt: null, staleAttempts: 0, staleError: null });
         if (isErr(cleared)) return err(dbFailure(cleared.error));
+      }
+      if (flight.changed) {
+        const remarked = await markRows([ownId], MARKABLE);
+        if (isErr(remarked)) logger.error("delivery/static: could not mark an output whose render overlapped a change, the recovery pass marks it", { ...output, error: remarked.error.message });
       }
       const after = await db.findOne<StatusRow>(STATUS, { id: ownId });
       if (isErr(after)) return err(dbFailure(after.error));
@@ -606,6 +615,16 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   };
 
   const publishLocale = async (type: string, id: string, locale: string | undefined): Promise<Result<RenderOutcome, DeliveryError>> => {
+    const flight: Flight = { changed: false };
+    inFlight.add(flight);
+    try {
+      return await renderLocale(flight, type, id, locale);
+    } finally {
+      inFlight.delete(flight);
+    }
+  };
+
+  const renderLocale = async (flight: Flight, type: string, id: string, locale: string | undefined): Promise<Result<RenderOutcome, DeliveryError>> => {
     const tc = typeConfig(type);
     const output: OutputRef = { type, docId: id, locale: locale ?? "" };
     const found = await readRow(type, id, output.locale);
@@ -618,7 +637,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     const view = viewResult.value;
     if (!view) {
       if (before?.state === "deleted") return ok({ status: null, failure: null });
-      return commit(output, before, renderId, { state: "draft", path: null, error: null }, { renderPath: null, written: [], set: { kind: "none" }, failure: null });
+      return commit(flight, output, before, renderId, { state: "draft", path: null, error: null }, { renderPath: null, written: [], set: { kind: "none" }, failure: null });
     }
     const rules = { home: tc.home, slugField: tc.slugField, prefixPrimary: config.prefixPrimary, fallback: config.fallback, filter: statusFilter };
     const options = { ...(locale === undefined ? {} : { locale }), rules };
@@ -630,8 +649,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     const path = site.pathOf(type, doc, options);
     const keptPath = before !== null && (before.state === "live" || before.state === "error") ? before.path : null;
     const failed = (message: string, work: Omit<Work, "failure" | "set">, reads: ObservedRead[]): Promise<Result<RenderOutcome, DeliveryError>> =>
-      commit(output, before, renderId, { state: "error", path: keptPath, error: message }, { ...work, set: { kind: "failure", reads }, failure: message });
-    if (path === null) return commit(output, before, renderId, { state: "error", path: null, error: `no ${tc.slugField}` }, { renderPath: null, written: [], set: { kind: "empty" }, failure: null });
+      commit(flight, output, before, renderId, { state: "error", path: keptPath, error: message }, { ...work, set: { kind: "failure", reads }, failure: message });
+    if (path === null) return commit(flight, output, before, renderId, { state: "error", path: null, error: `no ${tc.slugField}` }, { renderPath: null, written: [], set: { kind: "empty" }, failure: null });
     const reservedPage = reservedMatch(path, config.reservedPaths);
     if (reservedPage !== undefined) return failed(`path ${path} is reserved (${reservedPage})`, { renderPath: null, written: [] }, linkScope.reads);
 
@@ -659,7 +678,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     } catch (error) {
       return failed(errorText(error), { renderPath: path, written }, reads);
     }
-    return commit(output, before, renderId, { state: "live", path, error: null }, { renderPath: path, written, set: { kind: "known", reads, rendererReads: renderScope.reads }, failure: null });
+    return commit(flight, output, before, renderId, { state: "live", path, error: null }, { renderPath: path, written, set: { kind: "known", reads, rendererReads: renderScope.reads }, failure: null });
   };
 
   const publish: Delivery["publish"] = async (type, id) => {
@@ -801,6 +820,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   if (dependencies.render === "background") loop = createBackgroundLoop(pass, logger, "delivery/static");
 
   const markDependents: Delivery["markDependents"] = async (type, ids) => {
+    for (const flight of inFlight) flight.changed = true;
     const changed = [...new Set(ids)];
     const outputs = new Set<string>();
     const isModelType = model.types[type] !== undefined;

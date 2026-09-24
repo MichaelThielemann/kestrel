@@ -439,6 +439,41 @@ describe("delivery/static dependencies: marks and renders", () => {
     expect(await h.marked()).not.toContain(`${ids.programm}/de`);
   });
 
+  it("a change marked while a render that newly reads the document is still running marks that output too", async () => {
+    const h = await harness();
+    const ids = await seed(h);
+    const fresh = expectOk(await h.content.create("speakers", { name: "Hedy", status: "published" })).id;
+    const lineup = expectOk(await h.content.create("lineups", { title: "Late", speakers: [fresh] })).id;
+    expectOk(await h.content.update("pages", ids.kontakt, { body: [{ type: "lineup", id: lineup }] }, { locale: "de" }));
+    const held = h.reading.hold(ids.kontakt);
+    const publishing = h.delivery.publish("pages", ids.kontakt);
+    await held.reached;
+    expectOk(await h.content.update("speakers", fresh, { name: "Hedy L." }));
+    expectOk(await h.delivery.markDependents("speakers", [fresh]));
+    held.release();
+    expectOk(await publishing);
+    expect(h.html("/kontakt")).toContain("Hedy");
+    expect(await h.marked()).toContain(`${ids.kontakt}/de`);
+    expectOk(await h.delivery.republishOutput({ type: "pages", docId: ids.kontakt, locale: "de" }));
+    expect(h.html("/kontakt")).toContain("Hedy L.");
+  });
+
+  it("the same holds for the first render of a page that has no status row yet", async () => {
+    const h = await harness();
+    await seed(h);
+    const fresh = expectOk(await h.content.create("speakers", { name: "Hedy", status: "published" })).id;
+    const lineup = expectOk(await h.content.create("lineups", { title: "Late", speakers: [fresh] })).id;
+    const neu = await h.page({ slug: "neu", title: "Neu", status: "published", body: [{ type: "lineup", id: lineup }] });
+    const held = h.reading.hold(neu);
+    const publishing = h.delivery.publish("pages", neu);
+    await held.reached;
+    expectOk(await h.content.update("speakers", fresh, { name: "Hedy L." }));
+    expectOk(await h.delivery.markDependents("speakers", [fresh]));
+    held.release();
+    expectOk(await publishing);
+    expect(await h.marked()).toContain(`${neu}/de`);
+  });
+
   it("a job for an output that is not marked renders nothing", async () => {
     const h = await harness();
     const ids = await seed(h);
