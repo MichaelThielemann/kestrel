@@ -177,6 +177,22 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
         expect(en._links).toEqual({ [ids.home]: { path: "/en", locale: "en" }, [ids.entwurf]: { broken: true } });
       });
 
+      it("fills a linked page's missing slug from the default locale only when the default locale passes the filter too", async () => {
+        const target = expectOk(await content.create("pages", { slug: "ziel-de", title: "Ziel DE", status: "published" }));
+        expectOk(await content.update("pages", target.id, { title: "Ziel EN", status: "published" }, { locale: "en" }));
+        const linker = expectOk(await content.create("pages", { slug: "linker-a", title: "Linker", status: "published", body: `<a href="kestrel:pages:${target.id}">Ziel</a>` }));
+        const en = expectOk(await site.resolveLinks("pages", linker, { locale: "en", rules }));
+        expect(en._links).toEqual({ [target.id]: { path: "/en/ziel-de", locale: "en" } });
+      });
+
+      it("never fills a linked page's missing slug from a default locale that is only a draft", async () => {
+        const target = expectOk(await content.create("pages", { slug: "ziel-draft", title: "Ziel Draft", status: "draft" }));
+        expectOk(await content.update("pages", target.id, { title: "Ziel EN 2", status: "published" }, { locale: "en" }));
+        const linker = expectOk(await content.create("pages", { slug: "linker-b", title: "Linker", status: "published", body: `<a href="kestrel:pages:${target.id}">Ziel</a>` }));
+        const en = expectOk(await site.resolveLinks("pages", linker, { locale: "en", rules }));
+        expect(en._links).toEqual({ [target.id]: { broken: true } });
+      });
+
       it("rewrites internal link objects and marks unserved ones", async () => {
         const withBlocks = expectOk(
           await content.create("pages", {

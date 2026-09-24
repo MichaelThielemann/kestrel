@@ -1,5 +1,5 @@
 import type { Content, ContentDocument, ContentError, ContentModel, LocaleOptions } from "@michaelthielemann/kestrel-contracts/content";
-import { nonLocalizedFilter, publishedLocale } from "@michaelthielemann/kestrel-contracts/content-locale";
+import { defaultLocaleSatisfiesFilter, nonLocalizedFilter, publishedLocale, satisfiesFilter } from "@michaelthielemann/kestrel-contracts/content-locale";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { LinkTarget } from "@michaelthielemann/kestrel-contracts/links";
 import { INTERNAL_REF, collectInternalRefs } from "@michaelthielemann/kestrel-contracts/links";
@@ -148,12 +148,16 @@ export function createSiteDefault(content: Content): SiteDefault {
           const strictResult = await content.get(t, id, locale === undefined ? {} : { locale });
           if (isErr(strictResult)) return err(transientOnly(strictResult.error));
           const strict = strictResult.value;
-          if (strict && Object.entries(rules.filter).every(([f, v]) => strict[f] === v)) {
+          if (strict && satisfiesFilter(rules.filter, strict)) {
             let slug = strict[rules.slugField];
-            if ((slug === null || slug === undefined) && rules.fallback && locale !== undefined) {
-              const fallbackResult = await content.get(t, id, { locale, fallback: true });
-              if (isErr(fallbackResult)) return err(transientOnly(fallbackResult.error));
-              slug = fallbackResult.value?.[rules.slugField];
+            if ((slug === null || slug === undefined) && rules.fallback && locale !== undefined && locale !== model.defaultLocale) {
+              const defaultOk = await defaultLocaleSatisfiesFilter(content, model.defaultLocale, t, id, rules.filter);
+              if (isErr(defaultOk)) return err(transientOnly(defaultOk.error));
+              if (defaultOk.value) {
+                const fallbackResult = await content.get(t, id, { locale, fallback: true });
+                if (isErr(fallbackResult)) return err(transientOnly(fallbackResult.error));
+                slug = fallbackResult.value?.[rules.slugField];
+              }
             }
             if (typeof slug === "string" && slug !== "") path = publicPath(slug, locale, model.defaultLocale, rules.home, rules.prefixPrimary);
           }
