@@ -27,23 +27,24 @@ interface ResolvedProject {
   reload: (scratchDir: string) => Promise<LoadResult>;
 }
 
-async function detectPlugin(plugins: readonly UpgradePlugin[], root: string): Promise<UpgradePlugin | undefined> {
+async function detectPlugin(plugins: readonly UpgradePlugin[], root: string): Promise<{ plugin?: UpgradePlugin; issues: LoadIssue[] }> {
+  const issues: LoadIssue[] = [];
   for (const plugin of plugins) {
     try {
-      if (await plugin.detect(root)) return plugin;
-    } catch {
-      continue;
+      if (await plugin.detect(root)) return { plugin, issues };
+    } catch (err) {
+      issues.push({ message: `plugin "${plugin.kind}" detect() threw: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
-  return undefined;
+  return { issues };
 }
 
 async function resolveProject(root: string, entry: string | undefined, scratchDir: string, plugins: readonly UpgradePlugin[]): Promise<ResolvedProject> {
-  const plugin = await detectPlugin(plugins, root);
+  const { plugin, issues: detectIssues } = await detectPlugin(plugins, root);
   if (plugin === undefined) {
     const { project, issues } = await loadBackendProject(scratchDir, entry === undefined ? undefined : resolve(root, entry));
     const reload = (dir: string): Promise<LoadResult> => loadBackendProject(dir, entry === undefined ? undefined : resolve(root, entry));
-    return { ...(project === undefined ? {} : { project }), issues, rules: DEFAULT_RULES, reload };
+    return { ...(project === undefined ? {} : { project }), issues: [...detectIssues, ...issues], rules: DEFAULT_RULES, reload };
   }
   const rules = [...DEFAULT_RULES, ...(plugin.rules ?? [])];
   const sandboxEntries = plugin.sandbox === undefined ? {} : { sandboxEntries: plugin.sandbox };
@@ -56,9 +57,9 @@ async function resolveProject(root: string, entry: string | undefined, scratchDi
   };
   try {
     const project = await plugin.load(root, scratchDir);
-    return { project, issues: [], rules, ...sandboxEntries, reload };
+    return { project, issues: detectIssues, rules, ...sandboxEntries, reload };
   } catch (err) {
-    return { issues: [{ message: err instanceof Error ? err.message : String(err) }], rules, ...sandboxEntries, reload };
+    return { issues: [...detectIssues, { message: err instanceof Error ? err.message : String(err) }], rules, ...sandboxEntries, reload };
   }
 }
 

@@ -81,4 +81,20 @@ describe("a plugin registered through RunUpgradeCliOptions.plugins", () => {
     const { report } = await runJson([]);
     expect(report.project.kind).toBe("unknown");
   });
+
+  it("reports a plugin whose detect() throws as a load/failed finding, instead of silently dropping its rules", async () => {
+    const plugin: UpgradePlugin = {
+      kind: "custom-host",
+      detect: () => {
+        throw new Error("boom");
+      },
+      load: () => Promise.resolve(customProject()),
+      rules: [customRule],
+    };
+    const { report } = await runJson([plugin]);
+    expect(report.project.kind).toBe("unknown");
+    const issue = report.findings.find((f) => f.rule === "load/failed");
+    expect(issue?.message).toContain("custom-host");
+    expect(issue?.message).toContain("boom");
+  });
 });
