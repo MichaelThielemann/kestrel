@@ -98,6 +98,40 @@ describe("fix never writes an edit that fails to re-parse", () => {
   });
 });
 
+describe("fix never silently drops a conflicting edit from a different rule", () => {
+  it("downgrades the later-processed rule to manual, naming the conflicting rule, instead of silently applying only one of the two edits", async () => {
+    const configFile = join(dir, "host.config.ts");
+    const source = "export default { a: 1, b: 2 };\n";
+    await writeFile(configFile, source);
+    const aValueStart = source.indexOf("a: 1");
+    const oneEnd = aValueStart + "a: 1".length;
+    const twoEnd = source.indexOf("b: 2") + "b: 2".length;
+    const ruleFirst: Rule = {
+      id: "plugin/rule-first",
+      check: () => [{ id: "plugin/rule-first", rule: "plugin/rule-first", severity: "error", tier: "source", where: {}, message: "first", suggestion: "n/a", fix: { kind: "auto", edits: [{ file: configFile, start: aValueStart, end: oneEnd, text: "a: 100" }] }, docs: "n/a" }],
+    };
+    const ruleSecond: Rule = {
+      id: "plugin/rule-second",
+      check: () => [{ id: "plugin/rule-second", rule: "plugin/rule-second", severity: "error", tier: "source", where: {}, message: "second", suggestion: "n/a", fix: { kind: "auto", edits: [{ file: configFile, start: oneEnd - 1, end: twoEnd, text: "1, b: 999" }] }, docs: "n/a" }],
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [ruleFirst, ruleSecond] };
+
+    const lines: string[] = [];
+    await runUpgradeCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines[0]!), "json");
+    const findingFirst = report.findings.find((f) => f.rule === "plugin/rule-first");
+    const findingSecond = report.findings.find((f) => f.rule === "plugin/rule-second");
+    expect(findingFirst?.fix.kind).toBe("auto");
+    expect(findingSecond?.fix.kind).toBe("manual");
+    expect(findingSecond?.suggestion).toContain("plugin/rule-first");
+
+    const writeCode = await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin] });
+    expect(writeCode).toBe(1);
+    const text = readFileSync(configFile, "utf8");
+    expect(text).toBe("export default { a: 100, b: 2 };\n");
+  });
+});
+
 describe("fix --write runs the dirty guard for every touched file before writing any of them", () => {
   it("writes nothing at all when one of several touched files is dirty", async () => {
     await run("git", ["init"], { cwd: dir });

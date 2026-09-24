@@ -336,8 +336,8 @@ async function runCheck(args: ParsedArgs, stdout: (line: string) => void, option
   const runSetupUses = args.repeated.get("run-setup") ?? [];
   const dataReport = readDataReport(stringFlag(args, "data-report"));
   const { report } = await buildReport(root, entry, { runSetupUses, answers: new Map(), dataReport, forceMajor: options.forceInstalledMajor, plugins: options.plugins });
-  const { rejectedIds } = verifyAndApply(report.findings);
-  const findings = downgradeRejected(report.findings, rejectedIds);
+  const { rejectedIds, conflictsWith } = verifyAndApply(report.findings);
+  const findings = downgradeRejected(report.findings, rejectedIds, conflictsWith);
   const verifiedReport: UpgradeReport = { ...report, findings, summary: summarize(findings) };
   printReport(verifiedReport, args, stdout);
   return exitCodeFor(verifiedReport.findings, failOn);
@@ -367,10 +367,16 @@ interface FileState {
   current: string;
 }
 
-function verifyAndApply(findings: readonly Finding[]): { states: Map<string, FileState>; rejectedIds: Set<string> } {
+function verifyAndApply(findings: readonly Finding[]): { states: Map<string, FileState>; rejectedIds: Set<string>; conflictsWith: Map<string, string[]> } {
   const sources = new Map<string, string>();
   const accepted = new Map<string, Edit[]>();
+  const ownerOf = new Map<Edit, Finding>();
+  for (const finding of findings) {
+    if (finding.fix.kind !== "auto") continue;
+    for (const edit of finding.fix.edits) ownerOf.set(edit, finding);
+  }
   const rejectedIds = new Set<string>();
+  const conflictsWith = new Map<string, string[]>();
   const sourceFor = (file: string): string | undefined => {
     const existing = sources.get(file);
     if (existing !== undefined) return existing;
@@ -383,13 +389,23 @@ function verifyAndApply(findings: readonly Finding[]): { states: Map<string, Fil
     if (finding.fix.kind !== "auto" || finding.fix.edits.length === 0) continue;
     const perFile = groupByFile(finding.fix.edits);
     let ok = true;
+    const conflictingRules = new Set<string>();
     for (const [file, edits] of perFile) {
       const source = sourceFor(file);
       if (source === undefined) {
         ok = false;
         break;
       }
-      const { text } = applyEdits(source, [...(accepted.get(file) ?? []), ...edits]);
+      const { text, applied, conflicted } = applyEdits(source, [...(accepted.get(file) ?? []), ...edits]);
+      const unresolved = conflicted.filter((c) => !applied.some((a) => a.start <= c.start && a.end >= c.end));
+      if (unresolved.length > 0) {
+        ok = false;
+        for (const edit of unresolved) {
+          const owner = ownerOf.get(edit);
+          if (owner !== undefined && owner.id !== finding.id) conflictingRules.add(owner.rule);
+        }
+        break;
+      }
       if (!verifiesAfterEdit(file, text)) {
         ok = false;
         break;
@@ -397,6 +413,7 @@ function verifyAndApply(findings: readonly Finding[]): { states: Map<string, Fil
     }
     if (!ok) {
       rejectedIds.add(finding.id);
+      if (conflictingRules.size > 0) conflictsWith.set(finding.id, [...conflictingRules]);
       continue;
     }
     for (const [file, edits] of perFile) accepted.set(file, [...(accepted.get(file) ?? []), ...edits]);
@@ -406,11 +423,16 @@ function verifyAndApply(findings: readonly Finding[]): { states: Map<string, Fil
     const { text } = applyEdits(source, accepted.get(file) ?? []);
     states.set(file, { source, current: text });
   }
-  return { states, rejectedIds };
+  return { states, rejectedIds, conflictsWith };
 }
 
-function downgradeRejected(findings: readonly Finding[], rejectedIds: ReadonlySet<string>): Finding[] {
-  return findings.map((f) => (rejectedIds.has(f.id) ? { ...f, fix: { kind: "manual" as const }, suggestion: `${f.suggestion} (the edit did not verify after applying; do this by hand)` } : f));
+function downgradeRejected(findings: readonly Finding[], rejectedIds: ReadonlySet<string>, conflictsWith: ReadonlyMap<string, string[]>): Finding[] {
+  return findings.map((f) => {
+    if (!rejectedIds.has(f.id)) return f;
+    const conflicting = conflictsWith.get(f.id);
+    const reason = conflicting && conflicting.length > 0 ? `conflicts with ${conflicting.join(", ")} on the same file span` : "the edit did not verify after applying";
+    return { ...f, fix: { kind: "manual" as const }, suggestion: `${f.suggestion} (${reason}; do this by hand)` };
+  });
 }
 
 interface AskLoopResult {
@@ -481,8 +503,8 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     return 2;
   }
 
-  const { states, rejectedIds } = verifyAndApply(report.findings);
-  const adjustedFindings = downgradeRejected(report.findings, rejectedIds);
+  const { states, rejectedIds, conflictsWith } = verifyAndApply(report.findings);
+  const adjustedFindings = downgradeRejected(report.findings, rejectedIds, conflictsWith);
   const adjustedReport: UpgradeReport = { ...report, findings: adjustedFindings, summary: summarize(adjustedFindings) };
   const changed = [...states].filter(([, state]) => state.current !== state.source);
 

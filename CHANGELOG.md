@@ -629,6 +629,13 @@ Net changes since 5.8.1.
   module's own config breaking their check, say). It now names each such pipeline and its own
   `notChecked` reason instead, falling back to the install guidance only when the preview did not run
   at all.
+- `kestrel-upgrade`: `fix` verified only that each finding's own edit still parsed after applying,
+  never checking `applyEdits`'s `conflicted` result — two rules whose edits genuinely overlap, without
+  one containing the other, could both report `auto` while only the earlier-processed one was actually
+  written, the other silently dropped. A conflicted edit not absorbed by a wider, containing accepted
+  edit (the intentional case, where one rule replaces a value inside a construct another rule replaces
+  or deletes whole) now rejects the whole finding, downgrading it to manual and naming the rule it
+  conflicts with instead of writing a partial result.
 
 ## 5.8.1 – 2026-09-22
 
