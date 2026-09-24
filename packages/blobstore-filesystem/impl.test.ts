@@ -124,6 +124,15 @@ describe("blobstore/filesystem", () => {
     expect(entries.filter((name) => name.includes("kestrel-tmp"))).toEqual([]);
   });
 
+  it("writes a key whose last segment is close to the file system's name limit, since the temporary name does not grow with the key", async () => {
+    const root = await fresh();
+    const store = createBlobstoreFilesystem({ root });
+    const key = `a/${"n".repeat(250)}`;
+    expectOk(await store.put(key, new Uint8Array([7])));
+    expect(Array.from(expectOk(await store.get(key)) ?? [])).toEqual([7]);
+    expect(expectOk(await store.list("a/"))).toEqual([{ key, size: 1 }]);
+  });
+
   it("removes the temporary file when the rename fails, leaving the original untouched", async () => {
     const root = await fresh();
     const store = createBlobstoreFilesystem({ root });

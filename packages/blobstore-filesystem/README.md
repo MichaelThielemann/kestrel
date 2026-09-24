@@ -7,8 +7,8 @@ Keys must be relative, without `.`/`..` segments, and must not end in `.meta.jso
 `{ root: "./data/blobs" }`. For local development and tests; on ephemeral disks use `blobstore-s3`.
 
 `put` replaces a file atomically: it writes the bytes to a temporary file in the same directory
-(`<key>.<uuid>.kestrel-tmp`) and renames it onto the key, which is atomic within one file system.
-A reader – this store's `get`, or a web server serving the directory directly – always sees the
+(`.<24 hex digits>.kestrel-tmp`, whose length does not depend on the key) and renames it onto the
+key, which is atomic within one file system. A reader – this store's `get`, or a web server serving the directory directly – always sees the
 old file or the new one, never a partially written one. A crash between the write and the rename
 can leave a temporary file behind; it is never listed or read, and its name is unguessable.
 

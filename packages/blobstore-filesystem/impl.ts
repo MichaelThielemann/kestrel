@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { BlobInfo, Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
@@ -77,7 +77,7 @@ export function createBlobstoreFilesystem(config: Config): Blobstore {
   return {
     async put(key, data) {
       const path = pathOf(key);
-      const tmp = `${path}.${randomUUID()}${TMP_SUFFIX}`;
+      const tmp = join(dirname(path), `.${randomBytes(12).toString("hex")}${TMP_SUFFIX}`);
       try {
         await mkdir(dirname(path), { recursive: true });
         await writeFile(tmp, data);
