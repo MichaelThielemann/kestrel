@@ -208,14 +208,15 @@ export interface InsertStepOptions {
   anchorStep: string;
   position: "before" | "after";
   newStep: string;
-  /** Locates the pipeline's own step array(s) directly, for a project layout where it does not sit at a `definePipeline({ name, steps })` call; the built-in search (which also expands into an atomic group's own array) runs when this is absent. */
+  /** Locates the pipeline's own step array(s) directly, for a project layout where it does not sit at a `definePipeline({ name, steps })` call; additive, not a replacement — the built-in search (which also expands into an atomic group's own array) runs when this is absent, or when it returns nothing for this pipeline. */
   locateSteps?: StepListLocator;
 }
 
 /** Inserts `newStep` next to `anchorStep` in the named pipeline's step list, including inside an atomic group; `undefined` when the pipeline, the array or the anchor cannot be found, or `newStep` is already there. */
 export function insertPipelineStep(file: string, source: string, options: InsertStepOptions): Edit | undefined {
   const root = parseTs(source);
-  const arrays = options.locateSteps ? options.locateSteps(root, options.pipelineName) : pipelineStepsArrays(root, options.pipelineName).flatMap(stepArraysOf);
+  const located = options.locateSteps?.(root, options.pipelineName) ?? [];
+  const arrays = located.length > 0 ? located : pipelineStepsArrays(root, options.pipelineName).flatMap(stepArraysOf);
   for (const array of arrays) {
     const stepElements = elements(array);
     if (stepElements.some((e) => stringValue(e) === options.newStep)) return undefined;
@@ -233,7 +234,7 @@ export interface InsertAfterEmitOptions {
   pipelineName: string;
   emitStep: string;
   newStep: string;
-  /** Locates the pipeline's own top-level step array(s) directly, for a project layout where it does not sit at a `definePipeline({ name, steps })` call; the built-in search runs when this is absent. Atomic-group detection inside each returned array is unaffected. */
+  /** Locates the pipeline's own top-level step array(s) directly, for a project layout where it does not sit at a `definePipeline({ name, steps })` call; additive, not a replacement — the built-in search runs when this is absent, or when it returns nothing for this pipeline. Atomic-group detection inside each returned array is unaffected. */
   locateSteps?: StepListLocator;
 }
 
@@ -244,7 +245,8 @@ interface EmitAnchor {
 }
 
 function locateEmitAnchor(root: AstNode, options: InsertAfterEmitOptions): EmitAnchor | undefined {
-  const tops = options.locateSteps ? options.locateSteps(root, options.pipelineName) : pipelineStepsArrays(root, options.pipelineName);
+  const located = options.locateSteps?.(root, options.pipelineName) ?? [];
+  const tops = located.length > 0 ? located : pipelineStepsArrays(root, options.pipelineName);
   for (const top of tops) {
     const topElements = elements(top);
     for (let i = topElements.length - 1; i >= 0; i--) {
@@ -402,14 +404,15 @@ export interface RenameContentFieldOptions {
   typeName: string;
   from: string;
   to: string;
-  /** Locates the content type's `fields` object literal directly, for a project layout where it does not sit at `config.types.<typeName>.fields` on the module-list entry named `use`; the built-in search runs when this is absent. */
+  /** Locates the content type's `fields` object literal directly, for a project layout where it does not sit at `config.types.<typeName>.fields` on the module-list entry named `use`; additive, not a replacement — the built-in search runs when this is absent, or when it returns `undefined` for this type. */
   locateModelFields?: ModelFieldsLocator;
 }
 
 /** Renames a content type's field key, `config.types.<typeName>.fields.<from>`, on a module-list entry named `use` (or wherever `locateModelFields` says it lives). */
 export function renameContentField(file: string, source: string, options: RenameContentFieldOptions): Edit | undefined {
   const root = parseTs(source);
-  const fields = options.locateModelFields ? options.locateModelFields(root, { use: options.use, typeName: options.typeName }) : builtInModelFields(root, options.use, options.typeName);
+  const located = options.locateModelFields?.(root, { use: options.use, typeName: options.typeName });
+  const fields = located ?? builtInModelFields(root, options.use, options.typeName);
   if (fields === undefined || fields.type !== "ObjectExpression") return undefined;
   const prop = objectPropertyNodes(fields).find((p) => propertyKeyName(p) === options.from);
   const key = prop && propertyKeyNode(prop);

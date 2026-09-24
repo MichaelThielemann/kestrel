@@ -375,16 +375,22 @@ directory) with only the built-in rules.
   `config.types.<typeName>.fields` on a module-list entry (for example, either living inside another
   call's options object). `RuleContext` carries the active plugin's own locators through, and
   `pipelines/verified-user` / `model/underscore-field` pass them to the codemod instead of only ever
-  searching the built-in shape; absent, both fall back to the exact built-in search unchanged.
+  searching the built-in shape. Additive, not a replacement: absent, or returning nothing for the
+  pipeline or type at hand (an empty array from `locateSteps`, `undefined` from `locateModelFields`),
+  the exact built-in search runs for that target instead — a plugin's locator only needs to answer for
+  the layouts it actually recognizes.
 - `dataModel?(root): Promise<DataContentModel | undefined>` — supplies the content model the `data`
   command's underscore-field counter needs (`types`, each with a `fields` map of `{ localized? }`,
-  plus optional `locales` and `use`), for a project layout where it cannot be read from a
+  plus optional `locales`, `use` and `file`), for a project layout where it cannot be read from a
   `content-default` module's config on `kestrel.config.ts`. Consulted through the same `detect()` used
   for `check`/`fix`; `undefined`, from the hook or its result, skips underscore-field counting for
   this project without failing the rest of the `data` command, which stays SQLite-only either way.
   `check`/`fix` also derives `LoadedProject.contentModel` from this hook when `load()` did not set it
   directly, so `model/underscore-field` (including its orphaned-column warning) reads the same model a
-  plugin need only describe once, whichever of the two it implements.
+  plugin need only describe once, whichever of the two it implements. `DataContentModel.file` is the
+  file `model/underscore-field` reads and splices a verified-zero-count rename into; `LoadedProject.configFile`
+  is used when absent, so a plugin whose content model does not live there (unlike the built-in
+  `content-default`-on-`kestrel.config.ts` layout) still gets an automatic rename, not a manual one.
 - `switchEdits?(ctx, relayPipelines): Promise<{ parts, blockers }>` — supplies `offer/event-queue`'s
   switch for a project layout where events-direct is not a `kestrel.config.ts` module-list entry:
   `parts` is the switch's edits as the same all-or-nothing `Record<label, Edit[] | undefined>` shape
@@ -420,6 +426,10 @@ writes edits with, so it never needs a second copy of this engine's own edit mac
 - `combineEditParts(parts)` — the all-or-nothing combine primitive: `Record<label, Edit[] | undefined>`
   becomes one accepted set, or none at all (`missing` naming every part that could not be located) —
   a multi-part edit (a module-list entry plus a `package.json` range, say) is never applied halfway.
+- `replaceModuleListEntry(file, source, { use, newUse, config? })` — replaces a `kestrel.config.ts`-shaped
+  module-list entry named `use` with a new `{ use: newUse, config }` literal; `undefined` when the array
+  or the entry cannot be found. The primitive `switchEdits`'s own built-in fallback is written with, for
+  a plugin whose project layout keeps a hand-written module list of the same shape.
 - `parseTs`, `walk`, `findAll`, `findCalls`, `firstArgument`, `objectProperty`, `objectPropertyNodes`,
   `propertyKeyName`, `propertyKeyNode`, `isAstNode`, `isArrayExpression`, `arrayElements`, `span`,
   `stringValue`, and the `AstNode` type — the AST reading primitives `locateSteps` and

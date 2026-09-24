@@ -305,6 +305,33 @@ describe("insertPipelineStep", () => {
     const { text } = applyEdits(source, [edit!]);
     expect(text).toContain('"authn.requireUser", "authn.verifyUser:reassignTo", "revisions.reassignAuthor"');
   });
+
+  it("falls back to the built-in search when the locator finds nothing for this pipeline, instead of giving up", () => {
+    const source = 'definePipeline({ name: "custom", steps: ["authn.requireUser", "revisions.reassignAuthor"] });\n';
+    const locateSteps: StepListLocator = () => [];
+    const edit = insertPipelineStep("p.ts", source, { pipelineName: "custom", anchorStep: "revisions.reassignAuthor", position: "before", newStep: "authn.verifyUser:reassignTo", locateSteps });
+    expect(edit).toBeDefined();
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('"authn.requireUser", "authn.verifyUser:reassignTo", "revisions.reassignAuthor"');
+  });
+
+  it("uses the locator's own result exclusively, even when the built-in search would also match the same pipeline name", () => {
+    const source = `definePipeline({ name: "custom", steps: ["authn.requireUser", "revisions.reassignAuthor"] });\ndefineFlow({ id: "custom", options: { steps: ["authn.requireUser", "revisions.reassignAuthor"] } });\n`;
+    const locateSteps: StepListLocator = (root, pipelineName) => {
+      const arrays: AstNode[] = [];
+      for (const call of findCalls(root, "defineFlow")) {
+        const arg = firstArgument(call);
+        if (arg?.type !== "ObjectExpression" || objectProperty(arg, "id")?.value !== pipelineName) continue;
+        const options = objectProperty(arg, "options");
+        const steps = options?.type === "ObjectExpression" ? objectProperty(options, "steps") : undefined;
+        if (isArrayExpression(steps)) arrays.push(steps);
+      }
+      return arrays;
+    };
+    const edit = insertPipelineStep("p.ts", source, { pipelineName: "custom", anchorStep: "revisions.reassignAuthor", position: "before", newStep: "authn.verifyUser:reassignTo", locateSteps });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text.indexOf("defineFlow")).toBeLessThan(text.indexOf("authn.verifyUser:reassignTo"));
+  });
 });
 
 describe("renameContentField", () => {
@@ -338,6 +365,31 @@ describe("renameContentField", () => {
     const edit = renameContentField("model.ts", source, { use: "irrelevant", typeName: "page", from: "_hint", to: "hint", locateModelFields });
     const { text } = applyEdits(source, [edit!]);
     expect(text).toContain("fields: { hint: { type: \"string\" }, title:");
+  });
+
+  it("falls back to the built-in search when the locator returns undefined for this type, instead of giving up", () => {
+    const locateModelFields: ModelFieldsLocator = () => undefined;
+    const edit = renameContentField("kestrel.config.ts", CONFIG, { use: "@michaelthielemann/kestrel-content-default", typeName: "page", from: "_hint", to: "hint", locateModelFields });
+    expect(edit).toBeDefined();
+    const { text } = applyEdits(CONFIG, [edit!]);
+    expect(text).toContain("fields: { hint: { type: \"string\" }, title:");
+  });
+
+  it("uses the locator's own result exclusively, even when the built-in search would also match the same type name", () => {
+    const source = `export default defineConfig({ modules: [{ use: "content-default", config: { types: { page: { fields: { _hint: { type: "string" } } } } } }] });\ndefineContentModel({ name: "page", schema: { fields: { _hint: { type: "string" } } } });\n`;
+    const locateModelFields: ModelFieldsLocator = (root, { typeName }) => {
+      for (const call of findCalls(root, "defineContentModel")) {
+        const arg = firstArgument(call);
+        if (arg?.type !== "ObjectExpression" || objectProperty(arg, "name")?.value !== typeName) continue;
+        const schema = objectProperty(arg, "schema");
+        const fields = schema?.type === "ObjectExpression" ? objectProperty(schema, "fields") : undefined;
+        if (fields?.type === "ObjectExpression") return fields;
+      }
+      return undefined;
+    };
+    const edit = renameContentField("model.ts", source, { use: "content-default", typeName: "page", from: "_hint", to: "hint", locateModelFields });
+    expect(edit).toBeDefined();
+    expect(edit!.start).toBeGreaterThan(source.indexOf("defineContentModel"));
   });
 });
 
@@ -457,6 +509,15 @@ describe("insertStepAfterEmitOutsideGroup", () => {
       return arrays;
     };
     const edit = insertStepAfterEmitOutsideGroup("p.ts", source, { pipelineName: "createPage", emitStep: "events.emit:page.created", newStep: "events.relay", locateSteps });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('"content.create", "events.emit:page.created", "events.relay"');
+  });
+
+  it("falls back to the built-in search when the locator finds nothing for this pipeline, instead of giving up", () => {
+    const source = 'definePipeline({ name: "createPage", steps: ["content.create", "events.emit:page.created"] });\n';
+    const locateSteps: StepListLocator = () => [];
+    const edit = insertStepAfterEmitOutsideGroup("p.ts", source, { pipelineName: "createPage", emitStep: "events.emit:page.created", newStep: "events.relay", locateSteps });
+    expect(edit).toBeDefined();
     const { text } = applyEdits(source, [edit!]);
     expect(text).toContain('"content.create", "events.emit:page.created", "events.relay"');
   });

@@ -404,6 +404,19 @@ Net changes since 5.8.1.
   a cached value in its `cache` parameter must be path-independent, or rebased onto the current
   `scratch` on every call, and that `load()` itself (a config import, a plugin's own prepare step) runs
   unconditionally, before any consent question — `--run-setup` only ever gates a module's own `setup()`.
+- `kestrel-upgrade`'s plugin API closes three more gaps a real host's plugin met once it moved onto the
+  hooks above. `DataContentModel` gains `file?: string`, the file `model/underscore-field` reads and
+  splices a verified-zero-count rename into; `LoadedProject.configFile` (previously always the target,
+  even for a plugin whose content model lives elsewhere) is used when absent, so the rename is auto
+  again instead of manual for such a project. `replaceModuleListEntry` (and its
+  `ReplaceModuleEntryOptions`) is published from `@michaelthielemann/kestrel-upgrade/codemods`, so a
+  plugin's own `switchEdits` can build a hand-written-module-list switch without reimplementing it.
+  `locateSteps` and `locateModelFields` are additive, not a replacement: previously supplying either
+  one to `insertPipelineStep`, `insertStepAfterEmitOutsideGroup` or `renameContentField` disabled the
+  built-in search entirely, even for a pipeline or type the locator itself had nothing to say about;
+  now an empty result from `locateSteps`, or `undefined` from `locateModelFields`, falls back to the
+  exact built-in search for that target, so a plugin's locator only needs to answer for the layouts it
+  actually recognizes.
 
 - `events-queue` coalesces: an event whose data carries a string `coalesceKey` is queued at most
   once per subscribed pipeline and key while an earlier row of that key has not started; a claim,
