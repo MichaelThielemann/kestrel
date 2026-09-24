@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { copyFile, mkdtemp } from "node:fs/promises";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -9,6 +9,7 @@ import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { isErr, type Result } from "@michaelthielemann/kestrel/result";
 import type { Document, Page, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { trackTempDir, untrackTempDir } from "./cleanup.ts";
 import type { Finding, UpgradeReport } from "./report.ts";
 import { summarize } from "./report.ts";
 
@@ -129,29 +130,35 @@ async function queueFindings(root: string, copy: string): Promise<{ findings: Fi
   }
 }
 
-/** Copies `dbFile` (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_check`, then reads it through the project's own persistence-sqlite; the given file is never opened after the copy. */
+/** Copies `dbFile` (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_check`, then reads it through the project's own persistence-sqlite; the given file is never opened after the copy. The copy directory is always removed before returning, whether the step succeeds or refuses. */
 export async function runDataStep(dbFile: string, root: string): Promise<DataStepResult> {
   const dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-data-"));
-  let copy: string;
+  trackTempDir(dir);
   try {
-    copy = await copyWithSiblings(dbFile, dir);
-  } catch (err) {
-    return { exitCode: 2, error: `cannot copy "${dbFile}": ${err instanceof Error ? err.message : String(err)}` };
+    let copy: string;
+    try {
+      copy = await copyWithSiblings(dbFile, dir);
+    } catch (err) {
+      return { exitCode: 2, error: `cannot copy "${dbFile}": ${err instanceof Error ? err.message : String(err)}` };
+    }
+    if (!quickCheckOk(copy)) {
+      return { exitCode: 2, error: `the copy of "${dbFile}" did not pass PRAGMA quick_check; take a consistent snapshot (persistence.snapshot, a replication snapshot, or "sqlite3 <db> .backup <copy>") and try again` };
+    }
+    const { findings, error } = await queueFindings(root, copy);
+    if (error !== undefined) return { exitCode: 2, error };
+    const report: UpgradeReport = {
+      schema: 1,
+      tool: { name: "kestrel-upgrade", version: "0.0.0" },
+      target: "6.0.0",
+      project: { root, kind: "data", installed: {} },
+      tiers: { source: "not-run", load: "not-run", boot: "not-run", data: "done" },
+      summary: summarize(findings),
+      findings,
+    };
+    const exitCode = findings.some((f) => f.severity === "error") ? 1 : 0;
+    return { exitCode, report };
+  } finally {
+    untrackTempDir(dir);
+    await rm(dir, { recursive: true, force: true });
   }
-  if (!quickCheckOk(copy)) {
-    return { exitCode: 2, error: `the copy of "${dbFile}" did not pass PRAGMA quick_check; take a consistent snapshot (persistence.snapshot, a replication snapshot, or "sqlite3 <db> .backup <copy>") and try again` };
-  }
-  const { findings, error } = await queueFindings(root, copy);
-  if (error !== undefined) return { exitCode: 2, error };
-  const report: UpgradeReport = {
-    schema: 1,
-    tool: { name: "kestrel-upgrade", version: "0.0.0" },
-    target: "6.0.0",
-    project: { root, kind: "data", installed: {} },
-    tiers: { source: "not-run", load: "not-run", boot: "not-run", data: "done" },
-    summary: summarize(findings),
-    findings,
-  };
-  const exitCode = findings.some((f) => f.severity === "error") ? 1 : 0;
-  return { exitCode, report };
 }

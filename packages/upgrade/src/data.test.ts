@@ -1,11 +1,26 @@
+import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import type * as FsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPersistenceSqlite } from "@michaelthielemann/kestrel-persistence-sqlite/impl";
 import { runDataStep } from "./data.ts";
+
+const createdCopyDirs: string[] = [];
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromises>();
+  return {
+    ...actual,
+    mkdtemp: async (prefix: string) => {
+      const dir = await actual.mkdtemp(prefix);
+      createdCopyDirs.push(dir);
+      return dir;
+    },
+  };
+});
 
 const PROJECT_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -87,4 +102,15 @@ describe("runDataStep", () => {
     expect(result.exitCode).toBe(2);
   });
 
+  it("removes its own copy directory afterward, on success and on refusal", async () => {
+    createdCopyDirs.length = 0;
+    const file = join(dir, "kestrel.db");
+    await makeDb(file, [{ id: "1", name: "page.created", pipeline: null, state: "pending" }]);
+    await runDataStep(file, PROJECT_ROOT);
+    const badFile = join(dir, "not-a-db.db");
+    await writeFile(badFile, "this is not sqlite");
+    await runDataStep(badFile, PROJECT_ROOT);
+    expect(createdCopyDirs.length).toBeGreaterThan(0);
+    for (const copyDir of createdCopyDirs) expect(existsSync(copyDir)).toBe(false);
+  });
 });
