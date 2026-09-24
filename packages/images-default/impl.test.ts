@@ -214,6 +214,21 @@ describe("images/default planning (images.plan)", () => {
     expect(events.emitted.map((e) => boundaryCast<{ ids: string[] }>(e.data, "host").ids)).toEqual([["a"]]);
   });
 
+  it("a sync job stopped by a TRANSIENT failure still raises media.updated for the items it placed before it", async () => {
+    const events = fakeEvents();
+    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }] }, undefined, fixedRenderer, events);
+    for (const id of ["a", "b"]) {
+      const { key } = await seedMedia(db, { id });
+      expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    }
+    const put = blobs.put.bind(blobs);
+    blobs.put = async (key, data, options) => (key.startsWith("site/media/b/") ? err(failure("TRANSIENT", "down")) : put(key, data, options));
+    expectOk(await images.sync());
+    await whenIdle(images);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(events.emitted.map((e) => boundaryCast<{ ids: string[] }>(e.data, "host").ids)).toEqual([["a"]]);
+  });
+
   it("does nothing, and emits nothing, a second time once already placed", async () => {
     const events = fakeEvents();
     const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, undefined, events);

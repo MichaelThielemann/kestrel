@@ -50,7 +50,9 @@ copy and removes the copy again when the item was deleted meanwhile; an upload o
 the same time therefore never leaves a deleted item's copy behind or costs a ready item its copy. It
 marks an upload `failed` only while the row is still `uploading`, and an upload turns its row `ready`
 only under the same condition: when the sync abandoned it first, the upload removes what it wrote and
-answers `TRANSIENT`. Boot fails if the copy tree and this module's own
+answers `TRANSIENT`. This holds as long as only an upload and the sync itself write depth-1 files in
+the copy tree, and the persistence module orders ids the same way for `sort: { id: "asc" }` and
+`{ id: { gt } }`, as every bundled one does. Boot fails if the copy tree and this module's own
 storage `prefix` overlap, if `publicCopy` is set but no pipeline runs `media.serve`, or if a pipeline
 runs `media.syncPublic` without `publicCopy` set.
 

@@ -3,8 +3,15 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { extOf } from "./sizes.ts";
 import type { Size } from "./sizes.ts";
 
+/** The media type of a content type: the part before any parameters, trimmed and lower-cased. */
+export function mediaTypeOf(contentType: string): string {
+  return contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+}
+
+/** Whether a media item gets variants: any raster image, judged by its media type alone; SVG and GIF keep only their original. */
 export function eligible(contentType: string): boolean {
-  return contentType.startsWith("image/") && contentType !== "image/svg+xml" && contentType !== "image/gif";
+  const mediaType = mediaTypeOf(contentType);
+  return mediaType.startsWith("image/") && mediaType !== "image/svg+xml" && mediaType !== "image/gif";
 }
 
 export interface Rendered {

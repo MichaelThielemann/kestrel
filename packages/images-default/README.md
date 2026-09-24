@@ -38,10 +38,14 @@ call. A host that registers sizes must therefore register them at boot — until
 `images.listSizes` and `images.serve` only know the config/default sizes, and `images.readStatus`
 reports nothing as orphaned (`registrySeen: false`) because it cannot yet tell a leftover from a
 size that has not been registered again yet. Size rows written by earlier versions are deleted once
-at setup, with a log line naming the count. Whenever the effective size set changes — a new size, or
+at setup, with a log line naming the count; a variant or retired row without a `slot` (written before
+6.0.0) stops setup instead, since this version cannot read it. Whenever the effective size set changes — a new size, or
 an existing one with a new width/height/fit/format/quality — this module compares it against the
 stored rows and starts its background sync job to place and render the difference on every existing
-item, raising `media.updated` (see below) per chunk it touches. `images_variants` is otherwise
+item, raising `media.updated` (see below) per chunk it touches. The comparison counts ready images
+against the rows of each size, so an image that has no rows yet — its plan is still queued, or its
+original is missing from the blob store — also starts that job at every start until it is placed or
+deleted; the job then skips it after logging why. `images_variants` is otherwise
 unaffected by a size change alone: variants stay in the database, and `images.readStatus` reports
 variants of sizes nobody declares any more under `orphaned`, which `images.prune` retires (see
 below).
@@ -112,8 +116,9 @@ Concurrent requests to generate variants for the same media item share one rende
 it twice; two callers that start a sync job in the same instant share the same start, so only one job
 row is ever created. Placing never runs more than four public-copy writes at a time.
 
-Within one process, placing, rendering and `images.remove` of one item run one at a time, so
-`images.remove` waits for a plan or a render of that item already in progress. Across processes the
+Within one process, placing, rendering, `images.remove` and the public-copy sync's writes of one item
+run one at a time, so `images.remove` waits for a plan or a render of that item already in progress;
+a render stops after the size it is rendering once a remove of its item is waiting. Across processes the
 store decides: a plan or a render reads the media item again after its last write and, when the item
 was deleted meanwhile, removes everything it wrote; a render marks its row `done` only if the row
 still has the path and spec it rendered for, and otherwise drops what it wrote at a path the row no

@@ -23,6 +23,13 @@ describe("eligible", () => {
     expect(eligible("application/pdf")).toBe(false);
     expect(eligible("text/plain")).toBe(false);
   });
+
+  it("judges the media type alone, ignoring parameters and case", () => {
+    expect(eligible("image/svg+xml; charset=utf-8")).toBe(false);
+    expect(eligible("IMAGE/GIF")).toBe(false);
+    expect(eligible("Image/JPEG")).toBe(true);
+    expect(eligible("image/png; x=1")).toBe(true);
+  });
 });
 
 describe("render", () => {

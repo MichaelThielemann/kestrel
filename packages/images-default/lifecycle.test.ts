@@ -471,3 +471,73 @@ describe("images/default: images.syncPublic touches only <id>/variants/<file>", 
     for (const key of ["site/media/x/y/variants/z.webp", "site/media/m1/variants/deep/z.webp", "site/media/m1/photo.jpg", "site/media/stray.webp"]) expect(w.blobs.blobs.has(key)).toBe(true);
   });
 });
+
+describe("images/default: images.syncPublic racing a render", () => {
+  it("a copy it writes from content read before another process's render finished ends with the render", async () => {
+    const w = await world();
+    const other = await w.open();
+    await seed(w, "m1", await jpeg(1000, 600));
+    expectOk(await w.images.plan(["m1"]));
+    w.blobs.blobs.delete("site/media/m1/variants/thumb.webp");
+    const put = w.blobs.put.bind(w.blobs);
+    let armed = true;
+    w.blobs.put = async (key, data, options) => {
+      if (armed && key === "site/media/m1/variants/thumb.webp") {
+        armed = false;
+        expectOk(await other.generate("m1"));
+      }
+      return put(key, data, options);
+    };
+    expectOk(await w.images.syncPublic());
+    await whenIdle(w.images);
+    expect((await rowsOf(w, "m1")).map((r) => r.state)).toEqual(["done"]);
+    expect(w.blobs.blobs.get("site/media/m1/variants/thumb.webp")?.data).toEqual(new Uint8Array([9, 9, 5]));
+  });
+});
+
+describe("images/default: a content type with parameters", () => {
+  it("an SVG sent with a charset gets no variant rows", async () => {
+    const w = await world();
+    await seed(w, "m1", new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>"), { contentType: "image/svg+xml; charset=utf-8" });
+    expectOk(await w.images.plan(["m1"]));
+    expectOk(await w.images.generate("m1"));
+    expect(await rowsOf(w, "m1")).toEqual([]);
+  });
+});
+
+describe("images/default: images.remove in the same process", () => {
+  it("stops a render of the item after its current size instead of rendering every size first", async () => {
+    let renders = 0;
+    const g = gate();
+    const gated: Renderer = async (d, s, p) => {
+      renders += 1;
+      g.arrive();
+      await g.wait;
+      return fixedRenderer(d, s, p);
+    };
+    const w = await world({ sizes: [THUMB, HERO, { ...THUMB, name: "small", width: 640 }] }, gated);
+    await seed(w, "m1", await jpeg(1000, 600));
+    expectOk(await w.images.plan(["m1"]));
+    const generating = w.images.generate("m1");
+    await g.reached;
+    await deleteMedia(w, "m1");
+    const removing = w.images.remove("m1");
+    g.open();
+    await generating;
+    expectOk(await removing);
+    expect(renders).toBe(1);
+    expect(copiesOf(w, "m1")).toEqual([]);
+    expect(await rowsOf(w, "m1")).toEqual([]);
+  });
+});
+
+describe("images/default: rows written before 6.0.0", () => {
+  it("setup refuses variant or retired rows without a slot, naming the collection", async () => {
+    const w = await world();
+    expectOk(await w.db.createOne(VARIANTS, { mediaId: "old", size: "thumb", spec: "x", width: 1, height: 1, format: "webp", key: "media-variants/old/thumb.webp", bytes: 0, state: "done", error: null, attempts: 0, updatedAt: 1 }));
+    await expect(w.open()).rejects.toThrow(/1 row\(s\) in "images_variants" have no slot/);
+    expectOk(await w.db.deleteMany(VARIANTS, {}));
+    expectOk(await w.db.createOne(RETIRED, { mediaId: "old", file: "thumb.webp", retiredAt: 1 }));
+    await expect(w.open()).rejects.toThrow(/1 row\(s\) in "images_retired" have no slot/);
+  });
+});

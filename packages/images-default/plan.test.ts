@@ -21,6 +21,11 @@ describe("plannedFormat and plannedExt", () => {
     expect(plannedExt(originalSize, "image/png")).toBe("png");
   });
 
+  it("reads the media type of a content type with parameters or in another case", () => {
+    expect(plannedFormat(originalSize, "image/png; x=1")).toBe("png");
+    expect(plannedExt(originalSize, "IMAGE/JPEG")).toBe("jpg");
+  });
+
   it("falls back to jpeg for every other eligible type (HEIC, TIFF, BMP, ...)", () => {
     expect(plannedFormat(originalSize, "image/heic")).toBe("jpeg");
     expect(plannedFormat(originalSize, "image/tiff")).toBe("jpeg");
