@@ -3,7 +3,7 @@ import "@michaelthielemann/kestrel-contracts/authn";
 import { EVENTS } from "@michaelthielemann/kestrel-contracts/events";
 import { eventEnvelope } from "@michaelthielemann/kestrel-contracts/events.envelope";
 import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/events.envelope";
-import { mergeRelayReport, RELAY_SCHEMA } from "@michaelthielemann/kestrel-contracts/events.steps";
+import { DELIVERY_STATUS_SCHEMA, mergeRelayReport, RELAY_SCHEMA } from "@michaelthielemann/kestrel-contracts/events.steps";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";
@@ -112,6 +112,11 @@ export default defineModule({
       if (isErr(status)) return ctx.fail(status.error);
       return ok({ ...ctx, result: status.value });
     },
+    readDeliveryStatus: async (ctx: Context) => {
+      const status = await queue.deliveryStatus();
+      if (isErr(status)) return ctx.fail(status.error);
+      return ok({ ...ctx, result: status.value });
+    },
     listDead: async (ctx: Context) => {
       const raw = first(ctx.payload.limit) ?? (typeof ctx.payload.limit === "number" ? String(ctx.payload.limit) : undefined);
       const limit = raw === undefined ? DEFAULT_DEAD_LIMIT : Math.min(MAX_DEAD_LIMIT, Number(raw));
@@ -148,6 +153,7 @@ export default defineModule({
   describe: () => ({
     emit: (spec: string) => ({ summary: `Queue event "${spec}" for the subscribed handler pipelines; the worker delivers it after this run`, reads: [], writes: [], errors: { 503: "the event could not be persisted" }, atomicSafe: true }),
     readQueueStatus: { summary: "Queue counters per state, the oldest pending event and the worker state of this process", reads: [], writes: ["result"], output: STATUS_SCHEMA, atomicSafe: true },
+    readDeliveryStatus: { summary: "Dead-letter rows of the queue across every process: deliveries that used up maxAttempts and wait for events.retryDead", reads: [], writes: ["result"], output: DELIVERY_STATUS_SCHEMA, errors: { 503: "the queue could not be read" } },
     listDead: { summary: "Dead-letter events, most recently failed first", reads: [], writes: ["result"], query: { limit: { type: "integer", minimum: 1, maximum: MAX_DEAD_LIMIT } }, output: DEAD_SCHEMA, atomicSafe: true },
     retryDead: (arg: string) =>
       arg === "one"

@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { createRelayReports } from "./impl.ts";
+import { createDeadDeliveries, createRelayReports } from "./impl.ts";
+
+describe("events/direct dead deliveries", () => {
+  it("starts at zero with no lastDeadAt, scoped to the process since the given instant", () => {
+    const dead = createDeadDeliveries(1_000);
+    expect(dead.status()).toEqual({ dead: 0, scope: "process", since: 1_000, lastDeadAt: null });
+  });
+
+  it("record() counts the delivery and stamps lastDeadAt with the current time", () => {
+    const clock = { t: 1_000 };
+    const dead = createDeadDeliveries(1_000, () => clock.t);
+    clock.t = 1_500;
+    dead.record();
+    expect(dead.status()).toEqual({ dead: 1, scope: "process", since: 1_000, lastDeadAt: 1_500 });
+    clock.t = 1_800;
+    dead.record();
+    expect(dead.status()).toEqual({ dead: 2, scope: "process", since: 1_000, lastDeadAt: 1_800 });
+  });
+});
 
 describe("events/direct relay reports: the map does not leak", () => {
   it("take() clears an existing entry, leaving nothing for the sweep", () => {

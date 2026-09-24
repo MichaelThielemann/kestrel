@@ -2,7 +2,34 @@ import type { JsonSchema } from "@michaelthielemann/kestrel/defineModule";
 import { defineStepSet } from "./stepSet.ts";
 
 /** Every event delivery module registers these steps; the bus module `events/inmemory` registers none. */
-export const EVENT_DELIVERY_STEPS = defineStepSet({ id: "events.delivery", prefix: "events", steps: ["events.emit", "events.relay"] });
+export const EVENT_DELIVERY_STEPS = defineStepSet({ id: "events.delivery", prefix: "events", steps: ["events.emit", "events.relay", "events.readDeliveryStatus"] });
+
+/** What `events.readDeliveryStatus` answers: the deliveries this module gave up on. */
+export interface DeliveryStatus {
+  /** Deliveries that failed and that the module does not retry on its own. */
+  dead: number;
+  /**
+   * `store`: counted over the module's stored rows, the same whichever process answers, lowered by a retry.
+   * `process`: counted in the process that answers, since `since`; another process of the same site has its
+   * own count, and a restart starts at 0.
+   */
+  scope: "store" | "process";
+  /** Where a `process` count starts; `null` for `store`. */
+  since: number | null;
+  /** When the newest counted delivery failed; `null` when `dead` is 0. */
+  lastDeadAt: number | null;
+}
+
+export const DELIVERY_STATUS_SCHEMA: JsonSchema = {
+  type: "object",
+  properties: {
+    dead: { type: "integer", minimum: 0 },
+    scope: { type: "string", enum: ["store", "process"] },
+    since: { type: ["number", "null"] },
+    lastDeadAt: { type: ["number", "null"] },
+  },
+  required: ["dead", "scope", "since", "lastDeadAt"],
+};
 
 const RELAY_STATUS: JsonSchema = { type: "string", enum: ["done", "error", "pending", "queued"] };
 

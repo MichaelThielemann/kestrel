@@ -2,19 +2,20 @@ import { z } from "zod";
 import "@michaelthielemann/kestrel-contracts/authn";
 import { EVENTS, type Events } from "@michaelthielemann/kestrel-contracts/events";
 import { eventEnvelope } from "@michaelthielemann/kestrel-contracts/events.envelope";
-import { mergeRelayReport, relaySummary, RELAY_SCHEMA } from "@michaelthielemann/kestrel-contracts/events.steps";
+import { DELIVERY_STATUS_SCHEMA, mergeRelayReport, relaySummary, RELAY_SCHEMA } from "@michaelthielemann/kestrel-contracts/events.steps";
 import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
 import { ok } from "@michaelthielemann/kestrel/result";
-import { createRelayReports, startEventTriggers, type RelayReports } from "./impl.ts";
+import { createDeadDeliveries, createRelayReports, startEventTriggers, type DeadDeliveries, type RelayReports } from "./impl.ts";
 
 const SWEEP_AFTER_MS = 60_000;
 
 interface DirectInstance {
   bus: Events;
   reports: RelayReports;
+  dead: DeadDeliveries;
   logger: Logger;
 }
 
@@ -25,10 +26,10 @@ export default defineModule({
   configSchema: z.object({}).strict(),
 
   async setup(_config, deps): Promise<DirectInstance> {
-    return { bus: deps.get(EVENTS), reports: createRelayReports(), logger: deps.logger };
+    return { bus: deps.get(EVENTS), reports: createRelayReports(), dead: createDeadDeliveries(deps.bootStartedAt ?? Date.now()), logger: deps.logger };
   },
 
-  triggers: { event: (instance, entries, run, logger) => startEventTriggers(instance.bus, entries, run, logger, instance.reports) },
+  triggers: { event: (instance, entries, run, logger) => startEventTriggers(instance.bus, entries, run, logger, instance.reports, instance.dead) },
 
   steps: (instance) => ({
     emit: stepFactory((spec: string) => async (ctx: Context) => {
@@ -46,6 +47,7 @@ export default defineModule({
       const report = { status: relaySummary(entries), pipelines: entries };
       return ok({ ...ctx, result: mergeRelayReport(ctx.result, report, "events/direct") });
     },
+    readDeliveryStatus: async (ctx: Context) => ok({ ...ctx, result: instance.dead.status() }),
   }),
 
   describe: () => ({
@@ -55,6 +57,12 @@ export default defineModule({
       reads: [],
       writes: ["result._events"],
       extendsOutput: RELAY_SCHEMA,
+    },
+    readDeliveryStatus: {
+      summary: "Failed deliveries of the process that answers, since it started; inline delivery never retries, so each one is final",
+      reads: [],
+      writes: ["result"],
+      output: DELIVERY_STATUS_SCHEMA,
     },
   }),
 });

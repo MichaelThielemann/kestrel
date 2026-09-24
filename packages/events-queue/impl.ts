@@ -1,6 +1,6 @@
 import { hostname } from "node:os";
 import type { EventData } from "@michaelthielemann/kestrel-contracts/events";
-import { relaySummary, type RelayEntry, type RelayReport } from "@michaelthielemann/kestrel-contracts/events.steps";
+import { relaySummary, type DeliveryStatus, type RelayEntry, type RelayReport } from "@michaelthielemann/kestrel-contracts/events.steps";
 import type { Document, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { EventEntry } from "@michaelthielemann/kestrel/defineModule";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
@@ -71,6 +71,8 @@ export interface EventsQueue {
   /** Copies every unfanned row (`pipeline: null`) to one row per currently subscribed pipeline. Returns how many were fanned out. */
   fanOutUnfanned(): Promise<number>;
   status(): Promise<Result<QueueStatus, PersistenceError>>;
+  /** The dead-letter rows across every process: deliveries this module gave up on. */
+  deliveryStatus(): Promise<Result<DeliveryStatus, PersistenceError>>;
   listDead(limit: number): Promise<Result<{ items: DeadEntry[] }, PersistenceError>>;
   retryDead(id: string): Promise<Result<{ retried: number }, PersistenceError>>;
   purgeDone(): Promise<Result<{ removed: number }, PersistenceError>>;
@@ -363,6 +365,13 @@ export async function createEventsQueue(config: Config, deps: QueueDeps): Promis
       const dead = deadCount.ok ? deadCount.value : 0;
       const done24h = done24hCount.ok ? done24hCount.value : 0;
       return ok({ pending, running: running_, dead, done24h, oldestPendingAt: oldest.value.items[0]?.availableAt ?? null, worker: { running, lastTickAt } });
+    },
+    async deliveryStatus() {
+      const dead = await db.count(QUEUE, { state: "dead" });
+      if (isErr(dead)) return dead;
+      const newest = await db.findMany<QueueRow>(QUEUE, { state: "dead" }, { sort: { finishedAt: "desc" }, limit: 1 });
+      if (isErr(newest)) return newest;
+      return ok({ dead: dead.value, scope: "store", since: null, lastDeadAt: newest.value.items[0]?.finishedAt ?? null });
     },
     async listDead(limit) {
       const page = await db.findMany<QueueRow>(QUEUE, { state: "dead" }, { sort: { finishedAt: "desc" }, limit });

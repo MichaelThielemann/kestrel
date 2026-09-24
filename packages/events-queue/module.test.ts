@@ -467,6 +467,55 @@ describe("events/queue in a booted instance", () => {
     await kestrel.stop();
   });
 
+  it("a dead-letter row leaves the instance healthy", async () => {
+    const db = createFakePersistence();
+    const persistenceCapturing = defineModule({
+      name: "persistence/fake",
+      provides: [PERSISTENCE],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return db;
+      },
+    });
+    const probe = defineModule({
+      name: "probe/fail",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ boom: async (ctx: Context) => ctx.fail("NOT_FOUND", "gone") }),
+      describe: () => ({ boom: { summary: "fails on purpose", reads: [], writes: [] } }),
+    });
+    const kestrel = await boot({
+      config: {
+        modules: [
+          { use: "./persistence.ts", config: {} },
+          { use: "./events.ts", config: {} },
+          { use: "@michaelthielemann/kestrel-events-queue", config: { pollMs: 2, relayMs: 0, maxAttempts: 1 } },
+          { use: "./probe.ts", config: {} },
+        ],
+        triggers: [{ http: "POST /docs", pipeline: "createDoc" }, { event: "doc.created", pipeline: "onCreated" }],
+        http: null,
+      },
+      modules: [persistenceCapturing, bus, module, probe],
+      pipelines: [definePipeline({ name: "createDoc", steps: ["events.emit:doc.created", "events.relay"] }), definePipeline({ name: "onCreated", steps: ["probe.boom"] }), definePipeline({ name: "status", steps: ["events.readDeliveryStatus"] })],
+      logger: silentLogger,
+    });
+    await kestrel.start();
+    const res = await kestrel.run("createDoc", { trigger: { kind: "http", name: "POST /docs" } });
+    expect(res.status).toBe(200);
+
+    await new Promise((r) => setTimeout(r, 30));
+    const status = await kestrel.run("status", { trigger: { kind: "http", name: "GET /status" } });
+    expect(status.result).toMatchObject({ dead: 1 });
+    expect(kestrel.health()).toEqual({ ok: true, restartRequired: false, modules: [] });
+
+    await kestrel.stop();
+  });
+
   it("relayPipelines naming an unknown pipeline fails boot with a clear message", async () => {
     const persistenceFake = defineModule({
       name: "persistence/fake",
@@ -515,12 +564,13 @@ describe("events/queue in a booted instance", () => {
 });
 
 describe("events/queue: atomicSafe is pinned", () => {
-  it("every step is atomic-safe, except relay, which runs whole pipelines and cannot be", async () => {
+  it("every step is atomic-safe, except relay and readDeliveryStatus, which cannot be", async () => {
     const { instance } = await setup();
     const describeMap = module.describe!(instance);
+    const notAtomicSafe = new Set(["relay", "readDeliveryStatus"]);
     for (const [name, description] of Object.entries(describeMap)) {
       const resolved = typeof description === "function" ? description("one") : description;
-      expect(resolved.atomicSafe, `${name}.atomicSafe`).toBe(name === "relay" ? undefined : true);
+      expect(resolved.atomicSafe, `${name}.atomicSafe`).toBe(notAtomicSafe.has(name) ? undefined : true);
     }
   });
 });

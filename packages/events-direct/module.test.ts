@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { z } from "zod";
+import { boot, defineModule, definePipeline } from "@michaelthielemann/kestrel";
 import { eventDeliveryStepTests, type EventDeliveryFixture } from "@michaelthielemann/kestrel-contracts/events.steps.contract.test";
 import type { EventData, Events } from "@michaelthielemann/kestrel-contracts/events";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -7,9 +9,10 @@ import { failure, type CoreCode, type KestrelError } from "@michaelthielemann/ke
 import type { RunResult, Runner } from "@michaelthielemann/kestrel/runner";
 import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err } from "@michaelthielemann/kestrel/result";
+import busModule from "@michaelthielemann/kestrel-events-inmemory";
 import { createEventsInmemory } from "@michaelthielemann/kestrel-events-inmemory/impl";
 import module from "./module.ts";
-import { createRelayReports, startEventTriggers } from "./impl.ts";
+import { createDeadDeliveries, createRelayReports, startEventTriggers } from "./impl.ts";
 
 function fakeCtx(overrides: Partial<Context> = {}): Context {
   return {
@@ -50,8 +53,8 @@ function eventDeliveryFixture(): EventDeliveryFixture {
     delivered.push(jsonCopy(input.payload));
     return { runId: "r", status: 200 };
   };
-  const instance = { bus: spyBus, reports: createRelayReports(), logger: silentLogger };
-  startEventTriggers(bus, [{ event: "x.happened", pipeline: "onX1" }, { event: "x.happened", pipeline: "onX2" }], run, silentLogger, instance.reports);
+  const instance = { bus: spyBus, reports: createRelayReports(), dead: createDeadDeliveries(0), logger: silentLogger };
+  startEventTriggers(bus, [{ event: "x.happened", pipeline: "onX1" }, { event: "x.happened", pipeline: "onX2" }], run, silentLogger, instance.reports, instance.dead);
   return {
     steps: module.steps!(instance),
     describe: module.describe!(instance),
@@ -186,5 +189,83 @@ describe("events/direct event trigger hook", () => {
     stop();
 
     expect(order).toEqual(["first:start", "first:end", "second:start", "second:end"]);
+  });
+
+  it("counts a delivery that answered 404 and one that threw, once each", async () => {
+    const events = createEventsInmemory();
+    const dead = createDeadDeliveries(0);
+    const run: Runner = async (pipeline) => (pipeline === "notFound" ? { runId: "r", status: 404, error: "gone", code: "NOT_FOUND" } : Promise.reject(new Error("boom")));
+
+    const stop = startEventTriggers(events, [{ event: "page.created", pipeline: "notFound" }, { event: "page.created", pipeline: "throws" }], run, noLogger, undefined, dead);
+    await expect(events.emit("page.created", {})).rejects.toThrow();
+    stop();
+
+    expect(dead.status()).toMatchObject({ dead: 2 });
+  });
+
+  it("does not count a delivery that answered 200", async () => {
+    const events = createEventsInmemory();
+    const dead = createDeadDeliveries(0);
+
+    const stop = startEventTriggers(events, [{ event: "page.created", pipeline: "ok" }], async () => ok, noLogger, undefined, dead);
+    await events.emit("page.created", {});
+    stop();
+
+    expect(dead.status()).toMatchObject({ dead: 0 });
+  });
+
+  it("counts a failed delivery of an event raised outside a run", async () => {
+    const events = createEventsInmemory();
+    const dead = createDeadDeliveries(0);
+    const run: Runner = async () => ({ runId: "r", status: 500, error: "boom", code: "INTERNAL", retryable: false });
+
+    const stop = startEventTriggers(events, [{ event: "migrations.applied", pipeline: "onMigrated" }], run, noLogger, undefined, dead);
+    await events.emit("migrations.applied", { migrations: ["1"] });
+    stop();
+
+    expect(dead.status()).toMatchObject({ dead: 1 });
+  });
+});
+
+describe("events/direct in a booted instance", () => {
+  it("a failed inline delivery leaves the instance healthy", async () => {
+    const probe = defineModule({
+      name: "probe/fail",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ boom: async (ctx: Context) => ctx.fail("NOT_FOUND", "gone") }),
+      describe: () => ({ boom: { summary: "fails on purpose", reads: [], writes: [] } }),
+    });
+    const kestrel = await boot({
+      config: {
+        modules: [
+          { use: "@michaelthielemann/kestrel-events-inmemory", config: {} },
+          { use: "@michaelthielemann/kestrel-events-direct", config: {} },
+          { use: "./probe.ts", config: {} },
+        ],
+        triggers: [{ http: "POST /raise", pipeline: "raise" }, { event: "thing.happened", pipeline: "onThing" }],
+        http: null,
+      },
+      modules: [busModule, module, probe],
+      pipelines: [
+        definePipeline({ name: "raise", steps: ["events.emit:thing.happened", "events.relay"] }),
+        definePipeline({ name: "onThing", steps: ["probe.boom"] }),
+        definePipeline({ name: "status", steps: ["events.readDeliveryStatus"] }),
+      ],
+      logger: silentLogger,
+    });
+    await kestrel.start();
+    const raised = await kestrel.run("raise", { trigger: { kind: "http", name: "POST /raise" } });
+    expect(raised.status).toBe(200);
+
+    const status = await kestrel.run("status", { trigger: { kind: "http", name: "GET /status" } });
+    expect(status.result).toMatchObject({ dead: 1 });
+    expect(kestrel.health()).toEqual({ ok: true, restartRequired: false, modules: [] });
+
+    await kestrel.stop();
   });
 });

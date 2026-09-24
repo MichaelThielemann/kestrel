@@ -366,6 +366,32 @@ describe("events/queue admin", () => {
     expect((await rows()).map((r) => r.state)).toEqual(["pending", "pending"]);
   });
 
+  it("a row waiting for its retry is not dead; at maxAttempts it is", async () => {
+    const { queue, clock } = await make({ maxAttempts: 2 });
+    const run: Runner = async () => ({ runId: "r", status: 500, error: "boom", code: "INTERNAL", retryable: false });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], run);
+    await queue.enqueue("x", {});
+
+    await queue.tick();
+    expect(expectOk(await queue.deliveryStatus())).toEqual({ dead: 0, scope: "store", since: null, lastDeadAt: null });
+
+    clock.t += 200_000;
+    await queue.tick();
+    expect(expectOk(await queue.deliveryStatus())).toEqual({ dead: 1, scope: "store", since: null, lastDeadAt: clock.t });
+  });
+
+  it("retrying a dead row lowers the dead count", async () => {
+    const { queue, rows } = await make({ maxAttempts: 1 });
+    queue.setDelivery([{ event: "x", pipeline: "p1" }], async () => ({ runId: "r", status: 500, error: "no", code: "INTERNAL", retryable: false }));
+    await queue.enqueue("x", {});
+    await queue.tick();
+    expect(expectOk(await queue.deliveryStatus())).toMatchObject({ dead: 1 });
+
+    const [row] = await rows();
+    expect(expectOk(await queue.retryDead(row!.id))).toEqual({ retried: 1 });
+    expect(expectOk(await queue.deliveryStatus())).toMatchObject({ dead: 0 });
+  });
+
   it("retryTarget accepts all and one only", () => {
     expect(retryTarget("all")).toBe("all");
     expect(retryTarget("one")).toBe("one");

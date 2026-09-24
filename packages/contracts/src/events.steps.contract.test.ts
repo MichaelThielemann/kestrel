@@ -4,7 +4,7 @@ import type { Context, Step, StepFactory, StepResult } from "@michaelthielemann/
 import type { StepDescription } from "@michaelthielemann/kestrel/defineModule";
 import type { CoreCode, KestrelError } from "@michaelthielemann/kestrel/errors";
 import { stepPrefix } from "@michaelthielemann/kestrel/defineModule";
-import { EVENT_DELIVERY_STEPS, RELAY_SCHEMA } from "./events.steps.ts";
+import { DELIVERY_STATUS_SCHEMA, EVENT_DELIVERY_STEPS, RELAY_SCHEMA, type DeliveryStatus } from "./events.steps.ts";
 import type { EventData } from "./events.ts";
 
 export interface EventDeliveryFixture {
@@ -19,6 +19,7 @@ export interface EventDeliveryFixture {
 const PREFIX = stepPrefix(EVENT_DELIVERY_STEPS.prefix);
 const EMIT_KEY = EVENT_DELIVERY_STEPS.steps[0]!.slice(PREFIX.length + 1);
 const RELAY_KEY = EVENT_DELIVERY_STEPS.steps[1]!.slice(PREFIX.length + 1);
+const STATUS_KEY = EVENT_DELIVERY_STEPS.steps[2]!.slice(PREFIX.length + 1);
 
 function fakeCtx(overrides: Partial<Context> = {}): Context {
   return {
@@ -56,6 +57,14 @@ function describeRelayOf(fixture: EventDeliveryFixture): StepDescription {
   return boundaryCast<StepDescription>(fixture.describe[RELAY_KEY], "host");
 }
 
+function readDeliveryStatusStepOf(fixture: EventDeliveryFixture): Step {
+  return boundaryCast<Step>(fixture.steps[STATUS_KEY], "host");
+}
+
+function describeReadDeliveryStatusOf(fixture: EventDeliveryFixture): StepDescription {
+  return boundaryCast<StepDescription>(fixture.describe[STATUS_KEY], "host");
+}
+
 async function emitAndCapture(fixture: EventDeliveryFixture, spec: string, ctx: Context): Promise<Record<string, unknown>> {
   const emit = emitStepOf(fixture)(spec);
   const result: StepResult = await emit(ctx);
@@ -89,6 +98,23 @@ export function eventDeliveryStepTests(make: () => Promise<EventDeliveryFixture>
       const fixture = await make();
       const description = describeRelayOf(fixture);
       expect(description.extendsOutput).toEqual(RELAY_SCHEMA);
+    });
+
+    it("events.readDeliveryStatus declares the shared DELIVERY_STATUS_SCHEMA as its output, not a copy", async () => {
+      const fixture = await make();
+      const description = describeReadDeliveryStatusOf(fixture);
+      expect(description.output).toEqual(DELIVERY_STATUS_SCHEMA);
+      expect(description.reads).toEqual([]);
+      expect(description.writes).toEqual(["result"]);
+    });
+
+    it("events.readDeliveryStatus answers dead: 0 and lastDeadAt: null before any delivery failed", async () => {
+      const fixture = await make();
+      const status = readDeliveryStatusStepOf(fixture);
+      const result: StepResult = await status(fakeCtx());
+      if (!result.ok) throw new Error(`readDeliveryStatus failed: ${result.error.code} ${result.error.message}`);
+      const body = boundaryCast<{ result?: DeliveryStatus }>(result.value, "host");
+      expect(body.result).toMatchObject({ dead: 0, lastDeadAt: null });
     });
 
     it("events.relay reports {status: 'done', pipelines: []} for a run that raised nothing, at zero cost", async () => {
