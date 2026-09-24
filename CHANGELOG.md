@@ -606,7 +606,9 @@ Net changes since 5.8.1.
   through `events@1` (`delivery.republishOutput`, coalesced by the queue), with `"background"`
   (default) by the module's own loop in the process that marked them. Renders time out after
   `dependencies.renderTimeoutSeconds`; a failed re-render keeps the previous output and is retried
-  after `dependencies.backoffSeconds`, up to `dependencies.maxAttempts`. `delivery.markAll:<type>`
+  after `dependencies.backoffSeconds`, up to `dependencies.maxAttempts`; a change marked while a render
+  in the same process was reading it marks that output again once the render has committed.
+  `delivery.markAll:<type>`
   marks every output of a type, `delivery.checkBuild` marks everything once per new `payload.build`
   and stores the build only after marking succeeded, `delivery.resumeStale` releases expired claims,
   removes tombstones and orphaned dependency sets and re-raises marks left behind,

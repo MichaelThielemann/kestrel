@@ -156,8 +156,10 @@ older render never overwrites a newer write. A render that loses removes the fil
 is live at that path; if its own output is still `live` or `error` at the same path, it marks it again instead.
 `delivery.unpublish` leaves a `deleted` row for every locale (also one that was never rendered), which blocks a
 render still in flight, and which `delivery.resumeStale` removes after `claimTtlSeconds`; reads never return it.
-Dependency sets are written before the status row names them, so a crash leaves either the previous complete set or
-an orphan that `delivery.resumeStale` removes. The one way a removed page can remain is a process that stops between
+A change marked while a render in the same process is still running marks that output again once the render has
+committed, if the render read what the change touched, so a dependency the render reads for the first time cannot
+slip past the mark before its set is recorded. Dependency sets are written before the status row names them, so a
+crash leaves either the previous complete set or an orphan that `delivery.resumeStale` removes. The one way a removed page can remain is a process that stops between
 a losing render's file write and its cleanup.
 
 **Operations.** `delivery.markAll:<type>` marks every output of a type, creating a marked row for a document that
