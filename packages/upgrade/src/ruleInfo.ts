@@ -1,3 +1,4 @@
+import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
 import { isRecord } from "./guards.ts";
 import type { Rule } from "./plugin.ts";
 import type { Finding } from "./report.ts";
@@ -63,13 +64,51 @@ export const busSubscriberQueueRule: Rule = {
   },
 };
 
-/** `types/breaking-signatures`: `Deps`, `Introspection`, `PipelineDefinition["steps"]`, `ModuleManifest` and `FakePersistence` all gained required members; only the consumer's own typecheck sees a violation. */
+/** `types/breaking-signatures`: `Deps`, `Introspection`, `PipelineDefinition["steps"]`, `ModuleManifest`, `FakePersistence`, `Manifest` and `Kestrel["contracts"]` all gained required members; only the consumer's own typecheck sees a violation. */
 export const typeSignaturesRule: Rule = {
   id: "types/breaking-signatures",
   check() {
     return [
-      infoFinding("types/breaking-signatures", "types/breaking-signatures", "Deps.eventTriggers, Introspection.health(), PipelineDefinition[\"steps\"] (readonly PipelineEntry[]), ModuleManifest.atomicScope and FakePersistence's atomic members are all required now", "run your own typecheck after installing the 6.0.0 packages; a hand-built implementation of any of these needs the new members", {}, "docs/upgrading.md#types-breaking-signatures"),
+      infoFinding("types/breaking-signatures", "types/breaking-signatures", "Deps.eventTriggers, Introspection.health(), PipelineDefinition[\"steps\"] (readonly PipelineEntry[]), ModuleManifest.atomicScope, FakePersistence's atomic members, Manifest.warnings and Kestrel[\"contracts\"].names() are all required now", "run your own typecheck after installing the 6.0.0 packages; a hand-built implementation of any of these needs the new members", {}, "docs/upgrading.md#types-breaking-signatures"),
     ];
+  },
+};
+
+const STEP_SHAPE_CHANGES: Record<string, string> = {
+  "redirects.lookup": "its hit is now terminalOutput: { redirect: { to, status } }, combined with the 200 as anyOf; status is narrowed to 301 | 302 | 307 | 308 and the schema is closed",
+  "media.upload": "its 200 is now anyOf, not oneOf: the continuing branch (after events.relay) carries _events alongside the item or list result, a ctx.done() branch does not -- narrow with '_events' in res, not res._events",
+  "insights.readManifest": "its output schema follows Manifest's two new fields, atomicScope and warnings",
+  "events.listDead": "its items now carry pipeline and runId, and rows are no longer ordered across pipelines",
+};
+
+/** `responses/breaking-step-shapes`: flags a pipeline running one of a handful of steps whose 6.0.0 response or manifest shape differs from 5.8's. */
+export const breakingStepShapesRule: Rule = {
+  id: "responses/breaking-step-shapes",
+  check(ctx) {
+    const findings: Finding[] = [];
+    for (const def of ctx.project.input.pipelines) {
+      for (const step of pipelineSteps(def.steps)) {
+        const bareName = step.split(":")[0]!;
+        const change = STEP_SHAPE_CHANGES[bareName];
+        if (change === undefined) continue;
+        findings.push(infoFinding(`responses/breaking-step-shapes:${def.name}:${bareName}`, "responses/breaking-step-shapes", `pipeline "${def.name}" runs "${bareName}", whose shape changed in 6.0.0: ${change}`, "update any client or test reading the old shape", { pipeline: def.name, step: bareName }, "docs/upgrading.md#responses-breaking-step-shapes"));
+      }
+    }
+    return findings;
+  },
+};
+
+/** `steps/ctx-done-terminal-output`: a local module calling `ctx.done()` needs `terminalOutput` on that step's `describe()` entry now; boot cannot detect a missing one. */
+export const ctxDoneTerminalOutputRule: Rule = {
+  id: "steps/ctx-done-terminal-output",
+  check(ctx) {
+    const findings: Finding[] = [];
+    for (const [moduleName, file] of localModuleFiles(ctx)) {
+      const source = ctx.readFile(file);
+      if (source === undefined || !source.includes("ctx.done(")) continue;
+      findings.push(infoFinding(`steps/ctx-done-terminal-output:${moduleName}`, "steps/ctx-done-terminal-output", `module "${moduleName}" calls ctx.done(); a step whose early result does not match its terminalOutput schema now fails the run, and boot cannot detect a mismatch by itself`, "add terminalOutput (the same schema as output when the early result has that shape) to every step that calls ctx.done()", { file, module: moduleName }, "docs/upgrading.md#steps-ctx-done-terminal-output"));
+    }
+    return findings;
   },
 };
 
@@ -104,4 +143,4 @@ export const restoreFreshnessRule: Rule = {
   },
 };
 
-export const INFO_RULES: readonly Rule[] = [deliveryMembersRule, busHandlerThrowsRule, busSubscriberQueueRule, typeSignaturesRule, runPipelineValidatesRule, restoreFreshnessRule];
+export const INFO_RULES: readonly Rule[] = [deliveryMembersRule, busHandlerThrowsRule, busSubscriberQueueRule, typeSignaturesRule, breakingStepShapesRule, ctxDoneTerminalOutputRule, runPipelineValidatesRule, restoreFreshnessRule];

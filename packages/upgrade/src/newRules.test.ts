@@ -7,7 +7,7 @@ import type { BootCheck, BootProblem, BootWarning, ModuleDefinition, PipelineDef
 import { applyEdits } from "./apply.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
 import { readFileOrUndefined } from "./rules.ts";
-import { busHandlerThrowsRule, busSubscriberQueueRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule, typeSignaturesRule } from "./ruleInfo.ts";
+import { breakingStepShapesRule, busHandlerThrowsRule, busSubscriberQueueRule, ctxDoneTerminalOutputRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule, typeSignaturesRule } from "./ruleInfo.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { dependencyCycleRule, optionalReadOrderRule, outputFoldRule, terminalOutputRule, undeclaredOutputRule, undeclaredRequiredRule } from "./ruleBootWraps.ts";
 import { underscoreFieldRule } from "./ruleUnderscoreField.ts";
@@ -320,5 +320,47 @@ describe("info rules", () => {
   it("runtime/restore-freshness stays quiet when restoreOnStart is off", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-replication-sqlite", config: { restoreOnStart: false } }] });
     expect(await restoreFreshnessRule.check(contextFor(p))).toEqual([]);
+  });
+
+  it("types/breaking-signatures names Manifest.warnings and Kestrel contracts", async () => {
+    const p = await project({});
+    const findings = await typeSignaturesRule.check(contextFor(p));
+    expect(findings[0]?.message).toContain("Manifest.warnings");
+    expect(findings[0]?.message).toContain('Kestrel["contracts"].names()');
+  });
+
+  it("responses/breaking-step-shapes fires once per matching step, each with its own message", async () => {
+    const p = await project({ pipelines: [{ name: "resolveLink", steps: ["redirects.lookup:x"] }, { name: "upload", steps: ["media.upload:y"] }] });
+    const findings = await breakingStepShapesRule.check(contextFor(p));
+    expect(findings).toHaveLength(2);
+    expect(findings.find((f) => f.where.step === "redirects.lookup")?.message).toContain("terminalOutput");
+    expect(findings.find((f) => f.where.step === "media.upload")?.message).toContain("_events");
+  });
+
+  it("responses/breaking-step-shapes fires for events.listDead and insights.readManifest too", async () => {
+    const p = await project({ pipelines: [{ name: "admin", steps: ["events.listDead:x", "insights.readManifest"] }] });
+    const findings = await breakingStepShapesRule.check(contextFor(p));
+    expect(findings.map((f) => f.where.step).sort()).toEqual(["events.listDead", "insights.readManifest"]);
+  });
+
+  it("responses/breaking-step-shapes stays quiet for a pipeline using none of these steps", async () => {
+    const p = await project({ pipelines: [{ name: "createPage", steps: ["content.create"] }] });
+    expect(await breakingStepShapesRule.check(contextFor(p))).toEqual([]);
+  });
+
+  it("steps/ctx-done-terminal-output fires for a local module calling ctx.done(", async () => {
+    const file = join(dir, "notes.ts");
+    await writeFile(file, 'steps: () => ({ create: async (ctx) => ctx.done({ id: "x" }) })\n');
+    const p = await project({ moduleFiles: { "notes/local": file } });
+    const findings = await ctxDoneTerminalOutputRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain("terminalOutput");
+  });
+
+  it("steps/ctx-done-terminal-output stays quiet for a module that never calls ctx.done(", async () => {
+    const file = join(dir, "notes.ts");
+    await writeFile(file, 'steps: () => ({ create: async (ctx) => ok(ctx) })\n');
+    const p = await project({ moduleFiles: { "notes/local": file } });
+    expect(await ctxDoneTerminalOutputRule.check(contextFor(p))).toEqual([]);
   });
 });
