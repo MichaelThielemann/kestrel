@@ -10,7 +10,7 @@ import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { ok } from "@michaelthielemann/kestrel/result";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
-import { createPersistenceSqlite } from "./impl.ts";
+import { createPersistenceSqlite, resolveAcquireTimeoutMs } from "./impl.ts";
 import module, { configSchema } from "./module.ts";
 
 function tempFile(): { file: string; cleanup: () => void } {
@@ -185,8 +185,18 @@ describe("persistence/sqlite atomic scope", () => {
     expect(() => configSchema.parse({ file: ":memory:", busyTimeoutMs: 3000, acquireTimeoutMs: 3000 })).toThrow(/acquireTimeoutMs/);
   });
 
-  it("acquireTimeoutMs and scopeTimeoutMs default to 5000, so an instance that sets neither is rejected", () => {
-    expect(() => configSchema.parse({ file: ":memory:" })).toThrow(/must be greater than busyTimeoutMs \(5000\)/);
+  it("boots with neither key set; the effective acquireTimeoutMs is busyTimeoutMs + 10000", () => {
+    const config = configSchema.parse({ file: ":memory:" });
+    expect(resolveAcquireTimeoutMs(config)).toBe(15000);
+  });
+
+  it("boots with only busyTimeoutMs set; the effective acquireTimeoutMs derives from it", () => {
+    const config = configSchema.parse({ file: ":memory:", busyTimeoutMs: 20000 });
+    expect(resolveAcquireTimeoutMs(config)).toBe(30000);
+  });
+
+  it("setup() rejects an explicit acquireTimeoutMs equal to the default busyTimeoutMs, naming the key", () => {
+    expect(() => configSchema.parse({ file: ":memory:", acquireTimeoutMs: 5000 })).toThrow(/acquireTimeoutMs/);
   });
 
   it("module.ts declares atomicScope next to teardown", () => {

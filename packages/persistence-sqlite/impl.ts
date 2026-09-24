@@ -56,6 +56,11 @@ function uniqueIndexName(collection: string, field: string): string {
   return `${collection}_${field}_unique`;
 }
 
+/** `acquireTimeoutMs` when the config sets it, otherwise `busyTimeoutMs` (or its own 5000 default) plus a 10 second margin. */
+export function resolveAcquireTimeoutMs(config: Pick<Config, "acquireTimeoutMs" | "busyTimeoutMs">): number {
+  return config.acquireTimeoutMs ?? (config.busyTimeoutMs ?? 5000) + 10000;
+}
+
 function run<T>(fn: () => T): Result<T, PersistenceError> {
   try {
     return ok(fn());
@@ -103,7 +108,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
   db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA synchronous = NORMAL");
   const schemas = new Map<string, Record<string, FieldDefinition>>();
-  const acquireTimeoutMs = config.acquireTimeoutMs ?? 5000;
+  const acquireTimeoutMs = resolveAcquireTimeoutMs(config);
   const defaultScopeTimeoutMs = config.scopeTimeoutMs ?? 5000;
   const als = new AsyncLocalStorage<ScopeStore>();
   let unusable = false;

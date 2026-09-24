@@ -10,13 +10,13 @@ export const configSchema = z
   .object({
     file: z.string().min(1),
     busyTimeoutMs: z.number().int().min(0).optional(),
-    /** How long a request may wait for its turn at the connection before it is answered 503. */
-    acquireTimeoutMs: z.number().int().min(100).default(5000),
+    acquireTimeoutMs: z.number().int().min(100).optional().describe("How long a request may wait for its turn at the connection before it is answered 503; when unset, busyTimeoutMs + 10000"),
     /** How long an atomic group may hold the connection once it has it, measured from BEGIN IMMEDIATE. */
     scopeTimeoutMs: z.number().int().min(100).default(5000),
   })
   .strict()
   .superRefine((config, ctx) => {
+    if (config.acquireTimeoutMs === undefined) return;
     const busy = config.busyTimeoutMs ?? 5000;
     if (config.acquireTimeoutMs <= busy) {
       ctx.addIssue({
