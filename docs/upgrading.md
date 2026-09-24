@@ -329,10 +329,13 @@ A pipeline runs a step whose 6.0.0 response or manifest shape differs from 5.8's
 `media.upload`, `media.get`, `media.list`, `media.update`, `media.listFolders`, `media.remove`,
 `media.removeFolder`, `media.renameFolder`, `images.attach`, `images.serve`, `images.prune`,
 `images.generate`, `insights.readManifest` or `events.listDead`; the finding names which one and how.
-`media.upload`'s own change also covers `allowedTypes`/`deniedTypes` now matching the media type
-before its `;` parameters, lower-cased (a parameterised type that passed a denylist before is now
-refused), and an upload whose sanitised base name is `file` or `variants` being stored as
-`…-upload` instead of colliding with a reserved route or directory name.
+`media.upload`'s own change also covers the declared type: one that is not exactly one
+`type/subtype` (a list such as `image/png, text/html`, or an empty type) is refused with 415, and
+only its lower-cased `type/subtype` is stored, so `allowedTypes`/`deniedTypes` match it without
+parameters (a parameterised type that passed a denylist before is now refused). The stored name's
+extension comes from that stored type, never from the uploaded name: a listed type keeps its own
+extension, and every other type — like an SVG that `sanitize.svg` did not clean in the same
+pipeline — is stored as `<name>.bin` and published as `application/octet-stream`.
 
 #### responses-binary-cache-control
 A local module mentions `cache-control` in its own source, near a binary step result: 5.x silently
