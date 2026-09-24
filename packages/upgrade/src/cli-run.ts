@@ -10,13 +10,56 @@ import { unifiedDiff } from "./diff.ts";
 import { runDataStep } from "./data.ts";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { isRecord } from "./guards.ts";
-import { loadBackendProject, loadIssuesAsFindings } from "./project.ts";
-import type { RunUpgradeCliOptions } from "./plugin.ts";
+import { loadBackendProject, loadIssuesAsFindings, type LoadIssue } from "./project.ts";
+import type { LoadedProject, Rule, RunUpgradeCliOptions, UpgradePlugin } from "./plugin.ts";
 import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity, type UpgradeReport } from "./report.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
-import { sandboxBootInput } from "./sandbox.ts";
+import { sandboxBootInput, type SandboxTable } from "./sandbox.ts";
 import { createScratchCopy } from "./scratch.ts";
 import { installedVersions, majorOf } from "./versions.ts";
+
+interface ResolvedProject {
+  project?: LoadedProject;
+  issues: LoadIssue[];
+  rules: readonly Rule[];
+  sandboxEntries?: SandboxTable;
+  reload: (scratchDir: string) => Promise<LoadedProject | undefined>;
+}
+
+async function detectPlugin(plugins: readonly UpgradePlugin[], root: string): Promise<UpgradePlugin | undefined> {
+  for (const plugin of plugins) {
+    try {
+      if (await plugin.detect(root)) return plugin;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+async function resolveProject(root: string, entry: string | undefined, scratchDir: string, plugins: readonly UpgradePlugin[]): Promise<ResolvedProject> {
+  const plugin = await detectPlugin(plugins, root);
+  if (plugin === undefined) {
+    const { project, issues } = await loadBackendProject(scratchDir, entry === undefined ? undefined : resolve(root, entry));
+    const reload = async (dir: string): Promise<LoadedProject | undefined> => (await loadBackendProject(dir, entry === undefined ? undefined : resolve(root, entry))).project;
+    return { ...(project === undefined ? {} : { project }), issues, rules: DEFAULT_RULES, reload };
+  }
+  const rules = [...DEFAULT_RULES, ...(plugin.rules ?? [])];
+  const sandboxEntries = plugin.sandbox === undefined ? {} : { sandboxEntries: plugin.sandbox };
+  const reload = async (dir: string): Promise<LoadedProject | undefined> => {
+    try {
+      return await plugin.load(root, dir);
+    } catch {
+      return undefined;
+    }
+  };
+  try {
+    const project = await plugin.load(root, scratchDir);
+    return { project, issues: [], rules, ...sandboxEntries, reload };
+  } catch (err) {
+    return { issues: [{ message: err instanceof Error ? err.message : String(err) }], rules, ...sandboxEntries, reload };
+  }
+}
 
 const execFileAsync = promisify(execFile);
 const TOOL_VERSION = "5.8.0";
@@ -59,6 +102,7 @@ interface BuildOptions {
   answers: ReadonlyMap<string, string>;
   dataReport?: Record<string, unknown> | undefined;
   forceMajor?: number | undefined;
+  plugins?: readonly UpgradePlugin[] | undefined;
 }
 
 function groupByFile(edits: readonly Edit[]): Map<string, Edit[]> {
@@ -92,7 +136,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
     });
   }
 
-  const { project, issues } = await loadBackendProject(scratch.dir, entry === undefined ? undefined : resolve(root, entry));
+  const { project, issues, rules, sandboxEntries, reload } = await resolveProject(root, entry, scratch.dir, options.plugins ?? []);
   findings.push(...loadIssuesAsFindings(issues));
 
   let tiers: UpgradeReport["tiers"] = { source: "not-run", load: "not-run", boot: "not-run", data: "not-run" };
@@ -106,7 +150,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
 
     if (kestrelMajor === 6 && !versions.mixedMajors) {
       tiers = { ...tiers, load: "done" };
-      const box = sandboxBootInput(project.input, { dir: scratch.dir, consent: options.runSetupUses });
+      const box = sandboxBootInput(project.input, { dir: scratch.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
       outside = box.outside;
       bootCheck = await checkBoot(box.input, { setup: box.setup });
       tiers = { ...tiers, boot: "done" };
@@ -121,9 +165,9 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
             if (original === undefined) continue;
             writeFileSync(file, applyEdits(original, fileEdits).text);
           }
-          const reloaded = await loadBackendProject(scratch.dir, entry === undefined ? undefined : resolve(root, entry));
-          if (!reloaded.project) return undefined;
-          const previewSandbox = sandboxBootInput(reloaded.project.input, { dir: scratch.dir, consent: options.runSetupUses });
+          const reloadedProject = await reload(scratch.dir);
+          if (!reloadedProject) return undefined;
+          const previewSandbox = sandboxBootInput(reloadedProject.input, { dir: scratch.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
           return await checkBoot(previewSandbox.input, { setup: previewSandbox.setup });
         } finally {
           for (const [file, original] of originals) {
@@ -147,7 +191,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
 
     const projectWithData = options.dataReport === undefined ? project : { ...project, data: options.dataReport };
     const ctx = { root: scratch.dir, scratch: scratch.dir, project: projectWithData, bootCheck, readFile: readFileOrUndefined, answers: options.answers, ...(previewBoot === undefined ? {} : { previewBoot }) };
-    for (const rule of DEFAULT_RULES) findings.push(...(await rule.check(ctx)));
+    for (const rule of rules) findings.push(...(await rule.check(ctx)));
 
     const claimed = new Set(findings.map((f) => `${f.where.module ?? ""}|${f.where.pipeline ?? ""}|${f.where.step ?? ""}`));
     for (const problem of bootCheck.errors) {
@@ -204,7 +248,7 @@ async function runCheck(args: ParsedArgs, stdout: (line: string) => void, option
   const failOn = failOnOf(args);
   const runSetupUses = args.repeated.get("run-setup") ?? [];
   const dataReport = readDataReport(stringFlag(args, "data-report"));
-  const { report } = await buildReport(root, entry, { runSetupUses, answers: new Map(), dataReport, forceMajor: options.forceInstalledMajor });
+  const { report } = await buildReport(root, entry, { runSetupUses, answers: new Map(), dataReport, forceMajor: options.forceInstalledMajor, plugins: options.plugins });
   printReport(report, args, stdout);
   return exitCodeFor(report.findings, failOn);
 }
@@ -224,12 +268,12 @@ interface AskLoopResult {
   answers: Map<string, string>;
 }
 
-async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined): Promise<AskLoopResult & { unknownIds: string[] }> {
+async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined, plugins: readonly UpgradePlugin[] | undefined): Promise<AskLoopResult & { unknownIds: string[] }> {
   const answers = new Map<string, string>();
   const everAsked = new Set<string>();
   let report: UpgradeReport | undefined;
   for (let round = 0; round < 8; round++) {
-    ({ report } = await buildReport(root, entry, { runSetupUses, answers, dataReport, forceMajor }));
+    ({ report } = await buildReport(root, entry, { runSetupUses, answers, dataReport, forceMajor, plugins }));
     const asks = askFindings(report.findings);
     for (const { fix } of asks) everAsked.add(fix.question);
     const unresolved = asks.filter(({ fix }) => !answers.has(fix.question));
@@ -279,7 +323,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     return 2;
   }
 
-  const { report, unknownIds, answers } = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor);
+  const { report, unknownIds, answers } = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins);
   if (unknownIds.length > 0) {
     stderr(`--answers names an id this run never asked: ${unknownIds.join(", ")}`);
     return 2;
