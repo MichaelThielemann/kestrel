@@ -1,0 +1,19 @@
+{
+  "name": "upgrade-fixture-blobstore-s3",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@michaelthielemann/kestrel": "^5.8.0",
+    "@michaelthielemann/kestrel-backup-blobstore": "^5.8.0",
+    "@michaelthielemann/kestrel-blobstore-s3": "^5.8.0",
+    "@michaelthielemann/kestrel-content-default": "^5.8.0",
+    "@michaelthielemann/kestrel-delivery-static": "^5.8.0",
+    "@michaelthielemann/kestrel-events-inmemory": "^5.8.0",
+    "@michaelthielemann/kestrel-images-default": "^5.8.0",
+    "@michaelthielemann/kestrel-media-default": "^5.8.0",
+    "@michaelthielemann/kestrel-persistence-sqlite": "^5.8.0",
+    "@michaelthielemann/kestrel-renderer-plain": "^5.8.0",
+    "@michaelthielemann/kestrel-replication-sqlite": "^5.8.0",
+    "@michaelthielemann/kestrel-site-default": "^5.8.0"
+  }
+}

@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import type { BootInput } from "@michaelthielemann/kestrel";
+import type { BootInput, ModuleDefinition } from "@michaelthielemann/kestrel";
+import { blobstoreStandIn, providesBlobstore } from "./blobstoreStandIn.ts";
 import { isRecord } from "./guards.ts";
 
 const OFFICIAL_PREFIX = "@michaelthielemann/kestrel-";
@@ -21,6 +22,7 @@ export interface SandboxResult {
   input: BootInput;
   setup: { only: readonly string[] };
   outside: readonly string[];
+  replaced: readonly string[];
 }
 
 function asRecord(config: unknown): Record<string, unknown> {
@@ -42,14 +44,19 @@ const DEFAULT_SANDBOX_ENTRIES: SandboxTable = {
  * Rewrites the config of kestrel's own storage modules so their `setup()` reaches only the scratch
  * directory, and reports which other modules would need to run `setup()` outside the sandbox.
  * `setup.only` also carries every known-safe entry (one that reaches nothing but `persistence@1`
- * or `blobstore@1` and needs no rewrite) plus anything named in `consent`.
+ * or `blobstore@1` and needs no rewrite) plus anything named in `consent`. A module that provides
+ * `blobstore@1` but is neither rewritten nor known-safe, such as a network object store, is swapped
+ * for a local, filesystem-backed stand-in instead of being left outside the sandbox, so every
+ * module requiring `blobstore@1` still gets checked; `replaced` names each one swapped this way.
  */
 export function sandboxBootInput(input: BootInput, options: SandboxOptions): SandboxResult {
   const table = { ...DEFAULT_SANDBOX_ENTRIES, ...(options.entries ?? {}) };
   const consent = new Set(options.consent ?? []);
   const only: string[] = [];
   const outside: string[] = [];
-  const modules = input.config.modules.map((entry) => {
+  const replaced: string[] = [];
+  const loadedModules = [...input.modules];
+  const configModules = input.config.modules.map((entry, i) => {
     const official = officialModuleName(entry.use);
     const rewrite = official === undefined ? undefined : table[official];
     if (rewrite) {
@@ -60,8 +67,15 @@ export function sandboxBootInput(input: BootInput, options: SandboxOptions): San
       only.push(entry.use);
       return entry;
     }
+    const loaded: ModuleDefinition | undefined = loadedModules[i];
+    if (loaded !== undefined && providesBlobstore(loaded)) {
+      only.push(entry.use);
+      replaced.push(entry.use);
+      loadedModules[i] = blobstoreStandIn(loaded.name, options.dir);
+      return entry;
+    }
     outside.push(entry.use);
     return entry;
   });
-  return { input: { ...input, config: { ...input.config, modules } }, setup: { only }, outside };
+  return { input: { ...input, config: { ...input.config, modules: configModules }, modules: loadedModules }, setup: { only }, outside, replaced };
 }

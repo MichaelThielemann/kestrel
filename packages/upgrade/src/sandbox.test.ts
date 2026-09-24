@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { BootInput } from "@michaelthielemann/kestrel";
+import { z } from "zod";
+import type { BootInput, ModuleDefinition } from "@michaelthielemann/kestrel";
+import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { sandboxBootInput } from "./sandbox.ts";
+
+function s3StandInModule(): ModuleDefinition {
+  return { name: "blobstore/s3", provides: [BLOBSTORE], requires: [], configSchema: z.any(), async setup() { return {}; } };
+}
+
+function dummyModule(name: string): ModuleDefinition {
+  return { name, provides: [], requires: [], configSchema: z.any(), async setup() { return {}; } };
+}
 
 function input(): BootInput {
   return {
@@ -71,5 +81,34 @@ describe("sandboxBootInput", () => {
     const before = JSON.stringify(original);
     sandboxBootInput(original, { dir: "/tmp/scratch-1" });
     expect(JSON.stringify(original)).toBe(before);
+  });
+
+  it("swaps a blobstore@1 provider that is neither rewritten nor known-safe for a local stand-in", () => {
+    const base = input();
+    const withS3: BootInput = {
+      ...base,
+      config: { ...base.config, modules: [...base.config.modules, { use: "@michaelthielemann/kestrel-blobstore-s3", config: { bucket: "prod" } }] },
+      modules: [dummyModule("a"), dummyModule("b"), dummyModule("c"), dummyModule("d"), s3StandInModule()],
+    };
+    const result = sandboxBootInput(withS3, { dir: "/tmp/scratch-1" });
+    expect(result.replaced).toEqual(["@michaelthielemann/kestrel-blobstore-s3"]);
+    expect(result.outside).not.toContain("@michaelthielemann/kestrel-blobstore-s3");
+    expect(result.setup.only).toContain("@michaelthielemann/kestrel-blobstore-s3");
+    const swapped = result.input.modules.find((m) => m.name === "blobstore/s3");
+    expect(swapped).toBeDefined();
+    expect(swapped?.provides).toEqual([BLOBSTORE]);
+    expect(swapped).not.toBe(s3StandInModule());
+  });
+
+  it("does not swap a module that does not provide blobstore@1", () => {
+    const base = input();
+    const withOther: BootInput = {
+      ...base,
+      config: { ...base.config, modules: [...base.config.modules, { use: "@michaelthielemann/kestrel-blobstore-s3", config: {} }] },
+      modules: [dummyModule("a"), dummyModule("b"), dummyModule("c"), dummyModule("d"), dummyModule("notes/local")],
+    };
+    const result = sandboxBootInput(withOther, { dir: "/tmp/scratch-1" });
+    expect(result.replaced).toEqual([]);
+    expect(result.outside).toContain("@michaelthielemann/kestrel-blobstore-s3");
   });
 });

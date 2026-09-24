@@ -145,6 +145,7 @@ Every finding's `docs` field links to one of the anchors below.
 | [`boot/<code>`](#boot-code) | boot | manual | any boot error no rule above claims |
 | `boot/not-checked` | boot | none (warning) | a module or pipeline `checkBoot()` could not check safely |
 | `load/failed` | source | manual | a config, module or pipeline file that failed to load |
+| [`sandbox/blobstore-standin`](#sandbox-blobstore-standin) | boot | none (info) | a `blobstore@1` provider the sandbox replaced to keep the boot tier open |
 
 #### modules-event-delivery
 An event trigger or `events.emit` needs exactly one delivery module (`events-direct` or
@@ -264,6 +265,14 @@ consent list, made it unsafe to check. Run with `--run-setup <use>` to include i
 
 #### load
 A config, module or pipeline file failed to load; the message is the load error itself.
+
+#### sandbox-blobstore-standin
+A configured module provides `blobstore@1` but the sandbox neither rewrites its config (unlike
+`blobstore-filesystem`) nor lists it as known-safe — a network object store reaches outside the
+sandbox by design. Rather than leaving every module requiring `blobstore@1` unchecked, the boot
+tier swaps it for a local, filesystem-backed stand-in scoped to the scratch directory, so media,
+images, delivery, replication and backup modules still get checked. The real module's own `setup()`
+never runs during the check.
 
 ## What the tool never does
 

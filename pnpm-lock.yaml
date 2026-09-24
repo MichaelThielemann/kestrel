@@ -691,13 +691,28 @@ importers:
       '@babel/parser':
         specifier: ^7.26.0
         version: 7.29.9
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
     devDependencies:
       '@michaelthielemann/kestrel':
         specifier: workspace:*
         version: link:../core
+      '@michaelthielemann/kestrel-backup-blobstore':
+        specifier: workspace:*
+        version: link:../backup-blobstore
+      '@michaelthielemann/kestrel-blobstore-s3':
+        specifier: workspace:*
+        version: link:../blobstore-s3
+      '@michaelthielemann/kestrel-content-default':
+        specifier: workspace:*
+        version: link:../content-default
       '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@michaelthielemann/kestrel-delivery-static':
+        specifier: workspace:*
+        version: link:../delivery-static
       '@michaelthielemann/kestrel-events-direct':
         specifier: workspace:*
         version: link:../events-direct
@@ -707,15 +722,27 @@ importers:
       '@michaelthielemann/kestrel-events-queue':
         specifier: workspace:*
         version: link:../events-queue
+      '@michaelthielemann/kestrel-images-default':
+        specifier: workspace:*
+        version: link:../images-default
+      '@michaelthielemann/kestrel-media-default':
+        specifier: workspace:*
+        version: link:../media-default
       '@michaelthielemann/kestrel-persistence-sqlite':
         specifier: workspace:*
         version: link:../persistence-sqlite
+      '@michaelthielemann/kestrel-renderer-plain':
+        specifier: workspace:*
+        version: link:../renderer-plain
+      '@michaelthielemann/kestrel-replication-sqlite':
+        specifier: workspace:*
+        version: link:../replication-sqlite
+      '@michaelthielemann/kestrel-site-default':
+        specifier: workspace:*
+        version: link:../site-default
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@22.20.1)
-      zod:
-        specifier: ^3.23.8
-        version: 3.25.76
 
   packages/validate-jsonschema:
     dependencies:

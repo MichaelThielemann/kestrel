@@ -181,6 +181,19 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         outside = box.outside;
         bootCheck = await checkBoot(box.input, { setup: box.setup });
         tiers = { ...tiers, boot: "done" };
+        for (const use of box.replaced) {
+          findings.push({
+            id: `sandbox/blobstore-standin:${use}`,
+            rule: "sandbox/blobstore-standin",
+            severity: "info",
+            tier: "boot",
+            where: { module: use },
+            message: "blobstore replaced by a local stand-in for the check",
+            suggestion: "the real module's own setup() never ran here; this only proves the modules requiring blobstore@1 boot",
+            fix: { kind: "none" },
+            docs: "docs/upgrading.md#sandbox-blobstore-standin",
+          });
+        }
 
         previewBootRaw = async (edits) => {
           const preview = await createScratchCopy(root);

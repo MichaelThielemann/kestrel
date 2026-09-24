@@ -46,17 +46,26 @@
     "@michaelthielemann/kestrel-contracts": "workspace:^"
   },
   "dependencies": {
-    "@babel/parser": "^7.26.0"
+    "@babel/parser": "^7.26.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@michaelthielemann/kestrel": "workspace:*",
+    "@michaelthielemann/kestrel-backup-blobstore": "workspace:*",
+    "@michaelthielemann/kestrel-blobstore-s3": "workspace:*",
     "@michaelthielemann/kestrel-contracts": "workspace:*",
+    "@michaelthielemann/kestrel-content-default": "workspace:*",
+    "@michaelthielemann/kestrel-delivery-static": "workspace:*",
     "@michaelthielemann/kestrel-events-direct": "workspace:*",
     "@michaelthielemann/kestrel-events-inmemory": "workspace:*",
     "@michaelthielemann/kestrel-events-queue": "workspace:*",
+    "@michaelthielemann/kestrel-images-default": "workspace:*",
+    "@michaelthielemann/kestrel-media-default": "workspace:*",
     "@michaelthielemann/kestrel-persistence-sqlite": "workspace:*",
-    "vitest": "^3.2.0",
-    "zod": "^3.23.8"
+    "@michaelthielemann/kestrel-renderer-plain": "workspace:*",
+    "@michaelthielemann/kestrel-replication-sqlite": "workspace:*",
+    "@michaelthielemann/kestrel-site-default": "workspace:*",
+    "vitest": "^3.2.0"
   },
   "repository": {
     "type": "git",
