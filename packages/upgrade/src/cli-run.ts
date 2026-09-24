@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { checkBoot, type BootCheck } from "@michaelthielemann/kestrel";
+import { checkBoot, type BootCheck, type BootProblem } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
 import { hasArrayHole, parseTs } from "./ast.ts";
 import { askFindings, parseAnswersFile, resolveAnswer, ttyPrompt, unknownAnswerIds, type PromptFn } from "./answers.ts";
@@ -106,6 +106,20 @@ interface BuildOptions {
   plugins?: readonly UpgradePlugin[] | undefined;
 }
 
+function bootErrorFinding(problem: BootProblem): Finding {
+  return {
+    id: `boot/${problem.code}:${problem.owner}`,
+    rule: `boot/${problem.code}`,
+    severity: "error",
+    tier: "boot",
+    where: whereOf({ module: problem.module, pipeline: problem.pipeline, step: problem.step }),
+    message: problem.reason,
+    suggestion: "see docs/upgrading.md for this boot error code",
+    fix: { kind: "manual" },
+    docs: "docs/upgrading.md#boot-code",
+  };
+}
+
 function groupByFile(edits: readonly Edit[]): Map<string, Edit[]> {
   const grouped = new Map<string, Edit[]>();
   for (const edit of edits) {
@@ -116,7 +130,12 @@ function groupByFile(edits: readonly Edit[]): Map<string, Edit[]> {
   return grouped;
 }
 
-async function buildReport(root: string, entry: string | undefined, options: BuildOptions): Promise<{ report: UpgradeReport }> {
+interface BuildResult {
+  report: UpgradeReport;
+  previewBoot?: (edits: readonly Edit[]) => Promise<BootCheck | undefined>;
+}
+
+async function buildReport(root: string, entry: string | undefined, options: BuildOptions): Promise<BuildResult> {
   const versions = installedVersions(root);
   const kestrelVersion = versions.installed["@michaelthielemann/kestrel"];
   const kestrelMajor = options.forceMajor ?? (kestrelVersion === undefined ? undefined : majorOf(kestrelVersion));
@@ -195,17 +214,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       for (const problem of bootCheck.errors) {
         const key = `${problem.module ?? ""}|${problem.pipeline ?? ""}|${problem.step ?? ""}`;
         if (claimed.has(key) && key !== "||") continue;
-        findings.push({
-          id: `boot/${problem.code}:${problem.owner}`,
-          rule: `boot/${problem.code}`,
-          severity: "error",
-          tier: "boot",
-          where: whereOf({ module: problem.module, pipeline: problem.pipeline, step: problem.step }),
-          message: problem.reason,
-          suggestion: "see docs/upgrading.md for this boot error code",
-          fix: { kind: "manual" },
-          docs: "docs/upgrading.md#boot-code",
-        });
+        findings.push(bootErrorFinding(problem));
       }
       for (const item of bootCheck.notChecked) {
         findings.push({
@@ -232,7 +241,8 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       summary: summarize(remapped),
       findings: remapped,
     };
-    return { report };
+    const boundPreviewBoot = previewBoot === undefined ? undefined : (edits: readonly Edit[]): Promise<BootCheck | undefined> => previewBoot(edits.map((e) => ({ ...e, file: resolve(scratch.dir, relative(root, e.file)) })));
+    return { report, ...(boundPreviewBoot === undefined ? {} : { previewBoot: boundPreviewBoot }) };
   } finally {
     await removeScratchCopy(scratch);
   }
@@ -337,15 +347,16 @@ function downgradeRejected(findings: readonly Finding[], rejectedIds: ReadonlySe
 interface AskLoopResult {
   report: UpgradeReport;
   answers: Map<string, string>;
+  previewBoot?: (edits: readonly Edit[]) => Promise<BootCheck | undefined>;
 }
 
 async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined, plugins: readonly UpgradePlugin[] | undefined): Promise<AskLoopResult & { unknownIds: string[] }> {
   const answers = new Map<string, string>();
   const everAsked = new Set<string>();
-  let report: UpgradeReport | undefined;
+  let built: BuildResult | undefined;
   for (let round = 0; round < 8; round++) {
-    ({ report } = await buildReport(root, entry, { runSetupUses, answers, dataReport, forceMajor, plugins }));
-    const asks = askFindings(report.findings);
+    built = await buildReport(root, entry, { runSetupUses, answers, dataReport, forceMajor, plugins });
+    const asks = askFindings(built.report.findings);
     for (const { fix } of asks) everAsked.add(fix.question);
     const unresolved = asks.filter(({ fix }) => !answers.has(fix.question));
     if (unresolved.length === 0) break;
@@ -360,7 +371,7 @@ async function resolveQuestions(root: string, entry: string | undefined, runSetu
     if (!resolvedAny) break;
   }
   const unknownIds = fromFile === undefined ? [] : unknownAnswerIds(fromFile, everAsked);
-  return { report: report!, answers, unknownIds };
+  return { report: built!.report, answers, ...(built!.previewBoot === undefined ? {} : { previewBoot: built!.previewBoot }), unknownIds };
 }
 
 async function confirmFile(file: string, root: string, before: string, after: string, prompt: PromptFn): Promise<boolean> {
@@ -394,7 +405,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     return 2;
   }
 
-  const { report, unknownIds, answers } = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins);
+  const { report, unknownIds, answers, previewBoot } = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins);
   if (unknownIds.length > 0) {
     stderr(`--answers names an id this run never asked: ${unknownIds.join(", ")}`);
     return 2;
@@ -434,7 +445,12 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     if (applied.length > 0) stdout("run `pnpm install` to pick up any dependency range changes");
   } else {
     printReport(adjustedReport, args, stdout);
-    const afterEdits = summarize(adjustedFindings.filter((f) => f.fix.kind !== "auto"));
+    const isRawBootError = (f: Finding): boolean => f.rule.startsWith("boot/");
+    const finalEdits = adjustedFindings.flatMap((f) => (f.fix.kind === "auto" ? f.fix.edits : []));
+    const preview = previewBoot ? await previewBoot(finalEdits) : undefined;
+    const nonBootRemaining = adjustedFindings.filter((f) => f.fix.kind !== "auto" && !isRawBootError(f));
+    const bootRemaining = preview ? preview.errors.map(bootErrorFinding) : adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto");
+    const afterEdits = summarize([...nonBootRemaining, ...bootRemaining]);
     stdout(`after these edits: ${afterEdits.error} errors remain (${afterEdits.ask} need your answer, ${afterEdits.manual} manual)`);
   }
   if (write && saveAnswersFile !== undefined) writeFileSync(resolve(saveAnswersFile), JSON.stringify(Object.fromEntries(answers), null, 2));
