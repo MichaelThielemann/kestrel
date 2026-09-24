@@ -46,8 +46,4 @@ project's own files, for a CI gate that wants `checkBoot()` without a full `kest
 
 **Not included.** Installing, committing, pushing or reaching the network — the tool prints the next
 command and lets the consumer run it. Draining a queue, renaming a stored column or any other write
-to a live database — the `data` command only reads. The design's boot-tier re-verification of the
-queue offer's own switch (re-running `checkBoot()` on a sandboxed preview before offering it): this
-release checks the offer's other conditions and asks the question, but does not additionally re-run
-`checkBoot()` on the switched config first — `fix`'s ordinary preview still shows the boot result of
-whatever the switch produced.
+to a live database — the `data` command only reads.

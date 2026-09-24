@@ -59,7 +59,8 @@ how many still need an answer, how many stay manual.
 A project on `events-direct` is offered the switch to `events-queue`, never forced. `check` reports
 `offer/event-queue`: which conditions block it (no event trigger to move, no durable
 `persistence@1`, a serverless marker suggesting no long-lived worker, an open `steps/closed-event-input`
-or `modules/emits` finding), or that it can switch. `fix` then asks `switch-to-queue` (default
+or `modules/emits` finding, or the switched config itself failing to boot on a sandboxed preview), or
+that it can switch. `fix` then asks `switch-to-queue` (default
 **no**), explaining that uploads and similar requests answer at once while other subscribers move to
 the worker with retry, a failing subscriber no longer fails the request that emitted the event, and
 an event may now reach a pipeline more than once. A "yes" asks `idempotent:<pipeline>` for every

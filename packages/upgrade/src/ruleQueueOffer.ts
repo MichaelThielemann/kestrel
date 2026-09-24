@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import type { BootProblem } from "@michaelthielemann/kestrel";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
-import { insertPipelineStep, replaceModuleListEntry } from "./edits.ts";
+import { insertStepAfterEmitOutsideGroup, replaceModuleListEntry } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { removeDependency, setDependencyRange } from "./packageJson.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
@@ -11,6 +12,18 @@ import { KESTREL_RANGE, infoFinding, moduleEntry, packageJsonPath } from "./rule
 
 const RULE_ID = "offer/event-queue";
 const SERVERLESS_MARKERS = ["vercel.json", "netlify.toml", "wrangler.toml", "serverless.yml", "template.yaml"];
+
+function errKey(e: BootProblem): string {
+  return [e.code, e.owner, e.reason, e.module, e.pipeline, e.step, e.path].join(":");
+}
+
+async function newBootErrors(ctx: RuleContext, relayPipelines: readonly string[]): Promise<readonly BootProblem[]> {
+  if (!ctx.previewBoot) return [];
+  const preview = await ctx.previewBoot(switchEdits(ctx, relayPipelines));
+  if (!preview) return [];
+  const baseline = new Set(ctx.bootCheck.errors.map(errKey));
+  return preview.errors.filter((e) => !baseline.has(errKey(e)));
+}
 
 async function unmetConditions(ctx: RuleContext): Promise<string[]> {
   const unmet: string[] = [];
@@ -22,6 +35,8 @@ async function unmetConditions(ctx: RuleContext): Promise<string[]> {
   if (marker !== undefined) unmet.push(`"${marker}" suggests the process does not stay alive between requests`);
   if ((await eventPayloadRule.check(ctx)).length > 0) unmet.push("an open steps/closed-event-input finding exists");
   if ((await emitsRule.check(ctx)).some((f) => f.fix.kind === "ask")) unmet.push("an open modules/emits finding exists");
+  const bootErrors = await newBootErrors(ctx, defaultRelayPipelines(ctx));
+  if (bootErrors.length > 0) unmet.push(`the switched project fails to boot: ${bootErrors.map((e) => e.reason).join("; ")}`);
   return unmet;
 }
 
@@ -61,7 +76,7 @@ function switchEdits(ctx: RuleContext, relayPipelines: readonly string[]): Edit[
     const emitsOfInterest = steps.filter((s) => s.startsWith("events.emit:") && relayEvents.has(s.slice("events.emit:".length).split("?")[0]!));
     const lastEmit = emitsOfInterest.at(-1);
     if (lastEmit === undefined) continue;
-    const edit = insertPipelineStep(file, source, { pipelineName: def.name, anchorStep: lastEmit, position: "after", newStep: "events.relay" });
+    const edit = insertStepAfterEmitOutsideGroup(file, source, { pipelineName: def.name, emitStep: lastEmit, newStep: "events.relay" });
     if (edit) edits.push(edit);
   }
   return edits;
@@ -71,10 +86,10 @@ const CONSEQUENCES = "uploads and other requests answer at once; a subscriber no
 
 /**
  * Offers switching a backend project's event delivery from events-direct to events-queue, never forcing it.
- * Detection gates whether the offer appears at all; at-least-once safety is the
- * `idempotent:<pipeline>` question per consumer event pipeline, asked only after `switch-to-queue: yes`.
- * A boot-tier re-check (verifying the switch on a sandboxed preview) is not
- * reproduced here — see the package README for why.
+ * The offer only appears once an event is actually delivered through it, a durable persistence module
+ * backs the queue, nothing suggests a short-lived process, no open finding leaves an event payload or
+ * emit unresolved, and a sandboxed preview of the switch still boots clean; at-least-once safety is then
+ * the `idempotent:<pipeline>` question per consumer event pipeline, asked only after `switch-to-queue: yes`.
  */
 export const queueOfferRule: Rule = {
   id: RULE_ID,

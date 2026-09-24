@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import type { BootCheck, ModuleDefinition, PipelineDefinition } from "@michaelthielemann/kestrel";
+import type { BootCheck, BootProblem, ModuleDefinition, PipelineDefinition } from "@michaelthielemann/kestrel";
 import { defineContract } from "@michaelthielemann/kestrel/defineContract";
 import { applyEdits } from "./apply.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
+import type { Edit } from "./report.ts";
 import { readFileOrUndefined } from "./rules.ts";
 import { queueOfferRule } from "./ruleQueueOffer.ts";
 
@@ -24,12 +25,16 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-function contextFor(project: LoadedProject, answers: ReadonlyMap<string, string> = new Map()): RuleContext {
+function contextFor(
+  project: LoadedProject,
+  answers: ReadonlyMap<string, string> = new Map(),
+  previewBoot?: (edits: readonly Edit[]) => Promise<BootCheck | undefined>,
+): RuleContext {
   const check: BootCheck = { errors: [], warnings: [], notChecked: [] };
-  return { root: dir, scratch: dir, project, bootCheck: check, readFile: readFileOrUndefined, answers };
+  return { root: dir, scratch: dir, project, bootCheck: check, readFile: readFileOrUndefined, answers, ...(previewBoot === undefined ? {} : { previewBoot }) };
 }
 
-async function directProject(options: { sqliteFile?: string; publishPipeline?: boolean } = {}): Promise<LoadedProject> {
+async function directProject(options: { sqliteFile?: string; publishPipeline?: boolean; groupedEmit?: boolean } = {}): Promise<LoadedProject> {
   const configFile = join(dir, "kestrel.config.ts");
   const configSource = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-events-inmemory" }, { use: "@michaelthielemann/kestrel-events-direct" }, { use: "@michaelthielemann/kestrel-persistence-sqlite" }], triggers: [] });\n';
   await writeFile(configFile, configSource);
@@ -37,7 +42,10 @@ async function directProject(options: { sqliteFile?: string; publishPipeline?: b
 
   const createPageFile = join(dir, "createPage.ts");
   const createPageSteps = options.publishPipeline ? ["content.create", "events.emit:page.created"] : ["content.create"];
-  await writeFile(createPageFile, `definePipeline({ name: "createPage", steps: [${createPageSteps.map((s) => `"${s}"`).join(", ")}] });\n`);
+  const createPageSource = options.groupedEmit
+    ? `definePipeline({ name: "createPage", steps: [{ atomic: [${createPageSteps.map((s) => `"${s}"`).join(", ")}] }] });\n`
+    : `definePipeline({ name: "createPage", steps: [${createPageSteps.map((s) => `"${s}"`).join(", ")}] });\n`;
+  await writeFile(createPageFile, createPageSource);
   const publishPageFile = join(dir, "publishPage.ts");
   await writeFile(publishPageFile, 'definePipeline({ name: "publishPage", steps: ["delivery.publish:pages"] });\n');
 
@@ -145,5 +153,47 @@ describe("offer/event-queue", () => {
     const createPageEdits = edits.filter((e) => e.file === createPageFile);
     const { text: createPageText } = applyEdits(createPageSource, createPageEdits);
     expect(createPageText).toContain('"events.emit:page.created", "events.relay"');
+  });
+
+  it("places events.relay after the whole atomic group when the emit is grouped, never inside it", async () => {
+    const p = await directProject({ publishPipeline: true, groupedEmit: true });
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
+    const findings = await queueOfferRule.check(contextFor(p, answers));
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const createPageFile = join(dir, "createPage.ts");
+    const createPageSource = readFileOrUndefined(createPageFile)!;
+    const createPageEdits = edits.filter((e) => e.file === createPageFile);
+    const { text } = applyEdits(createPageSource, createPageEdits);
+    expect(text).toContain('steps: [{ atomic: ["content.create", "events.emit:page.created"] }, "events.relay"]');
+  });
+
+  it("blocks the offer and reports the errors when the switch's own boot preview finds new ones", async () => {
+    const p = await directProject();
+    const newError: BootProblem = { code: "setup-failed", owner: "events-queue", reason: "queue setup boom" };
+    const previewBoot = async (): Promise<BootCheck> => ({ errors: [newError], warnings: [], notChecked: [] });
+    const findings = await queueOfferRule.check(contextFor(p, new Map(), previewBoot));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("none");
+    expect(findings[0]?.message).toContain("fails to boot");
+    expect(findings[0]?.message).toContain("queue setup boom");
+  });
+
+  it("still offers the switch when the boot preview finds no new errors", async () => {
+    const p = await directProject();
+    const previewBoot = async (): Promise<BootCheck> => ({ errors: [], warnings: [], notChecked: [] });
+    const findings = await queueOfferRule.check(contextFor(p, new Map(), previewBoot));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("ask");
+  });
+
+  it("does not count a boot error already present before the switch as new", async () => {
+    const p = await directProject();
+    const existing: BootProblem = { code: "setup-failed", owner: "events-direct", reason: "already broken" };
+    const check: BootCheck = { errors: [existing], warnings: [], notChecked: [] };
+    const previewBoot = async (): Promise<BootCheck> => ({ errors: [existing], warnings: [], notChecked: [] });
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: check, readFile: readFileOrUndefined, answers: new Map(), previewBoot };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("ask");
   });
 });
