@@ -939,7 +939,7 @@ describe("terminal output shapes at the HTTP boundary", () => {
     }
   });
 
-  it("the continuing uploadMedia result carries the item plus _events", async () => {
+  it("the published continuing branch of uploadMedia's 200 requires the item or list fields, not _events alone", async () => {
     const { kestrel, dispose } = await bootIsolated();
     try {
       const admin = await login(kestrel, "admin", "kestrel-demo");
@@ -952,6 +952,15 @@ describe("terminal output shapes at the HTTP boundary", () => {
       const body = boundaryCast<{ filename?: string; _events?: { status: string } }>(uploaded.result, "json");
       expect(body.filename).toBe("acceptance.png");
       expect(body._events).toBeDefined();
+
+      const openapi = boundaryCast<OpenApiSchemaDoc>(JSON.parse(readFileSync(join(root, "openapi.json"), "utf8")), "json");
+      const schema = openapi.paths["/media"]?.post?.responses["200"]?.content["application/json"].schema;
+      if (schema === undefined) throw new Error("missing schema for POST /media 200");
+      expect(validateSchema(schema, uploaded.result)).toEqual([]);
+
+      const continuingBranch = boundaryCast<{ anyOf: Record<string, unknown>[] }>(schema, "json").anyOf[0];
+      if (continuingBranch === undefined) throw new Error("missing the continuing branch of the anyOf");
+      expect(validateSchema(continuingBranch, { _events: body._events })).not.toEqual([]);
     } finally {
       await dispose();
     }
