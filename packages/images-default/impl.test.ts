@@ -533,6 +533,35 @@ describe("images/default size set changes", () => {
   });
 });
 
+describe("images/default size-set check at attach", () => {
+  it("logs a store that throws during the check instead of leaving a rejected promise, and close waits for the check", async () => {
+    const errors: string[] = [];
+    const logger: Logger = { step() {}, info() {}, error: (message) => errors.push(message) };
+    const blobs = fakeBlobstore();
+    const db = createFakePersistence();
+    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", width: "number", height: "number", createdAt: "number" });
+    const images = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" } }, { blobs, db, logger }, () => 1000);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    db.count = async () => {
+      await held;
+      throw new Error("database is not open");
+    };
+    images.attach(introspectionOf(manifestWithPipelines([{ pipeline: "serveImageVariant", module: "images/default", step: "images.serve" }])));
+    let closed = false;
+    const closing = images.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(closed).toBe(false);
+    release();
+    await closing;
+    expect(errors).toContain("images: could not check for a size-set shortfall");
+  });
+});
+
 describe("images/default resume repair pass", () => {
   it("places and renders items created recently with no rows at all", async () => {
     const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);

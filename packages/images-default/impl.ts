@@ -1473,9 +1473,11 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     },
 
     attach(kestrel) {
-      const detecting = detectAndStartSync();
+      const detecting = detectAndStartSync().catch((cause: unknown) => {
+        logger.error("images: could not check for a size-set shortfall", { error: errorMessage(cause) });
+      });
       detections.add(detecting);
-      void detecting.finally(() => detections.delete(detecting));
+      void detecting.then(() => detections.delete(detecting));
       const pipelines = kestrel.describe().pipelines;
       const runs = (name: string): boolean => pipelines.some((p) => p.steps.some((s) => s.module === "images/default" && s.name === name));
       if (config.publicCopy === undefined) {
@@ -1491,6 +1493,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     async close() {
       closed = true;
       stopRequested = true;
+      await Promise.all([...detections]);
       await idle();
       await idlePlacing();
       await idleItems();
