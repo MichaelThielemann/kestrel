@@ -176,6 +176,7 @@ async function bootExample(options: Options): Promise<Example> {
       definePipeline({ name: "planImageVariants", steps: ["images.plan", "events.emit:images.planned"] }),
       definePipeline({ name: "republishOutput", steps: ["delivery.republishOutput"] }),
       definePipeline({ name: "refreshLlms", steps: ["delivery.exportLlms"] }),
+      definePipeline({ name: "queueStatus", steps: ["events.readQueueStatus"] }),
     );
   }
   const config: KestrelConfigInput = { ...configInput, http: options.http === true ? { port: 0, host: "127.0.0.1" } : null, modules: modulesConfig, triggers };
@@ -259,7 +260,10 @@ async function seed(example: Example): Promise<Seeded> {
 async function settled(example: Example): Promise<void> {
   await pollUntil(async () => {
     const status = await stale(example);
-    return status.stale === 0 && status.rendering === 0;
+    if (status.stale !== 0 || status.rendering !== 0) return false;
+    if (!example.kestrel.pipelines.has("queueStatus")) return true;
+    const queue = boundaryCast<{ pending: number; running: number }>(await call(example, "queueStatus"), "json");
+    return queue.pending === 0 && queue.running === 0;
   });
 }
 
@@ -299,8 +303,8 @@ for (const mode of ["direct", "queue"] as const) {
       try {
         const ids = await seed(example);
         await settled(example);
-        const llmsBefore = example.runs.filter((r) => r.phase === "end" && (r.pipeline === "refreshLlms" || r.pipeline === "settingsDependents")).length;
         const callsBefore = example.reading.calls.length;
+        const putAt = Date.now();
         const held = mode === "direct" ? example.reading.hold("/programm") : undefined;
         const before = { programm: mtime(example, "/programm"), info: mtime(example, "/info") };
         const response = await call(example, "setSettings", { token: ids.token, body: { title: "Festival 2027", locale: "de" } });
@@ -318,13 +322,13 @@ for (const mode of ["direct", "queue"] as const) {
         await pollUntil(() => readFileSync(join(example.site, "llms.txt"), "utf8").includes("# Festival 2027"));
         expect(page(example, "/entwurf")).toBeNull();
         if (mode === "queue") {
-          const refreshes = example.runs.filter((r) => r.pipeline === "refreshLlms" && r.phase === "start");
-          const renders = example.runs.filter((r) => r.pipeline === "republishOutput" && r.phase === "end");
-          expect(refreshes.length - llmsBefore >= 0).toBe(true);
-          const after = refreshes.filter((r) => r.at >= renders[0]!.at);
-          expect(after.length).toBe(1);
-          expect(after[0]!.at).toBeGreaterThanOrEqual(renders.at(-1)!.at);
-          expect(example.runs.filter((r) => r.pipeline === "settingsDependents" && r.phase === "end").length).toBeGreaterThanOrEqual(1);
+          const since = example.runs.filter((r) => r.at >= putAt);
+          const refreshes = since.filter((r) => r.pipeline === "refreshLlms" && r.phase === "start");
+          const renders = since.filter((r) => r.pipeline === "republishOutput" && r.phase === "end");
+          expect(renders.length).toBeGreaterThanOrEqual(3);
+          expect(refreshes.length).toBe(1);
+          expect(refreshes[0]!.at).toBeGreaterThanOrEqual(renders.at(-1)!.at);
+          expect(since.filter((r) => r.pipeline === "settingsDependents" && r.phase === "end").length).toBe(1);
         }
       } finally {
         await example.dispose();

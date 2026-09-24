@@ -504,6 +504,19 @@ describe("delivery/static dependencies: marks and renders", () => {
     expect(h.html("/kontakt")).toContain("Hedy L.");
   });
 
+  it("a change the running render did not read leaves its output unmarked", async () => {
+    const h = await harness();
+    const ids = await seed(h);
+    const held = h.reading.hold(ids.kontakt);
+    const publishing = h.delivery.publish("pages", ids.kontakt);
+    await held.reached;
+    expectOk(await h.content.update("speakers", ids.ada, { name: "Ada L." }));
+    expectOk(await h.delivery.markDependents("speakers", [ids.ada]));
+    held.release();
+    expectOk(await publishing);
+    expect(await h.marked()).not.toContain(`${ids.kontakt}/de`);
+  });
+
   it("the same holds for the first render of a page that has no status row yet", async () => {
     const h = await harness();
     await seed(h);

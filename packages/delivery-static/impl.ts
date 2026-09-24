@@ -167,8 +167,13 @@ interface Work {
   failure: string | null;
 }
 
+interface Change {
+  type: string;
+  ids: readonly string[];
+}
+
 interface Flight {
-  changed: boolean;
+  changes: Change[];
 }
 
 interface RenderOutcome {
@@ -209,6 +214,15 @@ function bytes(data: Uint8Array | string): Uint8Array {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readsOf(plan: SetPlan): readonly ObservedRead[] {
+  return plan.kind === "known" || plan.kind === "failure" ? plan.reads : [];
+}
+
+function touches(reads: readonly ObservedRead[], changes: readonly Change[]): boolean {
+  if (changes.length === 0) return false;
+  return reads.some((read) => changes.some((change) => read.type === change.type && (read.kind === "type" || read.kind === "query" || change.ids.includes(read.id))));
 }
 
 function chunks<T>(values: readonly T[], size: number): T[][] {
@@ -545,7 +559,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         const cleared = await db.updateMany<StatusRow>(STATUS, { id: ownId, staleToken: before.staleToken }, { staleToken: null, staleAt: null, staleRetryAt: null, staleAttempts: 0, staleError: null });
         if (isErr(cleared)) return err(dbFailure(cleared.error));
       }
-      if (flight.changed) {
+      if (touches(readsOf(work.set), flight.changes)) {
         const remarked = await markRows([ownId], MARKABLE);
         if (isErr(remarked)) logger.error("delivery/static: could not mark an output whose render overlapped a change, the recovery pass marks it", { ...output, error: remarked.error.message });
       }
@@ -615,7 +629,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   };
 
   const publishLocale = async (type: string, id: string, locale: string | undefined): Promise<Result<RenderOutcome, DeliveryError>> => {
-    const flight: Flight = { changed: false };
+    const flight: Flight = { changes: [] };
     inFlight.add(flight);
     try {
       return await renderLocale(flight, type, id, locale);
@@ -820,8 +834,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
   if (dependencies.render === "background") loop = createBackgroundLoop(pass, logger, "delivery/static");
 
   const markDependents: Delivery["markDependents"] = async (type, ids) => {
-    for (const flight of inFlight) flight.changed = true;
     const changed = [...new Set(ids)];
+    for (const flight of inFlight) flight.changes.push({ type, ids: changed });
     const outputs = new Set<string>();
     const isModelType = model.types[type] !== undefined;
     for (const id of changed) {
