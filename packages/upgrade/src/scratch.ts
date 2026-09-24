@@ -1,13 +1,19 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, stat, symlink, copyFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, symlink, copyFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
+import { trackTempDir, untrackTempDir } from "./cleanup.ts";
 
 const run = promisify(execFile);
 
 const EXCLUDED_DIRS = new Set(["node_modules", ".git", ".nuxt", ".output", "dist"]);
 const MAX_BYTES = 10 * 1024 * 1024;
+const EXCLUDED_FILE_PATTERNS = [/^\.env(\..*)?$/, /\.db(-wal|-shm)?$/i, /\.sqlite3?(-wal|-shm)?$/i];
+
+function isExcludedFile(name: string): boolean {
+  return EXCLUDED_FILE_PATTERNS.some((pattern) => pattern.test(name));
+}
 
 async function gitTrackedFiles(root: string): Promise<string[] | undefined> {
   try {
@@ -28,6 +34,7 @@ async function walk(root: string, dir: string, out: string[]): Promise<void> {
       continue;
     }
     if (!entry.isFile()) continue;
+    if (isExcludedFile(entry.name)) continue;
     const info = await stat(join(root, relPath));
     if (info.size > MAX_BYTES) continue;
     out.push(relPath);
@@ -92,6 +99,7 @@ export interface ScratchCopy {
 /** Copies the project's own files into a fresh temp directory and points a symlinked `node_modules` at the project's real one, so loading and any file writes it triggers never touch the project. */
 export async function createScratchCopy(root: string): Promise<ScratchCopy> {
   const dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-"));
+  trackTempDir(dir);
   const files = await projectFiles(root);
   for (const file of files) {
     const from = join(root, file);
@@ -102,6 +110,12 @@ export async function createScratchCopy(root: string): Promise<ScratchCopy> {
   await symlinkNodeModules(root, dir);
   await mkdir(join(dir, "sandbox"), { recursive: true });
   return { dir, root };
+}
+
+/** Removes a scratch copy's directory; always call this once a scratch copy is no longer needed. */
+export async function removeScratchCopy(scratch: ScratchCopy): Promise<void> {
+  untrackTempDir(scratch.dir);
+  await rm(scratch.dir, { recursive: true, force: true });
 }
 
 export function relativeToRoot(root: string, file: string): string {

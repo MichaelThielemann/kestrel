@@ -1,5 +1,4 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { relative, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -17,7 +16,7 @@ import type { LoadedProject, Rule, RunUpgradeCliOptions, UpgradePlugin } from ".
 import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity, type UpgradeReport } from "./report.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
 import { sandboxBootInput, type SandboxTable } from "./sandbox.ts";
-import { createScratchCopy } from "./scratch.ts";
+import { createScratchCopy, removeScratchCopy } from "./scratch.ts";
 import { installedVersions, majorOf } from "./versions.ts";
 
 interface ResolvedProject {
@@ -123,117 +122,120 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
   const kestrelMajor = options.forceMajor ?? (kestrelVersion === undefined ? undefined : majorOf(kestrelVersion));
   const findings: Finding[] = [];
   const scratch = await createScratchCopy(root);
-
-  if (versions.mixedMajors) {
-    findings.push({
-      id: "deps/mixed-majors",
-      rule: "deps/mixed-majors",
-      severity: "error",
-      tier: "source",
-      where: {},
-      message: "the project's @michaelthielemann/kestrel* dependencies mix majors",
-      suggestion: "run fix to bump every out-of-range dependency to ^6.0.0, then pnpm install",
-      fix: { kind: "manual" },
-      docs: "docs/upgrading.md#deps-kestrel-range",
-    });
-  }
-
-  const { project, issues, rules, sandboxEntries, reload } = await resolveProject(root, entry, scratch.dir, options.plugins ?? []);
-  findings.push(...loadIssuesAsFindings(issues));
-
-  let tiers: UpgradeReport["tiers"] = { source: "not-run", load: "not-run", boot: "not-run", data: "not-run" };
-  let bootCheck: Awaited<ReturnType<typeof checkBoot>> = { errors: [], warnings: [], notChecked: [] };
-  let outside: readonly string[] = [];
-
-  let previewBoot: ((edits: readonly Edit[]) => Promise<BootCheck | undefined>) | undefined;
-
-  if (project) {
-    tiers = { ...tiers, source: "done" };
-
-    if (kestrelMajor === 6 && !versions.mixedMajors) {
-      tiers = { ...tiers, load: "done" };
-      const box = sandboxBootInput(project.input, { dir: scratch.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
-      outside = box.outside;
-      bootCheck = await checkBoot(box.input, { setup: box.setup });
-      tiers = { ...tiers, boot: "done" };
-
-      previewBoot = async (edits) => {
-        const preview = await createScratchCopy(root);
-        try {
-          const grouped = groupByFile(edits);
-          for (const [file, fileEdits] of grouped) {
-            const target = resolve(preview.dir, relative(scratch.dir, file));
-            if (!existsSync(target)) continue;
-            writeFileSync(target, applyEdits(readFileSync(target, "utf8"), fileEdits).text);
-          }
-          const reloadedProject = await reload(preview.dir);
-          if (!reloadedProject) return undefined;
-          const previewSandbox = sandboxBootInput(reloadedProject.input, { dir: preview.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
-          return await checkBoot(previewSandbox.input, { setup: previewSandbox.setup });
-        } finally {
-          await rm(preview.dir, { recursive: true, force: true });
-        }
-      };
-    } else if (kestrelMajor !== undefined && kestrelMajor < 6) {
+  try {
+    if (versions.mixedMajors) {
       findings.push({
-        id: "deps/pre-install",
-        rule: "deps/pre-install",
-        severity: "info",
+        id: "deps/mixed-majors",
+        rule: "deps/mixed-majors",
+        severity: "error",
         tier: "source",
         where: {},
-        message: "the 5.x packages are installed; this run sees the source tier only",
-        suggestion: "install the 6.0.0 packages and run check again for the load and boot checks",
-        fix: { kind: "none" },
-        docs: "docs/upgrading.md",
-      });
-    }
-
-    const projectWithData = options.dataReport === undefined ? project : { ...project, data: options.dataReport };
-    const ctx = { root: scratch.dir, scratch: scratch.dir, project: projectWithData, bootCheck, readFile: readFileOrUndefined, answers: options.answers, ...(previewBoot === undefined ? {} : { previewBoot }) };
-    for (const rule of rules) findings.push(...(await rule.check(ctx)));
-
-    const claimed = new Set(findings.map((f) => `${f.where.module ?? ""}|${f.where.pipeline ?? ""}|${f.where.step ?? ""}`));
-    for (const problem of bootCheck.errors) {
-      const key = `${problem.module ?? ""}|${problem.pipeline ?? ""}|${problem.step ?? ""}`;
-      if (claimed.has(key) && key !== "||") continue;
-      findings.push({
-        id: `boot/${problem.code}:${problem.owner}`,
-        rule: `boot/${problem.code}`,
-        severity: "error",
-        tier: "boot",
-        where: whereOf({ module: problem.module, pipeline: problem.pipeline, step: problem.step }),
-        message: problem.reason,
-        suggestion: "see docs/upgrading.md for this boot error code",
+        message: "the project's @michaelthielemann/kestrel* dependencies mix majors",
+        suggestion: "run fix to bump every out-of-range dependency to ^6.0.0, then pnpm install",
         fix: { kind: "manual" },
-        docs: "docs/upgrading.md#boot-code",
+        docs: "docs/upgrading.md#deps-kestrel-range",
       });
     }
-    for (const item of bootCheck.notChecked) {
-      findings.push({
-        id: `boot/not-checked:${item.kind}:${item.name}`,
-        rule: "boot/not-checked",
-        severity: "warning",
-        tier: "boot",
-        where: item.kind === "module" ? { module: item.name } : { pipeline: item.name },
-        message: `${item.kind} "${item.name}" was not checked: ${item.because}`,
-        suggestion: outside.includes(item.name) ? `run with --run-setup ${item.name} to include it` : "see docs/upgrading.md",
-        fix: { kind: "none" },
-        docs: "docs/upgrading.md#not-checked",
-      });
-    }
-  }
 
-  const remapped = findings.map((f) => remapFinding(f, scratch.dir, root));
-  const report: UpgradeReport = {
-    schema: 1,
-    tool: { name: "kestrel-upgrade", version: TOOL_VERSION },
-    target: "6.0.0",
-    project: { root, kind: project?.kind ?? "unknown", installed: versions.installed },
-    tiers,
-    summary: summarize(remapped),
-    findings: remapped,
-  };
-  return { report };
+    const { project, issues, rules, sandboxEntries, reload } = await resolveProject(root, entry, scratch.dir, options.plugins ?? []);
+    findings.push(...loadIssuesAsFindings(issues));
+
+    let tiers: UpgradeReport["tiers"] = { source: "not-run", load: "not-run", boot: "not-run", data: "not-run" };
+    let bootCheck: Awaited<ReturnType<typeof checkBoot>> = { errors: [], warnings: [], notChecked: [] };
+    let outside: readonly string[] = [];
+
+    let previewBoot: ((edits: readonly Edit[]) => Promise<BootCheck | undefined>) | undefined;
+
+    if (project) {
+      tiers = { ...tiers, source: "done" };
+
+      if (kestrelMajor === 6 && !versions.mixedMajors) {
+        tiers = { ...tiers, load: "done" };
+        const box = sandboxBootInput(project.input, { dir: scratch.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
+        outside = box.outside;
+        bootCheck = await checkBoot(box.input, { setup: box.setup });
+        tiers = { ...tiers, boot: "done" };
+
+        previewBoot = async (edits) => {
+          const preview = await createScratchCopy(root);
+          try {
+            const grouped = groupByFile(edits);
+            for (const [file, fileEdits] of grouped) {
+              const target = resolve(preview.dir, relative(scratch.dir, file));
+              if (!existsSync(target)) continue;
+              writeFileSync(target, applyEdits(readFileSync(target, "utf8"), fileEdits).text);
+            }
+            const reloadedProject = await reload(preview.dir);
+            if (!reloadedProject) return undefined;
+            const previewSandbox = sandboxBootInput(reloadedProject.input, { dir: preview.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
+            return await checkBoot(previewSandbox.input, { setup: previewSandbox.setup });
+          } finally {
+            await removeScratchCopy(preview);
+          }
+        };
+      } else if (kestrelMajor !== undefined && kestrelMajor < 6) {
+        findings.push({
+          id: "deps/pre-install",
+          rule: "deps/pre-install",
+          severity: "info",
+          tier: "source",
+          where: {},
+          message: "the 5.x packages are installed; this run sees the source tier only",
+          suggestion: "install the 6.0.0 packages and run check again for the load and boot checks",
+          fix: { kind: "none" },
+          docs: "docs/upgrading.md",
+        });
+      }
+
+      const projectWithData = options.dataReport === undefined ? project : { ...project, data: options.dataReport };
+      const ctx = { root: scratch.dir, scratch: scratch.dir, project: projectWithData, bootCheck, readFile: readFileOrUndefined, answers: options.answers, ...(previewBoot === undefined ? {} : { previewBoot }) };
+      for (const rule of rules) findings.push(...(await rule.check(ctx)));
+
+      const claimed = new Set(findings.map((f) => `${f.where.module ?? ""}|${f.where.pipeline ?? ""}|${f.where.step ?? ""}`));
+      for (const problem of bootCheck.errors) {
+        const key = `${problem.module ?? ""}|${problem.pipeline ?? ""}|${problem.step ?? ""}`;
+        if (claimed.has(key) && key !== "||") continue;
+        findings.push({
+          id: `boot/${problem.code}:${problem.owner}`,
+          rule: `boot/${problem.code}`,
+          severity: "error",
+          tier: "boot",
+          where: whereOf({ module: problem.module, pipeline: problem.pipeline, step: problem.step }),
+          message: problem.reason,
+          suggestion: "see docs/upgrading.md for this boot error code",
+          fix: { kind: "manual" },
+          docs: "docs/upgrading.md#boot-code",
+        });
+      }
+      for (const item of bootCheck.notChecked) {
+        findings.push({
+          id: `boot/not-checked:${item.kind}:${item.name}`,
+          rule: "boot/not-checked",
+          severity: "warning",
+          tier: "boot",
+          where: item.kind === "module" ? { module: item.name } : { pipeline: item.name },
+          message: `${item.kind} "${item.name}" was not checked: ${item.because}`,
+          suggestion: outside.includes(item.name) ? `run with --run-setup ${item.name} to include it` : "see docs/upgrading.md",
+          fix: { kind: "none" },
+          docs: "docs/upgrading.md#not-checked",
+        });
+      }
+    }
+
+    const remapped = findings.map((f) => remapFinding(f, scratch.dir, root));
+    const report: UpgradeReport = {
+      schema: 1,
+      tool: { name: "kestrel-upgrade", version: TOOL_VERSION },
+      target: "6.0.0",
+      project: { root, kind: project?.kind ?? "unknown", installed: versions.installed },
+      tiers,
+      summary: summarize(remapped),
+      findings: remapped,
+    };
+    return { report };
+  } finally {
+    await removeScratchCopy(scratch);
+  }
 }
 
 function printReport(report: UpgradeReport, args: ParsedArgs, stdout: (line: string) => void): void {
