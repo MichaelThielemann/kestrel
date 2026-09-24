@@ -311,6 +311,23 @@ Net changes since 5.8.1.
   that composes with `checkBoot()` for a CI gate, and a plugin API
   (`@michaelthielemann/kestrel-upgrade/plugin`) a host CLI registers its own project loader and
   rules through instead of shipping a second copy of the engine.
+- `kestrel-upgrade`'s plugin API, finalized against its first real host: `UpgradePlugin.load()`
+  returns `LoadResult` (`{ project?, issues }`), the same shape the built-in loader already has, so a
+  partial load failure surfaces as `load/failed` findings instead of losing the rest of the project;
+  it also takes a third parameter, `cache: Map<string, unknown>`, shared by every `load()` call within
+  one `check`/`fix` invocation (every re-ask round, every edit preview) so a plugin can skip repeating
+  an expensive prepare step. `UpgradePlugin` gains `overrides` (replaces or disables a built-in rule
+  by id, reported as `plugin/rule-replaced`/`plugin/rule-disabled`; two plugins claiming the same id
+  is a load error), `ownsPackages` (package names the built-in dependency rules never read or edit,
+  even under this repo's own npm scope), and `locateSteps`/`locateModelFields` (locates a pipeline's
+  step array or a content type's fields object literal directly, for a project layout the built-in
+  search does not recognize; `RuleContext` carries the active plugin's own locators to
+  `pipelines/verified-user` and `model/underscore-field`). Version detection
+  (`mixedMajors`, `deps/kestrel-range`) now checks this repo's own fixed package list instead of a
+  name prefix, so a plugin's own package is never mistaken for one of this repo's own. The edit,
+  verify and all-or-nothing combine primitives (`applyEdits`, `verifiesAfterEdit`,
+  `combineEditParts`), plus the AST reading primitives a locator is written with, are published from
+  a new `@michaelthielemann/kestrel-upgrade/codemods` export.
 
 ### Changed
 
@@ -364,6 +381,10 @@ Net changes since 5.8.1.
 - `events-queue`: an instance with no event trigger anywhere in the manifest now installs an empty
   delivery table at `setup()` instead of leaving delivery uninstalled, so `events.emit` drops the
   event instead of writing a row with no pipeline that nothing could ever fan out or process.
+- `kestrel-upgrade`: a scratch copy that failed partway through (copying a file, symlinking
+  `node_modules`) leaked its own temp directory — it was already tracked for signal-based cleanup, but
+  nothing removed it on a normal, non-signal failure. `createScratchCopy` now removes and untracks its
+  own partial copy before rethrowing.
 
 ## 5.8.1 – 2026-09-22
 

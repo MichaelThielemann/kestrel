@@ -315,3 +315,70 @@ boot without starting it, which also lists every boot error code. `@michaelthiel
 exports the plugin API (`UpgradePlugin`, `Rule`, `RuleContext`, `runUpgradeCli`) a host CLI registers
 its own project loader and rules through, instead of shipping a second copy of the check-and-fix
 engine; `runUpgradeCli` also takes a `prompt` and `isInteractive` override for a host with its own UI.
+
+### The plugin API
+
+A host registers one or more `UpgradePlugin`s through `runUpgradeCli(argv, { plugins })`. For a given
+`root`, the first plugin whose `detect(root)` returns `true` becomes the active one for that run;
+none matching falls back to the built-in backend loader (`kestrel.config.ts`, module list, pipelines
+directory) with only the built-in rules.
+
+- `kind: string` — the plugin's own project kind, shown as `report.project.kind`.
+- `detect(root): boolean | Promise<boolean>` — whether this plugin owns the project at `root`.
+- `load(root, scratch, cache): Promise<LoadResult>` — loads the project into `scratch`, a fresh,
+  uniquely-named directory this call alone ever sees. `LoadResult` is `{ project?, issues }`, the
+  same shape the built-in loader itself returns: one bad file becomes an `issues` entry (surfacing as
+  a `load/failed` finding) without stopping the rest of the load; `project` is absent only when
+  nothing could be loaded at all. `load()` runs again, with a new `scratch`, for every re-ask round
+  and every edit preview within one `check`/`fix` invocation, and again for each project a host
+  processing several in one process loads — a loader with its own module cache keyed by a fixed path
+  (one that does not vary with `scratch`) must make that cache fresh per call or disable it, or a
+  later call can silently answer from an earlier project's or an earlier preview's cached module.
+  `cache` is one plain `Map`, shared by every `load()` call for this one invocation only (never across
+  two different projects, or two separate invocations): a plugin whose own loading runs something as
+  expensive as a build tool's own prepare step can stash the result there and skip repeating it for
+  the same project's later scratch copies.
+- `sandbox?: Record<string, (config, scratch) => unknown>` — extra sandbox config-rewrite entries,
+  keyed like `DEFAULT_SANDBOX_ENTRIES` (see `sandbox-blobstore-standin` above), merged with the
+  built-in table.
+- `rules?: readonly Rule[]` — extra rules, run alongside every built-in one.
+- `overrides?: Record<string, Rule | null>` — replaces a built-in rule by id with a different `Rule`,
+  or disables it entirely (`null`). A replacement is reported as an info finding, `plugin/rule-replaced`
+  naming the id and the plugin; a disable is reported the same way as `plugin/rule-disabled`. Two
+  plugins registered in the same `plugins` array claiming the same id, whether or not both would ever
+  be the active one for the same project, is a load error — nothing loads until that's fixed.
+- `ownsPackages?: readonly string[]` — package names this plugin owns the versioning of. The built-in
+  dependency rules (`deps/kestrel-range` and the mixed-majors check) only ever read or edit this
+  repo's own backend packages; a plugin's own package range is never rewritten or counted as a
+  mixed-major break, even if its name happens to fall under this repo's own npm scope.
+- `locateSteps?`, `locateModelFields?` — locate a pipeline's step array(s) or a content type's fields
+  object literal directly, for a project layout where a pipeline is not a
+  `definePipeline({ name, steps })` call or a content type does not sit at
+  `config.types.<typeName>.fields` on a module-list entry (for example, either living inside another
+  call's options object). `RuleContext` carries the active plugin's own locators through, and
+  `pipelines/verified-user` / `model/underscore-field` pass them to the codemod instead of only ever
+  searching the built-in shape; absent, both fall back to the exact built-in search unchanged.
+- `questions?: readonly Question[]` — reserved for a plugin's own standalone questions.
+
+`RuleContext` (passed to every `Rule.check()`) additionally carries `ownsPackages`, `locateSteps` and
+`locateModelFields` from the active plugin, and `previewBoot(edits)`, which applies the given edits to
+a scratch copy, reloads the project (through the active plugin's own `load()`, or the built-in loader)
+and runs `checkBoot()` on it — the mechanism `fix` itself uses to report what remains after writing.
+
+`@michaelthielemann/kestrel-upgrade/codemods` exports the primitives a plugin's own `Rule` or locator
+writes edits with, so it never needs a second copy of this engine's own edit machinery:
+
+- `applyEdits(source, edits)` — the edit primitive: splices non-overlapping edits into `source` in one
+  pass; an edit that fully contains an already-accepted one takes its place, any other overlap drops
+  the later-processed edit.
+- `verifiesAfterEdit(file, text)` — the verify primitive: whether `text` (a file's content after
+  applying edits) is still syntactically sound — valid JSON for a `.json` file, otherwise a TS/JS
+  source with no array hole an edit can leave behind. An edit that fails this never gets written.
+- `combineEditParts(parts)` — the all-or-nothing combine primitive: `Record<label, Edit[] | undefined>`
+  becomes one accepted set, or none at all (`missing` naming every part that could not be located) —
+  a multi-part edit (a module-list entry plus a `package.json` range, say) is never applied halfway.
+- `parseTs`, `walk`, `findAll`, `findCalls`, `firstArgument`, `objectProperty`, `objectPropertyNodes`,
+  `propertyKeyName`, `propertyKeyNode`, `isAstNode`, `isArrayExpression`, `arrayElements`, `span`,
+  `stringValue`, and the `AstNode` type — the AST reading primitives `locateSteps` and
+  `locateModelFields` are written with; a babel AST node read generically (`type`, `start`, `end`),
+  never depending on a more specific shape.
