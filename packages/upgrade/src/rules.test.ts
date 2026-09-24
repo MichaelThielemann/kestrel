@@ -67,6 +67,30 @@ describe("modules/event-delivery", () => {
     const project = await projectWithConfig(source, []);
     expect(await eventDeliveryRule.check(contextFor(project))).toEqual([]);
   });
+
+  it("also adds the module to a sibling modules.ts, when one exists", async () => {
+    const source = 'export default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-events-inmemory" }], triggers: [] });\n';
+    const project = await projectWithConfig(source, ["@michaelthielemann/kestrel-events-inmemory"]);
+    const modulesTsFile = join(dir, "modules.ts");
+    const modulesTsSource = `import { pipelineDefiner, type StepCatalogue } from "@michaelthielemann/kestrel";
+import eventsInmemory from "@michaelthielemann/kestrel-events-inmemory";
+
+const modules = [eventsInmemory] as const;
+
+export default modules;
+export type KnownStep = StepCatalogue<typeof modules>;
+export const definePipeline = pipelineDefiner<KnownStep>();
+`;
+    await writeFile(modulesTsFile, modulesTsSource);
+    const findings = await eventDeliveryRule.check(contextFor(project));
+    expect(findings).toHaveLength(1);
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const modulesTsEdits = edits.filter((e) => e.file === modulesTsFile);
+    expect(modulesTsEdits.length).toBeGreaterThan(0);
+    const { text } = applyEdits(modulesTsSource, modulesTsEdits);
+    expect(text).toContain('import eventsDirect from "@michaelthielemann/kestrel-events-direct";');
+    expect(text).toContain("const modules = [eventsInmemory, eventsDirect] as const;");
+  });
 });
 
 describe("modules/event-bus", () => {

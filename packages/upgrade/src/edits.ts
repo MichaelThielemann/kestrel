@@ -386,3 +386,56 @@ export function renameContentField(file: string, source: string, options: Rename
   }
   return { file, start, end, text: options.to };
 }
+
+function kebabToCamel(name: string): string {
+  return name.replace(/-([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+}
+
+function packageIdentifier(packageName: string): string {
+  return kebabToCamel(packageName.replace(/^@[^/]+\/kestrel-/, ""));
+}
+
+function findModulesIdentifierArray(root: AstNode): AstNode | undefined {
+  let found: AstNode | undefined;
+  walk(root, (node) => {
+    if (found || node.type !== "VariableDeclarator") return;
+    const rawInit = node.init;
+    let init: AstNode | undefined = isAstNode(rawInit) ? rawInit : undefined;
+    if (init !== undefined && init.type === "TSAsExpression" && isAstNode(init.expression)) init = init.expression;
+    if (!isArray(init)) return;
+    const els = elements(init);
+    if (els.length > 0 && els.every((e) => e.type === "Identifier")) found = init;
+  });
+  return found;
+}
+
+function insertLineAfter(file: string, source: string, node: AstNode, line: string): Edit {
+  const eol = eolOf(source);
+  const { end } = span(node);
+  const nlIndex = source.indexOf("\n", end);
+  const insertAt = nlIndex === -1 ? source.length : nlIndex + 1;
+  return { file, start: insertAt, end: insertAt, text: `${line}${eol}` };
+}
+
+/**
+ * Adds a default-imported module to a `modules.ts`-style file: a plain array of module-object
+ * identifiers (`const modules = [a, b] as const`) a project derives its `KnownStep` union from,
+ * separate from `kestrel.config.ts`'s runtime `use` strings. `undefined` when the package is
+ * already imported, or the file is not shaped like this array-of-identifiers pattern at all.
+ */
+export function insertModulesTsEntry(file: string, source: string, packageName: string): Edit[] | undefined {
+  if (source.includes(`"${packageName}"`) || source.includes(`'${packageName}'`)) return undefined;
+  const root = parseTs(source);
+  const array = findModulesIdentifierArray(root);
+  if (array === undefined) return undefined;
+  const imports = findAll(root, "ImportDeclaration");
+  const lastImport = imports[imports.length - 1];
+  if (lastImport === undefined) return undefined;
+  const firstImportSource = imports[0]?.source;
+  const quote = quoteOf(source, isAstNode(firstImportSource) ? firstImportSource : undefined);
+  const identifier = packageIdentifier(packageName);
+  const importEdit = insertLineAfter(file, source, lastImport, `import ${identifier} from ${quote}${packageName}${quote};`);
+  const els = elements(array);
+  const arrayEdit = insertRelativeToAnchor(file, source, array, els[els.length - 1]!, "after", identifier);
+  return [importEdit, arrayEdit];
+}

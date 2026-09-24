@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { insertModuleListEntry, renameStringLiterals, setModuleConfigProperties } from "./edits.ts";
+import { insertModuleListEntry, insertModulesTsEntry, renameStringLiterals, setModuleConfigProperties } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { setDependencyRange } from "./packageJson.ts";
-import type { Rule } from "./plugin.ts";
+import type { Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
 import { finding, KESTREL_RANGE, moduleEntry, packageJsonPath } from "./ruleHelpers.ts";
 import { bootWrapRules } from "./ruleBootWraps.ts";
@@ -13,6 +14,13 @@ import { queueOfferRule } from "./ruleQueueOffer.ts";
 import { underscoreFieldRules } from "./ruleUnderscoreField.ts";
 import { verifiedUserRule } from "./ruleVerifiedUser.ts";
 import { useToken } from "./useToken.ts";
+
+function modulesTsEdits(ctx: RuleContext, packageName: string): Edit[] {
+  const file = join(dirname(ctx.project.configFile), "modules.ts");
+  const source = ctx.readFile(file);
+  if (source === undefined) return [];
+  return insertModulesTsEntry(file, source, packageName) ?? [];
+}
 
 export const eventDeliveryRule: Rule = {
   id: "modules/event-delivery",
@@ -30,6 +38,7 @@ export const eventDeliveryRule: Rule = {
     const pkgFile = packageJsonPath(ctx);
     const pkgSource = ctx.readFile(pkgFile);
     if (pkgSource !== undefined) edits.push(setDependencyRange(pkgFile, pkgSource, "dependencies", "@michaelthielemann/kestrel-events-direct", KESTREL_RANGE));
+    edits.push(...modulesTsEdits(ctx, "@michaelthielemann/kestrel-events-direct"));
     return [
       finding(
         "modules/event-delivery",
@@ -60,6 +69,7 @@ export const eventBusRule: Rule = {
     const pkgFile = packageJsonPath(ctx);
     const pkgSource = ctx.readFile(pkgFile);
     if (pkgSource !== undefined) edits.push(setDependencyRange(pkgFile, pkgSource, "dependencies", "@michaelthielemann/kestrel-events-inmemory", KESTREL_RANGE));
+    edits.push(...modulesTsEdits(ctx, "@michaelthielemann/kestrel-events-inmemory"));
     return [
       finding(
         "modules/event-bus",
