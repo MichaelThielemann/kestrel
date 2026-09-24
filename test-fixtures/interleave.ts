@@ -33,7 +33,7 @@ export async function countGateCalls(run: () => Promise<void>): Promise<number> 
   return n;
 }
 
-/** Pauses `target` right before its `index`-th gated call (0-based), runs `between` to completion ungated, then lets `target` finish. */
+/** Pauses `target` right before its `index`-th gated call (0-based), runs `between` to completion ungated, then lets `target` finish; a target that makes fewer calls simply finishes before `between` runs. */
 export async function runWithGapAt(index: number, target: () => Promise<void>, between: () => Promise<void>): Promise<void> {
   let seen = -1;
   let resolveArmed: () => void = () => {};
@@ -52,7 +52,7 @@ export async function runWithGapAt(index: number, target: () => Promise<void>, b
     }
   };
   const targetDone = asTarget(target);
-  await armed;
+  await Promise.race([armed, targetDone]);
   await between();
   releaseGate();
   await targetDone;
