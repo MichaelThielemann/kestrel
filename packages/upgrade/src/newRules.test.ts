@@ -287,6 +287,8 @@ describe("info rules", () => {
     const findings = await deliveryMembersRule.check(contextFor(p));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.severity).toBe("info");
+    expect(findings[0]?.message).toContain("merges { document, delivery } into _delivery");
+    expect(findings[0]?.message).toContain("writes _llms instead of llms");
   });
 
   it("runtime/bus-handler-throws fires when events-direct is configured and a module subscribes with .on(", async () => {

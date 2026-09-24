@@ -16,7 +16,7 @@ export const deliveryMembersRule: Rule = {
       if (def === undefined) continue;
       const usesDelivery = def.steps.some((s) => typeof s === "string" && DELIVERY_STEPS.includes(s.split(":")[0]!));
       if (!usesDelivery) continue;
-      findings.push(infoFinding(`responses/delivery-members:${t.http}`, "responses/delivery-members", `${t.http} runs a delivery step whose response shape changed: delivery.publish now merges { document, delivery } instead of _delivery, delivery.exportLlms writes llms instead of _llms, and a missing id is 400 instead of 500`, "update any client reading the old field names", { file: ctx.project.configFile, pipeline: t.pipeline }, "docs/upgrading.md#responses-delivery-members"));
+      findings.push(infoFinding(`responses/delivery-members:${t.http}`, "responses/delivery-members", `${t.http} runs a delivery step whose response shape changed: delivery.publish now merges { document, delivery } into _delivery instead of replacing the result with it, delivery.exportLlms writes _llms instead of llms, and a missing id is 400 instead of 500`, "update any client reading the old field names", { file: ctx.project.configFile, pipeline: t.pipeline }, "docs/upgrading.md#responses-delivery-members"));
     }
     return findings;
   },
