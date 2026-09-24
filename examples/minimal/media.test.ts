@@ -295,6 +295,39 @@ describe("examples/minimal media: public copies need anonymous read", () => {
   });
 });
 
+describe("examples/minimal media: nothing active reaches the public copy", () => {
+  it("an HTML file sent as an image type is published as .bin and served as application/octet-stream", async () => {
+    const example = await bootExample();
+    try {
+      const token = await adminToken(example);
+      const item = await upload(example, token, "Invite.HTML", "image/x-foo", new TextEncoder().encode("<html><script>alert(1)</script></html>"));
+      expect(fileOf(item.path)).toBe("Invite-HTML.bin");
+      expect(readdirSync(join(example.blobRoot, "site", "media", item.id), { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name)).toEqual(["Invite-HTML.bin"]);
+      const served = await example.kestrel.run("serveMediaFile", { trigger, params: { id: item.id, name: "Invite-HTML.bin" } });
+      expect(served.status).toBe(200);
+      expect(boundaryCast<{ contentType: string }>(served.result, "json").contentType).toBe("application/octet-stream");
+      expect((await example.kestrel.run("serveMediaFile", { trigger, params: { id: item.id, name: "Invite.HTML" } })).status).toBe(404);
+    } finally {
+      await example.dispose();
+    }
+  });
+
+  it("an SVG with a script is sanitised before its public copy is written", async () => {
+    const example = await bootExample();
+    try {
+      const token = await adminToken(example);
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(2)</script><rect width="1" height="1"/></svg>';
+      const item = await upload(example, token, "logo.SVG.html", "image/svg+xml", new TextEncoder().encode(svg));
+      expect(fileOf(item.path)).toBe("logo-SVG.svg");
+      const copy = readFileSync(join(example.blobRoot, "site", "media", item.id, "logo-SVG.svg"), "utf8");
+      expect(copy).toContain("<rect");
+      expect(copy).not.toMatch(/script|onload/i);
+    } finally {
+      await example.dispose();
+    }
+  });
+});
+
 describe("examples/minimal media: an image whose render fails", () => {
   it("is placed right after the upload with the original at every variant path, and a later failed render keeps that placeholder", async () => {
     const example = await bootExample();

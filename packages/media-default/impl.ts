@@ -8,7 +8,7 @@ import { err, failure, isErr, ok, type KestrelError, type Result } from "@michae
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { noteRead } from "@michaelthielemann/kestrel/reads";
-import { EXTENSION_BY_TYPE } from "./extensions.ts";
+import { EXTENSION_BY_TYPE, NEUTRAL_EXTENSION, mediaTypeOf, publicFormOf } from "./extensions.ts";
 import { imageSize } from "./imageSize.ts";
 
 export const COLLECTION = "media_items";
@@ -167,10 +167,6 @@ function parentsOf(folder: string): string[] {
   return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
 }
 
-function mediaTypeOf(contentType: string): string {
-  return contentType.split(";")[0]?.trim().toLowerCase() ?? "";
-}
-
 function typeAllowed(allowed: string[], contentType: string): boolean {
   const mediaType = mediaTypeOf(contentType);
   return allowed.some((entry) => {
@@ -178,6 +174,8 @@ function typeAllowed(allowed: string[], contentType: string): boolean {
     return pattern === "*" || pattern === mediaType || (pattern.endsWith("/*") && mediaType.startsWith(pattern.slice(0, -1)));
   });
 }
+
+const SVG = "image/svg+xml";
 
 const ORIGINS = new Set<string>(["human", "ai", "mixed", "unknown"]);
 
@@ -250,18 +248,13 @@ export function safeName(filename: string): string {
   return named.replace(/\.meta\.json$/i, "-meta.json");
 }
 
-/** Names an upload never receives as they are, because they collide with a path next to the file's own: `variants` is the directory of an image's variants, `file` the download route of an item. */
-export const RESERVED_NAMES: ReadonlySet<string> = new Set(["file", "variants"]);
-
-/** The upload-time name for a file: `safeName(filename)` with the extension of `contentType` when it is known, so a host that derives Content-Type from the extension serves the right one; an unknown type keeps the uploaded extension. A reserved name gets `-upload` appended. */
+/** The upload-time name for a file, which is the last segment of its key and of its public URL: the uploaded name reduced by `safeName`, without its extension when the stored type has a listed one, with every remaining `.` turned into `-`, and then `.` plus the extension of the stored type (`bin` for an unlisted type). So the name carries exactly one extension, and it always follows the type the file was stored under, never the uploaded name. */
 export function nameFor(filename: string, contentType: string): string {
   const base = safeName(filename);
-  const ext = EXTENSION_BY_TYPE[mediaTypeOf(contentType)];
-  if (ext === undefined) return RESERVED_NAMES.has(base.toLowerCase()) ? `${base}-upload` : base;
-  const baseExt = extname(base);
-  const stem = baseExt === "" ? base : base.slice(0, -baseExt.length);
-  const named = capName(`${stem === "" ? "file" : stem}.${ext}`);
-  return named.replace(/\.meta\.json$/i, "-meta.json");
+  const listed = EXTENSION_BY_TYPE[mediaTypeOf(contentType)];
+  const uploadedExt = extname(base);
+  const stem = (listed !== undefined && uploadedExt !== "" ? base.slice(0, -uploadedExt.length) : base).replace(/\./g, "-").replace(/^-+|-+$/g, "");
+  return capName(`${stem === "" ? "file" : stem}.${listed ?? NEUTRAL_EXTENSION}`);
 }
 
 /** The last path segment of a blob key: for `<prefix><id>/<name>` this is the upload-time `<name>`. */
@@ -322,8 +315,14 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
   const releaseFailed = async (location: string): Promise<Result<void, MediaError>> => {
     const row = await db.findOne<MediaItem>(COLLECTION, { location });
     if (isErr(row)) return row;
-    if (row.value === null || row.value.status !== "failed") return ok();
+    if (row.value === null) return ok();
     const item = row.value;
+    if (item.status === "uploading") {
+      if (now() - item.updatedAt < config.uploadStaleAfterMs) return ok();
+      const abandoned = await db.updateMany<MediaItem>(COLLECTION, { id: item.id, status: "uploading" }, { status: "failed", updatedAt: now() });
+      if (isErr(abandoned)) return abandoned;
+      if (abandoned.value === 0) return ok();
+    } else if (item.status !== "failed") return ok();
     if (config.publicCopy !== undefined) {
       const droppedCopy = await blobs.remove(copyKey(item.id, urlNameOf(item.key)));
       if (isErr(droppedCopy)) return droppedCopy;
@@ -531,7 +530,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         return stored;
       }
       if (config.publicCopy !== undefined) {
-        const copied = await blobs.put(copyKey(id, name), file.data, { contentType: file.contentType });
+        const copied = await blobs.put(copyKey(id, name), file.data, { contentType: publicFormOf(file.contentType).contentType });
         if (isErr(copied)) {
           const removedBlob = await blobs.remove(key);
           if (isErr(removedBlob)) logger.error(`media/default: could not delete blob ${key} after a failed public copy`, { id, key, error: removedBlob.error.message });
@@ -889,7 +888,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
           logger.error(`media/default: blob ${item.key} for ${item.id} is missing, its public copy was not written`, { id: item.id, key: item.key });
           return ok();
         }
-        const put = await blobs.put(key, original.value, { contentType: item.contentType });
+        const put = await blobs.put(key, original.value, { contentType: publicFormOf(item.contentType).contentType });
         if (isErr(put)) return put;
         const reread = await db.findOne<MediaItem>(COLLECTION, { id: item.id });
         if (isErr(reread)) return reread;
@@ -945,6 +944,13 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       }
       if (!runs("media.serve")) {
         throw new Error(`media/default: publicCopy is set, but no pipeline runs media.serve – the public URL ${config.publicPath}/<id>/<name> must also resolve on this origin`);
+      }
+      if (!typeAllowed(config.allowedTypes, SVG) || typeAllowed(config.deniedTypes, SVG)) return;
+      for (const pipeline of pipelines) {
+        const upload = pipeline.steps.findIndex((s) => s.module === "media/default" && s.name === "media.upload");
+        if (upload === -1) continue;
+        if (pipeline.steps.slice(0, upload).some((s) => s.name === "sanitize.svg")) continue;
+        throw new Error(`media/default: publicCopy is set and SVG uploads are allowed, but pipeline "${pipeline.name}" runs media.upload without sanitize.svg before it – an unsanitised SVG would be published; run sanitize.svg before media.upload or deny image/svg+xml`);
       }
     },
     async exportTo(dir) {

@@ -19,12 +19,23 @@ script) is the one that knows.
 ## One public URL per file
 
 Every item has exactly one public URL, `path`: `<publicPath>/<id>/<name>` (default `publicPath`:
-`/media`). `<name>` is decided once, at upload, from the sent filename reduced to
-`[A-Za-z0-9._-]` with the extension of the content type (`Photo 1.JPG` sent as `image/jpeg` becomes
-`Photo-1.jpg`, so a static host that derives `Content-Type` from the extension serves the right one);
-it never changes again. The names `variants` and `file` would collide with the variants directory
-next to the file and with the download route `/media/:id/file`, so such an upload is stored as
-`variants-upload` or `file-upload`. `media.update`'s `filename` only changes the *display* name from then on —
+`/media`). `<name>` is decided once, at upload, and never changes again. Its extension comes from
+the content type the file is stored under, never from the uploaded name, so the checks on the type
+(`allowedTypes`, `deniedTypes`, `sanitize.svg`) and the type a static host serves by the extension
+are always the same one:
+
+- a listed type (images, PDF, audio, video, `text/plain`, `text/csv`, JSON, ZIP; see
+  `extensions.ts`) gets its own extension, replacing the uploaded one: `Photo 1.JPG` sent as
+  `image/jpeg` becomes `Photo-1.jpg`, `x.html.png` sent as `image/png` becomes `x-html.png`;
+- every other type gets `.bin` and keeps the uploaded extension in the stem: `x.html` sent as
+  `image/x-foo` or `text/html` becomes `x-html.bin`, `app.js` sent as `text/javascript` becomes
+  `app-js.bin`. Its public copy is stored as `application/octet-stream`, and `media.serve` answers
+  with that type too, so every host offers it as a download and no browser runs it.
+
+The stem is the uploaded name reduced to `[A-Za-z0-9_-]`: any other dot becomes `-`, so a name
+carries exactly one extension and a host that maps several extensions (`x.html.png`) sees only the
+last. Case does not matter anywhere (`X.HTML`, `IMAGE/PNG`). A name is therefore never `variants` or
+`file`, the variants directory and the download route next to it. `media.update`'s `filename` only changes the *display* name from then on —
 neither the blob key nor `path` ever move, so renaming or moving an item needs no republish anywhere
 it is linked. A name still has to be unique per folder: the check runs against an internal
 `location` column (`folder + display filename`), never against the id-based blob key; a clash
@@ -44,7 +55,12 @@ build step for media. New step `media.syncPublic` reconciles that copy tree with
 `uploadStaleAfterMs` (default 15 minutes, an abandoned upload) the same way a normal failure is
 handled, writes a missing or mismatched copy, and removes a copy whose item is gone or whose file no
 longer matches — never touching anything deeper than one path segment under `<id>/`, since that is
-where `images-default`'s own variant copies live. It pages through the items by id, so an item
+where `images-default`'s own variant copies live. An SVG, the one listed type a browser can run
+script in, reaches the copy only after `sanitize.svg`: with `publicCopy` set and SVG uploads allowed
+by `allowedTypes`/`deniedTypes`, boot fails unless every pipeline that runs `media.upload` runs
+`sanitize.svg` before it. Serve the copy tree with `X-Content-Type-Options: nosniff` and
+`Content-Security-Policy: sandbox`, as the Node origin does, so a host never guesses a type or runs
+a document from it. It pages through the items by id, so an item
 deleted or added during the run never makes it skip another, and re-reads an item after writing its
 copy and removes the copy again when the item was deleted meanwhile; an upload or a delete running at
 the same time therefore never leaves a deleted item's copy behind or costs a ready item its copy. It
@@ -70,8 +86,10 @@ instead (see above). An upload writes the row first (`status: "uploading"`, `che
 the bytes as hex), then the private blob, then (if `publicCopy` is set) the public copy, then
 `status: "ready"`. A failing blob or copy write leaves `status: "failed"` and returns the
 blobstore's failure, so the pipeline still fails; a failing `ready` update returns the store's
-error and leaves the row `uploading`, which the next `media.syncPublic` marks `failed` once it is
-older than `uploadStaleAfterMs`, removing its copy and blob and freeing the name. Only `ready` items are returned by `media.get`,
+error and leaves the row `uploading`. Such a row, and one left by a blob store that threw, counts
+as abandoned once it is older than `uploadStaleAfterMs`: the next upload of the same name, and with
+`publicCopy` the next `media.syncPublic`, mark it `failed` and remove its copy and blob, which frees
+the name. Only `ready` items are returned by `media.get`,
 `media.list` and `media.download` (`NOT_FOUND` / filtered out otherwise), and a `failed` row is
 replaced when the same name is uploaded again, so a broken attempt never blocks a filename.
 `media.remove` and `media.removeFolder` remove the public copy, then the private blob, then the row,

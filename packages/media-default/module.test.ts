@@ -150,6 +150,16 @@ describe("media/default download and serve steps", () => {
     expect(expectErr(await steps.serve(fakeCtx([], {}, { id: "missing", name: "a.png" })), "NOT_FOUND").status).toBe(404);
   });
 
+  it("serve: answers with the same neutral type as the public copy for a type that is not a known inert one", async () => {
+    const { media, steps } = await make({ allowedTypes: ["*"], publicCopy: { prefix: "site/" } });
+    const item = expectOk(await media.upload({ filename: "x.html", contentType: "text/html", data: new TextEncoder().encode("<p>x</p>") })).item;
+    const served = boundaryCast<{ contentType: string; filename: string }>(expectOk(await steps.serve(fakeCtx([], {}, { id: item.id, name: "x-html.bin" }))).result, "host");
+    expect(served.contentType).toBe("application/octet-stream");
+    expect(served.filename).toBe("x-html.bin");
+    const downloaded = boundaryCast<{ contentType: string }>(expectOk(await steps.download(fakeCtx([], {}, { id: item.id }))).result, "host");
+    expect(downloaded.contentType).toBe("text/html");
+  });
+
   it("serve: immutable cache-control, private without publicCopy, public with it", async () => {
     const withoutCopy = await make();
     const itemA = expectOk(await withoutCopy.media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) })).item;

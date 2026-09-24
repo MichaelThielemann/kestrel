@@ -420,10 +420,12 @@ stop the rest (partial success still answers 200); `ids` lists only the newly st
 
 The blob key is `<prefix><id>/<name>` (the `media/` prefix is configurable and separates media from
 replication snapshots, the site export and `redirects.json`), so on disk e.g.
-`data/blobs/media/3f2e…-…/photo.jpg`. `<name>` is `filename` reduced to `[A-Za-z0-9._-]`, with the
-extension replaced by the one its content type implies (`Photo 1.JPG` sent as `image/jpeg` becomes
-`Photo-1.jpg`) so that a static host deriving `Content-Type` from the extension serves the right
-one; an unknown content type keeps the uploaded extension. `<name>` is fixed at upload and never
+`data/blobs/media/3f2e…-…/photo.jpg`. `<name>` is `filename` reduced to `[A-Za-z0-9_-]`, with one
+extension, taken from the content type the file is stored under and never from the uploaded name
+(`Photo 1.JPG` sent as `image/jpeg` becomes `Photo-1.jpg`), so that a static host deriving
+`Content-Type` from the extension serves the type the upload was checked as; a type outside
+`media-default`'s list becomes `.bin` (`x.html` sent as `image/x-foo` becomes `x-html.bin`) and is
+published as `application/octet-stream`. `<name>` is fixed at upload and never
 changes again — renaming the item only changes the display `filename`, never the key or `path`. The
 same display name in the same folder answers 409 (`details: { collection: "media_items", field:
 "location" }`; for multi-file uploads, as an entry in `errors` rather than an HTTP status) — the same
@@ -437,11 +439,14 @@ prolog and comments are dropped; > 2 MB → 413 (`PAYLOAD_TOO_LARGE`), no `<svg>
 (`VALIDATION`). Sanitized SVGs are served `inline` on `GET /media/:id/file` and `GET /media/:id/:name`
 (`http.inlineTypes: ["image/svg+xml"]`), every other non-image type remains `attachment`. The two
 are linked: `image/svg+xml` in `http.inlineTypes` without a module that registers `sanitize.svg`
-aborts boot — unsanitized SVGs are never served inline. `folder` is a path label (`2026/press`), not
+aborts boot, and so does `publicCopy` with SVG uploads allowed unless `sanitize.svg` runs before
+`media.upload` — unsanitized SVGs are never served inline, neither here nor from the public copy. A
+file's public name takes its extension from its stored type; a type outside the list in
+`media-default`'s README is published as `<name>.bin` with `application/octet-stream`. `folder` is a path label (`2026/press`), not
 a directory: segments only `[A-Za-z0-9._-]`, separated by `/`, leading/trailing `/` are stripped,
-`.`/`..` → 400. `filename` is sanitized on upload and rename (basename only, characters outside
-`[A-Za-z0-9._-]` → `-`, leading `.`/`-` stripped, empty → `file`) — the response can differ from the
-value that was sent; the UI should adopt the response value.
+`.`/`..` → 400. `filename` starts out as the public name (see above) and is sanitized on rename
+(basename only, characters outside `[A-Za-z0-9._-]` → `-`, leading `.`/`-` stripped, empty → `file`)
+— the response can differ from the value that was sent; the UI should adopt the response value.
 Image URL in the frontend: the item's own `path` — never build one from an id. A page references a
 medium via `hero: "<media-id>"`.
 `alt`, `title` and `description` are plain text and are validated as such: at most 2000 characters,
