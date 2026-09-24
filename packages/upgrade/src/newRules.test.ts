@@ -9,7 +9,7 @@ import { findCalls, firstArgument, isArrayExpression, objectProperty } from "./a
 import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
 import { readFileOrUndefined } from "./rules.ts";
-import { breakingStepShapesRule, busHandlerThrowsRule, busSubscriberQueueRule, ctxDoneTerminalOutputRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule, typeSignaturesRule } from "./ruleInfo.ts";
+import { breakingStepShapesRule, busHandlerThrowsRule, busSubscriberQueueRule, ctxDoneTerminalOutputRule, deliveryDependentsRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule, typeSignaturesRule } from "./ruleInfo.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { dependencyCycleRule, optionalReadOrderRule, outputFoldRule, terminalOutputRule, undeclaredOutputRule, undeclaredRequiredRule } from "./ruleBootWraps.ts";
 import { underscoreFieldRule } from "./ruleUnderscoreField.ts";
@@ -573,6 +573,48 @@ describe("info rules", () => {
   it("runtime/restore-freshness stays quiet when restoreOnStart is off", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-replication-sqlite", config: { restoreOnStart: false } }] });
     expect(await restoreFreshnessRule.check(contextFor(p))).toEqual([]);
+  });
+
+  const publishing = {
+    triggers: [{ event: "page.updated", pipeline: "publishPage" }],
+    pipelines: [{ name: "publishPage", steps: ["delivery.publish:pages", "delivery.exportLlms"] }],
+  };
+
+  it("delivery/dependents stays quiet without delivery-static or without event-triggered publishing", async () => {
+    expect(await deliveryDependentsRule.check(contextFor(await project(publishing)))).toEqual([]);
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-delivery-static" }], triggers: [{ http: "POST /publish", pipeline: "publishPage" }], pipelines: publishing.pipelines });
+    expect(await deliveryDependentsRule.check(contextFor(p))).toEqual([]);
+  });
+
+  it("delivery/dependents names the missing marking and recovery pass of a delivery-static project that publishes on events", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-delivery-static" }], ...publishing });
+    const findings = await deliveryDependentsRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe("info");
+    expect(findings[0]?.docs).toBe("docs/upgrading.md#delivery-dependents");
+    expect(findings[0]?.message).toContain("delivery.markDependents");
+    expect(findings[0]?.message).toContain("delivery.resumeStale");
+  });
+
+  it("delivery/dependents names a render \"events\" configuration without its job trigger", async () => {
+    const p = await project({
+      configModules: [{ use: "@michaelthielemann/kestrel-delivery-static", config: { dependencies: { render: "events" } } }],
+      triggers: [...publishing.triggers, { event: "page.updated", pipeline: "pageDependents" }, { cron: "*/5 * * * *", pipeline: "resumeStalePages" }],
+      pipelines: [...publishing.pipelines, { name: "pageDependents", steps: ["delivery.markDependents:pages"] }, { name: "resumeStalePages", steps: ["delivery.resumeStale"] }],
+    });
+    const findings = await deliveryDependentsRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain("delivery.outputStale");
+    expect(findings[0]?.message).not.toContain("delivery.resumeStale");
+  });
+
+  it("delivery/dependents stays quiet for a complete wiring", async () => {
+    const p = await project({
+      configModules: [{ use: "@michaelthielemann/kestrel-delivery-static", config: { dependencies: { render: "events" } } }],
+      triggers: [...publishing.triggers, { event: "page.updated", pipeline: "pageDependents" }, { cron: "*/5 * * * *", pipeline: "resumeStalePages" }, { event: "delivery.outputStale", pipeline: "republishOutput" }],
+      pipelines: [...publishing.pipelines, { name: "pageDependents", steps: ["delivery.markDependents:pages"] }, { name: "resumeStalePages", steps: ["delivery.resumeStale"] }, { name: "republishOutput", steps: ["delivery.republishOutput"] }],
+    });
+    expect(await deliveryDependentsRule.check(contextFor(p))).toEqual([]);
   });
 
   it("types/breaking-signatures names Manifest.warnings and Kestrel contracts", async () => {

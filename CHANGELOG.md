@@ -596,9 +596,48 @@ Net changes since 5.8.1.
   own atomic writes. New primitives published for the plugin API's own rule authors:
   `insertTriggers`/`insertTrigger` (append one or more trigger literals to `triggers: [...]` in one
   edit), `createPipelineFile`/`newPipelineFileContent` and `swapPipelineSteps`.
+- **Published outputs are refreshed when what they show changes.** `delivery-static` records, per
+  output and locale, what its render read — the paths `site.resolveLinks` answered, and every read
+  the renderer made through this instance in the same process — and `delivery.markDependents:<type>`
+  marks every published output that read a changed document, a list the store now puts the document
+  in, or a link whose path or published state changed; outputs whose dependencies are unknown are
+  marked by every change, drafts never. Marked outputs are rendered at once and never inside the
+  marking request: with `dependencies.render: "events"` as one `delivery.outputStale` job per output
+  through `events@1` (`delivery.republishOutput`, coalesced by the queue), with `"background"`
+  (default) by the module's own loop in the process that marked them. Renders time out after
+  `dependencies.renderTimeoutSeconds`; a failed re-render keeps the previous output and is retried
+  after `dependencies.backoffSeconds`, up to `dependencies.maxAttempts`. `delivery.markAll:<type>`
+  marks every output of a type, `delivery.checkBuild` marks everything once per new `payload.build`
+  and stores the build only after marking succeeded, `delivery.resumeStale` releases expired claims,
+  removes tombstones and orphaned dependency sets and re-raises marks left behind,
+  `delivery.retryStale` retries failed re-renders, and `delivery.readStaleStatus` answers
+  `{ stale, failed, rendering, unknown, oldestStaleAt, abandoned }`. `readStatus` rows and `_delivery`
+  gain `stale`, `staleSince`, `staleFailed`, `staleError` and `dependencies`. With `"events"`, boot
+  fails unless triggers run `delivery.republishOutput` on `delivery.outputStale` and
+  `delivery.exportLlms` on `delivery.llmsStale`, and under `events-direct`.
+- `delivery.requestLlms` asks for an `llms.txt` export without running it: a coalesced
+  `delivery.llmsStale` event with `"events"`, the background loop's next idle moment with
+  `"background"`. Every re-render asks for one, so a site-wide re-render writes `llms.txt` once,
+  after the pages it summarizes.
+- `@michaelthielemann/kestrel/reads`: `observeReads`, `noteRead` and `unobserved`, one read scope per
+  async context kept on `globalThis`. `content-default` notes the documents, single types and lists it
+  answers, `media-default` the media items, `site-default` the resolved document or missed slug
+  lookup and one path per resolved link; `redirects-default`'s lookup is not noted.
+- `examples/minimal` re-renders the pages that show a changed page, the settings or a media item in
+  the background (`pageDependents`, `settingsDependents`, `mediaDependents`, `resumeStalePages`);
+  `setSettings` writes inside an atomic group and emits `settings.updated`, and `publishPage`,
+  `unpublishPage` and `settingsDependents` request `llms.txt` instead of exporting it in the request.
 
 ### Changed
 
+- `delivery-static` writes each status row with a version check, so a render that finishes after a
+  newer write, an unpublish or a path change removes the files it wrote instead of keeping them, or
+  marks its output again when that output is still live at the same path. `delivery.unpublish`
+  leaves a short-lived `deleted` row per locale, also for a locale that was never rendered, which
+  `delivery.resumeStale` removes after `dependencies.claimTtlSeconds`; `readStatus`, `_delivery` and
+  `llms.txt` never show it. A failed render keeps a previous `error` row's path, so its last live
+  file is still tracked. New status rows get the id `<type>/<docId>/<locale>`; older rows keep theirs
+  and gain `version: 0` at setup.
 - `replication-sqlite`: `setup()` no longer silently skips restoring the database when the file
   already exists. When `restoreOnStart` is set and the file was not just restored from a pending
   marker or automatic restore in this same `setup()` call, `setup()` now checks whether the file

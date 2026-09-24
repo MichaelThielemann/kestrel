@@ -155,4 +155,25 @@ export const restoreFreshnessRule: Rule = {
   },
 };
 
-export const INFO_RULES: readonly Rule[] = [deliveryMembersRule, busHandlerThrowsRule, busSubscriberQueueRule, typeSignaturesRule, breakingStepShapesRule, ctxDoneTerminalOutputRule, runPipelineValidatesRule, restoreFreshnessRule];
+/** `delivery/dependents`: a `delivery-static` project that publishes on events but does not mark dependent outputs refreshes a page only when that page itself is saved. */
+export const deliveryDependentsRule: Rule = {
+  id: "delivery/dependents",
+  check(ctx) {
+    const entry = moduleEntry(ctx, "delivery-static");
+    if (entry === undefined) return [];
+    const { config, pipelines } = ctx.project.input;
+    const stepsOf = new Map(pipelines.map((p) => [p.name, pipelineSteps(p.steps)]));
+    const runs = (pipeline: string, step: string): boolean => (stepsOf.get(pipeline) ?? []).some((s) => s === step || s.startsWith(`${step}:`));
+    const eventTriggers = config.triggers.flatMap((t) => ("event" in t ? [t] : []));
+    if (!eventTriggers.some((t) => runs(t.pipeline, "delivery.publish"))) return [];
+    const missing: string[] = [];
+    if (!pipelines.some((p) => runs(p.name, "delivery.markDependents"))) missing.push("no pipeline runs delivery.markDependents:<type>, so a page is re-rendered only when it is saved itself, not when the settings, a referenced document or a linked page change");
+    if (!config.triggers.some((t) => "cron" in t && runs(t.pipeline, "delivery.resumeStale"))) missing.push("no cron runs delivery.resumeStale, the recovery pass for re-renders a stopped process left behind");
+    const dependencies = isRecord(entry.config) && isRecord(entry.config.dependencies) ? entry.config.dependencies : {};
+    if (dependencies.render === "events" && !eventTriggers.some((t) => t.event === "delivery.outputStale" && runs(t.pipeline, "delivery.republishOutput"))) missing.push('dependencies.render is "events" but no trigger runs delivery.republishOutput on delivery.outputStale, which fails boot');
+    if (missing.length === 0) return [];
+    return [infoFinding("delivery/dependents", "delivery/dependents", `delivery-static publishes on events, but ${missing.join("; ")}`, "add dependents pipelines (delivery.markDependents:<type>) on the change events of pages, settings, media and every collection a page shows, and a resumeStale cron; with render \"events\", also the delivery.outputStale and delivery.llmsStale job triggers", { file: ctx.project.configFile }, "docs/upgrading.md#delivery-dependents")];
+  },
+};
+
+export const INFO_RULES: readonly Rule[] = [deliveryMembersRule, busHandlerThrowsRule, busSubscriberQueueRule, typeSignaturesRule, breakingStepShapesRule, ctxDoneTerminalOutputRule, runPipelineValidatesRule, restoreFreshnessRule, deliveryDependentsRule];

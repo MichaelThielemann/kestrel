@@ -155,6 +155,7 @@ Every finding's `docs` field links to one of the anchors below.
 | [`tests/run-pipeline-validates`](#tests-run-pipeline-validates) | source | none (info) | a file importing `testing/runPipeline` |
 | [`boot/dependency-cycle`](#boot-dependency-cycle) | boot | manual | a module dependency cycle |
 | [`runtime/restore-freshness`](#runtime-restore-freshness) | load | none (info) | `restoreOnStart` left on for `replication-sqlite`/`backup-blobstore` |
+| [`delivery/dependents`](#delivery-dependents) | source | none (info) | `delivery-static` publishing on events without marking dependent outputs |
 | [`deps/kestrel-range`](#deps-kestrel-range), `deps/mixed-majors`, `deps/pre-install` | source | auto / manual / none | a `@michaelthielemann/kestrel*` dependency range |
 | [`offer/event-queue`](#offer-event-queue) | source | none / ask / auto | the switch from `events-direct` to `events-queue` |
 | [`boot/<code>`](#boot-code) | boot | manual | any boot error no rule above claims |
@@ -379,6 +380,14 @@ A module dependency cycle — `boot()` names the full cycle path.
 #### runtime-restore-freshness
 `replication-sqlite`/`backup-blobstore` now fail boot when the database file was created during
 this boot while a restore point exists, if `restoreOnStart` is on (the default).
+
+#### delivery-dependents
+`delivery-static` publishes on events, but no pipeline runs `delivery.markDependents:<type>`, no cron runs
+`delivery.resumeStale`, or `dependencies.render` is `"events"` without a trigger that runs
+`delivery.republishOutput` on `delivery.outputStale` (boot fails in that last case). Without marking, a
+published page is re-rendered only when it is saved itself; a change to the settings, a document it shows or
+a page it links to leaves its output stale. The `delivery-static` README ("Dependent outputs") shows the
+wiring for both render modes.
 
 #### deps-kestrel-range
 A `@michaelthielemann/kestrel*` dependency is not on a 6.x range; `deps/mixed-majors` fires when

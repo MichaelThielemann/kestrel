@@ -48,8 +48,10 @@ trigger implementations, tests) is private and not importable. `@michaelthielema
 root: `boot`, `defineContract`, `defineModule`, `definePipeline`, `defineConfig`, the HTTP helpers
 an adapter needs, the error and result vocabulary) and `@michaelthielemann/kestrel/<name>` for
 `cast`, `catalogue`, `context`, `dataflow`, `defineConfig`, `defineContract`, `defineModule`,
-`definePipeline`, `errors`, `load`, `logger`, `result`, `runner`, `schema` and
-`testing/runPipeline`. The core imports no contract, no module and no host framework; ESLint
+`definePipeline`, `errors`, `load`, `logger`, `reads`, `result`, `runner`, `schema` and
+`testing/runPipeline`. `reads` (`observeReads`, `noteRead`, `unobserved`) lets a caller see what the providers
+answered while a function ran, in the same process and async context; `delivery-static` uses it to record what a
+render read (see `docs/contracts.md`). The core imports no contract, no module and no host framework; ESLint
 enforces that for `core`, `contracts` (only the core) and the `h3` adapter (only `h3` and the core).
 Binary results are served `inline` for a built-in safe set of content types plus any listed in `http.inlineTypes`.
 `http.inlineTypes` with `image/svg+xml` needs a module registering the step `sanitize.svg`

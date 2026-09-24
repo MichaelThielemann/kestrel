@@ -29,8 +29,9 @@ unchanged, in whatever spelling the renderer produced.
 owns. A page whose path equals or lies under one of them is not written; its status becomes
 `error` with `path <path> is reserved (<reserved>)`, and the previous live output (if any) stays. A
 renderer asset under a reserved path fails the same way, naming the asset's own path.
-`delivery.exportLlms` (always on; `llms` defaults to paths instead of URLs and no full file) (no argument; append it after `delivery.publish`/`unpublish`/`publishAll`
-and after saving the settings) writes `<prefix>llms.txt` per [llmstxt.org](https://llmstxt.org) from the `live` status rows
+`delivery.exportLlms` (always on; `llms` defaults to paths instead of URLs and no full file) (no argument; run it
+after `delivery.publishAll`, or let `delivery.requestLlms` ask for it after a publish, an unpublish or a settings
+change, see below) writes `<prefix>llms.txt` per [llmstxt.org](https://llmstxt.org) from the `live` status rows
 of every delivered type, re-checking each source locale's own current values at read time — a
 `live` row only names where to look, not what to trust, so a document saved as a draft after its
 last successful publish is skipped even if its row has not caught up yet: `# <settings title>`,
@@ -53,11 +54,121 @@ published. Only wiring bugs throw (unknown type, unconfigured type, an asset pat
 
 | Step | reads | writes | codes |
 |---|---|---|---|
-| `delivery.publish:<type>` | `result.id` | `result` (`document`, `delivery`) | TRANSIENT |
+| `delivery.publish:<type>` | `result.id` | `result._delivery` | TRANSIENT |
 | `delivery.unpublish:<type>` | `params.id` | – | VALIDATION (missing id), TRANSIENT |
 | `delivery.readStatus:<type>` | `params.id` | `result` | VALIDATION (missing id), TRANSIENT |
 | `delivery.publishAll:<type>` | – | `result` | TRANSIENT |
-| `delivery.exportLlms` | – | `result.llms` | TRANSIENT |
+| `delivery.exportLlms` | – | `result._llms` | TRANSIENT |
+| `delivery.markDependents:<type>` | `payload.id`, `payload.ids` | `result._dependents` | TRANSIENT |
+| `delivery.markAll:<type>` | – | `result.marked` | TRANSIENT |
+| `delivery.checkBuild` | `payload.build` | `result` | VALIDATION, TRANSIENT |
+| `delivery.republishOutput` | `payload.type`, `payload.docId`, `payload.locale` | `result` | VALIDATION, TRANSIENT |
+| `delivery.requestLlms` | – | – | TRANSIENT |
+| `delivery.resumeStale` | – | `result` | TRANSIENT |
+| `delivery.retryStale` | – | `result.retried` | TRANSIENT |
+| `delivery.readStaleStatus` | – | `result` | TRANSIENT |
+
+Status rows (`readStatus`, `_delivery`) also carry `stale` (marked for a re-render), `staleSince`, `staleFailed`
+(the re-render failed `dependencies.maxAttempts` times), `staleError` and `dependencies` (how many dependencies the
+last render recorded, `null` when they are unknown).
+
+## Dependent outputs
+
+A published output (document × locale) shows more than its own document: the settings, the documents its blocks
+reference, lists, the paths of the pages it links to, media. Each render records what it read, and a change to any
+of it re-renders the output without the document itself being saved.
+
+**What is recorded.** The paths `site.resolveLinks` answered for the document's links, and every read the renderer
+made through this instance, in the same process, while it rendered. Reads are observed through
+`@michaelthielemann/kestrel/reads`: `content-default` notes the documents, single types and filtered lists it answers,
+`media-default` the media items, `site-default` the document a path resolved to (or the slug lookup that found
+nothing). A renderer that fetches its page through this instance's API in the same process (a server-side rendered
+frontend calling `/api` in memory) is observed completely. Reads of the published document itself are left out,
+because its own save publishes it. The dependencies of one render are kept as one set in
+`delivery_dependencies` and `delivery_dependency_sets`; a render that read more than
+`dependencies.maxPerRender` things keeps one row per type for its largest groups instead. With
+`dependencies.rendererReadsDocument: true`, a render in which the renderer did not read its own document is stored
+with unknown dependencies and logs one warning per type: the reads were lost (another process, a socket, a cache).
+
+**Not tracked.** Reads made in another process, over a socket, or answered from a cache kept across requests, and
+lists bounded by time ("upcoming events", `date >= now`), which change without a write. For those,
+`dependencies.maxAgeSeconds` makes `delivery.resumeStale` re-render every output older than that.
+
+**Marking.** `delivery.markDependents:<type>` runs on a change event and takes the changed ids from the payload's
+`id` and `ids`. It marks every `live` or `error` output whose last render read one of those documents, any document
+of `<type>` as a whole, a list the store now puts one of them in (`content.list(<type>, { ...filter, id })` decides,
+so list filters are never evaluated here), or a link whose path or published state changed. Outputs with unknown
+dependencies are marked by every change. Drafts are never marked, and a re-render raises no content event, so a
+change marks each dependent output once and a cycle of pages that show each other ends after one round.
+
+**Rendering, never inside the request.** `dependencies.render` chooses who renders a marked output:
+
+- `"background"` (default): the process that marked it, in a background loop of its own that starts with the first
+  mark and renders one output at a time. The loop is detached from the request: the request never waits for it. It
+  exports `llms.txt` once nothing is due, when a render or `delivery.requestLlms` asked for it. Other processes'
+  loops never render a row claimed here.
+- `"events"`: every mark raises `delivery.outputStale` (`{ type, docId, locale, coalesceKey }`) through `events@1`,
+  and a pipeline with `delivery.republishOutput` subscribed to it renders the output; `delivery.requestLlms` raises
+  `delivery.llmsStale` (`coalesceKey: "llms"`) for a pipeline with `delivery.exportLlms`. With `events-queue`, at
+  most one job per output is pending at a time, and both pipelines belong in a lane of their own, so re-renders and
+  the export never delay other queued work:
+
+```ts
+modules: [
+  { use: "@michaelthielemann/kestrel-events-queue", config: { lanes: { pages: ["republishOutput", "refreshLlms"] } } },
+  { use: "@michaelthielemann/kestrel-delivery-static", config: { types: { pages: {} }, dependencies: { render: "events", rendererReadsDocument: true } } },
+],
+triggers: [
+  { event: "page.updated", pipeline: "pageDependents" },
+  { event: "settings.updated", pipeline: "settingsDependents" },
+  { event: "media.updated", pipeline: "mediaDependents" },
+  { event: "media.deleted", pipeline: "mediaDependents" },
+  { event: "delivery.outputStale", pipeline: "republishOutput" },
+  { event: "delivery.llmsStale", pipeline: "refreshLlms" },
+  { cron: "*/5 * * * *", pipeline: "resumeStalePages" },
+],
+```
+
+```ts
+definePipeline({ name: "pageDependents", steps: ["delivery.markDependents:pages"] });
+definePipeline({ name: "settingsDependents", steps: ["delivery.markDependents:settings", "delivery.requestLlms"] });
+definePipeline({ name: "mediaDependents", steps: ["delivery.markDependents:media"] });
+definePipeline({ name: "republishOutput", steps: ["delivery.republishOutput"] });
+definePipeline({ name: "refreshLlms", steps: ["delivery.exportLlms"] });
+definePipeline({ name: "resumeStalePages", steps: ["delivery.resumeStale"] });
+```
+
+Every other page event (`created`, `restored`, `translationRemoved`, `deleted`) and every collection a page can
+show needs its own dependents trigger the same way, and the pipeline that writes it must emit the event
+(`examples/minimal`'s `setSettings` emits `settings.updated` after its atomic group).
+
+Boot fails with `"events"` unless both job triggers exist, and under `events-direct`, which would run every
+re-render inside the request that marked it.
+
+A render that fails keeps the previous output (`state: "error"`), records `staleError` and is tried again after
+`dependencies.backoffSeconds`, up to `dependencies.maxAttempts` times; with `"events"`, set both to the event
+delivery's own values. Every render is bounded by `dependencies.renderTimeoutSeconds` (below `claimTtlSeconds`): a
+render abandoned at the timeout is never written, but keeps its memory until it settles, and
+`readStaleStatus.abandoned` counts those.
+
+**Concurrent renders, unpublish, crashes.** Every status write compares and increments the row's `version`, so an
+older render never overwrites a newer write. A render that loses removes the files it wrote, unless another output
+is live at that path; if its own output is still `live` or `error` at the same path, it marks it again instead.
+`delivery.unpublish` leaves a `deleted` row for every locale (also one that was never rendered), which blocks a
+render still in flight, and which `delivery.resumeStale` removes after `claimTtlSeconds`; reads never return it.
+Dependency sets are written before the status row names them, so a crash leaves either the previous complete set or
+an orphan that `delivery.resumeStale` removes. The one way a removed page can remain is a process that stops between
+a losing render's file write and its cleanup.
+
+**Operations.** `delivery.markAll:<type>` marks every output of a type, creating a marked row for a document that
+was never delivered (drafts are checked and never rendered), and answers `{ marked }` at once.
+`delivery.checkBuild` compares `payload.build` with the build stored in `delivery_state`; on a change it marks every
+output of every delivered type and stores the build only afterwards, so a failed or interrupted run marks again on
+the next start. Run it after every deploy: every output is then re-rendered, and its dependencies recorded by the new
+code. `delivery.resumeStale` (a recovery net, not the render path) releases expired claims, removes tombstones and
+orphaned sets, and re-raises marks that are older than a minute, due and unclaimed, for example after a process
+stopped. `delivery.retryStale` gives outputs that failed `maxAttempts` times new attempts. `delivery.readStaleStatus`
+answers `{ stale, failed, rendering, unknown, oldestStaleAt, abandoned }`.
 
 Not included: sitemap, CDN invalidation.
 

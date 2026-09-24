@@ -223,6 +223,24 @@ persistenceContractTests(async () => createPersistenceSqlite({ file: ":memory:" 
 contains `not found` (pinned by the contract test) — an adapter must not let a technical error
 (e.g. `NoSuchKey`) through untranslated.
 
+## Reads a render can see
+
+`delivery-static` re-renders a published page when something its last render read changes. It learns what a render
+read through `@michaelthielemann/kestrel/reads`: `observeReads(fn)` runs `fn` in a read scope and returns the reads
+noted inside it, `noteRead(read)` records one, and `unobserved(fn)` hides the reads of lookups a provider makes on its
+own behalf. A `content@1` or `site@1` provider (and any provider a renderer reads through) should note what it
+answers: `content-default` notes a `document` read per `get` of a multi type (also when the answer is `null`), a
+`type` read per single type, and a `query` read plus one `document` read per returned item for `list`;
+`site-default` notes the document `resolve` answered with (or the slug lookup that found nothing) and one `path`
+read per link `resolveLinks` resolved, with its locale and rules. A provider that notes nothing still works, but the
+pages that read from it refresh only on their own publish.
+
+A provider must keep no process-wide in-flight dedupe or memo of reads: the scope lives in the async context of the
+render, so a cached answer shared between two callers attributes one render's reads to the other render, or to
+none. `noteRead` outside a scope, inside `unobserved`, or after the scope's function settled records nothing, and
+concurrent scopes never see each other's reads. Reads made in another process, over a socket, or answered from a
+cache kept across requests are not observed.
+
 ## Content is configuration, not modules
 
 `content@1` knows no "Page". What makes up a website is declared by the consumer in the model:
