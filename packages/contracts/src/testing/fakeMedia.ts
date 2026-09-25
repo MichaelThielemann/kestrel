@@ -21,6 +21,10 @@ export type FakeMediaMethod = "file" | "files" | "load" | "scan" | "count";
 export interface FakeMedia extends MediaFiles {
   /** Adds a ready file; `contentType` is stored canonical, `publishedType` defaults to `publicFormOf(contentType).contentType`. Throws for a type that is not exactly one media type and for an id used before. */
   add(file: FakeMediaInput): MediaFile;
+  /** Adds a file that is not ready yet, as an upload in flight, and returns its id; it stays invisible until {@link FakeMedia.markReady}. Throws like `add`. */
+  addPending(file: FakeMediaInput): string;
+  /** Makes a file added with `addPending` ready; throws for a file that is not pending, including one removed meanwhile. */
+  markReady(id: string): void;
   /** Ends a file's readiness, as the first step of a removal does. */
   remove(id: string): void;
   /** Keeps a file ready but drops its bytes, as a store that lost them. */
@@ -39,7 +43,7 @@ export interface FakeMediaOptions {
 interface Entry {
   file: MediaFile;
   data: Uint8Array | null;
-  ready: boolean;
+  phase: "pending" | "ready" | "gone";
 }
 
 const MAX_LIMIT = 500;
@@ -56,40 +60,48 @@ export function createFakeMedia(options: FakeMediaOptions = {}): FakeMedia {
   };
   const readyFile = (id: string): MediaFile | null => {
     const entry = entries.get(id);
-    return entry?.ready === true ? { ...entry.file } : null;
+    return entry?.phase === "ready" ? { ...entry.file } : null;
   };
   const matches = (file: MediaFile, filter: MediaFilter): boolean =>
     mediaTypeAllowed(filter.types ?? ["*"], filter.excludeTypes ?? [], file.contentType) && (filter.createdSince === undefined || file.createdAt >= filter.createdSince);
   const matching = (filter: MediaFilter): MediaFile[] =>
     [...entries.values()]
-      .filter((entry) => entry.ready && matches(entry.file, filter))
+      .filter((entry) => entry.phase === "ready" && matches(entry.file, filter))
       .map((entry) => ({ ...entry.file }))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
+  const store = (input: FakeMediaInput, phase: Entry["phase"]): MediaFile => {
+    const contentType = canonicalMediaType(input.contentType);
+    if (contentType === null) throw new Error(`fakeMedia: ${JSON.stringify(input.contentType)} is not exactly one media type`);
+    const id = input.id ?? randomUUID();
+    if (entries.has(id)) throw new Error(`fakeMedia: id ${id} is already used`);
+    const file: MediaFile = {
+      id,
+      contentType,
+      publishedType: input.publishedType ?? publicFormOf(contentType).contentType,
+      size: input.data.byteLength,
+      width: input.width ?? null,
+      height: input.height ?? null,
+      folder: input.folder ?? "",
+      filename: input.filename ?? id,
+      createdAt: input.createdAt ?? clock(),
+    };
+    entries.set(id, { file, data: input.data, phase });
+    return { ...file };
+  };
+
   return {
     calls,
-    add(input) {
-      const contentType = canonicalMediaType(input.contentType);
-      if (contentType === null) throw new Error(`fakeMedia: ${JSON.stringify(input.contentType)} is not exactly one media type`);
-      const id = input.id ?? randomUUID();
-      if (entries.has(id)) throw new Error(`fakeMedia: id ${id} is already used`);
-      const file: MediaFile = {
-        id,
-        contentType,
-        publishedType: input.publishedType ?? publicFormOf(contentType).contentType,
-        size: input.data.byteLength,
-        width: input.width ?? null,
-        height: input.height ?? null,
-        folder: input.folder ?? "",
-        filename: input.filename ?? id,
-        createdAt: input.createdAt ?? clock(),
-      };
-      entries.set(id, { file, data: input.data, ready: true });
-      return { ...file };
+    add: (input) => store(input, "ready"),
+    addPending: (input) => store(input, "pending").id,
+    markReady(id) {
+      const entry = entries.get(id);
+      if (entry?.phase !== "pending") throw new Error(`fakeMedia: ${id} is not pending`);
+      entry.phase = "ready";
     },
     remove(id) {
       const entry = entries.get(id);
-      if (entry !== undefined) entry.ready = false;
+      if (entry !== undefined) entry.phase = "gone";
     },
     loseBytes(id) {
       const entry = entries.get(id);

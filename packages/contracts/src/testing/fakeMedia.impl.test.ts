@@ -11,6 +11,9 @@ mediaContractTests(async () => {
       async add(file) {
         return media.add({ filename: file.filename, contentType: file.contentType, data: file.data, ...(file.folder === undefined ? {} : { folder: file.folder }) }).id;
       },
+      async pending(file) {
+        return media.addPending({ filename: file.filename, contentType: file.contentType, data: file.data });
+      },
       async removing(id) {
         media.remove(id);
       },
@@ -38,6 +41,20 @@ describe("fakeMedia", () => {
     media.add({ id: "a", contentType: "image/png", data: new Uint8Array([1]) });
     media.remove("a");
     expect(() => media.add({ id: "a", contentType: "image/png", data: new Uint8Array([1]) })).toThrow(/already used/);
+  });
+
+  it("keeps a pending file invisible until it is made ready, and never makes a removed one ready", async () => {
+    const media = createFakeMedia();
+    const id = media.addPending({ id: "p", contentType: "image/png", data: new Uint8Array([1]) });
+    expect(expectOk(await media.file(id))).toBeNull();
+    expect(expectOk(await media.count({}))).toBe(0);
+    media.markReady(id);
+    expect(expectOk(await media.file(id))?.id).toBe("p");
+    expect(() => media.markReady(id)).toThrow(/not pending/);
+    const other = media.addPending({ contentType: "image/png", data: new Uint8Array([1]) });
+    media.remove(other);
+    expect(() => media.markReady(other)).toThrow(/not pending/);
+    expect(expectOk(await media.file(other))).toBeNull();
   });
 
   it("keeps a file whose bytes were lost ready, and load answers null for it", async () => {

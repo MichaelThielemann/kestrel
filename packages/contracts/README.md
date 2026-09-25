@@ -14,8 +14,9 @@ is inferred from the stored value. `testing/result` holds `expectOk` / `expectEr
 for the suites. `testing/fakeAuthn` is a minimal `authn@1` for the shared step-contract suite
 (`authn.steps.contract.test`), which every `authn@1` implementation runs its five shared steps
 (`login`, `identifyUser`, `requireUser`, `loadIdentity`, `logout`) against. `testing/fakeMedia` is an
-in-memory `media@1` for tests of a consumer: `add`, `remove` (ends a file's readiness), `loseBytes`,
-the recorded `calls`, and a `beforeCall` hook that can change the store between a consumer's calls.
+in-memory `media@1` for tests of a consumer: `add`, `addPending` and `markReady` (a file not ready
+yet), `remove` (ends a file's readiness), `loseBytes`, the recorded `calls`, and a `beforeCall` hook
+that can change the store between a consumer's calls.
 `persistence.owned` is not a contract: `ownedPersistence(db, owner, collections)` is a
 `persistence@1` view that reaches only the named collections and throws a wiring error naming
 `owner` for any other, before the store is asked — for a module whose storage must stay its own.

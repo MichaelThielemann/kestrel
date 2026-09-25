@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { mediaContractTests } from "@michaelthielemann/kestrel-contracts/media.contract.test";
-import type { Document } from "@michaelthielemann/kestrel-contracts/persistence";
+import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import { createPersistenceSqlite } from "@michaelthielemann/kestrel-persistence-sqlite/impl";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -28,33 +29,42 @@ const quiet: Logger = { step() {}, info() {}, error() {} };
 const CONFIG: Config = { allowedTypes: ["*"], deniedTypes: [], maxBytes: 100_000, locales: [], prefix: "media/", publicPath: "/media", uploadStaleAfterMs: 900000, anonymousList: "ids" };
 const WITH_COPY: Config = { ...CONFIG, publicCopy: { prefix: "site/" } };
 
-mediaContractTests(async () => {
-  const blobs = memoryBlobs();
-  const db = createFakePersistence();
-  const media = await createMediaDefault(CONFIG, blobs, db, quiet);
-  return {
-    media,
-    reopen: () => createMediaDefault(CONFIG, blobs, db, quiet),
-    seed: {
-      async add(file) {
-        return expectOk(await media.upload({ filename: file.filename, contentType: file.contentType, data: file.data }, file.folder ?? "")).item.id;
-      },
-      async pending(file) {
-        const id = `pending-${file.filename.replace(/[^A-Za-z0-9]/g, "-")}`;
-        const key = `media/${id}/${file.filename}`;
-        expectOk(await db.createOne<Document>(COLLECTION, { id, filename: file.filename, folder: "", location: keyFor("", file.filename), contentType: file.contentType, size: file.data.byteLength, key, checksum: null, status: "uploading", createdAt: Date.now(), updatedAt: Date.now(), provenance: { origin: "unknown" }, width: null, height: null, alt: {}, title: {}, description: {}, svgSanitized: false }));
-        expectOk(await blobs.put(key, file.data, { contentType: file.contentType }));
-        return id;
-      },
-      async removing(id) {
-        expectOk(await db.updateOne(COLLECTION, id, { status: "removing" }));
-      },
-      async remove(id) {
-        expectOk(await media.remove(id));
-      },
-    },
-  };
-});
+const STORES: Array<[string, () => Persistence]> = [
+  ["the fake persistence", () => createFakePersistence()],
+  ["persistence-sqlite", () => createPersistenceSqlite({ file: ":memory:" })],
+];
+
+for (const [label, makeStore] of STORES) {
+  describe(`media/default on ${label}`, () => {
+    mediaContractTests(async () => {
+      const blobs = memoryBlobs();
+      const db = makeStore();
+      const media = await createMediaDefault(CONFIG, blobs, db, quiet);
+      return {
+        media,
+        reopen: () => createMediaDefault(CONFIG, blobs, db, quiet),
+        seed: {
+          async add(file) {
+            return expectOk(await media.upload({ filename: file.filename, contentType: file.contentType, data: file.data }, file.folder ?? "")).item.id;
+          },
+          async pending(file) {
+            const id = `pending-${file.filename.replace(/[^A-Za-z0-9]/g, "-")}`;
+            const key = `media/${id}/${file.filename}`;
+            expectOk(await db.createOne<Document>(COLLECTION, { id, filename: file.filename, folder: "", location: keyFor("", file.filename), contentType: file.contentType, size: file.data.byteLength, key, checksum: null, status: "uploading", createdAt: Date.now(), updatedAt: Date.now(), provenance: { origin: "unknown" }, width: null, height: null, alt: {}, title: {}, description: {}, svgSanitized: false }));
+            expectOk(await blobs.put(key, file.data, { contentType: file.contentType }));
+            return id;
+          },
+          async removing(id) {
+            expectOk(await db.updateOne(COLLECTION, id, { status: "removing" }));
+          },
+          async remove(id) {
+            expectOk(await media.remove(id));
+          },
+        },
+      };
+    });
+  });
+}
 
 interface Sample {
   call: string;

@@ -115,6 +115,53 @@ export function mediaContractTests(make: () => Promise<MediaUnderTest>): void {
       expect(expectOk(await media.count({}))).toBe(1);
     });
 
+    it("answers every call from the store: a file removed after it was read is gone for the next call, on this instance and another one", async () => {
+      const under = await make();
+      const { media, seed } = under;
+      const instances = under.reopen === undefined ? [media] : [media, await under.reopen()];
+      const leaving = await seed.add({ filename: "leaving.pdf", contentType: "application/pdf", data: bytes(1) });
+      const staying = await seed.add({ filename: "staying.pdf", contentType: "application/pdf", data: bytes(2) });
+      for (const instance of instances) {
+        expect(expectOk(await instance.file(leaving))).not.toBeNull();
+        expect(expectOk(await instance.load(leaving))).not.toBeNull();
+        expect(idsOf(expectOk(await instance.files([leaving, staying])))).toEqual([leaving, staying].sort());
+        expect(idsOf(await scanAll(instance, {}, 10))).toEqual([leaving, staying].sort());
+        expect(expectOk(await instance.count({}))).toBe(2);
+      }
+      await seed.remove(leaving);
+      const arriving = await seed.add({ filename: "arriving.pdf", contentType: "application/pdf", data: bytes(3) });
+      for (const instance of instances) {
+        expect(expectOk(await instance.file(leaving))).toBeNull();
+        expect(expectOk(await instance.load(leaving))).toBeNull();
+        expect(idsOf(expectOk(await instance.files([leaving, staying])))).toEqual([staying]);
+        expect(idsOf(await scanAll(instance, {}, 10))).toEqual([staying, arriving].sort());
+        expect(expectOk(await instance.count({}))).toBe(2);
+        expect(expectOk(await instance.file(arriving))).not.toBeNull();
+      }
+    });
+
+    it("resumes a scan after files were added and removed between its pages, returning every file that stayed ready exactly once", async () => {
+      const { media, seed } = await make();
+      const ids: string[] = [];
+      for (let i = 0; i < 8; i += 1) ids.push(await seed.add({ filename: `s${i}.pdf`, contentType: "application/pdf", data: bytes(i) }));
+      const first = expectOk(await media.scan({}, { limit: 3 }));
+      expect(first.items).toHaveLength(3);
+      const returned = first.items.map((file) => file.id);
+      const pending = ids.filter((id) => !returned.includes(id));
+      const removed = [returned[0]!, pending[0]!];
+      for (const id of removed) await seed.remove(id);
+      await seed.add({ filename: "late.pdf", contentType: "application/pdf", data: bytes(9) });
+      const seen = [...returned];
+      let after = first.next;
+      while (after !== null) {
+        const page: MediaScan = expectOk(await media.scan({}, { after, limit: 3 }));
+        seen.push(...page.items.map((file) => file.id));
+        after = page.next;
+      }
+      expect(new Set(seen).size).toBe(seen.length);
+      for (const id of ids.filter((candidate) => !removed.includes(candidate))) expect(seen.filter((candidate) => candidate === id), id).toHaveLength(1);
+    });
+
     it("files answers each ready id once, in the order of its first occurrence", async () => {
       const { media, seed } = await make();
       const a = await seed.add({ filename: "a.pdf", contentType: "application/pdf", data: bytes(1) });
