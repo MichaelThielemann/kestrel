@@ -148,7 +148,7 @@ export function mediaContractTests(make: () => Promise<MediaUnderTest>): void {
       expect(first.items).toHaveLength(3);
       const returned = first.items.map((file) => file.id);
       const pending = ids.filter((id) => !returned.includes(id));
-      const removed = [returned[0]!, pending[0]!];
+      const removed = [returned[0]!, returned[1]!, pending[0]!];
       for (const id of removed) await seed.remove(id);
       await seed.add({ filename: "late.pdf", contentType: "application/pdf", data: bytes(9) });
       const seen = [...returned];
