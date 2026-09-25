@@ -152,8 +152,12 @@ not ok; `restartRequired` is true if any listed module reports it. A readiness p
 false means route no traffic here — and this never depends on lock contention, since no module
 hook may report the outcome of a call. A liveness probe reads `restartRequired` — true means the
 process cannot recover on its own and needs a restart, not a retry. The built-in HTTP server's
-`http.healthPath` is that liveness probe: it answers this body plus `uptimeSeconds`, with 503 while
+`http.healthPath` is that liveness probe: it answers only `{ ok, restartRequired }`, with 503 while
 `restartRequired` is true and 200 otherwise.
+
+A `health()` hook that throws does not make `kestrel.health()` throw: the module is listed as
+`{ ok: false, reason: "health() threw", restartRequired: false }`, and the error is logged once per
+module. A broken hook thus takes the instance out of rotation without restarting it in a loop.
 
 ## Errors loud and cheap – four levels
 

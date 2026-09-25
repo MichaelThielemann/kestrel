@@ -274,8 +274,8 @@ decides itself: when it sets one, that value is sent (`media.serve` marks an ori
 the response header. Each request produces one `http` log line with method, path, pipeline,
 status, duration, IP and — if present — `requestId`. `http.timeouts` sets `requestMs`
 (30 s), `headersMs` (10 s) and `keepAliveMs` (5 s) on the server. `http.healthPath` (default
-`/health`, `null` disables it) answers without running a pipeline, with `kestrel.health()` plus
-`uptimeSeconds`: 503 once a module reports `restartRequired`, 200 otherwise.
+`/health`, `null` disables it) answers without running a pipeline, with `{ ok, restartRequired }`
+from `kestrel.health()`: 503 once a module reports `restartRequired`, 200 otherwise.
 
 **Client address.** `ctx.ip` (also used in the `http` log line and by `http.allow`) is the socket
 peer, unless a proxy sits in front. With `http.trustProxy`, it's the `X-Forwarded-For` entry

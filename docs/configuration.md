@@ -93,7 +93,7 @@ event and cron triggers still run.
 | `proxyHops` | integer | `1` | Which `X-Forwarded-For` entry, counted from the right |
 | `trustedHeader` | string | – | A platform's client header; its first value wins over `trustProxy` |
 | `allow` | string[] | `[]` | IPv4/IPv6 addresses or CIDR ranges; empty means open |
-| `healthPath` | string \| `null` | `"/health"` | Answers `kestrel.health()` plus `uptimeSeconds` without a pipeline |
+| `healthPath` | string \| `null` | `"/health"` | Answers `{ ok, restartRequired }` from `kestrel.health()` without a pipeline |
 | `inlineTypes` | string[] | `[]` | Content types served `inline` beyond the built-in safe set |
 | `timeouts.requestMs` | integer | `30000` | `server.requestTimeout` |
 | `timeouts.headersMs` | integer | `10000` | `server.headersTimeout` |
@@ -103,13 +103,14 @@ event and cron triggers still run.
 address nor a CIDR range aborts the boot. `image/svg+xml` in `inlineTypes` requires a module that
 registers the step `sanitize.svg`, otherwise the boot aborts.
 
-`healthPath` is a liveness probe. It answers `kestrel.health()` (`{ ok, restartRequired, modules }`,
-see [`architecture.md`](architecture.md) § Module hooks and `kestrel.health()`) plus
-`uptimeSeconds`, read afresh on every request: 503 once a module reports `restartRequired: true`,
-because the process cannot recover without a restart, and 200 otherwise — also while `ok` is false,
-since a module that is not ok but needs no restart recovers on its own. A readiness probe routes on
-`ok` instead; a host that needs one answers its own route from `kestrel.health()`, for example from
-code that holds the booted `Kestrel` instance.
+`healthPath` is a liveness probe and needs no authentication. It answers `{ ok, restartRequired }`
+from `kestrel.health()` (see [`architecture.md`](architecture.md) § Module hooks and
+`kestrel.health()`), read afresh on every request: 503 once a module reports
+`restartRequired: true`, because the process cannot recover without a restart, and 200 otherwise —
+also while `ok` is false, since a module that is not ok but needs no restart recovers on its own. The
+body carries nothing else; which module is not ok, and why, stays in `kestrel.health().modules`, for
+code that holds the booted `Kestrel` instance to expose behind its own access check. A readiness
+probe routes on `ok`; a host that needs one answers its own route from `kestrel.health()`.
 
 Request and response behaviour — headers, the `http` log line, client-address resolution, binary
 results — is described in [`pipelines.md`](pipelines.md) § HTTP Operation.

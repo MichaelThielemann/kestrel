@@ -138,8 +138,8 @@ without Nuxt: [`../examples/h3`](../examples/h3).
   `locales` is 400 (`VALIDATION`), not 500 — for both reading and writing.
 - **Timestamps** are milliseconds since epoch (`createdAt`, `updatedAt`). `date` fields likewise; on
   write, ISO-8601 is also accepted.
-- **Health**: `GET /health` → `{ "ok", "restartRequired", "modules", "uptimeSeconds" }`, no auth;
-  503 once a module reports `restartRequired`, otherwise 200.
+- **Health**: `GET /health` → `{ "ok": boolean, "restartRequired": boolean }`, no auth; 503 once a
+  module reports `restartRequired`, otherwise 200.
 
 ### Zero-Trust
 

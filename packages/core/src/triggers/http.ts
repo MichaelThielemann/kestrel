@@ -252,7 +252,7 @@ export interface HttpOptions extends ClientIpOptions {
   corsOrigin?: string;
   maxBodyBytes?: number;
   healthPath?: string | null;
-  health?: () => InstanceHealth;
+  health?: () => Pick<InstanceHealth, "ok" | "restartRequired">;
   inlineTypes?: readonly string[];
   timeouts?: HttpTimeouts;
 }
@@ -275,7 +275,6 @@ export function clientIp(req: IncomingMessage, options: boolean | ClientIpOption
 }
 
 export function createHttpServer(routes: readonly Route[], run: Runner, logger: Logger, options: HttpOptions = {}): Server {
-  const started = Date.now();
   const healthPath = options.healthPath === undefined ? "/health" : options.healthPath;
   const allowlist = createAllowlist(options.allow ?? []);
   const peer: ClientIpOptions = { trustProxy: options.trustProxy ?? false, proxyHops: options.proxyHops ?? 1, ...(options.trustedHeader === undefined ? {} : { trustedHeader: options.trustedHeader }) };
@@ -310,8 +309,8 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
     const requestId = requestIdOf(req.headers["x-request-id"]);
     if (healthPath && url.pathname === healthPath && req.method === "GET") {
       const meta: ResponseMeta = requestId === undefined ? { runId: randomUUID() } : { runId: randomUUID(), requestId };
-      const health = options.health?.() ?? { ok: true, restartRequired: false, modules: [] };
-      return write(res, buildResponse(health.restartRequired ? 503 : 200, { ...health, uptimeSeconds: Math.round((Date.now() - started) / 1000) }, meta));
+      const { ok, restartRequired } = options.health?.() ?? { ok: true, restartRequired: false };
+      return write(res, buildResponse(restartRequired ? 503 : 200, { ok, restartRequired }, meta));
     }
     const begin = performance.now();
     const match = matchRoute(routes, req.method ?? "GET", url.pathname);

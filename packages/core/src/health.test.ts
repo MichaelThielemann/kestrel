@@ -3,7 +3,7 @@ import { z } from "zod";
 import { boot, type Kestrel } from "./boot.ts";
 import { defineContract } from "./defineContract.ts";
 import { defineModule, type Introspection, type ModuleHealth } from "./defineModule.ts";
-import { silentLogger } from "./logger.ts";
+import { silentLogger, type Logger } from "./logger.ts";
 
 interface Store {
   get(id: string): Promise<string | null>;
@@ -77,6 +77,36 @@ describe("kestrel.health()", () => {
     await kestrel.stop();
   });
 
+  it("lists a module whose health() throws as not ok with a fixed reason, and logs the error once", async () => {
+    const errors: Array<{ message: string; data?: Record<string, unknown> }> = [];
+    const logger: Logger = { ...silentLogger, error: (message, data) => errors.push({ message, ...(data === undefined ? {} : { data }) }) };
+    const throwing = defineModule({
+      name: "watcher/throwing",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      health: (): ModuleHealth => {
+        throw new Error("secret detail");
+      },
+    });
+    const kestrel = await boot({
+      config: { ...config, modules: [...config.modules, { use: "./watcher-throwing.ts", config: {} }] },
+      modules: [store, throwing],
+      pipelines: [],
+      logger,
+    });
+    const expected = { ok: false, restartRequired: false, modules: [{ module: "watcher/throwing", ok: false, reason: "health() threw", restartRequired: false }] };
+    expect(kestrel.health()).toEqual(expected);
+    expect(kestrel.health()).toEqual(expected);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.message).toContain("watcher/throwing");
+    expect(String(errors[0]?.data?.error)).toContain("secret detail");
+    await kestrel.stop();
+  });
+
   it("is reachable from attach() through Introspection, mirroring describe()", async () => {
     let seen: ReturnType<Introspection["health"]> | undefined;
     const watcher = defineModule({
@@ -98,7 +128,7 @@ describe("kestrel.health()", () => {
 });
 
 describe("http.healthPath", () => {
-  let state: ModuleHealth = { ok: true };
+  let state: ModuleHealth | "throws" = { ok: true };
   const watched = defineModule({
     name: "watcher/switchable",
     provides: [],
@@ -107,7 +137,10 @@ describe("http.healthPath", () => {
     async setup() {
       return {};
     },
-    health: (): ModuleHealth => state,
+    health: (): ModuleHealth => {
+      if (state === "throws") throw new Error("broken hook");
+      return state;
+    },
   });
 
   async function served(): Promise<{ kestrel: Kestrel; base: string }> {
@@ -121,21 +154,21 @@ describe("http.healthPath", () => {
     return { kestrel, base: `http://127.0.0.1:${http?.port ?? 0}` };
   }
 
-  it("answers 200 with kestrel.health() and the uptime while every module is ok", async () => {
+  it("answers 200 with only ok and restartRequired while every module is ok", async () => {
     state = { ok: true };
     const { kestrel, base } = await served();
     const res = await fetch(`${base}/health`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, restartRequired: false, modules: [{ module: "watcher/switchable", ok: true }], uptimeSeconds: expect.any(Number) as unknown });
+    expect(await res.json()).toEqual({ ok: true, restartRequired: false });
     await kestrel.stop();
   });
 
-  it("answers 200 with ok false when a module is not ok but recovers on its own", async () => {
+  it("answers 200 with ok false and no module detail when a module is not ok but recovers on its own", async () => {
     state = { ok: false, reason: "catching up", restartRequired: false };
     const { kestrel, base } = await served();
     const res = await fetch(`${base}/health`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: false, restartRequired: false, modules: [{ module: "watcher/switchable", ok: false, reason: "catching up", restartRequired: false }] });
+    expect(await res.json()).toEqual({ ok: false, restartRequired: false });
     await kestrel.stop();
   });
 
@@ -146,7 +179,16 @@ describe("http.healthPath", () => {
     state = { ok: false, reason: "the store is unusable after a failed rollback", restartRequired: true };
     const res = await fetch(`${base}/health`);
     expect(res.status).toBe(503);
-    expect(await res.json()).toMatchObject({ ok: false, restartRequired: true, modules: [{ module: "watcher/switchable", reason: "the store is unusable after a failed rollback" }] });
+    expect(await res.json()).toEqual({ ok: false, restartRequired: true });
+    await kestrel.stop();
+  });
+
+  it("answers 200 with ok false, not 500, while a module's health() throws", async () => {
+    state = "throws";
+    const { kestrel, base } = await served();
+    const res = await fetch(`${base}/health`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false, restartRequired: false });
     await kestrel.stop();
   });
 });

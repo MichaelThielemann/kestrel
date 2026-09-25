@@ -109,7 +109,8 @@ export type ModuleHealth = { ok: true; note?: string } | { ok: false; reason: st
 /**
  * The aggregate health of a booted instance, over every module that declares `health()`; a module
  * without the hook is left out. `ok` is false if any listed module is not ok. `restartRequired` is
- * true if any listed module reports it.
+ * true if any listed module reports it. A hook that throws lists its module as
+ * `{ ok: false, reason: "health() threw", restartRequired: false }`.
  */
 export interface InstanceHealth {
   ok: boolean;

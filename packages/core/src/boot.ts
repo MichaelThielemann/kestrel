@@ -6,7 +6,7 @@ import type { ContextInput } from "./context.ts";
 import { missingMethods, type Contract } from "./defineContract.ts";
 import { checkDataflow, checkDataflowCollecting } from "./dataflow.ts";
 import { configSchema, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
-import { stepPrefix, type ContractLookup, type Deps, type EventEntry, type InstanceHealth, type Introspection, type ModuleDefinition, type StepDescription } from "./defineModule.ts";
+import { stepPrefix, type ContractLookup, type Deps, type EventEntry, type InstanceHealth, type Introspection, type ModuleDefinition, type ModuleHealth, type StepDescription } from "./defineModule.ts";
 import { buildManifest, type Manifest } from "./describe.ts";
 import { pipelineSteps, type PipelineDefinition } from "./definePipeline.ts";
 import { resolveEntries } from "./resolveEntries.ts";
@@ -617,8 +617,20 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
     manifest ??= buildManifest({ root, modules: input.modules, uses: config.modules.map((m) => m.use), rawConfigs: configByModule, parsedConfigs: parsedByModule, contracts: contracts.names(), steps, pipelines, triggers: { http: routes, events, crons }, warnings });
     return manifest;
   };
+  const healthThrew = new Set<ModuleDefinition>();
+  const moduleHealth = (mod: ModuleDefinition): ModuleHealth => {
+    try {
+      return mod.health?.(instances.get(mod)) ?? { ok: true };
+    } catch (error) {
+      if (!healthThrew.has(mod)) {
+        healthThrew.add(mod);
+        logger.error(`${mod.name}: health() threw`, { error: error instanceof Error ? error.stack : String(error) });
+      }
+      return { ok: false, reason: "health() threw", restartRequired: false };
+    }
+  };
   const health = (): InstanceHealth => {
-    const modules = ordered.flatMap((mod) => (mod.health && !notSetUp.has(mod) ? [{ module: mod.name, ...mod.health(instances.get(mod)) }] : []));
+    const modules = ordered.flatMap((mod) => (mod.health && !notSetUp.has(mod) ? [{ module: mod.name, ...moduleHealth(mod) }] : []));
     return { ok: modules.every((m) => m.ok), restartRequired: modules.some((m) => m.ok === false && m.restartRequired), modules };
   };
   const introspection: Introspection = { describe, observe: hub.observe, health };
