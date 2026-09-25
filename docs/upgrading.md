@@ -331,8 +331,9 @@ A pipeline runs a step whose 6.0.0 response or manifest shape differs from 5.8's
 `images.generate`, `insights.readManifest` or `events.listDead`; the finding names which one and how.
 `media.upload`'s own change also covers the declared type: one that is not exactly one
 `type/subtype` (a list such as `image/png, text/html`, or an empty type) is refused with 415, and
-only its lower-cased `type/subtype` is stored, so `allowedTypes`/`deniedTypes` match it without
-parameters (a parameterised type that passed a denylist before is now refused). The stored name's
+only its lower-cased `type/subtype` is stored, plus a `text/*` type's charset, so
+`allowedTypes`/`deniedTypes` match it without parameters (a parameterised type that passed a denylist
+before is now refused). The stored name's
 extension comes from that stored type, never from the uploaded name: a listed type keeps its own
 extension, and every other type — like an SVG that `sanitize.svg` did not clean in the same
 pipeline — is stored as `<name>.bin` and published as `application/octet-stream`.

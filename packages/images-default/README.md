@@ -85,8 +85,8 @@ removes on the way never make it skip others; and after writing a copy it reads 
 removes the copy when the item was deleted meanwhile. Serve the copy tree with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, as
 the Node origin does; a placeholder holds the original's bytes under the variant's extension until the
 render replaces it. Every copy — placeholder or render — takes its `Content-Type` from `publicFormOf`
-in `@michaelthielemann/kestrel-contracts/mediaType`: the lower-cased `type/subtype` of a listed type,
-else `application/octet-stream`, so an original stored with a list of types such as
+in `@michaelthielemann/kestrel-contracts/mediaType`: the canonical form of a listed type, else
+`application/octet-stream`, so an original stored with a list of types such as
 `image/png; x=1, text/html` never reaches a variant path with that list, and `images.serve` answers
 with the same type. Boot fails if the copy tree overlaps this module's own storage
 `prefix`, if `publicCopy` is set but no pipeline runs `images.serve`, or if a pipeline runs
