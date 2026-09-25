@@ -7,13 +7,20 @@ import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { createPersistenceSqlite, persistenceFailure } from "./impl.ts";
 
-async function withFailingExec<T>(failures: readonly { sql: string; error: () => Error }[], fn: () => Promise<T>): Promise<T> {
+interface ExecFailure {
+  sql: string;
+  error: () => Error;
+  runFirst?: string;
+}
+
+async function withFailingExec<T>(failures: readonly ExecFailure[], fn: () => Promise<T>): Promise<T> {
   // eslint-disable-next-line @typescript-eslint/unbound-method -- captured to be re-invoked with an explicit `this` via `.call()` below
   const original = DatabaseSync.prototype.exec;
   const queue = [...failures];
   DatabaseSync.prototype.exec = function failingExec(this: DatabaseSync, sql: string) {
     if (queue[0]?.sql === sql) {
-      const { error } = queue.shift()!;
+      const { error, runFirst } = queue.shift()!;
+      if (runFirst !== undefined) original.call(this, runFirst);
       throw error();
     }
     return original.call(this, sql);
@@ -205,6 +212,40 @@ describe("persistence/sqlite: calls queued before a ROLLBACK fails never run on 
 
     for (const answer of answers) expect(answer).toMatchObject({ ok: false, error: { code: "TRANSIENT" } });
     expect(db.health()).toMatchObject({ ok: false, restartRequired: true });
+    db.close();
+  });
+});
+
+describe("persistence/sqlite: a ROLLBACK that fails because SQLite already rolled back keeps the store usable", () => {
+  it("a group whose COMMIT fails after SQLite rolled back on its own reports the commit failure, not an unusable store", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+
+    const outcome = await withFailingExec([{ sql: "COMMIT", runFirst: "ROLLBACK", error: ioError }], () =>
+      db.scope({ pipeline: "p", group: 1 }, async () => {
+        expectOk(await db.createOne("rows", { id: "a", name: "alpha" }));
+        return "commit";
+      }),
+    );
+
+    expect(outcome).toMatchObject({ kind: "failed", phase: "commit" });
+    expect(db.health()).toEqual({ ok: true });
+    expectOk(await db.createOne("rows", { id: "b", name: "beta" }));
+    expect(expectOk(await db.findMany("rows", {})).items.map((row) => row.id)).toEqual(["b"]);
+    db.close();
+  });
+
+  it("a createMany whose COMMIT fails after SQLite rolled back on its own answers TRANSIENT and leaves the store usable", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+
+    const result = await withFailingExec([{ sql: "COMMIT", runFirst: "ROLLBACK", error: ioError }], () => db.createMany("rows", [{ id: "a", name: "alpha" }]));
+
+    expect(result).toMatchObject({ ok: false, error: { code: "TRANSIENT" } });
+    expect(result.ok === false && result.error.message).toMatch(/commit failed/);
+    expect(db.health()).toEqual({ ok: true });
+    expectOk(await db.createMany("rows", [{ id: "b", name: "beta" }]));
+    expect(expectOk(await db.findMany("rows", {})).items.map((row) => row.id)).toEqual(["b"]);
     db.close();
   });
 });

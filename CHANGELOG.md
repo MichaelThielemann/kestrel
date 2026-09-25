@@ -546,8 +546,8 @@ Net changes since 5.8.1.
   `Introspection` in `attach()`. A hook that throws lists its module as
   `{ ok: false, reason: "health() threw", restartRequired: false }` and logs the error once per
   module; `kestrel.health()` itself never throws. `persistence-sqlite` reports the store unusable, with
-  `restartRequired: true`, once a rollback has failed, a group's or the one `createMany` runs for its
-  own transaction outside a group; contention is never reported. A `createMany` whose `ROLLBACK`
+  `restartRequired: true`, once a rollback has failed and left a transaction open, a group's or the
+  one `createMany` runs for its own transaction outside a group; contention is never reported. A `createMany` whose `ROLLBACK`
   fails answers that unusable state's `Err(TRANSIENT)` itself, or rethrows the wiring error it
   rolled back for. Every call, group, `checkpoint()` and `snapshot()` already waiting for its turn
   when a rollback fails answers the same `TRANSIENT` instead of running on the connection.

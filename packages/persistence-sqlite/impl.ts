@@ -101,6 +101,11 @@ function execOrFail(db: DatabaseSync, sql: string, phase: string): KestrelError 
   }
 }
 
+function rollback(db: DatabaseSync): KestrelError | null {
+  const rollbackError = execOrFail(db, "ROLLBACK", "rollback");
+  return rollbackError !== null && db.isTransaction ? rollbackError : null;
+}
+
 export interface PersistenceSqlite extends Persistence {
   /** Routed through the same mutex as every other call: it waits for an open scope and holds the connection while it runs. */
   checkpoint(): Promise<void>;
@@ -180,7 +185,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
     }
   };
   const rollbackOrFail = (): PersistenceError | null => {
-    const rollbackError = execOrFail(db, "ROLLBACK", "rollback");
+    const rollbackError = rollback(db);
     if (rollbackError === null) return null;
     unusable = true;
     logger.error("persistence/sqlite: rollback failed; the store is now unusable", { cause: rollbackError });
@@ -327,7 +332,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
         store.state = "committed";
         return { kind: "settled", verdict: "commit" };
       }
-      const rollbackError = execOrFail(db, "ROLLBACK", "rollback");
+      const rollbackError = rollback(db);
       store.state = "rolled-back";
       if (rollbackError) {
         unusable = true;
@@ -337,7 +342,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
       return { kind: "failed", phase: "commit", error: commitError };
     }
 
-    const rollbackError = execOrFail(db, "ROLLBACK", "rollback");
+    const rollbackError = rollback(db);
     store.state = "rolled-back";
     if (rollbackError) {
       unusable = true;

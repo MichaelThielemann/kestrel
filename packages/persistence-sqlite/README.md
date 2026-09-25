@@ -82,9 +82,11 @@ restart; the connection's state can no longer be proven, and continuing to serve
 would turn one incident into silent corruption. That includes every call and group already waiting
 for its turn when the rollback failed: none of them runs on the connection. A group answers a failed
 `begin` with that error, and `checkpoint()`/`snapshot()` reject with an error the steps answer as
-the same `TRANSIENT`. The same holds for the transaction `createMany`
-runs on its own outside a group: when its `ROLLBACK` fails, that `createMany` already answers the
-same `Err(TRANSIENT)`, or rethrows the wiring error it was rolling back for.
+the same `TRANSIENT`. The same holds for the transaction `createMany` runs on its own outside a
+group: when its `ROLLBACK` fails, that `createMany` already answers the same `Err(TRANSIENT)`, or
+rethrows the wiring error it was rolling back for. A `ROLLBACK` that fails because SQLite already
+rolled the transaction back on its own (after some I/O errors, for example) leaves no transaction
+open and does not count as a failed rollback.
 
 That unusable state is also readable without provoking a call: the module declares `health()`,
 synchronous and with no I/O, so a host's readiness probe learns it needs to stop routing traffic
