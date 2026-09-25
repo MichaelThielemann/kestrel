@@ -167,7 +167,7 @@ Every finding's `docs` field links to one of the anchors below.
 | `boot/not-checked` | boot | none (warning) | a module or pipeline `checkBoot()` could not check safely |
 | `load/failed` | source | manual | a config, module or pipeline file that failed to load |
 | [`sandbox/blobstore-standin`](#sandbox-blobstore-standin) | boot | none (info) | a `blobstore@1` provider the sandbox replaced to keep the boot tier open |
-| [`plugin/hook-failed`](#plugin-hook-failed) | source | manual | a plugin hook (`dataModel`, so far) threw instead of returning |
+| [`plugin/hook-failed`](#plugin-hook-failed) | source | manual | a plugin hook (`dataModel`) or a rule's own `check()` threw instead of returning |
 | [`preview/edit-refused`](#preview-edit-refused) | boot | none (warning) | a boot-preview edit could not be verified (its target escaped the preview copy, or the copy could not reload) |
 | [`data/config-load-failed`](#data-config-load-failed) | data | manual | `kestrel.config.ts` exists but could not be loaded, so the `data` command's underscore-field count was skipped |
 
@@ -433,7 +433,10 @@ re-rendered on every change until they render once; run "Publish all" (`delivery
 #### deps-kestrel-range
 A `@michaelthielemann/kestrel*` dependency is not on a 6.x range; `deps/mixed-majors` fires when
 some are on 6.x and others are not, and `deps/pre-install` when the 5.x packages are still
-installed (source tier only).
+installed (source tier only). `deps/kestrel-range` reads and edits `package.json` alone, so it
+still runs — and `fix --write` still bumps the range — even when the project itself could not load
+at all (a `load/failed` finding alongside it names why); install the bumped range and run `check`
+again to see the rest.
 
 #### offer-event-queue
 See [Switching event delivery to the queue](#5-switching-event-delivery-to-the-queue) above.
@@ -457,9 +460,12 @@ images, delivery, replication and backup modules still get checked. The real mod
 never runs during the check.
 
 #### plugin-hook-failed
-A plugin hook threw instead of returning or resolving; the message names the plugin and the hook.
-`dataModel()` is the one hook this covers so far, in `check`/`fix` and in `data`. Always manual: the
-plugin's own code needs fixing, not the project being checked.
+A plugin hook, or a rule's own `check()`, threw instead of returning or resolving; the message names
+the plugin and the hook, or the rule's own id. `dataModel()` is the one plugin hook this covers, in
+`check`/`fix` and in `data`; a throwing `check()` — a bug in it, or a `needs: "source"` rule reaching
+into a project it was never given — is caught the same way in both the source and the project rule
+loop, so one broken rule never aborts the run for every other rule. Always manual: the rule's own
+code needs fixing, not the project being checked.
 
 #### preview-edit-refused
 A boot preview received an edit it could not verify: the edit's own file, or its mapped location in
@@ -544,7 +550,14 @@ directory) with only the built-in rules.
   a built-in one is a load error naming both, and that rule is dropped from the merge; reach for a
   locator or hook (`locateSteps`, `locateModelFields`, `dataModel`, `switchEdits`) when a built-in
   rule only needs a different project layout, so a later fix to the built-in rule's own logic still
-  reaches every project.
+  reaches every project. A rule's `check(ctx)` gets the full `RuleContext` (a loaded project, its boot
+  check, both preview forms) and runs only once the project loaded, unless it declares
+  `needs: "source"`: such a rule gets the smaller `SourceRuleContext` instead (`root`, `scratch`,
+  `readFile`, `answers` — no project, boot check or preview) and runs whether or not the project
+  loaded this round, so it still finds and fixes what never depended on that — a dependency range in
+  `package.json`, say, the way the built-in `deps/kestrel-range` does. Declare `needs: "source"` only
+  for a rule that genuinely reads and edits files by their own path; one that reaches into
+  `ctx.project` has nothing to read when the project itself failed to load.
 - `locateSteps?`, `locateModelFields?` — locate a pipeline's step array(s) or a content type's fields
   object literal directly, for a project layout where a pipeline is not a
   `definePipeline({ name, steps })` call or a content type does not sit at

@@ -12,11 +12,11 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { loadBackendProject, loadIssuesAsFindings, type LoadIssue, type LoadResult } from "./project.ts";
-import type { AskFix, LoadedProject, Rule, RuleContext, RunUpgradeCliOptions, SwitchEditsResult, UpgradePlugin } from "./plugin.ts";
+import type { AskFix, LoadedProject, Rule, RuleContext, RunUpgradeCliOptions, SourceRuleContext, SwitchEditsResult, UpgradePlugin } from "./plugin.ts";
 import { detectPlugin, mergeRules } from "./pluginRules.ts";
 import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity, type UpgradeReport } from "./report.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
-import { hookFailedFinding, verifyEditsWith, type VerifyEditsResult } from "./ruleHelpers.ts";
+import { hookFailedFinding, ruleCheckFailedFinding, verifyEditsWith, type VerifyEditsResult } from "./ruleHelpers.ts";
 import { sandboxBootInput, type SandboxTable } from "./sandbox.ts";
 import { createScratchCopy, removeScratchCopy, type ScratchCopy } from "./scratch.ts";
 import { verifiesAfterEdit } from "./verify.ts";
@@ -290,12 +290,35 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         docs: "docs/upgrading.md#deps-kestrel-range",
       });
     }
+    if (kestrelMajor !== undefined && kestrelMajor < 6) {
+      findings.push({
+        id: "deps/pre-install",
+        rule: "deps/pre-install",
+        severity: "info",
+        tier: "source",
+        where: {},
+        message: "the 5.x packages are installed; this run sees the source tier only",
+        suggestion: "install the 6.0.0 packages and run check again for the load and boot checks",
+        fix: { kind: "none" },
+        docs: "docs/upgrading.md",
+      });
+    }
 
     const pluginCache = options.pluginCache ?? new Map<string, unknown>();
     const { project, issues, findings: resolvedFindings, rules, sandboxEntries, locateSteps, locateModelFields, switchEdits, reload } = await resolveProject(root, entry, scratch.dir, plugin, pluginCache);
     findings.push(...loadIssuesAsFindings(issues), ...(resolvedFindings ?? []));
 
-    let tiers: UpgradeReport["tiers"] = { source: "not-run", load: "not-run", boot: "not-run", data: "not-run" };
+    const sourceCtx: SourceRuleContext = { root: scratch.dir, scratch: scratch.dir, readFile: readFileOrUndefined, answers: options.answers };
+    for (const rule of rules) {
+      if (rule.needs !== "source") continue;
+      try {
+        findings.push(...(await rule.check(sourceCtx)));
+      } catch (err) {
+        findings.push(ruleCheckFailedFinding(rule.id, err));
+      }
+    }
+
+    let tiers: UpgradeReport["tiers"] = { source: project ? "done" : "failed", load: "not-run", boot: "not-run", data: "not-run" };
     let bootCheck: Awaited<ReturnType<typeof checkBoot>> = { errors: [], warnings: [], notChecked: [] };
     let outside: readonly string[] = [];
     let sandboxInfo: { rewritten: readonly string[]; consented: readonly string[]; outside: readonly string[] } | undefined;
@@ -307,8 +330,6 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
     const editsCacheKey = (edits: readonly Edit[]): string => JSON.stringify(edits.map((e) => [e.file, e.start, e.end, e.text, e.create === true]));
 
     if (project) {
-      tiers = { ...tiers, source: "done" };
-
       if (kestrelMajor === 6 && !versions.mixedMajors) {
         tiers = { ...tiers, load: "done" };
         const box = sandboxBootInput(project.input, { dir: scratch.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
@@ -385,18 +406,6 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
           const raw = await previewBootRaw!(edits);
           return raw === undefined || raw.issues.length > 0 || raw.refused !== undefined || raw.failed !== undefined ? undefined : raw.bootCheck;
         };
-      } else if (kestrelMajor !== undefined && kestrelMajor < 6) {
-        findings.push({
-          id: "deps/pre-install",
-          rule: "deps/pre-install",
-          severity: "info",
-          tier: "source",
-          where: {},
-          message: "the 5.x packages are installed; this run sees the source tier only",
-          suggestion: "install the 6.0.0 packages and run check again for the load and boot checks",
-          fix: { kind: "none" },
-          docs: "docs/upgrading.md",
-        });
       }
 
       const projectWithData = options.dataReport === undefined ? project : { ...project, dataReport: options.dataReport };
@@ -430,7 +439,14 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         ...(previewDetails === undefined ? {} : { previewDetails }),
         ...(plugin === undefined ? {} : { pluginKind: plugin.kind }),
       };
-      for (const rule of rules) findings.push(...(await rule.check(ctx)));
+      for (const rule of rules) {
+        if (rule.needs === "source") continue;
+        try {
+          findings.push(...(await rule.check(ctx)));
+        } catch (err) {
+          findings.push(ruleCheckFailedFinding(rule.id, err));
+        }
+      }
       findings.push(...refusedEditFindings(previewRefusals));
 
       const claimed = new Set(findings.map((f) => `${f.where.module ?? ""}|${f.where.pipeline ?? ""}|${f.where.step ?? ""}`));
@@ -752,7 +768,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
 
   if (write) {
     for (const file of applied) stdout(`wrote ${file}`);
-    if (applied.length > 0) stdout("run `pnpm install` to pick up any dependency range changes");
+    if (applied.length > 0) stdout("run `pnpm install` to pick up any dependency range changes, then run `check` again");
     const writtenFiles = new Set(changed.filter(([file]) => applied.includes(relative(root, file))).map(([file]) => file));
     for (const f of adjustedFindings) {
       if (f.severity !== "warning" || f.fix.kind !== "auto") continue;
@@ -793,6 +809,9 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
         const notChecked = preview.bootCheck.notChecked.length;
         const notCheckedSuffix = notChecked > 0 ? ` (${notChecked} not checked)` : "";
         stdout(`after these edits: ${afterEdits.error} errors remain (${afterEdits.ask} need your answer, ${afterEdits.manual} manual)${notCheckedSuffix}`);
+      } else if (adjustedReport.tiers.source === "failed") {
+        stdout("could not verify the boot result: the project itself did not load; resolve the load failure above, then run `check` again once its own fix (a dependency range bump, say) is installed");
+        for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);
       } else {
         stdout("could not verify the boot result: no boot check ran; upgrade @michaelthielemann/kestrel to 6 first, then run `fix` again to verify");
         for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);

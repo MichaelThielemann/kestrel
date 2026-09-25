@@ -5,7 +5,7 @@ import { BACKEND_PACKAGE_NAMES } from "./backendPackages.ts";
 import { insertModuleListEntry, insertModulesTsEntry, renameStringLiterals } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { setDependencyRange } from "./packageJson.ts";
-import type { Rule, RuleContext } from "./plugin.ts";
+import type { Rule, RuleContext, SourceRule } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
 import { combineEditParts, finding, KESTREL_RANGE, moduleEntry, packageJsonPath } from "./ruleHelpers.ts";
 import { bootWrapRules } from "./ruleBootWraps.ts";
@@ -121,8 +121,9 @@ function majorOf(range: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
-export const kestrelRangeRule: Rule = {
+export const kestrelRangeRule: SourceRule = {
   id: "deps/kestrel-range",
+  needs: "source",
   check(ctx) {
     const pkgFile = packageJsonPath(ctx);
     const source = ctx.readFile(pkgFile);

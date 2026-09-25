@@ -719,6 +719,20 @@ Net changes since 5.8.1.
   the background (`pageDependents`, `settingsDependents`, `mediaDependents`, `resumeStalePages`);
   `setSettings` writes inside an atomic group and emits `settings.updated`, and `publishPage`,
   `unpublishPage` and `settingsDependents` request `llms.txt` instead of exporting it in the request.
+- `@michaelthielemann/kestrel-upgrade`'s plugin API gains `Rule.needs: "source"` and the
+  `SourceRuleContext` such a rule declares itself with (`root`, `scratch`, `readFile`, `answers` — no
+  loaded project, boot check or preview, both exported from the root entry alongside `Rule` and
+  `RuleContext`): it runs whether or not the project itself loaded this round, so the built-in
+  `deps/kestrel-range`, `deps/pre-install` and `types/breaking-signatures` — now on this path — still
+  find and fix or report what never needed the project, even when a plugin's own `load()` failed or
+  the installed config throws on import; the report still carries the load failure as its own finding
+  alongside them, and `report.tiers.source` is `"failed"`, not `"not-run"`, when this happens.
+  `fix --write` applies a source rule's edit the same as any other, and both its own "run pnpm
+  install..." line and its dry-run's no-preview fallback point at running `check` again once it is
+  installed. A rule's own `check()` throwing — its own bug, or a `needs: "source"` rule reaching into
+  a project it was never given — becomes a `plugin/hook-failed` finding naming the rule instead of
+  aborting the run for every other one. Every rule without `needs` keeps running only once the
+  project loaded, exactly as before.
 
 ### Changed
 

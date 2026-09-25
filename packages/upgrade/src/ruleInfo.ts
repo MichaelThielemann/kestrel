@@ -1,6 +1,6 @@
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
 import { isRecord } from "./guards.ts";
-import type { Rule } from "./plugin.ts";
+import type { Rule, SourceRule } from "./plugin.ts";
 import type { Finding } from "./report.ts";
 import { hasModule, infoFinding, localModuleFiles, moduleEntry } from "./ruleHelpers.ts";
 
@@ -65,8 +65,9 @@ export const busSubscriberQueueRule: Rule = {
 };
 
 /** `types/breaking-signatures`: `Deps`, `Introspection`, `PipelineDefinition["steps"]`, `ModuleManifest`, `FakePersistence`, `Manifest` and `Kestrel["contracts"]` all gained required members; only the consumer's own typecheck sees a violation. */
-export const typeSignaturesRule: Rule = {
+export const typeSignaturesRule: SourceRule = {
   id: "types/breaking-signatures",
+  needs: "source",
   check() {
     return [
       infoFinding("types/breaking-signatures", "types/breaking-signatures", "Deps.eventTriggers, Introspection.health(), PipelineDefinition[\"steps\"] (readonly PipelineEntry[]), ModuleManifest.atomicScope, FakePersistence's atomic members, Manifest.warnings and Kestrel[\"contracts\"].names() are all required now. Media: Media lost migrateKeys, gained serveFile, syncPublic, toPublicItem, publicCopyEnabled, anonymousListAllowed, sanitizesSvg and attach, and upload takes a fourth svgSanitized argument; MediaItem gained location and svgSanitized. Images: Images gained plan, syncPublic, publicCopyEnabled, publicPath and attach, and its Renderer takes a third planned argument; VariantState gained planned. Reading media through media@1: createImages takes deps.media (a media@1 provider) and images-default's Config lost media; Media extends MediaFiles (file, files, load, scan, count); MediaStatus gained removing", "run your own typecheck after installing the 6.0.0 packages; a hand-built implementation of any of these needs the new members", {}, "docs/upgrading.md#types-breaking-signatures"),

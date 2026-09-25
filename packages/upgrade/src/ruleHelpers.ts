@@ -8,7 +8,7 @@ export { whereOf } from "./report.ts";
 
 export const KESTREL_RANGE = "^6.0.0";
 
-export function packageJsonPath(ctx: RuleContext): string {
+export function packageJsonPath(ctx: { root: string }): string {
   return join(ctx.root, "package.json");
 }
 
@@ -44,6 +44,22 @@ export function hookFailedFinding(pluginKind: string, hook: string, err: unknown
     where: {},
     message,
     suggestion: `fix ${hook}() in the "${pluginKind}" plugin so it does not throw`,
+    fix: { kind: "manual" },
+    docs: "docs/upgrading.md#plugin-hook-failed",
+  };
+}
+
+/** A rule's own `check()` threw (a bug in it, or a JS plugin's rule reaching into `ctx.project` after mislabelling itself `needs: "source"`) — named the same way a failed plugin hook is, so one throwing rule never aborts the whole run. */
+export function ruleCheckFailedFinding(ruleId: string, err: unknown): Finding {
+  const message = `rule "${ruleId}"'s check() threw: ${err instanceof Error ? err.message : String(err)}`;
+  return {
+    id: `plugin/hook-failed:${ruleId}:check`,
+    rule: "plugin/hook-failed",
+    severity: "error",
+    tier: "source",
+    where: {},
+    message,
+    suggestion: `fix "${ruleId}"'s check() so it does not throw`,
     fix: { kind: "manual" },
     docs: "docs/upgrading.md#plugin-hook-failed",
   };

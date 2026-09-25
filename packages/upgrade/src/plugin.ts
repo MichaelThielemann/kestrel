@@ -84,6 +84,22 @@ export interface SwitchEditsResult {
   blockers: readonly string[];
 }
 
+/**
+ * The context a `needs: "source"` rule gets: a project the loader could not load (a plugin's `load()`
+ * returned no project, or the config threw on the installed code) still has a `root`, files to
+ * `readFile`, and answers already known, so a rule scoped to that alone — `deps/kestrel-range`
+ * bumping a dependency range in `package.json`, say — still runs and still offers its fix. `root` is
+ * the same scratch-relative root `RuleContext.root` is; there is no loaded project, boot check or
+ * preview here, so this type has none of them, rather than leaving them present but always
+ * `undefined`.
+ */
+export interface SourceRuleContext {
+  root: string;
+  scratch: string;
+  readFile(file: string): string | undefined;
+  answers: ReadonlyMap<string, string>;
+}
+
 export interface RuleContext {
   root: string;
   scratch: string;
@@ -117,11 +133,34 @@ export interface RuleContext {
   verifyEdits?: (edits: readonly Edit[], options?: { pipelines?: readonly string[] }) => Promise<{ verified: boolean; newErrors: readonly BootProblem[]; unchecked: readonly { name: string; because: string }[] }>;
 }
 
-/** One 5.8 -> 6.0 rule: turns a loaded project (plus the boot check it produced) into findings. An answer to one of this rule's `ask` questions reaches it only through `ctx.answers` on the next `check()` call — there is no separate answer-to-edit path. */
-export interface Rule {
+/** A rule needing the loaded project, its boot check, or a preview — the default when `needs` is absent. */
+export interface ProjectRule {
   id: string;
+  needs?: "project";
   check(ctx: RuleContext): readonly Finding[] | Promise<readonly Finding[]>;
 }
+
+/**
+ * A rule needing only `SourceRuleContext` — never a loaded project, boot check or preview — so it
+ * runs whether or not the project loaded this round, and still offers its fix when nothing else can.
+ * The built-in `deps/kestrel-range` is one; a plugin's own rule declares this the same way.
+ */
+export interface SourceRule {
+  id: string;
+  needs: "source";
+  check(ctx: SourceRuleContext): readonly Finding[] | Promise<readonly Finding[]>;
+}
+
+/**
+ * One 5.8 -> 6.0 rule: turns a loaded project (plus the boot check it produced) into findings, or —
+ * `needs: "source"` — just the root and its files. `RuleContext` is assignable to every variant's own
+ * context (`SourceRuleContext` today), since each is the subset of `RuleContext` that `needs` value
+ * actually requires; a later `needs` value's own, narrower context stays additive the same way,
+ * never a breaking change to `RuleContext` itself. An answer to one of this rule's `ask` questions
+ * reaches it only through `ctx.answers` on the next `check()` call — there is no separate
+ * answer-to-edit path.
+ */
+export type Rule = ProjectRule | SourceRule;
 
 export interface UpgradePlugin {
   kind: string;
