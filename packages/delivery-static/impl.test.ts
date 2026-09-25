@@ -433,6 +433,101 @@ describe("delivery/static: rendered output is stored byte for byte, no media rew
   });
 });
 
+function mismatchedRenderer(): Renderer {
+  return {
+    formats: () => ["html", "pdf"],
+    async render(input) {
+      const extension = input.format === "html" ? "htm" : "pdf-doc";
+      return ok({ data: `<h1>${String(input.document.title)}</h1>`, contentType: input.format === "pdf" ? "application/pdf" : "text/html", extension });
+    },
+  };
+}
+
+describe("delivery/static: removes exactly the keys it wrote", () => {
+  it("a renderer whose extension differs from its format name leaves nothing behind on unpublish", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const delivery = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: mismatchedRenderer(), blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published", status__en: "published" });
+    expectOk(await delivery.publish("pages", "p1"));
+    expect([...blobs.blobs.keys()].sort()).toEqual(["site/en/seite/index.htm", "site/en/seite/index.pdf-doc", "site/seite/index.htm", "site/seite/index.pdf-doc"]);
+    expect(expectOk(await delivery.unpublish("pages", "p1"))).toBe(2);
+    expect(blobs.blobs.size).toBe(0);
+  });
+
+  it("removes the real files of a path a rename left, even when the renderer's extension differs from the format name", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const delivery = await createDeliveryStatic({ ...config, formats: ["html"] }, { content, site, renderer: mismatchedRenderer(), blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "alt", title__de: "Alt", status__de: "published" });
+    expectOk(await delivery.publish("pages", "p1"));
+    expect(blobs.blobs.has("site/alt/index.htm")).toBe(true);
+    put("p1", { slug__de: "neu" });
+    expectOk(await delivery.publish("pages", "p1"));
+    expect(blobs.blobs.has("site/alt/index.htm")).toBe(false);
+    expect(blobs.blobs.has("site/neu/index.htm")).toBe(true);
+  });
+
+  it("removes the real files of a locale that stops being published, even when the renderer's extension differs from the format name", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const delivery = await createDeliveryStatic({ ...config, formats: ["html"] }, { content, site, renderer: mismatchedRenderer(), blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published", status__en: "published" });
+    expectOk(await delivery.publish("pages", "p1"));
+    expect(blobs.blobs.has("site/en/seite/index.htm")).toBe(true);
+    put("p1", { status__en: "draft" });
+    expectOk(await delivery.publish("pages", "p1"));
+    expect(blobs.blobs.has("site/en/seite/index.htm")).toBe(false);
+    expect(blobs.blobs.has("site/seite/index.htm")).toBe(true);
+  });
+
+  it("a republish with a smaller format list removes the keys the previous render wrote but the new one does not", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const wide = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published" });
+    expectOk(await wide.publish("pages", "p1"));
+    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_nuxt/app.js", "site/seite/index.html", "site/seite/index.pdf"]);
+    const narrow = await createDeliveryStatic({ ...config, formats: ["html"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    expectOk(await narrow.publish("pages", "p1"));
+    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_nuxt/app.js", "site/seite/index.html"]);
+  });
+
+  it("a row published before written keys were recorded still loses every real file on unpublish", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const delivery = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published" });
+    expectOk(await delivery.publish("pages", "p1"));
+    const before = expectOk(await db.findOne<{ id: string }>(STATUS, { type: "pages", docId: "p1", locale: "de" }));
+    expectOk(await db.updateMany(STATUS, { id: before!.id }, { writtenKeys: null }));
+    expect(expectOk(await db.findOne<{ id: string; writtenKeys: string[] | null }>(STATUS, { id: before!.id }))?.writtenKeys).toBeNull();
+    expect(expectOk(await delivery.unpublish("pages", "p1"))).toBe(2);
+    expect(blobs.blobs.has("site/seite/index.html")).toBe(false);
+    expect(blobs.blobs.has("site/seite/index.pdf")).toBe(false);
+  });
+
+  it("never removes a key another live output still owns at the same path, even while dropping keys its own re-render no longer writes", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const wide = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "seite", title__de: "Seite Eins", status__de: "published" });
+    expectOk(await wide.publish("pages", "p1"));
+    put("p2", { slug__de: "seite", title__de: "Seite Zwei", status__de: "published" });
+    expectOk(await wide.publish("pages", "p2"));
+    expect(blobs.blobs.has("site/seite/index.pdf")).toBe(true);
+    const narrow = await createDeliveryStatic({ ...config, formats: ["html"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    expectOk(await narrow.publish("pages", "p1"));
+    expect(blobs.blobs.has("site/seite/index.pdf")).toBe(true);
+  });
+});
+
 describe("rewriteMedia (pure), removed", () => {
   it("rewriteMedia is no longer exported from ./impl", async () => {
     const impl = await import("./impl.ts");

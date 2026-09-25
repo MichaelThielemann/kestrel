@@ -162,6 +162,15 @@ is always followed by a render of the current content. `delivery.unpublish` leav
 (also one that was never rendered), which blocks a render still in flight, and which `delivery.resumeStale` removes
 after `claimTtlSeconds`; reads never return it.
 
+**Removes exactly what it wrote.** Each status row keeps the blob keys its own `live` or `error` output currently
+owns, taken from the renderer's own `extension` for each write, not derived from the format name – a renderer whose
+extension differs from its format leaves nothing behind. Unpublish, a slug or locale change, a losing render's
+cleanup and the tombstone sweep all remove exactly those recorded keys, and a re-render that no longer writes a key
+its previous render did removes that one key too, whether or not the path itself changed; a path that another live
+or error output still owns is never touched. A row written before this was recorded derives its keys once, the same
+way an unpublish always did, from its path and the currently configured formats, and remembers the result for the
+next removal instead of deriving it again.
+
 **Changes that overlap a render.** A render reads a document for the first time; the document changes and is
 marked before the render has recorded its dependencies, so the mark finds nothing. To close that gap without
 comparing clocks, `delivery.markDependents` first takes the next number of a sequence kept in `delivery_state`

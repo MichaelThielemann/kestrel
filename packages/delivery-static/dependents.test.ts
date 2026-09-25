@@ -157,6 +157,20 @@ function memoryBlobs(): Blobstore & { files: Map<string, string> } {
   };
 }
 
+function failingRemoveOnce(blobs: ReturnType<typeof memoryBlobs>, key: string): ReturnType<typeof memoryBlobs> {
+  let armed = true;
+  return {
+    ...blobs,
+    async remove(k) {
+      if (armed && k === key) {
+        armed = false;
+        return err(failure("TRANSIENT", "disk unavailable"));
+      }
+      return blobs.remove(k);
+    },
+  };
+}
+
 function recordingLogger(): Logger & { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -183,6 +197,7 @@ interface HarnessOptions {
   content?: Content;
   blobs?: ReturnType<typeof memoryBlobs>;
   renderer?: Renderer;
+  formats?: string[];
 }
 
 const instances: Delivery[] = [];
@@ -207,7 +222,7 @@ async function harness(options: HarnessOptions = {}) {
   const logger = recordingLogger();
   let offset = 0;
   const now = () => Date.now() + offset;
-  const config = configSchema.parse({ types: { pages: {} }, prefix: "site/", dependencies: { render: options.render ?? "events", rendererReadsDocument: true, ...options.dependencies } });
+  const config = configSchema.parse({ types: { pages: {} }, prefix: "site/", ...(options.formats ? { formats: options.formats } : {}), dependencies: { render: options.render ?? "events", rendererReadsDocument: true, ...options.dependencies } });
   const delivery = await createDeliveryStatic(config, { content, site, renderer: options.renderer ?? reading.renderer, blobs, db, logger, events }, now);
   instances.push(delivery);
 
@@ -1082,6 +1097,28 @@ describe("delivery/static dependencies: markAll, checkBuild and the recovery pas
     expect((await h.row(never, "en"))?.state).toBe("draft");
   });
 
+  it("a rebuild after the format list shrank removes the keys the previous build wrote but the new one does not", async () => {
+    const fake = createFakePersistence();
+    const content = await createContentDefault(model, fake);
+    const renderer: Renderer = {
+      formats: () => ["html", "json"],
+      async render(input) {
+        return ok({ data: `<h1>${String(input.document.title)}</h1>`, contentType: "text/html", extension: input.format });
+      },
+    };
+    const wide = await harness({ db: fake, content, renderer, formats: ["html", "json"], render: "background" });
+    const page = await wide.page({ slug: "seite", title: "Seite", status: "published", body: [] });
+    expectOk(await wide.delivery.publish("pages", page));
+    expect(wide.blobs.files.has("site/seite/index.json")).toBe(true);
+    await wide.delivery.close();
+
+    const narrow = await harness({ db: fake, content, blobs: wide.blobs, renderer, formats: ["html"], render: "background" });
+    expectOk(await narrow.delivery.markAll("pages"));
+    await narrow.settle();
+    expect(narrow.blobs.files.has("site/seite/index.json")).toBe(false);
+    expect(narrow.blobs.files.has("site/seite/index.html")).toBe(true);
+  });
+
   it("checkBuild marks everything once per new build and stores the build only after marking succeeded", async () => {
     const fake = createFakePersistence();
     const content = await createContentDefault(model, fake);
@@ -1741,7 +1778,7 @@ describe("delivery/static dependencies: markAll and rows with older ids", () => 
     await seed(h);
     const late = await h.page({ slug: "spaet", title: "Spät", status: "published" });
     const at = Date.now();
-    const row = (locale: string, id: string): StatusRow => ({ id, type: "pages", docId: late, locale, state: "draft", path: null, error: null, publishedAt: null, updatedAt: at, version: 0, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null });
+    const row = (locale: string, id: string): StatusRow => ({ id, type: "pages", docId: late, locale, state: "draft", path: null, writtenKeys: [], error: null, publishedAt: null, updatedAt: at, version: 0, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null });
     for (const locale of ["fr", "it", "es", "nl", "pl", "pt", "sv", "da", "fi", "cs", "hu", "ro"]) expectOk(await h.db.createOne<StatusRow>(STATUS, row(locale, `old-${locale}`)));
     expectOk(await h.db.createOne<StatusRow>(STATUS, row("de", "zz-older-random-id")));
     expectOk(await h.delivery.markAll("pages"));
@@ -1817,6 +1854,36 @@ describe("delivery/static dependencies: links by internal object reference", () 
     expectOk(await h.content.update("pages", targetId, { status: "published" }, { locale: "de" }));
     expectOk(await h.delivery.markDependents("pages", [targetId]));
     expect(await h.marked()).toContain(`${linker}/de`);
+  });
+});
+
+describe("delivery/static dependencies: keys recorded before this version", () => {
+  it("records the keys it derives for a row with none once, so a retry after a crash removes the same keys instead of deriving fewer from a since-shrunk format list", async () => {
+    const fake = createFakePersistence();
+    const content = await createContentDefault(model, fake);
+    const renderer: Renderer = {
+      formats: () => ["html", "json"],
+      async render(input) {
+        return ok({ data: `<h1>${String(input.document.title)}</h1>`, contentType: "text/html", extension: input.format });
+      },
+    };
+    const h1 = await harness({ db: fake, content, renderer, formats: ["html", "json"] });
+    const page = await h1.page({ slug: "seite", title: "Seite", status: "published", body: [] });
+    expectOk(await h1.delivery.publish("pages", page));
+    expect(h1.blobs.files.has("site/seite/index.json")).toBe(true);
+    const row = (await h1.row(page))!;
+    expectOk(await fake.updateMany(STATUS, { id: row.id }, { writtenKeys: null }));
+
+    const brokenBlobs = failingRemoveOnce(h1.blobs, "site/seite/index.html");
+    const h2 = await harness({ db: fake, content, blobs: brokenBlobs, renderer, formats: ["html", "json"] });
+    expectErr(await h2.delivery.unpublish("pages", page), "TRANSIENT");
+    expect(expectOk(await fake.findOne<StatusRow>(STATUS, { id: row.id }))?.writtenKeys).toEqual(["site/seite/index.html", "site/seite/index.json"]);
+    expect(h1.blobs.files.has("site/seite/index.json")).toBe(true);
+
+    const h3 = await harness({ db: fake, content, blobs: h1.blobs, renderer, formats: ["html"] });
+    expectOk(await h3.delivery.unpublish("pages", page));
+    expect(h1.blobs.files.has("site/seite/index.html")).toBe(false);
+    expect(h1.blobs.files.has("site/seite/index.json")).toBe(false);
   });
 });
 
