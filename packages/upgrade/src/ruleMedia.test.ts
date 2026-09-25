@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BootCheck, PipelineDefinition } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
+import { upgradingDocs } from "./ruleHelpers.ts";
 import { readFileOrUndefined } from "./rules.ts";
 import {
   anonymousMediaListRule,
@@ -516,7 +517,7 @@ describe("modules/images-media-option", () => {
     ]);
     const findings = await imagesMediaOptionRule.check(contextFor(p));
     expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({ rule: "modules/images-media-option", severity: "error", where: { module: IMAGES_DEFAULT, path: "media" }, docs: "docs/upgrading.md#modules-images-media-option" });
+    expect(findings[0]).toMatchObject({ rule: "modules/images-media-option", severity: "error", where: { module: IMAGES_DEFAULT, path: "media" }, docs: upgradingDocs("modules-images-media-option") });
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
     const text = applied(p, edits);
     expect(text).toContain('kestrel-images-default", config: {"chunk":10,"publicCopy":{"prefix":"site/"}}');
@@ -548,7 +549,7 @@ describe("modules/references-media-target", () => {
     ]);
     const findings = await referencesMediaTargetRule.check(contextFor(p));
     expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({ rule: "modules/references-media-target", severity: "warning", where: { module: REFERENCES, path: "targets.media" }, docs: "docs/upgrading.md#modules-references-media-target" });
+    expect(findings[0]).toMatchObject({ rule: "modules/references-media-target", severity: "warning", where: { module: REFERENCES, path: "targets.media" }, docs: upgradingDocs("modules-references-media-target") });
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
     expect(applied(p, edits)).toContain('"targets":{"pages":{"content":"pages"},"media":{ media: true }}');
   });
@@ -583,7 +584,7 @@ describe("events/images-variants-changed", () => {
     ];
     const findings = await imagesVariantsChangedRule.check(contextFor(await project([{ use: IMAGES_DEFAULT, config: {} }], { triggers })));
     expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({ rule: "events/images-variants-changed", severity: "info", where: { pipeline: "mediaDependents" }, docs: "docs/upgrading.md#events-images-variants-changed" });
+    expect(findings[0]).toMatchObject({ rule: "events/images-variants-changed", severity: "info", where: { pipeline: "mediaDependents" }, docs: upgradingDocs("events-images-variants-changed") });
     expect(findings[0]?.suggestion).toContain('{ event: "images.variantsChanged", pipeline: "mediaDependents" }');
   });
 });

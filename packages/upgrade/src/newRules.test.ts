@@ -8,6 +8,7 @@ import { applyEdits } from "./apply.ts";
 import { findCalls, firstArgument, isArrayExpression, objectProperty } from "./ast.ts";
 import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
+import { upgradingDocs } from "./ruleHelpers.ts";
 import { readFileOrUndefined } from "./rules.ts";
 import { breakingStepShapesRule, busHandlerThrowsRule, busSubscriberQueueRule, ctxDoneTerminalOutputRule, deliveryDependentsRule, deliveryMembersRule, restoreFreshnessRule, runPipelineValidatesRule, typeSignaturesRule } from "./ruleInfo.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
@@ -324,7 +325,7 @@ describe("the generic boot wraps (output-fold, terminal-output, optional-read-or
     expect(findings[0]?.fix.kind).toBe("manual");
     expect(findings[0]?.message).toBe(problem.reason);
     expect(findings[0]?.where.pipeline).toBe("p");
-    expect(findings[0]?.docs).toBe("docs/upgrading.md#steps-output-fold");
+    expect(findings[0]?.docs).toBe(upgradingDocs("steps-output-fold"));
   });
 
   it("steps/terminal-output reports terminal-output-misplaced as a manual finding", async () => {
@@ -334,7 +335,7 @@ describe("the generic boot wraps (output-fold, terminal-output, optional-read-or
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("manual");
     expect(findings[0]?.message).toBe(problem.reason);
-    expect(findings[0]?.docs).toBe("docs/upgrading.md#steps-terminal-output");
+    expect(findings[0]?.docs).toBe(upgradingDocs("steps-terminal-output"));
   });
 
   it("pipelines/optional-read-order reports optional-read-order as a manual finding", async () => {
@@ -344,7 +345,7 @@ describe("the generic boot wraps (output-fold, terminal-output, optional-read-or
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("manual");
     expect(findings[0]?.message).toBe(problem.reason);
-    expect(findings[0]?.docs).toBe("docs/upgrading.md#pipelines-optional-read-order");
+    expect(findings[0]?.docs).toBe(upgradingDocs("pipelines-optional-read-order"));
   });
 
   it("boot/dependency-cycle reports dependency-cycle as a manual finding", async () => {
@@ -355,7 +356,7 @@ describe("the generic boot wraps (output-fold, terminal-output, optional-read-or
     expect(findings[0]?.fix.kind).toBe("manual");
     expect(findings[0]?.message).toBe(problem.reason);
     expect(findings[0]?.where.module).toBe("a");
-    expect(findings[0]?.docs).toBe("docs/upgrading.md#boot-dependency-cycle");
+    expect(findings[0]?.docs).toBe(upgradingDocs("boot-dependency-cycle"));
   });
 
   it("reports nothing when no boot error of its own code is present", async () => {
@@ -374,7 +375,7 @@ describe("types/breaking-signatures", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.severity).toBe("info");
     expect(findings[0]?.fix.kind).toBe("none");
-    expect(findings[0]?.docs).toBe("docs/upgrading.md#types-breaking-signatures");
+    expect(findings[0]?.docs).toBe(upgradingDocs("types-breaking-signatures"));
 
     const full = await project({
       configModules: [{ use: "@michaelthielemann/kestrel-authn-multi" }],
@@ -667,7 +668,7 @@ describe("info rules", () => {
     const findings = await deliveryDependentsRule.check(contextFor(p));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.severity).toBe("info");
-    expect(findings[0]?.docs).toBe("docs/upgrading.md#delivery-dependents");
+    expect(findings[0]?.docs).toBe(upgradingDocs("delivery-dependents"));
     expect(findings[0]?.message).toContain("delivery.markDependents");
     expect(findings[0]?.message).toContain("delivery.resumeStale");
   });

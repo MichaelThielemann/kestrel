@@ -5,7 +5,7 @@ import { insertPipelineStep, setModuleConfigProperties } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
-import { combineEditParts, fileForPipeline, hasModule, infoFinding, moduleEntry } from "./ruleHelpers.ts";
+import { combineEditParts, fileForPipeline, hasModule, infoFinding, moduleEntry, upgradingDocs } from "./ruleHelpers.ts";
 
 const AUTHZ_MODULE = "authz/roles";
 const FIELD_STEP = "pipelines/field-step";
@@ -146,7 +146,7 @@ export const fieldStepRule: Rule = {
       ...(steps.length === 0 ? [] : [`end ${steps.map((s) => `${s.pipeline} → "${s.step}"`).join(", ")}`]),
       ...(Object.keys(proposals).length === 0 ? [] : [`grant anonymous callers ${Object.entries(proposals).map(([resource, paths]) => `${resource}: ${paths.join(", ")}`).join("; ")}`]),
     ].join("; and ");
-    const docs = "docs/upgrading.md#pipelines-field-step";
+    const docs = upgradingDocs("pipelines-field-step");
     const id = FIELD_STEP;
 
     if (unknown.length > 0) return [boot({ id, severity: "error", message, suggestion: `choose by hand for ${unknown.join("; ")}${plan === "" ? "" : `; the rest: ${plan}`}`, fix: { kind: "manual" } }, FIELD_STEP, docs)];
@@ -183,7 +183,7 @@ export const fieldGrantUnknownRule: Rule = {
       .filter((line) => OTHER_FIELD_PROBLEMS.some((pattern) => pattern.test(line)))
       .map((line, index) => {
         const hint = line.split(" – ")[1];
-        return boot({ id: `${FIELD_GRANT}:${index}`, severity: "error", message: line, suggestion: hint ?? "change the grant or the pipeline so that the grant names only fields the pipeline's declared output has", fix: { kind: "manual" } }, FIELD_GRANT, "docs/upgrading.md#authz-field-grant-unknown");
+        return boot({ id: `${FIELD_GRANT}:${index}`, severity: "error", message: line, suggestion: hint ?? "change the grant or the pipeline so that the grant names only fields the pipeline's declared output has", fix: { kind: "manual" } }, FIELD_GRANT, upgradingDocs("authz-field-grant-unknown"));
       });
   },
 };
@@ -227,7 +227,7 @@ export const anonymousFieldsRule: Rule = {
           `pipeline "${trigger.pipeline}" (${trigger.http}) answers anonymous callers; once it ends with authz.fields they no longer receive ${droppedMembers(resource, steps)}`,
           "make sure no client that reads it without a session relies on those members",
           file === undefined ? { pipeline: trigger.pipeline } : { pipeline: trigger.pipeline, file },
-          "docs/upgrading.md#responses-anonymous-fields",
+          upgradingDocs("responses-anonymous-fields"),
         ),
       );
     }
@@ -261,7 +261,7 @@ export const thrownErrorTextRule: Rule = {
           "this file matches on the error text of an answer; a step that throws now answers \"<pipeline>/<step>: unexpected <ErrorName>\", and its message is only in the log",
           "match on code and step instead, or read the message from the log under the answer's runId",
           { file },
-          "docs/upgrading.md#responses-thrown-error-text",
+          upgradingDocs("responses-thrown-error-text"),
         ),
       );
   },
