@@ -24,6 +24,7 @@ export interface Steps {
   names(): string[];
   owner(name: string): string | undefined;
   list(): RegisteredStep[];
+  /** Resolves one pipeline step spec. Every problem, including a step factory or `describe()` that throws, is thrown as a `KestrelBootError`. */
   resolve(spec: string, owner?: string): ResolvedStep;
 }
 
@@ -150,25 +151,52 @@ export class StepRegistry {
   }
 
   resolve(spec: string, owner = "pipeline"): ResolvedStep {
+    const resolved = this.tryResolve(spec, owner);
+    if (resolved instanceof KestrelBootError) throw resolved;
+    return resolved;
+  }
+
+  /** `resolve()` that returns its problem instead of throwing it. A step factory or a factory step's `describe()` that throws becomes a problem naming the step and the module that registered it. */
+  tryResolve(spec: string, owner = "pipeline"): ResolvedStep | KestrelBootError {
     const colon = spec.indexOf(":");
     const name = colon === -1 ? spec : spec.slice(0, colon);
     const arg = colon === -1 ? undefined : spec.slice(colon + 1);
     const entry = this.entries.get(name);
-    if (!entry) throw new KestrelBootError(owner, `unknown step "${name}"`, "unknown-step");
+    if (!entry) return new KestrelBootError(owner, `unknown step "${name}"`, "unknown-step");
     if (arg === undefined) {
-      if (entry.factory) throw new KestrelBootError(owner, `step "${name}" requires an argument`, "step-argument");
+      if (entry.factory) return new KestrelBootError(owner, `step "${name}" requires an argument`, "step-argument");
       return { name: spec, fn: entry.fn, description: entry.describe };
     }
-    if (arg === "") throw new KestrelBootError(owner, `step "${name}" has an empty argument`, "step-argument");
-    if (!entry.factory) throw new KestrelBootError(owner, `step "${name}" does not accept an argument`, "step-argument");
-    const built = entry.fn(arg);
-    if (typeof built !== "function") throw new KestrelBootError(owner, `step "${name}" returned ${typeof built} instead of a step`, "step-not-function");
-    const description = typeof entry.describe === "function" ? checkPathsOrThrow(entry.owner, spec, entry.describe(arg)) : entry.describe;
-    return { name: spec, fn: built, description };
+    if (arg === "") return new KestrelBootError(owner, `step "${name}" has an empty argument`, "step-argument");
+    if (!entry.factory) return new KestrelBootError(owner, `step "${name}" does not accept an argument`, "step-argument");
+    const built = attempt(() => entry.fn(arg));
+    if (!built.ok) return new KestrelBootError(owner, `module "${entry.owner}" could not build step "${spec}": ${built.reason}`, "step-argument");
+    if (typeof built.value !== "function") return new KestrelBootError(owner, `step "${name}" returned ${typeof built.value} instead of a step`, "step-not-function");
+    const describe = entry.describe;
+    if (typeof describe !== "function") return { name: spec, fn: built.value, description: describe };
+    const described = attempt(() => describe(arg));
+    if (!described.ok) return new KestrelBootError(owner, `module "${entry.owner}"'s describe() threw for step "${spec}": ${described.reason}`, "describe-threw");
+    return firstPathProblem(entry.owner, spec, described.value) ?? { name: spec, fn: built.value, description: described.value };
   }
 }
 
-function checkPathsOrThrow(owner: string, name: string, description: StepDescription): StepDescription {
-  checkPaths(throwSink(), owner, name, description);
-  return description;
+function attempt<T>(fn: () => T): { ok: true; value: T } | { ok: false; reason: string } {
+  try {
+    return { ok: true, value: fn() };
+  } catch (err) {
+    if (err instanceof KestrelBootError) return { ok: false, reason: err.reason };
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function firstPathProblem(owner: string, name: string, description: StepDescription): KestrelBootError | undefined {
+  let problem: KestrelBootError | undefined;
+  const sink: Sink = {
+    collecting: true,
+    fail(code, problemOwner, reason) {
+      problem ??= new KestrelBootError(problemOwner, reason, code);
+    },
+  };
+  checkPaths(sink, owner, name, description);
+  return problem;
 }

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import { boot as bootKestrel, checkBoot, defineModule, KestrelBootError } from "@michaelthielemann/kestrel";
 import type { ContentDocument } from "@michaelthielemann/kestrel-contracts/content";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
@@ -227,6 +229,43 @@ describe("content/default: a fixed filter together with fallback=true is refused
   it("refuses to build content.list combining a fixed filter with fallback=true", async () => {
     const { instance } = await bootPublish();
     expect(() => run(["content.list:pages?status=published&fallback=true"], {}, instance)).toThrow(/fallback/);
+  });
+
+  it("refuses with a typed boot error of this module", async () => {
+    const { instance } = await bootPublish();
+    const steps = module.steps!(instance);
+    let caught: unknown;
+    try {
+      steps.list("pages?status=published&fallback=true");
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(KestrelBootError);
+    expect(caught).toMatchObject({ code: "step-argument", module: "content/default" });
+  });
+
+  it("checkBoot reports it as a problem naming the pipeline, the step and the module instead of rejecting", async () => {
+    const persistence = defineModule({
+      name: "persistence/fake",
+      provides: [PERSISTENCE],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return createFakePersistence();
+      },
+    });
+    const step = "content.list:pages?status=published&fallback=true";
+    const input = {
+      config: { modules: [{ use: "./persistence-fake.ts" }, { use: "@michaelthielemann/kestrel-content-default", config: PUBLISH_MODEL }], triggers: [] },
+      modules: [persistence, module],
+      pipelines: [definePipeline({ name: "listPublished", steps: [step] })],
+      logger: silentLogger,
+    };
+    const check = await checkBoot(input, { setup: "all" });
+    expect(check.errors).toEqual([expect.objectContaining({ code: "step-argument", pipeline: "listPublished", step })]);
+    expect(check.errors[0]?.reason).toContain('"content/default"');
+    expect(check.errors[0]?.reason).toContain(step);
+    await expect(bootKestrel(input)).rejects.toThrow(KestrelBootError);
   });
 
   it("still allows fallback=true alone and a fixed filter alone", async () => {

@@ -762,6 +762,14 @@ Net changes since 5.8.1.
 
 ### Changed
 
+- `core`: module code that throws while `boot()` registers or resolves steps is a `KestrelBootError`
+  and, in `checkBoot()`, an entry in `errors`. A module's `steps()` that throws is `steps-threw` (a
+  new `BootErrorCode`) and its `describe()` `describe-threw`, both naming the module; `checkBoot()`
+  lists a pipeline using one of that module's steps in `notChecked`. A step factory that throws for
+  a pipeline's argument is `step-argument`, and a factory step's `describe()` that throws for it
+  `describe-threw`; both name the pipeline, the step and the module. `kestrel.steps.resolve()`
+  throws only `KestrelBootError`. `content-default` refuses `content.get`/`content.list` combining a
+  fixed filter with `fallback=true` with a `KestrelBootError` (`step-argument`).
 - `media-default`: `media.reconcile` and `media.reconcileDelete` count a key as orphaned only when it
   has the module's own shape, `<prefix><id>/<name>`, and no item has that id, instead of every key
   under `prefix` without a row except a hard-coded `media-variants/`. `images-default`'s variants

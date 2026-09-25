@@ -152,7 +152,7 @@ code it does not recognize rather than assume this list is complete.
 | Config | `invalid-config`, `module-count`, `module-listed-twice`, `module-entry-mismatch` |
 | Module order | `contract-provided-twice`, `before-and-requires`, `missing-provider`, `provides-itself`, `dependency-cycle`, `module-name-contract` |
 | Module setup | `invalid-module-config`, `setup-failed`, `missing-methods` |
-| Step registration | `invalid-read-path`, `invalid-write-path`, `step-not-function`, `step-registered-twice`, `step-undescribed`, `describe-shape`, `describe-threw`, `describe-unknown-step` |
+| Step registration | `steps-threw`, `invalid-read-path`, `invalid-write-path`, `step-not-function`, `step-registered-twice`, `step-undescribed`, `describe-shape`, `describe-threw`, `describe-unknown-step` |
 | Pipeline resolution | `pipeline-defined-twice`, `pipeline-empty`, `unknown-step`, `step-argument`, `atomic-unsafe-step` |
 | Triggers | `svg-without-sanitizer`, `invalid-allowlist`, `unknown-trigger-pipeline`, `invalid-trigger`, `duplicate-route` |
 | Dataflow | `unsatisfied-read`, `optional-read-order` |
@@ -160,6 +160,12 @@ code it does not recognize rather than assume this list is complete.
 | Output declarations | `undeclared-output`, `undeclared-required`, `output-fold-contradiction`, `terminal-output-misplaced` |
 | Attach | `attach-failed` |
 | Loading (`loadConfig`/`loadModule`/`loadPipelineFile`) | `load-failed`, `no-default-export`, `not-a-module`, `not-a-pipeline`, `module-unresolved`, `config-not-object`, `pipelines-not-directory` |
+
+Module code that throws while boot registers or resolves steps is reported like any other problem.
+A module's `steps()` that throws is `steps-threw`, its `describe()` `describe-threw`, both naming
+the module; a pipeline using a step of that module is listed in `notChecked`. A step factory that
+throws for a pipeline's argument is `step-argument`, and a factory step's `describe()` that throws
+for it `describe-threw`; both name the pipeline, the step and the module that registered it.
 
 `@michaelthielemann/kestrel-upgrade` (`docs/upgrading.md`) builds on this: its exported
 `sandboxBootInput()` rewrites a loaded project's storage modules to write into a scratch directory,

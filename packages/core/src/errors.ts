@@ -18,6 +18,7 @@ export type BootErrorCode =
   | "invalid-module-config"
   | "setup-failed"
   | "missing-methods"
+  | "steps-threw"
   | "invalid-read-path"
   | "invalid-write-path"
   | "step-not-function"

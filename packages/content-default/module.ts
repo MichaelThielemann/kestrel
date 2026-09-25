@@ -7,7 +7,7 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
-import type { KestrelError } from "@michaelthielemann/kestrel/errors";
+import { KestrelBootError, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import { isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import { createContentDefault } from "./impl.ts";
 
@@ -88,9 +88,9 @@ function listOptions(ctx: Context, maxLimit: number): Result<ListOptions, Kestre
   return ok(options);
 }
 
-function assertNoFallbackWithFilter(arg: string, fallbackFlag: unknown, filter: Record<string, unknown>): void {
+function assertNoFallbackWithFilter(fallbackFlag: unknown, filter: Record<string, unknown>): void {
   if (fallbackFlag === true && Object.keys(filter).length > 0) {
-    throw new Error(`content/default: content.get/list:${arg} combines a fixed filter with fallback=true; fallback fills a field from any default locale, whatever its status, so a filtered read must not use it — resolve the page through site.resolve instead`);
+    throw new KestrelBootError("content/default", "a fixed filter together with fallback=true is refused; fallback fills a field from any default locale, whatever its status, so a filtered read must not use it — resolve the page through site.resolve instead", "step-argument");
   }
 }
 
@@ -225,7 +225,7 @@ export default defineModule({
     get: stepFactory((arg: string) => {
       const { type, fixed } = parseTarget(arg);
       const { fallback: fallbackFlag, ...filter } = fixed;
-      assertNoFallbackWithFilter(arg, fallbackFlag, filter);
+      assertNoFallbackWithFilter(fallbackFlag, filter);
       return async (ctx: Context) => {
         const notFound = () => ctx.fail("NOT_FOUND", `${type}${ctx.params.id ? `/${ctx.params.id}` : ""} not found`);
         const options = localeOf(ctx, fixed);
@@ -240,7 +240,7 @@ export default defineModule({
     list: stepFactory((arg: string) => {
       const { type, fixed } = parseTarget(arg);
       const { fallback: fallbackFlag, ...filter } = fixed;
-      assertNoFallbackWithFilter(arg, fallbackFlag, filter);
+      assertNoFallbackWithFilter(fallbackFlag, filter);
       return async (ctx: Context) => {
         const parsed = listOptions(ctx, content.maxLimit);
         if (isErr(parsed)) return parsed;

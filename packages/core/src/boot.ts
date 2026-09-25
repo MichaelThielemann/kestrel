@@ -2,11 +2,11 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { AtomicScope } from "./atomic.ts";
 import { boundaryCast } from "./cast.ts";
-import type { ContextInput } from "./context.ts";
+import type { ContextInput, StepMap } from "./context.ts";
 import { missingMethods, type Contract } from "./defineContract.ts";
 import { checkDataflow, checkDataflowCollecting } from "./dataflow.ts";
 import { configSchema, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
-import { stepPrefix, type ContractLookup, type Deps, type EventEntry, type InstanceHealth, type Introspection, type ModuleDefinition, type ModuleHealth, type StepDescription } from "./defineModule.ts";
+import { stepPrefix, type ContractLookup, type Deps, type EventEntry, type InstanceHealth, type Introspection, type ModuleDefinition, type ModuleHealth, type StepDescription, type StepDescriptions } from "./defineModule.ts";
 import { buildManifest, type Manifest } from "./describe.ts";
 import { pipelineSteps, type PipelineDefinition } from "./definePipeline.ts";
 import { resolveEntries } from "./resolveEntries.ts";
@@ -263,6 +263,26 @@ function warnUnwrittenOptionalReads(pipelines: ReadonlyMap<string, ResolvedPipel
   return warnings;
 }
 
+function registerModuleSteps(steps: StepRegistry, mod: ModuleDefinition, instance: unknown, sink: Sink): string | undefined {
+  if (!mod.steps) return undefined;
+  let stepMap: StepMap;
+  try {
+    stepMap = mod.steps(instance);
+  } catch (err) {
+    sink.fail("steps-threw", mod.name, `steps() threw: ${err instanceof Error ? err.message : String(err)}`);
+    return "steps() threw";
+  }
+  let descriptions: StepDescriptions;
+  try {
+    descriptions = mod.describe?.(instance) ?? {};
+  } catch (err) {
+    sink.fail("describe-threw", mod.name, `describe() threw: ${err instanceof Error ? err.message : String(err)}`);
+    return "describe() threw";
+  }
+  steps.register(mod.name, stepPrefix(mod.name), stepMap, descriptions, sink);
+  return undefined;
+}
+
 function settledWithin(promise: Promise<void>, ms: number): Promise<boolean> {
   if (ms <= 0) return Promise.resolve(false);
   return new Promise<boolean>((resolve) => {
@@ -472,8 +492,9 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
 
   const steps = new StepRegistry();
   for (const mod of ordered) {
-    if (notSetUp.has(mod) || !mod.steps) continue;
-    steps.register(mod.name, stepPrefix(mod.name), mod.steps(instances.get(mod)), mod.describe?.(instances.get(mod)) ?? {}, sink);
+    if (notSetUp.has(mod)) continue;
+    const unregistered = registerModuleSteps(steps, mod, instances.get(mod), sink);
+    if (unregistered !== undefined) markNotSetUp(notSetUp, mod, unregistered);
   }
 
   const svgSanitizerProvider = prefixToModule.get(SANITIZE_SVG.split(".")[0]!);
@@ -512,24 +533,21 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
     let failed = false;
     const resolved = resolveEntries(def.steps, (s) => {
       if (failed) return DUMMY_STEP;
-      try {
-        return steps.resolve(s, `pipelines/${def.name}`);
-      } catch (err) {
-        if (!(err instanceof KestrelBootError)) throw err;
-        if (!sink.collecting) throw err;
-        const stepName = s.split(":")[0];
-        const prefix = stepName?.split(".")[0];
-        const owner = prefix === undefined ? undefined : prefixToModule.get(prefix);
-        if (err.code === "unknown-step" && owner !== undefined && notSetUp.has(owner)) {
-          cascadeModule = owner;
-        } else if (err.code === "unknown-step" && stepName !== undefined && steps.failedToRegister(stepName)) {
-          cascadeStep = stepName;
-        } else {
-          sink.fail(err.code, err.module, err.reason, { step: s });
-        }
-        failed = true;
-        return DUMMY_STEP;
+      const step = steps.tryResolve(s, `pipelines/${def.name}`);
+      if (!(step instanceof KestrelBootError)) return step;
+      if (!sink.collecting) throw step;
+      const stepName = s.split(":")[0];
+      const prefix = stepName?.split(".")[0];
+      const owner = prefix === undefined ? undefined : prefixToModule.get(prefix);
+      if (step.code === "unknown-step" && owner !== undefined && notSetUp.has(owner)) {
+        cascadeModule = owner;
+      } else if (step.code === "unknown-step" && stepName !== undefined && steps.failedToRegister(stepName)) {
+        cascadeStep = stepName;
+      } else {
+        sink.fail(step.code, step.module, step.reason, { step: s });
       }
+      failed = true;
+      return DUMMY_STEP;
     });
     if (failed) {
       const because = cascadeModule

@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, checkBoot, type BootInput } from "./boot.ts";
 import { boundaryCast } from "./cast.ts";
-import { stepFactory, type Context } from "./context.ts";
+import { stepFactory, type Context, type Step } from "./context.ts";
 import { defineContract } from "./defineContract.ts";
 import type { KestrelConfigInput } from "./defineConfig.ts";
-import type { ModuleDefinition } from "./defineModule.ts";
+import type { ModuleDefinition, StepDescription } from "./defineModule.ts";
 import { definePipeline, type PipelineDefinition } from "./definePipeline.ts";
 import type { BootErrorCode } from "./errors.ts";
 import { KestrelBootError } from "./errors.ts";
@@ -180,6 +180,17 @@ const cases: BootCase[] = [
         steps: () => boundaryCast({ go: "not a function" }, "host"),
       };
       return { config: { modules: [{ use: "./bad-step" }], triggers: [] }, modules: [mod], pipelines: [], logger: silentLogger };
+    },
+  },
+  {
+    code: "steps-threw",
+    build: () => {
+      const mod = simpleModule("throwing/steps", {
+        steps: () => {
+          throw new Error("steps boom");
+        },
+      });
+      return { config: { modules: [{ use: "./throwing-steps" }], triggers: [] }, modules: [mod], pipelines: [], logger: silentLogger };
     },
   },
   {
@@ -429,10 +440,10 @@ const cases: BootCase[] = [
 ];
 
 describe("bootCases: every sink-reachable BootErrorCode, pinned and checked for parity", () => {
-  it("covers exactly the 42 codes the sink can report", () => {
+  it("covers exactly the 43 codes the sink can report", () => {
     const seen = new Set(cases.map((c) => c.code));
     expect(seen.size).toBe(cases.length);
-    expect(cases.length).toBe(42);
+    expect(cases.length).toBe(43);
   });
 
   for (const { code, build } of cases) {
@@ -450,4 +461,116 @@ describe("bootCases: every sink-reachable BootErrorCode, pinned and checked for 
       }
     });
   }
+});
+
+describe("module code that throws while boot registers or resolves steps is a typed boot problem", () => {
+  interface Loud {
+    code: BootErrorCode;
+    owner: string;
+    step?: string;
+    mentions: string[];
+  }
+
+  async function expectLoud(build: () => BootInput, expected: Loud): Promise<void> {
+    const check = await checkBoot(build(), { setup: "all" });
+    const problem = check.errors.find((e) => e.code === expected.code);
+    expect(problem).toMatchObject({ owner: expected.owner, ...(expected.step === undefined ? {} : { step: expected.step }) });
+    for (const text of expected.mentions) expect(problem?.reason).toContain(text);
+
+    const thrown = await boot(build()).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+    expect(thrown).toBeInstanceOf(KestrelBootError);
+    if (!(thrown instanceof KestrelBootError)) return;
+    expect(thrown.code).toBe(expected.code);
+    expect(thrown.module).toBe(expected.owner);
+    for (const text of expected.mentions) expect(thrown.message).toContain(text);
+  }
+
+  function factoryModule(name: string, factory: (arg: string) => Step, describeFor: (arg: string) => StepDescription = () => ({ summary: "x", reads: [], writes: [] })): ModuleDefinition {
+    return simpleModule(name, { steps: () => ({ go: stepFactory(factory) }), describe: () => ({ go: describeFor }) });
+  }
+
+  function withPipeline(mod: ModuleDefinition, use: string, step: string): BootInput {
+    return { config: { modules: [{ use }], triggers: [] }, modules: [mod], pipelines: [definePipeline({ name: "uses", steps: [step] })], logger: silentLogger };
+  }
+
+  it("a step factory that throws for the pipeline's argument names the pipeline, the step and its module", async () => {
+    const build = () =>
+      withPipeline(
+        factoryModule("factory/one", (arg) => {
+          if (arg === "bad") throw new Error("factory boom");
+          return async (ctx: Context) => ok(ctx);
+        }),
+        "./factory-one",
+        "factory.go:bad",
+      );
+    await expectLoud(build, { code: "step-argument", owner: "pipelines/uses", step: "factory.go:bad", mentions: ['"factory.go:bad"', '"factory/one"', "factory boom"] });
+  });
+
+  it("a step factory that throws a non-Error value is reported the same way", async () => {
+    const build = () =>
+      withPipeline(
+        factoryModule("factory/one", () => {
+          throw boundaryCast<Error>("plain string", "host");
+        }),
+        "./factory-one",
+        "factory.go:any",
+      );
+    await expectLoud(build, { code: "step-argument", owner: "pipelines/uses", step: "factory.go:any", mentions: ['"factory/one"', "plain string"] });
+  });
+
+  it("a factory step's describe() that throws for the pipeline's argument names the pipeline, the step and its module", async () => {
+    const build = () =>
+      withPipeline(
+        factoryModule(
+          "factory/one",
+          () => async (ctx: Context) => ok(ctx),
+          (arg) => {
+            if (arg === "bad") throw new Error("describe boom");
+            return { summary: "x", reads: [], writes: [] };
+          },
+        ),
+        "./factory-one",
+        "factory.go:bad",
+      );
+    await expectLoud(build, { code: "describe-threw", owner: "pipelines/uses", step: "factory.go:bad", mentions: ['"factory.go:bad"', '"factory/one"', "describe boom"] });
+  });
+
+  it("a module's describe() that throws names the module, and its pipelines are left unchecked rather than reported as unknown steps", async () => {
+    const build = () =>
+      withPipeline(
+        simpleModule("throwing/describe", {
+          steps: () => ({ go: async (ctx: Context) => ok(ctx) }),
+          describe: () => {
+            throw new Error("describe map boom");
+          },
+        }),
+        "./throwing-describe",
+        "throwing.go",
+      );
+    await expectLoud(build, { code: "describe-threw", owner: "throwing/describe", mentions: ["describe() threw", "describe map boom"] });
+    const check = await checkBoot(build(), { setup: "all" });
+    expect(check.errors.map((e) => e.code)).toEqual(["describe-threw"]);
+    expect(check.notChecked).toContainEqual(expect.objectContaining({ kind: "pipeline", name: "uses" }));
+  });
+
+  it("a module's steps() that throws names the module, and its pipelines are left unchecked rather than reported as unknown steps", async () => {
+    const build = () =>
+      withPipeline(
+        simpleModule("throwing/steps", {
+          steps: () => {
+            throw new Error("steps boom");
+          },
+          describe: () => ({ go: { summary: "x", reads: [], writes: [] } }),
+        }),
+        "./throwing-steps",
+        "throwing.go",
+      );
+    await expectLoud(build, { code: "steps-threw", owner: "throwing/steps", mentions: ["steps() threw", "steps boom"] });
+    const check = await checkBoot(build(), { setup: "all" });
+    expect(check.errors.map((e) => e.code)).toEqual(["steps-threw"]);
+    expect(check.notChecked).toContainEqual(expect.objectContaining({ kind: "pipeline", name: "uses" }));
+  });
 });
