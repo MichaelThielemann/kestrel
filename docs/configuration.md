@@ -153,7 +153,7 @@ code it does not recognize rather than assume this list is complete.
 | Module order | `contract-provided-twice`, `before-and-requires`, `missing-provider`, `provides-itself`, `dependency-cycle`, `module-name-contract` |
 | Module setup | `invalid-module-config`, `setup-failed`, `missing-methods` |
 | Step registration | `steps-threw`, `invalid-read-path`, `invalid-write-path`, `step-not-function`, `step-registered-twice`, `step-undescribed`, `describe-shape`, `describe-threw`, `describe-unknown-step` |
-| Pipeline resolution | `pipeline-defined-twice`, `pipeline-empty`, `unknown-step`, `step-argument`, `atomic-unsafe-step` |
+| Pipeline resolution | `pipeline-defined-twice`, `pipeline-empty`, `unknown-step`, `step-argument`, `describe-threw`, `atomic-unsafe-step` |
 | Triggers | `svg-without-sanitizer`, `invalid-allowlist`, `unknown-trigger-pipeline`, `invalid-trigger`, `duplicate-route` |
 | Dataflow | `unsatisfied-read`, `optional-read-order` |
 | Hooks | `event-hooks-twice`, `event-hook-missing`, `atomic-scope-twice`, `atomic-scope-missing` |
@@ -165,7 +165,8 @@ Module code that throws while boot registers or resolves steps is reported like 
 A module's `steps()` that throws is `steps-threw`, its `describe()` `describe-threw`, both naming
 the module; a pipeline using a step of that module is listed in `notChecked`. A step factory that
 throws for a pipeline's argument is `step-argument`, and a factory step's `describe()` that throws
-for it `describe-threw`; both name the pipeline, the step and the module that registered it.
+for it `describe-threw`; both name the pipeline, the step and the module that registered it. When
+either throws a `KestrelBootError` of its own, the problem keeps that error's code.
 
 `@michaelthielemann/kestrel-upgrade` (`docs/upgrading.md`) builds on this: its exported
 `sandboxBootInput()` rewrites a loaded project's storage modules to write into a scratch directory,

@@ -778,7 +778,8 @@ Net changes since 5.8.1.
   new `BootErrorCode`) and its `describe()` `describe-threw`, both naming the module; `checkBoot()`
   lists a pipeline using one of that module's steps in `notChecked`. A step factory that throws for
   a pipeline's argument is `step-argument`, and a factory step's `describe()` that throws for it
-  `describe-threw`; both name the pipeline, the step and the module. `kestrel.steps.resolve()`
+  `describe-threw`, unless either throws a `KestrelBootError` of its own, whose code is kept; both
+  name the pipeline, the step and the module. `kestrel.steps.resolve()`
   throws only `KestrelBootError`. `content-default` refuses `content.get`/`content.list` combining a
   fixed filter with `fallback=true` with a `KestrelBootError` (`step-argument`).
 - `media-default`: `media.reconcile` and `media.reconcileDelete` count a key as orphaned only when it

@@ -1,6 +1,6 @@
 import { isStepFactory, type Step, type StepFactory, type StepMap } from "./context.ts";
 import type { StepDescription, StepDescriptions } from "./defineModule.ts";
-import { KestrelBootError } from "./errors.ts";
+import { KestrelBootError, type BootErrorCode } from "./errors.ts";
 import { throwSink, type Sink } from "./sink.ts";
 
 export interface ResolvedStep {
@@ -156,7 +156,7 @@ export class StepRegistry {
     return resolved;
   }
 
-  /** `resolve()` that returns its problem instead of throwing it. A step factory or a factory step's `describe()` that throws becomes a problem naming the step and the module that registered it. */
+  /** `resolve()` that returns its problem instead of throwing it. A step factory or a factory step's `describe()` that throws becomes a problem naming the step and the module that registered it, with the code of a thrown `KestrelBootError` or else `step-argument` or `describe-threw`. */
   tryResolve(spec: string, owner = "pipeline"): ResolvedStep | KestrelBootError {
     const colon = spec.indexOf(":");
     const name = colon === -1 ? spec : spec.slice(0, colon);
@@ -170,21 +170,21 @@ export class StepRegistry {
     if (arg === "") return new KestrelBootError(owner, `step "${name}" has an empty argument`, "step-argument");
     if (!entry.factory) return new KestrelBootError(owner, `step "${name}" does not accept an argument`, "step-argument");
     const built = attempt(() => entry.fn(arg));
-    if (!built.ok) return new KestrelBootError(owner, `module "${entry.owner}" could not build step "${spec}": ${built.reason}`, "step-argument");
+    if (!built.ok) return new KestrelBootError(owner, `module "${entry.owner}" could not build step "${spec}": ${built.reason}`, built.code ?? "step-argument");
     if (typeof built.value !== "function") return new KestrelBootError(owner, `step "${name}" returned ${typeof built.value} instead of a step`, "step-not-function");
     const describe = entry.describe;
     if (typeof describe !== "function") return { name: spec, fn: built.value, description: describe };
     const described = attempt(() => describe(arg));
-    if (!described.ok) return new KestrelBootError(owner, `module "${entry.owner}"'s describe() threw for step "${spec}": ${described.reason}`, "describe-threw");
+    if (!described.ok) return new KestrelBootError(owner, `module "${entry.owner}"'s describe() threw for step "${spec}": ${described.reason}`, described.code ?? "describe-threw");
     return firstPathProblem(entry.owner, spec, described.value) ?? { name: spec, fn: built.value, description: described.value };
   }
 }
 
-function attempt<T>(fn: () => T): { ok: true; value: T } | { ok: false; reason: string } {
+function attempt<T>(fn: () => T): { ok: true; value: T } | { ok: false; reason: string; code?: BootErrorCode } {
   try {
     return { ok: true, value: fn() };
   } catch (err) {
-    if (err instanceof KestrelBootError) return { ok: false, reason: err.reason };
+    if (err instanceof KestrelBootError) return { ok: false, reason: err.reason, code: err.code };
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
 }

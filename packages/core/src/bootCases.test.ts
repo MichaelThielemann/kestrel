@@ -538,6 +538,35 @@ describe("module code that throws while boot registers or resolves steps is a ty
     await expectLoud(build, { code: "describe-threw", owner: "pipelines/uses", step: "factory.go:bad", mentions: ['"factory.go:bad"', '"factory/one"', "describe boom"] });
   });
 
+  it("a step factory's own KestrelBootError keeps its code, and still names the pipeline, the step and its module", async () => {
+    const build = () =>
+      withPipeline(
+        factoryModule("factory/one", (arg) => {
+          throw new KestrelBootError("factory/one", `no target "${arg}" in this module's config`, "invalid-module-config");
+        }),
+        "./factory-one",
+        "factory.go:missing",
+      );
+    await expectLoud(build, { code: "invalid-module-config", owner: "pipelines/uses", step: "factory.go:missing", mentions: ['"factory.go:missing"', '"factory/one"', 'no target "missing"'] });
+  });
+
+  it("a factory step's describe() that throws its own KestrelBootError keeps its code", async () => {
+    const build = () =>
+      withPipeline(
+        factoryModule(
+          "factory/one",
+          () => async (ctx: Context) => ok(ctx),
+          (arg) => {
+            if (arg === "bad") throw new KestrelBootError("factory/one", "describe refuses this argument", "invalid-read-path");
+            return { summary: "x", reads: [], writes: [] };
+          },
+        ),
+        "./factory-one",
+        "factory.go:bad",
+      );
+    await expectLoud(build, { code: "invalid-read-path", owner: "pipelines/uses", step: "factory.go:bad", mentions: ['"factory.go:bad"', '"factory/one"', "describe refuses this argument"] });
+  });
+
   it("a module's describe() that throws names the module, and its pipelines are left unchecked rather than reported as unknown steps", async () => {
     const build = () =>
       withPipeline(
