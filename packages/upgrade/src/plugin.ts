@@ -10,10 +10,15 @@ export type { AskFix, Edit, Finding, FindingFix, FindingLocation, Severity, Tier
 export type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 
 /**
- * The version of this plugin API. A member added to `UpgradePlugin`, `RuleContext` or
- * `SourceRuleContext` is optional and raises this number by one, so a plugin that relies on an
- * addition checks `PLUGIN_API_VERSION` first: an engine older than the addition ignores a hook it
- * does not know.
+ * The version of this plugin API. It covers every type `./plugin` exports, the ones a plugin
+ * returns to the engine as much as the ones it receives: `UpgradePlugin`, `LoadResult`,
+ * `LoadedProject`, `LoadIssue`, `PipelineFile`, `DataContentModel` and its parts,
+ * `SwitchEditsResult`, `Rule` with its `needs` values, `RuleContext`/`SourceRuleContext`, the
+ * locator types, `Finding`/`Edit` and `RunUpgradeCliOptions`. A member added to any of them is
+ * optional, and a new `needs` value is a new variant of `Rule`; each such addition raises this
+ * number by one. An engine older than an addition ignores a hook or member it does not know, so a
+ * plugin that relies on one compares `PLUGIN_API_VERSION` first. The number only grows: a new major
+ * of this package continues from the previous major's value and never resets it.
  */
 export const PLUGIN_API_VERSION = 1;
 

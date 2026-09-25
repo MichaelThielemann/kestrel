@@ -639,10 +639,16 @@ without running the CLI: `root` and `scratch` default to the directory of `proje
 `overrides` replaces any of them. A member `RuleContext` gains later gets its default there, so a
 test built on it keeps compiling.
 
-`PLUGIN_API_VERSION` is the version of this plugin API, `1` as 6.0.0 ships it. A later member of
-`UpgradePlugin`, `RuleContext` or `SourceRuleContext` is added as an optional one and raises the
-number by one. An engine older than such an addition ignores a hook it does not know, so a plugin
-that relies on one compares `PLUGIN_API_VERSION` first and reports the engine as too old instead.
+`PLUGIN_API_VERSION` is the version of this plugin API, `1` as 6.0.0 ships it. It covers every type
+`./plugin` exports, the ones a plugin returns to the engine as much as the ones it receives:
+`UpgradePlugin`, `LoadResult`, `LoadedProject`, `LoadIssue`, `PipelineFile`, `DataContentModel` and
+its parts, `SwitchEditsResult`, `Rule` with its `needs` values, `RuleContext`/`SourceRuleContext`, the
+locator types, `Finding`/`Edit` and `RunUpgradeCliOptions`. A member added to any of them later is an
+optional one, and a new `needs` value is a new variant of `Rule`; each such addition raises the
+number by one. An engine older than an addition ignores a hook or member it does not know, so a
+plugin that relies on one compares `PLUGIN_API_VERSION` first and reports the engine as too old
+instead. The number only grows: a new major of this package continues from the previous major's
+value and never resets it.
 
 `@michaelthielemann/kestrel-upgrade/codemods` exports the primitives a plugin's own `Rule` or locator
 writes edits with, so it never needs a second copy of this engine's own edit machinery:
