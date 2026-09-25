@@ -290,6 +290,40 @@ describe("media/default: an interrupted delete without publicCopy", () => {
   });
 });
 
+describe("media/default: scan reads only the rows it needs", () => {
+  it("reads a page the size of limit when every row matches, and grows the page only while the filter drops rows", async () => {
+    const blobs = memoryBlobs();
+    const db = createFakePersistence();
+    const media = await createMediaDefault(CONFIG, blobs, db, quiet);
+    for (let i = 0; i < 30; i += 1) {
+      expectOk(await media.upload({ filename: `p${i}.png`, contentType: "image/png", data: new Uint8Array([i]) }));
+      expectOk(await media.upload({ filename: `d${i}.pdf`, contentType: "application/pdf", data: new Uint8Array([i]) }));
+    }
+    const limits: number[] = [];
+    let rowsRead = 0;
+    const findMany = db.findMany.bind(db);
+    db.findMany = async <T extends Document>(collection: string, filter: Record<string, unknown>, options?: { limit?: number }) => {
+      const page = await findMany<T>(collection, filter, options);
+      if (collection === COLLECTION) {
+        limits.push(options?.limit ?? Number.POSITIVE_INFINITY);
+        if (page.ok) rowsRead += page.value.items.length;
+      }
+      return page;
+    };
+    expect(expectOk(await media.scan({ types: ["image/*"] }, { limit: 5 })).items).toHaveLength(5);
+    expect(limits).toEqual([5]);
+    expect(rowsRead).toBe(5);
+
+    limits.length = 0;
+    rowsRead = 0;
+    const mixed = expectOk(await media.scan({ types: ["*"], excludeTypes: ["application/pdf"] }, { limit: 5 }));
+    expect(mixed.items).toHaveLength(5);
+    expect(limits[0]).toBe(5);
+    for (let i = 1; i < limits.length; i += 1) expect(limits[i]).toBe(Math.min(500, limits[i - 1]! * 2));
+    expect(rowsRead).toBeLessThanOrEqual(35);
+  });
+});
+
 describe("media/default: media@1 answers", () => {
   it("publishes a file with the type media.serve sends, and describes its stored dimensions", async () => {
     const blobs = memoryBlobs();

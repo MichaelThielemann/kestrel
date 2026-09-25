@@ -590,16 +590,18 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     if (shared !== null) base.contentType = { like: `${shared}/%` };
     const items: MediaFile[] = [];
     let cursor = after;
+    let pageSize = Math.min(SCAN_PAGE, limit);
     for (;;) {
-      const page = await db.findMany<MediaItem>(COLLECTION, cursor === null ? base : { ...base, id: { gt: cursor } }, { sort: { id: "asc" }, limit: SCAN_PAGE });
+      const page = await db.findMany<MediaItem>(COLLECTION, cursor === null ? base : { ...base, id: { gt: cursor } }, { sort: { id: "asc" }, limit: pageSize });
       if (isErr(page)) return page;
       for (const row of page.value.items) {
         if (!mediaTypeAllowed(types, excluded, row.contentType)) continue;
         items.push(mediaFileOf(row));
         if (items.length === limit) return ok({ items, next: row.id });
       }
-      if (page.value.items.length < SCAN_PAGE) return ok({ items, next: null });
+      if (page.value.items.length < pageSize) return ok({ items, next: null });
       cursor = page.value.items[page.value.items.length - 1]!.id;
+      pageSize = Math.min(SCAN_PAGE, pageSize * 2);
     }
   };
 
