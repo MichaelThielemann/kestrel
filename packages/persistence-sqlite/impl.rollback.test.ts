@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
-import type { Logger } from "@michaelthielemann/kestrel/logger";
+import type { Context } from "@michaelthielemann/kestrel/context";
+import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
+import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
+import { ok } from "@michaelthielemann/kestrel/result";
+import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
 import { createPersistenceSqlite, persistenceFailure } from "./impl.ts";
 
 interface ExecFailure {
@@ -247,5 +251,58 @@ describe("persistence/sqlite: a ROLLBACK that fails because SQLite already rolle
     expectOk(await db.createMany("rows", [{ id: "b", name: "beta" }]));
     expect(expectOk(await db.findMany("rows", {})).items.map((row) => row.id)).toEqual(["b"]);
     db.close();
+  });
+});
+
+describe("persistence/sqlite: a database closed while a group runs", () => {
+  for (const verdict of ["commit", "rollback"] as const) {
+    it(`scope() resolves to a failed outcome when the body then answers ${verdict}, and marks the store unusable`, async () => {
+      const db = createPersistenceSqlite({ file: ":memory:" });
+      expectOk(await db.ensureCollection("rows", { name: "string" }));
+      const entered = gate();
+      const release = gate();
+      const outcome = db.scope({ pipeline: "p", group: 1 }, async () => {
+        expectOk(await db.createOne("rows", { id: "a", name: "alpha" }));
+        entered.open();
+        await release.opened;
+        return verdict;
+      });
+      await entered.opened;
+      db.close();
+      release.open();
+
+      expect(await settle(outcome)).toMatchObject({ kind: "failed", phase: "rollback" });
+      expect(db.health()).toMatchObject({ ok: false, restartRequired: true });
+    });
+  }
+
+  it("runPipeline answers a 5xx RunResult instead of rejecting", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    const entered = gate();
+    const release = gate();
+    const pipeline = definePipeline({ name: "p", steps: [{ atomic: ["test.hold"] }] });
+    const running = runPipeline(
+      pipeline,
+      { trigger: { kind: "http", name: "test" }, payload: {} },
+      {
+        logger: silentLogger,
+        atomicScope: (info, body) => db.scope(info, body),
+        steps: {
+          "test.hold": async (ctx: Context) => {
+            entered.open();
+            await release.opened;
+            return ok(ctx);
+          },
+        },
+      },
+    );
+    await entered.opened;
+    db.close();
+    release.open();
+
+    const result = await settle(running);
+    expect(result).not.toBeInstanceOf(Error);
+    expect(result instanceof Error ? 0 : result.status).toBeGreaterThanOrEqual(500);
   });
 });

@@ -103,7 +103,8 @@ function execOrFail(db: DatabaseSync, sql: string, phase: string): KestrelError 
 
 function rollback(db: DatabaseSync): KestrelError | null {
   const rollbackError = execOrFail(db, "ROLLBACK", "rollback");
-  return rollbackError !== null && db.isTransaction ? rollbackError : null;
+  if (rollbackError === null) return null;
+  return db.isOpen && !db.isTransaction ? null : rollbackError;
 }
 
 export interface PersistenceSqlite extends Persistence {
@@ -113,7 +114,7 @@ export interface PersistenceSqlite extends Persistence {
   close(): void;
   /** Runs `body` inside `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK`, holding the single connection for its duration. */
   scope(info: AtomicScopeInfo, body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome>;
-  /** Synchronous, no I/O: `ok: false` only once a rollback has failed and left the connection's state unprovable; never reports lock contention. */
+  /** Synchronous, no I/O: `ok: false` only once a `ROLLBACK` has failed while a transaction stayed open, or on a closed connection, so the connection's state is unprovable; never reports lock contention. */
   health(): ModuleHealth;
 }
 
