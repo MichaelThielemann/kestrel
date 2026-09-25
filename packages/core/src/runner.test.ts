@@ -6,7 +6,7 @@ import type { RunEndEvent, RunObserver } from "./observer.ts";
 import { boundaryCast } from "./cast.ts";
 import { ok } from "./result.ts";
 import type { ResolvedStep } from "./registry.ts";
-import { createRunTracker, runPipeline } from "./runner.ts";
+import { createRunTracker, runPipeline, type RunResult } from "./runner.ts";
 
 function collectingLogger() {
   const steps: StepLog[] = [];
@@ -14,6 +14,15 @@ function collectingLogger() {
   const logger: Logger = { step: (e) => steps.push(e), info() {}, error: (m) => errors.push(m) };
   return { logger, steps, errors };
 }
+const thrownStacks = new Map<string, string>();
+const stackLogger: Logger = {
+  step() {},
+  info() {},
+  error: (_message, data) => {
+    if (typeof data?.runId === "string") thrownStacks.set(data.runId, String(data.stack));
+  },
+};
+const thrownText = (res: RunResult): string => thrownStacks.get(res.runId) ?? "";
 const description = { summary: "test", reads: [], writes: [] };
 const writesResult = { summary: "test", reads: [], writes: ["result"] };
 const input = { trigger: { kind: "http" as const, name: "POST /x" }, payload: { a: 1 } };
@@ -91,40 +100,47 @@ describe("runPipeline", () => {
     expect(errors[0]).toContain('step "io"');
   });
 
-  it("unexpected throw becomes 500 INTERNAL with pipeline and step name", async () => {
+  it("unexpected throw becomes 500 INTERNAL naming the pipeline, the step and the error class, never the message", async () => {
     const { logger, steps, errors } = collectingLogger();
     const res = await runPipeline(
-      { name: "p", steps: [{ name: "boom", description, fn: async () => { throw new Error("db down"); } }] },
+      { name: "p", steps: [{ name: "boom", description, fn: async () => { throw new TypeError("db down at 10.0.0.7"); } }] },
       input,
       logger,
     );
-    expect(res).toMatchObject({ status: 500, error: "p/boom: db down", code: "INTERNAL", retryable: false, step: "boom" });
+    expect(res).toMatchObject({ status: 500, error: "p/boom: unexpected TypeError", code: "INTERNAL", retryable: false, step: "boom" });
+    expect(JSON.stringify(res)).not.toContain("db down");
     expect(steps[0]?.outcome).toBe("error");
     expect(errors[0]).toContain('step "boom"');
   });
 
+  it("logs the message and the stack of an unexpected throw under the answer's runId", async () => {
+    const logged: Array<{ message: string; data?: Record<string, unknown> }> = [];
+    const logger: Logger = { step() {}, info() {}, error: (message, data) => logged.push({ message, ...(data === undefined ? {} : { data }) }) };
+    const res = await runPipeline({ name: "p", steps: [{ name: "boom", description, fn: async () => { throw new Error("db down"); } }] }, input, logger);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]?.data?.runId).toBe(res.runId);
+    expect(String(logged[0]?.data?.stack)).toContain("Error: db down");
+  });
+
   it("a step that returns no Result is an INTERNAL error", async () => {
-    const { logger } = collectingLogger();
-    const res = await runPipeline({ name: "p", steps: [looseStep("bad", async () => undefined)] }, input, logger);
+        const res = await runPipeline({ name: "p", steps: [looseStep("bad", async () => undefined)] }, input, stackLogger);
     expect(res.status).toBe(500);
     expect(res.code).toBe("INTERNAL");
-    expect(res.error).toContain("instead of a Result<Context>");
+    expect(thrownText(res)).toContain("instead of a Result<Context>");
   });
 
   it("a step that returns a bare context instead of a Result is an INTERNAL error", async () => {
-    const { logger } = collectingLogger();
-    const res = await runPipeline({ name: "p", steps: [looseStep("bare", async (ctx: Context) => ctx)] }, input, logger);
+        const res = await runPipeline({ name: "p", steps: [looseStep("bare", async (ctx: Context) => ctx)] }, input, stackLogger);
     expect(res.status).toBe(500);
-    expect(res.error).toContain('step "bare"');
-    expect(res.error).toContain("instead of a Result<Context>");
+    expect(thrownText(res)).toContain('step "bare"');
+    expect(thrownText(res)).toContain("instead of a Result<Context>");
   });
 
   it("an Ok whose value is not a context is an INTERNAL error", async () => {
-    const { logger } = collectingLogger();
-    const res = await runPipeline({ name: "p", steps: [looseStep("half", async () => ok({ nope: true }))] }, input, logger);
+        const res = await runPipeline({ name: "p", steps: [looseStep("half", async () => ok({ nope: true }))] }, input, stackLogger);
     expect(res.status).toBe(500);
-    expect(res.error).toContain('step "half"');
-    expect(res.error).toContain("instead of a Result<Context>");
+    expect(thrownText(res)).toContain('step "half"');
+    expect(thrownText(res)).toContain("instead of a Result<Context>");
   });
 
   it("ctx.done ends the pipeline with status 200 and the given result", async () => {
@@ -247,10 +263,13 @@ describe("runPipeline", () => {
     expect(res).not.toHaveProperty("details");
   });
 
-  it("an unexpected throw reports the step name next to the unchanged message", async () => {
+  it("an unexpected throw of an error subclass answers with the subclass's name", async () => {
+    class StoreFailure extends Error {
+      override name = "StoreFailure";
+    }
     const { logger } = collectingLogger();
-    const res = await runPipeline({ name: "p", steps: [{ name: "boom", description, fn: async () => { throw new Error("db down"); } }] }, input, logger);
-    expect(res.error).toBe("p/boom: db down");
+    const res = await runPipeline({ name: "p", steps: [{ name: "boom", description, fn: async () => { throw new StoreFailure("row 7 locked"); } }] }, input, logger);
+    expect(res.error).toBe("p/boom: unexpected StoreFailure");
     expect(res.step).toBe("boom");
   });
 
@@ -309,18 +328,19 @@ describe("runPipeline payload validation", () => {
 });
 
 describe("runPipeline writes check", () => {
-  const run = (writes: string[], fn: Step) => runPipeline({ name: "p", steps: [{ name: "one", description: { summary: "test", reads: [], writes }, fn }] }, input, collectingLogger().logger);
+  const run = (writes: string[], fn: Step) => runPipeline({ name: "p", steps: [{ name: "one", description: { summary: "test", reads: [], writes }, fn }] }, input, stackLogger);
 
   it("a write of an undeclared key is an INTERNAL error naming step and key", async () => {
     const res = await run([], async (ctx: Context) => ok({ ...ctx, result: 1 }));
     expect(res).toMatchObject({ status: 500, code: "INTERNAL", retryable: false, step: "one" });
-    expect(res.error).toBe('p/one: step "one" writes "result" without declaring it');
+    expect(res.error).toBe("p/one: unexpected Error");
+    expect(thrownText(res)).toContain('step "one" writes "result" without declaring it');
   });
 
   it("a declared write that never happened is an INTERNAL error pointing at the conditional form", async () => {
     const res = await run(["result"], async (ctx: Context) => ok(ctx));
     expect(res).toMatchObject({ status: 500, code: "INTERNAL", step: "one" });
-    expect(res.error).toBe('p/one: step "one" declares writes "result" but did not write it (declare "result?" for a conditional write)');
+    expect(thrownText(res)).toContain('step "one" declares writes "result" but did not write it (declare "result?" for a conditional write)');
   });
 
   it("a conditional write may stay unwritten", async () => {
@@ -333,7 +353,7 @@ describe("runPipeline writes check", () => {
     expect(await run(["result.x"], async (ctx: Context) => ok({ ...ctx, result: { x: null } }))).toMatchObject({ status: 200 });
     const missing = await run(["result.x"], async (ctx: Context) => ok({ ...ctx, result: { y: 1 } }));
     expect(missing.status).toBe(500);
-    expect(missing.error).toContain('declares writes "result.x" but did not write it');
+    expect(thrownText(missing)).toContain('declares writes "result.x" but did not write it');
     const scalar = await run(["result.x"], async (ctx: Context) => ok({ ...ctx, result: "done" }));
     expect(scalar.status).toBe(500);
   });
@@ -342,7 +362,7 @@ describe("runPipeline writes check", () => {
     expect(await run(["result"], async (ctx: Context) => ctx.done({ id: "p1" }))).toMatchObject({ status: 200, result: { id: "p1" } });
     const undeclared = await run([], async (ctx: Context) => ctx.done({ id: "p1" }));
     expect(undeclared.status).toBe(500);
-    expect(undeclared.error).toContain('writes "result" without declaring it');
+    expect(thrownText(undeclared)).toContain('writes "result" without declaring it');
   });
 
   it("ignores a key a step rewrote with the same value", async () => {
@@ -358,7 +378,7 @@ describe("runPipeline output validation", () => {
     const res = await runPipeline(
       { name: "p", steps: [{ name: "maybe", description: { summary: "test", reads: [], writes: ["result?"], output: A_SCHEMA }, fn: async (ctx: Context) => ok(ctx) }] },
       input,
-      collectingLogger().logger,
+      stackLogger,
       {},
       { validateOutput: true },
     );
@@ -368,10 +388,10 @@ describe("runPipeline output validation", () => {
   it("does not skip a step whose optional write is a sub-path (result.x?), even when ctx.result is unchanged", async () => {
     const seed: ResolvedStep = { name: "seed", description: { summary: "test", reads: [], writes: ["result"], output: A_SCHEMA }, fn: boundaryCast<Step>(async (ctx: Context) => ok({ ...ctx, result: { a: "x" } }), "host") };
     const extend: ResolvedStep = { name: "extend", description: { summary: "test", reads: ["result"], writes: ["result.x?"], extendsOutput: B_SCHEMA }, fn: boundaryCast<Step>(async (ctx: Context) => ok(ctx), "host") };
-    const res = await runPipeline({ name: "p", steps: [seed, extend] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    const res = await runPipeline({ name: "p", steps: [seed, extend] }, input, stackLogger, {}, { validateOutput: true });
     expect(res.status).toBe(500);
-    expect(res.error).toContain('step "extend": result does not match describe().output');
-    expect(res.error).toContain("$.b is required");
+    expect(thrownText(res)).toContain('step "extend": result does not match describe().output');
+    expect(thrownText(res)).toContain("$.b is required");
   });
 });
 
@@ -380,41 +400,41 @@ describe("runPipeline terminal output validation", () => {
 
   it("a ctx.done() without terminalOutput fails the run naming the step", async () => {
     const step = { name: "maybe", description: { summary: "test", reads: [], writes: ["result?"] }, fn: async (ctx: Context) => ctx.done({ redirect: "/x" }) };
-    const res = await runPipeline({ name: "p", steps: [step] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    const res = await runPipeline({ name: "p", steps: [step] }, input, stackLogger, {}, { validateOutput: true });
     expect(res.status).toBe(500);
-    expect(res.error).toContain('step "maybe" ended the run with ctx.done() without declaring describe().terminalOutput');
+    expect(thrownText(res)).toContain('step "maybe" ended the run with ctx.done() without declaring describe().terminalOutput');
   });
 
   it("without validateOutput, the same ctx.done() still ends the run with 200", async () => {
     const step = { name: "maybe", description: { summary: "test", reads: [], writes: ["result?"] }, fn: async (ctx: Context) => ctx.done({ redirect: "/x" }) };
-    const res = await runPipeline({ name: "p", steps: [step] }, input, collectingLogger().logger);
+    const res = await runPipeline({ name: "p", steps: [step] }, input, stackLogger);
     expect(res).toMatchObject({ status: 200, result: { redirect: "/x" } });
   });
 
   it("a done result that does not match terminalOutput fails, naming the path", async () => {
     const step = { name: "maybe", description: { summary: "test", reads: [], writes: ["result?"], terminalOutput: TERMINAL }, fn: async (ctx: Context) => ctx.done({ redirect: 1 }) };
-    const res = await runPipeline({ name: "p", steps: [step] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    const res = await runPipeline({ name: "p", steps: [step] }, input, stackLogger, {}, { validateOutput: true });
     expect(res.status).toBe(500);
-    expect(res.error).toContain('step "maybe": result does not match describe().terminalOutput');
-    expect(res.error).toContain("$.redirect expected string, got number");
+    expect(thrownText(res)).toContain('step "maybe": result does not match describe().terminalOutput');
+    expect(thrownText(res)).toContain("$.redirect expected string, got number");
   });
 
   it("a done result matching terminalOutput passes", async () => {
     const step = { name: "maybe", description: { summary: "test", reads: [], writes: ["result?"], terminalOutput: TERMINAL }, fn: async (ctx: Context) => ctx.done({ redirect: "/x" }) };
-    const res = await runPipeline({ name: "p", steps: [step] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    const res = await runPipeline({ name: "p", steps: [step] }, input, stackLogger, {}, { validateOutput: true });
     expect(res).toMatchObject({ status: 200, result: { redirect: "/x" } });
   });
 
   it("a step declaring only terminalOutput that changes result without ctx.done() fails", async () => {
     const step = { name: "sneaky", description: { summary: "test", reads: [], writes: ["result?"], terminalOutput: TERMINAL }, fn: async (ctx: Context) => ok({ ...ctx, result: { redirect: "/x" } }) };
-    const res = await runPipeline({ name: "p", steps: [step] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    const res = await runPipeline({ name: "p", steps: [step] }, input, stackLogger, {}, { validateOutput: true });
     expect(res.status).toBe(500);
-    expect(res.error).toContain('step "sneaky" changed result without ctx.done() but declares only terminalOutput');
+    expect(thrownText(res)).toContain('step "sneaky" changed result without ctx.done() but declares only terminalOutput');
   });
 
   it("a step declaring only terminalOutput that leaves result unchanged passes", async () => {
     const step = { name: "quiet", description: { summary: "test", reads: [], writes: ["result?"], terminalOutput: TERMINAL }, fn: async (ctx: Context) => ok(ctx) };
-    const res = await runPipeline({ name: "p", steps: [step] }, input, collectingLogger().logger, {}, { validateOutput: true });
+    const res = await runPipeline({ name: "p", steps: [step] }, input, stackLogger, {}, { validateOutput: true });
     expect(res.status).toBe(200);
   });
 });

@@ -4,7 +4,13 @@ import { stepFactory, type Context } from "../context.ts";
 import type { ModuleDefinition } from "../defineModule.ts";
 import { ok } from "../result.ts";
 import { definePipeline } from "../definePipeline.ts";
+import type { Logger } from "../logger.ts";
 import { runPipeline } from "./runPipeline.ts";
+
+function stackLogger(): { logger: Logger; stacks: string[] } {
+  const stacks: string[] = [];
+  return { logger: { step() {}, info() {}, error: (_message, data) => stacks.push(String(data?.stack)) }, stacks };
+}
 
 const createPage = definePipeline({ name: "createPage", steps: ["authn.requireUser", "authz.require:pages.write", "page.save"] });
 
@@ -28,9 +34,10 @@ describe("testing/runPipeline", () => {
   });
 
   it("a stand-in that writes an undeclared key fails the run", async () => {
-    const res = await runPipeline(createPage, { payload: { title: "x" }, headers: { authorization: "Bearer ok" } }, { steps: fakeSteps });
-    expect(res.status).toBe(500);
-    expect(res.error).toContain('writes "params" without declaring it');
+    const { logger, stacks } = stackLogger();
+    const res = await runPipeline(createPage, { payload: { title: "x" }, headers: { authorization: "Bearer ok" } }, { steps: fakeSteps, logger });
+    expect(res).toMatchObject({ status: 500, error: "createPage/authn.requireUser: unexpected Error" });
+    expect(stacks.join("\n")).toContain('writes "params" without declaring it');
   });
 
   it("unknown step in the pipeline fails loudly", async () => {
@@ -51,9 +58,9 @@ describe("testing/runPipeline", () => {
       }),
     };
     const p = definePipeline({ name: "getWidget", steps: ["widgets.get"] });
-    const res = await runPipeline(p, {}, { modules: [{ module, instance: {} }] });
-    expect(res.status).toBe(500);
-    expect(res.error).toContain('widgets.get');
-    expect(res.error).toContain("$.id");
+    const { logger, stacks } = stackLogger();
+    const res = await runPipeline(p, {}, { modules: [{ module, instance: {} }], logger });
+    expect(res).toMatchObject({ status: 500, error: "getWidget/widgets.get: unexpected Error" });
+    expect(stacks.join("\n")).toContain('step "widgets.get": result does not match describe().output ($.id is required)');
   });
 });

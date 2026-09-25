@@ -275,10 +275,11 @@ async function runStep(
     log("error", 500);
     const error = caught instanceof Error ? caught : new Error(String(caught));
     logger.error(`pipeline "${pipelineName}" step "${step.name}" threw`, { runId, stack: error.stack ?? error.message });
+    const unexpected = `${pipelineName}/${step.name}: unexpected ${error.name}`;
     return {
       kind: "throw",
-      thrownMessage: `${pipelineName}/${step.name}: unexpected ${error.name}`,
-      result: { runId, status: 500, error: `${pipelineName}/${step.name}: ${error.message}`, code: "INTERNAL", retryable: false, step: step.name },
+      thrownMessage: unexpected,
+      result: { runId, status: 500, error: unexpected, code: "INTERNAL", retryable: false, step: step.name },
     };
   }
 }
