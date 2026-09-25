@@ -107,6 +107,43 @@ describe("insertModuleListEntry", () => {
   });
 });
 
+const CONFIG_CONST_MODULES = `import { defineConfig } from "@michaelthielemann/kestrel/defineConfig";
+
+const modules = [
+  { use: "kestrel-events-inmemory" },
+  { use: "kestrel-persistence-sqlite", config: { file: "./data/kestrel.db" } },
+];
+
+export default defineConfig({
+  modules,
+  triggers: [],
+});
+`;
+
+describe("module-list edits find the array when modules is a separate const, not an inline literal", () => {
+  it("inserts after the anchor when the config object uses the shorthand modules property", () => {
+    const edit = insertModuleListEntry("kestrel.config.ts", CONFIG_CONST_MODULES, { anchorUse: "kestrel-events-inmemory", position: "after", use: "kestrel-events-direct" });
+    expect(edit).toBeDefined();
+    const { text } = applyEdits(CONFIG_CONST_MODULES, [edit!]);
+    expect(text).toContain('  { use: "kestrel-events-inmemory" },\n  { use: "kestrel-events-direct" },\n  { use: "kestrel-persistence-sqlite"');
+  });
+
+  it("also finds it when the property is written out as modules: modules", () => {
+    const source = CONFIG_CONST_MODULES.replace("  modules,\n", "  modules: modules,\n");
+    const edit = insertModuleListEntry("kestrel.config.ts", source, { anchorUse: "kestrel-events-inmemory", position: "after", use: "kestrel-events-direct" });
+    expect(edit).toBeDefined();
+  });
+
+  it("also finds an exported const modules array", () => {
+    const source = CONFIG_CONST_MODULES.replace("const modules", "export const modules");
+    const edit = replaceModuleListEntry("kestrel.config.ts", source, { use: "kestrel-events-inmemory", newUse: "kestrel-events-direct" });
+    expect(edit).toBeDefined();
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).toContain('{ use: "kestrel-events-direct" }');
+    expect(text).not.toContain("kestrel-events-inmemory");
+  });
+});
+
 describe("setModuleConfigProperties", () => {
   it("adds a property to an existing config object literal", () => {
     const edits = setModuleConfigProperties("kestrel.config.ts", CONFIG_SINGLE_LINE, { use: "kestrel-persistence-sqlite", assignments: { acquireTimeoutMs: "15000" } });

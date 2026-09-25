@@ -30,12 +30,28 @@ function quoteOf(source: string, node: AstNode | undefined): '"' | "'" {
   return source[start] === "'" ? "'" : '"';
 }
 
+function declaredArray(root: AstNode, name: string): AstNode | undefined {
+  let found: AstNode | undefined;
+  walk(root, (node) => {
+    if (found || node.type !== "VariableDeclarator") return;
+    const id = node.id;
+    if (!isAstNode(id) || id.type !== "Identifier" || id.name !== name) return;
+    const init = node.init;
+    if (isAstNode(init) && init.type === "ArrayExpression") found = init;
+  });
+  return found;
+}
+
 function findConfigArray(root: AstNode, key: string): AstNode | undefined {
   let found: AstNode | undefined;
   walk(root, (node) => {
     if (found || node.type !== "ObjectExpression") return;
     const value = objectProperty(node, key);
-    if (isArray(value)) found = value;
+    if (value?.type === "ArrayExpression") {
+      found = value;
+    } else if (value?.type === "Identifier" && typeof value.name === "string") {
+      found = declaredArray(root, value.name);
+    }
   });
   return found;
 }
@@ -52,7 +68,11 @@ function entryUseNode(entry: AstNode): AstNode | undefined {
   return objectProperty(entry, "use");
 }
 
-/** Locates the `modules: [...]` array of a `defineConfig({...})` call or a default-exported config object literal. */
+/**
+ * Locates the module-list array of a `defineConfig({...})` call or a default-exported config object
+ * literal: an inline `modules: [...]`, or `modules` (or the shorthand `{ modules }`) naming a
+ * `const modules = [...]` (`export` or not) declared anywhere in the same file.
+ */
 export function moduleListArray(source: string): AstNode | undefined {
   return findModuleArray(parseTs(source));
 }
