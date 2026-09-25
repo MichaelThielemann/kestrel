@@ -1,7 +1,9 @@
 # @michaelthielemann/kestrel-contracts
 The standard contracts: `persistence@1`, `authn@1`, `authz@1`, `blobstore@1`, `events@1`, `content@1`,
 `site@1`, `renderer@1`, `validate@1`, `revisions@1`, `migrations@1`, `insights@1`, `media@1`.
-Each contract is one file plus one `*.contract.test.ts` suite every implementation must pass.
+Each contract is one file plus one `*.contract.test.ts` suite every implementation must pass,
+imported as `@michaelthielemann/kestrel-contracts/<name>.contract.test`. The package's own unit tests
+are not part of it.
 Every async method answers `Promise<Result<T, E>>` from `@michaelthielemann/kestrel/result`; the
 error union of each contract is declared next to it (`PersistenceError`, `ContentError`, …) and
 `errors.ts` re-exports the core error model the contract files build on. A `throw` is left for

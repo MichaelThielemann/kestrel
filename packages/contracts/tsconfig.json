@@ -9,12 +9,30 @@
     "rewriteRelativeImportExtensions": true,
     "composite": true
   },
+  "files": [
+    "src/atomic.contract.test.ts",
+    "src/authn.contract.test.ts",
+    "src/authn.steps.contract.test.ts",
+    "src/authz.contract.test.ts",
+    "src/blobstore.contract.test.ts",
+    "src/content.contract.test.ts",
+    "src/events.contract.test.ts",
+    "src/events.steps.contract.test.ts",
+    "src/insights.contract.test.ts",
+    "src/media.contract.test.ts",
+    "src/migrations.contract.test.ts",
+    "src/persistence.contract.test.ts",
+    "src/renderer.contract.test.ts",
+    "src/revisions.contract.test.ts",
+    "src/site.contract.test.ts",
+    "src/validate.contract.test.ts"
+  ],
   "include": [
     "src"
   ],
   "exclude": [
     "dist",
-    "src/testing/*.impl.test.ts"
+    "src/**/*.test.ts"
   ],
   "references": [
     {

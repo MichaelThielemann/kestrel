@@ -411,6 +411,10 @@ Net changes since 5.8.1.
     ready item whose provider lost its bytes fails a plan or render with
     `images: the stored bytes of media/<id> are missing`, naming no storage key; an item whose delete
     began while it was planned or rendered ends that work quietly instead of failing `INTERNAL`.
+- `contracts`: the package exports its contracts, helpers, testing fakes and the shared contract
+  suites, each suite listed by name (`@michaelthielemann/kestrel-contracts/<name>.contract.test`), and
+  nothing else. Its own unit tests are neither built nor published; any other `*.test` subpath answers
+  `ERR_PACKAGE_PATH_NOT_EXPORTED`.
 
 ### Added
 

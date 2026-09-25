@@ -8,10 +8,92 @@
     "node": ">=22.18.0"
   },
   "exports": {
+    "./*.test": null,
+    "./atomic.contract.test": "./src/atomic.contract.test.ts",
+    "./authn.contract.test": "./src/authn.contract.test.ts",
+    "./authn.steps.contract.test": "./src/authn.steps.contract.test.ts",
+    "./authz.contract.test": "./src/authz.contract.test.ts",
+    "./blobstore.contract.test": "./src/blobstore.contract.test.ts",
+    "./content.contract.test": "./src/content.contract.test.ts",
+    "./events.contract.test": "./src/events.contract.test.ts",
+    "./events.steps.contract.test": "./src/events.steps.contract.test.ts",
+    "./insights.contract.test": "./src/insights.contract.test.ts",
+    "./media.contract.test": "./src/media.contract.test.ts",
+    "./migrations.contract.test": "./src/migrations.contract.test.ts",
+    "./persistence.contract.test": "./src/persistence.contract.test.ts",
+    "./renderer.contract.test": "./src/renderer.contract.test.ts",
+    "./revisions.contract.test": "./src/revisions.contract.test.ts",
+    "./site.contract.test": "./src/site.contract.test.ts",
+    "./validate.contract.test": "./src/validate.contract.test.ts",
     "./*": "./src/*.ts"
   },
   "publishConfig": {
     "exports": {
+      "./*.test": null,
+      "./atomic.contract.test": {
+        "types": "./dist/atomic.contract.test.d.ts",
+        "default": "./dist/atomic.contract.test.js"
+      },
+      "./authn.contract.test": {
+        "types": "./dist/authn.contract.test.d.ts",
+        "default": "./dist/authn.contract.test.js"
+      },
+      "./authn.steps.contract.test": {
+        "types": "./dist/authn.steps.contract.test.d.ts",
+        "default": "./dist/authn.steps.contract.test.js"
+      },
+      "./authz.contract.test": {
+        "types": "./dist/authz.contract.test.d.ts",
+        "default": "./dist/authz.contract.test.js"
+      },
+      "./blobstore.contract.test": {
+        "types": "./dist/blobstore.contract.test.d.ts",
+        "default": "./dist/blobstore.contract.test.js"
+      },
+      "./content.contract.test": {
+        "types": "./dist/content.contract.test.d.ts",
+        "default": "./dist/content.contract.test.js"
+      },
+      "./events.contract.test": {
+        "types": "./dist/events.contract.test.d.ts",
+        "default": "./dist/events.contract.test.js"
+      },
+      "./events.steps.contract.test": {
+        "types": "./dist/events.steps.contract.test.d.ts",
+        "default": "./dist/events.steps.contract.test.js"
+      },
+      "./insights.contract.test": {
+        "types": "./dist/insights.contract.test.d.ts",
+        "default": "./dist/insights.contract.test.js"
+      },
+      "./media.contract.test": {
+        "types": "./dist/media.contract.test.d.ts",
+        "default": "./dist/media.contract.test.js"
+      },
+      "./migrations.contract.test": {
+        "types": "./dist/migrations.contract.test.d.ts",
+        "default": "./dist/migrations.contract.test.js"
+      },
+      "./persistence.contract.test": {
+        "types": "./dist/persistence.contract.test.d.ts",
+        "default": "./dist/persistence.contract.test.js"
+      },
+      "./renderer.contract.test": {
+        "types": "./dist/renderer.contract.test.d.ts",
+        "default": "./dist/renderer.contract.test.js"
+      },
+      "./revisions.contract.test": {
+        "types": "./dist/revisions.contract.test.d.ts",
+        "default": "./dist/revisions.contract.test.js"
+      },
+      "./site.contract.test": {
+        "types": "./dist/site.contract.test.d.ts",
+        "default": "./dist/site.contract.test.js"
+      },
+      "./validate.contract.test": {
+        "types": "./dist/validate.contract.test.d.ts",
+        "default": "./dist/validate.contract.test.js"
+      },
       "./*": {
         "types": "./dist/*.d.ts",
         "default": "./dist/*.js"

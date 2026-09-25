@@ -13,6 +13,10 @@ may define its own contracts with the same `defineContract`; the core treats the
 - Domain-neutral. No words like `user`, `page`, `email` in the contract.
 - Every contract has exactly one file `<name>.ts` and one test `<name>.contract.test.ts`
   (in the package under `packages/contracts/src/`).
+- The package exports each shared suite by name
+  (`@michaelthielemann/kestrel-contracts/<name>.contract.test`), listed in the package's `exports`
+  and in the `files` of its `tsconfig.json`. Every other `*.test.ts` in the package is its own unit
+  test: it is not built, not published and not importable.
 - New contracts only when a different *implementation* is needed, not different *fields*.
   `blobstore@1` is its own contract (different technology), `user-persistence@1` is not.
 - Contracts don't change once frozen. A capability that needs a different shape becomes a new
