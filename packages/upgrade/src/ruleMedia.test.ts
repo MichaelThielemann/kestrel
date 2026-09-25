@@ -535,6 +535,39 @@ describe("pipelines/images-plan", () => {
     expect(findings[0]?.fix.kind).toBe("manual");
     expect(findings[0]?.severity).toBe("warning");
   });
+
+  it("stays quiet for a queue-mode split already correctly composed: a plan-only pipeline and a separate generate pipeline triggered on images.planned", async () => {
+    const p = await project([{ use: IMAGES_DEFAULT, config: {} }], {
+      pipelines: [
+        { name: "planImageVariants", steps: ["images.plan"] },
+        { name: "generateImageVariants", steps: ["images.generate"] },
+      ],
+      triggers: [{ event: "media.uploaded", pipeline: "planImageVariants" }, { event: "images.planned", pipeline: "generateImageVariants" }],
+    });
+    expect(await imagesPlanRule.check(contextFor(p))).toEqual([]);
+  });
+
+  it("still fires when images.plan and images.generate sit in the same pipeline, even with an images.planned trigger elsewhere", async () => {
+    const p = await project([{ use: IMAGES_DEFAULT, config: {} }], {
+      pipelines: [
+        { name: "planAndGenerate", steps: ["images.plan", "images.generate"] },
+        { name: "otherOnPlanned", steps: ["images.generate"] },
+      ],
+      triggers: [{ event: "images.planned", pipeline: "otherOnPlanned" }],
+    });
+    const findings = await imagesPlanRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.where.pipeline).toBe("planAndGenerate");
+  });
+
+  it("still fires for a lone images.plan with no images.planned-triggered pipeline generating anything", async () => {
+    const p = await project([{ use: IMAGES_DEFAULT, config: {} }], {
+      pipelines: [{ name: "planImageVariants", steps: ["images.plan"] }],
+      triggers: [{ event: "media.uploaded", pipeline: "planImageVariants" }],
+    });
+    const findings = await imagesPlanRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+  });
 });
 
 describe("modules/images-media-option", () => {

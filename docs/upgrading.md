@@ -436,7 +436,9 @@ A pipeline calls `images.plan` directly. Always manual: with direct event delive
 `images.generate` now plans internally, so a standalone `images.plan` step can usually be dropped;
 with queue delivery and lane-based bulk pipelines, split it into a main-lane `planImageVariants` and
 a `generateImageVariants` triggered on `images.planned` instead — which one applies depends on the
-project's delivery mode and whether it has adopted lanes, so this tool does not guess.
+project's delivery mode and whether it has adopted lanes, so this tool does not guess. Silent once a
+pipeline already does only the planning half and some pipeline triggered on `images.planned` does
+the generating half — that split is already correct, not something to review again.
 
 #### data-media-layout
 The `data` command's own SQL check: a `media_items` row whose key is not `<prefix><id>/<name>` makes

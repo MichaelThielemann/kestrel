@@ -435,22 +435,26 @@ export const binaryCacheControlRule: Rule = {
 
 const IMAGES_PLAN_RULE_ID = "pipelines/images-plan";
 
-/** `pipelines/images-plan`: a pipeline calling `images.plan` directly needs a by-hand review — the right replacement depends on the delivery mode and whether lane-based bulk pipelines are in use, which this tool cannot safely decide on its own. */
+/** `pipelines/images-plan`: a pipeline calling `images.plan` directly needs a by-hand review — the right replacement depends on the delivery mode and whether lane-based bulk pipelines are in use, which this tool cannot safely decide on its own. Silent once a pipeline already does only the planning half, and some pipeline triggered on `images.planned` does the generating half — the lane-based split its own suggestion recommends. */
 export const imagesPlanRule: Rule = {
   id: IMAGES_PLAN_RULE_ID,
   check(ctx) {
     if (!hasModule(ctx, "images-default")) return [];
+    const stepsOf = new Map(ctx.project.input.pipelines.map((p) => [p.name, pipelineSteps(p.steps)]));
+    const plannedPipelines = new Set(ctx.project.input.config.triggers.flatMap((t) => ("event" in t && t.event === "images.planned" ? [t.pipeline] : [])));
+    const isSplit = [...plannedPipelines].some((name) => (stepsOf.get(name) ?? []).some((s) => s.split(":")[0] === "images.generate"));
+
     const findings: Finding[] = [];
-    for (const def of ctx.project.input.pipelines) {
-      const steps = pipelineSteps(def.steps);
+    for (const [name, steps] of stepsOf) {
       if (!steps.some((s) => s.split(":")[0] === "images.plan")) continue;
+      if (isSplit && !steps.some((s) => s.split(":")[0] === "images.generate")) continue;
       findings.push(
         finding(
-          `${IMAGES_PLAN_RULE_ID}:${def.name}`,
+          `${IMAGES_PLAN_RULE_ID}:${name}`,
           IMAGES_PLAN_RULE_ID,
-          `pipeline "${def.name}" calls images.plan directly`,
+          `pipeline "${name}" calls images.plan directly`,
           "review by hand: with direct event delivery, images.generate now plans internally, so a standalone images.plan step can usually be removed; with queue delivery and lane-based bulk pipelines, split this into a main-lane planImageVariants and a generateImageVariants triggered on images.planned instead",
-          { pipeline: def.name },
+          { pipeline: name },
           undefined,
           upgradingDocs("pipelines-images-plan"),
           "warning",
