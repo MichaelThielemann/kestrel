@@ -229,26 +229,51 @@ Net changes since 5.8.1.
   must never use it. Every `site@1` implementation must follow the fallback/`_translations` rule now;
   the shared contract suite (`@michaelthielemann/kestrel-contracts/site.contract.test`) tests it.
 - **Every media file has exactly one public URL, and the API returns it.** `media-default` stores an
-  original under `<prefix><id>/<name>`. `<name>` is fixed at upload, and its extension always comes
-  from the content type the file is stored under, never from the uploaded name: a listed inert type
-  (images, PDF, audio, video, plain text, CSV, JSON, ZIP, and SVG) replaces the uploaded extension
-  (`Photo 1.JPG` sent as `image/jpeg` is stored as `Photo-1.jpg`), every other type gets `.bin` and
-  keeps the uploaded extension in the stem (`x.html` sent as `image/x-foo` or `text/html` is stored as
-  `x-html.bin`). Every other dot becomes `-`, so a name has exactly one extension. `media.upload`, `media.get`, `media.list` and `media.update` return it as
-  `path`, `<publicPath>/<id>/<name>` (new config key `publicPath`, default `"/media"`). Renaming or
-  moving an item and renaming a folder change metadata only: no blob moves, and neither the key nor
-  `path` changes. `filename` starts out equal to `<name>` and is the display name from then on. A name
-  is still unique within its folder; a clash answers 409 with `details.field: "location"` (was
-  `"key"`).
-  - The public copy of a file whose type is not listed is stored as `application/octet-stream`, and
-    `media.serve` answers with that type too, so no host runs an HTML, JavaScript or XML file uploaded
-    under any type. With `publicCopy` set and SVG uploads allowed, boot fails unless every pipeline
-    that runs `media.upload` runs `sanitize.svg` before it.
+  original under `<prefix><id>/<name>`. `media.upload`, `media.get`, `media.list` and `media.update`
+  return it as `path`, `<publicPath>/<id>/<name>` (new config key `publicPath`, default `"/media"`).
+  Renaming or moving an item and renaming a folder change metadata only: no blob moves, and neither
+  the key nor `path` changes. `filename` starts out equal to `<name>` and is the display name from then
+  on. A name is still unique within its folder; a clash answers 409 with `details.field: "location"`
+  (was `"key"`).
+  - The declared content type must be exactly one media type — `type/subtype` of RFC 9110 token
+    characters, optionally with `;` parameters, and no comma. A list such as
+    `image/png; x=1, text/html`, which a browser would read as its last type, or an empty type answers
+    415 (`UNSUPPORTED`). What is stored and written to the blob store is the lower-cased
+    `type/subtype`, plus the `charset` of a `text/*` type when it is a token, lower-cased
+    (`text/plain; charset=utf-8`); no other parameter survives. `allowedTypes`/`deniedTypes` and their
+    entries are matched by the `type/subtype` alone, ignoring parameters and case on both sides: `image/svg+xml; charset=utf-8` is denied wherever `image/svg+xml` is, and an entry
+    `IMAGE/SVG+XML; charset=utf-8` denies `image/svg+xml`.
+  - `<name>` is fixed at upload and never changes, except for a demotion to `.bin` (below); its one
+    extension comes from the stored type, never from the uploaded name. A listed type — images, PDF, audio, video, plain text, CSV, JSON, office documents
+    (DOC, XLS, PPT, RTF, DOCX, XLSX, PPTX, ODT, ODS, ODP) and archives (ZIP, 7Z, RAR, TAR), none of
+    which a browser runs as a document — replaces the uploaded extension (`Photo 1.JPG` sent as
+    `image/jpeg` is stored as `Photo-1.jpg`). Every other type gets `.bin` and keeps the uploaded
+    extension in the stem (`x.html` sent as `image/x-foo` or `text/html` is stored as `x-html.bin`);
+    its public copy is stored as `application/octet-stream`, and `media.serve` answers with that type
+    too. Every other dot becomes `-`, so a name has exactly one extension.
+  - An SVG is published as `image/svg+xml` only when its bytes passed `sanitize.svg`. `media_items`
+    gains a `svgSanitized` column (rows without it read as `false`), which `media.upload` sets when its
+    pipeline runs `sanitize.svg` before it with no step in between that declares a write to `files`
+    — known from the pipelines at attach, never from the request. Any other SVG is stored and served
+    like an unlisted type (`logo.svg` becomes `logo-svg.bin`, `application/octet-stream`, on
+    `media.serve`, `media.download` and in the public copy), also once `publicCopy` and
+    `sanitize.svg` are turned on later, and each write of its public copy logs a warning naming its
+    id. A run the booted instance did not start (the `testing/runPipeline` helper) never counts as
+    sanitising. With `publicCopy` set and SVG uploads allowed, boot fails unless every pipeline that runs
+    `media.upload` runs `sanitize.svg` before it with no such step in between.
+  - Every public copy — `media-default`'s upload and `media.syncPublic`, `images-default`'s variants
+    and placeholders — and `media.serve`, `media.download` and `images.serve` take the `Content-Type`
+    from `publicFormOf` (new, see Added), never from the stored value as it is, and the published name
+    is the stored one. A name stored as `.bin` stays `.bin` and is published as
+    `application/octet-stream`, also once the list holds its type, so the name and the type always
+    agree for a static host that types by extension. Any other name that does not end in the extension
+    its type is listed with — an SVG without the `sanitize.svg` record, a row already stored with a
+    list or an empty type — is demoted: every `.` turned into `-`, plus `.bin`, published as
+    `application/octet-stream`; `path`, `media.serve` and the public copy follow it. The list only
+    ever grows.
   - An upload stuck in `uploading` for longer than `uploadStaleAfterMs` — its `ready` update failed, or
     the blob store threw — is released by the next upload of the same name, also without
     `publicCopy`.
-  - `allowedTypes` and `deniedTypes` compare the media type without parameters and ignoring case, so
-    `image/svg+xml; charset=utf-8` is denied wherever `image/svg+xml` is.
   - An upload turns its row `ready` only while the row is still `uploading`. When `media.syncPublic`
     abandoned a stalled upload meanwhile, the upload removes what it wrote and answers `TRANSIENT`
     (503); uploading the file again succeeds.
@@ -262,7 +287,8 @@ Net changes since 5.8.1.
     before 6.0.0 have no `slot`, which this version needs to find them, so `images-default`'s setup
     fails while either collection holds such a row, naming the collection and the count.
   - New step `media.serve` answers a file at its public URL (`params.id`, `params.name`), cacheable
-    for a year as `immutable`; any other name is 404. `media.download` is unchanged.
+    for a year as `immutable`; any other name is 404. `media.download` answers with the same type as
+    `media.serve` (see above), so an unlisted type is a download there too.
   - `media.remove` and `media.removeFolder` delete the copy and the blob first and the row last, then
     sweep the item's files once more. A failed blob delete now fails the step with the blob store's
     error; it used to be logged. `media.removeFolder`'s result gains `ids`. Run `images.remove` /
@@ -363,6 +389,11 @@ Net changes since 5.8.1.
 
 ### Added
 
+- `@michaelthielemann/kestrel-contracts/mediaType`: `parseMediaType`, `mediaTypeEssence` and
+  `canonicalMediaType` (a declared content type that is exactly one media type, as its lower-cased
+  `type/subtype` and a `text/*` type's charset, else `null`), `publicFormOf` (the `Content-Type` and
+  extension a stored type is published with) and `EXTENSION_BY_TYPE`, shared by `media-default` and
+  `images-default`.
 - `@michaelthielemann/kestrel-contracts/content-locale`: `satisfiesFilter`, `publishedLocale` and
   `narrowListTranslations` — the shared rule behind the two entries above, for any module that
   builds a public view on top of `content@1`. `satisfiesFilter` decides membership through
