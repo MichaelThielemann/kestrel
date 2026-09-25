@@ -193,8 +193,14 @@ function isUploadStep(step: PipelineStepManifest): boolean {
   return step.module === "media/default" && step.name === UPLOAD_STEP;
 }
 
+function writeRootOf(path: string): string {
+  const dot = path.indexOf(".");
+  const root = dot === -1 ? path : path.slice(0, dot);
+  return root.endsWith("?") ? root.slice(0, -1) : root;
+}
+
 function writesFiles(step: PipelineStepManifest): boolean {
-  return step.description.writes.some((path) => path.replace(/\?$/, "").split(".")[0] === "files");
+  return step.description.writes.some((path) => writeRootOf(path) === "files");
 }
 
 function unsanitisedUpload(pipeline: PipelineManifest): string | null {

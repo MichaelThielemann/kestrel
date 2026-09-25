@@ -950,7 +950,9 @@ describe("media/default", () => {
       const { media } = await make({ ...BASE_CONFIG, allowedTypes: ["image/*"], deniedTypes: [], publicCopy: { prefix: "site/" } });
       const writer = (writes: string[]) => ({ pipeline: "uploadMedia", module: "probe/files", step: "probe.rename", writes });
       expect(() => media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, writer(["files"]), upload])))).toThrow('media/default: publicCopy is set and SVG uploads are allowed, but pipeline "uploadMedia" runs probe.rename between sanitize.svg and media.upload, which writes the uploaded files again – an unsanitised SVG would be published; run sanitize.svg before media.upload or deny image/svg+xml');
-      expect(() => media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, writer(["files.0?"]), upload])))).toThrow(/runs probe\.rename between sanitize\.svg and media\.upload/);
+      for (const writes of [["files.0?"], ["files?"], ["files?.0"], ["result", "files?.0.data"]]) {
+        expect(() => media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, writer(writes), upload])))).toThrow(/runs probe\.rename between sanitize\.svg and media\.upload/);
+      }
       expect(() => media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, upload, writer(["files"]), { ...upload, step: "media.upload" }])))).toThrow(/runs probe\.rename between sanitize\.svg and media\.upload/);
       expect(() => media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, writer(["result", "filesSeen"]), upload])))).not.toThrow();
       expect(() => media.attach(introspectionOf(manifestWithPipelines([serve, sanitize, writer(["files"]), { ...sanitize }, upload])))).not.toThrow();
