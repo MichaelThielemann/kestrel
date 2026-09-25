@@ -136,11 +136,15 @@ error and leaves the row `uploading`. Such a row, and one left by a blob store t
 as abandoned once it is older than `uploadStaleAfterMs`: the next upload of the same name, and with
 `publicCopy` the next `media.syncPublic`, mark it `failed` and remove its copy and blob, which frees
 the name. Only `ready` items are returned by `media.get`,
-`media.list` and `media.download` (`NOT_FOUND` / filtered out otherwise), and a `failed` row is
-replaced when the same name is uploaded again, so a broken attempt never blocks a filename.
-`media.remove` and `media.removeFolder` remove the public copy, then the private blob, then the row,
-then sweep the item's own files once more — so a retry after a partial failure completes, and a
-failing blob delete fails the step.
+`media.list`, `media.download`, `media.serve`, `media.export:<dir>` and `media@1` (`NOT_FOUND` /
+filtered out otherwise), and a `failed` row is replaced when the same name is uploaded again, so a
+broken attempt never blocks a filename. `media.remove` and `media.removeFolder` first end the item's
+readiness (`status: "removing"`), then remove the public copy, then the private blob, then the row,
+then sweep the item's own files once more. From the first of these writes on the item is answered by
+nothing: `media.serve` and `media.download` answer 404 while a delete is under way, and no reader
+meets a ready item without its bytes. A failing blob delete fails the step and leaves the item
+invisible; repeating the delete, an upload of the same name into the same folder, or
+`media.syncPublic` finishes it.
 
 Uploading is idempotent: same folder, same filename and the same bytes return the item that is
 already there — no second row, no second blob write, no second variant folder — and `media.upload`
@@ -150,8 +154,24 @@ announce an upload that stored nothing. The same name with *different* bytes sta
 the step ends the pipeline the same way.
 
 Why: a plain blobstore has no metadata, folders, locale texts or provenance tracking; this module
-adds the bookkeeping other modules (`delivery-static`, `references-default`) rely on, without
-depending on an image library.
+adds that bookkeeping, and other modules read the ready files through `media@1`, without depending
+on an image library.
+
+## Provides `media@1`
+
+The instance is also a `media@1` provider (`@michaelthielemann/kestrel-contracts/media`): `file`,
+`files`, `load` (the description and the stored bytes, from one read of the item), `scan` (ready
+files by type pattern and creation time, paged by id, so a cursor resumes in another process) and
+`count`. Only a `ready` item is visible; `uploading`, `failed` and `removing` rows never are. A
+`MediaFile` carries `contentType` as stored, `publishedType` — the type `media.serve`,
+`media.download` and the public copy send (`application/octet-stream` for a name stored as `.bin`) —
+`size`, the `width`/`height` read at upload, `folder`, the display `filename` and `createdAt`; never
+the storage key. `load` answers `null` for a ready item whose bytes are missing from the blob store
+and logs it, and answers `null` without a log when the item's delete began meanwhile. `scan` and
+`count` read the ready rows by id; `count` of one `*`, `type/*` or exact pattern (not a `text/*`
+type) without `excludeTypes` is a single store count, any other filter counts through a scan. Every
+method notes its reads like `media.get` and `media.list` do: a `document` read per id asked of
+`file`, `files` and `load`, a `type` read per `scan` and `count`.
 
 Config: `allowedTypes` (`image/*`, `application/pdf`, `*` or `*/*`), `deniedTypes` (default
 `image/svg+xml`, `text/html`, `application/xhtml+xml` — they can carry scripts; both lists are
@@ -226,7 +246,7 @@ Not included: image resizing, tags, linking media to content documents.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
-`@michaelthielemann/kestrel-media-default` – module `media/default`: provides no contract; requires `blobstore@1`, `persistence@1`.
+`@michaelthielemann/kestrel-media-default` – module `media/default`: provides `media@1`; requires `blobstore@1`, `persistence@1`.
 
 | Config | Type | Required | Default |
 |---|---|---|---|
@@ -255,11 +275,11 @@ Not included: image resizing, tags, linking media to content documents.
 | `media.removeFolder` | Delete a folder and everything in it (each item as media.remove) | `params.path` | `result` | – | { ok: boolean, removed: number, ids: string[], … } | 400 invalid path; 404 folder not found; 409 folder not empty or still referenced | – | no |
 | `media.download` | The file itself | `params.id` | `result` | – | – | 404 not found | – | no |
 | `media.serve` | The file at its public URL (params.id, params.name); the name must be the one it was uploaded under | `params.id`, `params.name` | `result` | – | – | 404 not found, not ready, or not the name the file was uploaded under | – | no |
-| `media.remove` | Delete file and metadata (copy, blob, row, then a final sweep) | `params.id` | `result` | – | { ok: boolean, … } | 400 missing id | – | no |
+| `media.remove` | Delete file and metadata: end the item's readiness, then remove copy, blob and row, then a final sweep | `params.id` | `result` | – | { ok: boolean, … } | 400 missing id | – | no |
 | `media.reconcile` | Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted) | – | `result` | { delete?: boolean } | { blobsWithoutRow: string[], rowsWithoutBlob: string[], … } | – | – | no |
 | `media.reconcileDelete` | Like media.reconcile, but always deletes the orphan blobs – the deletion is in the pipeline, not in the request | – | `result` | – | { blobsWithoutRow: string[], rowsWithoutBlob: string[], … } | – | – | no |
-| `media.syncPublic` | Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result) | – | `result._publicMedia` | – | { _publicMedia: object, … } | – | – | no |
-| `media.export:<arg>` | Copy every media item to <arg>/<folder>/<filename> | – | `result` | – | { written: number, skipped: number, missing: number, conflicts: number, … } | – | – | no |
+| `media.syncPublic` | Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result) | – | `result._publicMedia` | – | { _publicMedia: object, … } | – | – | no |
+| `media.export:<arg>` | Copy every ready media item to <arg>/<folder>/<filename> | – | `result` | – | { written: number, skipped: number, missing: number, conflicts: number, … } | – | – | no |
 
 Used by 14 of 93 pipelines in `examples/minimal`.
 

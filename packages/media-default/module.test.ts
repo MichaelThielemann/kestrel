@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { MEDIA } from "@michaelthielemann/kestrel-contracts/media";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
@@ -135,6 +136,18 @@ describe("media/default download and serve steps", () => {
     expect(item.provenance).toEqual({ origin: "unknown" });
     const ctx = expectOk(await steps.download(fakeCtx([], {}, { id: item.id })));
     expect(boundaryCast<{ headers?: Record<string, string> }>(ctx.result, "host").headers).toEqual({ "x-content-provenance": "unknown" });
+  });
+
+  it("serve and download answer 404, not an error, while a delete of the item is under way", async () => {
+    const { media, steps, blobs } = await make();
+    const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1, 2]) })).item;
+    const remove = blobs.remove.bind(blobs);
+    blobs.remove = async () => err(failure("TRANSIENT", "store down"));
+    expectErr(await media.remove(item.id), "TRANSIENT");
+    blobs.remove = remove;
+    expect(blobs.blobs.has(item.key)).toBe(true);
+    expect(expectErr(await steps.serve(fakeCtx([], {}, { id: item.id, name: item.filename })), "NOT_FOUND").status).toBe(404);
+    expect(expectErr(await steps.download(fakeCtx([], {}, { id: item.id })), "NOT_FOUND").status).toBe(404);
   });
 
   it("download: an unknown id is NOT_FOUND", async () => {
@@ -347,6 +360,14 @@ describe("media/default reconcile and syncPublic steps", () => {
     await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) });
     const ctx = expectOk(await steps.syncPublic(fakeCtx()));
     expect(boundaryCast<{ _publicMedia: { written: number } }>(ctx.result, "host")._publicMedia.written).toBe(0);
+  });
+});
+
+describe("media/default provides media@1", () => {
+  it("declares the contract, and its instance carries every method of it", async () => {
+    expect(module.provides).toEqual([MEDIA]);
+    const { media } = await make();
+    for (const method of MEDIA.methods) expect(typeof Reflect.get(media, method), method).toBe("function");
   });
 });
 

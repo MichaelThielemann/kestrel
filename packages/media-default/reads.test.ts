@@ -73,6 +73,25 @@ describe("media/default notes what it answers inside a read scope", () => {
     ]);
   });
 
+  it("media@1 notes one document per id asked of file, files and load, and the whole type per scan and count", async () => {
+    const { media, first, second } = await seeded();
+    const { reads } = await observeReads(async () => {
+      expectOk(await media.file(first.id));
+      expectOk(await media.files([second.id, "missing", second.id]));
+      expectOk(await media.load("missing"));
+      expectOk(await media.scan({ types: ["image/*"] }, { limit: 10 }));
+      expectOk(await media.count({}));
+    });
+    expect(reads).toEqual([
+      { kind: "document", type: "media", id: first.id },
+      { kind: "document", type: "media", id: second.id },
+      { kind: "document", type: "media", id: "missing" },
+      { kind: "document", type: "media", id: "missing" },
+      { kind: "type", type: "media" },
+      { kind: "type", type: "media" },
+    ]);
+  });
+
   it("keeps the read type internal", async () => {
     const impl = await import("./impl.ts");
     expect(Reflect.has(impl, "MEDIA_READ_TYPE")).toBe(false);

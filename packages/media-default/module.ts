@@ -1,6 +1,7 @@
 import { z } from "zod";
 import "@michaelthielemann/kestrel-contracts/authn";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { MEDIA } from "@michaelthielemann/kestrel-contracts/media";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { binaryResult, first, stepFactory, type Context, type StepResult } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
@@ -116,7 +117,7 @@ function listFolderItemsStep(media: Media): (ctx: Context) => Promise<StepResult
 
 export default defineModule({
   name: "media/default",
-  provides: [],
+  provides: [MEDIA],
   requires: [BLOBSTORE, PERSISTENCE],
   configSchema,
 
@@ -311,16 +312,16 @@ export default defineModule({
         },
     listFolders: { summary: "Folders (persistent and implied) with item counts; anonymous callers are refused", reads: ["identity?"], writes: ["result"], output: { type: "array", items: { type: "object", properties: { folder: { type: "string" }, count: { type: "number" } }, required: ["folder", "count"] } }, errors: { 401: "no identity (unless anonymousList is \"all\")" } },
     update: { summary: "Rename, move, set provenance or texts (alt/title/description per locale); the file's key and path never change", reads: ["params.id"], writes: ["result"], input: { type: "object", properties: { filename: { type: "string" }, folder: { type: "string" }, provenance: PROVENANCE, locale: { type: "string" }, alt: { type: ["string", "null"] }, title: { type: ["string", "null"] }, description: { type: ["string", "null"] } }, additionalProperties: false }, query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "invalid name, folder or text (texts are plain text, max 2000 chars)", 404: "not found", 409: "the folder already has a file with that name, `details.field: \"location\"`" } },
-    remove: { summary: "Delete file and metadata (copy, blob, row, then a final sweep)", reads: ["params.id"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 400: "missing id" } },
+    remove: { summary: "Delete file and metadata: end the item's readiness, then remove copy, blob and row, then a final sweep", reads: ["params.id"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 400: "missing id" } },
     reconcile: { summary: "Compare the blobs under the media prefix with the media_items rows; with `delete` also removes blobs that no row points at (rows are never deleted)", reads: [], writes: ["result"], input: { type: "object", properties: { delete: { type: "boolean" } }, additionalProperties: false }, output: RECONCILE_SCHEMA },
     reconcileDelete: { summary: "Like media.reconcile, but always deletes the orphan blobs – the deletion is in the pipeline, not in the request", reads: [], writes: ["result"], output: RECONCILE_SCHEMA },
     syncPublic: {
-      summary: "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result)",
+      summary: "Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result)",
       reads: [],
       writes: ["result._publicMedia"],
       extendsOutput: { type: "object", properties: { _publicMedia: PUBLIC_SYNC_SCHEMA }, required: ["_publicMedia"] },
     },
-    export: (dir: string) => ({ summary: `Copy every media item to ${dir}/<folder>/<filename>`, reads: [], writes: ["result"], output: { type: "object", properties: { written: { type: "number" }, skipped: { type: "number" }, missing: { type: "number" }, conflicts: { type: "number" } }, required: ["written", "skipped", "missing", "conflicts"] } }),
+    export: (dir: string) => ({ summary: `Copy every ready media item to ${dir}/<folder>/<filename>`, reads: [], writes: ["result"], output: { type: "object", properties: { written: { type: "number" }, skipped: { type: "number" }, missing: { type: "number" }, conflicts: { type: "number" } }, required: ["written", "skipped", "missing", "conflicts"] } }),
     createFolder: { summary: "Create a folder (idempotent: an existing folder is returned unchanged)", reads: [], writes: ["result"], input: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, output: { type: "object", properties: { folder: { type: "string" }, count: { type: "number" } }, required: ["folder", "count"] }, errors: { 400: "missing or invalid path" } },
     renameFolder: { summary: "Rename or move a folder (metadata only: keys and paths do not change)", reads: ["params.path"], writes: ["result"], input: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }, output: { type: "object", properties: { folder: { type: "string" }, moved: { type: "number" } }, required: ["folder", "moved"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "target folder already exists" } },
     listFolderItems: { summary: FOLDER_ITEMS_SUMMARY, reads: ["params.path"], writes: ["result"], query: { recursive: { type: "boolean" } }, output: { type: "object", properties: { path: { type: "string" }, ids: { type: "array", items: { type: "string" } } }, required: ["path", "ids"] }, errors: { 400: "missing or invalid path", 404: "folder not found", 409: "folder not empty (without `recursive`)" } },

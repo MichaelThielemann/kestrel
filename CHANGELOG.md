@@ -686,6 +686,14 @@ Net changes since 5.8.1.
 
 ### Changed
 
+- `media-default` provides `media@1`; `Media` extends `MediaFiles`. A delete ends the item's
+  readiness before it removes any byte (`MediaStatus` gains `removing`): `media.serve` and
+  `media.download` answer 404 during a delete instead of failing, and a delete that stopped midway
+  leaves the item invisible until repeating it, an upload of the same name into the same folder, or
+  the next `media.syncPublic` finishes it. Every reader of the module — `media.get`, `media.list`,
+  `media.serve`, `media.download`, `media.syncPublic`, `media.export:<dir>` and `media@1` — asks one
+  readiness rule, so `media.syncPublic` no longer treats an unknown status as ready and
+  `media.export:<dir>` copies ready items only.
 - `delivery-static` writes each status row with a version check, so a render that finishes after a
   newer write, an unpublish or a path change removes the files it wrote instead of keeping them, and
   marks its output again whenever that output is still served; an output live at a path whose files

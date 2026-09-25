@@ -836,6 +836,8 @@ describe("media/default", () => {
     expectErr(await media.remove(item.id), "TRANSIENT");
     expect(expectOk(await db.count(COLLECTION, {}))).toBe(1);
     expect(blobs.blobs.has(item.key)).toBe(true);
+    expect(expectOk(await media.get(item.id))).toBeNull();
+    expect(expectOk(await media.list())).toEqual({ items: [], total: 0 });
   });
 
   describe("public copy and reconciliation", () => {
