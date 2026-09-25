@@ -2,7 +2,7 @@ import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
 import { isRecord } from "./guards.ts";
 import type { Rule, SourceRule } from "./plugin.ts";
 import type { Finding } from "./report.ts";
-import { hasModule, infoFinding, localModuleFiles, moduleEntry } from "./ruleHelpers.ts";
+import { hasModule, infoFinding, localModuleFiles, moduleEntry, upgradingDocs } from "./ruleHelpers.ts";
 
 const DELIVERY_STEPS = ["delivery.publish", "delivery.unpublish", "delivery.exportLlms"];
 
@@ -17,7 +17,7 @@ export const deliveryMembersRule: Rule = {
       if (def === undefined) continue;
       const usesDelivery = def.steps.some((s) => typeof s === "string" && DELIVERY_STEPS.includes(s.split(":")[0]!));
       if (!usesDelivery) continue;
-      findings.push(infoFinding(`responses/delivery-members:${t.http}`, "responses/delivery-members", `${t.http} runs a delivery step whose response shape changed: delivery.publish now merges { document, delivery } into _delivery instead of replacing the result with it, delivery.exportLlms writes _llms instead of llms, and a missing id is 400 instead of 500`, "update any client reading the old field names", { file: ctx.project.configFile, pipeline: t.pipeline }, "docs/upgrading.md#responses-delivery-members"));
+      findings.push(infoFinding(`responses/delivery-members:${t.http}`, "responses/delivery-members", `${t.http} runs a delivery step whose response shape changed: delivery.publish now merges { document, delivery } into _delivery instead of replacing the result with it, delivery.exportLlms writes _llms instead of llms, and a missing id is 400 instead of 500`, "update any client reading the old field names", { file: ctx.project.configFile, pipeline: t.pipeline }, upgradingDocs("responses-delivery-members")));
     }
     return findings;
   },
@@ -40,7 +40,7 @@ export const busHandlerThrowsRule: Rule = {
     for (const [, file] of localModuleFiles(ctx)) {
       const source = ctx.readFile(file);
       if (source === undefined || subscribedEventsIn(source).length === 0) continue;
-      findings.push(infoFinding(`runtime/bus-handler-throws:${file}`, "runtime/bus-handler-throws", "a local module subscribes to events@1 with .on(...); with events-direct, a handler that throws now fails the emitting run with 500 instead of being logged and ignored", "make sure the handler cannot throw for an input it does not control, or catch and log inside it", { file }, "docs/upgrading.md#runtime-bus-handler-throws"));
+      findings.push(infoFinding(`runtime/bus-handler-throws:${file}`, "runtime/bus-handler-throws", "a local module subscribes to events@1 with .on(...); with events-direct, a handler that throws now fails the emitting run with 500 instead of being logged and ignored", "make sure the handler cannot throw for an input it does not control, or catch and log inside it", { file }, upgradingDocs("runtime-bus-handler-throws")));
     }
     return findings;
   },
@@ -58,7 +58,7 @@ export const busSubscriberQueueRule: Rule = {
       if (source === undefined) continue;
       const subscribed = subscribedEventsIn(source).filter((e) => triggerEvents.has(e));
       if (subscribed.length === 0) continue;
-      findings.push(infoFinding(`runtime/bus-subscriber-queue:${moduleName}`, "runtime/bus-subscriber-queue", `module "${moduleName}" subscribes to ${subscribed.join(", ")} with .on(...); with events-queue, a pipeline step's events.emit never touches the bus, so this subscriber stops seeing it`, "move the logic into a pipeline the event triggers, or keep events-direct", { file, module: moduleName }, "docs/upgrading.md#runtime-bus-subscriber-queue"));
+      findings.push(infoFinding(`runtime/bus-subscriber-queue:${moduleName}`, "runtime/bus-subscriber-queue", `module "${moduleName}" subscribes to ${subscribed.join(", ")} with .on(...); with events-queue, a pipeline step's events.emit never touches the bus, so this subscriber stops seeing it`, "move the logic into a pipeline the event triggers, or keep events-direct", { file, module: moduleName }, upgradingDocs("runtime-bus-subscriber-queue")));
     }
     return findings;
   },
@@ -70,7 +70,7 @@ export const typeSignaturesRule: SourceRule = {
   needs: "source",
   check() {
     return [
-      infoFinding("types/breaking-signatures", "types/breaking-signatures", "Deps.eventTriggers, Introspection.health(), PipelineDefinition[\"steps\"] (readonly PipelineEntry[]), ModuleManifest.atomicScope, FakePersistence's atomic members, Manifest.warnings and Kestrel[\"contracts\"].names() are all required now. Media: Media lost migrateKeys, gained serveFile, syncPublic, toPublicItem, publicCopyEnabled, anonymousListAllowed, sanitizesSvg and attach, and upload takes a fourth svgSanitized argument; MediaItem gained location and svgSanitized. Images: Images gained plan, syncPublic, publicCopyEnabled, publicPath and attach, and its Renderer takes a third planned argument; VariantState gained planned. Reading media through media@1: createImages takes deps.media (a media@1 provider) and images-default's Config lost media; Media extends MediaFiles (file, files, load, scan, count); MediaStatus gained removing", "run your own typecheck after installing the 6.0.0 packages; a hand-built implementation of any of these needs the new members", {}, "docs/upgrading.md#types-breaking-signatures"),
+      infoFinding("types/breaking-signatures", "types/breaking-signatures", "Deps.eventTriggers, Introspection.health(), PipelineDefinition[\"steps\"] (readonly PipelineEntry[]), ModuleManifest.atomicScope, FakePersistence's atomic members, Manifest.warnings and Kestrel[\"contracts\"].names() are all required now. Media: Media lost migrateKeys, gained serveFile, syncPublic, toPublicItem, publicCopyEnabled, anonymousListAllowed, sanitizesSvg and attach, and upload takes a fourth svgSanitized argument; MediaItem gained location and svgSanitized. Images: Images gained plan, syncPublic, publicCopyEnabled, variantCounts and attach, and its Renderer takes a third planned argument; VariantState gained planned. Reading media through media@1: createImages takes deps.media (a media@1 provider) and images-default's Config lost media; Media extends MediaFiles (file, files, load, scan, count); MediaStatus gained removing", "run your own typecheck after installing the 6.0.0 packages; a hand-built implementation of any of these needs the new members", {}, upgradingDocs("types-breaking-signatures")),
     ];
   },
 };
@@ -109,7 +109,7 @@ export const breakingStepShapesRule: Rule = {
         const bareName = step.split(":")[0]!;
         const change = STEP_SHAPE_CHANGES[bareName];
         if (change === undefined) continue;
-        findings.push(infoFinding(`responses/breaking-step-shapes:${def.name}:${bareName}`, "responses/breaking-step-shapes", `pipeline "${def.name}" runs "${bareName}", whose shape changed in 6.0.0: ${change}`, "update any client or test reading the old shape", { pipeline: def.name, step: bareName }, "docs/upgrading.md#responses-breaking-step-shapes"));
+        findings.push(infoFinding(`responses/breaking-step-shapes:${def.name}:${bareName}`, "responses/breaking-step-shapes", `pipeline "${def.name}" runs "${bareName}", whose shape changed in 6.0.0: ${change}`, "update any client or test reading the old shape", { pipeline: def.name, step: bareName }, upgradingDocs("responses-breaking-step-shapes")));
       }
     }
     return findings;
@@ -124,7 +124,7 @@ export const ctxDoneTerminalOutputRule: Rule = {
     for (const [moduleName, file] of localModuleFiles(ctx)) {
       const source = ctx.readFile(file);
       if (source === undefined || !source.includes("ctx.done(")) continue;
-      findings.push(infoFinding(`steps/ctx-done-terminal-output:${moduleName}`, "steps/ctx-done-terminal-output", `module "${moduleName}" calls ctx.done(); a step that ends the run this way without declaring terminalOutput now fails that run in every mode, one whose early result does not match its terminalOutput fails under validateOutput, and boot cannot see either by itself`, "add terminalOutput (the same schema as output when the early result has that shape) to every step that calls ctx.done()", { file, module: moduleName }, "docs/upgrading.md#steps-ctx-done-terminal-output"));
+      findings.push(infoFinding(`steps/ctx-done-terminal-output:${moduleName}`, "steps/ctx-done-terminal-output", `module "${moduleName}" calls ctx.done(); a step that ends the run this way without declaring terminalOutput now fails that run in every mode, one whose early result does not match its terminalOutput fails under validateOutput, and boot cannot see either by itself`, "add terminalOutput (the same schema as output when the early result has that shape) to every step that calls ctx.done()", { file, module: moduleName }, upgradingDocs("steps-ctx-done-terminal-output")));
     }
     return findings;
   },
@@ -138,7 +138,7 @@ export const runPipelineValidatesRule: Rule = {
     for (const [, file] of ctx.project.moduleFiles) {
       const source = ctx.readFile(file);
       if (source !== undefined && /testing\/runPipeline/.test(source)) {
-        findings.push(infoFinding(`tests/run-pipeline-validates:${file}`, "tests/run-pipeline-validates", "testing/runPipeline always validates ctx.result against the folded output schema now", "run your tests; one that produced an undeclared shape now fails", { file }, "docs/upgrading.md#tests-run-pipeline-validates"));
+        findings.push(infoFinding(`tests/run-pipeline-validates:${file}`, "tests/run-pipeline-validates", "testing/runPipeline always validates ctx.result against the folded output schema now", "run your tests; one that produced an undeclared shape now fails", { file }, upgradingDocs("tests-run-pipeline-validates")));
       }
     }
     return findings;
@@ -155,7 +155,7 @@ export const restoreFreshnessRule: Rule = {
       if (entry === undefined) continue;
       const restoreOnStart = isRecord(entry.config) && entry.config.restoreOnStart === false ? false : true;
       if (!restoreOnStart) continue;
-      findings.push(infoFinding(`runtime/restore-freshness:${token}`, "runtime/restore-freshness", `${entry.use} fails boot now when the database file was created during this boot while a restore point exists (restoreOnStart is on)`, "deploy so the database file already exists before the first 6.0.0 boot, or set restoreOnStart: false where that is not wanted", { module: entry.use }, "docs/upgrading.md#runtime-restore-freshness"));
+      findings.push(infoFinding(`runtime/restore-freshness:${token}`, "runtime/restore-freshness", `${entry.use} fails boot now when the database file was created during this boot while a restore point exists (restoreOnStart is on)`, "deploy so the database file already exists before the first 6.0.0 boot, or set restoreOnStart: false where that is not wanted", { module: entry.use }, upgradingDocs("runtime-restore-freshness")));
     }
     return findings;
   },
@@ -178,7 +178,7 @@ export const deliveryDependentsRule: Rule = {
     const dependencies = isRecord(entry.config) && isRecord(entry.config.dependencies) ? entry.config.dependencies : {};
     if (dependencies.render === "events" && !eventTriggers.some((t) => t.event === "delivery.outputStale" && runs(t.pipeline, "delivery.republishOutput"))) missing.push('dependencies.render is "events" but no trigger runs delivery.republishOutput on delivery.outputStale, which fails boot');
     if (missing.length === 0) return [];
-    return [infoFinding("delivery/dependents", "delivery/dependents", `delivery-static publishes on events, but ${missing.join("; ")}`, "add dependents pipelines (delivery.markDependents:<type>) on the change events of pages, settings, media and every collection a page shows, and a resumeStale cron; with render \"events\", also the delivery.outputStale and delivery.llmsStale job triggers", { file: ctx.project.configFile }, "docs/upgrading.md#delivery-dependents")];
+    return [infoFinding("delivery/dependents", "delivery/dependents", `delivery-static publishes on events, but ${missing.join("; ")}`, "add dependents pipelines (delivery.markDependents:<type>) on the change events of pages, settings, media and every collection a page shows, and a resumeStale cron; with render \"events\", also the delivery.outputStale and delivery.llmsStale job triggers", { file: ctx.project.configFile }, upgradingDocs("delivery-dependents"))];
   },
 };
 

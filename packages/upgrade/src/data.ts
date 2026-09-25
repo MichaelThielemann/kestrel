@@ -17,7 +17,7 @@ import { detectPlugin } from "./pluginRules.ts";
 import { loadIssuesAsFindings } from "./project.ts";
 import type { Finding, UpgradeReport } from "./report.ts";
 import { summarize } from "./report.ts";
-import { hookFailedFinding } from "./ruleHelpers.ts";
+import { hookFailedFinding, upgradingDocs } from "./ruleHelpers.ts";
 import { useToken } from "./useToken.ts";
 import { toolVersion } from "./versions.ts";
 
@@ -109,7 +109,7 @@ async function queueFindings(db: Persistence): Promise<{ findings: Finding[]; er
     message: `${n} stored event(s) named "${event}" are not yet fanned out to a pipeline`,
     suggestion: "at the first 6.0 tick these fan out to every pipeline subscribed then; drain the queue at cutover",
     fix: { kind: "none" },
-    docs: "docs/upgrading.md#cutover",
+    docs: upgradingDocs("cutover"),
   }));
 
   const deadRows = dead.value.items;
@@ -123,7 +123,7 @@ async function queueFindings(db: Persistence): Promise<{ findings: Finding[]; er
       message: `${deadRows.length} dead-letter row(s) have no pipeline assigned`,
       suggestion: "a retry re-fans them out to every pipeline currently subscribed",
       fix: { kind: "none" },
-      docs: "docs/upgrading.md#cutover",
+      docs: upgradingDocs("cutover"),
     });
   }
   return { findings };
@@ -154,7 +154,7 @@ function configLoadFailedFinding(err: unknown, pluginKind: string | undefined): 
       message: `the "${pluginKind}" plugin provides no dataModel hook, and kestrel.config.ts could not be loaded without it: ${detail}`,
       suggestion: `implement dataModel(root) on the "${pluginKind}" plugin, or count again with --data-report`,
       fix: { kind: "manual" },
-      docs: "docs/upgrading.md#data-config-load-failed",
+      docs: upgradingDocs("data-config-load-failed"),
     };
   }
   return {
@@ -166,7 +166,7 @@ function configLoadFailedFinding(err: unknown, pluginKind: string | undefined): 
     message: `kestrel.config.ts could not be loaded: ${detail}`,
     suggestion: "fix the config so it loads, then run data again to check underscore fields",
     fix: { kind: "manual" },
-    docs: "docs/upgrading.md#data-config-load-failed",
+    docs: upgradingDocs("data-config-load-failed"),
   };
 }
 
@@ -288,7 +288,7 @@ function underscoreFieldFindings(counts: Record<string, Record<string, number | 
       message: `"${key}": ${describeCounts(perLocale)}`,
       suggestion: "add a migration on the running 5.8.x instance (defineMigration) copying it to the new key before upgrading",
       fix: { kind: "none" },
-      docs: "docs/upgrading.md#model-underscore-field",
+      docs: upgradingDocs("model-underscore-field"),
     });
   }
   return findings;
@@ -331,7 +331,7 @@ async function mediaItemsLayoutFindings(db: Persistence, prefix: string): Promis
         message: `${offLayout.length} media_items row(s) use a blob key other than "${prefix}<id>/<name>" (first: ${offLayout[0]!.id} at "${offLayout[0]!.key}")`,
         suggestion: "media-default's setup() refuses to start with these; start 6.0.0 with an empty media store, or migrate the blob keys to the new layout by hand before upgrading",
         fix: { kind: "none" },
-        docs: "docs/upgrading.md#data-media-layout",
+        docs: upgradingDocs("data-media-layout"),
       },
     ];
   } catch {
@@ -354,7 +354,7 @@ async function unslottedCollectionFinding(db: Persistence, collection: string): 
       message: `${unslotted.value} row(s) in ${collection} have no slot; they were written before 6.0.0 and images-default's setup() refuses to start with any`,
       suggestion: `start 6.0.0 with an empty "${collection}" collection`,
       fix: { kind: "none" },
-      docs: "docs/upgrading.md#data-media-layout",
+      docs: upgradingDocs("data-media-layout"),
     };
   } catch {
     return undefined;
@@ -403,7 +403,7 @@ async function siteMediaLeftoversFindings(root: string): Promise<Finding[]> {
         message: `${entries.length} entr${entries.length === 1 ? "y" : "ies"} found under "${leftoversDir}", the 5.x delivery-static media export directory`,
         suggestion: 'review these by hand; media.syncPublic never touches this tree. Republish every page that might still link one of them, then delete the directory',
         fix: { kind: "manual" },
-        docs: "docs/upgrading.md#data-site-media-leftovers",
+        docs: upgradingDocs("data-site-media-leftovers"),
       },
     ];
   } catch {
@@ -449,7 +449,7 @@ async function blobstoreTmpSuffixFindings(root: string): Promise<Finding[]> {
       message: `${found.length} stored key(s) already end in "${TMP_SUFFIX}" (first: "${found[0]}")`,
       suggestion: "rename these keys by hand if they are meant to stay readable; 6.0.0 treats this suffix as its own atomic-write temp file and skips it",
       fix: { kind: "none" },
-      docs: "docs/upgrading.md#data-blobstore-tmp-suffix",
+      docs: upgradingDocs("data-blobstore-tmp-suffix"),
     },
   ];
 }

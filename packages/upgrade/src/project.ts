@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import type { BootInput, KestrelConfigInput, ModuleDefinition, PipelineDefinition } from "@michaelthielemann/kestrel";
 import { loadConfig, loadModule, loadPipelineFile, pipelineFiles } from "@michaelthielemann/kestrel/load";
 import type { LoadIssue, LoadResult, PipelineFile } from "./plugin.ts";
+import { upgradingDocs } from "./ruleHelpers.ts";
 import type { Finding } from "./report.ts";
 
 export type { LoadIssue, LoadResult } from "./plugin.ts";
@@ -63,6 +64,6 @@ export function loadIssuesAsFindings(issues: readonly LoadIssue[]): Finding[] {
     message: issue.message,
     suggestion: "fix the file so it loads, then run check again",
     fix: { kind: "manual" },
-    docs: "docs/upgrading.md#load",
+    docs: upgradingDocs("load"),
   }));
 }

@@ -2,7 +2,7 @@ import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
 import { insertPipelineStep } from "./edits.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding, FindingLocation } from "./report.ts";
-import { fileForPipeline, finding, hasModule } from "./ruleHelpers.ts";
+import { fileForPipeline, finding, hasModule, upgradingDocs } from "./ruleHelpers.ts";
 
 const RULE_ID = "pipelines/verified-user";
 
@@ -42,14 +42,14 @@ export const verifiedUserRule: Rule = {
 
       if (!hasModule(ctx, "authn-multi")) {
         const suggestion = hasModule(ctx, "authn-single") ? "authn-single has no verifyUser step; verify the target user by hand before this step" : "add authn-multi, or verify the target user by hand before this step";
-        findings.push(finding(`${RULE_ID}:${def.name}`, RULE_ID, message, suggestion, where, undefined, "docs/upgrading.md#pipelines-verified-user"));
+        findings.push(finding(`${RULE_ID}:${def.name}`, RULE_ID, message, suggestion, where, undefined, upgradingDocs("pipelines-verified-user")));
         continue;
       }
 
       const { hasHttp, hasEvent } = triggerKinds(ctx, def.name);
       const answer = ctx.answers.get(questionId(def.name));
       if (answer === "other" || answer === "split manually") {
-        findings.push(finding(`${RULE_ID}:${def.name}`, RULE_ID, message, "left manual: pick authn.verifyUser's path by hand and insert it before revisions.reassignAuthor", where, undefined, "docs/upgrading.md#pipelines-verified-user"));
+        findings.push(finding(`${RULE_ID}:${def.name}`, RULE_ID, message, "left manual: pick authn.verifyUser's path by hand and insert it before revisions.reassignAuthor", where, undefined, upgradingDocs("pipelines-verified-user")));
         continue;
       }
       let path: string | undefined;
@@ -67,7 +67,7 @@ export const verifiedUserRule: Rule = {
           message: `${message}, and its triggers do not decide the path by themselves`,
           suggestion: "choose where authn.verifyUser reads the target user id from",
           fix: { kind: "ask", question: questionId(def.name), prompt: "authn.verifyUser reads which path?", choices: ["reassignTo", "result.reassignTo", "other", "split manually"], closedChoices: true, defaultValue: "reassignTo" },
-          docs: "docs/upgrading.md#pipelines-verified-user",
+          docs: upgradingDocs("pipelines-verified-user"),
         });
         continue;
       }
@@ -78,7 +78,7 @@ export const verifiedUserRule: Rule = {
         const edit = insertPipelineStep(file, source, { pipelineName: def.name, anchorStep: "revisions.reassignAuthor", position: "before", newStep: `authn.verifyUser:${path}`, ...(ctx.locateSteps === undefined ? {} : { locateSteps: ctx.locateSteps }) });
         if (edit) edits.push(edit);
       }
-      findings.push(finding(`${RULE_ID}:${def.name}`, RULE_ID, message, `insert authn.verifyUser:${path} before revisions.reassignAuthor (it now rejects an unknown or inactive target with 404/400, where 5.8 accepted one)`, where, edits, "docs/upgrading.md#pipelines-verified-user"));
+      findings.push(finding(`${RULE_ID}:${def.name}`, RULE_ID, message, `insert authn.verifyUser:${path} before revisions.reassignAuthor (it now rejects an unknown or inactive target with 404/400, where 5.8 accepted one)`, where, edits, upgradingDocs("pipelines-verified-user")));
     }
     return findings;
   },

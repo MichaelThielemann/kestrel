@@ -2,7 +2,7 @@ import { addModuleEmits, allDescribedSteps } from "./edits.ts";
 import { objectProperty, objectPropertyNodes, propertyKeyName, type AstNode } from "./ast.ts";
 import type { Rule } from "./plugin.ts";
 import type { AskFix, Edit, Finding } from "./report.ts";
-import { finding, localModuleFiles, pipelinesTriggeredBy } from "./ruleHelpers.ts";
+import { finding, localModuleFiles, pipelinesTriggeredBy, upgradingDocs } from "./ruleHelpers.ts";
 
 const EMIT_CALL = /\.emit\(\s*(['"])([^'"]+)\1/g;
 
@@ -44,7 +44,7 @@ export const emitsRule: Rule = {
           const edit = addModuleEmits(file, source, events);
           if (edit) edits.push(edit);
         }
-        findings.push(finding(id, "modules/emits", `module "${moduleName}" raises ${missing.join(", ")} without declaring it in emits`, `emits: [${events.map((e) => `"${e}"`).join(", ")}] added`, where, edits, "docs/upgrading.md#modules-emits"));
+        findings.push(finding(id, "modules/emits", `module "${moduleName}" raises ${missing.join(", ")} without declaring it in emits`, `emits: [${events.map((e) => `"${e}"`).join(", ")}] added`, where, edits, upgradingDocs("modules-emits")));
         continue;
       }
       const fix: AskFix = { kind: "ask", question: questionId(moduleName), prompt: `which events does "${moduleName}" raise from its own setup()? (comma-separated, or "none" if ${missing.join(", ")} only ever comes from a pipeline step)`, choices: [missing.join(", "), "none"], defaultValue: missing.join(", ") };
@@ -57,7 +57,7 @@ export const emitsRule: Rule = {
         message: `module "${moduleName}" appears to raise ${missing.join(", ")} without declaring it in emits`,
         suggestion: "with events-queue, an undeclared event raised during setup() before the queue exists is lost",
         fix,
-        docs: "docs/upgrading.md#modules-emits",
+        docs: upgradingDocs("modules-emits"),
       });
     }
     return findings;
@@ -101,7 +101,7 @@ export const eventPayloadRule: Rule = {
         if (missing.length === 0) continue;
         const stepUsedOnEvent = [...stepsOnEventPipelines].some((s) => s.endsWith(`.${key}`));
         if (!stepUsedOnEvent) continue;
-        findings.push(finding(`steps/closed-event-input:${key}`, "steps/closed-event-input", `step "${key}"'s input schema rejects additional properties, so an event trigger's envelope (${missing.join(", ")}) is rejected`, `add ${missing.join(", ")} to input.properties, or drop additionalProperties: false`, { file, step: key }, undefined, "docs/upgrading.md#steps-closed-event-input"));
+        findings.push(finding(`steps/closed-event-input:${key}`, "steps/closed-event-input", `step "${key}"'s input schema rejects additional properties, so an event trigger's envelope (${missing.join(", ")}) is rejected`, `add ${missing.join(", ")} to input.properties, or drop additionalProperties: false`, { file, step: key }, undefined, upgradingDocs("steps-closed-event-input")));
       }
     }
     return findings;

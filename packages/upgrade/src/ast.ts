@@ -9,11 +9,13 @@ export interface AstNode {
   [key: string]: unknown;
 }
 
+/** Parses `source` as TypeScript source into a babel AST, read generically through {@link AstNode}. */
 export function parseTs(source: string): AstNode {
   const file = parse(source, { sourceType: "module", plugins: ["typescript"] });
   return boundaryCast<AstNode>(file, "host");
 }
 
+/** True when `value` looks like a babel AST node — judged by having a string `type`, nothing more specific. */
 export function isAstNode(value: unknown): value is AstNode {
   return typeof value === "object" && value !== null && typeof (value as { type?: unknown }).type === "string";
 }
@@ -38,6 +40,7 @@ export function walk(root: AstNode, visit: (node: AstNode, parent: AstNode | und
   visitValue(root, undefined);
 }
 
+/** Every node in the tree whose `type` equals `type`, in the order {@link walk} visits them. */
 export function findAll(root: AstNode, type: string): AstNode[] {
   const out: AstNode[] = [];
   walk(root, (node) => {
@@ -60,6 +63,7 @@ export function hasArrayHole(root: AstNode): boolean {
   return found;
 }
 
+/** The string value of a `StringLiteral` node; `undefined` for any other node, or a missing one. */
 export function stringValue(node: AstNode | undefined): string | undefined {
   if (node?.type !== "StringLiteral") return undefined;
   return typeof node.value === "string" ? node.value : undefined;
@@ -132,6 +136,7 @@ export function importSpans(source: string, packageName: string): Array<{ start:
   return spans;
 }
 
+/** An object property's key as a plain string — an identifier (`{ a: 1 }`) or a string literal (`{ "a": 1 }`); `undefined` for a computed or otherwise unreadable key. */
 export function propertyKeyName(prop: AstNode): string | undefined {
   const key = prop.key;
   if (!isNode(key)) return undefined;
@@ -139,12 +144,14 @@ export function propertyKeyName(prop: AstNode): string | undefined {
   return stringValue(key);
 }
 
+/** Every plain `key: value` property of an object literal, skipping spreads and any other property kind. */
 export function objectPropertyNodes(obj: AstNode): AstNode[] {
   if (obj.type !== "ObjectExpression") return [];
   const properties = Array.isArray(obj.properties) ? obj.properties : [];
   return properties.filter((p): p is AstNode => isNode(p) && p.type === "ObjectProperty");
 }
 
+/** The value node of the object literal's `key` property; `undefined` when it has no plain property by that name. */
 export function objectProperty(obj: AstNode, key: string): AstNode | undefined {
   for (const prop of objectPropertyNodes(obj)) {
     if (propertyKeyName(prop) !== key) continue;
@@ -153,14 +160,17 @@ export function objectProperty(obj: AstNode, key: string): AstNode | undefined {
   return undefined;
 }
 
+/** An object property's key node, when the key is itself an AST node. */
 export function propertyKeyNode(prop: AstNode): AstNode | undefined {
   return isNode(prop.key) ? prop.key : undefined;
 }
 
+/** True when `node` is an array literal (`[...]`). */
 export function isArrayExpression(node: unknown): node is AstNode {
   return isAstNode(node) && node.type === "ArrayExpression";
 }
 
+/** An array literal's elements, skipping holes (`[a, , b]`) and anything that is not itself an AST node. */
 export function arrayElements(node: AstNode): AstNode[] {
   return isArrayExpression(node) && Array.isArray(node.elements) ? node.elements.filter((e): e is AstNode => isAstNode(e)) : [];
 }
@@ -173,10 +183,12 @@ export function findCalls(root: AstNode, calleeName: string): AstNode[] {
   });
 }
 
+/** A call expression's first argument node, when it exists and is itself an AST node. */
 export function firstArgument(call: AstNode): AstNode | undefined {
   return Array.isArray(call.arguments) && isAstNode(call.arguments[0]) ? call.arguments[0] : undefined;
 }
 
+/** A node's source span; throws for a synthetic node with no source position. */
 export function span(node: AstNode): { start: number; end: number } {
   if (typeof node.start !== "number" || typeof node.end !== "number") throw new Error(`ast node "${node.type}" has no source position`);
   return { start: node.start, end: node.end };

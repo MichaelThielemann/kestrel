@@ -8,6 +8,13 @@ export { whereOf } from "./report.ts";
 
 export const KESTREL_RANGE = "^6.0.0";
 
+const UPGRADING_DOCS_URL = "https://github.com/MichaelThielemann/kestrel/blob/main/docs/upgrading.md";
+
+/** An absolute link into `docs/upgrading.md`: the installed package ships no `docs/` for a repo-relative link to resolve against. */
+export function upgradingDocs(anchor?: string): string {
+  return anchor === undefined ? UPGRADING_DOCS_URL : `${UPGRADING_DOCS_URL}#${anchor}`;
+}
+
 export function packageJsonPath(ctx: { root: string }): string {
   return join(ctx.root, "package.json");
 }
@@ -45,7 +52,7 @@ export function hookFailedFinding(pluginKind: string, hook: string, err: unknown
     message,
     suggestion: `fix ${hook}() in the "${pluginKind}" plugin so it does not throw`,
     fix: { kind: "manual" },
-    docs: "docs/upgrading.md#plugin-hook-failed",
+    docs: upgradingDocs("plugin-hook-failed"),
   };
 }
 
@@ -61,7 +68,7 @@ export function ruleCheckFailedFinding(ruleId: string, err: unknown): Finding {
     message,
     suggestion: `fix "${ruleId}"'s check() so it does not throw`,
     fix: { kind: "manual" },
-    docs: "docs/upgrading.md#plugin-hook-failed",
+    docs: upgradingDocs("plugin-hook-failed"),
   };
 }
 

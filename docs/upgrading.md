@@ -234,10 +234,12 @@ that file back with `check --data-report <report>.json` / `fix --data-report <re
   reporting what it saw so you can judge which locales need a migration.
 - No data report at all — the rule asks, with no default, and points at `kestrel-upgrade data`.
 - An explicit rename answer given without a data report proving the field empty is still applied,
-  but stays a visible warning in the report and in `fix --write`'s own output, naming the old column
-  and how to check it, until a later data report counts every locale of that old column empty — the
-  rule tracks the old, now-unwritten column by name, not by remembering the run that wrote the edit,
-  so the warning survives across runs even once the field itself no longer starts with `_`.
+  naming the old column and how to check it. Nothing remembers this across runs by itself: on a
+  later `check`/`fix` run given `--data-report <report>.json`, the rule probes the *new* field name's
+  own old, underscore-prefixed column directly against that report's raw counts, so it warns again as
+  long as the old column still holds data — even though the field itself no longer starts with `_` —
+  but a run given no `--data-report` at all stays silent about it, the same as any other data-report
+  question. Run `kestrel-upgrade data` again and pass its report to confirm the old column is empty.
 
 Where a stored value can exist, rename it in two phases instead of trusting a mechanical edit:
 

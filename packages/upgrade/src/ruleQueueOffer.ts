@@ -10,7 +10,7 @@ import { replaceDependency } from "./packageJson.ts";
 import type { LoadIssue, Rule, RuleContext, SwitchEditsResult } from "./plugin.ts";
 import type { AskFix, Edit, Finding } from "./report.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
-import { KESTREL_RANGE, combineEditParts, fileForPipeline, infoFinding, moduleEntry, packageJsonPath, verifyEditsWith, type UncheckedPipeline } from "./ruleHelpers.ts";
+import { KESTREL_RANGE, combineEditParts, fileForPipeline, infoFinding, moduleEntry, packageJsonPath, upgradingDocs, verifyEditsWith, type UncheckedPipeline } from "./ruleHelpers.ts";
 
 const RULE_ID = "offer/event-queue";
 const SERVERLESS_MARKERS = ["vercel.json", "netlify.toml", "wrangler.toml", "serverless.yml", "template.yaml"];
@@ -264,7 +264,7 @@ export const queueOfferRule: Rule = {
 
     const { unmet, unverified, noBootTier, unchecked, issues } = await offerGate(ctx);
     if (unmet.length > 0) {
-      return [infoFinding(RULE_ID, RULE_ID, `cannot switch to the queue: ${unmet.join("; ")}`, "resolve the conditions above and run check again", {}, "docs/upgrading.md#offer-event-queue")];
+      return [infoFinding(RULE_ID, RULE_ID, `cannot switch to the queue: ${unmet.join("; ")}`, "resolve the conditions above and run check again", {}, upgradingDocs("offer-event-queue"))];
     }
 
     const switchAnswer = ctx.answers.get("switch-to-queue");
@@ -274,7 +274,7 @@ export const queueOfferRule: Rule = {
         const { subject, instruction } = unverifiedGuidance(noBootTier, unchecked, issues);
         fix = { kind: "ask", question: "switch-to-queue", prompt: `switch event delivery to the queue? could not verify: ${subject}; ${instruction}. ${CONSEQUENCES}`, choices: ["no", "yes"], closedChoices: true };
       }
-      return [{ id: RULE_ID, rule: RULE_ID, severity: "info", tier: "source", where: {}, message: "can switch to the queue", suggestion: "run fix to be asked; check never decides this on its own", fix, docs: "docs/upgrading.md#offer-event-queue" }];
+      return [{ id: RULE_ID, rule: RULE_ID, severity: "info", tier: "source", where: {}, message: "can switch to the queue", suggestion: "run fix to be asked; check never decides this on its own", fix, docs: upgradingDocs("offer-event-queue") }];
     }
     if (switchAnswer !== "yes") return [];
 
@@ -283,7 +283,7 @@ export const queueOfferRule: Rule = {
     if (unresolvedIdempotent.length > 0) {
       return unresolvedIdempotent.map((p): Finding => {
         const fix: AskFix = { kind: "ask", question: `idempotent:${p}`, prompt: `is pipeline "${p}" safe to run twice for one event, or does it deduplicate by eventId?`, choices: ["no", "yes"], closedChoices: true, defaultValue: "no" };
-        return { id: `${RULE_ID}:idempotent:${p}`, rule: RULE_ID, severity: "info", tier: "source", where: { pipeline: p }, message: `at-least-once delivery may run "${p}" more than once for one event`, suggestion: "a \"no\" withdraws the switch", fix, docs: "docs/upgrading.md#offer-event-queue" };
+        return { id: `${RULE_ID}:idempotent:${p}`, rule: RULE_ID, severity: "info", tier: "source", where: { pipeline: p }, message: `at-least-once delivery may run "${p}" more than once for one event`, suggestion: "a \"no\" withdraws the switch", fix, docs: upgradingDocs("offer-event-queue") };
       });
     }
     if (eventPipelines.some((p) => ctx.answers.get(`idempotent:${p}`) === "no")) return [];
@@ -292,7 +292,7 @@ export const queueOfferRule: Rule = {
     if (relayAnswer === undefined) {
       const relayDefault = defaultRelayPipelines(ctx);
       const fix: AskFix = { kind: "ask", question: "relay-pipelines", prompt: "which pipelines should still deliver inside the write request (relayPipelines)?", choices: [relayDefault.join(", ")], defaultValue: relayDefault.join(", ") };
-      return [{ id: `${RULE_ID}:relay-pipelines`, rule: RULE_ID, severity: "info", tier: "source", where: {}, message: "which pipelines keep their delivery inside the request", suggestion: "without a pipeline here, relayPipelines has nothing to deliver inside the request", fix, docs: "docs/upgrading.md#offer-event-queue" }];
+      return [{ id: `${RULE_ID}:relay-pipelines`, rule: RULE_ID, severity: "info", tier: "source", where: {}, message: "which pipelines keep their delivery inside the request", suggestion: "without a pipeline here, relayPipelines has nothing to deliver inside the request", fix, docs: upgradingDocs("offer-event-queue") }];
     }
 
     const relayPipelines = relayAnswer
@@ -313,7 +313,7 @@ export const queueOfferRule: Rule = {
           message: `relay-pipelines names a pipeline this project does not have: ${unknownNames.join(", ")}`,
           suggestion: `the project's pipelines are: ${[...knownPipelines].join(", ") || "(none)"}`,
           fix: { kind: "manual" },
-          docs: "docs/upgrading.md#offer-event-queue",
+          docs: upgradingDocs("offer-event-queue"),
         },
       ];
     }
@@ -331,7 +331,7 @@ export const queueOfferRule: Rule = {
           message: `could not verify the switch: ${subject}`,
           suggestion: instruction,
           fix: { kind: "manual" },
-          docs: "docs/upgrading.md#offer-event-queue",
+          docs: upgradingDocs("offer-event-queue"),
         },
       ];
     }
@@ -346,7 +346,7 @@ export const queueOfferRule: Rule = {
           message: `the switch with relayPipelines: [${relayPipelines.join(", ")}] fails to boot: ${finalVerification.newErrors.map((e) => e.reason).join("; ")}`,
           suggestion: "answer relay-pipelines differently, or resolve the boot error above",
           fix: { kind: "manual" },
-          docs: "docs/upgrading.md#offer-event-queue",
+          docs: upgradingDocs("offer-event-queue"),
         },
       ];
     }
@@ -365,7 +365,7 @@ export const queueOfferRule: Rule = {
             ? `events-queue replaces events-direct with relayPipelines: [${relayPipelines.join(", ")}] by hand; could not locate: ${missing.join(", ")}`
             : `events-queue replaces events-direct with relayPipelines: [${relayPipelines.join(", ")}]; run pnpm install afterwards`,
         fix: edits.length > 0 ? { kind: "auto", edits } : { kind: "manual" },
-        docs: "docs/upgrading.md#offer-event-queue",
+        docs: upgradingDocs("offer-event-queue"),
       },
     ];
   },

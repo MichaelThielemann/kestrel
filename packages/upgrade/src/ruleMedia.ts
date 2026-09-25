@@ -4,7 +4,7 @@ import { createPipelineFile, insertTriggers, removeModuleConfigProperty, replace
 import { isRecord } from "./guards.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
-import { combineEditParts, finding, fileForPipeline, hasModule, infoFinding, moduleEntry, pipelinesTriggeredBy } from "./ruleHelpers.ts";
+import { combineEditParts, finding, fileForPipeline, hasModule, infoFinding, moduleEntry, pipelinesTriggeredBy, upgradingDocs } from "./ruleHelpers.ts";
 
 function normalizePublicPath(path: string): string {
   return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
@@ -29,7 +29,7 @@ export const deliveryMediaRule: Rule = {
     const message = 'delivery-static\'s "media" option is removed in 6.0.0; media-default and images-default\'s publicCopy replace the URL rewriting and copying it did';
     const publicPathNote = publicPath === "/media" ? "" : `, and publicPath: "${publicPath}" on media-default and images-default`;
     const suggestion = `remove "media" from delivery-static, set publicCopy: { prefix: "${deliveryPrefix}" } on media-default and images-default, add reservedPaths: ["${publicPath}"] to delivery-static${publicPathNote}`;
-    const docs = "docs/upgrading.md#modules-delivery-media";
+    const docs = upgradingDocs("modules-delivery-media");
 
     const mediaDefault = moduleEntry(ctx, "media-default");
     const source = ctx.readFile(ctx.project.configFile);
@@ -78,7 +78,7 @@ export const mediaPublicPathRule: Rule = {
     const where = { module: imagesDefault.use, path: "publicPath" };
     const message = `images-default's publicPath ("${rawImagesPath}") does not match media-default's ("${mediaPath}"); a mismatch answers 404 for every image variant path`;
     const suggestion = `set images-default's publicPath to "${mediaPath}"`;
-    const docs = "docs/upgrading.md#modules-media-public-path";
+    const docs = upgradingDocs("modules-media-public-path");
     const source = ctx.readFile(ctx.project.configFile);
     if (source === undefined) return [finding(MEDIA_PUBLIC_PATH_RULE_ID, MEDIA_PUBLIC_PATH_RULE_ID, message, `${suggestion} by hand`, where, undefined, docs, "warning")];
     const edits = setModuleConfigProperties(ctx.project.configFile, source, { use: imagesDefault.use, assignments: { publicPath: `"${mediaPath}"` } });
@@ -103,7 +103,7 @@ export const authzAnonymousFloorRule: Rule = {
         `authz-roles's anonymous grants (${anonymous.join(", ")}) are now also held by every signed-in caller, in authz.require, can and describePipelineAccess — a signed-in caller refused one of these before is served now`,
         "remove a permission from anonymous if a signed-in caller lacking it must still be refused",
         { module: authz.use },
-        "docs/upgrading.md#runtime-authz-anonymous-floor",
+        upgradingDocs("runtime-authz-anonymous-floor"),
       ),
     ];
   },
@@ -140,7 +140,7 @@ export const removedExportRule: Rule = {
             "rewrite this by hand: delivery-static no longer rewrites, copies or reads media; reach a media file through the API's own path (media.get/media.list's path field) and set publicCopy on the media modules for a static copy instead",
             { file, module: moduleName },
             undefined,
-            "docs/upgrading.md#imports-removed-export",
+            upgradingDocs("imports-removed-export"),
           ),
         );
       }
@@ -153,7 +153,7 @@ export const removedExportRule: Rule = {
             "remove the call; a stored item's key not matching <prefix><id>/<name> now fails setup instead, naming the first such item",
             { file, module: moduleName },
             undefined,
-            "docs/upgrading.md#imports-removed-export",
+            upgradingDocs("imports-removed-export"),
           ),
         );
       }
@@ -213,7 +213,7 @@ export const mediaServeRule: Rule = {
 
     const needsMediaServe = mediaPublicCopy && !runsStep(ctx, "media.serve");
     const needsImagesServe = imagesPublicCopy && !runsStep(ctx, "images.serve");
-    const docs = "docs/upgrading.md#pipelines-media-serve";
+    const docs = upgradingDocs("pipelines-media-serve");
     if (needsMediaServe || needsImagesServe) {
       const publicPath = expectedPublicPath(ctx);
       const missingSteps = [needsMediaServe ? "media.serve" : undefined, needsImagesServe ? "images.serve" : undefined].filter((s): s is string => s !== undefined);
@@ -276,7 +276,7 @@ export const mediaRepairRule: Rule = {
     const message = "publicCopy is set, but no pipeline runs media.syncPublic or images.syncPublic; the public copy tree drifts from what is stored without a repair pass";
     const suggestion =
       "add a repairPublicMedia pipeline (steps: authn.requireUser, authz.require:media.manage, media.syncPublic, images.syncPublic) behind an admin HTTP trigger, and a syncPublicMedia pipeline (steps: media.syncPublic, images.syncPublic) on a nightly cron trigger";
-    const docs = "docs/upgrading.md#pipelines-media-repair";
+    const docs = upgradingDocs("pipelines-media-repair");
     const dir = pipelinesDirOf(ctx);
     const configSource = ctx.readFile(ctx.project.configFile);
     if (dir === undefined || configSource === undefined) {
@@ -317,7 +317,7 @@ export const imagesResumeCronRule: Rule = {
         'add a resumeImages pipeline (steps: ["images.resume"]) on a cron trigger, e.g. { cron: "*/5 * * * *", pipeline: "resumeImages" }',
         {},
         undefined,
-        "docs/upgrading.md#pipelines-images-resume-cron",
+        upgradingDocs("pipelines-images-resume-cron"),
         "warning",
       ),
     ];
@@ -344,7 +344,7 @@ export const mediaDeleteOrderRule: Rule = {
         if (mediaIndex === -1 || imagesIndex === -1 || mediaIndex < imagesIndex) continue;
         const message = `pipeline "${def.name}" runs ${imagesStep} before ${mediaStep}; a render finishing after the delete can leave a public copy or a private blob behind`;
         const suggestion = `move ${mediaStep} before ${imagesStep}`;
-        const docs = "docs/upgrading.md#pipelines-media-delete-order";
+        const docs = upgradingDocs("pipelines-media-delete-order");
         const file = fileForPipeline(ctx, def.name);
         const source = file === undefined ? undefined : ctx.readFile(file);
         if (file === undefined || source === undefined) {
@@ -362,7 +362,7 @@ export const mediaDeleteOrderRule: Rule = {
             `pipeline "${def.name}" runs media.removeFolder without events.emit:media.deleted afterwards`,
             "add events.emit:media.deleted (and events.relay) after the removal, so a subscriber can react to the deleted ids",
             { pipeline: def.name },
-            "docs/upgrading.md#pipelines-media-delete-order",
+            upgradingDocs("pipelines-media-delete-order"),
           ),
         );
       }
@@ -389,7 +389,7 @@ export const anonymousMediaListRule: Rule = {
         'authz-roles grants anonymous media.read, but media-default\'s anonymousList is "ids" (the default): an anonymous caller can still only fetch media by explicit ids, not list or browse folders (401)',
         'set media-default\'s anonymousList to "all" to let anonymous callers list and browse folders too, or leave it as is if that is intended',
         { module: mediaDefault.use },
-        "docs/upgrading.md#runtime-anonymous-media-list",
+        upgradingDocs("runtime-anonymous-media-list"),
       ),
     ];
   },
@@ -412,7 +412,7 @@ export const binaryCacheControlRule: Rule = {
           `module "${moduleName}" mentions cache-control in its own code; a binary step result's own cache-control header used to be silently replaced with no-store, but 6.0.0 sends it as given`,
           "review any binary step result this module returns: a non-empty cache-control it sets is now honoured instead of being overridden",
           { file, module: moduleName },
-          "docs/upgrading.md#responses-binary-cache-control",
+          upgradingDocs("responses-binary-cache-control"),
         ),
       );
     }
@@ -439,7 +439,7 @@ export const imagesPlanRule: Rule = {
           "review by hand: with direct event delivery, images.generate now plans internally, so a standalone images.plan step can usually be removed; with queue delivery and lane-based bulk pipelines, split this into a main-lane planImageVariants and a generateImageVariants triggered on images.planned instead",
           { pipeline: def.name },
           undefined,
-          "docs/upgrading.md#pipelines-images-plan",
+          upgradingDocs("pipelines-images-plan"),
           "warning",
         ),
       );
@@ -464,7 +464,7 @@ export const imagesMediaOptionRule: Rule = {
       ? `images-default's "media" option (collection "${collection}") is removed in 6.0.0; images-default reads media only through media@1 and fails boot while the option is set`
       : 'images-default\'s "media" option is removed in 6.0.0; images-default reads media only through media@1 (media-default provides it) and fails boot while the option is set';
     const suggestion = custom ? 'remove "media" from images-default; images-default reads media only through media@1 now, so make sure the module that owns that store provides media@1' : 'remove "media" from images-default';
-    const docs = "docs/upgrading.md#modules-images-media-option";
+    const docs = upgradingDocs("modules-images-media-option");
     const severity = custom ? "warning" : "error";
     const source = ctx.readFile(ctx.project.configFile);
     const edit = source === undefined ? undefined : removeModuleConfigProperty(ctx.project.configFile, source, { use: images.use, key: "media" });
@@ -481,7 +481,7 @@ export const referencesMediaTargetRule: Rule = {
     const references = moduleEntry(ctx, "references-default");
     if (references === undefined || !isRecord(references.config) || !isRecord(references.config.targets)) return [];
     const mediaProvided = hasModule(ctx, "media-default");
-    const docs = "docs/upgrading.md#modules-references-media-target";
+    const docs = upgradingDocs("modules-references-media-target");
     const source = ctx.readFile(ctx.project.configFile);
     const findings: Finding[] = [];
     for (const [name, target] of Object.entries(references.config.targets)) {
@@ -520,7 +520,7 @@ export const imagesVariantsChangedRule: Rule = {
         `pipeline "${pipeline}" runs on media.updated; images-default announces that an item's variants changed (placed, a size added or changed, a size pruned) as images.variantsChanged, never as media.updated`,
         `if "${pipeline}" should also react to variant changes (it re-renders pages that show media, for one), add the trigger { event: "images.variantsChanged", pipeline: "${pipeline}" }`,
         { pipeline },
-        "docs/upgrading.md#events-images-variants-changed",
+        upgradingDocs("events-images-variants-changed"),
       ),
     );
   },

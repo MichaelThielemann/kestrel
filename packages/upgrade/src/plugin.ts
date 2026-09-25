@@ -39,10 +39,15 @@ export interface PipelineFile {
  * that root.
  */
 export interface LoadedProject {
+  /** What `checkBoot()` needs to run against the project: its config, modules and pipelines, already loaded. */
   input: BootInput;
+  /** The project shape this came from (e.g. a host framework's name), for a rule that only applies to one kind. */
   kind: string;
+  /** The project's own `kestrel.config.ts` (or equivalent), inside the `scratch` directory `load()` was given. */
   configFile: string;
+  /** Every loaded module's file, keyed by its `use` string. */
   moduleFiles: ReadonlyMap<string, string>;
+  /** Every file the project's pipelines live in. */
   pipelineFiles: readonly PipelineFile[];
   /** A plugin's own project-specific data, in whatever shape it likes; `check`/`fix` never reads or writes this. */
   data?: Record<string, unknown>;
@@ -164,6 +169,7 @@ export function createRuleContext(project: LoadedProject, overrides: Partial<Omi
 export interface ProjectRule {
   id: string;
   needs?: "project";
+  /** Turns the loaded project, its boot check and any prior answers into this round's findings for this rule. */
   check(ctx: RuleContext): readonly Finding[] | Promise<readonly Finding[]>;
 }
 
@@ -175,6 +181,7 @@ export interface ProjectRule {
 export interface SourceRule {
   id: string;
   needs: "source";
+  /** Turns the project's root, its files and any prior answers into this round's findings for this rule. */
   check(ctx: SourceRuleContext): readonly Finding[] | Promise<readonly Finding[]>;
 }
 
@@ -190,7 +197,9 @@ export interface SourceRule {
 export type Rule = ProjectRule | SourceRule;
 
 export interface UpgradePlugin {
+  /** Identifies this plugin's project shape (e.g. a host framework's name), reported as `LoadedProject.kind`. */
   kind: string;
+  /** True when `root` is a project this plugin knows how to load; the engine tries each registered plugin in turn. */
   detect(root: string): boolean | Promise<boolean>;
   /**
    * Loads the project at `root` into `scratch`, a fresh, uniquely-named directory this call alone
@@ -219,6 +228,7 @@ export interface UpgradePlugin {
    * warning.
    */
   sandbox?: Record<string, (config: unknown, scratch: string) => unknown>;
+  /** Additional rules this plugin contributes, run alongside the built-in ones. */
   rules?: readonly Rule[];
   /** Locates a pipeline's own step array(s) directly, for a project layout where a pipeline is not a `definePipeline({ name, steps })` call; the built-in search runs when this is absent. */
   locateSteps?: StepListLocator;

@@ -1,7 +1,7 @@
 import { markStepBinary, setStepRequired, stepOutputPropertyNames } from "./edits.ts";
 import type { Rule } from "./plugin.ts";
 import type { AskFix, Edit, Finding } from "./report.ts";
-import { finding, moduleOwningStep, shortStepKey, whereOf } from "./ruleHelpers.ts";
+import { finding, moduleOwningStep, shortStepKey, upgradingDocs, whereOf } from "./ruleHelpers.ts";
 
 function wrapManual(ruleId: string, code: string, docsAnchor: string): Rule {
   return {
@@ -10,7 +10,7 @@ function wrapManual(ruleId: string, code: string, docsAnchor: string): Rule {
       return ctx.bootCheck.errors
         .filter((e) => e.code === code)
         .map((e) =>
-          finding(`${ruleId}:${e.pipeline ?? e.module ?? ""}:${e.step ?? ""}:${e.path ?? ""}`, ruleId, e.reason, "this needs a human decision; boot() names the exact location above", whereOf({ pipeline: e.pipeline, module: e.module, step: e.step, path: e.path }), undefined, `docs/upgrading.md#${docsAnchor}`),
+          finding(`${ruleId}:${e.pipeline ?? e.module ?? ""}:${e.step ?? ""}:${e.path ?? ""}`, ruleId, e.reason, "this needs a human decision; boot() names the exact location above", whereOf({ pipeline: e.pipeline, module: e.module, step: e.step, path: e.path }), undefined, upgradingDocs(docsAnchor)),
         );
     },
   };
@@ -26,7 +26,7 @@ export const undeclaredOutputRule: Rule = {
         const owner = moduleOwningStep(ctx, e.step ?? "");
         const id = `steps/undeclared-output:${e.pipeline ?? ""}:${e.step ?? ""}`;
         const where = whereOf({ pipeline: e.pipeline, module: owner?.name, step: e.step });
-        if (owner?.file === undefined) return finding(id, "steps/undeclared-output", e.reason, "the owning module's file could not be located; declare output, extendsOutput, extendsItems or binary: true by hand", where, undefined, "docs/upgrading.md#steps-undeclared-output");
+        if (owner?.file === undefined) return finding(id, "steps/undeclared-output", e.reason, "the owning module's file could not be located; declare output, extendsOutput, extendsItems or binary: true by hand", where, undefined, upgradingDocs("steps-undeclared-output"));
         const answer = ctx.answers.get(`binary:${owner.name}.${shortStepKey(e.step ?? "")}`);
         if (answer === "yes") {
           const source = ctx.readFile(owner.file);
@@ -35,11 +35,11 @@ export const undeclaredOutputRule: Rule = {
             const edit = markStepBinary(owner.file, source, shortStepKey(e.step ?? ""));
             if (edit) edits.push(edit);
           }
-          return finding(id, "steps/undeclared-output", e.reason, `binary: true added to ${e.step}'s describe() entry`, where, edits, "docs/upgrading.md#steps-undeclared-output");
+          return finding(id, "steps/undeclared-output", e.reason, `binary: true added to ${e.step}'s describe() entry`, where, edits, upgradingDocs("steps-undeclared-output"));
         }
-        if (answer === "no") return finding(id, "steps/undeclared-output", e.reason, "declare output, extendsOutput or extendsItems by hand", where, undefined, "docs/upgrading.md#steps-undeclared-output");
+        if (answer === "no") return finding(id, "steps/undeclared-output", e.reason, "declare output, extendsOutput or extendsItems by hand", where, undefined, upgradingDocs("steps-undeclared-output"));
         const fix: AskFix = { kind: "ask", question: `binary:${owner.name}.${shortStepKey(e.step ?? "")}`, prompt: `is "${e.step}"'s result a binary body?`, choices: ["no", "yes"], closedChoices: true, defaultValue: "no" };
-        return { id, rule: "steps/undeclared-output", severity: "error", tier: "boot", where, message: e.reason, suggestion: "a \"yes\" adds binary: true; a \"no\" stays manual (declare output/extendsOutput/extendsItems by hand)", fix, docs: "docs/upgrading.md#steps-undeclared-output" } satisfies Finding;
+        return { id, rule: "steps/undeclared-output", severity: "error", tier: "boot", where, message: e.reason, suggestion: "a \"yes\" adds binary: true; a \"no\" stays manual (declare output/extendsOutput/extendsItems by hand)", fix, docs: upgradingDocs("steps-undeclared-output") } satisfies Finding;
       });
   },
 };
@@ -56,7 +56,7 @@ export const undeclaredRequiredRule: Rule = {
         const where = whereOf({ pipeline: e.pipeline, module: owner?.name, step: e.step, path: e.path });
         const questionId = `required:${owner?.name ?? ""}.${shortStepKey(e.step ?? "")}:${e.path ?? ""}`;
         if (owner?.file === undefined || e.path !== "$.output") {
-          return finding(id, "steps/undeclared-required", e.reason, "declare required at this schema path by hand (only the top-level $.output schema is edited automatically)", where, undefined, "docs/upgrading.md#steps-undeclared-required");
+          return finding(id, "steps/undeclared-required", e.reason, "declare required at this schema path by hand (only the top-level $.output schema is edited automatically)", where, undefined, upgradingDocs("steps-undeclared-required"));
         }
         const answer = ctx.answers.get(questionId);
         if (answer !== undefined && answer !== "manual") {
@@ -68,12 +68,12 @@ export const undeclaredRequiredRule: Rule = {
               const edit = setStepRequired(owner.file, source, shortStepKey(e.step ?? ""), properties);
               if (edit) edits.push(edit);
             }
-            return finding(id, "steps/undeclared-required", e.reason, `required: [${properties.map((p) => `"${p}"`).join(", ")}] added`, where, edits, "docs/upgrading.md#steps-undeclared-required");
+            return finding(id, "steps/undeclared-required", e.reason, `required: [${properties.map((p) => `"${p}"`).join(", ")}] added`, where, edits, upgradingDocs("steps-undeclared-required"));
           }
-          return finding(id, "steps/undeclared-required", e.reason, `"all" could not locate "${e.step}"'s output.properties this way (a factory step, or a shape this cannot parse); list the always-present properties by hand instead of "all"`, where, undefined, "docs/upgrading.md#steps-undeclared-required");
+          return finding(id, "steps/undeclared-required", e.reason, `"all" could not locate "${e.step}"'s output.properties this way (a factory step, or a shape this cannot parse); list the always-present properties by hand instead of "all"`, where, undefined, upgradingDocs("steps-undeclared-required"));
         }
         const fix: AskFix = { kind: "ask", question: questionId, prompt: `which of "${e.step}"'s output properties are always present? (comma-separated, "all", or "none")`, choices: ["all", "none", "<comma-separated>", "manual"] };
-        return { id, rule: "steps/undeclared-required", severity: "error", tier: "boot", where, message: e.reason, suggestion: "no default: declaring required makes a claim nobody verified yet", fix, docs: "docs/upgrading.md#steps-undeclared-required" } satisfies Finding;
+        return { id, rule: "steps/undeclared-required", severity: "error", tier: "boot", where, message: e.reason, suggestion: "no default: declaring required makes a claim nobody verified yet", fix, docs: upgradingDocs("steps-undeclared-required") } satisfies Finding;
       });
   },
 };
@@ -89,7 +89,7 @@ export const unwrittenOptionalReadRule: Rule = {
   check(ctx) {
     return ctx.bootCheck.warnings
       .filter((w) => w.code === "unwritten-optional-read")
-      .map((w) => finding(`pipelines/unwritten-optional-read:${w.pipeline}:${w.step}:${w.key}`, "pipelines/unwritten-optional-read", w.message, "almost always a typo in the key; check the reading step by hand", whereOf({ pipeline: w.pipeline, step: w.step, path: w.key }), undefined, "docs/upgrading.md#pipelines-unwritten-optional-read", "warning"));
+      .map((w) => finding(`pipelines/unwritten-optional-read:${w.pipeline}:${w.step}:${w.key}`, "pipelines/unwritten-optional-read", w.message, "almost always a typo in the key; check the reading step by hand", whereOf({ pipeline: w.pipeline, step: w.step, path: w.key }), undefined, upgradingDocs("pipelines-unwritten-optional-read"), "warning"));
   },
 };
 

@@ -962,6 +962,9 @@ Net changes since 5.8.1.
   broken. `steps/undeclared-required`'s `"all"` answer for a step this cannot locate this way (a
   factory step, say) reports why, naming the step, instead of repeating the same question with no
   explanation.
+- `kestrel-upgrade`: every finding's `docs` field is now an absolute URL into `docs/upgrading.md` on
+  GitHub instead of a path relative to the repository; the installed package ships no `docs/` for a
+  relative path to resolve against.
 
 ## 5.8.1 – 2026-09-22
 

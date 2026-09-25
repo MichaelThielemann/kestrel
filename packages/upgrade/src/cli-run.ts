@@ -16,7 +16,7 @@ import type { AskFix, LoadedProject, Rule, RuleContext, RunUpgradeCliOptions, So
 import { detectPlugin, mergeRules, mergeSandboxEntries } from "./pluginRules.ts";
 import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity, type UpgradeReport } from "./report.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
-import { hookFailedFinding, ruleCheckFailedFinding, verifyEditsWith, type VerifyEditsResult } from "./ruleHelpers.ts";
+import { hookFailedFinding, ruleCheckFailedFinding, upgradingDocs, verifyEditsWith, type VerifyEditsResult } from "./ruleHelpers.ts";
 import { sandboxBootInput, type SandboxTable } from "./sandbox.ts";
 import { createScratchCopy, removeScratchCopy, type ScratchCopy } from "./scratch.ts";
 import { verifiesAfterEdit } from "./verify.ts";
@@ -218,7 +218,7 @@ function bootErrorFinding(problem: BootProblem): Finding {
     message: problem.reason,
     suggestion: "see docs/upgrading.md for this boot error code",
     fix: { kind: "manual" },
-    docs: "docs/upgrading.md#boot-code",
+    docs: upgradingDocs("boot-code"),
   };
 }
 
@@ -242,7 +242,7 @@ function refusedEditFinding(issue: LoadIssue): Finding {
     message: issue.message,
     suggestion: "review the edit and the rule or plugin hook that produced it",
     fix: { kind: "none" },
-    docs: "docs/upgrading.md#preview-edit-refused",
+    docs: upgradingDocs("preview-edit-refused"),
   };
 }
 
@@ -289,7 +289,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         message: "the project's @michaelthielemann/kestrel* dependencies mix majors",
         suggestion: "run fix to bump every out-of-range dependency to ^6.0.0, then pnpm install",
         fix: { kind: "manual" },
-        docs: "docs/upgrading.md#deps-kestrel-range",
+        docs: upgradingDocs("deps-kestrel-range"),
       });
     }
     if (kestrelMajor !== undefined && kestrelMajor < 6) {
@@ -302,7 +302,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         message: "the 5.x packages are installed; this run sees the source tier only",
         suggestion: "install the 6.0.0 packages and run check again for the load and boot checks",
         fix: { kind: "none" },
-        docs: "docs/upgrading.md",
+        docs: upgradingDocs(),
       });
     }
 
@@ -349,7 +349,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
             message: `plugin "${plugin?.kind ?? ""}"'s sandbox entry "${key}" matches no module-list entry, so it rewrites nothing`,
             suggestion: "key the entry by a module-list entry's full use string, without a ?/# suffix",
             fix: { kind: "manual" },
-            docs: "docs/upgrading.md#sandbox-unmatched-entry",
+            docs: upgradingDocs("sandbox-unmatched-entry"),
           });
         }
         for (const use of box.replaced) {
@@ -362,7 +362,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
             message: "blobstore replaced by a local stand-in for the check",
             suggestion: "the real module's own setup() never ran here; this only proves the modules requiring blobstore@1 boot",
             fix: { kind: "none" },
-            docs: "docs/upgrading.md#sandbox-blobstore-standin",
+            docs: upgradingDocs("sandbox-blobstore-standin"),
           });
         }
 
@@ -480,7 +480,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
           message: `${item.kind} "${item.name}" was not checked: ${item.because}`,
           suggestion: outside.includes(item.name) ? `run with --run-setup ${item.name} to include it` : "see docs/upgrading.md",
           fix: { kind: "none" },
-          docs: "docs/upgrading.md#not-checked",
+          docs: upgradingDocs("not-checked"),
         });
       }
     }

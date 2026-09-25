@@ -290,6 +290,7 @@ function insertRelativeToAnchor(file: string, source: string, array: AstNode, an
   return { file, start: lineStart, end: lineStart, text: `${indent}${literal},${eol}` };
 }
 
+/** A plugin hook that finds `pipelineName`'s own step array node(s) in a parsed source file, for a project layout the built-in search does not recognize; an empty result falls back to that search. */
 export type StepListLocator = (root: AstNode, pipelineName: string) => readonly AstNode[];
 
 export interface InsertStepOptions {
@@ -589,6 +590,7 @@ export function stepOutputPropertyNames(source: string, stepName: string): strin
   return names;
 }
 
+/** A plugin hook that finds `typeName`'s `fields` object literal node in a parsed source file, for a project layout the built-in search does not recognize; `undefined` falls back to that search. */
 export type ModelFieldsLocator = (root: AstNode, options: { use: string; typeName: string }) => AstNode | undefined;
 
 function builtInModelFields(root: AstNode, use: string, typeName: string): AstNode | undefined {

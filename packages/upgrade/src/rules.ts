@@ -7,7 +7,7 @@ import { isRecord } from "./guards.ts";
 import { setDependencyRange } from "./packageJson.ts";
 import type { Rule, RuleContext, SourceRule } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
-import { combineEditParts, finding, KESTREL_RANGE, moduleEntry, packageJsonPath } from "./ruleHelpers.ts";
+import { combineEditParts, finding, KESTREL_RANGE, moduleEntry, packageJsonPath, upgradingDocs } from "./ruleHelpers.ts";
 import { bootWrapRules } from "./ruleBootWraps.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { fieldGrantRules } from "./ruleFieldGrants.ts";
@@ -55,7 +55,7 @@ export const eventDeliveryRule: Rule = {
         "@michaelthielemann/kestrel-events-direct",
         "an event trigger or events.emit needs exactly one delivery module (events-direct or events-queue) next to events-inmemory",
         "add @michaelthielemann/kestrel-events-direct after kestrel-events-inmemory",
-        "docs/upgrading.md#modules-event-delivery",
+        upgradingDocs("modules-event-delivery"),
       ),
     ];
   },
@@ -77,7 +77,7 @@ export const eventBusRule: Rule = {
         "@michaelthielemann/kestrel-events-inmemory",
         "events-queue requires events@1 instead of providing it; the bus module must be configured next to it",
         "add @michaelthielemann/kestrel-events-inmemory before kestrel-events-queue",
-        "docs/upgrading.md#modules-event-bus",
+        upgradingDocs("modules-event-bus"),
       ),
     ];
   },
@@ -96,7 +96,7 @@ export const removedStepsRule: Rule = {
         const edits = renameStringLiterals(file, source, from, to);
         if (edits.length === 0) continue;
         const where = pipelines.length === 1 ? { file, pipeline: pipelines[0]! } : { file };
-        findings.push(finding(`steps/removed:${file}:${from}`, "steps/removed", `"${from}" was removed; "${to}" is the same handler`, `rename "${from}" to "${to}"`, where, edits, "docs/upgrading.md#steps-removed"));
+        findings.push(finding(`steps/removed:${file}:${from}`, "steps/removed", `"${from}" was removed; "${to}" is the same handler`, `rename "${from}" to "${to}"`, where, edits, upgradingDocs("steps-removed")));
       }
     }
     return findings;
@@ -134,7 +134,7 @@ export const kestrelRangeRule: SourceRule = {
       const major = majorOf(dep.range);
       if (major === 6) continue;
       const edit = setDependencyRange(pkgFile, source, dep.map, dep.name, KESTREL_RANGE);
-      findings.push(finding(`deps/kestrel-range:${dep.name}`, "deps/kestrel-range", `${dep.name} is at ${dep.range}, not a 6.x range`, `set ${dep.name} to "${KESTREL_RANGE}"`, { file: pkgFile, module: dep.name }, [edit], "docs/upgrading.md#deps-kestrel-range"));
+      findings.push(finding(`deps/kestrel-range:${dep.name}`, "deps/kestrel-range", `${dep.name} is at ${dep.range}, not a 6.x range`, `set ${dep.name} to "${KESTREL_RANGE}"`, { file: pkgFile, module: dep.name }, [edit], upgradingDocs("deps-kestrel-range")));
     }
     return findings;
   },
