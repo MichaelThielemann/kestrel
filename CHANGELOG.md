@@ -451,7 +451,9 @@ Net changes since 5.8.1.
   media item's `folder`, `available`, `variantCounts` or variant `bytes` and `state`.
 - A step that throws answers `"<pipeline>/<step>: unexpected <ErrorName>"` as its `error`, for every
   caller, instead of its message; the message and the stack are in the log under the answer's `runId`.
-  A failure a step returns with `ctx.fail` keeps its message.
+  A failure a step returns with `ctx.fail` keeps its message. `testing/runPipeline` called without a
+  `logger` answers `"<pipeline>/<step>: <message>"`, so a failing module test still names the cause;
+  with a `logger`, the message is in its log.
 - OpenAPI: the 200 of an operation ending with a narrowing step is `anyOf`
   `#/components/schemas/<operationId>` and one `#/components/schemas/<operationId>.<label>` per
   audience (`.anonymous`, `.role.<name>`); types generated from the 200 become a union — use the
@@ -467,6 +469,8 @@ Net changes since 5.8.1.
   schema's `required` lists. The insights manifest schema describes it.
 - `authz-roles`' `./impl` exports `fieldSet`, `answersOf`, `anonymousPipelines` and
   `fieldGrantProblems`.
+- `RunPipelineOptions.thrownMessages` (test only) answers a thrown step's message instead of its error
+  class.
 - The OpenAPI extension `x-kestrel-answers` on a 200 maps each audience label to its component, or
   for a file operation to the response headers the audience receives.
 - `kestrel-upgrade` rules `pipelines/field-step`, `authz/field-grant-unknown`,

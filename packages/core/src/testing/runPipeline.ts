@@ -45,6 +45,7 @@ export function runPipeline(pipeline: PipelineDefinition, input: Partial<Context
   const resolved = { name: pipeline.name, steps: resolveEntries(pipeline.steps, (s) => registry.resolve(s, `pipelines/${pipeline.name}`)) };
   return execute(resolved, { trigger: { kind: "http", name: "test" }, ...input }, options.logger ?? silentLogger, {}, {
     validateOutput: true,
+    thrownMessages: options.logger === undefined,
     ...(options.atomicScope === undefined ? {} : { atomicScope: options.atomicScope }),
   });
 }

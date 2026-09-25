@@ -36,6 +36,8 @@ export interface RunPipelineOptions {
   validateOutput?: boolean;
   /** Wraps an atomic group in one all-or-nothing scope; absent when no loaded module provides one, in which case no pipeline has a group (boot guarantees it). */
   atomicScope?: AtomicScope;
+  /** Test only: a step that throws answers `<pipeline>/<step>: <message>` instead of `<pipeline>/<step>: unexpected <ErrorName>`. `testing/runPipeline` sets it when no logger is passed. */
+  thrownMessages?: boolean;
 }
 
 export interface RunTracker {
@@ -205,6 +207,7 @@ async function runStep(
   observer: RunObserver,
   validateOutput: boolean,
   descriptionsSoFar: StepDescription[],
+  thrownMessages: boolean,
 ): Promise<StepOutcome> {
   const started = performance.now();
   const stepEvent: StepStartEvent = { runId, pipeline: pipelineName, step: step.name, at: Date.now() };
@@ -279,7 +282,7 @@ async function runStep(
     return {
       kind: "throw",
       thrownMessage: unexpected,
-      result: { runId, status: 500, error: unexpected, code: "INTERNAL", retryable: false, step: step.name },
+      result: { runId, status: 500, error: thrownMessages ? `${pipelineName}/${step.name}: ${error.message}` : unexpected, code: "INTERNAL", retryable: false, step: step.name },
     };
   }
 }
@@ -319,7 +322,7 @@ export async function runPipeline(pipeline: ResolvedPipeline, input: ContextInpu
     return result;
   };
   const runOne = (step: ResolvedStep, currentCtx: Context): Promise<StepOutcome> =>
-    runStep(step, currentCtx, pipeline.name, runId, input.parentRunId, logger, observer, options.validateOutput === true, descriptionsSoFar);
+    runStep(step, currentCtx, pipeline.name, runId, input.parentRunId, logger, observer, options.validateOutput === true, descriptionsSoFar, options.thrownMessages === true);
   const takeOutcome = (outcome: { kind: "err" | "throw"; result: RunResult; thrownMessage?: string }): RunResult => {
     if (outcome.kind === "throw") {
       thrown = true;

@@ -40,6 +40,11 @@ describe("testing/runPipeline", () => {
     expect(stacks.join("\n")).toContain('writes "params" without declaring it');
   });
 
+  it("answers a thrown step's message when no logger is passed, so a failing test names the cause", async () => {
+    const res = await runPipeline(createPage, { payload: { title: "x" }, headers: { authorization: "Bearer ok" } }, { steps: fakeSteps });
+    expect(res).toMatchObject({ status: 500, code: "INTERNAL", error: 'createPage/authn.requireUser: step "authn.requireUser" writes "params" without declaring it' });
+  });
+
   it("unknown step in the pipeline fails loudly", async () => {
     const p = definePipeline({ name: "p", steps: ["nope.step"] });
     expect(() => runPipeline(p, {}, { steps: fakeSteps })).toThrow(/unknown step "nope.step"/);
