@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { binaryResult } from "@michaelthielemann/kestrel/context";
 import type { JsonSchema } from "@michaelthielemann/kestrel/defineModule";
-import { answerShape, cutAnswer, declaredPath, fieldTree, parseFieldsArgument, uncoveredMember } from "./fields.ts";
+import { answerShape, cutAnswer, declaredPath, fieldTree, parseFieldsArgument, shapeFits, uncoveredMember } from "./fields.ts";
 
 describe("the authz.fields argument", () => {
   it("names a resource and the answer's shape", () => {
@@ -39,6 +39,11 @@ describe("cutting an answer to a field tree", () => {
     const file = { ...binaryResult(new Uint8Array([1, 2]), "image/png", "a.png"), headers: { "Cache-Control": "public", "X-Content-Provenance": "ai", "x-internal": "1" } };
     expect(cutAnswer(file, "file", fieldTree(["headers.cache-control", "headers.x-content-provenance"]))).toEqual({ ...binaryResult(new Uint8Array([1, 2]), "image/png", "a.png"), headers: { "Cache-Control": "public", "X-Content-Provenance": "ai" } });
     expect(cutAnswer(binaryResult(new Uint8Array([1]), "image/png"), "file", fieldTree(["headers.cache-control"]))).toEqual(binaryResult(new Uint8Array([1]), "image/png"));
+  });
+
+  it("cuts an item whose items member is an array as one item, never as a list", () => {
+    const answer = { id: "a", secret: "s", items: [{ label: "x", note: "n" }], total: 3 };
+    expect(cutAnswer(answer, "item", fieldTree(["id", "items[].label"]))).toEqual({ id: "a", items: [{ label: "x" }] });
   });
 
   it("keeps null and scalar answers as they are", () => {
@@ -81,6 +86,23 @@ describe("the shape of a declared answer", () => {
     expect(answerShape(ITEM, false)).toBe("item");
     expect(answerShape(undefined, true)).toBe("file");
     expect(answerShape(undefined, false)).toBe("item");
+  });
+
+  it("fits a named shape: an item any object, including one with an items member; a list only { items: object[] }; an array only object[]; a file only a binary answer", () => {
+    const withItems: JsonSchema = { type: "object", properties: { id: { type: "string" }, items: { type: "array", items: ITEM } }, required: ["id", "items"] };
+    const list: JsonSchema = { type: "object", properties: { items: { type: "array", items: ITEM }, total: { type: "number" } }, required: ["items", "total"] };
+    expect(shapeFits(withItems, false, "item")).toBe(true);
+    expect(shapeFits(list, false, "item")).toBe(true);
+    expect(shapeFits(list, false, "list")).toBe(true);
+    expect(shapeFits(ITEM, false, "list")).toBe(false);
+    expect(shapeFits({ type: "array", items: ITEM }, false, "array")).toBe(true);
+    expect(shapeFits({ type: "array", items: ITEM }, false, "item")).toBe(false);
+    expect(shapeFits(ITEM, false, "array")).toBe(false);
+    expect(shapeFits(undefined, true, "file")).toBe(true);
+    expect(shapeFits(ITEM, false, "file")).toBe(false);
+    expect(shapeFits(undefined, true, "item")).toBe(false);
+    expect(shapeFits({ anyOf: [ITEM, withItems] }, false, "item")).toBe(true);
+    expect(shapeFits({ anyOf: [ITEM, { type: "array", items: ITEM }] }, false, "item")).toBe(false);
   });
 
   it("is the branches' shape for a union whose branches agree, and undefined when they do not", () => {

@@ -6315,7 +6315,7 @@
       "module": "authz/roles",
       "factory": true,
       "description": {
-        "summary": "Keep only the <arg> fields the caller may see: anonymousFields.<arg> without an identity; with one, everything when one of its roles has no field grant for <arg>, otherwise the union of its roles' grants and the anonymous one",
+        "summary": "Keep only the <arg> fields the caller may see: anonymousFields.<arg> without an identity or a configured role; otherwise everything when one of its roles has no field grant for <arg>, else the union of its roles' grants and the anonymous one",
         "reads": [
           "identity?",
           "result?"
@@ -6324,7 +6324,7 @@
           "result?"
         ],
         "errors": {
-          "403": "no field grant for anonymous callers on <arg>"
+          "403": "no field grant on <arg> for a caller without an identity or a configured role"
         }
       }
     },
@@ -13487,7 +13487,7 @@
           "name": "authz.fields",
           "module": "authz/roles",
           "description": {
-            "summary": "Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity; with one, everything when one of its roles has no field grant for mediaFile, otherwise the union of its roles' grants and the anonymous one",
+            "summary": "Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity or a configured role; otherwise everything when one of its roles has no field grant for mediaFile, else the union of its roles' grants and the anonymous one",
             "reads": [
               "identity?",
               "result?"
@@ -13496,7 +13496,7 @@
               "result?"
             ],
             "errors": {
-              "403": "no field grant for anonymous callers on mediaFile"
+              "403": "no field grant on mediaFile for a caller without an identity or a configured role"
             },
             "narrows": {
               "shape": "file",
@@ -14190,7 +14190,7 @@
           "name": "authz.fields",
           "module": "authz/roles",
           "description": {
-            "summary": "Keep only the media fields the caller may see: anonymousFields.media without an identity; with one, everything when one of its roles has no field grant for media, otherwise the union of its roles' grants and the anonymous one",
+            "summary": "Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
             "reads": [
               "identity?",
               "result?"
@@ -14199,7 +14199,7 @@
               "result?"
             ],
             "errors": {
-              "403": "no field grant for anonymous callers on media"
+              "403": "no field grant on media for a caller without an identity or a configured role"
             },
             "narrows": {
               "shape": "item",
@@ -14451,7 +14451,7 @@
           "name": "authz.fields",
           "module": "authz/roles",
           "description": {
-            "summary": "Keep only the settings fields the caller may see: anonymousFields.settings without an identity; with one, everything when one of its roles has no field grant for settings, otherwise the union of its roles' grants and the anonymous one",
+            "summary": "Keep only the settings fields the caller may see: anonymousFields.settings without an identity or a configured role; otherwise everything when one of its roles has no field grant for settings, else the union of its roles' grants and the anonymous one",
             "reads": [
               "identity?",
               "result?"
@@ -14460,7 +14460,7 @@
               "result?"
             ],
             "errors": {
-              "403": "no field grant for anonymous callers on settings"
+              "403": "no field grant on settings for a caller without an identity or a configured role"
             },
             "narrows": {
               "shape": "item",
@@ -16467,7 +16467,7 @@
           "name": "authz.fields",
           "module": "authz/roles",
           "description": {
-            "summary": "Keep only the media fields the caller may see: anonymousFields.media without an identity; with one, everything when one of its roles has no field grant for media, otherwise the union of its roles' grants and the anonymous one",
+            "summary": "Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
             "reads": [
               "identity?",
               "result?"
@@ -16476,7 +16476,7 @@
               "result?"
             ],
             "errors": {
-              "403": "no field grant for anonymous callers on media"
+              "403": "no field grant on media for a caller without an identity or a configured role"
             },
             "narrows": {
               "shape": "list",
@@ -16865,7 +16865,7 @@
           "name": "authz.fields",
           "module": "authz/roles",
           "description": {
-            "summary": "Keep only the pages fields the caller may see: anonymousFields.pages without an identity; with one, everything when one of its roles has no field grant for pages, otherwise the union of its roles' grants and the anonymous one",
+            "summary": "Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
             "reads": [
               "identity?",
               "result?"
@@ -16874,7 +16874,7 @@
               "result?"
             ],
             "errors": {
-              "403": "no field grant for anonymous callers on pages"
+              "403": "no field grant on pages for a caller without an identity or a configured role"
             },
             "narrows": {
               "shape": "list",
@@ -19096,7 +19096,7 @@
           "name": "authz.fields",
           "module": "authz/roles",
           "description": {
-            "summary": "Keep only the pages fields the caller may see: anonymousFields.pages without an identity; with one, everything when one of its roles has no field grant for pages, otherwise the union of its roles' grants and the anonymous one",
+            "summary": "Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
             "reads": [
               "identity?",
               "result?"
@@ -19105,7 +19105,7 @@
               "result?"
             ],
             "errors": {
-              "403": "no field grant for anonymous callers on pages"
+              "403": "no field grant on pages for a caller without an identity or a configured role"
             },
             "narrows": {
               "shape": "item",
@@ -19797,7 +19797,7 @@
           "name": "authz.fields",
           "module": "authz/roles",
           "description": {
-            "summary": "Keep only the redirectRules fields the caller may see: anonymousFields.redirectRules without an identity; with one, everything when one of its roles has no field grant for redirectRules, otherwise the union of its roles' grants and the anonymous one",
+            "summary": "Keep only the redirectRules fields the caller may see: anonymousFields.redirectRules without an identity or a configured role; otherwise everything when one of its roles has no field grant for redirectRules, else the union of its roles' grants and the anonymous one",
             "reads": [
               "identity?",
               "result?"
@@ -19806,7 +19806,7 @@
               "result?"
             ],
             "errors": {
-              "403": "no field grant for anonymous callers on redirectRules"
+              "403": "no field grant on redirectRules for a caller without an identity or a configured role"
             },
             "narrows": {
               "shape": "array",
@@ -20588,7 +20588,7 @@
           "name": "authz.fields",
           "module": "authz/roles",
           "description": {
-            "summary": "Keep only the pages fields the caller may see: anonymousFields.pages without an identity; with one, everything when one of its roles has no field grant for pages, otherwise the union of its roles' grants and the anonymous one",
+            "summary": "Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
             "reads": [
               "identity?",
               "result?"
@@ -20597,7 +20597,7 @@
               "result?"
             ],
             "errors": {
-              "403": "no field grant for anonymous callers on pages"
+              "403": "no field grant on pages for a caller without an identity or a configured role"
             },
             "narrows": {
               "shape": "item",
@@ -21700,7 +21700,7 @@
           "name": "authz.fields",
           "module": "authz/roles",
           "description": {
-            "summary": "Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity; with one, everything when one of its roles has no field grant for mediaFile, otherwise the union of its roles' grants and the anonymous one",
+            "summary": "Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity or a configured role; otherwise everything when one of its roles has no field grant for mediaFile, else the union of its roles' grants and the anonymous one",
             "reads": [
               "identity?",
               "result?"
@@ -21709,7 +21709,7 @@
               "result?"
             ],
             "errors": {
-              "403": "no field grant for anonymous callers on mediaFile"
+              "403": "no field grant on mediaFile for a caller without an identity or a configured role"
             },
             "narrows": {
               "shape": "file",
@@ -21782,7 +21782,7 @@
           "name": "authz.fields",
           "module": "authz/roles",
           "description": {
-            "summary": "Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity; with one, everything when one of its roles has no field grant for mediaFile, otherwise the union of its roles' grants and the anonymous one",
+            "summary": "Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity or a configured role; otherwise everything when one of its roles has no field grant for mediaFile, else the union of its roles' grants and the anonymous one",
             "reads": [
               "identity?",
               "result?"
@@ -21791,7 +21791,7 @@
               "result?"
             ],
             "errors": {
-              "403": "no field grant for anonymous callers on mediaFile"
+              "403": "no field grant on mediaFile for a caller without an identity or a configured role"
             },
             "narrows": {
               "shape": "file",

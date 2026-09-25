@@ -138,7 +138,8 @@ without Nuxt: [`../examples/h3`](../examples/h3).
   every public read (`authz.fields`). A document comes without `createdAt` and `updatedAt`; a media
   item without `folder`, `createdAt`, `updatedAt`, `available` and `variantCounts`, and each variant
   without `bytes` and `state`; a file answer keeps `cache-control`, `x-content-provenance` and
-  `x-kestrel-variant` of the headers its step sets. A signed-in caller receives the whole answer. The
+  `x-kestrel-variant` of the headers its step sets. A signed-in caller with a role receives the whole
+  answer; one whose roles are all unknown to the config receives the anonymous one. The
   OpenAPI document describes both: `#/components/schemas/<operationId>` and
   `#/components/schemas/<operationId>.anonymous`, named per audience in the 200's
   `x-kestrel-answers`.

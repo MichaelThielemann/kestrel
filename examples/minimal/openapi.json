@@ -7162,7 +7162,7 @@
     "/media": {
       "get": {
         "operationId": "listMedia",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → List media, newest first; anonymous callers may only fetch by ids → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed → Keep only the media fields the caller may see: anonymousFields.media without an identity; with one, everything when one of its roles has no field grant for media, otherwise the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → List media, newest first; anonymous callers may only fetch by ids → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed → Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -7284,7 +7284,7 @@
             }
           },
           "403": {
-            "description": "no field grant for anonymous callers on media",
+            "description": "no field grant on media for a caller without an identity or a configured role",
             "content": {
               "application/json": {
                 "schema": {
@@ -8303,7 +8303,7 @@
       },
       "get": {
         "operationId": "getMedia",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → Media metadata → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed → Keep only the media fields the caller may see: anonymousFields.media without an identity; with one, everything when one of its roles has no field grant for media, otherwise the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → Media metadata → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed → Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -8377,7 +8377,7 @@
             }
           },
           "403": {
-            "description": "no field grant for anonymous callers on media",
+            "description": "no field grant on media for a caller without an identity or a configured role",
             "content": {
               "application/json": {
                 "schema": {
@@ -8793,7 +8793,7 @@
     "/media/{id}/{name}": {
       "get": {
         "operationId": "serveMediaFile",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The file at its public URL (params.id, params.name); the name must be the one it was uploaded under → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity; with one, everything when one of its roles has no field grant for mediaFile, otherwise the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The file at its public URL (params.id, params.name); the name must be the one it was uploaded under → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity or a configured role; otherwise everything when one of its roles has no field grant for mediaFile, else the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -8854,7 +8854,7 @@
             }
           },
           "403": {
-            "description": "no field grant for anonymous callers on mediaFile",
+            "description": "no field grant on mediaFile for a caller without an identity or a configured role",
             "content": {
               "application/json": {
                 "schema": {
@@ -8912,7 +8912,7 @@
     "/media/{id}/file": {
       "get": {
         "operationId": "downloadMedia",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The file itself → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity; with one, everything when one of its roles has no field grant for mediaFile, otherwise the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The file itself → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity or a configured role; otherwise everything when one of its roles has no field grant for mediaFile, else the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -8965,7 +8965,7 @@
             }
           },
           "403": {
-            "description": "no field grant for anonymous callers on mediaFile",
+            "description": "no field grant on mediaFile for a caller without an identity or a configured role",
             "content": {
               "application/json": {
                 "schema": {
@@ -9023,7 +9023,7 @@
     "/media/{id}/variants/{file}": {
       "get": {
         "operationId": "serveImageVariant",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity; with one, everything when one of its roles has no field grant for mediaFile, otherwise the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity or a configured role; otherwise everything when one of its roles has no field grant for mediaFile, else the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -9094,7 +9094,7 @@
             }
           },
           "403": {
-            "description": "no field grant for anonymous callers on mediaFile",
+            "description": "no field grant on mediaFile for a caller without an identity or a configured role",
             "content": {
               "application/json": {
                 "schema": {
@@ -9733,7 +9733,7 @@
     "/pages": {
       "get": {
         "operationId": "listPages",
-        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → List pages → Keep only the pages fields the caller may see: anonymousFields.pages without an identity; with one, everything when one of its roles has no field grant for pages, otherwise the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → List pages → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
         "tags": [
           "pages"
         ],
@@ -9830,7 +9830,7 @@
             }
           },
           "403": {
-            "description": "no field grant for anonymous callers on pages",
+            "description": "no field grant on pages for a caller without an identity or a configured role",
             "content": {
               "application/json": {
                 "schema": {
@@ -10401,7 +10401,7 @@
       },
       "get": {
         "operationId": "readPage",
-        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → One pages document → Keep only the pages fields the caller may see: anonymousFields.pages without an identity; with one, everything when one of its roles has no field grant for pages, otherwise the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → One pages document → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
         "tags": [
           "pages"
         ],
@@ -10478,7 +10478,7 @@
             }
           },
           "403": {
-            "description": "no field grant for anonymous callers on pages",
+            "description": "no field grant on pages for a caller without an identity or a configured role",
             "content": {
               "application/json": {
                 "schema": {
@@ -11514,7 +11514,7 @@
     "/redirects.json": {
       "get": {
         "operationId": "renderRedirects",
-        "summary": "The compiled redirect list (same content as redirects.json) → Keep only the redirectRules fields the caller may see: anonymousFields.redirectRules without an identity; with one, everything when one of its roles has no field grant for redirectRules, otherwise the union of its roles' grants and the anonymous one",
+        "summary": "The compiled redirect list (same content as redirects.json) → Keep only the redirectRules fields the caller may see: anonymousFields.redirectRules without an identity or a configured role; otherwise everything when one of its roles has no field grant for redirectRules, else the union of its roles' grants and the anonymous one",
         "tags": [
           "redirects.json"
         ],
@@ -11548,7 +11548,7 @@
             }
           },
           "403": {
-            "description": "no field grant for anonymous callers on redirectRules",
+            "description": "no field grant on redirectRules for a caller without an identity or a configured role",
             "content": {
               "application/json": {
                 "schema": {
@@ -11683,7 +11683,7 @@
     "/settings": {
       "get": {
         "operationId": "getSettings",
-        "summary": "Identify the caller if a valid token is present → Requires permission settings.read → One settings document → Keep only the settings fields the caller may see: anonymousFields.settings without an identity; with one, everything when one of its roles has no field grant for settings, otherwise the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present → Requires permission settings.read → One settings document → Keep only the settings fields the caller may see: anonymousFields.settings without an identity or a configured role; otherwise everything when one of its roles has no field grant for settings, else the union of its roles' grants and the anonymous one",
         "tags": [
           "settings"
         ],
@@ -11752,7 +11752,7 @@
             }
           },
           "403": {
-            "description": "no field grant for anonymous callers on settings",
+            "description": "no field grant on settings for a caller without an identity or a configured role",
             "content": {
               "application/json": {
                 "schema": {
@@ -12056,7 +12056,7 @@
     "/site/{path}": {
       "get": {
         "operationId": "resolvePage",
-        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → End the pipeline with { redirect: { to, status } } when the request path matches a rule; pass through otherwise → Resolve a site path to a pages document (default locale unprefixed) → Replace internal kestrel:<type>:<id> references in the pages document with public paths (_links map added) → Keep only the pages fields the caller may see: anonymousFields.pages without an identity; with one, everything when one of its roles has no field grant for pages, otherwise the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → End the pipeline with { redirect: { to, status } } when the request path matches a rule; pass through otherwise → Resolve a site path to a pages document (default locale unprefixed) → Replace internal kestrel:<type>:<id> references in the pages document with public paths (_links map added) → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
         "tags": [
           "site"
         ],
@@ -12122,7 +12122,7 @@
             }
           },
           "403": {
-            "description": "no field grant for anonymous callers on pages",
+            "description": "no field grant on pages for a caller without an identity or a configured role",
             "content": {
               "application/json": {
                 "schema": {

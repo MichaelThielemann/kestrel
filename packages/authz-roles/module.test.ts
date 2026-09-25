@@ -341,6 +341,7 @@ function recordsModule() {
       get: async (ctx: Context) => ok({ ...ctx, result: RECORD }),
       list: async (ctx: Context) => ok({ ...ctx, result: { items: [RECORD, RECORD], total: 2, cursor: "next" } }),
       stop: async (ctx: Context) => ctx.done(ctx.result),
+      bundle: async (ctx: Context) => ok({ ...ctx, result: { id: "b1", secret: "s3cret", items: [{ label: "a", note: "x" }, { label: "b", note: "y" }], total: 2 } }),
       signIn: async (ctx: Context) => {
         const role = ctx.headers["x-role"];
         return ok(role === undefined ? ctx : { ...ctx, identity: { id: "u", claims: { roles: role.split(",") } } });
@@ -351,6 +352,12 @@ function recordsModule() {
       list: { summary: "records", reads: [], writes: ["result"], output: { type: "object", properties: { items: { type: "array", items: ITEM_SCHEMA }, total: { type: "number" }, cursor: { type: "string" } }, required: ["items", "total"] } },
       signIn: { summary: "signs in the x-role header's roles", reads: [], writes: ["identity?"] },
       stop: { summary: "ends the run with the answer so far, declaring no early answer", reads: ["result"], writes: [] },
+      bundle: {
+        summary: "one record whose items member is a list",
+        reads: [],
+        writes: ["result"],
+        output: { type: "object", properties: { id: { type: "string" }, secret: { type: "string" }, items: { type: "array", items: { type: "object", properties: { label: { type: "string" }, note: { type: "string" } }, required: ["label", "note"] } }, total: { type: "number" } }, required: ["id", "secret", "items", "total"] },
+      },
     }),
   });
 }
@@ -407,6 +414,28 @@ describe("authz/roles: authz.fields cuts the answer to the caller's field grant"
     await kestrel.stop();
   });
 
+  it("answers a signed-in caller without a configured role like an anonymous one, and 403 where anonymous callers have no grant", async () => {
+    const kestrel = await bootRecords(grants);
+    expect((await kestrel.run("getRecord", as("ghost"))).result).toEqual({ id: "r1", nested: { open: "o" } });
+    await kestrel.stop();
+    const { anonymousFields: _anonymousFields, ...withoutAnonymousGrant } = grants;
+    void _anonymousFields;
+    const signedInOnly = [definePipeline({ name: "getRecord", steps: ["records.signIn", "authn.requireUser", "authz.require:records.read", "records.get", "authz.fields:records?shape=item"] })];
+    const signedInOnlyKestrel = await bootRecordsSignedIn(withoutAnonymousGrant, signedInOnly);
+    const res = await signedInOnlyKestrel.run("getRecord", as("ghost"));
+    expect(res).toMatchObject({ status: 403, code: "FORBIDDEN" });
+    expect(JSON.stringify(res)).not.toContain("s3cret");
+    expect((await signedInOnlyKestrel.run("getRecord", as("editor"))).result).toEqual(RECORD);
+    await signedInOnlyKestrel.stop();
+  });
+
+  it("cuts an item whose items member is an array as one item when the step names ?shape=item", async () => {
+    const pipelines = [definePipeline({ name: "getRecord", steps: ["records.signIn", "authz.require:records.read", "records.bundle", "authz.fields:records?shape=item"] })];
+    const kestrel = await bootRecords({ ...grants, anonymousFields: { records: ["id", "items[].label"] }, fields: {} }, pipelines);
+    expect((await kestrel.run("getRecord", as())).result).toEqual({ id: "b1", items: [{ label: "a" }, { label: "b" }] });
+    await kestrel.stop();
+  });
+
   it("answers 403 FORBIDDEN to an anonymous caller of a resource without an anonymous grant", async () => {
     const instance = await module.setup(configSchema.parse({ roles: {}, anonymous: ["records.read"] }), deps);
     const pipeline = definePipeline({ name: "getRecord", steps: ["records.get", "authz.fields:records?shape=item"] });
@@ -432,3 +461,31 @@ describe("authz/roles: authz.fields cuts the answer to the caller's field grant"
     await expect(bootRecords(grants, [definePipeline({ name: "getRecord", steps: ["records.signIn", "authz.require:records.read", "records.get"] }), definePipeline({ name: "listRecords", steps: ["records.list", "authz.fields:records?shape=list"] })])).rejects.toThrow('authz/roles: pipeline "getRecord" answers anonymous callers but does not end with authz.fields:<resource>?shape=item');
   });
 });
+
+function requireUserModule() {
+  return defineModule({
+    name: "authn/stub",
+    provides: [],
+    requires: [],
+    configSchema: z.object({}).strict(),
+    async setup() {
+      return {};
+    },
+    steps: () => ({ requireUser: async (ctx: Context) => (ctx.identity ? ok(ctx) : ctx.fail("UNAUTHENTICATED", "not authenticated")) }),
+    describe: () => ({ requireUser: { summary: "requires a signed-in caller", reads: ["identity?"], writes: [], security: "required" as const } }),
+  });
+}
+
+async function bootRecordsSignedIn(authzConfig: Record<string, unknown>, pipelines: PipelineDefinition[]) {
+  return bootKestrel({
+    config: {
+      modules: [{ use: "./records.ts", config: {} }, { use: "./authn.ts", config: {} }, { use: "@michaelthielemann/kestrel-authz-roles", config: authzConfig }],
+      triggers: pipelines.map((p) => ({ http: `GET /${p.name}`, pipeline: p.name })),
+      http: null,
+    },
+    modules: [recordsModule(), requireUserModule(), module],
+    pipelines,
+    logger: silentLogger,
+    validateOutput: true,
+  });
+}

@@ -83,7 +83,7 @@ export default defineModule({
       return async (ctx: Context) => {
         const tree = authz.fieldsFor(ctx.identity, resource);
         if (tree === "all") return ok(ctx);
-        if (tree === undefined) return ctx.fail("FORBIDDEN", `no field grant for anonymous callers on ${resource}`);
+        if (tree === undefined) return ctx.fail("FORBIDDEN", `no field grant on ${resource} for a caller without an identity or a configured role`);
         if (ctx.result === undefined) return ok(ctx);
         return ok({ ...ctx, result: cutAnswer(ctx.result, shape, tree) });
       };
@@ -123,8 +123,8 @@ export default defineModule({
     fields: (arg: string) => {
       const target = parseFieldsArgument(arg);
       const resource = target?.resource ?? arg;
-      const summary = `Keep only the ${resource} fields the caller may see: anonymousFields.${resource} without an identity; with one, everything when one of its roles has no field grant for ${resource}, otherwise the union of its roles' grants and the anonymous one`;
-      const errors = { 403: `no field grant for anonymous callers on ${resource}` };
+      const summary = `Keep only the ${resource} fields the caller may see: anonymousFields.${resource} without an identity or a configured role; otherwise everything when one of its roles has no field grant for ${resource}, else the union of its roles' grants and the anonymous one`;
+      const errors = { 403: `no field grant on ${resource} for a caller without an identity or a configured role` };
       return target === undefined
         ? { summary, reads: ["identity?", "result?"], writes: ["result?"], errors }
         : { summary, reads: ["identity?", "result?"], writes: ["result?"], errors, narrows: { shape: target.shape, answers: authz.answersOf(target.resource) } };

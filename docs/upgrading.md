@@ -366,8 +366,9 @@ grants kept), "manual" leaves both to you. A pipeline whose resource it cannot t
 
 #### authz-field-grant-unknown
 A grant names a field no pipeline of its resource declares, grants a resource no pipeline cuts, or an
-`authz.fields` step does not fit its pipeline (a step after it, a shape the declared output
-contradicts, an answer an earlier step ends the run with that the anonymous grant does not cover).
+`authz.fields` step does not fit its pipeline (a step after it, a shape the declared output does not
+fit, an answer an earlier step ends the run with that the anonymous grant or a role's grant does not
+cover).
 Manual; the suggestion is the hint boot gives, for example `"variants" is a list, write
 "variants[].path"`.
 

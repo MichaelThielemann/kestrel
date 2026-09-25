@@ -217,10 +217,11 @@ describe("fieldSet", () => {
     expect(fieldSet(grants, as("reviewer", "ghost", "constructor", "__proto__"), "media")).toEqual(["folder", "id", "path"]);
   });
 
-  it("gives an identity without a configured role the anonymous grant, or everything where there is none", () => {
+  it("treats an identity without a configured role like an anonymous caller: the anonymous grant, never everything", () => {
     expect(fieldSet(grants, as(), "media")).toEqual(["id", "path"]);
     expect(fieldSet(grants, as("ghost"), "media")).toEqual(["id", "path"]);
-    expect(fieldSet(grants, as("ghost"), "pages")).toBe("all");
+    expect(fieldSet(grants, as("ghost"), "pages")).toBeUndefined();
+    expect(fieldSet(grants, { id: "u", claims: {} }, "pages")).toBeUndefined();
   });
 
   it("names every restricted answer per audience label for the step's declaration", () => {
@@ -321,10 +322,18 @@ describe("fieldGrantProblems", () => {
     expect(fieldGrantProblems(config, fieldManifest(pipelines))).toContain('authz/roles: pipeline "getMedia" runs images.attach after authz.fields:media?shape=item – authz.fields must be the last step');
   });
 
-  it("refuses a shape parameter the declared output contradicts", () => {
+  it("refuses a shape parameter the declared output does not fit, naming the shape it has", () => {
     const pipelines = passing();
-    pipelines[1] = ["listMedia", [identify, gate("media.read"), listMedia, fields("media?shape=item")]];
-    expect(fieldGrantProblems(config, fieldManifest(pipelines))).toEqual(['authz/roles: pipeline "listMedia" ends with authz.fields:media?shape=item, but its declared output is a list ({ items, total }) – write authz.fields:media?shape=list']);
+    pipelines[0] = ["getMedia", [identify, gate("media.read"), getMedia, fields("media?shape=list")]];
+    expect(fieldGrantProblems(config, fieldManifest(pipelines))).toEqual(['authz/roles: pipeline "getMedia" ends with authz.fields:media?shape=list, but its declared output is not a list ({ items, total }) – write authz.fields:media?shape=item']);
+    pipelines[0] = ["getMedia", [identify, gate("media.read"), getMedia, fields("media?shape=file")]];
+    expect(fieldGrantProblems(config, fieldManifest(pipelines))).toEqual(['authz/roles: pipeline "getMedia" ends with authz.fields:media?shape=file, but its declared output is not a file – write authz.fields:media?shape=item']);
+  });
+
+  it("accepts ?shape=item for an item whose output has an items member, and finds its paths", () => {
+    const itemWithItems = described("media.get", { writes: ["result"], output: { type: "object", properties: { id: { type: "string" }, items: { type: "array", items: { type: "object", properties: { label: { type: "string" } }, required: ["label"] } } }, required: ["id", "items"] } });
+    const manifest = fieldManifest([["getBundle", [identify, gate("media.read"), itemWithItems, fields("bundle?shape=item")]]]);
+    expect(fieldGrantProblems({ ...config, anonymousFields: { bundle: ["id", "items[].label"] } }, manifest)).toEqual([]);
   });
 
   it("refuses an anonymously answered resource without an anonymous grant", () => {
@@ -364,6 +373,20 @@ describe("fieldGrantProblems", () => {
     const openLookup = described("redirects.lookup", { writes: ["result?"], terminalOutput: { type: "object", properties: { redirect: { type: "string" } }, required: ["redirect"] } });
     pipelines[3] = ["resolvePage", [identify, gate("pages.read"), openLookup, described("site.resolve", { writes: ["result"], output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } }), fields("pages?shape=item")]];
     expect(fieldGrantProblems(config, fieldManifest(pipelines))).toEqual(['authz/roles: pipeline "resolvePage" can end at redirects.lookup before authz.fields:pages, and that answer is an open object at the root, which no grant can bound']);
+  });
+
+  it("refuses an early answer before the step that a role's field grant does not cover, also where no anonymous caller reaches", () => {
+    const signedIn = described("authn.requireUser", { writes: ["identity"], security: "required" });
+    const resolve = described("site.resolve", { writes: ["result"], output: { type: "object", properties: { id: { type: "string" }, title: { type: "string" } }, required: ["id", "title"] } });
+    const manifest = fieldManifest([["resolvePage", [signedIn, gate("pages.read"), lookup, resolve, fields("pages?shape=item")]]]);
+    const roles = { roles: { editor: ["*"], reviewer: ["pages.read"] }, roleClaim: "roles", anonymous: [] };
+    expect(fieldGrantProblems({ ...roles, anonymousFields: {}, fields: { reviewer: { pages: ["id", "title"] } } }, manifest)).toEqual([
+      'authz/roles: pipeline "resolvePage" can end at redirects.lookup before authz.fields:pages, and that answer carries "redirect", which fields.reviewer.pages does not grant',
+    ]);
+    expect(fieldGrantProblems({ ...roles, anonymousFields: { pages: ["id"] }, fields: { reviewer: { pages: ["title", "redirect"] } } }, manifest)).toEqual([
+      'authz/roles: pipeline "resolvePage" can end at redirects.lookup before authz.fields:pages, and that answer carries "redirect", which anonymousFields.pages does not grant',
+    ]);
+    expect(fieldGrantProblems({ ...roles, anonymousFields: { pages: ["id", "redirect"] }, fields: { reviewer: { pages: ["title"] } } }, manifest)).toEqual([]);
   });
 
   it("is what attach throws, one problem per line", () => {

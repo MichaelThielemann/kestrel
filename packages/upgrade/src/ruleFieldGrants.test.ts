@@ -139,7 +139,7 @@ describe("authz/field-grant-unknown", () => {
     const lines = [
       'authz/roles: anonymousFields.media names "variants.path", which no pipeline ending with authz.fields:media declares – "variants" is a list, write "variants[].path"',
       'authz/roles: anonymousFields grants fields of "settings", but no pipeline ends with authz.fields:settings',
-      'authz/roles: pipeline "listMedia" ends with authz.fields:media?shape=item, but its declared output is a list ({ items, total }) – write authz.fields:media?shape=list',
+      'authz/roles: pipeline "getMedia" ends with authz.fields:media?shape=list, but its declared output is not a list ({ items, total }) – write authz.fields:media?shape=item',
     ];
     const findings = await fieldGrantUnknownRule.check(contextFor(await project(), [attachFailed([missingStepLine("getMedia", "item"), ...lines])]));
     expect(findings.map((f) => f.message)).toEqual(lines);

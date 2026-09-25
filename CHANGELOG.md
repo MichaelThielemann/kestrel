@@ -439,13 +439,14 @@ Net changes since 5.8.1.
 - **Field grants in `authz-roles`.** `anonymousFields` (resource → field paths) and `fields` (role →
   resource → field paths) say which fields of an answer a caller keeps; the new step
   `authz.fields:<resource>?shape=<item|list|array|file>`, last in a pipeline, cuts the answer to them.
-  A caller without an identity keeps its resource's `anonymousFields`; a signed-in caller keeps
-  everything unless every one of its roles has a grant for the resource, and then the union of those
-  grants and the anonymous one. Boot fails when a pipeline anonymous callers reach over HTTP does not
-  end with the step, when `anonymousFields` grants nothing for its resource, when the shape
-  contradicts the pipeline's declared output, when a grant names a field no pipeline of that resource
-  declares or a resource no pipeline cuts, or when the pipeline can end earlier with an answer the
-  anonymous grant does not cover. Add the step and the grants to every pipeline your anonymous
+  A caller without an identity, or with one that holds no configured role, keeps its resource's
+  `anonymousFields` (403 where there is none); any other signed-in caller keeps everything unless every
+  one of its roles has a grant for the resource, and then the union of those grants and the anonymous
+  one. Boot fails when a pipeline anonymous callers reach over HTTP does not end with the step, when
+  `anonymousFields` grants nothing for its resource, when the pipeline's declared output does not fit
+  the shape, when a grant names a field no pipeline of that resource declares or a resource no
+  pipeline cuts, or when the pipeline can end earlier with an answer the anonymous grant or a role's
+  grant does not cover. Add the step and the grants to every pipeline your anonymous
   callers read; `examples/minimal` shows the lists, and `kestrel-upgrade`'s `pipelines/field-step`
   proposes them. An anonymous caller of the example receives no `createdAt` or `updatedAt`, and no
   media item's `folder`, `available`, `variantCounts` or variant `bytes` and `state`.

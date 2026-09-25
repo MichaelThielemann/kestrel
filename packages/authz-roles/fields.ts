@@ -135,6 +135,25 @@ export function answerShape(fold: JsonSchema | undefined, binary: boolean): Answ
   return shapes.size === 1 ? [...shapes][0] : undefined;
 }
 
+function branchFits(schema: JsonSchema, shape: AnswerShape): boolean {
+  if (shape === "array") return isObjectSchema(itemsOf(schema));
+  if (!isObjectSchema(schema) || itemsOf(schema) !== undefined) return false;
+  if (shape === "item") return true;
+  const items = propertiesOf(schema)?.items;
+  return isRecord(items) && isObjectSchema(itemsOf(items));
+}
+
+/**
+ * Whether an answer declared by `fold` (after a binary step when `binary`) can be cut as `shape`: `item` fits
+ * any object, one with an `items` member included; `list` an object whose `items` is an array of objects;
+ * `array` an array of objects; `file` a binary answer. Every branch of a union must fit.
+ */
+export function shapeFits(fold: JsonSchema | undefined, binary: boolean, shape: AnswerShape): boolean {
+  if (shape === "file" || binary) return shape === "file" && binary;
+  if (fold === undefined) return shape === "item";
+  return branchesOf(fold).every((branch) => branchFits(branch, shape));
+}
+
 /** The item schemas of an answer declared by `fold` and cut as `shape`. */
 export function itemSchemas(fold: JsonSchema | undefined, shape: AnswerShape): JsonSchema[] {
   if (fold === undefined || shape === "file") return [];

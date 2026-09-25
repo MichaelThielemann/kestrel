@@ -175,13 +175,13 @@ steps: ["authn.identifyUser", "authz.require:pages.read", "content.list:pages?st
 
 The same pipeline serves both callers, so its answer is cut at the end.
 `authz.fields:<resource>?shape=<shape>` keeps of `result` only the members the caller may see:
-`anonymousFields` in the authz config names them for a caller without an identity
-(`pages: ["id", "slug", "title", …]`), `fields` names them for a role that should see less than
-everything, and a signed-in caller whose roles have no such grant keeps the whole answer. The
-parameter says where the items are: `item` (one document), `list` (every element of `items` in
-`{ items, total }`; `total` stays), `array` (every element), `file` (bytes, type and name stay; the
-grant names response headers as `headers.<name>`). Boot checks it against the pipeline's declared
-output. A path reaches into an item — `provenance.origin`, `variants[].path` — and a map or a
+`anonymousFields` in the authz config names them for a caller without an identity and for a
+signed-in one without a configured role (`pages: ["id", "slug", "title", …]`), `fields` names them
+for a role that should see less than everything, and a signed-in caller one of whose roles has no
+such grant keeps the whole answer. The parameter says where the items are: `item` (one document,
+also one with an `items` member), `list` (every element of `items` in `{ items, total }`; `total`
+stays), `array` (every element), `file` (bytes, type and name stay; the grant names response headers
+as `headers.<name>`). Boot checks that the pipeline's declared output fits it. A path reaches into an item — `provenance.origin`, `variants[].path` — and a map or a
 free-form value (`_translations`, a `json` field) is granted whole.
 
 Boot fails for a pipeline an anonymous caller reaches over HTTP that does not end with the step, for

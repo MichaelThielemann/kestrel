@@ -3,7 +3,7 @@ import type { Authz, AuthzError } from "@michaelthielemann/kestrel-contracts/aut
 import type { Detach, Introspection, Manifest, PipelineManifest } from "@michaelthielemann/kestrel";
 import { ok, type Result } from "@michaelthielemann/kestrel/result";
 import { resolveOutputSchema } from "@michaelthielemann/kestrel/schema";
-import { answerShape, declaredPath, fieldTree, itemSchemas, parseFieldsArgument, uncoveredMember, type AnswerShape, type FieldTree } from "./fields.ts";
+import { answerShape, declaredPath, fieldTree, itemSchemas, parseFieldsArgument, shapeFits, uncoveredMember, type AnswerShape, type FieldTree } from "./fields.ts";
 
 /** Field paths per resource: which members of an answer a caller keeps. */
 export type FieldGrants = Record<string, string[]>;
@@ -89,14 +89,14 @@ export function requiredPermissions(pipeline: PipelineManifest): string[] {
 /**
  * The field paths `identity` keeps of `resource`: without an identity the `anonymousFields` grant, `undefined`
  * when there is none; with one, `"all"` when one of its configured roles has no field grant for the resource,
- * otherwise the union of its roles' grants and the anonymous one. An identity without a configured role keeps
- * the anonymous grant, or everything where there is none.
+ * otherwise the union of its roles' grants and the anonymous one. An identity without a configured role is an
+ * anonymous caller here: it keeps the anonymous grant, and nothing where there is none.
  */
 export function fieldSet(config: Config, identity: Identity | undefined, resource: string): "all" | readonly string[] | undefined {
   const anonymous = own(config.anonymousFields, resource);
   if (identity === undefined) return anonymous;
   const roles = [...new Set(rolesOf(identity, config.roleClaim))].filter((role) => Object.hasOwn(config.roles, role));
-  if (roles.length === 0) return anonymous ?? "all";
+  if (roles.length === 0) return anonymous;
   const grants = roles.map((role) => own(own(config.fields, role), resource));
   if (grants.some((grant) => grant === undefined)) return "all";
   return union(...grants.map((grant) => grant ?? []), anonymous ?? []);
@@ -158,11 +158,11 @@ function cutOf(pipeline: PipelineManifest, problems: string[]): FieldCut | undef
   if (target === undefined) return undefined;
   const before = pipeline.steps.slice(0, last);
   const fold = resolveOutputSchema(before.map((s) => s.description));
-  const expected = answerShape(fold, before.some((s) => s.description.binary === true));
-  if (expected === undefined) {
-    problems.push(`authz/roles: pipeline "${pipeline.name}" ends with ${step.spec}, but its declared output is a union of different shapes, which one step cannot cut`);
-  } else if (expected !== target.shape) {
-    problems.push(`authz/roles: pipeline "${pipeline.name}" ends with ${step.spec}, but its declared output is ${SHAPE_WORDS[expected]} – write authz.fields:${target.resource}?shape=${expected}`);
+  const binary = before.some((s) => s.description.binary === true);
+  if (!shapeFits(fold, binary, target.shape)) {
+    const declared = answerShape(fold, binary);
+    const hint = declared === undefined || declared === target.shape ? "" : ` – write authz.fields:${target.resource}?shape=${declared}`;
+    problems.push(`authz/roles: pipeline "${pipeline.name}" ends with ${step.spec}, but its declared output is not ${SHAPE_WORDS[target.shape]}${hint}`);
   }
   return { pipeline, resource: target.resource, shape: target.shape, fold, terminals: before.filter((s) => s.description.terminalOutput !== undefined) };
 }
@@ -188,15 +188,25 @@ function grantPathProblem(cuts: readonly FieldCut[], path: string): string | und
   return hint ?? "";
 }
 
-function terminalProblem(cut: FieldCut, tree: FieldTree): string | undefined {
+function grantLabel(config: Config, audience: string, resource: string): string {
+  if (audience === "anonymous") return `anonymousFields.${resource} does not grant`;
+  const role = `fields.${audience.slice("role:".length)}.${resource}`;
+  return own(config.anonymousFields, resource) === undefined ? `${role} does not grant` : `${role} and anonymousFields.${resource} do not grant`;
+}
+
+function terminalProblems(config: Config, cut: FieldCut): string[] {
+  const problems: string[] = [];
+  const audiences = Object.entries(answersOf(config, cut.resource));
   for (const step of cut.terminals) {
-    const uncovered = uncoveredMember(step.description.terminalOutput!, tree);
-    if (uncovered === undefined) continue;
     const head = `authz/roles: pipeline "${cut.pipeline.name}" can end at ${step.spec} before authz.fields:${cut.resource}, and that answer`;
-    if (uncovered.kind === "ungranted") return `${head} carries "${uncovered.path}", which anonymousFields.${cut.resource} does not grant`;
-    return `${head} is an open object at ${uncovered.path === "" ? "the root" : uncovered.path}, which no grant can bound`;
+    for (const [audience, paths] of audiences) {
+      const uncovered = uncoveredMember(step.description.terminalOutput!, fieldTree(paths));
+      if (uncovered === undefined) continue;
+      problems.push(uncovered.kind === "ungranted" ? `${head} carries "${uncovered.path}", which ${grantLabel(config, audience, cut.resource)}` : `${head} is an open object at ${uncovered.path === "" ? "the root" : uncovered.path}, which no grant can bound`);
+      if (uncovered.kind === "open") break;
+    }
   }
-  return undefined;
+  return [...new Set(problems)];
 }
 
 /**
@@ -222,14 +232,11 @@ export function fieldGrantProblems(config: Config, manifest: Pick<Manifest, "pip
       }
       continue;
     }
-    const grant = own(config.anonymousFields, cut.resource);
-    if (grant === undefined) {
+    if (own(config.anonymousFields, cut.resource) === undefined) {
       problems.push(`authz/roles: pipeline "${pipeline.name}" answers anonymous callers and ends with authz.fields:${cut.resource}, but anonymousFields grants nothing for "${cut.resource}"`);
-      continue;
     }
-    const terminal = terminalProblem(cut, fieldTree(grant));
-    if (terminal !== undefined) problems.push(terminal);
   }
+  for (const cut of [...cuts.values()].flat()) problems.push(...terminalProblems(config, cut));
   const grants: Array<[string, FieldGrants]> = [["anonymousFields", config.anonymousFields ?? {}], ...Object.entries(config.fields ?? {}).map(([role, grant]): [string, FieldGrants] => [`fields.${role}`, grant])];
   for (const [label, byResource] of grants) {
     for (const [resource, paths] of Object.entries(byResource)) {

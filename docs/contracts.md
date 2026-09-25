@@ -169,12 +169,14 @@ answer per label.
 `authz-roles` uses it for field grants. `anonymousFields` (resource → field paths) and `fields` (role
 → resource → field paths) say which members of an answer a caller keeps, and its step
 `authz.fields:<resource>?shape=<shape>`, last in a pipeline, cuts the answer to them: a caller
-without an identity keeps the anonymous grant; a signed-in caller keeps everything when one of its
-roles has no grant for the resource, otherwise the union of its roles' grants and the anonymous one.
-At `attach()` boot fails when a pipeline an anonymous caller reaches over HTTP does not end with the
-step or its resource has no anonymous grant, when the shape parameter contradicts the declared
-output, when a grant names a field no pipeline of its resource declares, and when an answer a step
-ends the run with before the step carries a member the anonymous grant does not cover. Like
+without an identity, or with one that holds no configured role, keeps the anonymous grant and never
+everything; any other signed-in caller keeps everything when one of its roles has no grant for the
+resource, otherwise the union of its roles' grants and the anonymous one. At `attach()` boot fails
+when a pipeline an anonymous caller reaches over HTTP does not end with the step or its resource has
+no anonymous grant, when the declared output does not fit the shape parameter, when a grant names a
+field no pipeline of its resource declares, and when an answer a step ends the run with before the
+step carries a member the anonymous grant or a role's grant does not cover. Such an early answer is
+always a declared one: a step that ends the run without declaring `terminalOutput` fails the run. Like
 `anonymous: "required"`, this is `authz-roles`' own check: another `authz@1` provider has neither the
 step nor the checks, so under it every caller receives the whole answer.
 
