@@ -40,11 +40,11 @@ export function freshnessOf(birthMs: number, bootStartedAt: number): Freshness {
   return birthMs >= bootStartedAt ? "fresh" : "old";
 }
 
-function tableCountIsZero(file: string): boolean {
+function holdsNoRows(file: string): boolean {
   const db = new DatabaseSync(file);
   try {
-    const row = boundaryCast<{ n: number }>(db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get(), "host");
-    return row.n === 0;
+    const tables = boundaryCast<Array<{ name: string }>>(db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all(), "host");
+    return tables.every(({ name }) => db.prepare(`SELECT 1 FROM "${name.replaceAll('"', '""')}" LIMIT 1`).get() === undefined);
   } finally {
     db.close();
   }
@@ -95,8 +95,8 @@ function freshRestoreError(file: string, note?: string): string {
  * by this module's own automatic restore, or by another module configured on the same file — is
  * skipped without further checks. Otherwise freshness is judged locally first, against
  * `bootStartedAt` (the start of this boot, not of the process): an old file never needs a blobstore
- * call at all. Only a file that looks fresh (or whose birth time this file system cannot report,
- * judged instead by table count) asks the blobstore whether a restore point exists; a failure of
+ * call at all. Only a file that looks fresh (or whose birth time this file system cannot report and
+ * none of whose tables holds a row) asks the blobstore whether a restore point exists; a failure of
  * that one call fails the boot, since the file is already known to be a plausible loss and the
  * check could not rule it out. A file the blobstore has no restore point for, or one that predates
  * this boot, is safe and only logged.
@@ -111,13 +111,13 @@ export async function checkSkippedRestore(config: Config, blobs: Blobstore, logg
     logger.info("replication/sqlite: restore-on-start skipped", { file: config.file, reason: "file present, older than this process" });
     return;
   }
-  let judgedByTableCount = false;
+  let judgedByRows = false;
   if (freshness === "unknown") {
-    if (!tableCountIsZero(config.file)) {
-      logger.info("replication/sqlite: restore-on-start skipped", { file: config.file, reason: "file present, birth time unavailable on this file system; judged by table count" });
+    if (!holdsNoRows(config.file)) {
+      logger.info("replication/sqlite: restore-on-start skipped", { file: config.file, reason: "file present, birth time unavailable on this file system; judged by whether any table holds a row" });
       return;
     }
-    judgedByTableCount = true;
+    judgedByRows = true;
   }
   let hasPoint: boolean;
   try {
@@ -129,5 +129,5 @@ export async function checkSkippedRestore(config: Config, blobs: Blobstore, logg
     logger.info("replication/sqlite: restore-on-start skipped", { file: config.file, reason: "file present, no restore point" });
     return;
   }
-  throw new Error(freshRestoreError(config.file, judgedByTableCount ? "birth time unavailable on this file system; judged by table count" : undefined));
+  throw new Error(freshRestoreError(config.file, judgedByRows ? "birth time unavailable on this file system; judged by whether any table holds a row" : undefined));
 }

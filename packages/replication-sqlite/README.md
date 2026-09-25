@@ -16,8 +16,9 @@ frames. Config: `file`, `prefix`, `checkpointBytes`/`checkpointSeconds`,
 `before: [persistence@1]`, so it is set up before `persistence-sqlite` by declaration, regardless
 of where either module sits in `kestrel.config.modules`. If the file already exists and holds
 a restore point when `setup()` runs, was not itself just restored, and was created during this very
-boot (judged by birth time against the start of this boot, falling back to a table count where the
-file system reports none), `setup()` fails: that proves another module opened the database first.
+boot (judged by birth time against the start of this boot; where the file system reports none, a
+database none of whose tables holds a row counts as created during this boot), `setup()` fails:
+that proves another module opened the database first.
 Move the named file (and its `-wal` and `-shm` siblings) aside and start again — an ephemeral disk
 clears them for you on the next restart, a persistent volume does not, so move them by hand there:
 a stale file left over from an earlier, unrelated failure predates this boot, so this check stays

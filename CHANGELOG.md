@@ -869,8 +869,8 @@ Net changes since 5.8.1.
   already exists. When `restoreOnStart` is set and the file was not just restored from a pending
   marker or automatic restore in this same `setup()` call, `setup()` now checks whether the file
   was created during the current boot while the replica holds a restore point (judged against
-  `Deps.bootStartedAt`, with a local table-count fallback where the file system reports no birth
-  time) and fails naming the file and its `-wal`/`-shm` siblings if so, telling the operator to
+  `Deps.bootStartedAt`, with a local fallback where the file system reports no birth time: whether
+  any table holds a row) and fails naming the file and its `-wal`/`-shm` siblings if so, telling the operator to
   move them aside and start again — the shape of a misordered module list that would otherwise
   start from an empty database. A file just restored by `backup-blobstore` configured on the same
   file is recognized through a small sidecar file, `<file>.restored-at`, and skipped without either
@@ -882,7 +882,7 @@ Net changes since 5.8.1.
   only fails the boot for a file that already looked fresh. Every other skip is now logged with its
   reason, where previously it was silent.
 - `backup-blobstore`: `setup()` gets the same check as `replication-sqlite` — including the shared
-  `<file>.restored-at` sidecar and the "move aside" wording — minus the table-count fallback, since
+  `<file>.restored-at` sidecar and the "move aside" wording — minus the row-count fallback, since
   the backed-up file is not necessarily SQLite; an unavailable birth time is only logged, not failed.
 - A `reassignTo` value in `authn.verifyUser`'s request body or event hand-over no longer requires a
   `name` alongside `id`, and also accepts a bare user id string.
@@ -908,6 +908,11 @@ Net changes since 5.8.1.
 
 ### Fixed
 
+- `replication-sqlite`: where the file system reports no birth time, the restore-on-start skip check
+  judged an existing database by whether it held any table, so a database whose schema another
+  module had just created during this boot, with no rows in it, passed as real data and the restore
+  over an intact replica was skipped silently. The check now looks at whether any table holds a
+  row: an empty schema with a restore point in the replica fails the boot like any other fresh file.
 - `site-default`: with `fallback=true`, `site.resolve` finds a locale that has no slug of its own
   through the default locale's slug again when the filter holds a localized field such as `status`
   and the default locale fails it: a page published in one locale but still a draft in the default

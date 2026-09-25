@@ -122,7 +122,7 @@ describe("freshnessOf", () => {
 });
 
 describe("replication/sqlite module setup: restore-on-start skip check", () => {
-  it("rejects when the file already holds tables and was created during this boot, even though the table-count design would stay quiet", async () => {
+  it("rejects when the file already holds rows and was created during this boot, even though a check by rows alone would stay quiet", async () => {
     const bootStartedAt = Date.now();
     const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-fresh-"));
     dirs.push(dir);
@@ -215,7 +215,7 @@ describe("checkSkippedRestore", () => {
     expect(infos).toEqual([{ message: "replication/sqlite: restore-on-start skipped", data: { file, reason: "file present, older than this process" } }]);
   });
 
-  it("falls back to the table count when the birth time is unavailable, and rejects an empty database", async () => {
+  it("falls back to whether any table holds a row when the birth time is unavailable, and rejects a database without tables", async () => {
     const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
     dirs.push(dir);
     const file = join(dir, "live.db");
@@ -223,21 +223,36 @@ describe("checkSkippedRestore", () => {
     app.close();
     const blobs = fakeBlobs();
     putSnapshot(blobs);
-    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger, Date.now(), () => 0)).rejects.toThrow(/birth time unavailable on this file system; judged by table count/);
+    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger, Date.now(), () => 0)).rejects.toThrow(/birth time unavailable on this file system; judged by whether any table holds a row/);
   });
 
-  it("falls back to the table count and stays clean when tables already exist", async () => {
+  it("rejects a database whose tables hold no rows when the birth time is unavailable, the shape a schema created during this boot leaves behind", async () => {
     const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
     dirs.push(dir);
     const file = join(dir, "live.db");
     const app = new DatabaseSync(file);
-    app.exec("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    app.exec("CREATE TABLE pages (id TEXT PRIMARY KEY, title TEXT)");
+    app.exec("CREATE TABLE \"odd \"\"name\" (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    app.close();
+    const blobs = fakeBlobs();
+    putSnapshot(blobs);
+    await expect(checkSkippedRestore(skippedConfig(file), blobs, silentLogger, Date.now(), () => 0)).rejects.toThrow(/birth time unavailable on this file system; judged by whether any table holds a row/);
+  });
+
+  it("stays clean when the birth time is unavailable and a table already holds a row", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-repl-check-"));
+    dirs.push(dir);
+    const file = join(dir, "live.db");
+    const app = new DatabaseSync(file);
+    app.exec("CREATE TABLE pages (id TEXT PRIMARY KEY, title TEXT)");
+    app.exec("CREATE TABLE \"odd \"\"name\" (id INTEGER PRIMARY KEY)");
+    app.prepare("INSERT INTO \"odd \"\"name\" (id) VALUES (1)").run();
     app.close();
     const blobs = fakeBlobs();
     putSnapshot(blobs);
     const { infos, logger } = infoLogger();
     await checkSkippedRestore(skippedConfig(file), blobs, logger, Date.now(), () => 0);
-    expect(infos).toEqual([{ message: "replication/sqlite: restore-on-start skipped", data: { file, reason: "file present, birth time unavailable on this file system; judged by table count" } }]);
+    expect(infos).toEqual([{ message: "replication/sqlite: restore-on-start skipped", data: { file, reason: "file present, birth time unavailable on this file system; judged by whether any table holds a row" } }]);
   });
 
   it("stays quiet when no restore point exists, whatever the birth time", async () => {

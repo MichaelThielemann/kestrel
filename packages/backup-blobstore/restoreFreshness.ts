@@ -84,7 +84,7 @@ function freshRestoreError(file: string): string {
  * skipped without further checks. Otherwise freshness is judged locally first, against
  * `bootStartedAt` (the start of this boot, not of the process): an old file never needs a
  * blobstore call at all. Only a file that looks fresh asks the blobstore whether a restore point
- * exists — there is no table-count fallback here, since the backed-up file is not necessarily
+ * exists — there is no row-count fallback here, since the backed-up file is not necessarily
  * SQLite, so an unavailable birth time is only logged. A blobstore failure for a fresh file fails
  * the boot, since the file is already a plausible loss and the check could not rule it out.
  */
