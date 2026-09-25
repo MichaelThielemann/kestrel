@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -116,5 +116,51 @@ describe("a rule's own check() failing never aborts the whole run", () => {
     expect(failed).toBeDefined();
     expect(failed?.message).toContain("boom");
     expect(report.findings.some((f) => f.rule === "plugin/ok")).toBe(true);
+  });
+});
+
+describe("the standalone tool points at a host command when one is available, instead of a dead-end suggestion", () => {
+  it("names the dependency's own upgrade command when the config cannot load without a plugin", async () => {
+    const hostDir = join(dir, "node_modules", "example-host-layer");
+    await mkdir(hostDir, { recursive: true });
+    await writeFile(join(hostDir, "package.json"), JSON.stringify({ name: "example-host-layer", bin: { "example-host-layer-upgrade": "./cli.js" }, dependencies: { "@michaelthielemann/kestrel-upgrade": "^6.0.0" } }, null, 2));
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { "example-host-layer": "1.0.0" } }, null, 2));
+    await writeFile(join(dir, "kestrel.config.ts"), 'throw new Error("this project\'s own config only loads through its host layer");\n');
+
+    const lines: string[] = [];
+    await runCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    const failed = report.findings.find((f) => f.rule === "load/failed");
+    expect(failed).toBeDefined();
+    expect(failed?.suggestion).toContain("example-host-layer-upgrade");
+    expect(failed?.suggestion).not.toContain("fix the file so it loads");
+  });
+
+  it("keeps the generic suggestion when no dependency ships its own upgrade command", async () => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: {} }, null, 2));
+    await writeFile(join(dir, "kestrel.config.ts"), 'throw new Error("boom");\n');
+
+    const lines: string[] = [];
+    await runCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    const failed = report.findings.find((f) => f.rule === "load/failed");
+    expect(failed).toBeDefined();
+    expect(failed?.suggestion).toContain("fix the file so it loads");
+  });
+
+  it("keeps the generic suggestion once a plugin is active, even when a host command is available", async () => {
+    const hostDir = join(dir, "node_modules", "example-host-layer");
+    await mkdir(hostDir, { recursive: true });
+    await writeFile(join(hostDir, "package.json"), JSON.stringify({ name: "example-host-layer", bin: { "example-host-layer-upgrade": "./cli.js" }, dependencies: { "@michaelthielemann/kestrel-upgrade": "^6.0.0" } }, null, 2));
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { "example-host-layer": "1.0.0" } }, null, 2));
+    await writeFile(join(dir, "kestrel.config.ts"), 'throw new Error("boom");\n');
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.reject(new Error("plugin load fails too")) };
+
+    const lines: string[] = [];
+    await runCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    const failed = report.findings.find((f) => f.rule === "load/failed");
+    expect(failed).toBeDefined();
+    expect(failed?.suggestion).not.toContain("example-host-layer-upgrade");
   });
 });

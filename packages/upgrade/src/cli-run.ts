@@ -20,7 +20,7 @@ import { hookFailedFinding, ruleCheckFailedFinding, upgradingDocs, verifyEditsWi
 import { sandboxBootInput, type SandboxTable } from "./sandbox.ts";
 import { createScratchCopy, removeScratchCopy, type ScratchCopy } from "./scratch.ts";
 import { verifiesAfterEdit } from "./verify.ts";
-import { installedVersions, majorOf, toolVersion } from "./versions.ts";
+import { hostUpgradeCommand, installedVersions, majorOf, toolVersion } from "./versions.ts";
 
 interface InternalRunOptions extends RunUpgradeCliOptions {
   forceInstalledMajor?: number;
@@ -271,6 +271,10 @@ interface BuildResult {
   previewBoot?: (edits: readonly Edit[]) => Promise<BootPreview | undefined>;
 }
 
+function withHostUpgradeCommand(findings: readonly Finding[], command: string): Finding[] {
+  return findings.map((f) => (f.rule === "load/failed" ? { ...f, suggestion: `this project depends on "${command}", which already runs @michaelthielemann/kestrel-upgrade's own rules against it; run "${command}" instead of this standalone command` } : f));
+}
+
 async function buildReport(root: string, entry: string | undefined, options: BuildOptions): Promise<BuildResult> {
   const { plugin, issues: detectIssues } = await detectPlugin(options.plugins ?? [], root);
   const versions = installedVersions(root);
@@ -308,7 +312,9 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
 
     const pluginCache = options.pluginCache ?? new Map<string, unknown>();
     const { project, issues, findings: resolvedFindings, rules, sandboxEntries, locateSteps, locateModelFields, switchEdits, reload } = await resolveProject(root, entry, scratch.dir, plugin, pluginCache);
-    findings.push(...loadIssuesAsFindings(issues), ...(resolvedFindings ?? []));
+    const loadFindings = loadIssuesAsFindings(issues);
+    const hostCommand = project === undefined && plugin === undefined ? hostUpgradeCommand(root) : undefined;
+    findings.push(...(hostCommand === undefined ? loadFindings : withHostUpgradeCommand(loadFindings, hostCommand)), ...(resolvedFindings ?? []));
 
     const sourceCtx: SourceRuleContext = { root: scratch.dir, scratch: scratch.dir, readFile: readFileOrUndefined, answers: options.answers };
     for (const rule of rules) {

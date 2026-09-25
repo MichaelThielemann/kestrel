@@ -965,6 +965,34 @@ Net changes since 5.8.1.
 - `kestrel-upgrade`: every finding's `docs` field is now an absolute URL into `docs/upgrading.md` on
   GitHub instead of a path relative to the repository; the installed package ships no `docs/` for a
   relative path to resolve against.
+- `kestrel-upgrade`: every module-list edit (event delivery, `modules/delivery-media`,
+  `modules/references-media-target`, `modules/media-public-path`, a field-grant write, the queue
+  switch) fell back to manual for a config that writes `const modules = [...]` (or `export const
+  modules = [...]`) and references it by `modules: modules` or the shorthand `modules`, instead of an
+  inline `modules: [...]` literal. The module-list array is now resolved through that declaration too,
+  found anywhere in the same file.
+- `kestrel-upgrade`: `modules/delivery-media` carried the old `delivery-static` `media.publicPath`
+  value forward into the new `reservedPaths`/`publicPath` verbatim, even when that value's first path
+  segment was `api` or `admin` — a path many projects reserve for their own API or admin UI — producing
+  a config that passes every check tier but a real boot then refuses. It now falls back to manual
+  instead, naming the conflict, since it cannot see where a given project actually mounts either one.
+- `kestrel-upgrade`: `localModuleFiles()` counted a project's own module by file extension alone, so a
+  module resolved into `node_modules` (a nested package-manager store included) counted as the
+  project's own too — `responses/binary-cache-control`, `steps/ctx-done-terminal-output` and
+  `responses/thrown-error-text` could flag an installed package's own published code. All three now
+  exclude anything reached through a `node_modules` segment, or outside the project root.
+- `kestrel-upgrade`: `pipelines/images-plan` fired for a pipeline calling `images.plan` directly even
+  when it was already correctly split into a plan-only pipeline and a separate one, triggered on
+  `images.planned`, doing the generating half — the very shape its own suggestion recommends. It now
+  stays quiet for that shape and still fires for an unsplit or incomplete one.
+- `kestrel-upgrade`: `fix --write` printed nothing at all once every proposed edit failed to verify (or
+  every write was declined, or no open finding had an edit to offer), instead of saying so; it now
+  always reports what happened, naming the rejected finding and its own reason when that is why.
+- `kestrel-upgrade`: without a plugin registered, a `kestrel.config.ts` that fails to load always
+  suggested "fix the file so it loads", even for a project whose config only loads through a dependency
+  that ships its own upgrade command. That dependency is now detected generically — its own
+  `package.json` declares a `bin` and depends on `@michaelthielemann/kestrel-upgrade` itself — and the
+  suggestion names its command instead; a plugin already registered keeps the generic suggestion.
 
 ## 5.8.1 – 2026-09-22
 

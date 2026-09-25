@@ -505,7 +505,13 @@ A module or pipeline `checkBoot()` left unchecked because a problem it depends o
 consent list, made it unsafe to check. Run with `--run-setup <use>` to include it.
 
 #### load
-A config, module or pipeline file failed to load; the message is the load error itself.
+A config, module or pipeline file failed to load; the message is the load error itself. Without a
+plugin registered, the suggestion is "fix the file so it loads, then run check again" — unless a
+project dependency's own `package.json` both declares a `bin` and depends on
+`@michaelthielemann/kestrel-upgrade` itself: that dependency ships its own upgrade command, running
+this package's own rules against a project shape only it can load, so the suggestion names that
+command instead. A plugin already registered keeps the generic suggestion, since it is the one
+already trying to load the project this way.
 
 #### sandbox-blobstore-standin
 A configured module provides `blobstore@1` but the sandbox neither rewrites its config (unlike
