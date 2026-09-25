@@ -1,8 +1,9 @@
 import { dirname, join } from "node:path";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
+import type { InternalRuleContext } from "./cli-run.ts";
 import { createPipelineFile, insertTriggers, removeModuleConfigProperty, replaceModuleConfigProperty, replaceModuleConfigValue, setModuleConfigProperties, swapPipelineSteps } from "./edits.ts";
 import { isRecord } from "./guards.ts";
-import type { Rule, RuleContext } from "./plugin.ts";
+import type { MediaWiring, Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
 import { combineEditParts, finding, fileForPipeline, hasModule, infoFinding, localModuleFiles, moduleEntry, pipelinesTriggeredBy, upgradingDocs } from "./ruleHelpers.ts";
 
@@ -23,18 +24,60 @@ function underReservedMount(path: string): boolean {
 
 const DELIVERY_MEDIA_RULE_ID = "modules/delivery-media";
 
+type ModuleListEntry = NonNullable<ReturnType<typeof moduleEntry>>;
+
+function mediaWiringFindings(ctx: RuleContext, delivery: ModuleListEntry, mediaDefault: ModuleListEntry | undefined, imagesDefault: ModuleListEntry | undefined, source: string | undefined, message: string, docs: string, wiring: MediaWiring): Finding[] {
+  const findings: Finding[] = [];
+  const reservedPathsText = `[${wiring.reservedPaths.map((p) => `"${p}"`).join(", ")}]`;
+  const deliveryWhere = { module: delivery.use, path: "media" };
+  const existingReserved = isRecord(delivery.config) && Array.isArray(delivery.config.reservedPaths) ? delivery.config.reservedPaths : [];
+  const alreadyReserved = wiring.reservedPaths.every((p) => existingReserved.includes(p));
+  const deliverySuggestion = `remove "media" from delivery-static, set reservedPaths: ${reservedPathsText}`;
+  const deliveryEdit =
+    source === undefined
+      ? undefined
+      : alreadyReserved
+        ? removeModuleConfigProperty(ctx.project.configFile, source, { use: delivery.use, key: "media" })
+        : existingReserved.length > 0
+          ? undefined
+          : replaceModuleConfigProperty(ctx.project.configFile, source, { use: delivery.use, fromKey: "media", toText: `reservedPaths: ${reservedPathsText}` });
+  findings.push(finding(`${DELIVERY_MEDIA_RULE_ID}:${delivery.use}`, DELIVERY_MEDIA_RULE_ID, message, deliveryEdit === undefined ? `${deliverySuggestion} by hand` : deliverySuggestion, deliveryWhere, deliveryEdit === undefined ? undefined : [deliveryEdit], docs));
+
+  for (const entry of [mediaDefault, imagesDefault]) {
+    if (entry === undefined) continue;
+    const currentPublicPath = stringConfig(entry.config, "publicPath");
+    const currentPrefix = isRecord(entry.config) && isRecord(entry.config.publicCopy) ? stringConfig(entry.config.publicCopy, "prefix") : undefined;
+    if (currentPublicPath === wiring.publicPath && currentPrefix === wiring.copyPrefix) continue;
+    const where = { module: entry.use, path: "publicPath" };
+    const assignments: Record<string, string> = { publicCopy: `{ prefix: "${wiring.copyPrefix}" }` };
+    if (currentPublicPath !== wiring.publicPath) assignments.publicPath = `"${wiring.publicPath}"`;
+    const suggestion = `set publicPath: "${wiring.publicPath}" and publicCopy: { prefix: "${wiring.copyPrefix}" }`;
+    const edits = source === undefined ? undefined : setModuleConfigProperties(ctx.project.configFile, source, { use: entry.use, assignments });
+    findings.push(finding(`${DELIVERY_MEDIA_RULE_ID}:${entry.use}`, DELIVERY_MEDIA_RULE_ID, message, edits === undefined ? `${suggestion} by hand` : suggestion, where, edits, docs));
+  }
+
+  return findings;
+}
+
 /** `modules/delivery-media`: delivery-static's old `media` option is removed; media-default/images-default's `publicCopy` replaces the rewriting it did. */
 export const deliveryMediaRule: Rule = {
   id: DELIVERY_MEDIA_RULE_ID,
-  check(ctx) {
+  check(untypedCtx) {
+    const ctx = untypedCtx as InternalRuleContext;
     const delivery = moduleEntry(ctx, "delivery-static");
     if (delivery === undefined || !isRecord(delivery.config) || !isRecord(delivery.config.media)) return [];
+    const message = 'delivery-static\'s "media" option is removed in 6.0.0; media-default and images-default\'s publicCopy replace the URL rewriting and copying it did';
+    const docs = upgradingDocs("modules-delivery-media");
+
+    if (ctx.hostMediaWiring !== undefined) {
+      const source = ctx.readFile(ctx.project.configFile);
+      return mediaWiringFindings(ctx, delivery, moduleEntry(ctx, "media-default"), moduleEntry(ctx, "images-default"), source, message, docs, ctx.hostMediaWiring);
+    }
+
     const rawPublicPath = stringConfig(delivery.config.media, "publicPath") ?? "/media";
     const publicPath = normalizePublicPath(rawPublicPath);
     const deliveryPrefix = stringConfig(delivery.config, "prefix") ?? "";
     const where = { module: delivery.use, path: "media" };
-    const message = 'delivery-static\'s "media" option is removed in 6.0.0; media-default and images-default\'s publicCopy replace the URL rewriting and copying it did';
-    const docs = upgradingDocs("modules-delivery-media");
 
     if (underReservedMount(publicPath)) {
       const suggestion = `the old media.publicPath ("${publicPath}") lies under a path many projects reserve for their own API or admin UI; pick a publicPath outside your project's own mounts (commonly "/media"), add it to delivery-static's reservedPaths alongside your actual mounts, and set publicCopy: { prefix: "${deliveryPrefix}" } on media-default and images-default by hand — this assistant cannot see where your project mounts its API`;

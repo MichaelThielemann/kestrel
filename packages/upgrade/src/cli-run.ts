@@ -12,7 +12,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { loadBackendProject, loadIssuesAsFindings, type LoadIssue, type LoadResult } from "./project.ts";
-import type { AskFix, LoadedProject, Rule, RuleContext, RunUpgradeCliOptions, SourceRuleContext, SwitchEditsResult, UpgradePlugin } from "./plugin.ts";
+import type { AskFix, LoadedProject, MediaWiring, Rule, RuleContext, RunUpgradeCliOptions, SourceRuleContext, SwitchEditsResult, UpgradePlugin } from "./plugin.ts";
 import { detectPlugin, mergeRules, mergeSandboxEntries } from "./pluginRules.ts";
 import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity, type UpgradeReport } from "./report.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
@@ -41,6 +41,8 @@ export interface InternalRuleContext extends RuleContext {
   previewDetails?: (edits: readonly Edit[]) => Promise<{ moduleUses?: readonly string[]; issues: readonly LoadIssue[]; failed?: LoadIssue } | undefined>;
   /** The active plugin's own `idempotentPipelines(project)` result, when it supplies the hook; `offer/event-queue` skips asking `idempotent:<pipeline>` for a name listed here. */
   vouchedIdempotentPipelines?: readonly string[];
+  /** The active plugin's own `mediaWiring(project)` result, when it supplies the hook; `modules/delivery-media` uses it instead of its own heuristic. */
+  hostMediaWiring?: MediaWiring;
 }
 
 interface ResolvedProject {
@@ -53,6 +55,7 @@ interface ResolvedProject {
   locateModelFields?: ModelFieldsLocator;
   switchEdits?: (ctx: RuleContext, relayPipelines: readonly string[]) => Promise<SwitchEditsResult>;
   idempotentPipelines?: readonly string[];
+  mediaWiring?: MediaWiring;
   reload: (scratchDir: string) => Promise<LoadResult>;
 }
 
@@ -93,7 +96,18 @@ async function resolveProject(root: string, entry: string | undefined, scratchDi
     const { project: loaded, issues } = await plugin.load(root, scratchDir, cache);
     const { project, finding } = await withDerivedContentModel(loaded, plugin, root);
     const idempotentPipelines = project === undefined ? undefined : plugin.idempotentPipelines?.(project);
-    return { ...(project === undefined ? {} : { project }), issues: [...mergeIssues, ...issues], findings: finding ? [finding] : [], rules, ...sandboxEntries, ...locators, ...(idempotentPipelines === undefined ? {} : { idempotentPipelines }), reload };
+    const mediaWiring = project === undefined ? undefined : plugin.mediaWiring?.(project);
+    return {
+      ...(project === undefined ? {} : { project }),
+      issues: [...mergeIssues, ...issues],
+      findings: finding ? [finding] : [],
+      rules,
+      ...sandboxEntries,
+      ...locators,
+      ...(idempotentPipelines === undefined ? {} : { idempotentPipelines }),
+      ...(mediaWiring === undefined ? {} : { mediaWiring }),
+      reload,
+    };
   } catch (err) {
     return { issues: [...mergeIssues, { message: err instanceof Error ? err.message : String(err) }], rules, ...sandboxEntries, ...locators, reload };
   }
@@ -322,7 +336,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
     }
 
     const pluginCache = options.pluginCache ?? new Map<string, unknown>();
-    const { project, issues, findings: resolvedFindings, rules, sandboxEntries, locateSteps, locateModelFields, switchEdits, idempotentPipelines, reload } = await resolveProject(root, entry, scratch.dir, plugin, pluginCache);
+    const { project, issues, findings: resolvedFindings, rules, sandboxEntries, locateSteps, locateModelFields, switchEdits, idempotentPipelines, mediaWiring, reload } = await resolveProject(root, entry, scratch.dir, plugin, pluginCache);
     const loadFindings = loadIssuesAsFindings(issues);
     const hostCommand = project === undefined && plugin === undefined ? hostUpgradeCommand(root) : undefined;
     findings.push(...(hostCommand === undefined ? loadFindings : withHostUpgradeCommand(loadFindings, hostCommand)), ...(resolvedFindings ?? []));
@@ -467,6 +481,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         ...(locateModelFields === undefined ? {} : { locateModelFields }),
         ...(switchEdits === undefined ? {} : { switchEdits }),
         ...(idempotentPipelines === undefined ? {} : { vouchedIdempotentPipelines: idempotentPipelines }),
+        ...(mediaWiring === undefined ? {} : { hostMediaWiring: mediaWiring }),
         ...(previewBoot === undefined ? {} : { previewBoot }),
         ...(verifyEdits === undefined ? {} : { verifyEdits }),
         ...(previewDetails === undefined ? {} : { previewDetails }),

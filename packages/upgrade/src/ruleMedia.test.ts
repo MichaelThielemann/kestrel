@@ -4,7 +4,8 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BootCheck, PipelineDefinition } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
-import type { LoadedProject, RuleContext } from "./plugin.ts";
+import type { InternalRuleContext } from "./cli-run.ts";
+import type { LoadedProject, MediaWiring, RuleContext } from "./plugin.ts";
 import { upgradingDocs } from "./ruleHelpers.ts";
 import { readFileOrUndefined } from "./rules.ts";
 import {
@@ -61,6 +62,10 @@ async function project(
 
 function contextFor(p: LoadedProject): RuleContext {
   return { root: dir, scratch: dir, project: p, bootCheck: bootCheck(), readFile: readFileOrUndefined, answers: new Map() };
+}
+
+function contextWithWiring(p: LoadedProject, wiring: MediaWiring): InternalRuleContext {
+  return { ...contextFor(p), hostMediaWiring: wiring };
 }
 
 const DELIVERY = "@michaelthielemann/kestrel-delivery-static";
@@ -165,6 +170,53 @@ describe("modules/delivery-media", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).not.toBe("auto");
     expect(findings[0]?.suggestion).toContain("media-default");
+  });
+
+  it("with a host mediaWiring hook, auto-fixes even under a reserved mount, one finding per module entry", async () => {
+    const p = await project([
+      { use: DELIVERY, config: { prefix: "site/", media: { publicPath: "/api/media" } } },
+      { use: MEDIA_DEFAULT, config: {} },
+      { use: IMAGES_DEFAULT, config: {} },
+    ]);
+    const wiring: MediaWiring = { publicPath: "/media", copyPrefix: "site/", reservedPaths: ["/api/media"] };
+    const findings = await deliveryMediaRule.check(contextWithWiring(p, wiring));
+    expect(findings.map((f) => f.id)).toEqual([`modules/delivery-media:${DELIVERY}`, `modules/delivery-media:${MEDIA_DEFAULT}`, `modules/delivery-media:${IMAGES_DEFAULT}`]);
+    expect(findings.every((f) => f.rule === "modules/delivery-media")).toBe(true);
+    expect(findings.every((f) => f.fix.kind === "auto")).toBe(true);
+    const edits = findings.flatMap((f) => (f.fix.kind === "auto" ? f.fix.edits : []));
+    const source = readFileOrUndefined(p.configFile)!;
+    const { text } = applyEdits(source, edits);
+    expect(text).not.toContain("media:");
+    expect(text).toContain('kestrel-delivery-static", config: {"prefix":"site/",reservedPaths: ["/api/media"]}');
+    expect(text).toContain('kestrel-media-default", config: {publicCopy: { prefix: "site/" }, publicPath: "/media"}');
+    expect(text).toContain('kestrel-images-default", config: {publicCopy: { prefix: "site/" }, publicPath: "/media"}');
+  });
+
+  it("with a host mediaWiring hook, skips a module entry whose config already matches it", async () => {
+    const p = await project([
+      { use: DELIVERY, config: { prefix: "site/", media: { publicPath: "/media" } } },
+      { use: MEDIA_DEFAULT, config: { publicPath: "/media", publicCopy: { prefix: "site/" } } },
+      { use: IMAGES_DEFAULT, config: {} },
+    ]);
+    const wiring: MediaWiring = { publicPath: "/media", copyPrefix: "site/", reservedPaths: ["/media"] };
+    const findings = await deliveryMediaRule.check(contextWithWiring(p, wiring));
+    expect(findings.map((f) => f.id)).toEqual([`modules/delivery-media:${DELIVERY}`, `modules/delivery-media:${IMAGES_DEFAULT}`]);
+  });
+
+  it("with a host mediaWiring hook, removes the media option outright once reservedPaths already covers it", async () => {
+    const p = await project([
+      { use: DELIVERY, config: { prefix: "site/", media: { publicPath: "/media" }, reservedPaths: ["/media"] } },
+      { use: MEDIA_DEFAULT, config: {} },
+    ]);
+    const wiring: MediaWiring = { publicPath: "/media", copyPrefix: "site/", reservedPaths: ["/media"] };
+    const findings = await deliveryMediaRule.check(contextWithWiring(p, wiring));
+    const deliveryFinding = findings.find((f) => f.id === `modules/delivery-media:${DELIVERY}`);
+    expect(deliveryFinding?.fix.kind).toBe("auto");
+    const edits = deliveryFinding?.fix.kind === "auto" ? deliveryFinding.fix.edits : [];
+    const source = readFileOrUndefined(p.configFile)!;
+    const { text } = applyEdits(source, edits);
+    expect(text).not.toContain("media:");
+    expect(text).toContain('"reservedPaths":["/media"]');
   });
 });
 

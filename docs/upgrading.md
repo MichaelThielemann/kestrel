@@ -691,6 +691,12 @@ directory) with only the built-in rules.
   without one in `--answers`; absent, every consumer event pipeline is asked about, unchanged. A
   project's own pipelines still get their own question — this only covers what the active plugin's own
   layout already vouches for.
+- `mediaWiring?(project): MediaWiring | undefined` — supplies the host layer's own media wiring
+  (`publicPath`, `copyPrefix`, and delivery-static's `reservedPaths`) for `modules/delivery-media`:
+  with it, the rule compares each of delivery-static, media-default and images-default against these
+  values directly and produces one auto-fixing finding per module entry that does not already match,
+  instead of the single manual finding it falls back to when it cannot tell where a project mounts its
+  own routes. Absent, or when it returns `undefined`, the built-in heuristic runs unchanged.
 
 A `Rule` answers one of its own `ask` questions the same way every other finding changes: through
 `ctx.answers` on the next `check()` call — there is no separate answer-to-edit path a plugin's rule

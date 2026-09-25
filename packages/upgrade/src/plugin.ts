@@ -20,7 +20,7 @@ export type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
  * plugin that relies on one compares `PLUGIN_API_VERSION` first. The number only grows: a new major
  * of this package continues from the previous major's value and never resets it.
  */
-export const PLUGIN_API_VERSION = 2;
+export const PLUGIN_API_VERSION = 3;
 
 /** One file a plugin's own pipeline layout lives in, and the pipeline(s) it defines — more than one when a layout keeps several pipelines in one file; a rule that iterates every pipeline file reports at most once per entry. */
 export interface PipelineFile {
@@ -94,6 +94,20 @@ export interface DataContentModel {
    * never remapped; it reaches the final report exactly as given.
    */
   file?: string;
+}
+
+/**
+ * A project's own media wiring, as its host layer knows it — `modules/delivery-media` uses these
+ * values directly when `UpgradePlugin.mediaWiring` supplies them, instead of deriving a value it
+ * cannot always get right on its own.
+ */
+export interface MediaWiring {
+  /** The path media and image variants are served from (media-default's and images-default's own `publicPath`), commonly `/media`. */
+  publicPath: string;
+  /** The prefix `publicCopy` writes ready files under, on both media-default and images-default. */
+  copyPrefix: string;
+  /** delivery-static's own `reservedPaths`, including `publicPath` and every other mount the project reserves for itself (its API, its admin UI). */
+  reservedPaths: readonly string[];
 }
 
 /** `offer/event-queue`'s switch for a project layout `UpgradePlugin.switchEdits` supplies. */
@@ -262,6 +276,15 @@ export interface UpgradePlugin {
    * `--answers`. Absent, every consumer event pipeline is asked about, unchanged.
    */
   idempotentPipelines?(project: LoadedProject): readonly string[];
+  /**
+   * Supplies the project's own media wiring, for a project layout where `modules/delivery-media`
+   * cannot always derive a safe value on its own — an old `media.publicPath` under a path the project
+   * reserves for its own API or admin UI, say, where the rule cannot see what the project's real
+   * mounts are. When supplied, the rule uses these values directly and offers an auto edit, one
+   * finding per module entry, instead of falling back to manual advice; absent, or `undefined` for a
+   * given project, it keeps its own existing behavior.
+   */
+  mediaWiring?(project: LoadedProject): MediaWiring | undefined;
 }
 
 export interface RunUpgradeCliOptions {
