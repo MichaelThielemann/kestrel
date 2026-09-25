@@ -67,17 +67,17 @@ describe("describeConfig", () => {
   });
 
   it("a defaulted object hands its default down: the child is optional and reports the inherited value", () => {
-    const nested = z.object({ media: z.object({ collection: z.string().min(1) }).default({ collection: "media_items" }) }).strict();
+    const nested = z.object({ archive: z.object({ folder: z.string().min(1) }).default({ folder: "old_posts" }) }).strict();
     const byPath = Object.fromEntries(describeConfig(nested, {}).variables.map((v) => [v.path, v]));
-    expect(byPath.media).toEqual({ path: "media", type: "object", required: false, default: { collection: "media_items" }, secret: false, set: false, status: "default", value: { collection: "media_items" }, redacted: false });
-    expect(byPath["media.collection"]).toEqual({ path: "media.collection", type: "string", required: false, default: "media_items", secret: false, set: false, status: "default", value: "media_items", redacted: false });
+    expect(byPath.archive).toEqual({ path: "archive", type: "object", required: false, default: { folder: "old_posts" }, secret: false, set: false, status: "default", value: { folder: "old_posts" }, redacted: false });
+    expect(byPath["archive.folder"]).toEqual({ path: "archive.folder", type: "string", required: false, default: "old_posts", secret: false, set: false, status: "default", value: "old_posts", redacted: false });
   });
 
   it("a spelled-out parent gets no inherited default, an own default still applies", () => {
-    const nested = z.object({ media: z.object({ collection: z.string(), locale: z.string().default("de") }).default({ collection: "media_items" }) }).strict();
-    const byPath = Object.fromEntries(describeConfig(nested, { media: { collection: "assets" } }).variables.map((v) => [v.path, v]));
-    expect(byPath["media.collection"]).toEqual({ path: "media.collection", type: "string", required: false, secret: false, set: true, status: "set", value: "assets", redacted: false });
-    expect(byPath["media.locale"]).toEqual({ path: "media.locale", type: "string", required: false, default: "de", secret: false, set: false, status: "default", value: "de", redacted: false });
+    const nested = z.object({ archive: z.object({ folder: z.string(), format: z.string().default("zip") }).default({ folder: "old_posts" }) }).strict();
+    const byPath = Object.fromEntries(describeConfig(nested, { archive: { folder: "drafts" } }).variables.map((v) => [v.path, v]));
+    expect(byPath["archive.folder"]).toEqual({ path: "archive.folder", type: "string", required: false, secret: false, set: true, status: "set", value: "drafts", redacted: false });
+    expect(byPath["archive.format"]).toEqual({ path: "archive.format", type: "string", required: false, default: "zip", secret: false, set: false, status: "default", value: "zip", redacted: false });
   });
 
   it("a required child of an optional object is optional and missing, of a required object required and missing", () => {
@@ -94,10 +94,10 @@ describe("describeConfig", () => {
   });
 
   it("a top-level default reaches a grandchild the raw config never mentions", () => {
-    const nested = z.object({ store: z.object({ media: z.object({ collection: z.string() }) }).default({ media: { collection: "media_items" } }) }).strict();
+    const nested = z.object({ store: z.object({ archive: z.object({ folder: z.string() }) }).default({ archive: { folder: "old_posts" } }) }).strict();
     const byPath = Object.fromEntries(describeConfig(nested, undefined).variables.map((v) => [v.path, v]));
-    expect(byPath["store.media"]).toMatchObject({ required: false, set: false, status: "default", default: { collection: "media_items" }, value: { collection: "media_items" } });
-    expect(byPath["store.media.collection"]).toEqual({ path: "store.media.collection", type: "string", required: false, default: "media_items", secret: false, set: false, status: "default", value: "media_items", redacted: false });
+    expect(byPath["store.archive"]).toMatchObject({ required: false, set: false, status: "default", default: { folder: "old_posts" }, value: { folder: "old_posts" } });
+    expect(byPath["store.archive.folder"]).toEqual({ path: "store.archive.folder", type: "string", required: false, default: "old_posts", secret: false, set: false, status: "default", value: "old_posts", redacted: false });
   });
 
   it("reads the effective value from the parsed config, defaults included", () => {

@@ -760,7 +760,7 @@ defaulted — `bootstrap.username` inside an optional `bootstrap` is *not* requi
 `bootstrap` out is legal. `set` says whether the raw config carries the path itself; `status` is the
 three-state version of it: `set` (same as `set: true`), `default` (the path is absent and the value
 comes from the variable's own `.default()` or from an ancestor's — `default` then holds the effective
-value, e.g. `media.collection` → `"media_items"` when `media` is left out entirely) or `missing` (no
+value, e.g. `archive.folder` → `"old_posts"` when `archive` is left out entirely) or `missing` (no
 value at all). A parent that *is* spelled out in the config hands its children no default: only their
 own `.default()` still applies.
 
