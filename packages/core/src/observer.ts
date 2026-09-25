@@ -37,7 +37,9 @@ export interface StepEndEvent extends StepStartEvent {
 export interface RunObserver {
   runStart?(event: RunStartEvent): void;
   runEnd?(event: RunEndEvent): void;
+  /** Called synchronously right before the step's input is checked and its function runs, so an observer that records `runId` here sees it before any code of the step does. */
   stepStart?(event: StepStartEvent): void;
+  /** Called once for every `stepStart`, whatever the step ends in: `Ok`, an `Err`, a throw, an input that fails its schema, or an undeclared write. */
   stepEnd?(event: StepEndEvent): void;
 }
 

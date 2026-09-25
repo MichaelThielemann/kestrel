@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Context, Step } from "./context.ts";
+import type { Context, Step, StepResult } from "./context.ts";
 import { customFailure } from "./errors.ts";
 import { silentLogger, type Logger, type StepLog } from "./logger.ts";
 import type { RunEndEvent, RunObserver } from "./observer.ts";
@@ -435,6 +435,33 @@ describe("runPipeline observer", () => {
     const { events, observer } = recording();
     await runPipeline({ name: "p", steps: [{ name: "one", description, fn: async (ctx: Context) => ok(ctx) }, { name: "two", description, fn: async (ctx: Context) => ok(ctx) }] }, input, silentLogger, observer);
     expect(events).toEqual(["runStart p http", "stepStart one", "stepEnd one 200 ok", "stepStart two", "stepEnd two 200 ok", "runEnd p 200 ok - - timed"]);
+  });
+
+  it("calls stepStart synchronously before the step body runs, with the run's own runId, and stepEnd after every outcome", async () => {
+    const open = new Set<string>();
+    const seenByBody: boolean[] = [];
+    const tracking: RunObserver = {
+      stepStart: (e) => {
+        open.add(e.runId);
+      },
+      stepEnd: (e) => {
+        open.delete(e.runId);
+      },
+    };
+    const body = (end: (ctx: Context) => Promise<StepResult>): ResolvedStep => ({
+      name: "watched",
+      description,
+      fn: async (ctx: Context) => {
+        seenByBody.push(open.has(ctx.runId));
+        return end(ctx);
+      },
+    });
+    await runPipeline({ name: "p", steps: [body(async (ctx) => ok(ctx))] }, input, silentLogger, tracking);
+    await runPipeline({ name: "p", steps: [body(async (ctx) => ctx.fail("FORBIDDEN", "no"))] }, input, silentLogger, tracking);
+    await runPipeline({ name: "p", steps: [body(async () => Promise.reject(new Error("x")))] }, input, silentLogger, tracking);
+    await runPipeline({ name: "p", steps: [{ ...body(async (ctx) => ok(ctx)), description: { ...description, input: { type: "object", properties: { a: { type: "string" } } } } }] }, input, silentLogger, tracking);
+    expect(seenByBody).toEqual([true, true, true]);
+    expect(open.size).toBe(0);
   });
 
   it("reports an Err as fail with the code and the step", async () => {
