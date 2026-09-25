@@ -664,14 +664,15 @@ describe("images/default attach: rows of items that are no longer ready", () => 
   it("removes them in the background and stops between chunks once closed", async () => {
     const blobs = fakeBlobstore();
     const db = createFakePersistence();
-    let images: Images | undefined;
+    const opened: { images?: Images } = {};
     let closing: Promise<void> | undefined;
     const media = createFakeMedia({
       beforeCall: (method) => {
-        if (method === "files" && closing === undefined) closing = images?.close();
+        if (method === "files" && closing === undefined) closing = opened.images?.close();
       },
     });
-    images = await createImages(baseConfig, { blobs, db, media, logger: noLogger }, () => 1000);
+    const images = await createImages(baseConfig, { blobs, db, media, logger: noLogger }, () => 1000);
+    opened.images = images;
     for (let i = 0; i < 450; i += 1) {
       const mediaId = `gone-${String(i).padStart(3, "0")}`;
       expectOk(await db.createOne(VARIANTS, { mediaId, size: "thumb", slot: `${mediaId}/thumb`, spec: "x", width: 1, height: 1, format: "webp", key: `media-variants/${mediaId}/thumb.webp`, bytes: 0, state: "done", error: null, attempts: 0, updatedAt: 1 }));
