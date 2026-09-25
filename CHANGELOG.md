@@ -399,6 +399,16 @@ Net changes since 5.8.1.
   `type/*+suffix` every subtype of a top-level type that ends in `+suffix` (`*/*+suffix` of every
   top-level type), any other pattern one type, case and parameters ignored) and `EXTENSION_BY_TYPE`, shared by
   `media-default`, `images-default` and any client that checks a type before uploading.
+- `@michaelthielemann/kestrel-contracts/media`: the `media@1` contract (`MediaFiles`: `file`, `files`,
+  `load`, `scan`, `count`), read access to the ready files a media provider stores. Only a ready file is
+  ever visible — all its bytes stored, its removal not begun — and readiness is the provider's alone.
+  `scan` and `count` take a `MediaFilter` (`types`, `excludeTypes` as `allowedTypes`-style patterns,
+  `createdSince`); `scan` pages with a cursor that resumes in another process. Its suite
+  `media.contract.test` (`mediaContractTests`) and the in-memory fake `testing/fakeMedia`
+  (`createFakeMedia`) come with it.
+- `@michaelthielemann/kestrel-contracts/persistence.owned`: `ownedPersistence(db, owner, collections)`,
+  a `persistence@1` view that reaches only the named collections and throws a wiring error naming the
+  owner for any other, before the store is asked.
 - `@michaelthielemann/kestrel-contracts/content-locale`: `satisfiesFilter`, `publishedLocale` and
   `narrowListTranslations` — the shared rule behind the two entries above, for any module that
   builds a public view on top of `content@1`. `satisfiesFilter` decides membership through
