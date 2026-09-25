@@ -150,7 +150,7 @@ describe("runPipeline", () => {
       {
         name: "p",
         steps: [
-          { name: "one", description: writesResult, fn: async (ctx: Context) => ctx.done({ redirect: { to: "/x", status: 301 } }) },
+          { name: "one", description: { ...writesResult, terminalOutput: {} }, fn: async (ctx: Context) => ctx.done({ redirect: { to: "/x", status: 301 } }) },
           { name: "two", description, fn: async (ctx: Context) => { ran = true; return ok(ctx); } },
         ],
       },
@@ -169,7 +169,7 @@ describe("runPipeline", () => {
         name: "p",
         steps: [
           { name: "one", description: { summary: "test", reads: [], writes: ["params.id"] }, fn: async (ctx: Context) => ok({ ...ctx, params: { ...ctx.params, id: "p1" } }) },
-          { name: "two", description: writesResult, fn: async (ctx: Context) => ctx.done(ctx.params.id) },
+          { name: "two", description: { ...writesResult, terminalOutput: {} }, fn: async (ctx: Context) => ctx.done(ctx.params.id) },
         ],
       },
       input,
@@ -328,7 +328,7 @@ describe("runPipeline payload validation", () => {
 });
 
 describe("runPipeline writes check", () => {
-  const run = (writes: string[], fn: Step) => runPipeline({ name: "p", steps: [{ name: "one", description: { summary: "test", reads: [], writes }, fn }] }, input, stackLogger);
+  const run = (writes: string[], fn: Step, terminalOutput?: Record<string, unknown>) => runPipeline({ name: "p", steps: [{ name: "one", description: { summary: "test", reads: [], writes, ...(terminalOutput === undefined ? {} : { terminalOutput }) }, fn }] }, input, stackLogger);
 
   it("a write of an undeclared key is an INTERNAL error naming step and key", async () => {
     const res = await run([], async (ctx: Context) => ok({ ...ctx, result: 1 }));
@@ -359,8 +359,8 @@ describe("runPipeline writes check", () => {
   });
 
   it("checks the context ctx.done() hands back", async () => {
-    expect(await run(["result"], async (ctx: Context) => ctx.done({ id: "p1" }))).toMatchObject({ status: 200, result: { id: "p1" } });
-    const undeclared = await run([], async (ctx: Context) => ctx.done({ id: "p1" }));
+    expect(await run(["result"], async (ctx: Context) => ctx.done({ id: "p1" }), {})).toMatchObject({ status: 200, result: { id: "p1" } });
+    const undeclared = await run([], async (ctx: Context) => ctx.done({ id: "p1" }), {});
     expect(undeclared.status).toBe(500);
     expect(thrownText(undeclared)).toContain('writes "result" without declaring it');
   });
@@ -405,10 +405,17 @@ describe("runPipeline terminal output validation", () => {
     expect(thrownText(res)).toContain('step "maybe" ended the run with ctx.done() without declaring describe().terminalOutput');
   });
 
-  it("without validateOutput, the same ctx.done() still ends the run with 200", async () => {
+  it("without validateOutput, the same ctx.done() fails the run too and never answers its result", async () => {
     const step = { name: "maybe", description: { summary: "test", reads: [], writes: ["result?"] }, fn: async (ctx: Context) => ctx.done({ redirect: "/x" }) };
     const res = await runPipeline({ name: "p", steps: [step] }, input, stackLogger);
-    expect(res).toMatchObject({ status: 200, result: { redirect: "/x" } });
+    expect(res).toMatchObject({ status: 500, code: "INTERNAL", error: "p/maybe: unexpected Error" });
+    expect(res).not.toHaveProperty("result");
+    expect(thrownText(res)).toContain('step "maybe" ended the run with ctx.done() without declaring describe().terminalOutput');
+  });
+
+  it("without validateOutput, a ctx.done() with a declared terminalOutput ends the run with its result", async () => {
+    const step = { name: "maybe", description: { summary: "test", reads: [], writes: ["result?"], terminalOutput: TERMINAL }, fn: async (ctx: Context) => ctx.done({ redirect: "/x" }) };
+    expect(await runPipeline({ name: "p", steps: [step] }, input, stackLogger)).toMatchObject({ status: 200, result: { redirect: "/x" } });
   });
 
   it("a done result that does not match terminalOutput fails, naming the path", async () => {

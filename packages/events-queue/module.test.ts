@@ -355,7 +355,7 @@ describe("events/queue in a booted instance", () => {
       }),
       describe: () => ({
         create: { summary: "c", reads: [], writes: ["result"], atomicSafe: true, output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
-        stop: { summary: "s", reads: ["result"], writes: [], atomicSafe: true },
+        stop: { summary: "s", reads: ["result"], writes: ["result?"], atomicSafe: true, terminalOutput: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
         listen: { summary: "l", reads: [], writes: [] },
       }),
     });

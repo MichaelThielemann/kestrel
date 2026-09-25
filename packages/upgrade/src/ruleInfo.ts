@@ -124,7 +124,7 @@ export const ctxDoneTerminalOutputRule: Rule = {
     for (const [moduleName, file] of localModuleFiles(ctx)) {
       const source = ctx.readFile(file);
       if (source === undefined || !source.includes("ctx.done(")) continue;
-      findings.push(infoFinding(`steps/ctx-done-terminal-output:${moduleName}`, "steps/ctx-done-terminal-output", `module "${moduleName}" calls ctx.done(); a step whose early result does not match its terminalOutput schema now fails the run, and boot cannot detect a mismatch by itself`, "add terminalOutput (the same schema as output when the early result has that shape) to every step that calls ctx.done()", { file, module: moduleName }, "docs/upgrading.md#steps-ctx-done-terminal-output"));
+      findings.push(infoFinding(`steps/ctx-done-terminal-output:${moduleName}`, "steps/ctx-done-terminal-output", `module "${moduleName}" calls ctx.done(); a step that ends the run this way without declaring terminalOutput now fails that run in every mode, one whose early result does not match its terminalOutput fails under validateOutput, and boot cannot see either by itself`, "add terminalOutput (the same schema as output when the early result has that shape) to every step that calls ctx.done()", { file, module: moduleName }, "docs/upgrading.md#steps-ctx-done-terminal-output"));
     }
     return findings;
   },

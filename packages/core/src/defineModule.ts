@@ -50,8 +50,9 @@ export interface StepDescription {
   /**
    * The complete shape of `result` when this step ends the run with `ctx.done()`. Not folded: no other
    * step's `output`, `extendsOutput` or `extendsItems` applies to it, and it does not apply to a run that
-   * continues past this step. Required on every step that calls `ctx.done()`; boot cannot see that call,
-   * so a missing declaration surfaces only at run time under `validateOutput`.
+   * continues past this step. Required on every step that calls `ctx.done()`: a run that ends at a step
+   * without it fails with `INTERNAL` in every mode. Boot cannot see the call, and the value is checked
+   * against the schema only under `validateOutput`.
    */
   terminalOutput?: JsonSchema;
   query?: Record<string, JsonSchema>;

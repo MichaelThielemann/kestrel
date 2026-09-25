@@ -454,6 +454,8 @@ Net changes since 5.8.1.
   A failure a step returns with `ctx.fail` keeps its message. `testing/runPipeline` called without a
   `logger` answers `"<pipeline>/<step>: <message>"`, so a failing module test still names the cause;
   with a `logger`, the message is in its log.
+- A step that ends the run with `ctx.done()` without declaring `terminalOutput` fails the run with
+  `INTERNAL` in every mode, not only under `validateOutput`, and never answers the early result.
 - OpenAPI: the 200 of an operation ending with a narrowing step is `anyOf`
   `#/components/schemas/<operationId>` and one `#/components/schemas/<operationId>.<label>` per
   audience (`.anonymous`, `.role.<name>`); types generated from the 200 become a union — use the

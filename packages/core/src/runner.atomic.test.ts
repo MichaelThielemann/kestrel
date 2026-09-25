@@ -57,7 +57,7 @@ describe("runPipeline: atomic groups", () => {
               rows.push("a");
               return ctx.done("early");
             },
-            writesResult,
+            { ...writesResult, terminalOutput: { type: "string" } },
           ),
           looseStep("b", 1, async (ctx) => {
             rows.push("b");

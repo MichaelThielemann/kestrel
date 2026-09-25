@@ -452,8 +452,9 @@ its own atomic-write temp files, so such a key is now unlisted and unreadable th
 Info only, since a legitimate use of that literal suffix before 6.0.0 is unlikely but not impossible.
 
 #### steps-ctx-done-terminal-output
-A local module calls `ctx.done()`. A step whose early result does not match its `terminalOutput`
-schema now fails the run, and boot cannot detect a mismatch by itself.
+A local module calls `ctx.done()`. A step that ends the run this way without declaring
+`terminalOutput` now fails that run with `INTERNAL` in every mode; under `validateOutput`, one whose
+early result does not match its `terminalOutput` fails too. Boot cannot see the call by itself.
 
 #### tests-run-pipeline-validates
 A file imports `testing/runPipeline`, which now always validates `ctx.result` against the folded

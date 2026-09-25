@@ -262,6 +262,9 @@ async function runStep(
     const before = ctx;
     const after = Object.freeze(out.value);
     const ended = Reflect.get(after, DONE) === true;
+    if (ended && step.description.terminalOutput === undefined) {
+      throw new Error(`step "${step.name}" ended the run with ctx.done() without declaring describe().terminalOutput`);
+    }
     if (validateOutput) {
       if (ended) {
         checkTerminalOutput(step, after);

@@ -340,6 +340,7 @@ function recordsModule() {
     steps: () => ({
       get: async (ctx: Context) => ok({ ...ctx, result: RECORD }),
       list: async (ctx: Context) => ok({ ...ctx, result: { items: [RECORD, RECORD], total: 2, cursor: "next" } }),
+      stop: async (ctx: Context) => ctx.done(ctx.result),
       signIn: async (ctx: Context) => {
         const role = ctx.headers["x-role"];
         return ok(role === undefined ? ctx : { ...ctx, identity: { id: "u", claims: { roles: role.split(",") } } });
@@ -349,6 +350,7 @@ function recordsModule() {
       get: { summary: "one record", reads: [], writes: ["result"], output: ITEM_SCHEMA },
       list: { summary: "records", reads: [], writes: ["result"], output: { type: "object", properties: { items: { type: "array", items: ITEM_SCHEMA }, total: { type: "number" }, cursor: { type: "string" } }, required: ["items", "total"] } },
       signIn: { summary: "signs in the x-role header's roles", reads: [], writes: ["identity?"] },
+      stop: { summary: "ends the run with the answer so far, declaring no early answer", reads: ["result"], writes: [] },
     }),
   });
 }
@@ -358,7 +360,7 @@ const RECORD_PIPELINES: PipelineDefinition[] = [
   definePipeline({ name: "listRecords", steps: ["records.signIn", "authz.require:records.read", "records.list", "authz.fields:records?shape=list"] }),
 ];
 
-async function bootRecords(authzConfig: Record<string, unknown>, pipelines: PipelineDefinition[] = RECORD_PIPELINES) {
+async function bootRecords(authzConfig: Record<string, unknown>, pipelines: PipelineDefinition[] = RECORD_PIPELINES, validateOutput = true) {
   return bootKestrel({
     config: {
       modules: [{ use: "./records.ts", config: {} }, { use: "@michaelthielemann/kestrel-authz-roles", config: authzConfig }],
@@ -368,7 +370,7 @@ async function bootRecords(authzConfig: Record<string, unknown>, pipelines: Pipe
     modules: [recordsModule(), module],
     pipelines,
     logger: silentLogger,
-    validateOutput: true,
+    validateOutput,
   });
 }
 
@@ -411,6 +413,15 @@ describe("authz/roles: authz.fields cuts the answer to the caller's field grant"
     const mod = recordsModule();
     const res = await runPipeline(pipeline, {}, { modules: [{ module: mod, instance: await mod.setup({}, deps) }, { module, instance }] });
     expect(res).toMatchObject({ status: 403, code: "FORBIDDEN" });
+  });
+
+  it("never answers an early exit past the step that declares no early answer, even without validateOutput", async () => {
+    const pipelines = [definePipeline({ name: "getRecord", steps: ["records.signIn", "authz.require:records.read", "records.get", "records.stop", "authz.fields:records?shape=item"] })];
+    const kestrel = await bootRecords(grants, pipelines, false);
+    const res = await kestrel.run("getRecord", as());
+    expect(res).toMatchObject({ status: 500, code: "INTERNAL", error: "getRecord/records.stop: unexpected Error" });
+    expect(JSON.stringify(res)).not.toContain("s3cret");
+    await kestrel.stop();
   });
 
   it("fails boot for a step argument without a resource and a shape", async () => {

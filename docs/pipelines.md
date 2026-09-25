@@ -637,12 +637,13 @@ and never applied to a run that continues past the step. `resolveResultSchema` (
 `schema` subpath) reports every shape a successful run can end in: the fold above, then each
 step's distinct `terminalOutput`, as one `anyOf` — this is what `kestrel-openapi` publishes as a
 route's 200 when a pipeline can end more than one way, for example `redirects.lookup`'s
-`{ redirect: { to, status } }` next to the page a resolver otherwise returns. Under
-`validateOutput`, a `ctx.done()` without a matching `terminalOutput` fails the run naming the step,
-and a step that declares only `terminalOutput` (no `output`) but changes `result` without calling
-`ctx.done()` fails as well. **Boot cannot see a `ctx.done()` call; a missing or wrong
-`terminalOutput` is found only at run time under `validateOutput` and by
-`@michaelthielemann/kestrel-upgrade`'s source scan.** Boot does reject `terminalOutput` on a step
+`{ redirect: { to, status } }` next to the page a resolver otherwise returns. A `ctx.done()` at a
+step without `terminalOutput` fails the run with `INTERNAL` in every mode, so no early answer is
+ever undeclared. Under `validateOutput`, a `ctx.done()` whose result does not match its
+`terminalOutput` fails the run naming the step, and a step that declares only `terminalOutput` (no
+`output`) but changes `result` without calling `ctx.done()` fails as well. **Boot cannot see a
+`ctx.done()` call; a missing `terminalOutput` is found at run time and by
+`@michaelthielemann/kestrel-upgrade`'s source scan, a wrong one only under `validateOutput`.** Boot does reject `terminalOutput` on a step
 with no write to `result`, and `terminalOutput` together with a `binary` step in the same pipeline.
 
 These checks, like the dataflow check above, run after every module's `setup()` has already
