@@ -338,6 +338,9 @@ Net changes since 5.8.1.
   - `images_variants` gains a unique `slot` (`<mediaId>/<size>`) and `images_retired` a unique `slot`
     (`<mediaId>/<file>`): the store keeps at most one row per item and size, so two planners of one
     item at once create one set of rows.
+  - `retryFailed`'s return type `RetriedFailures` is renamed `RetiredFailures`. `Images.failure()` and
+    its `VariantFailure` return type are removed; a variant's failure is visible on its own row
+    (`state: "failed"`) instead of a separate lookup.
   - A plan or a render re-reads its media item after writing; when the item was deleted meanwhile —
     in this process or another — it removes what it wrote. `images.remove` waits for a plan or a
     render of the same item already running in this process.
