@@ -29,7 +29,8 @@ timeout is `Err(TRANSIENT)` (503, `retryable`, `details.retryAfterSeconds: 1`), 
 included; for a unique field the error carries `details: { collection, field }` and applies to
 `createOne`, `createMany`, `updateOne` and `updateMany` alike. `updateOne` on a missing id is `Err(NOT_FOUND)`, `deleteOne` on one is `Ok`. Everything
 else – unknown collection, unknown field, `id` in a schema, a non-string for a string column –
-stays a throw, because it is a wiring bug. `node:sqlite` reports the *extended* result code in
+stays a throw, because it is a wiring bug. A `createMany` outside a group whose `COMMIT` fails with
+an error SQLite reports (an I/O error, say) rolls back and answers `Err(TRANSIENT)`. `node:sqlite` reports the *extended* result code in
 `errcode` (a primary-key collision is 1555), so the mapping masks it with `0xff` to get the primary
 code: 5 `SQLITE_BUSY`, 6 `SQLITE_LOCKED`, 19 `SQLITE_CONSTRAINT`.
 

@@ -47,8 +47,9 @@ function settle<T>(promise: Promise<T>): Promise<T | Error> {
 
 const rollbackFailure = () => new Error("simulated rollback failure");
 const busy = () => Object.assign(new Error("database is locked"), { errcode: 5 });
+const ioError = () => Object.assign(new Error("disk I/O error"), { errcode: 10 });
 
-describe("persistence/sqlite createMany: a ROLLBACK that fails leaves the store unusable", () => {
+describe("persistence/sqlite createMany outside a group: a failed COMMIT or ROLLBACK", () => {
   it("after a failed insert, the call answers TRANSIENT, health() asks for a restart, and later calls answer TRANSIENT", async () => {
     const { logger, errors } = recordingLogger();
     const db = createPersistenceSqlite({ file: ":memory:" }, { logger });
@@ -98,13 +99,26 @@ describe("persistence/sqlite createMany: a ROLLBACK that fails leaves the store 
     db.close();
   });
 
-  it("a COMMIT that throws is rolled back before its error is thrown, and the store keeps serving", async () => {
+  it("a COMMIT that fails with an I/O error is rolled back and answers TRANSIENT, and the store keeps serving", async () => {
     const db = createPersistenceSqlite({ file: ":memory:" });
     expectOk(await db.ensureCollection("rows", { name: "string" }));
 
-    const call = withFailingExec([{ sql: "COMMIT", error: () => new Error("simulated commit failure") }], () => db.createMany("rows", [{ id: "a", name: "alpha" }]));
+    const result = await withFailingExec([{ sql: "COMMIT", error: ioError }], () => db.createMany("rows", [{ id: "a", name: "alpha" }]));
 
-    await expect(call).rejects.toThrow(/simulated commit failure/);
+    expect(result).toMatchObject({ ok: false, error: { code: "TRANSIENT", status: 503, retryable: true } });
+    expect(db.health()).toEqual({ ok: true });
+    expectOk(await db.createMany("rows", [{ id: "b", name: "beta" }]));
+    expect(expectOk(await db.findMany("rows", {})).items.map((row) => row.id)).toEqual(["b"]);
+    db.close();
+  });
+
+  it("a COMMIT that throws something other than an SQLite error is rolled back and rethrown", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+
+    const call = withFailingExec([{ sql: "COMMIT", error: () => new Error("simulated wiring failure") }], () => db.createMany("rows", [{ id: "a", name: "alpha" }]));
+
+    await expect(call).rejects.toThrow(/simulated wiring failure/);
     expect(db.health()).toEqual({ ok: true });
     expectOk(await db.createMany("rows", [{ id: "b", name: "beta" }]));
     expect(expectOk(await db.findMany("rows", {})).items.map((row) => row.id)).toEqual(["b"]);

@@ -65,6 +65,10 @@ export function persistenceFailure(cause: unknown): PersistenceError | null {
   return null;
 }
 
+function isSqliteError(cause: unknown): cause is Error & { errcode: number } {
+  return cause instanceof Error && "errcode" in cause && typeof cause.errcode === "number";
+}
+
 function uniqueIndexName(collection: string, field: string): string {
   return `${collection}_${field}_unique`;
 }
@@ -165,6 +169,15 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
       if (cause instanceof AcquireTimeout) return err(timedOutWaiting());
       throw cause;
     });
+  };
+  const commitFailure = (): PersistenceError | null => {
+    try {
+      db.exec("COMMIT");
+      return null;
+    } catch (cause) {
+      if (!isSqliteError(cause)) throw cause;
+      return persistenceFailure(cause) ?? failure("TRANSIENT", `persistence/sqlite: commit failed: ${cause.message}`, { cause });
+    }
   };
   const rollbackOrFail = (): PersistenceError | null => {
     const rollbackError = execOrFail(db, "ROLLBACK", "rollback");
@@ -442,9 +455,9 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
           if (isErr(out)) {
             failed = out.error;
           } else {
-            const committed = run(() => db.exec("COMMIT"));
-            if (!isErr(committed)) return out;
-            failed = committed.error;
+            const commitError = commitFailure();
+            if (commitError === null) return out;
+            failed = commitError;
           }
         } catch (cause) {
           rollbackOrFail();

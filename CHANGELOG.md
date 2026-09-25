@@ -24,7 +24,9 @@ Net changes since 5.8.1.
     store's write lock for its whole duration.
   - `persistence/sqlite` implements the scope: one `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK` per
     group, serialized by a FIFO mutex so a concurrent read never observes an uncommitted row.
-    `createMany` now uses `BEGIN IMMEDIATE` and joins an outer scope instead of opening its own.
+    `createMany` now uses `BEGIN IMMEDIATE` and joins an outer scope instead of opening its own;
+    outside a group, a `COMMIT` that fails with an error SQLite reports rolls back and answers
+    `Err(TRANSIENT)`.
     Two new config keys, `acquireTimeoutMs` and `scopeTimeoutMs`. `scopeTimeoutMs` defaults to
     `5000`; `acquireTimeoutMs` defaults to `busyTimeoutMs + 10000`. An explicit `acquireTimeoutMs`
     that does not exceed `busyTimeoutMs` is rejected at setup, naming the key. `acquireTimeoutMs`
