@@ -78,7 +78,10 @@ late call throws – it is not executed – because the group's writes are gone 
 a fragment of a transaction that never happened. After a rollback that itself fails, the store
 answers `Err(TRANSIENT)` to every subsequent call, naming the reason and that the process needs a
 restart; the connection's state can no longer be proven, and continuing to serve writes from it
-would turn one incident into silent corruption. The same holds for the transaction `createMany`
+would turn one incident into silent corruption. That includes every call and group already waiting
+for its turn when the rollback failed: none of them runs on the connection. A group answers a failed
+`begin` with that error, and `checkpoint()`/`snapshot()` reject with an error the steps answer as
+the same `TRANSIENT`. The same holds for the transaction `createMany`
 runs on its own outside a group: when its `ROLLBACK` fails, that `createMany` already answers the
 same `Err(TRANSIENT)`, or rethrows the wiring error it was rolling back for.
 

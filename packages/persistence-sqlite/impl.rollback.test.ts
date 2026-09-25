@@ -1,8 +1,11 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
-import { createPersistenceSqlite } from "./impl.ts";
+import { createPersistenceSqlite, persistenceFailure } from "./impl.ts";
 
 async function withFailingExec<T>(failures: readonly { sql: string; error: () => Error }[], fn: () => Promise<T>): Promise<T> {
   // eslint-disable-next-line @typescript-eslint/unbound-method -- captured to be re-invoked with an explicit `this` via `.call()` below
@@ -25,6 +28,21 @@ async function withFailingExec<T>(failures: readonly { sql: string; error: () =>
 function recordingLogger(): { logger: Logger; errors: string[] } {
   const errors: string[] = [];
   return { errors, logger: { step() {}, info() {}, warn() {}, error: (message) => errors.push(message) } };
+}
+
+function gate(): { open: () => void; opened: Promise<void> } {
+  let open: () => void = () => {};
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { open, opened };
+}
+
+function settle<T>(promise: Promise<T>): Promise<T | Error> {
+  return promise.then(
+    (value) => value,
+    (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+  );
 }
 
 const rollbackFailure = () => new Error("simulated rollback failure");
@@ -106,6 +124,73 @@ describe("persistence/sqlite createMany: a ROLLBACK that fails leaves the store 
     expect(result).toMatchObject({ ok: false, error: { code: "CONFLICT" } });
     expect(db.health()).toEqual({ ok: true });
     expect(expectOk(await db.findMany("rows", {})).items.map((row) => row.id)).toEqual(["seed"]);
+    db.close();
+  });
+});
+
+describe("persistence/sqlite: calls queued before a ROLLBACK fails never run on the unusable connection", () => {
+  it("behind a group whose ROLLBACK fails and leaves the transaction open, every queued call, group, checkpoint and snapshot answers TRANSIENT", async () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "kestrel-sqlite-unusable-"));
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: "string" }));
+    expectOk(await db.createOne("rows", { id: "seed", name: "seed" }));
+
+    const answers = await withFailingExec([{ sql: "ROLLBACK", error: rollbackFailure }], async () => {
+      const entered = gate();
+      const release = gate();
+      const group = db.scope({ pipeline: "p", group: 1 }, async () => {
+        entered.open();
+        await release.opened;
+        return "rollback";
+      });
+      await entered.opened;
+      const calls = [
+        settle(db.createOne("rows", { id: "a", name: "alpha" })),
+        settle(db.updateOne("rows", "seed", { name: "changed" })),
+        settle(db.findMany("rows", {})),
+        settle(db.createMany("rows", [{ id: "b", name: "beta" }])),
+        settle(db.deleteOne("rows", "seed")),
+      ];
+      const laterGroup = db.scope({ pipeline: "p", group: 2 }, async () => "commit");
+      const maintenance = [settle(db.checkpoint()), settle(db.snapshot(join(dir, "copy.db")))];
+      release.open();
+      return { group: await group, calls: await Promise.all(calls), laterGroup: await laterGroup, maintenance: await Promise.all(maintenance) };
+    });
+
+    expect(answers.group).toMatchObject({ kind: "failed", phase: "rollback" });
+    for (const answer of answers.calls) expect(answer).toMatchObject({ ok: false, error: { code: "TRANSIENT" } });
+    expect(answers.laterGroup).toMatchObject({ kind: "failed", phase: "begin", error: { code: "TRANSIENT" } });
+    for (const answer of answers.maintenance) {
+      expect(answer).toBeInstanceOf(Error);
+      const mapped = persistenceFailure(answer);
+      expect(mapped?.code).toBe("TRANSIENT");
+      expect(String(mapped?.details?.reason)).toContain("restart");
+    }
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("calls queued in the same tick as a createMany whose ROLLBACK fails all answer TRANSIENT", async () => {
+    const db = createPersistenceSqlite({ file: ":memory:" });
+    expectOk(await db.ensureCollection("rows", { name: { type: "string", unique: true } }));
+    expectOk(await db.createOne("rows", { id: "seed", name: "seed" }));
+
+    const answers = await withFailingExec([{ sql: "ROLLBACK", error: rollbackFailure }], () =>
+      Promise.all([
+        settle(
+          db.createMany("rows", [
+            { id: "a", name: "alpha" },
+            { id: "b", name: "seed" },
+          ]),
+        ),
+        settle(db.createOne("rows", { id: "c", name: "gamma" })),
+        settle(db.updateOne("rows", "seed", { name: "changed" })),
+        settle(db.findOne("rows", { id: "seed" })),
+      ]),
+    );
+
+    for (const answer of answers) expect(answer).toMatchObject({ ok: false, error: { code: "TRANSIENT" } });
+    expect(db.health()).toMatchObject({ ok: false, restartRequired: true });
     db.close();
   });
 });

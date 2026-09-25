@@ -19,6 +19,18 @@ export interface Config {
 
 class AcquireTimeout extends Error {}
 
+class UnusableStore extends Error {
+  constructor() {
+    super("persistence/sqlite: the store is unusable after a failed rollback; restart the process");
+  }
+}
+
+function unusableError(): PersistenceError {
+  return failure("TRANSIENT", "persistence/sqlite: the store is unusable after a failed rollback; restart the process", {
+    details: { reason: "a rollback failed and the connection's state can no longer be proven; the process must be restarted", retryAfterSeconds: 30 },
+  });
+}
+
 interface ScopeStore {
   state: "open" | "committed" | "rolled-back";
 }
@@ -41,6 +53,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function persistenceFailure(cause: unknown): PersistenceError | null {
+  if (cause instanceof UnusableStore) return unusableError();
   const errcode = isRecord(cause) && typeof cause.errcode === "number" ? cause.errcode : 0;
   const primary = errcode & 0xff;
   if (primary === 5 || primary === 6) return failure("TRANSIENT", "persistence/sqlite: database is busy", { cause, details: { retryAfterSeconds: 1 } });
@@ -140,10 +153,6 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
   };
   const timedOutWaiting = (): PersistenceError => failure("TRANSIENT", "persistence/sqlite: timed out waiting for the connection");
 
-  const unusableError = (): PersistenceError =>
-    failure("TRANSIENT", "persistence/sqlite: the store is unusable after a failed rollback; restart the process", {
-      details: { reason: "a rollback failed and the connection's state can no longer be proven; the process must be restarted", retryAfterSeconds: 30 },
-    });
   const routed = <T>(collection: string, fn: () => Result<T, PersistenceError> | Promise<Result<T, PersistenceError>>): Promise<Result<T, PersistenceError>> => {
     const store = als.getStore();
     if (store?.state === "rolled-back") {
@@ -152,7 +161,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
     if (store?.state === "open") return Promise.resolve(fn());
     if (unusable) return Promise.resolve(err(unusableError()));
     if (store?.state === "committed") logWarn(logger, "persistence/sqlite: call after the atomic scope committed", { collection });
-    return enqueue(fn, acquireTimeoutMs).catch((cause: unknown) => {
+    return enqueue(() => (unusable ? err(unusableError()) : fn()), acquireTimeoutMs).catch((cause: unknown) => {
       if (cause instanceof AcquireTimeout) return err(timedOutWaiting());
       throw cause;
     });
@@ -275,6 +284,7 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
   };
 
   const runScope = async (body: () => Promise<AtomicVerdict>): Promise<AtomicOutcome> => {
+    if (unusable) return { kind: "failed", phase: "begin", error: unusableError() };
     const beginError = execOrFail(db, "BEGIN IMMEDIATE", "begin");
     if (beginError) return { kind: "failed", phase: "begin", error: beginError };
 
@@ -337,16 +347,23 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
     });
   };
 
+  const whenUsable = (fn: () => void) => (): void => {
+    if (unusable) throw new UnusableStore();
+    fn();
+  };
+
   return {
     checkpoint() {
+      const run = () => {
+        db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      };
       const store = als.getStore();
       if (store?.state === "open") {
-        db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+        run();
         return Promise.resolve();
       }
-      return enqueue(() => {
-        db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-      });
+      if (unusable) return Promise.reject(new UnusableStore());
+      return enqueue(whenUsable(run));
     },
     snapshot(file) {
       const run = () => {
@@ -359,7 +376,8 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
         run();
         return Promise.resolve();
       }
-      return enqueue(run);
+      if (unusable) return Promise.reject(new UnusableStore());
+      return enqueue(whenUsable(run));
     },
     close() {
       db.close();

@@ -547,7 +547,8 @@ Net changes since 5.8.1.
   `restartRequired: true`, once a rollback has failed, a group's or the one `createMany` runs for its
   own transaction outside a group; contention is never reported. A `createMany` whose `ROLLBACK`
   fails answers that unusable state's `Err(TRANSIENT)` itself, or rethrows the wiring error it
-  rolled back for.
+  rolled back for. Every call, group, `checkpoint()` and `snapshot()` already waiting for its turn
+  when a rollback fails answers the same `TRANSIENT` instead of running on the connection.
   `replication-sqlite` reports a prepared restore as `{ ok: true, note }`, since the instance
   keeps serving until a host restarts it to apply the restore.
 - `images-default`: `images.attach` also adds `variantCounts: { done, pending, error, failed }` to a
