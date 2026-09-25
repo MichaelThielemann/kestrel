@@ -77,10 +77,11 @@ Both budgets are timers, so they are enforced only when the event loop gets a tu
 synchronously and blocks the loop: a budget that runs out while a statement is running takes effect
 once that statement returns. Neither budget covers SQLite's own busy wait on a lock that another
 connection to the same file holds; that wait happens inside the statement and `busyTimeoutMs`
-bounds it. With `acquireTimeoutMs` at or below
-`scopeTimeoutMs`, a single group can outlast a waiter's budget: a call queued behind a group that
-runs longer than `acquireTimeoutMs` answers `Err(TRANSIENT)` while the group still holds the
-connection. Setup allows that, and logs a warning naming both values.
+bounds it. A group's `BEGIN IMMEDIATE` can wait up to `busyTimeoutMs` for such a lock before its
+`scopeTimeoutMs` starts, so with `acquireTimeoutMs` at or below `scopeTimeoutMs + busyTimeoutMs` a
+single group can outlast a waiter's budget: a call queued behind it answers `Err(TRANSIENT)` while
+the group still holds the connection. Setup allows that, and logs a warning naming the three
+values.
 
 A scope that closes leaves the store in one of two terminal states, and a call a step started
 without awaiting behaves differently depending on which: after a **commit**, a late call takes the

@@ -34,8 +34,8 @@ Net changes since 5.8.1.
     answers `Err(TRANSIENT)` and a group a failed `begin`, and neither runs afterwards. Both budgets
     are timers enforced when the event loop gets a turn, so synchronous SQLite work delays them,
     and neither covers SQLite's own busy wait on a lock another connection holds, which
-    `busyTimeoutMs` bounds. An `acquireTimeoutMs` at or below `scopeTimeoutMs` boots and logs a
-    warning at setup. A persistence call
+    `busyTimeoutMs` bounds. An `acquireTimeoutMs` at or below `scopeTimeoutMs + busyTimeoutMs`
+    boots and logs a warning at setup. A persistence call
     made after its own atomic scope rolled back or timed out **throws** instead of writing (only
     reachable from work a step did not await); a call made after the scope committed writes
     normally, with a warning logged.
