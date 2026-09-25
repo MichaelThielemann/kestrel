@@ -132,6 +132,9 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
   const schemas = new Map<string, Record<string, FieldDefinition>>();
   const acquireTimeoutMs = resolveAcquireTimeoutMs(config);
   const defaultScopeTimeoutMs = config.scopeTimeoutMs ?? 5000;
+  if (acquireTimeoutMs <= defaultScopeTimeoutMs) {
+    logWarn(logger, "persistence/sqlite: acquireTimeoutMs does not exceed scopeTimeoutMs, so a call queued behind a group that runs longer than acquireTimeoutMs answers TRANSIENT while the group still holds the connection", { acquireTimeoutMs, scopeTimeoutMs: defaultScopeTimeoutMs });
+  }
   const als = new AsyncLocalStorage<ScopeStore>();
   let unusable = false;
 

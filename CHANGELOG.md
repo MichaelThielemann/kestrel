@@ -31,7 +31,11 @@ Net changes since 5.8.1.
     `5000`; `acquireTimeoutMs` defaults to `busyTimeoutMs + 10000`. An explicit `acquireTimeoutMs`
     that does not exceed `busyTimeoutMs` is rejected at setup, naming the key. `acquireTimeoutMs`
     bounds every wait for the connection: a `persistence@1` call still waiting when it runs out
-    answers `Err(TRANSIENT)` and a group a failed `begin`, and neither runs afterwards. A persistence call
+    answers `Err(TRANSIENT)` and a group a failed `begin`, and neither runs afterwards. Both budgets
+    are timers enforced when the event loop gets a turn, so synchronous SQLite work delays them,
+    and neither covers SQLite's own busy wait on a lock another connection holds, which
+    `busyTimeoutMs` bounds. An `acquireTimeoutMs` at or below `scopeTimeoutMs` boots and logs a
+    warning at setup. A persistence call
     made after its own atomic scope rolled back or timed out **throws** instead of writing (only
     reachable from work a step did not await); a call made after the scope committed writes
     normally, with a warning logged.
@@ -782,9 +786,9 @@ Net changes since 5.8.1.
   lists a pipeline using one of that module's steps in `notChecked`. A step factory that throws for
   a pipeline's argument is `step-argument`, and a factory step's `describe()` that throws for it
   `describe-threw`, unless either throws a `KestrelBootError` of its own, whose code is kept; both
-  name the pipeline, the step and the module. `kestrel.steps.resolve()`
-  throws only `KestrelBootError`. `content-default` refuses `content.get`/`content.list` combining a
-  fixed filter with `fallback=true` with a `KestrelBootError` (`step-argument`).
+  name the pipeline, the step and the module. `kestrel.steps.resolve()` throws only
+  `KestrelBootError`. `content-default` refuses `content.get`/`content.list` combining a fixed
+  filter with `fallback=true` with a `KestrelBootError` (`step-argument`).
 - `media-default`: `media.reconcile` and `media.reconcileDelete` count a key as orphaned only when it
   has the module's own shape, `<prefix><id>/<name>`, and no item has that id, instead of every key
   under `prefix` without a row except a hard-coded `media-variants/`. `images-default`'s variants

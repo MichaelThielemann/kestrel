@@ -30,9 +30,10 @@ included; for a unique field the error carries `details: { collection, field }` 
 `createOne`, `createMany`, `updateOne` and `updateMany` alike. `updateOne` on a missing id is `Err(NOT_FOUND)`, `deleteOne` on one is `Ok`. Everything
 else – unknown collection, unknown field, `id` in a schema, a non-string for a string column –
 stays a throw, because it is a wiring bug. A `createMany` outside a group whose `COMMIT` fails with
-an error SQLite reports (an I/O error, say) rolls back and answers `Err(TRANSIENT)`. `node:sqlite` reports the *extended* result code in
-`errcode` (a primary-key collision is 1555), so the mapping masks it with `0xff` to get the primary
-code: 5 `SQLITE_BUSY`, 6 `SQLITE_LOCKED`, 19 `SQLITE_CONSTRAINT`.
+an error SQLite reports (an I/O error, say) rolls back and answers `Err(TRANSIENT)`. `node:sqlite`
+reports the *extended* result code in `errcode` (a primary-key collision is 1555), so the mapping
+masks it with `0xff` to get the primary code: 5 `SQLITE_BUSY`, 6 `SQLITE_LOCKED`, 19
+`SQLITE_CONSTRAINT`.
 
 `persistence.snapshot:<file>` writes a transactionally consistent copy via
 `VACUUM INTO` (safe while writes are in flight) – back that file up, not the live database.
@@ -71,6 +72,15 @@ budget. `acquireTimeoutMs` defaults to `busyTimeoutMs + 10000` (`15000` when `bu
 is also left at its own default of `5000`). Setup rejects an explicit `acquireTimeoutMs` that does not
 exceed `busyTimeoutMs`, naming the key – `BEGIN IMMEDIATE` blocks the event loop for up to
 `busyTimeoutMs`, so an equal budget would expire exactly when the wait succeeded.
+
+Both budgets are timers, so they are enforced only when the event loop gets a turn. SQLite work runs
+synchronously and blocks the loop: a budget that runs out while a statement is running takes effect
+once that statement returns. Neither budget covers SQLite's own busy wait on a lock that another
+connection to the same file holds; that wait happens inside the statement and `busyTimeoutMs`
+bounds it. With `acquireTimeoutMs` at or below
+`scopeTimeoutMs`, a single group can outlast a waiter's budget: a call queued behind a group that
+runs longer than `acquireTimeoutMs` answers `Err(TRANSIENT)` while the group still holds the
+connection. Setup allows that, and logs a warning naming both values.
 
 A scope that closes leaves the store in one of two terminal states, and a call a step started
 without awaiting behaves differently depending on which: after a **commit**, a late call takes the

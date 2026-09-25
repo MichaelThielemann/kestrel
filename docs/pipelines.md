@@ -113,6 +113,9 @@ Rules:
   back. A call or another group still waiting for the connection after `acquireTimeoutMs` gives up
   with `TRANSIENT` (503) and never runs afterwards. A group still open `scopeTimeoutMs` after its
   `BEGIN` rolls back and answers 503 `TRANSIENT`, which bounds how long a group holds the lock.
+  Both budgets are timers enforced when the event loop gets a turn: synchronous SQLite work blocks
+  the loop, so a budget that runs out during a statement takes effect once it returns, and neither
+  covers SQLite's own busy wait on a lock another connection holds, which `busyTimeoutMs` bounds.
   Group only the steps that must commit together; a step whose work grows with a collection holds
   the lock that long.
 - A group needs a module that provides the scope (the `atomicScope` hook on `ModuleDefinition`,
