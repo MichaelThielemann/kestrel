@@ -241,8 +241,10 @@ Net changes since 5.8.1.
     415 (`UNSUPPORTED`). What is stored and written to the blob store is the lower-cased
     `type/subtype`, plus the `charset` of a `text/*` type when it is a token, lower-cased
     (`text/plain; charset=utf-8`); no other parameter survives. `allowedTypes`/`deniedTypes` and their
-    entries are matched by the `type/subtype` alone, ignoring parameters and case on both sides: `image/svg+xml; charset=utf-8` is denied wherever `image/svg+xml` is, and an entry
-    `IMAGE/SVG+XML; charset=utf-8` denies `image/svg+xml`.
+    entries are matched by the `type/subtype` alone, ignoring parameters and case on both sides:
+    `image/svg+xml; charset=utf-8` is denied wherever `image/svg+xml` is, and an entry
+    `IMAGE/SVG+XML; charset=utf-8` denies `image/svg+xml`. An entry `*/*` now matches every type, like
+    `*`; it used to match none, so `deniedTypes: ["*/*"]` refuses every upload.
   - `<name>` is fixed at upload and never changes, except for a demotion to `.bin` (below); its one
     extension comes from the stored type, never from the uploaded name. A listed type — images, PDF, audio, video, plain text, CSV, JSON, office documents
     (DOC, XLS, PPT, RTF, DOCX, XLSX, PPTX, ODT, ODS, ODP) and archives (ZIP, 7Z, RAR, TAR), none of
@@ -392,8 +394,10 @@ Net changes since 5.8.1.
 - `@michaelthielemann/kestrel-contracts/mediaType`: `parseMediaType`, `mediaTypeEssence` and
   `canonicalMediaType` (a declared content type that is exactly one media type, as its lower-cased
   `type/subtype` and a `text/*` type's charset, else `null`), `publicFormOf` (the `Content-Type` and
-  extension a stored type is published with) and `EXTENSION_BY_TYPE`, shared by `media-default` and
-  `images-default`.
+  extension a stored type is published with), `mediaTypeMatches` and `mediaTypeAllowed` (the
+  `allowedTypes`/`deniedTypes` pattern rule: `*` and `*/*` match every type, `type/*` a top-level type,
+  any other pattern one type, case and parameters ignored) and `EXTENSION_BY_TYPE`, shared by
+  `media-default`, `images-default` and any client that checks a type before uploading.
 - `@michaelthielemann/kestrel-contracts/content-locale`: `satisfiesFilter`, `publishedLocale` and
   `narrowListTranslations` — the shared rule behind the two entries above, for any module that
   builds a public view on top of `content@1`. `satisfiesFilter` decides membership through
