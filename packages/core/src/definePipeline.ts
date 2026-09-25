@@ -11,6 +11,7 @@ export interface PipelineDefinition<S extends string = string> {
   steps: readonly PipelineEntry<S>[];
 }
 
+/** Narrows a {@link PipelineEntry} to an {@link AtomicGroup}, as opposed to a plain step name. */
 export function isAtomicGroup<S extends string>(entry: PipelineEntry<S>): entry is AtomicGroup<S> {
   return typeof entry !== "string";
 }

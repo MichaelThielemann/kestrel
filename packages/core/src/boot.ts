@@ -106,11 +106,13 @@ export interface NotChecked {
   because: string;
 }
 
+/** What `checkBoot()` returns: every problem, warning and unchecked item it found, instead of throwing at the first. */
 export interface BootCheck {
   /** Every problem that would have made `boot()` throw; `errors[0]` is the one it does throw. */
   errors: BootProblem[];
   /** What `boot()` would carry as `kestrel.warnings`. */
   warnings: BootWarning[];
+  /** Every module, pipeline or `attach` phase `checkBoot()` could not check safely, and why. */
   notChecked: NotChecked[];
 }
 

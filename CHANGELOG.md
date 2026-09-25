@@ -10,7 +10,8 @@ Net changes since 5.8.1.
   step name, and the runner wraps such a group in one all-or-nothing scope it obtains from a
   module hook. `PipelineDefinition["steps"]` is now `readonly PipelineEntry[]`, not
   `readonly string[]`; code that reads, filters or maps a pipeline's steps as plain strings must
-  flatten first with the exported `pipelineSteps()`. `ResolvedStep` and
+  flatten first with the exported `pipelineSteps()`, or narrow a single entry with the exported
+  `isAtomicGroup()`. `ResolvedStep` and
   `PipelineStepManifest` gain an optional `atomic` ordinal; `ModuleManifest` gains a required
   `atomicScope` boolean, so a hand-built manifest must add it.
   - `ModuleDefinition` (and `ModuleInput`) gain an optional `atomicScope(instance, info, body)`

@@ -39,15 +39,26 @@ variables (path, type, required, default, secret, set — never a value; fields 
 `.describe("secret")` show no default), every step with owner and description, every pipeline with
 its resolved steps, every trigger. `kestrel.observe(observer)` registers a `RunObserver`
 (`runStart`, `runEnd`, `stepStart`, `stepEnd`) fed by the runner independently of the logger and
-returns the unsubscribe. A module reaches both through its `attach(instance, { describe, observe })`
-hook, called at the end of boot; a returned function runs on `stop()`.
+returns the unsubscribe. `kestrel.health()` aggregates every module's own `health()` hook,
+synchronously and with no I/O: `ok: false` means a readiness probe should route no traffic here,
+`restartRequired: true` means a liveness probe should restart the process rather than retry. A
+module reaches all three through its `attach(instance, { describe, observe, health })` hook,
+called at the end of boot; a returned function runs on `stop()`.
+
+## Checking a config without booting
+`checkBoot(input, { setup })` runs every check `boot()` runs and returns every problem in
+`errors` instead of throwing at the first, sharing `boot()`'s engine so the two check the same
+things the same way; it never starts a trigger. `setup: "none"` runs no module code beyond
+`configSchema` and reports anything that needed an instance in `notChecked`; `setup: "all"` runs
+every module's `setup()`/`attach()`/`teardown()`; `{ only: [...] }` runs them for the named `use`
+entries only.
 
 ## Entry points
 The package exports a fixed list of subpaths; everything else (boot internals, registry, sorting,
 trigger implementations, tests) is private and not importable. `@michaelthielemann/kestrel` (the
-root: `boot`, `defineContract`, `defineModule`, `definePipeline`, `defineConfig`, the HTTP helpers
-an adapter needs, the error and result vocabulary) and `@michaelthielemann/kestrel/<name>` for
-`cast`, `catalogue`, `context`, `dataflow`, `defineConfig`, `defineContract`, `defineModule`,
+root: `boot`, `checkBoot`, `defineContract`, `defineModule`, `definePipeline`, `defineConfig`, the
+HTTP helpers an adapter needs, the error and result vocabulary) and `@michaelthielemann/kestrel/<name>`
+for `atomic`, `cast`, `catalogue`, `context`, `defineConfig`, `defineContract`, `defineModule`,
 `definePipeline`, `errors`, `load`, `logger`, `reads`, `result`, `runner`, `schema` and
 `testing/runPipeline`. `reads` (`observeReads`, `noteRead`, `unobserved`) lets a caller see what the providers
 answered while a function ran, in the same process and async context; `delivery-static` uses it to record what a
