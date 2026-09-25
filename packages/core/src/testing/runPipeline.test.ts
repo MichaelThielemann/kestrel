@@ -45,6 +45,13 @@ describe("testing/runPipeline", () => {
     expect(res).toMatchObject({ status: 500, code: "INTERNAL", error: 'createPage/authn.requireUser: step "authn.requireUser" writes "params" without declaring it' });
   });
 
+  it("with a logger, answers the error class and leaves the message to the logger it was given", async () => {
+    const { logger, stacks } = stackLogger();
+    const res = await runPipeline(createPage, { payload: { title: "x" }, headers: { authorization: "Bearer ok" } }, { steps: fakeSteps, logger });
+    expect(res.error).toBe("createPage/authn.requireUser: unexpected Error");
+    expect(stacks).toHaveLength(1);
+  });
+
   it("unknown step in the pipeline fails loudly", async () => {
     const p = definePipeline({ name: "p", steps: ["nope.step"] });
     expect(() => runPipeline(p, {}, { steps: fakeSteps })).toThrow(/unknown step "nope.step"/);

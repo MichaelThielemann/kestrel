@@ -21,7 +21,7 @@ export interface RunPipelineOptions {
   atomicScope?: AtomicScope;
 }
 
-/** Runs a pipeline through the real runner: `steps` are stand-ins registered with a bare description, `modules` register a module's own steps and `describe()` against a prepared instance, so their input and query schemas apply. */
+/** Runs a pipeline through the real runner: `steps` are stand-ins registered with a bare description, `modules` register a module's own steps and `describe()` against a prepared instance, so their input and query schemas apply. Without `options.logger`, a step that throws answers `<pipeline>/<step>: <message>` instead of the runner's `unexpected <ErrorName>`, so a failing test names the cause; with one, the message goes to that logger. */
 export function runPipeline(pipeline: PipelineDefinition, input: Partial<ContextInput>, options: RunPipelineOptions): Promise<RunResult> {
   const registry = new StepRegistry();
   for (const { module, instance } of options.modules ?? []) {
@@ -43,9 +43,20 @@ export function runPipeline(pipeline: PipelineDefinition, input: Partial<Context
   }
 
   const resolved = { name: pipeline.name, steps: resolveEntries(pipeline.steps, (s) => registry.resolve(s, `pipelines/${pipeline.name}`)) };
-  return execute(resolved, { trigger: { kind: "http", name: "test" }, ...input }, options.logger ?? silentLogger, {}, {
+  const thrown = new Map<string, string>();
+  const logger: Logger = options.logger ?? {
+    ...silentLogger,
+    error(_message, data) {
+      if (typeof data?.runId === "string" && typeof data.message === "string") thrown.set(data.runId, data.message);
+    },
+  };
+  const run = execute(resolved, { trigger: { kind: "http", name: "test" }, ...input }, logger, {}, {
     validateOutput: true,
-    thrownMessages: options.logger === undefined,
     ...(options.atomicScope === undefined ? {} : { atomicScope: options.atomicScope }),
+  });
+  return run.then((result) => {
+    const message = thrown.get(result.runId);
+    if (message === undefined || result.code !== "INTERNAL" || result.step === undefined) return result;
+    return { ...result, error: `${pipeline.name}/${result.step}: ${message}` };
   });
 }

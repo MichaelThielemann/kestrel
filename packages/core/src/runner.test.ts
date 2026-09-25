@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, expectTypeOf } from "vitest";
 import type { Context, Step, StepResult } from "./context.ts";
 import { customFailure } from "./errors.ts";
 import { silentLogger, type Logger, type StepLog } from "./logger.ts";
@@ -6,7 +6,7 @@ import type { RunEndEvent, RunObserver } from "./observer.ts";
 import { boundaryCast } from "./cast.ts";
 import { ok } from "./result.ts";
 import type { ResolvedStep } from "./registry.ts";
-import { createRunTracker, runPipeline, type RunResult } from "./runner.ts";
+import { createRunTracker, runPipeline, type RunPipelineOptions, type RunResult } from "./runner.ts";
 
 function collectingLogger() {
   const steps: StepLog[] = [];
@@ -113,6 +113,10 @@ describe("runPipeline", () => {
     expect(errors[0]).toContain('step "boom"');
   });
 
+  it("offers serving callers no option that puts a thrown step's message into the answer", () => {
+    expectTypeOf<keyof RunPipelineOptions>().toEqualTypeOf<"validateOutput" | "atomicScope">();
+  });
+
   it("logs the message and the stack of an unexpected throw under the answer's runId", async () => {
     const logged: Array<{ message: string; data?: Record<string, unknown> }> = [];
     const logger: Logger = { step() {}, info() {}, error: (message, data) => logged.push({ message, ...(data === undefined ? {} : { data }) }) };
@@ -120,6 +124,7 @@ describe("runPipeline", () => {
     expect(logged).toHaveLength(1);
     expect(logged[0]?.data?.runId).toBe(res.runId);
     expect(String(logged[0]?.data?.stack)).toContain("Error: db down");
+    expect(logged[0]?.data?.message).toBe("db down");
   });
 
   it("a step that returns no Result is an INTERNAL error", async () => {

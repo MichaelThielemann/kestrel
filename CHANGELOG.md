@@ -454,7 +454,8 @@ Net changes since 5.8.1.
   caller, instead of its message; the message and the stack are in the log under the answer's `runId`.
   A failure a step returns with `ctx.fail` keeps its message. `testing/runPipeline` called without a
   `logger` answers `"<pipeline>/<step>: <message>"`, so a failing module test still names the cause;
-  with a `logger`, the message is in its log.
+  with a `logger`, the message is in its log. The log entry of a thrown step carries `message` next to
+  `stack`.
 - A step that ends the run with `ctx.done()` without declaring `terminalOutput` fails the run with
   `INTERNAL` in every mode, not only under `validateOutput`, and never answers the early result.
 - OpenAPI: the 200 of an operation ending with a narrowing step is `anyOf`
@@ -473,8 +474,6 @@ Net changes since 5.8.1.
   manifest schema describes it.
 - `authz-roles`' `./impl` exports `fieldSet`, `answersOf`, `anonymousPipelines` and
   `fieldGrantProblems`.
-- `RunPipelineOptions.thrownMessages` (test only) answers a thrown step's message instead of its error
-  class.
 - The OpenAPI extension `x-kestrel-answers` on a 200 maps each audience label to its component, or
   for a file operation to the response headers the audience receives.
 - `kestrel-upgrade` rules `pipelines/field-step`, `authz/field-grant-unknown`,
