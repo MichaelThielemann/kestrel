@@ -62,6 +62,23 @@ describe("--answers resolves a question without a TTY", () => {
     expect(text).toContain('"authn.verifyUser:reassignTo", "revisions.reassignAuthor"');
   });
 
+  it("does not suggest pnpm install when the applied edits never touched package.json", async () => {
+    const scratch = await createScratchCopy(FIXTURE);
+    cleanupDirs.push(scratch.dir);
+    const pkgFile = join(scratch.dir, "package.json");
+    const pkg = boundaryCast<{ dependencies: Record<string, string> }>(JSON.parse(readFileSync(pkgFile, "utf8")), "json");
+    for (const dep of Object.keys(pkg.dependencies)) pkg.dependencies[dep] = "^6.0.0";
+    await writeFile(pkgFile, JSON.stringify(pkg, null, 2));
+    const answersFile = join(scratch.dir, "answers.json");
+    await writeFile(answersFile, JSON.stringify({ "verified-user-path:retryReassignRevisionAuthor": "reassignTo" }));
+    const lines: string[] = [];
+    const code = await runUpgradeCli(["fix", "--root", scratch.dir, "--write", "--yes", "--answers", answersFile], { stdout: (l) => lines.push(l), stderr: (l) => lines.push(l), isInteractive: false });
+    expect(code).toBe(1);
+    expect(lines.some((l) => l.startsWith("wrote "))).toBe(true);
+    expect(lines.some((l) => l.includes("package.json"))).toBe(false);
+    expect(lines.some((l) => l.includes("pnpm install"))).toBe(false);
+  });
+
   it("exits 2 when the answers file names an id this run never asked", async () => {
     const scratch = await createScratchCopy(FIXTURE);
     cleanupDirs.push(scratch.dir);

@@ -16,7 +16,7 @@ import type { AskFix, LoadedProject, MediaWiring, Rule, RuleContext, RunUpgradeC
 import { detectPlugin, mergeRules, mergeSandboxEntries } from "./pluginRules.ts";
 import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity, type UpgradeReport } from "./report.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
-import { hookFailedFinding, ruleCheckFailedFinding, upgradingDocs, verifyEditsWith, type VerifyEditsResult } from "./ruleHelpers.ts";
+import { hookFailedFinding, packageJsonPath, ruleCheckFailedFinding, upgradingDocs, verifyEditsWith, type VerifyEditsResult } from "./ruleHelpers.ts";
 import { sandboxBootInput, type SandboxTable } from "./sandbox.ts";
 import { createScratchCopy, removeScratchCopy, type ScratchCopy } from "./scratch.ts";
 import { verifiesAfterEdit } from "./verify.ts";
@@ -820,7 +820,9 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
   if (write) {
     for (const file of applied) humanLine(`wrote ${file}`);
     if (applied.length > 0) {
-      humanLine("run `pnpm install` to pick up any dependency range changes, then run `check` again");
+      if (applied.includes(relative(root, packageJsonPath({ root })))) {
+        humanLine("run `pnpm install` to pick up any dependency range changes, then run `check` again");
+      }
     } else if (changed.length > 0) {
       humanLine("wrote nothing: every write was declined");
     } else if (rejectedIds.size > 0) {

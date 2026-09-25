@@ -56,6 +56,8 @@ describe("kestrel-upgrade against the queue-offer-5.8 fixture, with the installe
     const pkg = boundaryCast<{ dependencies: Record<string, string> }>(JSON.parse(pkgText), "json");
     expect(pkg.dependencies["@michaelthielemann/kestrel-events-queue"]).toBe("^6.0.0");
     expect(pkg.dependencies["@michaelthielemann/kestrel-events-direct"]).toBeUndefined();
+
+    expect(lines.some((l) => l.includes("pnpm install"))).toBe(true);
   });
 
   it("exits 2, naming the id and the value, when the answers file gives a closed-choice question an answer outside its choices", async () => {
