@@ -19,7 +19,9 @@ Net changes since 5.8.1.
     providers, fails to boot naming the pipeline or the two modules.
   - `StepDescription` gains an optional `atomicSafe` boolean, default `false`. A step inside a
     group whose `describe()` does not declare `atomicSafe: true` fails boot, naming the pipeline
-    and the step.
+    and the step. `atomicSafe` means the step writes only through the scoped `persistence@1` and
+    has no effect outside it; it says nothing about how long the step runs. A group holds the
+    store's write lock for its whole duration.
   - `persistence/sqlite` implements the scope: one `BEGIN IMMEDIATE` … `COMMIT`/`ROLLBACK` per
     group, serialized by a FIFO mutex so a concurrent read never observes an uncommitted row.
     `createMany` now uses `BEGIN IMMEDIATE` and joins an outer scope instead of opening its own.
@@ -29,10 +31,11 @@ Net changes since 5.8.1.
     made after its own atomic scope rolled back or timed out **throws** instead of writing (only
     reachable from work a step did not await); a call made after the scope committed writes
     normally, with a warning logged.
-  - Every DB-only, single-document, request-bounded step of `content-default`, `revisions-default`,
-    `references-default`, `links-default`, `events-queue`, `delivery-static` (`readStatus` only)
-    and `authn-multi` (`verifyUser`, `deleteUser`) now declares `atomicSafe: true`; every other
-    shipped step keeps the default `false`.
+  - Every step of `content-default`, `revisions-default`, `references-default`, `links-default`,
+    `events-queue`, `delivery-static` (`readStatus` only) and `authn-multi` (`verifyUser`,
+    `deleteUser`) whose only effect goes through `persistence@1` declares `atomicSafe: true`,
+    including steps whose work grows with a collection (`events.purgeDone`, `references.report`);
+    every other shipped step keeps the default `false`.
   - `fakePersistence` (the contracts package's testing fake) gains the same `scope`/`failScope`/
     `scopeTimeoutMs`/`acquireTimeoutMs` surface, so a module test can exercise a grouped pipeline
     without SQLite, including its own FIFO queue, an acquire budget and the two terminal states of

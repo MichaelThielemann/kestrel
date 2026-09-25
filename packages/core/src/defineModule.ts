@@ -60,9 +60,11 @@ export interface StepDescription {
   multipart?: boolean;
   binary?: boolean;
   /**
-   * The step may run inside an atomic group: it reaches nothing but `persistence@1`, it issues those calls
-   * from its own async flow, it starts no work it does not await, it never runs another pipeline, and the
-   * work it does is bounded by the request rather than by the size of a collection. Default: false.
+   * The step may run inside an atomic group: it writes only through the scoped `persistence@1` and has no
+   * effect outside it, so a rollback undoes everything it did. It reaches nothing else, issues those calls
+   * from its own async flow, starts no work it does not await and never runs another pipeline. It says
+   * nothing about how long the step runs; a group holds the store's write lock for its whole duration.
+   * Default: false.
    */
   atomicSafe?: boolean;
   /**

@@ -101,11 +101,17 @@ Rules:
   the point the pipeline arrives (JSON or code).
 - A pipeline may have several groups; each is a separate transaction, run in list order.
 - Every step inside a group must declare `atomicSafe: true` in its `describe()` (default
-  `false`). It means: the step reaches nothing but `persistence@1`, issues those calls from its
-  own async flow (not a queue, timer or worker pool of its own), starts no work it does not
-  await, never runs another pipeline, and its work is bounded by the request rather than by the
-  size of a collection. Boot rejects a step inside a group that does not declare it, naming the
+  `false`). It means: the step writes only through the scoped `persistence@1` and has no effect
+  outside it, so a rollback undoes everything it did. It reaches nothing else, issues those calls
+  from its own async flow (not a queue, timer or worker pool of its own), starts no work it does
+  not await and never runs another pipeline. It says nothing about how long the step runs: a step
+  whose work grows with a collection, such as `events.purgeDone` or `references.report`, is
+  atomic-safe too. Boot rejects a step inside a group that does not declare it, naming the
   pipeline and the step.
+- A group holds the store's write lock for its whole duration. On `persistence/sqlite` every other
+  call, reads included, waits behind it for up to `acquireTimeoutMs`, and a group that runs longer
+  than `scopeTimeoutMs` rolls back and answers 503 `TRANSIENT`. Group only the steps that must
+  commit together; a step whose work grows with a collection holds the lock that long.
 - A group needs a module that provides the scope (the `atomicScope` hook on `ModuleDefinition`,
   next to `attach` and `triggers.event`) — in practice the module providing `persistence@1`. Boot
   rejects a grouped pipeline with no such module, and rejects two modules that both provide one.
