@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { checkBoot, type BootCheck, type BootProblem } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
-import { askFindings, invalidClosedAnswers, parseAnswersFile, resolveAnswer, ttyPrompt, unknownAnswerIds, type PromptFn } from "./answers.ts";
+import { askFindings, invalidClosedAnswers, parseAnswersFile, resolveAnswer, staleAnswerIds, ttyPrompt, unknownAnswerIds, type PromptFn } from "./answers.ts";
 import { boolFlag, parseArgs, stringFlag, type ParsedArgs } from "./args.ts";
 import { unifiedDiff } from "./diff.ts";
 import { runDataStep } from "./data.ts";
@@ -709,7 +709,7 @@ interface AskLoopResult {
   previewBoot?: (edits: readonly Edit[]) => Promise<BootPreview | undefined>;
 }
 
-async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined, plugins: readonly UpgradePlugin[] | undefined): Promise<AskLoopResult & { unknownIds: string[]; invalidAnswers: Array<{ id: string; value: string }> }> {
+async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined, plugins: readonly UpgradePlugin[] | undefined): Promise<AskLoopResult & { unknownIds: string[]; staleIds: string[]; invalidAnswers: Array<{ id: string; value: string }> }> {
   const answers = new Map<string, string>();
   const everAsked = new Set<string>();
   const askedFixes = new Map<string, AskFix>();
@@ -735,8 +735,9 @@ async function resolveQuestions(root: string, entry: string | undefined, runSetu
     if (!resolvedAny) break;
   }
   const unknownIds = fromFile === undefined ? [] : unknownAnswerIds(fromFile, everAsked);
+  const staleIds = fromFile === undefined ? [] : staleAnswerIds(fromFile, everAsked);
   const invalidAnswers = fromFile === undefined ? [] : invalidClosedAnswers(fromFile, askedFixes);
-  return { report: built!.report, answers, ...(built!.previewBoot === undefined ? {} : { previewBoot: built!.previewBoot }), unknownIds, invalidAnswers };
+  return { report: built!.report, answers, ...(built!.previewBoot === undefined ? {} : { previewBoot: built!.previewBoot }), unknownIds, staleIds, invalidAnswers };
 }
 
 async function confirmFile(file: string, root: string, before: string, after: string, prompt: PromptFn): Promise<boolean> {
@@ -771,7 +772,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     return 2;
   }
 
-  const { report, unknownIds, invalidAnswers, answers, previewBoot } = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins);
+  const { report, unknownIds, staleIds, invalidAnswers, answers, previewBoot } = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins);
   if (invalidAnswers.length > 0) {
     for (const { id, value } of invalidAnswers) stderr(`--answers: "${id}" is "${value}", which is not one of its choices`);
     return 2;
@@ -780,6 +781,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     stderr(`--answers names an id this run never asked: ${unknownIds.join(", ")}`);
     return 2;
   }
+  for (const id of staleIds) humanLine(`--answers: "${id}" is not asked this run; ignored as a stale answer from an earlier pass`);
 
   const { states, rejectedIds, conflictsWith, pathExists, unsafeTargets } = verifyAndApply(report.findings, root);
   const adjustedFindings = downgradeRejected(report.findings, rejectedIds, conflictsWith, pathExists, unsafeTargets);

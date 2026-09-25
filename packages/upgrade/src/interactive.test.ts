@@ -72,6 +72,22 @@ describe("--answers resolves a question without a TTY", () => {
     expect(code).toBe(2);
     expect(errored).toContain("nope:not-a-real-question");
   });
+
+  it("notes, but does not refuse, a stale answer belonging to a known rule's question family", async () => {
+    const scratch = await createScratchCopy(FIXTURE);
+    cleanupDirs.push(scratch.dir);
+    const answersFile = join(scratch.dir, "answers.json");
+    await writeFile(
+      answersFile,
+      JSON.stringify({ "verified-user-path:retryReassignRevisionAuthor": "reassignTo", "verified-user-path:aPipelineFromAnEarlierPass": "reassignTo" }),
+    );
+    const lines: string[] = [];
+    const code = await runUpgradeCli(["fix", "--root", scratch.dir, "--write", "--yes", "--answers", answersFile], { stdout: (l) => lines.push(l), stderr: (l) => lines.push(l), isInteractive: false });
+    expect(code).toBe(1);
+    expect(lines.some((l) => l.includes("verified-user-path:aPipelineFromAnEarlierPass") && l.includes("stale"))).toBe(true);
+    const text = await readFile(join(scratch.dir, "pipelines", "retryReassignRevisionAuthor.ts"), "utf8");
+    expect(text).toContain('"authn.verifyUser:reassignTo", "revisions.reassignAuthor"');
+  });
 });
 
 describe("a scripted TTY prompt", () => {

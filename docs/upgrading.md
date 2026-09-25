@@ -52,9 +52,12 @@ A finding whose fix needs a person's decision carries a question. `fix` on a ter
 in turn, with its default shown; pressing enter takes the default. Without a terminal it never
 prompts: pass `--answers <file>` (a JSON object of `{ "<question id>": "<answer>" }`) to supply
 them, or `--yes` to take every default — a question with no safe default (whether an output
-property is always present, for one) stays open under `--yes` either way. `--answers` naming an id
-this run never asked, or giving a closed-choice question (`yes`/`no`, say) a value outside its
-choices, is refused (exit 2), naming the id and, for the latter, the offending value.
+property is always present, for one) stays open under `--yes` either way. `--answers` giving a
+closed-choice question (`yes`/`no`, say) a value outside its choices is refused (exit 2), naming the
+id and the offending value. Naming an id this run never asked is refused (exit 2) too, unless the id
+belongs to a built-in rule's own question family (an earlier pass's answer that pass's own edit has
+since resolved, say) — such an id is only noted, not refused, so one answers file kept across several
+passes keeps working as later passes resolve what earlier ones asked.
 `--save-answers <file>` writes down what was answered interactively, to replay with `--answers` next
 time.
 

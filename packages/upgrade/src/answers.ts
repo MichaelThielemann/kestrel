@@ -63,9 +63,30 @@ export async function resolveAnswer(fix: AskFix, message: string, options: Resol
   return undefined;
 }
 
-/** Every id in the answers file that never matched an asked question: `--answers` refuses these (exit 2). */
+const KNOWN_QUESTION_IDS = new Set(["switch-to-queue", "relay-pipelines", "field-step"]);
+const KNOWN_QUESTION_PREFIXES = ["idempotent:", "binary:", "verified-user-path:", "underscore-field:", "emits:"];
+
+function isKnownQuestionFamily(id: string): boolean {
+  return KNOWN_QUESTION_IDS.has(id) || KNOWN_QUESTION_PREFIXES.some((prefix) => id.startsWith(prefix));
+}
+
+/**
+ * Every id in the answers file that neither matched an asked question nor belongs to a built-in
+ * rule's own question family: `--answers` refuses these (exit 2). A plugin's own custom rule and its
+ * own question ids are not in this family list, so a stale answer of its own still counts as unknown.
+ */
 export function unknownAnswerIds(fromFile: ReadonlyMap<string, string>, everAsked: ReadonlySet<string>): string[] {
-  return [...fromFile.keys()].filter((id) => !everAsked.has(id));
+  return [...fromFile.keys()].filter((id) => !everAsked.has(id) && !isKnownQuestionFamily(id));
+}
+
+/**
+ * Every id in the answers file that belongs to a built-in rule's own question family but this run
+ * never asked it: an earlier pass's answer that pass's own edit has since resolved, or a question this
+ * run's conditions never reach. `--answers` notes these instead of refusing them, so an answers file
+ * accumulated across several passes keeps working as later passes resolve what earlier ones asked.
+ */
+export function staleAnswerIds(fromFile: ReadonlyMap<string, string>, everAsked: ReadonlySet<string>): string[] {
+  return [...fromFile.keys()].filter((id) => !everAsked.has(id) && isKnownQuestionFamily(id));
 }
 
 /** Every answers-file value that named an asked, closed-choice question but does not match its choices: `--answers` refuses these (exit 2), naming the id and the value, instead of leaving the question silently open. */

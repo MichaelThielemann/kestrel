@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AskFix } from "./report.ts";
-import { invalidClosedAnswers, parseAnswersFile, resolveAnswer, unknownAnswerIds } from "./answers.ts";
+import { invalidClosedAnswers, parseAnswersFile, resolveAnswer, staleAnswerIds, unknownAnswerIds } from "./answers.ts";
 
 const fix: AskFix = { kind: "ask", question: "binary:notes/local.create", prompt: "should this step's result be binary?", choices: ["no", "yes"], closedChoices: true, defaultValue: "no" };
 
@@ -76,6 +76,23 @@ describe("unknownAnswerIds", () => {
   it("flags an id from the file that no question ever asked", () => {
     const fromFile = new Map([["binary:x", "yes"], ["nope:y", "yes"]]);
     expect(unknownAnswerIds(fromFile, new Set(["binary:x"]))).toEqual(["nope:y"]);
+  });
+
+  it("never flags an id from a built-in rule's own question family, even when this run never asked it", () => {
+    const fromFile = new Map([["field-step", "yes"], ["idempotent:oldPipeline", "yes"], ["nope:y", "yes"]]);
+    expect(unknownAnswerIds(fromFile, new Set())).toEqual(["nope:y"]);
+  });
+});
+
+describe("staleAnswerIds", () => {
+  it("flags an id from a known rule's question family this run never asked", () => {
+    const fromFile = new Map([["field-step", "yes"], ["idempotent:oldPipeline", "yes"], ["nope:y", "yes"]]);
+    expect(staleAnswerIds(fromFile, new Set())).toEqual(["field-step", "idempotent:oldPipeline"]);
+  });
+
+  it("never flags an id this run did ask, or one no family recognizes", () => {
+    const fromFile = new Map([["field-step", "yes"], ["nope:y", "yes"]]);
+    expect(staleAnswerIds(fromFile, new Set(["field-step"]))).toEqual([]);
   });
 });
 
