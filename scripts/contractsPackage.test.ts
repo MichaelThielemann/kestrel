@@ -59,8 +59,13 @@ describe("the contracts package", () => {
     expect(suites.filter((file) => !built.has(file))).toEqual([]);
   });
 
-  it.each(maps)("%s names every shared contract suite explicitly", (_, map) => {
-    expect(suites.filter((file) => !(subpath(file) in map))).toEqual([]);
+  it("points every shared suite's source export at its own source file", () => {
+    for (const file of suites) expect(pkg.exports[subpath(file)], file).toBe(`./src/${file}`);
+  });
+
+  it("points every shared suite's published export at its own built declaration and module", () => {
+    const base = (file: string): string => `./dist/${file.replace(/\.ts$/, "")}`;
+    for (const file of suites) expect(pkg.publishConfig.exports[subpath(file)], file).toEqual({ types: `${base(file)}.d.ts`, default: `${base(file)}.js` });
   });
 
   it.each(maps)("%s leaves no unit test importable", (_, map) => {
