@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BootCheck, BootProblem, PipelineDefinition } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
@@ -183,6 +183,17 @@ describe("responses/thrown-error-text", () => {
     const findings = await thrownErrorTextRule.check(contextFor(await project({ moduleFiles: { "notes/local": moduleFile } })));
     expect(findings.map((f) => f.where.file)).toEqual([join(dir, "modules", "notes.test.ts")]);
     expect(findings[0]).toMatchObject({ rule: "responses/thrown-error-text", severity: "info" });
+  });
+
+  it("never scans an installed package's own directory, reached through a pnpm-style node_modules layout", async () => {
+    const pkgDir = join(dir, "node_modules", ".pnpm", "@michaelthielemann+kestrel-events-direct@6.0.0", "node_modules", "@michaelthielemann", "kestrel-events-direct");
+    await mkdir(pkgDir, { recursive: true });
+    const moduleFile = join(pkgDir, "dist", "index.js");
+    await mkdir(dirname(moduleFile), { recursive: true });
+    await writeFile(moduleFile, "exports.default = { name: \"events/direct\" };\n");
+    await writeFile(join(pkgDir, "dist", "index.test.js"), 'expect(res.error).toContain("db down");\n');
+    const findings = await thrownErrorTextRule.check(contextFor(await project({ moduleFiles: { "events/direct": moduleFile } })));
+    expect(findings).toEqual([]);
   });
 });
 

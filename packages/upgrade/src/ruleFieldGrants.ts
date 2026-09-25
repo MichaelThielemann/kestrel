@@ -5,7 +5,7 @@ import { insertPipelineStep, setModuleConfigProperties } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
-import { combineEditParts, fileForPipeline, hasModule, infoFinding, moduleEntry, upgradingDocs } from "./ruleHelpers.ts";
+import { combineEditParts, fileForPipeline, hasModule, infoFinding, isProjectFile, moduleEntry, upgradingDocs } from "./ruleHelpers.ts";
 
 const AUTHZ_MODULE = "authz/roles";
 const FIELD_STEP = "pipelines/field-step";
@@ -241,7 +241,7 @@ const MATCHES_ERROR_TEXT = /\.error\)?\.(?:toContain|toMatch|toBe|toEqual|includ
 export const thrownErrorTextRule: Rule = {
   id: "responses/thrown-error-text",
   check(ctx) {
-    const dirs = [...new Set([...ctx.project.moduleFiles.values()].map((file) => dirname(file)))];
+    const dirs = [...new Set([...ctx.project.moduleFiles.values()].filter((file) => isProjectFile(ctx, file)).map((file) => dirname(file)))];
     const files = dirs.flatMap((dir) => {
       try {
         return readdirSync(dir)

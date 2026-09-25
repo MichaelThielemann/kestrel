@@ -1,6 +1,6 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BootCheck, PipelineDefinition } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
@@ -506,6 +506,14 @@ describe("responses/binary-cache-control", () => {
     const findings = await binaryCacheControlRule.check(contextFor(p));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.severity).toBe("info");
+  });
+
+  it("never fires for an installed package's own file, reached through a pnpm-style node_modules layout", async () => {
+    const file = join(dir, "node_modules", ".pnpm", "@michaelthielemann+kestrel-delivery-static@6.0.0", "node_modules", "@michaelthielemann", "kestrel-delivery-static", "dist", "index.js");
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, 'exports.serve = function serve() { return { binary: true, headers: { "cache-control": "public, max-age=60" } }; };\n');
+    const p = await project([], { moduleFiles: { "@michaelthielemann/kestrel-delivery-static": file } });
+    expect(await binaryCacheControlRule.check(contextFor(p))).toEqual([]);
   });
 });
 

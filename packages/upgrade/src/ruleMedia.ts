@@ -4,7 +4,7 @@ import { createPipelineFile, insertTriggers, removeModuleConfigProperty, replace
 import { isRecord } from "./guards.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
-import { combineEditParts, finding, fileForPipeline, hasModule, infoFinding, moduleEntry, pipelinesTriggeredBy, upgradingDocs } from "./ruleHelpers.ts";
+import { combineEditParts, finding, fileForPipeline, hasModule, infoFinding, localModuleFiles, moduleEntry, pipelinesTriggeredBy, upgradingDocs } from "./ruleHelpers.ts";
 
 function normalizePublicPath(path: string): string {
   return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
@@ -415,7 +415,7 @@ export const binaryCacheControlRule: Rule = {
   id: BINARY_CACHE_CONTROL_RULE_ID,
   check(ctx) {
     const findings: Finding[] = [];
-    for (const [moduleName, file] of ctx.project.moduleFiles) {
+    for (const [moduleName, file] of localModuleFiles(ctx)) {
       const source = ctx.readFile(file);
       if (source === undefined || !/cache-control/i.test(source)) continue;
       findings.push(

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -748,6 +748,15 @@ describe("info rules", () => {
     const file = join(dir, "notes.ts");
     await writeFile(file, 'steps: () => ({ create: async (ctx) => ok(ctx) })\n');
     const p = await project({ moduleFiles: { "notes/local": file } });
+    expect(await ctxDoneTerminalOutputRule.check(contextFor(p))).toEqual([]);
+  });
+
+  it("steps/ctx-done-terminal-output stays quiet for an installed package's own file, reached through a pnpm-style node_modules layout", async () => {
+    const pkgDir = join(dir, "node_modules", ".pnpm", "@michaelthielemann+kestrel-events-direct@6.0.0", "node_modules", "@michaelthielemann", "kestrel-events-direct");
+    await mkdir(join(pkgDir, "dist"), { recursive: true });
+    const file = join(pkgDir, "dist", "index.js");
+    await writeFile(file, 'exports.steps = () => ({ create: async (ctx) => ctx.done({ id: "x" }) });\n');
+    const p = await project({ moduleFiles: { "events/direct": file } });
     expect(await ctxDoneTerminalOutputRule.check(contextFor(p))).toEqual([]);
   });
 });

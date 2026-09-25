@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import type { BootCheck, BootProblem } from "@michaelthielemann/kestrel";
 import type { RuleContext } from "./plugin.ts";
 import type { Edit, Finding, FindingLocation, Severity } from "./report.ts";
@@ -80,8 +80,15 @@ export function hasModule(ctx: RuleContext, token: string): boolean {
   return ctx.project.input.config.modules.some((m) => useToken(m.use) === token);
 }
 
+/** Whether `file` is the project's own — inside `ctx.root` and never through a `node_modules` segment — never an installed package's, whose own published files a rule must not read as if they were the project's. */
+export function isProjectFile(ctx: { root: string }, file: string): boolean {
+  const rel = relative(ctx.root, file);
+  if (rel.startsWith("..") || isAbsolute(rel)) return false;
+  return !rel.split(sep).includes("node_modules");
+}
+
 export function localModuleFiles(ctx: RuleContext): Array<[string, string]> {
-  return [...ctx.project.moduleFiles].filter(([, file]) => file.endsWith(".ts") || file.endsWith(".js"));
+  return [...ctx.project.moduleFiles].filter(([, file]) => (file.endsWith(".ts") || file.endsWith(".js")) && isProjectFile(ctx, file));
 }
 
 /** The file a named pipeline lives in, whichever `PipelineFile` entry lists it. */
