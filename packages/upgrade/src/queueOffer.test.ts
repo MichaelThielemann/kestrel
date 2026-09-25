@@ -385,7 +385,54 @@ describe("offer/event-queue: UpgradePlugin.switchEdits", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("auto");
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
-    expect(edits).toEqual([{ file: markerFile, start: 0, end: 0, text: "// switched\n" }]);
+    expect(edits).toContainEqual({ file: markerFile, start: 0, end: 0, text: "// switched\n" });
+    const pkgFile = join(dir, "package.json");
+    const pkgEdit = edits.find((e) => e.file === pkgFile);
+    expect(pkgEdit).toBeDefined();
+    const { text } = applyEdits(readFileOrUndefined(pkgFile)!, [pkgEdit!]);
+    expect(text).toContain('"@michaelthielemann/kestrel-events-queue"');
+    expect(text).not.toContain("kestrel-events-direct");
+  });
+
+  it("swaps package.json's dependency on its own, even when the plugin's switchEdits never touches it (a layer project)", async () => {
+    const p = await directProject({ publishPipeline: true });
+    await writeFile(p.configFile, 'export default defineConfig(presetModuleConfig({ persistenceFile: "./data/kestrel.db" }));\n');
+    const pluginSwitchEdits = async (): Promise<{ parts: Record<string, Edit[] | undefined>; blockers: readonly string[] }> => ({ parts: {}, blockers: [] });
+    const previewDetails = async (): Promise<{ moduleUses?: readonly string[]; issues: readonly LoadIssue[] }> => ({
+      moduleUses: ["@michaelthielemann/kestrel-events-inmemory", "@michaelthielemann/kestrel-events-queue", "@michaelthielemann/kestrel-persistence-sqlite"],
+      issues: [],
+    });
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
+    const ctx: InternalRuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers, previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits, previewDetails };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const pkgFile = join(dir, "package.json");
+    const { text } = applyEdits(readFileOrUndefined(pkgFile)!, edits.filter((e) => e.file === pkgFile));
+    expect(text).toContain('"@michaelthielemann/kestrel-events-queue"');
+    expect(text).not.toContain("kestrel-events-direct");
+  });
+
+  it("does not double-edit package.json when the plugin's own switchEdits already covers it", async () => {
+    const p = await directProject({ publishPipeline: true });
+    await writeFile(p.configFile, 'export default defineConfig(presetModuleConfig({ persistenceFile: "./data/kestrel.db" }));\n');
+    const pkgFile = join(dir, "package.json");
+    const pluginPkgEdit: Edit = { file: pkgFile, start: 0, end: 0, text: "" };
+    const pluginSwitchEdits = async (): Promise<{ parts: Record<string, Edit[] | undefined>; blockers: readonly string[] }> => ({
+      parts: { "plugin's own package.json handling": [pluginPkgEdit] },
+      blockers: [],
+    });
+    const previewDetails = async (): Promise<{ moduleUses?: readonly string[]; issues: readonly LoadIssue[] }> => ({
+      moduleUses: ["@michaelthielemann/kestrel-events-inmemory", "@michaelthielemann/kestrel-events-queue", "@michaelthielemann/kestrel-persistence-sqlite"],
+      issues: [],
+    });
+    const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
+    const ctx: InternalRuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers, previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits, previewDetails };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    expect(edits.filter((e) => e.file === pkgFile)).toEqual([pluginPkgEdit]);
   });
 
   it("blocks the offer using the plugin's own deployment markers", async () => {

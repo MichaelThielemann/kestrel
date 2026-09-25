@@ -98,10 +98,25 @@ async function builtInBlockers(ctx: InternalRuleContext, edits: readonly Edit[])
   return unmet;
 }
 
+function packageJsonDependencySwap(ctx: RuleContext): Edit[] | undefined {
+  const directEntry = moduleEntry(ctx, "events-direct");
+  if (directEntry === undefined) return undefined;
+  const pkgFile = packageJsonPath(ctx);
+  const pkgSource = ctx.readFile(pkgFile);
+  return pkgSource === undefined ? undefined : replaceDependency(pkgFile, pkgSource, "dependencies", directEntry.use, EVENTS_QUEUE_PACKAGE, KESTREL_RANGE);
+}
+
+function withPackageJsonFallback(ctx: RuleContext, parts: Record<string, Edit[] | undefined>): Record<string, Edit[] | undefined> {
+  const pkgFile = packageJsonPath(ctx);
+  const alreadyTouchesPackageJson = Object.values(parts).some((edits) => edits?.some((e) => e.file === pkgFile));
+  return alreadyTouchesPackageJson ? parts : { ...parts, "package.json's dependencies": packageJsonDependencySwap(ctx) };
+}
+
 async function switchAvailability(ctx: InternalRuleContext, relayPipelines: readonly string[]): Promise<{ edits: Edit[]; blockers: string[] }> {
   if (ctx.switchEdits !== undefined) {
     const result: SwitchEditsResult = await ctx.switchEdits(ctx, relayPipelines);
-    const edits = Object.values(result.parts).flatMap((edits) => edits ?? []);
+    const parts = withPackageJsonFallback(ctx, result.parts);
+    const edits = Object.values(parts).flatMap((edits) => edits ?? []);
     return { edits, blockers: [...(await builtInBlockers(ctx, edits)), ...result.blockers] };
   }
   const edits = switchEdits(ctx, relayPipelines);
@@ -353,7 +368,7 @@ export const queueOfferRule: Rule = {
       ];
     }
 
-    const { edits, missing } = ctx.switchEdits === undefined ? verifiedSwitchEdits(ctx, relayPipelines) : combineEditParts((await ctx.switchEdits(ctx, relayPipelines)).parts);
+    const { edits, missing } = ctx.switchEdits === undefined ? verifiedSwitchEdits(ctx, relayPipelines) : combineEditParts(withPackageJsonFallback(ctx, (await ctx.switchEdits(ctx, relayPipelines)).parts));
     return [
       {
         id: RULE_ID,
