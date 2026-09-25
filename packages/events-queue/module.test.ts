@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { boot, defineModule, definePipeline, silentLogger } from "@michaelthielemann/kestrel";
+import { boot, defineModule, definePipeline, KestrelBootError, silentLogger } from "@michaelthielemann/kestrel";
 import { EVENTS, type EventData } from "@michaelthielemann/kestrel-contracts/events";
 import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/events.envelope";
 import { eventDeliveryStepTests, type EventDeliveryFixture } from "@michaelthielemann/kestrel-contracts/events.steps.contract.test";
@@ -674,9 +674,18 @@ describe("events/queue lanes: attach guards", () => {
         http: null,
       },
       modules: [persistenceFakeForLanes, busForLanes, module, probeForLanes],
-      pipelines: [definePipeline({ name: "onRender", steps: ["probe.render"] }), definePipeline({ name: "onPlan", steps: ["probe.plan"] })],
+      pipelines: [definePipeline({ name: "onRender", steps: ["probe.render"] }), definePipeline({ name: "onPlan", steps: ["probe.plan"] }), definePipeline({ name: "renderNow", steps: ["probe.render"] })],
       logger: silentLogger,
     });
+  }
+
+  async function bootError(booting: Promise<unknown>): Promise<unknown> {
+    try {
+      await booting;
+    } catch (error) {
+      return error;
+    }
+    return undefined;
   }
 
   it("refuses a lane naming an unknown pipeline", async () => {
@@ -710,6 +719,30 @@ describe("events/queue lanes: attach guards", () => {
     }
     expect(String(caught)).toContain("onRender");
     expect(String(caught)).toContain("relayPipelines");
+  });
+
+  it("refuses a lane naming a pipeline no event trigger runs, saying so", async () => {
+    const caught = await bootError(bootWithLanes({ pages: ["renderNow"] }));
+    expect(caught).toBeInstanceOf(KestrelBootError);
+    expect(caught).toMatchObject({ code: "attach-failed", module: "events/queue" });
+    expect(String(caught)).toContain('lane "pages"');
+    expect(String(caught)).toContain('"renderNow"');
+    expect(String(caught)).toContain("no event trigger");
+  });
+
+  it("refuses relayPipelines naming a pipeline no event trigger runs, saying so", async () => {
+    const caught = await bootError(bootWithLanes({}, ["onRender", "renderNow"]));
+    expect(caught).toBeInstanceOf(KestrelBootError);
+    expect(caught).toMatchObject({ code: "attach-failed", module: "events/queue" });
+    expect(String(caught)).toContain("relayPipelines");
+    expect(String(caught)).toContain("renderNow");
+    expect(String(caught)).not.toContain("onRender");
+    expect(String(caught)).toContain("no event trigger");
+  });
+
+  it("boots with relayPipelines and lanes naming only pipelines an event trigger runs", async () => {
+    const kestrel = await bootWithLanes({ pages: ["onPlan"] }, ["onRender"]);
+    await kestrel.stop();
   });
 
   it("boots fine with a lane pipeline and the default relayPipelines (\"all\")", async () => {

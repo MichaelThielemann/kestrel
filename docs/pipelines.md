@@ -794,8 +794,9 @@ it is the worker's from the moment the response goes out, immediately available 
 delivery is still pending without the relay having attempted it. This is the setting for a
 subscriber whose work is too heavy for the request (rendering image variants on upload, writing a
 login audit) while another subscriber of the same event still gets its head start (publishing the
-page). Naming a pipeline unknown to the booted manifest fails boot at `attach()`, once every
-pipeline is resolved, naming the module and the unknown pipeline(s).
+page). Naming a pipeline unknown to the booted manifest, or one no event trigger runs, fails boot
+at `attach()`, once every pipeline is resolved, naming the module, the pipeline(s) and which of the
+two it is.
 
 A relayed delivery is an ordinary run: it carries `parentRunId`, so it appears in the logs and in
 insights' recent failures linked to the request that raised it, and a delivery pipeline that hangs

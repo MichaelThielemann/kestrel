@@ -64,8 +64,9 @@ and the relay never claims it by id, so it is the worker's from the moment the r
 it returns; `_events.pipelines` still names it, with `status: "queued"`. This is how a heavy
 subscriber (rendering image variants on upload, writing a login audit) stays off the request while
 a subscriber that must show up in the response (publishing a page) keeps its head start. Naming a
-pipeline that is not in the booted manifest fails at `attach()`, once every pipeline is resolved,
-with an error naming the module and the unknown pipeline(s).
+pipeline that is not in the booted manifest, or one that no event trigger runs and so never gets a
+row, fails at `attach()`, once every pipeline is resolved, with an error naming the module, the
+pipeline(s) and which of the two it is.
 
 `events.readDeliveryStatus` answers `{ dead, scope: "store", since: null, lastDeadAt }`: the
 dead-letter rows across every process, the same count `events.readQueueStatus.dead` already
@@ -87,8 +88,8 @@ plain string on the event's data; this module attaches no meaning to it beyond t
 
 `lanes` (default `{}`) gives named pipelines their own worker loop: `{ "<lane>": ["<pipeline>",
 …] }`. A lane name matches `^[a-z][a-z0-9-]*$` (checked in the config schema; `main` is reserved
-there for the pipelines no lane names), and `attach()` rejects a pipeline in two lanes or in both a
-lane and `relayPipelines`. Every pipeline not listed runs in the implicit `main` lane, together
+there for the pipelines no lane names), and `attach()` rejects a pipeline the booted manifest does
+not know, one no event trigger runs, one in two lanes, and one in both a lane and `relayPipelines`. Every pipeline not listed runs in the implicit `main` lane, together
 with the worker's fan-out of unfanned rows and a sweep that reclaims every lane's expired locks;
 each lane's own claim also reclaims that lane's expired locks first, so a crashed process's row is
 retried by its own lane without waiting for the main loop. Each named lane runs its own

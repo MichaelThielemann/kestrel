@@ -144,8 +144,9 @@ Net changes since 5.8.1.
     client can tell delivery is still pending. This is the setting for a pipeline whose delivery
     work must not run inside the emitting request (rendering image variants on upload, writing a
     login audit) while another subscriber of the same event keeps its head start. Naming a
-    pipeline the booted manifest does not know fails boot at `attach()`, naming the module and the
-    unknown pipeline(s). `events-direct` has no equivalent key: its delivery is inline by nature.
+    pipeline the booted manifest does not know, or one no event trigger runs, fails boot at
+    `attach()`, naming the module, the pipeline(s) and which of the two it is. `events-direct` has
+    no equivalent key: its delivery is inline by nature.
 - `core`: `boot()` fails outright, with a `KestrelBootError` naming the pipeline and the step, for
   shapes it previously let through: a step that writes `result` without declaring `output`,
   `extendsOutput`, `extendsItems` or `binary: true`; an object schema inside one of those that
@@ -698,9 +699,11 @@ Net changes since 5.8.1.
   example one a pre-6.0 process claimed without knowing the column) is cleared and the row written,
   instead of the event being silently dropped.
 - `events-queue` runs named lanes: `lanes: { "<lane>": ["<pipeline>", …] }` gives each lane its own
-  worker loop, which claims and runs one row at a time, retrying at once rather than waiting
-  `pollMs` when it loses a claim race to another process; a claim that instead fails outright (a
-  persistence error) is logged and waits `pollMs`, never spinning. A due row of one lane never
+  worker loop; a lane naming a pipeline the booted manifest does not know, or one no event trigger
+  runs, fails boot at `attach()`, naming the lane and the pipeline. Each lane's loop claims and
+  runs one row at a time, retrying at once rather than waiting `pollMs` when it loses a claim race
+  to another process; a claim that instead fails outright (a persistence error) is logged and waits
+  `pollMs`, never spinning. A due row of one lane never
   waits for a row of another lane or of the main loop (the implicit lane for every pipeline `lanes`
   does not name), and the relay never claims a lane row. Each lane's claim also reclaims that
   lane's own expired locks, so a crashed process's row is retried by its own lane without waiting

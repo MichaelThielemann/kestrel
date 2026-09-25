@@ -91,15 +91,20 @@ export default defineModule({
   },
 
   attach: (instance, kestrel) => {
-    const known = new Set(kestrel.describe().pipelines.map((p) => p.name));
+    const manifest = kestrel.describe();
+    const known = new Set(manifest.pipelines.map((p) => p.name));
+    const eventRun = new Set(manifest.triggers.events.map((entry) => entry.pipeline));
     if (instance.relayPipelines !== "all") {
       const unknown = instance.relayPipelines.filter((name) => !known.has(name));
       if (unknown.length > 0) throw new Error(`events/queue: relayPipelines names unknown pipeline(s): ${unknown.join(", ")}`);
+      const untriggered = instance.relayPipelines.filter((name) => !eventRun.has(name));
+      if (untriggered.length > 0) throw new Error(`events/queue: relayPipelines names pipeline(s) no event trigger runs, so the queue never delivers to them: ${untriggered.join(", ")}`);
     }
     const laneOfPipeline = new Map<string, string>();
     for (const [lane, pipelines] of Object.entries(instance.lanes)) {
       for (const pipeline of pipelines) {
         if (!known.has(pipeline)) throw new Error(`events/queue: lane "${lane}" names unknown pipeline "${pipeline}"`);
+        if (!eventRun.has(pipeline)) throw new Error(`events/queue: lane "${lane}" names pipeline "${pipeline}", which no event trigger runs, so the queue never delivers to it`);
         const already = laneOfPipeline.get(pipeline);
         if (already !== undefined) throw new Error(`events/queue: pipeline "${pipeline}" is in two lanes: "${already}" and "${lane}"`);
         laneOfPipeline.set(pipeline, lane);
