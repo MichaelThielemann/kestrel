@@ -173,7 +173,7 @@ export default defineModule({
   describe: () => ({
     emit: (spec: string) => ({ summary: `Queue event "${spec}" for the subscribed handler pipelines; the worker delivers it after this run`, reads: [], writes: [], errors: { 503: "the event could not be persisted" }, atomicSafe: true }),
     readQueueStatus: { summary: "Queue counters per state, the oldest pending event, the worker state of this process, and pending/running/oldestPendingAt per configured lane", reads: [], writes: ["result"], output: STATUS_SCHEMA, atomicSafe: true },
-    readDeliveryStatus: { summary: "Dead-letter rows of the queue across every process: deliveries that used up maxAttempts and wait for events.retryDead", reads: [], writes: ["result"], output: DELIVERY_STATUS_SCHEMA, errors: { 503: "the queue could not be read" } },
+    readDeliveryStatus: { summary: "Dead-letter rows of the queue across every process: deliveries that used up maxAttempts and wait for events.retryDead", reads: [], writes: ["result"], output: DELIVERY_STATUS_SCHEMA, errors: { 503: "the queue could not be read" }, atomicSafe: true },
     listDead: { summary: "Dead-letter events, most recently failed first", reads: [], writes: ["result"], query: { limit: { type: "integer", minimum: 1, maximum: MAX_DEAD_LIMIT } }, output: DEAD_SCHEMA, atomicSafe: true },
     retryDead: (arg: string) =>
       arg === "one"

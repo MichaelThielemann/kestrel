@@ -364,7 +364,7 @@ describe("revisions/default: atomicSafe is pinned", () => {
       read: true,
       label: true,
       reassignAuthor: true,
-      prune: false,
+      prune: true,
     };
     for (const [name, expect_] of Object.entries(expected)) {
       const description = describeMap[name];

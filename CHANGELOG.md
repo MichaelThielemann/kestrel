@@ -31,11 +31,13 @@ Net changes since 5.8.1.
     made after its own atomic scope rolled back or timed out **throws** instead of writing (only
     reachable from work a step did not await); a call made after the scope committed writes
     normally, with a warning logged.
-  - Every step of `content-default`, `revisions-default`, `references-default`, `links-default`,
-    `events-queue`, `delivery-static` (`readStatus` only) and `authn-multi` (`verifyUser`,
-    `deleteUser`) whose only effect goes through `persistence@1` declares `atomicSafe: true`,
-    including steps whose work grows with a collection (`events.purgeDone`, `references.report`);
-    every other shipped step keeps the default `false`.
+  - These steps declare `atomicSafe: true`: every step of `content-default` and
+    `revisions-default`; every step of `events-queue` except `events.relay`; every step of
+    `references-default` except `references.guardAll`, `references.scan` and `references.rebuild`;
+    every step of `links-default` except `links.check` and `links.rebuild`; `delivery-static`'s
+    `delivery.readStatus`; and `authn-multi`'s `authn.verifyUser` and `authn.deleteUser`. Each of
+    them writes only through `persistence@1`, some over a whole collection (`events.purgeDone`,
+    `references.report`, `revisions.prune`). Every other shipped step keeps the default `false`.
   - `fakePersistence` (the contracts package's testing fake) gains the same `scope`/`failScope`/
     `scopeTimeoutMs`/`acquireTimeoutMs` surface, so a module test can exercise a grouped pipeline
     without SQLite, including its own FIFO queue, an acquire budget and the two terminal states of

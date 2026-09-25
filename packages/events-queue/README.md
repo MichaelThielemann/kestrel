@@ -134,7 +134,7 @@ them a head start the other processes' lanes never would.
 |---|---|---|---|---|---|---|---|---|
 | `events.emit:<arg>` | Queue event "<arg>" for the subscribed handler pipelines; the worker delivers it after this run | – | – | – | – | 503 the event could not be persisted | portable | yes |
 | `events.readQueueStatus` | Queue counters per state, the oldest pending event, the worker state of this process, and pending/running/oldestPendingAt per configured lane | – | `result` | – | { pending: number, running: number, dead: number, done24h: number, oldestPendingAt: number \| null, worker: object, lanes: object, … } | – | beside | yes |
-| `events.readDeliveryStatus` | Dead-letter rows of the queue across every process: deliveries that used up maxAttempts and wait for events.retryDead | – | `result` | – | { dead: integer, scope: "store" \| "process", since: number \| null, lastDeadAt: number \| null, … } | 503 the queue could not be read | portable | no |
+| `events.readDeliveryStatus` | Dead-letter rows of the queue across every process: deliveries that used up maxAttempts and wait for events.retryDead | – | `result` | – | { dead: integer, scope: "store" \| "process", since: number \| null, lastDeadAt: number \| null, … } | 503 the queue could not be read | portable | yes |
 | `events.listDead` | Dead-letter events, most recently failed first | – | `result` | ?limit: integer | { items: object[], … } | – | beside | yes |
 | `events.retryDead:<arg>` | Requeue every dead-letter event | – | `result` | – | { retried: number, … } | – | beside | yes |
 | `events.purgeDone` | Delete delivered events older than retentionDays | – | `result` | – | { removed: number, … } | – | beside | yes |

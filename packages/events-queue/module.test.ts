@@ -719,10 +719,10 @@ describe("events/queue lanes: attach guards", () => {
 });
 
 describe("events/queue: atomicSafe is pinned", () => {
-  it("every step is atomic-safe, except relay and readDeliveryStatus, which cannot be", async () => {
+  it("every step is atomic-safe, except relay, which runs whole pipelines and cannot be", async () => {
     const { instance } = await setup();
     const describeMap = module.describe!(instance);
-    const notAtomicSafe = new Set(["relay", "readDeliveryStatus"]);
+    const notAtomicSafe = new Set(["relay"]);
     for (const [name, description] of Object.entries(describeMap)) {
       const resolved = typeof description === "function" ? description("one") : description;
       expect(resolved.atomicSafe, `${name}.atomicSafe`).toBe(notAtomicSafe.has(name) ? undefined : true);

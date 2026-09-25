@@ -8616,7 +8616,8 @@
             "inspected",
             "removed"
           ]
-        }
+        },
+        "atomicSafe": true
       }
     },
     {
@@ -18091,7 +18092,8 @@
                 "inspected",
                 "removed"
               ]
-            }
+            },
+            "atomicSafe": true
           }
         }
       ]

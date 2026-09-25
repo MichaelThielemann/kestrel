@@ -413,8 +413,8 @@ for the steps inside it, and is deliberately narrow about what it does not cover
 
 - It guarantees one database: `persistence@1`'s writes inside the group either all commit or
   all roll back. It says nothing about a second system — a blob store, a rendered static
-  artefact, an outbound webhook, another process. `delivery.*` steps are never atomic-safe for
-  exactly this reason: a render plus blob I/O under the process's only write lock is the failure
+  artefact, an outbound webhook, another process. No `delivery.*` step that renders or writes
+  the published output is atomic-safe for exactly this reason: a render plus blob I/O under the process's only write lock is the failure
   the design exists to prevent, not a case it should also cover. A failed publish after a
   committed write leaves the database consistent and the published artefact stale; the existing
   repair path (`delivery.publishAll` / a status read) fixes that independently.

@@ -270,7 +270,7 @@ export default defineModule({
       errors: { 400: "no user id, or the former author again" },
       atomicSafe: true,
     },
-    prune: { summary: "Apply the retention rules to every recorded document and locale", reads: [], writes: ["result"], output: REPORT_SCHEMA },
+    prune: { summary: "Apply the retention rules to every recorded document and locale", reads: [], writes: ["result"], output: REPORT_SCHEMA, atomicSafe: true },
     remove: (collection: string) => ({ summary: `Drop every revision of a ${collection} document, in every locale`, reads: ["params.id"], writes: [], errors: { 400: "missing id" }, atomicSafe: true }),
     removeTranslation: (collection: string) => ({ summary: `Drop the revisions of one locale of a ${collection} document`, reads: ["params.id"], writes: [], query: LOCALE_QUERY, errors: { 400: "missing id" }, atomicSafe: true }),
   }),
