@@ -44,7 +44,7 @@ const BLOB_METHODS = ["put", "get", "remove", "list"] as const;
 const PERSISTENCE_METHODS = ["createOne", "createMany", "findOne", "findMany", "count", "updateOne", "updateMany", "deleteOne", "deleteMany"] as const;
 const noLogger: Logger = { step() {}, info() {}, error() {} };
 const MEDIA_CONFIG: MediaConfig = { allowedTypes: ["*"], deniedTypes: [], maxBytes: 1_000_000, locales: [], prefix: "media/", publicPath: "/media", publicCopy: { prefix: "site/" }, uploadStaleAfterMs: 900000, anonymousList: "ids" };
-const IMAGES_CONFIG: Config = { prefix: "media-variants/", publicPath: "/media", publicCopy: { prefix: "site/" }, media: { collection: "media_items" }, chunk: 3, staleAfterMs: 60000, maxAttempts: 2, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS };
+const IMAGES_CONFIG: Config = { prefix: "media-variants/", publicPath: "/media", publicCopy: { prefix: "site/" }, chunk: 3, staleAfterMs: 60000, maxAttempts: 2, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS };
 const SIZE_NAMES = ["thumb", "small", "hero", "wide"];
 
 function manifestServingVariants(): Manifest {
@@ -99,7 +99,7 @@ class Run {
 
   async deploy(): Promise<void> {
     if (this.images !== undefined) await this.images.close();
-    this.images = await createImages({ ...IMAGES_CONFIG, sizes: this.sizes.map((size) => ({ ...size })) }, { blobs: this.blobs, db: this.db, logger: noLogger, render: this.renderer }, () => 1000);
+    this.images = await createImages({ ...IMAGES_CONFIG, sizes: this.sizes.map((size) => ({ ...size })) }, { blobs: this.blobs, db: this.db, media: this.media, logger: noLogger, render: this.renderer }, () => 1000);
     this.images.attach(introspection);
   }
 

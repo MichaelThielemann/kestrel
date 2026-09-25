@@ -4,13 +4,15 @@ import type { Introspection } from "@michaelthielemann/kestrel";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/events.envelope";
+import type { MediaFile, MediaFiles, MediaFilter, MediaScan } from "@michaelthielemann/kestrel-contracts/media";
 import { publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
 import type { Document, Filter, Persistence, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
+import { ownedPersistence } from "@michaelthielemann/kestrel-contracts/persistence.owned";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import type { z } from "zod";
-import { contentTypeOf, eligible, render } from "./generate.ts";
+import { contentTypeOf, eligible, ELIGIBLE, render } from "./generate.ts";
 import type { Rendered, Renderer } from "./generate.ts";
 import { orientedOriginalDimensions, plannedDimensions, plannedExt, plannedFormat } from "./plan.ts";
 import { DEFAULT_SIZES, mergeSizes, sizeSchema, spec } from "./sizes.ts";
@@ -141,17 +143,6 @@ export interface Images {
   close(): Promise<void>;
 }
 
-interface MediaRow extends Document {
-  key: string;
-  contentType: string;
-  folder: string;
-  filename: string;
-  status?: string;
-  size?: number | null;
-  width?: number | null;
-  height?: number | null;
-}
-
 type NewVariant = Pick<Variant, "mediaId" | "size" | "slot" | "spec" | "width" | "height" | "format" | "key" | "bytes" | "state" | "error" | "attempts" | "updatedAt">;
 
 interface Content {
@@ -163,6 +154,11 @@ interface Content {
 interface Owner {
   row: Variant | null;
   retired: Retired | null;
+}
+
+interface Original {
+  data: Uint8Array;
+  publishedType: string;
 }
 
 function publicTypeOf(contentType: string): string {
@@ -194,14 +190,6 @@ function sizeNameOf(file: string): string {
   return dot === -1 ? file : file.slice(0, dot);
 }
 
-function isMediaReady(media: MediaRow): boolean {
-  return media.status === undefined || media.status === "ready";
-}
-
-function isLive(media: MediaRow | null): media is MediaRow {
-  return media !== null && isMediaReady(media);
-}
-
 async function pool<T>(tasks: Array<() => Promise<Result<T, KestrelError>>>, limit: number): Promise<Result<T[], KestrelError>> {
   const results: T[] = [];
   let index = 0;
@@ -222,8 +210,10 @@ async function pool<T>(tasks: Array<() => Promise<Result<T, KestrelError>>>, lim
   return failureError !== undefined ? err(failureError) : ok(results);
 }
 
-export async function createImages(config: Config, deps: { blobs: Blobstore; db: Persistence; logger: Logger; render?: Renderer; events?: Events }, now: () => number = Date.now): Promise<Images> {
-  const { blobs, db, logger } = deps;
+export async function createImages(config: Config, deps: { blobs: Blobstore; db: Persistence; media: MediaFiles; logger: Logger; render?: Renderer; events?: Events }, now: () => number = Date.now): Promise<Images> {
+  const { blobs, logger } = deps;
+  const db = ownedPersistence(deps.db, "images/default", [SIZES, VARIANTS, JOBS, RETIRED]);
+  const library = deps.media;
   const renderImage: Renderer = deps.render ?? render;
   const bus = deps.events;
 
@@ -374,8 +364,28 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok({ sizes: [...counts.keys()].sort(), variants: [...counts.values()].reduce((sum, n) => sum + n, 0) });
   }
 
-  async function readMedia(mediaId: string): Promise<Result<MediaRow | null, KestrelError>> {
-    return db.findOne<MediaRow>(config.media.collection, { id: mediaId });
+  async function readMedia(mediaId: string): Promise<Result<MediaFile | null, KestrelError>> {
+    return library.file(mediaId);
+  }
+
+  async function loadOriginal(mediaId: string): Promise<Result<Original | null, KestrelError>> {
+    const loaded = await library.load(mediaId);
+    if (isErr(loaded)) return loaded;
+    return ok(loaded.value === null ? null : { data: loaded.value.data, publishedType: loaded.value.file.publishedType });
+  }
+
+  async function eachMediaFile(filter: MediaFilter, visit: (file: MediaFile) => Promise<Result<void, KestrelError>>): Promise<Result<void, KestrelError>> {
+    let after: string | null = null;
+    for (;;) {
+      const page: Result<MediaScan, KestrelError> = await library.scan(filter, { after, limit: PAGE });
+      if (isErr(page)) return page;
+      for (const file of page.value.items) {
+        const visited = await visit(file);
+        if (isErr(visited)) return visited;
+      }
+      if (page.value.next === null) return ok(undefined);
+      after = page.value.next;
+    }
   }
 
   async function rowsOfItem(mediaId: string): Promise<Result<Map<string, Variant>, KestrelError>> {
@@ -393,16 +403,16 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok({ row: null, retired: retired.value });
   }
 
-  async function contentFor(media: MediaRow, row: Variant | null): Promise<Result<Content | null, KestrelError>> {
+  async function contentFor(item: MediaFile, row: Variant | null): Promise<Result<Content | null, KestrelError>> {
     if (row !== null && row.state !== "planned") {
       const rendered = await blobs.get(row.key);
       if (isErr(rendered)) return rendered;
       if (rendered.value !== null) return ok({ data: rendered.value, contentType: publicTypeOf(contentTypeOf(row.format)), rendered: true });
     }
-    const original = await blobs.get(media.key);
+    const original = await loadOriginal(item.id);
     if (isErr(original)) return original;
     if (original.value === null) return ok(null);
-    return ok({ data: original.value, contentType: publicTypeOf(media.contentType), rendered: false });
+    return ok({ data: original.value.data, contentType: original.value.publishedType, rendered: false });
   }
 
   function sameRow(a: Variant | null, b: Variant | null): boolean {
@@ -418,7 +428,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(media)) return media;
     const owner = await ownerOf(mediaId, file);
     if (isErr(owner)) return owner;
-    if (!isLive(media.value) || (owner.value.row === null && owner.value.retired === null)) {
+    if (media.value === null || (owner.value.row === null && owner.value.retired === null)) {
       const undone = await blobs.remove(key);
       if (isErr(undone)) return undone;
       return ok(false);
@@ -434,7 +444,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   async function settleWrites<T>(mediaId: string, outcome: Result<T, KestrelError>, whenGone: T): Promise<Result<T, KestrelError>> {
     const media = await readMedia(mediaId);
     if (isErr(media)) return isErr(outcome) ? outcome : media;
-    if (isLive(media.value)) return outcome;
+    if (media.value !== null) return outcome;
     const removed = await removeVariants(mediaId);
     if (isErr(removed)) return removed;
     return ok(whenGone);
@@ -478,32 +488,32 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     }
   }
 
-  async function originalDimensions(media: MediaRow): Promise<Result<{ decodable: boolean; ow: number; oh: number; bytes: Uint8Array } | null, KestrelError>> {
-    const blob = await blobs.get(media.key);
-    if (isErr(blob)) return blob;
-    if (blob.value === null) return ok(null);
-    const oriented = await orientedOriginalDimensions(blob.value);
-    return ok(oriented ? { decodable: true, ow: oriented.width, oh: oriented.height, bytes: blob.value } : { decodable: false, ow: 0, oh: 0, bytes: blob.value });
+  async function originalDimensions(item: MediaFile): Promise<Result<{ decodable: boolean; ow: number; oh: number; original: Original } | null, KestrelError>> {
+    const original = await loadOriginal(item.id);
+    if (isErr(original)) return original;
+    if (original.value === null) return ok(null);
+    const oriented = await orientedOriginalDimensions(original.value.data);
+    return ok(oriented ? { decodable: true, ow: oriented.width, oh: oriented.height, original: original.value } : { decodable: false, ow: 0, oh: 0, original: original.value });
   }
 
-  async function missingOriginal(media: MediaRow): Promise<Result<void, KestrelError>> {
-    const again = await readMedia(media.id);
+  async function missingOriginal(item: MediaFile): Promise<Result<void, KestrelError>> {
+    const again = await readMedia(item.id);
     if (isErr(again)) return again;
-    if (!isLive(again.value)) return ok(undefined);
-    return err(failure("INTERNAL", `images: the original ${media.key} of media/${media.id} is missing from the blob store`));
+    if (again.value === null) return ok(undefined);
+    return err(failure("INTERNAL", `images: the stored bytes of media/${item.id} are missing`));
   }
 
-  function newRow(mediaRow: MediaRow, size: Size, decodable: boolean, ow: number, oh: number): NewVariant {
-    const planned = decodable ? plannedDimensions(size, ow, oh) : { width: mediaRow.width ?? 0, height: mediaRow.height ?? 0 };
+  function newRow(item: MediaFile, size: Size, decodable: boolean, ow: number, oh: number): NewVariant {
+    const planned = decodable ? plannedDimensions(size, ow, oh) : { width: item.width ?? 0, height: item.height ?? 0 };
     return {
-      mediaId: mediaRow.id,
+      mediaId: item.id,
       size: size.name,
-      slot: slotOf(mediaRow.id, size.name),
+      slot: slotOf(item.id, size.name),
       spec: spec(size),
       width: planned.width,
       height: planned.height,
-      format: plannedFormat(size, mediaRow.contentType),
-      key: variantKey(mediaRow.id, size.name, plannedExt(size, mediaRow.contentType)),
+      format: plannedFormat(size, item.contentType),
+      key: variantKey(item.id, size.name, plannedExt(size, item.contentType)),
       bytes: 0,
       state: "planned",
       error: decodable ? null : UNDECODABLE,
@@ -515,20 +525,20 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   async function planItem(mediaId: string): Promise<Result<{ changed: boolean }, KestrelError>> {
     const media = await readMedia(mediaId);
     if (isErr(media)) return media;
-    if (!isLive(media.value) || !eligible(media.value.contentType)) return ok({ changed: false });
-    const mediaRow = media.value;
+    if (media.value === null || !eligible(media.value.contentType)) return ok({ changed: false });
+    const item = media.value;
     let touched = false;
     const touch = (): void => {
       touched = true;
     };
-    let outcome = await placeItem(mediaRow, touch);
-    if (isErr(outcome) && outcome.error.code === "CONFLICT" && !touched) outcome = await placeItem(mediaRow, touch);
+    let outcome = await placeItem(item, touch);
+    if (isErr(outcome) && outcome.error.code === "CONFLICT" && !touched) outcome = await placeItem(item, touch);
     if (!touched) return outcome;
     return settleWrites(mediaId, outcome, { changed: false });
   }
 
-  async function placeItem(mediaRow: MediaRow, touch: () => void): Promise<Result<{ changed: boolean }, KestrelError>> {
-    const mediaId = mediaRow.id;
+  async function placeItem(item: MediaFile, touch: () => void): Promise<Result<{ changed: boolean }, KestrelError>> {
+    const mediaId = item.id;
     const stored = await rowsOfItem(mediaId);
     if (isErr(stored)) return stored;
     const byName = stored.value;
@@ -540,22 +550,22 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     for (const size of effective) {
       const row = byName.get(size.name);
       if (row === undefined) missing.push(size);
-      else if (row.spec !== spec(size)) (row.format === plannedFormat(size, mediaRow.contentType) ? respec : reformat).push({ size, row });
+      else if (row.spec !== spec(size)) (row.format === plannedFormat(size, item.contentType) ? respec : reformat).push({ size, row });
       else if (row.state === "planned") toPlace.push(row);
     }
     if (missing.length === 0 && respec.length === 0 && reformat.length === 0 && toPlace.length === 0) return ok({ changed: false });
 
-    const dims = await originalDimensions(mediaRow);
+    const dims = await originalDimensions(item);
     if (isErr(dims)) return dims;
     if (dims.value === null) {
-      const absent = await missingOriginal(mediaRow);
+      const absent = await missingOriginal(item);
       return isErr(absent) ? absent : ok({ changed: false });
     }
-    const { decodable, ow, oh, bytes: original } = dims.value;
+    const { decodable, ow, oh, original } = dims.value;
     const settledState: VariantState = decodable ? "pending" : "failed";
 
     if (missing.length > 0) {
-      const created = await db.createMany<Variant>(VARIANTS, missing.map((size) => newRow(mediaRow, size, decodable, ow, oh)));
+      const created = await db.createMany<Variant>(VARIANTS, missing.map((size) => newRow(item, size, decodable, ow, oh)));
       if (isErr(created)) return created;
       touch();
       toPlace.push(...created.value);
@@ -567,12 +577,12 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const retired = await db.createOne<Retired>(RETIRED, { mediaId, file: oldFile, slot: slotOf(mediaId, oldFile), retiredAt: now() });
       if (isErr(retired) && retired.error.code !== "CONFLICT") return retired;
       if (config.publicCopy !== undefined) {
-        const overwritten = await blobs.put(copyKey(mediaId, oldFile), original, { contentType: publicTypeOf(mediaRow.contentType) });
+        const overwritten = await blobs.put(copyKey(mediaId, oldFile), original.data, { contentType: original.publishedType });
         if (isErr(overwritten)) return overwritten;
       }
       const dropped = await blobs.remove(row.key);
       if (isErr(dropped)) return dropped;
-      const fresh = newRow(mediaRow, size, decodable, ow, oh);
+      const fresh = newRow(item, size, decodable, ow, oh);
       const replanned = await db.updateOne<Variant>(VARIANTS, row.id, { key: fresh.key, format: fresh.format, spec: fresh.spec, width: fresh.width, height: fresh.height, bytes: 0, state: "planned", error: fresh.error, attempts: 0, updatedAt: now() });
       if (isErr(replanned)) return replanned;
       const current = await db.deleteMany(RETIRED, { slot: slotOf(mediaId, fileOf(replanned.value)) });
@@ -582,7 +592,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
     for (const { size, row } of respec) {
       touch();
-      const fresh = newRow(mediaRow, size, decodable, ow, oh);
+      const fresh = newRow(item, size, decodable, ow, oh);
       const dimsPatch = { spec: fresh.spec, width: fresh.width, height: fresh.height, updatedAt: now() };
       const patch: Partial<Variant> = row.state === "planned" ? dimsPatch : decodable ? { ...dimsPatch, state: "pending", attempts: 0, error: null } : { ...dimsPatch, state: "failed", error: UNDECODABLE };
       const updated = await db.updateOne<Variant>(VARIANTS, row.id, patch);
@@ -603,12 +613,12 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       toPlace.map((row) => async (): Promise<Result<void, KestrelError>> => {
         touch();
         const file = fileOf(row);
-        const put = await blobs.put(copyKey(mediaId, file), original, { contentType: publicTypeOf(mediaRow.contentType) });
+        const put = await blobs.put(copyKey(mediaId, file), original.data, { contentType: original.publishedType });
         if (isErr(put)) return put;
         const advanced = await db.updateMany<Variant>(VARIANTS, { id: row.id, key: row.key, state: "planned" }, { state: settledState, updatedAt: now() });
         if (isErr(advanced)) return advanced;
         if (advanced.value === 1) return ok(undefined);
-        return restoreAfterPlacement(mediaRow, file);
+        return restoreAfterPlacement(item, file);
       }),
       PLACEMENT_CONCURRENCY,
     );
@@ -616,18 +626,18 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok({ changed: true });
   }
 
-  async function restoreAfterPlacement(mediaRow: MediaRow, file: string): Promise<Result<void, KestrelError>> {
-    const owner = await ownerOf(mediaRow.id, file);
+  async function restoreAfterPlacement(item: MediaFile, file: string): Promise<Result<void, KestrelError>> {
+    const owner = await ownerOf(item.id, file);
     if (isErr(owner)) return owner;
     if (owner.value.row === null && owner.value.retired === null) {
-      const dropped = await blobs.remove(copyKey(mediaRow.id, file));
+      const dropped = await blobs.remove(copyKey(item.id, file));
       return isErr(dropped) ? dropped : ok(undefined);
     }
     if (owner.value.row === null || owner.value.row.state === "planned") return ok(undefined);
-    const content = await contentFor(mediaRow, owner.value.row);
+    const content = await contentFor(item, owner.value.row);
     if (isErr(content)) return content;
     if (content.value === null || !content.value.rendered) return ok(undefined);
-    const put = await blobs.put(copyKey(mediaRow.id, file), content.value.data, { contentType: content.value.contentType });
+    const put = await blobs.put(copyKey(item.id, file), content.value.data, { contentType: content.value.contentType });
     return isErr(put) ? put : ok(undefined);
   }
 
@@ -648,10 +658,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   async function generateOnce(mediaId: string): Promise<Result<Variant[], KestrelError>> {
     const media = await readMedia(mediaId);
     if (isErr(media)) return media;
-    if (!isLive(media.value) || !eligible(media.value.contentType)) return ok([]);
-    const mediaRow = media.value;
+    if (media.value === null || !eligible(media.value.contentType)) return ok([]);
+    const item = media.value;
     let touched = false;
-    const outcome = await renderItem(mediaRow, () => {
+    const outcome = await renderItem(item, () => {
       touched = true;
     });
     if (!touched) return outcome;
@@ -662,24 +672,24 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return row.spec === spec(size) && (row.state === "planned" || row.state === "pending" || row.state === "error");
   }
 
-  async function renderItem(mediaRow: MediaRow, touch: () => void): Promise<Result<Variant[], KestrelError>> {
-    const mediaId = mediaRow.id;
+  async function renderItem(item: MediaFile, touch: () => void): Promise<Result<Variant[], KestrelError>> {
+    const mediaId = item.id;
     const stored = await rowsOfItem(mediaId);
     if (isErr(stored)) return stored;
     let byName = stored.value;
 
-    let original: Uint8Array | null = null;
+    let original: Original | null = null;
     const missing = effective.filter((size) => !byName.has(size.name));
     if (missing.length > 0) {
-      const dims = await originalDimensions(mediaRow);
+      const dims = await originalDimensions(item);
       if (isErr(dims)) return dims;
       if (dims.value === null) {
-        const gone = await missingOriginal(mediaRow);
+        const gone = await missingOriginal(item);
         return isErr(gone) ? gone : ok([]);
       }
-      const { decodable, ow, oh, bytes } = dims.value;
-      original = bytes;
-      const created = await db.createMany<Variant>(VARIANTS, missing.map((size) => newRow(mediaRow, size, decodable, ow, oh)));
+      const { decodable, ow, oh } = dims.value;
+      original = dims.value.original;
+      const created = await db.createMany<Variant>(VARIANTS, missing.map((size) => newRow(item, size, decodable, ow, oh)));
       if (isErr(created)) {
         if (created.error.code !== "CONFLICT") return created;
         const reread = await rowsOfItem(mediaId);
@@ -696,13 +706,13 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     }
 
     if (original === null && effective.some((size) => { const row = byName.get(size.name); return row !== undefined && renderable(row, size); })) {
-      const blob = await blobs.get(mediaRow.key);
-      if (isErr(blob)) return blob;
-      if (blob.value === null) {
-        const gone = await missingOriginal(mediaRow);
+      const loaded = await loadOriginal(mediaId);
+      if (isErr(loaded)) return loaded;
+      if (loaded.value === null) {
+        const gone = await missingOriginal(item);
         return isErr(gone) ? gone : ok([]);
       }
-      original = blob.value;
+      original = loaded.value;
     }
 
     const results: Variant[] = [];
@@ -713,7 +723,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         results.push(row);
         continue;
       }
-      const rendered = await renderVariant(mediaRow, size, row, original, touch);
+      const rendered = await renderVariant(item, size, row, original, touch);
       if (isErr(rendered)) {
         if ([...byName.values()].some((stored) => stored.state === "planned")) schedulePlacement(mediaId);
         return rendered;
@@ -725,9 +735,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return ok(results);
   }
 
-  async function renderVariant(mediaRow: MediaRow, size: Size, row: Variant, original: Uint8Array, touch: () => void): Promise<Result<Variant | null, KestrelError>> {
-    const mediaId = mediaRow.id;
-    const attempt = await renderWithin(original, size, { width: row.width, height: row.height, format: row.format });
+  async function renderVariant(item: MediaFile, size: Size, row: Variant, original: Original, touch: () => void): Promise<Result<Variant | null, KestrelError>> {
+    const mediaId = item.id;
+    const attempt = await renderWithin(original.data, size, { width: row.width, height: row.height, format: row.format });
     const attempts = row.attempts + 1;
     const recordFailure = async (message: string): Promise<Result<Variant, KestrelError>> => {
       const patch: Partial<Variant> = row.state === "planned" ? { error: message } : { state: attempts >= maxAttempts ? "failed" : "error", attempts, error: message, updatedAt: now() };
@@ -771,14 +781,14 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (isErr(again)) return again;
       if (again.value === 1) return ok({ ...current.value, ...donePatch });
     }
-    const dropped = await dropStaleRender(mediaRow, row, original);
+    const dropped = await dropStaleRender(item, row, original);
     if (isErr(dropped)) return dropped;
     const latest = await db.findOne<Variant>(VARIANTS, { id: row.id });
     if (isErr(latest)) return latest;
     return ok(latest.value);
   }
 
-  async function dropStaleRender(mediaRow: MediaRow, row: Variant, original: Uint8Array): Promise<Result<void, KestrelError>> {
+  async function dropStaleRender(item: MediaFile, row: Variant, original: Original): Promise<Result<void, KestrelError>> {
     const holder = await db.findOne<Variant>(VARIANTS, { slot: row.slot });
     if (isErr(holder)) return holder;
     if (holder.value?.key !== row.key) {
@@ -787,14 +797,14 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     }
     if (config.publicCopy === undefined) return ok(undefined);
     const file = fileOf(row);
-    const owner = await ownerOf(mediaRow.id, file);
+    const owner = await ownerOf(item.id, file);
     if (isErr(owner)) return owner;
     if (owner.value.row !== null) return ok(undefined);
     if (owner.value.retired !== null) {
-      const put = await blobs.put(copyKey(mediaRow.id, file), original, { contentType: publicTypeOf(mediaRow.contentType) });
+      const put = await blobs.put(copyKey(item.id, file), original.data, { contentType: original.publishedType });
       return isErr(put) ? put : ok(undefined);
     }
-    const droppedCopy = await blobs.remove(copyKey(mediaRow.id, file));
+    const droppedCopy = await blobs.remove(copyKey(item.id, file));
     return isErr(droppedCopy) ? droppedCopy : ok(undefined);
   }
 
@@ -803,8 +813,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(found)) return found;
     const job = found.value;
     if (!job) return ok("done");
-    const filter = job.cursor === "" ? {} : { id: { gt: job.cursor } };
-    const page = await db.findMany<MediaRow>(config.media.collection, filter, { sort: { id: "asc" }, limit: config.chunk });
+    const page = await library.scan(ELIGIBLE, { after: job.cursor === "" ? null : job.cursor, limit: config.chunk });
     if (isErr(page)) return page;
     if (page.value.items.length === 0) {
       const closedJob = await db.updateOne<Job>(JOBS, job.id, { state: "done", finishedAt: now(), updatedAt: now() });
@@ -844,8 +853,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (isErr(progressed)) return progressed;
     }
     raiseMediaUpdated(changedIds);
-    const cursor = page.value.items[page.value.items.length - 1]!.id;
-    const finished = page.value.items.length < config.chunk;
+    const cursor = page.value.next ?? page.value.items[page.value.items.length - 1]!.id;
+    const finished = page.value.next === null;
     const advanced = await db.updateOne<Job>(JOBS, job.id, finished ? { done, failed, cursor, state: "done", finishedAt: now(), updatedAt: now() } : { done, failed, cursor, updatedAt: now() });
     if (isErr(advanced)) return advanced;
     return ok(finished ? "done" : "more");
@@ -914,7 +923,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       if (isErr(resumed)) return resumed;
       target = resumed.value;
     } else {
-      const total = await db.count(config.media.collection, {});
+      const total = await library.count(ELIGIBLE);
       if (isErr(total)) return total;
       const created = await db.createOne<Job>(JOBS, { state: "running", total: total.value, done: 0, failed: 0, cursor: "", startedAt: now(), updatedAt: now(), finishedAt: null, error: null });
       if (isErr(created)) return created;
@@ -955,13 +964,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     for (const id of mediaIds) counts.set(id, { done: 0, pending: 0, error: 0, failed: 0 });
     if (mediaIds.length === 0) return ok(counts);
 
-    const eligibleIds: string[] = [];
-    for (let i = 0; i < mediaIds.length; i += 200) {
-      const chunk = mediaIds.slice(i, i + 200);
-      const rows = await db.findMany<MediaRow>(config.media.collection, { id: { in: chunk } }, { limit: chunk.length });
-      if (isErr(rows)) return rows;
-      for (const row of rows.value.items) if (eligible(row.contentType)) eligibleIds.push(row.id);
-    }
+    const described = await library.files(mediaIds);
+    if (isErr(described)) return described;
+    const eligibleIds = described.value.filter((file) => eligible(file.contentType)).map((file) => file.id);
     if (eligibleIds.length === 0) return ok(counts);
 
     const byMedia = await variantsOf(eligibleIds);
@@ -1043,21 +1048,20 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const file = fileOf(variant);
     const media = await readMedia(mediaId);
     if (isErr(media)) return media;
-    if (!isLive(media.value)) {
+    if (media.value === null) {
       const removed = await removeVariants(mediaId);
       return isErr(removed) ? removed : ok(variant);
     }
-    const mediaRow = media.value;
     const retired = await db.createOne<Retired>(RETIRED, { mediaId, file, slot: slotOf(mediaId, file), retiredAt: now() });
     if (isErr(retired) && retired.error.code !== "CONFLICT") return retired;
     let wrote = false;
     const outcome = await (async (): Promise<Result<Variant, KestrelError>> => {
       if (config.publicCopy !== undefined) {
-        const original = await blobs.get(mediaRow.key);
+        const original = await loadOriginal(mediaId);
         if (isErr(original)) return original;
         if (original.value !== null) {
           wrote = true;
-          const overwritten = await blobs.put(copyKey(mediaId, file), original.value, { contentType: publicTypeOf(mediaRow.contentType) });
+          const overwritten = await blobs.put(copyKey(mediaId, file), original.value.data, { contentType: original.value.publishedType });
           if (isErr(overwritten)) return overwritten;
         }
       }
@@ -1071,21 +1075,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return settleWrites<Variant | null>(mediaId, outcome, variant);
   }
 
-  async function readyEligibleCount(): Promise<Result<number, KestrelError>> {
-    const images = await db.count(config.media.collection, { status: "ready", contentType: { like: "image/%" } });
-    if (isErr(images)) return images;
-    let n = images.value;
-    for (const excluded of ["image/%+xml%", "image/gif%"]) {
-      const count = await db.count(config.media.collection, { status: "ready", contentType: { like: excluded } });
-      if (isErr(count)) return count;
-      n -= count.value;
-    }
-    return ok(n);
-  }
-
   async function detectAndStartSync(): Promise<void> {
     if (closed) return;
-    const total = await readyEligibleCount();
+    const total = await library.count(ELIGIBLE);
     if (isErr(total)) {
       logger.error("images: could not check for a size-set shortfall", { error: total.error.message });
       return;
@@ -1109,7 +1101,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return exclusive(mediaId, async () => {
       const media = await readMedia(mediaId);
       if (isErr(media)) return media;
-      if (isLive(media.value)) return ok(undefined);
+      if (media.value !== null) return ok(undefined);
       const removed = await removeVariants(mediaId);
       return isErr(removed) ? removed : ok(undefined);
     });
@@ -1118,7 +1110,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
   async function removeForeignCopy(key: string, mediaId: string, file: string): Promise<Result<boolean, KestrelError>> {
     const media = await readMedia(mediaId);
     if (isErr(media)) return media;
-    if (isLive(media.value)) {
+    if (media.value !== null) {
       const owner = await ownerOf(mediaId, file);
       if (isErr(owner)) return owner;
       if (owner.value.row !== null || owner.value.retired !== null) return ok(false);
@@ -1127,7 +1119,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     if (isErr(dropped)) return dropped;
     const after = await readMedia(mediaId);
     if (isErr(after)) return after;
-    if (!isLive(after.value)) return ok(true);
+    if (after.value === null) return ok(true);
     const owner = await ownerOf(mediaId, file);
     if (isErr(owner)) return owner;
     if (owner.value.row === null && owner.value.retired === null) return ok(true);
@@ -1182,11 +1174,11 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const stalePlanned = await db.findMany<Variant>(VARIANTS, { state: "planned" }, { limit: REPAIR_SAMPLE, sort: { updatedAt: "asc" } });
       if (isErr(stalePlanned)) return stalePlanned;
       const ids = new Set(stalePlanned.value.items.map((row) => row.mediaId));
-      const recent = await eachRow<MediaRow>(config.media.collection, { status: "ready", createdAt: { gte: now() - NEW_ITEM_WINDOW_MS } }, async (row) => {
-        if (ids.size >= REPAIR_SAMPLE || !eligible(row.contentType)) return ok(undefined);
-        const has = await db.count(VARIANTS, { mediaId: row.id });
+      const recent = await eachMediaFile({ ...ELIGIBLE, createdSince: now() - NEW_ITEM_WINDOW_MS }, async (file) => {
+        if (ids.size >= REPAIR_SAMPLE) return ok(undefined);
+        const has = await db.count(VARIANTS, { mediaId: file.id });
         if (isErr(has)) return has;
-        if (has.value === 0) ids.add(row.id);
+        if (has.value === 0) ids.add(file.id);
         return ok(undefined);
       });
       if (isErr(recent)) return recent;
@@ -1327,7 +1319,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     async read(mediaId, file) {
       const media = await readMedia(mediaId);
       if (isErr(media)) return media;
-      if (!isLive(media.value)) return ok(null);
+      if (media.value === null) return ok(null);
       const owner = await ownerOf(mediaId, file);
       if (isErr(owner)) return owner;
       if (owner.value.row === null && owner.value.retired === null) return ok(null);
@@ -1395,9 +1387,9 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       let planned = 0;
       let missing = 0;
 
-      const ready = new Map<string, MediaRow>();
-      const snapshot = await eachRow<MediaRow>(config.media.collection, { status: "ready" }, async (row) => {
-        if (eligible(row.contentType)) ready.set(row.id, row);
+      const ready = new Map<string, MediaFile>();
+      const snapshot = await eachMediaFile(ELIGIBLE, async (file) => {
+        ready.set(file.id, file);
         return ok(undefined);
       });
       if (isErr(snapshot)) return snapshot;
@@ -1467,7 +1459,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const privateSizes = new Map(privateListed.value.map((info) => [info.key, info.size]));
 
       const owned = new Set<string>();
-      const ensureCopy = async (media: MediaRow, row: Variant | null, file: string, expectedSize: number | null | undefined): Promise<Result<void, KestrelError>> => {
+      const ensureCopy = async (media: MediaFile, row: Variant | null, file: string, expectedSize: number | null | undefined): Promise<Result<void, KestrelError>> => {
         const key = copyKey(media.id, file);
         owned.add(key);
         const entry = files.get(key);

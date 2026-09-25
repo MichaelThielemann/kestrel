@@ -535,7 +535,7 @@
             }
           },
           "404": {
-            "description": "media item not found",
+            "description": "media item not found or not ready",
             "content": {
               "application/json": {
                 "schema": {
@@ -2549,7 +2549,7 @@
     "/admin/media/export": {
       "post": {
         "operationId": "exportMedia",
-        "summary": "Require a valid session → Requires permission media.manage → Copy every ready media item to ./data/export/<folder>/<filename> → Copy every done variant to ./data/export/<folder>/<filename>.<size>.<ext>",
+        "summary": "Require a valid session → Requires permission media.manage → Copy every ready media item to ./data/export/<folder>/<filename> → Copy every done variant of a ready media item to ./data/export/<folder>/<filename>.<size>.<ext>",
         "tags": [
           "admin"
         ],

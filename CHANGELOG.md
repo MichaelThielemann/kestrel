@@ -388,6 +388,24 @@ Net changes since 5.8.1.
   relied on signed-in users being refused something anonymous callers may do must remove that
   permission from `anonymous`. `authn-multi`'s last-admin guard asks the same `can`, so granting its
   `adminPermission` to `anonymous` makes every user an administrator.
+- `images-default` requires `media@1` and reads media only through it. A config with
+  `images-default` and no `media@1` provider fails boot (`missing-provider`); its `media` option
+  (`media.collection`) is removed, so a config that still sets it fails boot; `createImages` takes
+  `deps.media`. Its own persistence handle reaches only `images_sizes`, `images_variants`,
+  `images_jobs` and `images_retired` and throws a wiring error for any other collection.
+  - `images.generate` and `images.retryFailed` answer 404 for an item that is not ready (an upload in
+    flight, a failed upload, an item being deleted); they answered 200 with no variants.
+  - The sync job's `total`, `done` and `failed` count the ready items that get variants, not every
+    media item, and its cursor is the provider's.
+  - Which items get variants is one rule, `ELIGIBLE` (`image/*` without `image/gif` and
+    `image/*+xml`), used both by the module and for the provider's `scan` and `count`, so the size-set
+    check at start begins a sync only for a real shortfall. A type that is not exactly one media type
+    no longer gets variants.
+  - A placeholder, a retired path and `images.serve`'s fallback carry the `publishedType` the provider
+    reports for the original. `images.export:<dir>` skips variants of an item that is not ready. A
+    ready item whose provider lost its bytes fails a plan or render with
+    `images: the stored bytes of media/<id> are missing`, naming no storage key; an item whose delete
+    began while it was planned or rendered ends that work quietly instead of failing `INTERNAL`.
 
 ### Added
 

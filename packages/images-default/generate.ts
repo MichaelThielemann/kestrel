@@ -1,17 +1,16 @@
 import sharp, { type FormatEnum } from "sharp";
+import type { MediaFilter } from "@michaelthielemann/kestrel-contracts/media";
+import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/mediaType";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { extOf } from "./sizes.ts";
 import type { Size } from "./sizes.ts";
 
-/** The media type of a content type: the part before any parameters, trimmed and lower-cased. */
-export function mediaTypeOf(contentType: string): string {
-  return contentType.split(";")[0]?.trim().toLowerCase() ?? "";
-}
+/** The media types that get variants: every image type except GIF and the XML image types, SVG among them, whose bytes a browser could open as a document. */
+export const ELIGIBLE = { types: ["image/*"], excludeTypes: ["image/gif", "image/*+xml"] } as const satisfies MediaFilter;
 
-/** Whether a media item gets variants: any raster image, judged by its media type alone. SVG, GIF and every XML image type keep only their original; an XML type would be opened by a browser as a document that can run script, so its bytes never go to a variant path. */
+/** Whether a media type gets variants, by the same rule `ELIGIBLE` gives a `media@1` provider; parameters and case are ignored, and a value that is not exactly one media type never does. */
 export function eligible(contentType: string): boolean {
-  const mediaType = mediaTypeOf(contentType);
-  return mediaType.startsWith("image/") && mediaType !== "image/svg+xml" && mediaType !== "image/gif" && !mediaType.endsWith("+xml");
+  return mediaTypeAllowed(ELIGIBLE.types, ELIGIBLE.excludeTypes, contentType);
 }
 
 export interface Rendered {

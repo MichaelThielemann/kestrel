@@ -1,9 +1,13 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import type { Blobstore, PutOptions } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { EventHandler, Events } from "@michaelthielemann/kestrel-contracts/events";
+import { createFakeMedia, type FakeMedia, type FakeMediaInput } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
-import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import type { Introspection, Manifest } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { failure } from "@michaelthielemann/kestrel/errors";
@@ -11,7 +15,7 @@ import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, JOBS, RETIRED, VARIANTS, createImages, whenIdle } from "./impl.ts";
 import type { Config, Retired } from "./impl.ts";
-import type { Renderer } from "./generate.ts";
+import { ELIGIBLE, type Renderer } from "./generate.ts";
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
   const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
@@ -63,27 +67,22 @@ function fakeEvents(): Events & { emitted: Array<{ name: string; data: Record<st
 
 const noLogger: Logger = { step() {}, info() {}, error() {} };
 
-const MEDIA = "media_items";
-
 async function jpeg(width: number, height: number): Promise<Uint8Array> {
   return sharp({ create: { width, height, channels: 3, background: "#336699" } }).jpeg().toBuffer();
 }
 
-const baseConfig: Config = { prefix: "media-variants/", publicPath: "/media", media: { collection: MEDIA }, chunk: 20, staleAfterMs: 60000, maxAttempts: DEFAULT_MAX_ATTEMPTS, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS };
+const baseConfig: Config = { prefix: "media-variants/", publicPath: "/media", chunk: 20, staleAfterMs: 60000, maxAttempts: DEFAULT_MAX_ATTEMPTS, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS };
 
 async function make(config: Partial<Config> = {}, now: () => number = () => 1000, render?: Renderer, events?: Events) {
   const blobs = fakeBlobstore();
   const db = createFakePersistence();
-  await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", width: "number", height: "number", createdAt: "number" });
-  const images = await createImages({ ...baseConfig, ...config }, { blobs, db, logger: noLogger, ...(render ? { render } : {}), ...(events ? { events } : {}) }, now);
-  return { images, blobs, db };
+  const media = createFakeMedia();
+  const images = await createImages({ ...baseConfig, ...config }, { blobs, db, media, logger: noLogger, ...(render ? { render } : {}), ...(events ? { events } : {}) }, now);
+  return { images, blobs, db, media };
 }
 
-async function seedMedia(db: ReturnType<typeof createFakePersistence>, patch: Record<string, unknown> = {}): Promise<{ id: string; key: string }> {
-  const id = boundaryCast<string | undefined>(patch.id, "host");
-  const key = `media/${id ?? "x"}/photo.jpg`;
-  const created = expectOk(await db.createOne(MEDIA, { key, contentType: "image/jpeg", folder: "", filename: "photo.jpg", status: "ready", width: null, height: null, createdAt: 1000, ...patch }));
-  return { id: created.id, key: boundaryCast<string>(created.key, "host") };
+function addMedia(media: FakeMedia, id: string, data: Uint8Array, patch: Partial<FakeMediaInput> = {}): string {
+  return media.add({ id, contentType: "image/jpeg", data, filename: "photo.jpg", createdAt: 1000, ...patch }).id;
 }
 
 function introspectionOf(manifest: Manifest): Introspection {
@@ -108,10 +107,9 @@ const fixedRenderer: Renderer = async (_data, _size, planned) => ({ data: new Ui
 
 describe("images/default planning (images.plan)", () => {
   it("decides format, extension and dimensions per size and creates them as planned", async () => {
-    const { images, db, blobs } = await make();
+    const { images, media } = await make();
     const data = await jpeg(2000, 1000);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, data, { contentType: "image/jpeg" }));
+    const id = addMedia(media, "m1", data);
     expectOk(await images.plan([id]));
     const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
     const thumb = rows.find((r) => r.size === "thumb");
@@ -126,13 +124,12 @@ describe("images/default planning (images.plan)", () => {
   it("without publicCopy, rows go straight to pending with no blob put", async () => {
     const blobs = fakeBlobstore();
     const db = createFakePersistence();
-    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", width: "number", height: "number", createdAt: "number" });
+    const media = createFakeMedia();
     let puts = 0;
     const countingBlobs: Blobstore = { ...blobs, put: (...a: Parameters<Blobstore["put"]>) => { puts += 1; return blobs.put(...a); } };
-    const images = await createImages(baseConfig, { blobs: countingBlobs, db, logger: noLogger }, () => 1000);
+    const images = await createImages(baseConfig, { blobs: countingBlobs, db, media, logger: noLogger }, () => 1000);
     const data = await jpeg(2000, 1000);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, data, { contentType: "image/jpeg" }));
+    const id = addMedia(media, "m1", data);
     expectOk(await images.plan([id]));
     expect(puts).toBe(0);
     const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
@@ -140,10 +137,9 @@ describe("images/default planning (images.plan)", () => {
   });
 
   it("with publicCopy, writes a placeholder copy of the original for every size, then turns pending", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
+    const { images, blobs, media } = await make({ publicCopy: { prefix: "site/" } });
     const data = await jpeg(1200, 800);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, data, { contentType: "image/jpeg" }));
+    const id = addMedia(media, "m1", data);
     expectOk(await images.plan([id]));
     const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
     expect(rows.length).toBeGreaterThan(0);
@@ -157,7 +153,7 @@ describe("images/default planning (images.plan)", () => {
   it("never runs more than four placement writes at a time", async () => {
     const blobs = fakeBlobstore();
     const db = createFakePersistence();
-    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", width: "number", height: "number", createdAt: "number" });
+    const media = createFakeMedia();
     let inFlight = 0;
     let maxInFlight = 0;
     const gatedBlobs: Blobstore = {
@@ -170,18 +166,16 @@ describe("images/default planning (images.plan)", () => {
         return blobs.put(key, data, options);
       },
     };
-    const images = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes: [1, 2, 3, 4, 5, 6].map((n) => ({ name: `s${n}`, width: 100 + n, fit: "inside" as const, format: "webp" as const, quality: 82 })) }, { blobs: gatedBlobs, db, logger: noLogger }, () => 1000);
+    const images = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes: [1, 2, 3, 4, 5, 6].map((n) => ({ name: `s${n}`, width: 100 + n, fit: "inside" as const, format: "webp" as const, quality: 82 })) }, { blobs: gatedBlobs, db, media, logger: noLogger }, () => 1000);
     const data = await jpeg(1200, 800);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, data, { contentType: "image/jpeg" }));
+    const id = addMedia(media, "m1", data);
     expectOk(await images.plan([id]));
     expect(maxInFlight).toBeLessThanOrEqual(4);
   });
 
   it("plans dimensions and a failed placeholder for an image sharp cannot decode, so it still becomes available", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
-    const { id, key } = await seedMedia(db, { id: "m1", width: 100, height: 50 });
-    expectOk(await blobs.put(key, new Uint8Array([1, 2, 3]), { contentType: "image/jpeg" }));
+    const { images, blobs, media } = await make({ publicCopy: { prefix: "site/" } });
+    const id = addMedia(media, "m1", new Uint8Array([1, 2, 3]), { width: 100, height: 50 });
     expectOk(await images.plan([id]));
     const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
     expect(rows.every((r) => r.state === "failed")).toBe(true);
@@ -191,9 +185,8 @@ describe("images/default planning (images.plan)", () => {
 
   it("raises media.updated for the ids it made available", async () => {
     const events = fakeEvents();
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, undefined, events);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    const { images, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, undefined, events);
+    const id = addMedia(media, "m1", await jpeg(400, 300));
     expectOk(await images.plan([id]));
     expect(events.emitted).toHaveLength(1);
     expect(events.emitted[0]?.name).toBe("media.updated");
@@ -202,10 +195,9 @@ describe("images/default planning (images.plan)", () => {
 
   it("raises media.updated for the items it placed before one it could not place", async () => {
     const events = fakeEvents();
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, undefined, events);
+    const { images, blobs, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, undefined, events);
     for (const id of ["a", "b"]) {
-      const { key } = await seedMedia(db, { id });
-      expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+      addMedia(media, id, await jpeg(400, 300));
     }
     const put = blobs.put.bind(blobs);
     blobs.put = async (key, data, options) => (key.startsWith("site/media/b/") ? err(failure("TRANSIENT", "down")) : put(key, data, options));
@@ -216,10 +208,9 @@ describe("images/default planning (images.plan)", () => {
 
   it("a sync job stopped by a TRANSIENT failure still raises media.updated for the items it placed before it", async () => {
     const events = fakeEvents();
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }] }, undefined, fixedRenderer, events);
+    const { images, blobs, media } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }] }, undefined, fixedRenderer, events);
     for (const id of ["a", "b"]) {
-      const { key } = await seedMedia(db, { id });
-      expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+      addMedia(media, id, await jpeg(400, 300));
     }
     const put = blobs.put.bind(blobs);
     blobs.put = async (key, data, options) => (key.startsWith("site/media/b/") ? err(failure("TRANSIENT", "down")) : put(key, data, options));
@@ -231,9 +222,8 @@ describe("images/default planning (images.plan)", () => {
 
   it("does nothing, and emits nothing, a second time once already placed", async () => {
     const events = fakeEvents();
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, undefined, events);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    const { images, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, undefined, events);
+    const id = addMedia(media, "m1", await jpeg(400, 300));
     expectOk(await images.plan([id]));
     events.emitted.length = 0;
     expectOk(await images.plan([id]));
@@ -243,10 +233,9 @@ describe("images/default planning (images.plan)", () => {
 
 describe("images/default content rule (images.read)", () => {
   it("serves the original's bytes and type for a planned, pending, error or failed row", async () => {
-    const { images, db, blobs } = await make();
+    const { images, media } = await make();
     const original = await jpeg(400, 300);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, original, { contentType: "image/jpeg" }));
+    const id = addMedia(media, "m1", original);
     expectOk(await images.plan([id]));
     const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
     const thumb = rows.find((r) => r.size === "thumb")!;
@@ -258,9 +247,8 @@ describe("images/default content rule (images.read)", () => {
   });
 
   it("serves the variant's own bytes once done", async () => {
-    const { images, db, blobs } = await make({}, undefined, fixedRenderer);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    const { images, media } = await make({}, undefined, fixedRenderer);
+    const id = addMedia(media, "m1", await jpeg(400, 300));
     expectOk(await images.generate(id));
     const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
     const thumb = rows.find((r) => r.size === "thumb")!;
@@ -271,26 +259,24 @@ describe("images/default content rule (images.read)", () => {
   });
 
   it("404s (null) for a name that is neither current nor retired, or an unready item", async () => {
-    const { images, db, blobs } = await make();
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    const { images, media } = await make();
+    const id = addMedia(media, "m1", await jpeg(400, 300));
     expectOk(await images.plan([id]));
     expect(expectOk(await images.read(id, "thumb.jpg"))).toBeNull();
     expect(expectOk(await images.read("missing", "thumb.webp"))).toBeNull();
-    expectOk(await db.updateOne(MEDIA, id, { status: "uploading" }));
+    media.remove(id);
     expect(expectOk(await images.read(id, "thumb.webp"))).toBeNull();
   });
 
   it("serves the original for a retired file, forever, even after the current row moved on", async () => {
-    const { images, db, blobs } = await make({ sizes: [{ name: "hero", width: 800, fit: "inside", format: "original", quality: 82 }] });
+    const { images, db, blobs, media } = await make({ sizes: [{ name: "hero", width: 800, fit: "inside", format: "original", quality: 82 }] });
     const original = await jpeg(1000, 600);
-    const { id, key } = await seedMedia(db, { id: "m1", contentType: "image/jpeg" });
-    expectOk(await blobs.put(key, original, { contentType: "image/jpeg" }));
+    const id = addMedia(media, "m1", original, { contentType: "image/jpeg" });
     expectOk(await images.plan([id]));
     const oldFile = (expectOk(await images.variantsOf([id])).get(id) ?? [])[0]!;
     expect(oldFile.format).toBe("jpeg");
 
-    const reformed = await createImages({ ...baseConfig, sizes: [{ name: "hero", width: 800, fit: "inside", format: "webp", quality: 82 }] }, { blobs, db, logger: noLogger }, () => 1000);
+    const reformed = await createImages({ ...baseConfig, sizes: [{ name: "hero", width: 800, fit: "inside", format: "webp", quality: 82 }] }, { blobs, db, media, logger: noLogger }, () => 1000);
     expectOk(await reformed.plan([id]));
     const retiredRows = expectOk(await db.findMany<Retired>(RETIRED, { mediaId: id })).items;
     expect(retiredRows.map((r) => r.file)).toContain("hero.jpg");
@@ -301,9 +287,8 @@ describe("images/default content rule (images.read)", () => {
 
 describe("images/default rendering", () => {
   it("renders to exactly the planned dimensions and writes the private blob (and copy, if publicCopy is set)", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    const { images, blobs, media } = await make({ publicCopy: { prefix: "site/" } });
+    const id = addMedia(media, "m1", await jpeg(2000, 1000));
     expectOk(await images.generate(id));
     const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
     const thumb = rows.find((r) => r.size === "thumb")!;
@@ -319,9 +304,8 @@ describe("images/default rendering", () => {
       if (fail) throw new Error("render failed");
       return { data: new Uint8Array([1]), width: planned.width, height: planned.height, format: planned.format, ext: "webp", contentType: "image/webp" };
     };
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }] }, undefined, flaky);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    const { images, blobs, media } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }] }, undefined, flaky);
+    const id = addMedia(media, "m1", await jpeg(2000, 1000));
     let puts = 0;
     const before = blobs.put.bind(blobs);
     blobs.put = (...a: Parameters<Blobstore["put"]>) => { puts += 1; return before(...a); };
@@ -342,9 +326,8 @@ describe("images/default rendering", () => {
       if (fail) throw new Error("render failed");
       return { data: new Uint8Array([1]), width: planned.width, height: planned.height, format: "webp", ext: "webp", contentType: "image/webp" };
     };
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }], maxAttempts: 2 }, undefined, flaky);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    const { images, blobs, media } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }], maxAttempts: 2 }, undefined, flaky);
+    const id = addMedia(media, "m1", await jpeg(2000, 1000));
     expectOk(await images.plan([id]));
     await images.generate(id);
     let rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
@@ -358,20 +341,67 @@ describe("images/default rendering", () => {
   it("removes what it wrote when the media item is gone by the time it re-reads", async () => {
     const blobs = fakeBlobstore();
     const db = createFakePersistence();
-    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", width: "number", height: "number", createdAt: "number" });
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
     let reads = 0;
-    const wrapped = { ...db, async findOne<T extends { id: string }>(collection: string, filter: Record<string, unknown>) {
-      if (collection === MEDIA) {
+    const media = createFakeMedia({
+      beforeCall: (method, args) => {
+        if (method !== "file") return;
         reads += 1;
-        if (reads > 1) return ok(null);
-      }
-      return db.findOne<T>(collection, filter);
-    } };
-    const images = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" } }, { blobs, db: wrapped, logger: noLogger, render: fixedRenderer }, () => 1000);
+        if (reads === 2) media.remove(boundaryCast<string>(args[0], "host"));
+      },
+    });
+    const id = addMedia(media, "m1", await jpeg(2000, 1000));
+    const images = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" } }, { blobs, db, media, logger: noLogger, render: fixedRenderer }, () => 1000);
     await images.generate(id);
+    expect(reads).toBeGreaterThanOrEqual(2);
     expect(expectOk(await images.variantsOf([id])).get(id) ?? []).toEqual([]);
+    expect([...blobs.blobs.keys()]).toEqual([]);
+  });
+});
+
+describe("images/default reads media only through media@1", () => {
+  it("an item the provider does not report as ready is never planned, rendered, served or exported", async () => {
+    const { images, db, blobs, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    addMedia(media, "gone", await jpeg(400, 300));
+    media.remove("gone");
+    expectOk(await images.plan(["gone"]));
+    expect(expectOk(await images.generate("gone"))).toEqual([]);
+    expect(expectOk(await images.exists("gone"))).toBe(false);
+    expect(expectOk(await images.read("gone", "thumb.webp"))).toBeNull();
+    expect(expectOk(await db.count(VARIANTS, {}))).toBe(0);
+    expect([...blobs.blobs.keys()]).toEqual([]);
+
+    addMedia(media, "leaving", await jpeg(400, 300));
+    expect(expectOk(await images.generate("leaving")).map((row) => row.state)).toContain("done");
+    media.remove("leaving");
+    const dir = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), "images-export-"));
+    try {
+      const exported = expectOk(await images.exportTo(dir));
+      expect(exported.written).toBe(0);
+      expect(exported.skipped).toBeGreaterThan(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a ready item whose bytes the store lost fails the plan with a message that names no storage key", async () => {
+    const { images, media } = await make({ publicCopy: { prefix: "site/" } });
+    addMedia(media, "m1", await jpeg(400, 300));
+    media.loseBytes("m1");
+    const failed = expectErr(await images.plan(["m1"]), "INTERNAL");
+    expect(failed.message).toBe("images: the stored bytes of media/m1 are missing");
+  });
+
+  it("asks the provider for the ids of a list once, and counts only eligible items", async () => {
+    const { images, media } = await make({}, undefined, fixedRenderer);
+    addMedia(media, "a", await jpeg(400, 300));
+    addMedia(media, "b", new Uint8Array([1]), { contentType: "application/pdf" });
+    expectOk(await images.generate("a"));
+    const mark = media.calls.length;
+    const counts = expectOk(await images.variantCounts(["a", "b", "missing"]));
+    expect(media.calls.slice(mark)).toEqual([{ method: "files", args: [["a", "b", "missing"]] }]);
+    expect(counts.get("a")?.done).toBeGreaterThan(0);
+    expect(counts.get("b")).toEqual({ done: 0, pending: 0, error: 0, failed: 0 });
+    expect(counts.get("missing")).toEqual({ done: 0, pending: 0, error: 0, failed: 0 });
   });
 });
 
@@ -382,13 +412,12 @@ describe("images/default media.updated outside an upload", () => {
   async function threeRendered(events?: Events, logger: Logger = noLogger) {
     const blobs = fakeBlobstore();
     const db = createFakePersistence();
-    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", width: "number", height: "number", createdAt: "number" });
-    const open = (sizes: Array<typeof THUMB | typeof HERO>, chunk = 20) => createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes, chunk }, { blobs, db, logger, render: fixedRenderer, ...(events ? { events } : {}) }, () => 1000);
+    const media = createFakeMedia();
+    const open = (sizes: Array<typeof THUMB | typeof HERO>, chunk = 20) => createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes, chunk }, { blobs, db, media, logger, render: fixedRenderer, ...(events ? { events } : {}) }, () => 1000);
     const images = await open([THUMB, HERO]);
     const ids: string[] = [];
     for (const id of ["a", "b", "c"]) {
-      const { key } = await seedMedia(db, { id });
-      expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+      addMedia(media, id, await jpeg(400, 300));
       expectOk(await images.generate(id));
       ids.push(id);
     }
@@ -441,15 +470,14 @@ describe("images/default media.updated outside an upload", () => {
 
 describe("images/default prune and remove", () => {
   it("prune retires the size, keeps the path answering with the original, and removes the private blob and row", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    const { images, db, blobs, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const id = addMedia(media, "m1", await jpeg(2000, 1000));
     expectOk(await images.generate(id));
     const before = (expectOk(await images.variantsOf([id])).get(id) ?? []).find((r) => r.size === "thumb")!;
     expect(before.state).toBe("done");
 
     const remainingSizes = (await images.sizes()).filter((s) => s.name !== "thumb");
-    const narrowed = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes: remainingSizes }, { blobs, db, logger: noLogger, render: fixedRenderer }, () => 1000);
+    const narrowed = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes: remainingSizes }, { blobs, db, media, logger: noLogger, render: fixedRenderer }, () => 1000);
     expectOk(await narrowed.prune(["thumb"]));
     expect((expectOk(await narrowed.variantsOf([id])).get(id) ?? []).some((r) => r.size === "thumb")).toBe(false);
     expect(blobs.blobs.has(before.key)).toBe(false);
@@ -458,11 +486,10 @@ describe("images/default prune and remove", () => {
   });
 
   it("remove deletes variant rows, retired rows, their copies and blobs, then sweeps", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "a", width: 100, fit: "inside", format: "original", quality: 82 }, { name: "b", width: 200, fit: "inside", format: "webp", quality: 82 }] }, undefined, fixedRenderer);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    const { images, db, blobs, media } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "a", width: 100, fit: "inside", format: "original", quality: 82 }, { name: "b", width: 200, fit: "inside", format: "webp", quality: 82 }] }, undefined, fixedRenderer);
+    const id = addMedia(media, "m1", await jpeg(2000, 1000));
     expectOk(await images.generate(id));
-    const narrowed = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes: [{ name: "b", width: 200, fit: "inside", format: "webp", quality: 82 }] }, { blobs, db, logger: noLogger, render: fixedRenderer }, () => 1000);
+    const narrowed = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes: [{ name: "b", width: 200, fit: "inside", format: "webp", quality: 82 }] }, { blobs, db, media, logger: noLogger, render: fixedRenderer }, () => 1000);
     expectOk(await narrowed.prune(["a"]));
     expectOk(await blobs.put(`site/media/${id}/variants/stray.png`, new Uint8Array([1]), { contentType: "image/png" }));
     expectOk(await narrowed.remove(id));
@@ -475,9 +502,8 @@ describe("images/default prune and remove", () => {
 
 describe("images/default syncPublic", () => {
   it("writes a missing copy, removes a foreign file and a copy of a deleted item", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    const { images, blobs, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const id = addMedia(media, "m1", await jpeg(2000, 1000));
     expectOk(await images.generate(id));
     const row = (expectOk(await images.variantsOf([id])).get(id) ?? [])[0]!;
     const copyKey = `site/media/${id}/variants/${row.size}.${row.format}`;
@@ -492,9 +518,8 @@ describe("images/default syncPublic", () => {
   });
 
   it("plans a missing size and reports it, starting a sync job", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
-    const { key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    const { images, media } = await make({ publicCopy: { prefix: "site/" } });
+    addMedia(media, "m1", await jpeg(2000, 1000));
     const synced = expectOk(await images.syncPublic());
     expect(synced.planned).toBeGreaterThan(0);
     await whenIdle(images);
@@ -508,7 +533,7 @@ describe("images/default syncPublic", () => {
 
 describe("images/default boot rules", () => {
   it("throws when the copy tree and the store prefix overlap", async () => {
-    await expect(createImages({ ...baseConfig, prefix: "media/", publicPath: "/media", publicCopy: { prefix: "" } }, { blobs: fakeBlobstore(), db: createFakePersistence(), logger: noLogger })).rejects.toThrow(/publicCopy tree "media\/" and prefix "media\/" overlap/);
+    await expect(createImages({ ...baseConfig, prefix: "media/", publicPath: "/media", publicCopy: { prefix: "" } }, { blobs: fakeBlobstore(), db: createFakePersistence(), media: createFakeMedia(), logger: noLogger })).rejects.toThrow(/publicCopy tree "media\/" and prefix "media\/" overlap/);
   });
 
   it("attach throws when publicCopy is set but no pipeline runs images.serve", async () => {
@@ -525,9 +550,8 @@ describe("images/default boot rules", () => {
 
 describe("images/default size set changes", () => {
   it("registering a spec change for a block-registered (non-config) size with existing items starts a background sync that re-plans them", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    const { images, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const id = addMedia(media, "m1", await jpeg(2000, 1000));
     expectOk(await images.generate(id));
     expectOk(await images.register([{ name: "thumb", width: 400, fit: "inside", format: "webp", quality: 82 }]));
     await whenIdle(images);
@@ -536,9 +560,8 @@ describe("images/default size set changes", () => {
   });
 
   it("an unchanged register does not start a sync", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(2000, 1000), { contentType: "image/jpeg" }));
+    const { images, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const id = addMedia(media, "m1", await jpeg(2000, 1000));
     expectOk(await images.generate(id));
     expectOk(await images.register([{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }]));
     await whenIdle(images);
@@ -549,44 +572,39 @@ describe("images/default size set changes", () => {
 });
 
 describe("images/default placeholder types", () => {
-  const cases: Array<[string, string]> = [
-    ["image/jpeg; x=1, text/html", "application/octet-stream"],
-    ["image/x-foo, text/html", "application/octet-stream"],
-    ["IMAGE/JPEG", "image/jpeg"],
-    ["image/jpeg; q=1", "image/jpeg"],
-  ];
-  for (const [contentType, published] of cases) {
-    it(`writes and serves the placeholder of an original stored as ${JSON.stringify(contentType)} as ${published}`, async () => {
-      const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
-      const { id, key } = await seedMedia(db, { id: "m1", contentType });
-      expectOk(await blobs.put(key, await jpeg(400, 300), { contentType }));
-      expectOk(await images.plan([id]));
-      const tree = `site/media/${id}/variants/`;
-      const placed = [...blobs.blobs].filter(([copy]) => copy.startsWith(tree));
-      expect(placed.length).toBeGreaterThan(0);
-      for (const [, blob] of placed) expect(blob.contentType).toBe(published);
-      const served = expectOk(await images.read(id, placed[0]![0].slice(tree.length)));
-      expect(served).toMatchObject({ contentType: published, fallback: true });
-    });
-  }
+  const HERO_ORIGINAL = { name: "hero", width: 200, fit: "inside" as const, format: "original" as const, quality: 82 };
+  const THUMB_WEBP = { name: "thumb", width: 100, fit: "inside" as const, format: "webp" as const, quality: 82 };
 
-  it("writes no placeholder for an original stored with an empty type", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } });
-    const { id, key } = await seedMedia(db, { id: "m1", contentType: "" });
-    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "" }));
+  it("placeholders, retired paths and the served fallback carry the type the provider publishes the original with", async () => {
+    const { images, blobs, db, media } = await make({ publicCopy: { prefix: "site/" }, sizes: [HERO_ORIGINAL, THUMB_WEBP] });
+    const id = addMedia(media, "m1", await jpeg(400, 300), { publishedType: "image/x-provider-type" });
     expectOk(await images.plan([id]));
-    expect([...blobs.blobs.keys()].filter((copy) => copy.startsWith("site/"))).toEqual([]);
+    for (const file of ["hero.jpg", "thumb.webp"]) {
+      expect(blobs.blobs.get(`site/media/${id}/variants/${file}`)?.contentType, file).toBe("image/x-provider-type");
+      expect(expectOk(await images.read(id, file)), file).toMatchObject({ contentType: "image/x-provider-type", fallback: true });
+    }
+
+    const reformed = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes: [{ ...HERO_ORIGINAL, format: "webp" }, THUMB_WEBP] }, { blobs, db, media, logger: noLogger, render: fixedRenderer }, () => 1000);
+    expectOk(await reformed.plan([id]));
+    expect(blobs.blobs.get(`site/media/${id}/variants/hero.jpg`)?.contentType).toBe("image/x-provider-type");
+    expect(blobs.blobs.get(`site/media/${id}/variants/hero.webp`)?.contentType).toBe("image/x-provider-type");
+    expectOk(await reformed.generate(id));
+    expect(blobs.blobs.get(`site/media/${id}/variants/thumb.webp`)?.contentType).toBe("image/webp");
+
+    const narrowed = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" }, sizes: [{ ...HERO_ORIGINAL, format: "webp" }] }, { blobs, db, media, logger: noLogger, render: fixedRenderer }, () => 1000);
+    expectOk(await narrowed.prune(["thumb"]));
+    expect(blobs.blobs.get(`site/media/${id}/variants/thumb.webp`)?.contentType).toBe("image/x-provider-type");
+    expect(expectOk(await narrowed.read(id, "thumb.webp"))).toMatchObject({ contentType: "image/x-provider-type", fallback: true });
   });
 });
 
 describe("images/default size-set check at attach", () => {
   it("counts an item of an XML image type as having no variants to place, so it starts no sync job", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    const { images, db, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const id = addMedia(media, "m1", await jpeg(400, 300));
     expectOk(await images.generate(id));
-    const drawing = await seedMedia(db, { id: "m2", contentType: "image/foo+xml" });
-    expectOk(await blobs.put(drawing.key, new TextEncoder().encode("<foo/>"), { contentType: "image/foo+xml" }));
+    addMedia(media, "m2", new TextEncoder().encode("<foo/>"), { contentType: "image/foo+xml" });
+    expect(expectOk(await media.count(ELIGIBLE))).toBe(1);
     expect(expectOk(await db.count(JOBS, {}))).toBe(0);
     images.attach(introspectionOf(manifestWithPipelines([{ pipeline: "serveImageVariant", module: "images/default", step: "images.serve" }])));
     await whenIdle(images);
@@ -597,13 +615,12 @@ describe("images/default size-set check at attach", () => {
   it("logs a sync job that cannot start after a size-set change instead of dropping the failure", async () => {
     const errors: Array<{ message: string; error: unknown }> = [];
     const logger: Logger = { step() {}, info() {}, error: (message, fields) => errors.push({ message, error: (fields as { error?: unknown } | undefined)?.error }) };
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
-    const { id, key } = await seedMedia(db, { id: "m1" });
-    expectOk(await blobs.put(key, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    const { images, db, blobs, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const id = addMedia(media, "m1", await jpeg(400, 300));
     expectOk(await images.generate(id));
     const createOne = db.createOne.bind(db);
     db.createOne = async (collection, doc) => (collection === JOBS ? err(failure("TRANSIENT", "store busy")) : createOne(collection, doc));
-    const reopened = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" } }, { blobs, db, logger, render: fixedRenderer }, () => 1000);
+    const reopened = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" } }, { blobs, db, media, logger, render: fixedRenderer }, () => 1000);
     expectOk(await reopened.register([{ name: "extra", width: 100 }]));
     expect(errors).toContainEqual({ message: "images: the size set changed, but the sync job that places it could not start", error: "store busy" });
   });
@@ -613,8 +630,9 @@ describe("images/default size-set check at attach", () => {
     const logger: Logger = { step() {}, info() {}, error: (message) => errors.push(message) };
     const blobs = fakeBlobstore();
     const db = createFakePersistence();
-    await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", width: "number", height: "number", createdAt: "number" });
-    const images = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" } }, { blobs, db, logger }, () => 1000);
+    const media = createFakeMedia();
+    addMedia(media, "m1", await jpeg(400, 300));
+    const images = await createImages({ ...baseConfig, publicCopy: { prefix: "site/" } }, { blobs, db, media, logger }, () => 1000);
     let release: () => void = () => {};
     const held = new Promise<void>((resolve) => {
       release = resolve;
@@ -638,10 +656,9 @@ describe("images/default size-set check at attach", () => {
 
 describe("images/default resume repair pass", () => {
   it("places and renders items created recently with no rows at all", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const { images, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
     const now = Date.now();
-    const { id: a, key: keyA } = await seedMedia(db, { id: "a", createdAt: now });
-    expectOk(await blobs.put(keyA, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    const a = addMedia(media, "a", await jpeg(400, 300), { createdAt: now });
 
     await images.resume();
     const rowsA = expectOk(await images.variantsOf([a])).get(a) ?? [];
@@ -649,9 +666,8 @@ describe("images/default resume repair pass", () => {
   });
 
   it("places and renders a row a crash left stuck at planned", async () => {
-    const { images, db, blobs } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
-    const { id: b, key: keyB } = await seedMedia(db, { id: "b", createdAt: 1 });
-    expectOk(await blobs.put(keyB, await jpeg(400, 300), { contentType: "image/jpeg" }));
+    const { images, db, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, fixedRenderer);
+    const b = addMedia(media, "b", await jpeg(400, 300), { createdAt: 1 });
     expectOk(await images.plan([b]));
     const rows = expectOk(await images.variantsOf([b])).get(b) ?? [];
     for (const row of rows) expectOk(await db.updateOne(VARIANTS, row.id, { state: "planned" }));

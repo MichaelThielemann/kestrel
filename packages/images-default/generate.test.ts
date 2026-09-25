@@ -1,6 +1,9 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { eligible, render } from "./generate.ts";
+import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/mediaType";
+import { createFakeMedia } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
+import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { ELIGIBLE, eligible, render } from "./generate.ts";
 import type { Size } from "./sizes.ts";
 
 async function jpeg(width: number, height: number): Promise<Uint8Array> {
@@ -34,6 +37,38 @@ describe("eligible", () => {
     expect(eligible("IMAGE/GIF")).toBe(false);
     expect(eligible("Image/JPEG")).toBe(true);
     expect(eligible("image/png; x=1")).toBe(true);
+  });
+});
+
+describe("one eligibility rule for this module and a media@1 provider", () => {
+  const table: Array<[string, boolean]> = [
+    ["image/jpeg", true],
+    ["IMAGE/PNG", true],
+    ["image/heic", true],
+    ["image/gif", false],
+    ["image/svg+xml", false],
+    ["image/foo+xml", false],
+    ["application/pdf", false],
+    ["image/png, text/html", false],
+  ];
+
+  it("eligible answers exactly what the pattern filter ELIGIBLE gives a provider", () => {
+    for (const [contentType, expected] of table) {
+      expect(eligible(contentType), contentType).toBe(expected);
+      expect(mediaTypeAllowed(ELIGIBLE.types, ELIGIBLE.excludeTypes, contentType), contentType).toBe(expected);
+    }
+  });
+
+  it("a provider's count of ELIGIBLE equals the number of stored items eligible accepts", async () => {
+    const media = createFakeMedia();
+    let accepted = 0;
+    for (const [contentType] of table) {
+      if (contentType.includes(",")) continue;
+      media.add({ contentType, data: new Uint8Array([1]) });
+      if (eligible(contentType)) accepted += 1;
+    }
+    expect(accepted).toBe(3);
+    expect(expectOk(await media.count(ELIGIBLE))).toBe(accepted);
   });
 });
 

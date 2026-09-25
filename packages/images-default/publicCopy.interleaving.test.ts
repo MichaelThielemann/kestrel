@@ -4,7 +4,7 @@ import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
+import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok, type Result } from "@michaelthielemann/kestrel/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { countGateCalls, patchGate, runSequential, runWithGapAt } from "../../test-fixtures/interleave.ts";
@@ -34,7 +34,7 @@ const noLogger: Logger = { step() {}, info() {}, error() {} };
 const THUMB: Size = { name: "thumb", width: 32, fit: "inside", format: "webp", quality: 82 };
 const HERO: Size = { name: "hero", width: 48, fit: "inside", format: "original", quality: 82 };
 const MEDIA_CONFIG: MediaConfig = { allowedTypes: ["*"], deniedTypes: [], maxBytes: 1_000_000, locales: [], prefix: "media/", publicPath: "/media", publicCopy: { prefix: "site/" }, uploadStaleAfterMs: 900000, anonymousList: "ids" };
-const IMAGES_CONFIG: Config = { prefix: "media-variants/", publicPath: "/media", publicCopy: { prefix: "site/" }, media: { collection: "media_items" }, chunk: 20, staleAfterMs: 60000, maxAttempts: DEFAULT_MAX_ATTEMPTS, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS, sizes: [THUMB, HERO] };
+const IMAGES_CONFIG: Config = { prefix: "media-variants/", publicPath: "/media", publicCopy: { prefix: "site/" }, chunk: 20, staleAfterMs: 60000, maxAttempts: DEFAULT_MAX_ATTEMPTS, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS, sizes: [THUMB, HERO] };
 const renderer: Renderer = async (_data, size, planned) => ({ data: new Uint8Array([7, size.name.length, planned.width]), width: planned.width, height: planned.height, format: planned.format, ext: planned.format, contentType: `image/${planned.format}` });
 
 let photo: Uint8Array | null = null;
@@ -58,7 +58,7 @@ async function openWorld(sizes: Size[] = [THUMB, HERO]): Promise<World> {
   const blobs = memoryBlobstore();
   const db = createFakePersistence();
   const media = await createMediaDefault(MEDIA_CONFIG, blobs, db, noLogger);
-  const open = (): Promise<Images> => createImages({ ...IMAGES_CONFIG, sizes }, { blobs, db, logger: noLogger, render: renderer }, () => 1000);
+  const open = (): Promise<Images> => createImages({ ...IMAGES_CONFIG, sizes }, { blobs, db, media, logger: noLogger, render: renderer }, () => 1000);
   return { blobs, db, media, writer: await open(), deleter: await open(), id: "" };
 }
 
@@ -67,7 +67,7 @@ async function upload(w: World, name = "photo.jpg"): Promise<string> {
 }
 
 async function withInstances(w: World, sizes: Size[]): Promise<World> {
-  const open = (): Promise<Images> => createImages({ ...IMAGES_CONFIG, sizes }, { blobs: w.blobs, db: w.db, logger: noLogger, render: renderer }, () => 1000);
+  const open = (): Promise<Images> => createImages({ ...IMAGES_CONFIG, sizes }, { blobs: w.blobs, db: w.db, media: w.media, logger: noLogger, render: renderer }, () => 1000);
   return { ...w, writer: await open(), deleter: await open() };
 }
 
@@ -98,19 +98,14 @@ const deleteVariantsFirst: Op = async (w) => {
   expectOk(await w.deleter.remove(w.id));
   expectOk(await w.media.remove(w.id));
 };
-function okOrDeletedMeanwhile(outcome: Result<unknown, KestrelError>): void {
-  if (outcome.ok) return;
-  expect(outcome.error.code).toBe("INTERNAL");
-  expect(outcome.error.message).toMatch(/is missing from the blob store/);
-}
 const planByWriter: Op = async (w) => {
-  okOrDeletedMeanwhile(await w.writer.plan([w.id]));
+  expectOk(await w.writer.plan([w.id]));
 };
 const planByOther: Op = async (w) => {
   expectOk(await w.deleter.plan([w.id]));
 };
 const generateByWriter: Op = async (w) => {
-  okOrDeletedMeanwhile(await w.writer.generate(w.id));
+  expectOk(await w.writer.generate(w.id));
 };
 const generateByOther: Op = async (w) => {
   expectOk(await w.deleter.generate(w.id));
@@ -128,19 +123,30 @@ async function settle(w: World): Promise<void> {
   await whenIdle(w.deleter);
 }
 
+async function liveNames(w: World, ids: Iterable<string>): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  for (const id of new Set(ids)) {
+    if (expectOk(await w.media.file(id)) === null) continue;
+    const item = expectOk(await w.media.get(id));
+    if (item !== null) names.set(id, nameOf(item.key));
+  }
+  return names;
+}
+
 async function violations(w: World): Promise<string[]> {
   await settle(w);
   const found: string[] = [];
-  const mediaRows = new Map(expectOk(await w.db.findMany<{ id: string; status: string; key: string }>("media_items", {})).items.map((row) => [row.id, row]));
   const variants = expectOk(await w.db.findMany<Variant>(VARIANTS, {})).items;
   const retired = expectOk(await w.db.findMany<Retired>(RETIRED, {})).items;
-  const live = (id: string): boolean => mediaRows.get(id)?.status === "ready";
+  const idOfKey = (key: string): string | undefined => (key.startsWith("site/media/") ? key.slice("site/media/".length).split("/")[0] : key.startsWith("media-variants/") ? key.split("/")[1] : undefined);
+  const names = await liveNames(w, [...[...w.blobs.blobs.keys()].flatMap((key) => idOfKey(key) ?? []), ...variants.map((row) => row.mediaId), ...retired.map((row) => row.mediaId)]);
+  const live = (id: string): boolean => names.has(id);
   for (const key of w.blobs.blobs.keys()) {
     if (key.startsWith("site/media/")) {
       const parts = key.slice("site/media/".length).split("/");
       const id = parts[0]!;
       if (!live(id)) found.push(`copy of a deleted item: ${key}`);
-      else if (parts.length === 2 && parts[1] !== nameOf(mediaRows.get(id)!.key)) found.push(`foreign original copy: ${key}`);
+      else if (parts.length === 2 && parts[1] !== names.get(id)) found.push(`foreign original copy: ${key}`);
       else if (parts.length === 3 && !variants.some((v) => v.mediaId === id && nameOf(v.key) === parts[2]) && !retired.some((r) => r.mediaId === id && r.file === parts[2])) found.push(`variant copy without owner: ${key}`);
     }
     if (key.startsWith("media-variants/") && !live(key.split("/")[1]!)) found.push(`private variant of a deleted item: ${key}`);
@@ -161,11 +167,10 @@ async function violations(w: World): Promise<string[]> {
 
 async function copiesMatchTheContentRule(w: World): Promise<string[]> {
   const found: string[] = [];
-  const mediaRows = new Map(expectOk(await w.db.findMany<{ id: string; key: string }>("media_items", {})).items.map((row) => [row.id, row]));
   for (const row of expectOk(await w.db.findMany<Variant>(VARIANTS, {})).items) {
     if (row.state === "planned") continue;
     const copy = w.blobs.blobs.get(`site/media/${row.mediaId}/variants/${nameOf(row.key)}`)?.data;
-    const expected = w.blobs.blobs.get(row.key)?.data ?? w.blobs.blobs.get(mediaRows.get(row.mediaId)?.key ?? "")?.data;
+    const expected = w.blobs.blobs.get(row.key)?.data ?? expectOk(await w.media.load(row.mediaId))?.data;
     if (copy === undefined || expected === undefined || Buffer.compare(Buffer.from(copy), Buffer.from(expected)) !== 0) found.push(`${row.mediaId}/${nameOf(row.key)} (${row.state}) does not hold its content`);
   }
   return found;

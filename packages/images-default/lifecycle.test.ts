@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { createFakeMedia, type FakeMedia, type FakeMediaInput } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { failure } from "@michaelthielemann/kestrel/errors";
@@ -8,7 +9,7 @@ import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, JOBS, RETIRED, VARIANTS, createImages, whenIdle } from "./impl.ts";
 import type { Config, Images, Job, Retired, Variant } from "./impl.ts";
-import type { Renderer } from "./generate.ts";
+import { ELIGIBLE, type Renderer } from "./generate.ts";
 import type { Size } from "./sizes.ts";
 
 type MemoryBlobstore = Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> };
@@ -26,10 +27,9 @@ function memoryBlobstore(): MemoryBlobstore {
 }
 
 const noLogger: Logger = { step() {}, info() {}, error() {} };
-const MEDIA = "media_items";
 const THUMB: Size = { name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 };
 const HERO: Size = { name: "hero", width: 800, fit: "inside", format: "original", quality: 82 };
-const baseConfig: Config = { prefix: "media-variants/", publicPath: "/media", publicCopy: { prefix: "site/" }, media: { collection: MEDIA }, chunk: 20, staleAfterMs: 60000, maxAttempts: DEFAULT_MAX_ATTEMPTS, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS, sizes: [THUMB] };
+const baseConfig: Config = { prefix: "media-variants/", publicPath: "/media", publicCopy: { prefix: "site/" }, chunk: 20, staleAfterMs: 60000, maxAttempts: DEFAULT_MAX_ATTEMPTS, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS, sizes: [THUMB] };
 const fixedRenderer: Renderer = async (_data, size, planned) => ({ data: new Uint8Array([9, 9, size.name.length]), width: planned.width, height: planned.height, format: planned.format, ext: planned.format, contentType: `image/${planned.format}` });
 
 async function jpeg(width: number, height: number): Promise<Uint8Array> {
@@ -39,6 +39,7 @@ async function jpeg(width: number, height: number): Promise<Uint8Array> {
 interface World {
   blobs: MemoryBlobstore;
   db: FakePersistence;
+  media: FakeMedia;
   images: Images;
   open(overrides?: Partial<Config>, render?: Renderer): Promise<Images>;
 }
@@ -46,21 +47,17 @@ interface World {
 async function world(config: Partial<Config> = {}, render: Renderer = fixedRenderer, clock: () => number = () => 1000): Promise<World> {
   const blobs = memoryBlobstore();
   const db = createFakePersistence();
-  expectOk(await db.ensureCollection(MEDIA, { key: "string", contentType: "string", folder: "string", filename: "string", status: "string", size: "number", width: "number", height: "number", createdAt: "number" }));
-  const open = (overrides: Partial<Config> = {}, r: Renderer = render): Promise<Images> => createImages({ ...baseConfig, ...config, ...overrides }, { blobs, db, logger: noLogger, render: r }, clock);
-  return { blobs, db, images: await open(), open };
+  const media = createFakeMedia();
+  const open = (overrides: Partial<Config> = {}, r: Renderer = render): Promise<Images> => createImages({ ...baseConfig, ...config, ...overrides }, { blobs, db, media, logger: noLogger, render: r }, clock);
+  return { blobs, db, media, images: await open(), open };
 }
 
-async function seed(w: World, id: string, data: Uint8Array, patch: Record<string, unknown> = {}): Promise<string> {
-  const key = `media/${id}/photo.jpg`;
-  expectOk(await w.db.createOne(MEDIA, { id, key, contentType: "image/jpeg", folder: "", filename: "photo.jpg", status: "ready", size: data.byteLength, width: null, height: null, createdAt: 1000, ...patch }));
-  expectOk(await w.blobs.put(key, data, { contentType: "image/jpeg" }));
-  return key;
+async function seed(w: World, id: string, data: Uint8Array, patch: Partial<FakeMediaInput> = {}): Promise<void> {
+  w.media.add({ id, contentType: "image/jpeg", data, filename: "photo.jpg", createdAt: 1000, ...patch });
 }
 
 async function deleteMedia(w: World, id: string): Promise<void> {
-  expectOk(await w.blobs.remove(`media/${id}/photo.jpg`));
-  expectOk(await w.db.deleteOne(MEDIA, id));
+  w.media.remove(id);
 }
 
 function copiesOf(w: World, id: string): string[] {
@@ -365,7 +362,8 @@ describe("images/default: one row per item and size", () => {
 describe("images/default: one item with a missing original", () => {
   it("does not stop the repair pass from placing the other items or resuming a stalled job", async () => {
     const w = await world();
-    expectOk(await w.db.createOne(MEDIA, { id: "a-broken", key: "media/a-broken/photo.jpg", contentType: "image/jpeg", folder: "", filename: "photo.jpg", status: "ready", size: 10, width: null, height: null, createdAt: Date.now() }));
+    await seed(w, "a-broken", await jpeg(400, 300), { createdAt: Date.now() });
+    w.media.loseBytes("a-broken");
     await seed(w, "b-good", await jpeg(400, 300), { createdAt: Date.now() });
     const stalled = expectOk(await w.db.createOne<Job>(JOBS, { state: "error", total: 2, done: 0, failed: 0, cursor: "", startedAt: 1, updatedAt: 1, finishedAt: null, error: "earlier" }));
     const reopened = await w.open();
@@ -378,7 +376,8 @@ describe("images/default: one item with a missing original", () => {
 
   it("does not stop the sync job at that item", async () => {
     const w = await world();
-    expectOk(await w.db.createOne(MEDIA, { id: "a-broken", key: "media/a-broken/photo.jpg", contentType: "image/jpeg", folder: "", filename: "photo.jpg", status: "ready", size: 10, width: null, height: null, createdAt: 1 }));
+    await seed(w, "a-broken", await jpeg(400, 300), { createdAt: 1 });
+    w.media.loseBytes("a-broken");
     await seed(w, "b-good", await jpeg(400, 300));
     expectOk(await w.images.sync());
     await whenIdle(w.images);
@@ -419,15 +418,10 @@ describe("images/default: a variant write that fails", () => {
   });
 });
 
-describe("images/default: reading the media table", () => {
-  function recordMediaReads(w: World): Array<Record<string, unknown>> {
-    const filters: Array<Record<string, unknown>> = [];
-    const findMany = w.db.findMany.bind(w.db);
-    w.db.findMany = async (collection, filter, options) => {
-      if (collection === MEDIA) filters.push(filter);
-      return findMany(collection, filter, options);
-    };
-    return filters;
+describe("images/default: reading media through media@1", () => {
+  function callsFrom(w: World): () => Array<{ method: string; args: readonly unknown[] }> {
+    const mark = w.media.calls.length;
+    return () => w.media.calls.slice(mark);
   }
 
   it("checks the size set against the stored rows with counts, without reading every media item", async () => {
@@ -436,10 +430,11 @@ describe("images/default: reading the media table", () => {
       await seed(w, id, await jpeg(400, 300));
       expectOk(await w.images.plan([id]));
     }
-    const filters = recordMediaReads(w);
+    const since = callsFrom(w);
     const reopened = await w.open({ sizes: [{ ...THUMB, width: 300 }] });
     expectOk(await reopened.register([{ name: "extra", width: 100 }]));
-    expect(filters).toEqual([]);
+    expect(since().length).toBeGreaterThan(0);
+    for (const call of since()) expect(call).toEqual({ method: "count", args: [ELIGIBLE] });
     await whenIdle(reopened);
     expect((await rowsOf(w, "a")).map((r) => [r.size, r.width]).sort()).toEqual([["extra", 100], ["thumb", 300]]);
   });
@@ -449,10 +444,11 @@ describe("images/default: reading the media table", () => {
     const w = await world({}, fixedRenderer, () => 10 * day);
     await seed(w, "old", await jpeg(400, 300), { createdAt: 8 * day });
     await seed(w, "fresh", await jpeg(400, 300), { createdAt: 10 * day - 1000 });
-    const filters = recordMediaReads(w);
+    const since = callsFrom(w);
     expectOk(await w.images.resume());
-    expect(filters.length).toBeGreaterThan(0);
-    for (const filter of filters) expect(filter).toHaveProperty("createdAt");
+    const scans = since().filter((call) => call.method === "scan");
+    expect(scans.length).toBeGreaterThan(0);
+    for (const scan of scans) expect(scan.args[0]).toEqual({ ...ELIGIBLE, createdSince: 9 * day });
     expect(await rowsOf(w, "old")).toEqual([]);
     expect((await rowsOf(w, "fresh")).map((r) => r.state)).toEqual(["done"]);
   });

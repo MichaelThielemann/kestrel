@@ -447,6 +447,9 @@ importers:
       '@michaelthielemann/kestrel-contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@michaelthielemann/kestrel-media-default':
+        specifier: workspace:*
+        version: link:../media-default
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@22.20.1)

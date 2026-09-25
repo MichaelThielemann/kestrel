@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { mediaTypeOf } from "./generate.ts";
+import { mediaTypeEssence } from "@michaelthielemann/kestrel-contracts/mediaType";
 import { extOf } from "./sizes.ts";
 import type { Size } from "./sizes.ts";
 
@@ -12,7 +12,7 @@ const ORIGINAL_FORMAT_BY_TYPE: Readonly<Record<string, string>> = {
 
 /** The format a size's render will be told to produce: the size's own format for `webp`, else the type's native format (jpeg for anything else). */
 export function plannedFormat(size: Size, contentType: string): string {
-  return size.format === "webp" ? "webp" : (ORIGINAL_FORMAT_BY_TYPE[mediaTypeOf(contentType)] ?? "jpeg");
+  return size.format === "webp" ? "webp" : (ORIGINAL_FORMAT_BY_TYPE[mediaTypeEssence(contentType) ?? ""] ?? "jpeg");
 }
 
 /** The extension a size's path carries, decided from `plannedFormat` alone: never depends on rendering. */

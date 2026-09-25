@@ -597,7 +597,8 @@
       "provides": [],
       "requires": [
         "blobstore@1",
-        "persistence@1"
+        "persistence@1",
+        "media@1"
       ],
       "optional": [
         "events@1"
@@ -677,21 +678,6 @@
               ],
               "additionalProperties": false
             },
-            "media": {
-              "type": "object",
-              "properties": {
-                "collection": {
-                  "type": "string",
-                  "minLength": 1
-                }
-              },
-              "required": [
-                "collection"
-              ],
-              "default": {
-                "collection": "media_items"
-              }
-            },
             "chunk": {
               "type": "integer",
               "minimum": 1,
@@ -770,32 +756,6 @@
             "status": "set",
             "value": "site/",
             "redacted": false
-          },
-          {
-            "path": "media",
-            "type": "object",
-            "required": false,
-            "secret": false,
-            "set": false,
-            "status": "default",
-            "value": {
-              "collection": "media_items"
-            },
-            "redacted": false,
-            "default": {
-              "collection": "media_items"
-            }
-          },
-          {
-            "path": "media.collection",
-            "type": "string",
-            "required": false,
-            "secret": false,
-            "set": false,
-            "status": "default",
-            "value": "media_items",
-            "redacted": false,
-            "default": "media_items"
           },
           {
             "path": "chunk",
@@ -5390,7 +5350,7 @@
         },
         "errors": {
           "400": "missing media id",
-          "404": "media item not found"
+          "404": "media item not found or not ready"
         }
       }
     },
@@ -5648,7 +5608,7 @@
           ]
         },
         "errors": {
-          "404": "media item not found",
+          "404": "media item not found or not ready",
           "409": "images are shutting down"
         }
       }
@@ -6131,7 +6091,7 @@
       "module": "images/default",
       "factory": true,
       "description": {
-        "summary": "Copy every done variant to <arg>/<folder>/<filename>.<size>.<ext>",
+        "summary": "Copy every done variant of a ready media item to <arg>/<folder>/<filename>.<size>.<ext>",
         "reads": [],
         "writes": [
           "result.variants"
@@ -13494,7 +13454,7 @@
           "name": "images.export",
           "module": "images/default",
           "description": {
-            "summary": "Copy every done variant to ./data/export/<folder>/<filename>.<size>.<ext>",
+            "summary": "Copy every done variant of a ready media item to ./data/export/<folder>/<filename>.<size>.<ext>",
             "reads": [],
             "writes": [
               "result.variants"
@@ -13748,7 +13708,7 @@
             },
             "errors": {
               "400": "missing media id",
-              "404": "media item not found"
+              "404": "media item not found or not ready"
             }
           }
         }
@@ -20982,7 +20942,7 @@
               ]
             },
             "errors": {
-              "404": "media item not found",
+              "404": "media item not found or not ready",
               "409": "images are shutting down"
             }
           }

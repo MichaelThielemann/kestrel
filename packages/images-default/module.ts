@@ -2,6 +2,7 @@ import { z } from "zod";
 import "@michaelthielemann/kestrel-contracts/authn";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { EVENTS } from "@michaelthielemann/kestrel-contracts/events";
+import { MEDIA } from "@michaelthielemann/kestrel-contracts/media";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { binaryResult, first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
@@ -22,7 +23,6 @@ export const configSchema = z
       })
       .strict()
       .optional(),
-    media: z.object({ collection: z.string().min(1) }).default({ collection: "media_items" }),
     chunk: z.number().int().min(1).max(500).default(20),
     staleAfterMs: z.number().int().positive().default(60000),
     maxAttempts: z.number().int().positive().default(DEFAULT_MAX_ATTEMPTS),
@@ -63,14 +63,14 @@ const PUBLIC_SYNC_SCHEMA = { type: "object", properties: { written: { type: "num
 export default defineModule({
   name: "images/default",
   provides: [],
-  requires: [BLOBSTORE, PERSISTENCE],
+  requires: [BLOBSTORE, PERSISTENCE, MEDIA],
   optional: [EVENTS],
   emits: ["media.updated"],
   configSchema,
 
   async setup(config, deps): Promise<Images> {
     const bus = deps.find(EVENTS);
-    return createImages(config, { blobs: deps.get(BLOBSTORE), db: deps.get(PERSISTENCE), logger: deps.logger, ...(bus ? { events: bus } : {}) });
+    return createImages(config, { blobs: deps.get(BLOBSTORE), db: deps.get(PERSISTENCE), media: deps.get(MEDIA), logger: deps.logger, ...(bus ? { events: bus } : {}) });
   },
 
   attach: (images, kestrel) => images.attach(kestrel),
@@ -244,7 +244,7 @@ export default defineModule({
     register: { summary: "Replace the sizes registered by this instance – code-declared sizes are held in memory, never stored", reads: [], writes: ["result"], input: { type: "object", properties: { sizes: { type: "array", items: SIZE_INPUT_SCHEMA } }, required: ["sizes"], additionalProperties: false }, output: { type: "array", items: SIZE_SCHEMA }, errors: { 400: "empty list or invalid size definition", 409: "a size collides with a config size" } },
     listSizes: { summary: "Effective sizes (defaults/config merged with the sizes registered in this process)", reads: [], writes: ["result"], output: { type: "array", items: SIZE_SCHEMA } },
     plan: { summary: "Decide every effective size's format, extension, dimensions and path for one media item (id from params.id or payload.id), or for each id in payload.ids, and make its public copies answer with the original's bytes; never renders", reads: [], writes: ["result"], input: GENERATE_INPUT_SCHEMA, output: { oneOf: [{ type: "object", properties: { id: { type: "string" } }, required: ["id"] }, { type: "object", properties: { ids: { type: "array", items: { type: "string" } } }, required: ["ids"] }] }, errors: { 400: "missing media id" } },
-    generate: { summary: "Generate variants for one media item (id from params.id or payload.id), or for each id in payload.ids (unknown ids are skipped)", reads: [], writes: ["result"], input: GENERATE_INPUT_SCHEMA, output: { oneOf: [{ type: "object", properties: { id: { type: "string" }, variants: { type: "array", items: VARIANT_SCHEMA } }, required: ["id", "variants"] }, { type: "object", properties: { items: { type: "array", items: { type: "object", properties: { id: { type: "string" }, variants: { type: "array", items: VARIANT_SCHEMA } }, required: ["id", "variants"] } } }, required: ["items"] }] }, errors: { 400: "missing media id", 404: "media item not found" } },
+    generate: { summary: "Generate variants for one media item (id from params.id or payload.id), or for each id in payload.ids (unknown ids are skipped)", reads: [], writes: ["result"], input: GENERATE_INPUT_SCHEMA, output: { oneOf: [{ type: "object", properties: { id: { type: "string" }, variants: { type: "array", items: VARIANT_SCHEMA } }, required: ["id", "variants"] }, { type: "object", properties: { items: { type: "array", items: { type: "object", properties: { id: { type: "string" }, variants: { type: "array", items: VARIANT_SCHEMA } }, required: ["id", "variants"] } } }, required: ["items"] }] }, errors: { 400: "missing media id", 404: "media item not found or not ready" } },
     sync: { summary: "Start a sync job, or resume a paused/error/stale one", reads: [], writes: ["result"], output: JOB_SCHEMA, errors: { 409: "a fresh job is already running" } },
     resume: { summary: "Place and render any item left unfinished (a repair pass), then resume a paused/error/stale sync job, or no-op (for cron)", reads: [], writes: ["result"], output: { oneOf: [JOB_SCHEMA, { type: "null" }] } },
     retryFailed: {
@@ -253,7 +253,7 @@ export default defineModule({
       writes: ["result"],
       input: { type: "object", properties: { id: { type: "string" } }, additionalProperties: false },
       output: { type: "object", properties: { variants: { type: "number" }, media: { type: "number" }, job: { oneOf: [JOB_SCHEMA, { type: "null" }] } }, required: ["variants", "media", "job"] },
-      errors: { 404: "media item not found", 409: "images are shutting down" },
+      errors: { 404: "media item not found or not ready", 409: "images are shutting down" },
     },
     prune: { summary: "Retire the variants of sizes that are no longer declared: their paths keep answering with the original's bytes until the item is deleted", reads: [], writes: ["result"], input: { type: "object", properties: { sizes: { type: "array", items: { type: "string" } } }, required: ["sizes"], additionalProperties: false }, output: { type: "object", properties: { sizes: { type: "number" }, variants: { type: "number" } }, required: ["sizes", "variants"] }, errors: { 400: "missing sizes, or a name is still declared or has no variants" } },
     readStatus: {
@@ -302,6 +302,6 @@ export default defineModule({
       writes: ["result._publicVariants"],
       extendsOutput: { type: "object", properties: { _publicVariants: PUBLIC_SYNC_SCHEMA }, required: ["_publicVariants"] },
     },
-    export: (dir: string) => ({ summary: `Copy every done variant to ${dir}/<folder>/<filename>.<size>.<ext>`, reads: [], writes: ["result.variants"], extendsOutput: { type: "object", properties: { variants: { type: "object", properties: { written: { type: "number" }, skipped: { type: "number" } }, required: ["written", "skipped"] } }, required: ["variants"] } }),
+    export: (dir: string) => ({ summary: `Copy every done variant of a ready media item to ${dir}/<folder>/<filename>.<size>.<ext>`, reads: [], writes: ["result.variants"], extendsOutput: { type: "object", properties: { variants: { type: "object", properties: { written: { type: "number" }, skipped: { type: "number" } }, required: ["written", "skipped"] } }, required: ["variants"] } }),
   }),
 });
