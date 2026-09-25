@@ -3,7 +3,7 @@ import type { Authz, AuthzError } from "@michaelthielemann/kestrel-contracts/aut
 import type { Detach, Introspection, Manifest, PipelineManifest } from "@michaelthielemann/kestrel";
 import { ok, type Result } from "@michaelthielemann/kestrel/result";
 import { resolveOutputSchema } from "@michaelthielemann/kestrel/schema";
-import { answerShape, declaredPath, fieldTree, itemSchemas, parseFieldsArgument, shapeFits, uncoveredMember, type AnswerShape, type FieldTree } from "./fields.ts";
+import { answerShape, declaredPath, fieldTree, isBareList, itemSchemas, parseFieldsArgument, shapeFits, uncoveredMember, type AnswerShape, type FieldTree } from "./fields.ts";
 
 /** Field paths per resource: which members of an answer a caller keeps. */
 export type FieldGrants = Record<string, string[]>;
@@ -137,6 +137,7 @@ export function anonymousPipelines(config: Config, manifest: Pick<Manifest, "pip
 
 interface FieldCut {
   pipeline: PipelineManifest;
+  spec: string;
   resource: string;
   shape: AnswerShape;
   fold: ReturnType<typeof resolveOutputSchema>;
@@ -164,7 +165,7 @@ function cutOf(pipeline: PipelineManifest, problems: string[]): FieldCut | undef
     const hint = declared === undefined || declared === target.shape ? "" : ` – write authz.fields:${target.resource}?shape=${declared}`;
     problems.push(`authz/roles: pipeline "${pipeline.name}" ends with ${step.spec}, but its declared output is not ${SHAPE_WORDS[target.shape]}${hint}`);
   }
-  return { pipeline, resource: target.resource, shape: target.shape, fold, terminals: before.filter((s) => s.description.terminalOutput !== undefined) };
+  return { pipeline, spec: step.spec, resource: target.resource, shape: target.shape, fold, terminals: before.filter((s) => s.description.terminalOutput !== undefined) };
 }
 
 function expectedShape(pipeline: PipelineManifest): AnswerShape {
@@ -186,6 +187,25 @@ function grantPathProblem(cuts: readonly FieldCut[], path: string): string | und
     hint ??= found.hint;
   }
   return hint ?? "";
+}
+
+function grantEntries(config: Config): Array<[string, FieldGrants]> {
+  return [["anonymousFields", config.anonymousFields ?? {}], ...Object.entries(config.fields ?? {}).map(([role, grant]): [string, FieldGrants] => [`fields.${role}`, grant])];
+}
+
+function listCutAsItemProblem(config: Config, cut: FieldCut): string | undefined {
+  if (cut.shape !== "item" || cut.fold === undefined || answerShape(cut.fold, false) !== "list") return undefined;
+  const head = `authz/roles: pipeline "${cut.pipeline.name}" ends with ${cut.spec}, but its declared output`;
+  const hint = ` – write authz.fields:${cut.resource}?shape=list`;
+  if (isBareList(cut.fold)) return `${head} is a list ({ items, total }) with no member of its own${hint}`;
+  const objects = itemSchemas(cut.fold, "item");
+  const elements = itemSchemas(cut.fold, "list");
+  for (const [label, byResource] of grantEntries(config)) {
+    for (const path of own(byResource, cut.resource) ?? []) {
+      if (!declaredPath(objects, path).declared && declaredPath(elements, path).declared) return `${head} reads as a list ({ items, total }) and ${label}.${cut.resource} names "${path}", which only its items declare${hint}`;
+    }
+  }
+  return undefined;
 }
 
 function grantLabel(config: Config, audience: string, resource: string): string {
@@ -236,9 +256,12 @@ export function fieldGrantProblems(config: Config, manifest: Pick<Manifest, "pip
       problems.push(`authz/roles: pipeline "${pipeline.name}" answers anonymous callers and ends with authz.fields:${cut.resource}, but anonymousFields grants nothing for "${cut.resource}"`);
     }
   }
-  for (const cut of [...cuts.values()].flat()) problems.push(...terminalProblems(config, cut));
-  const grants: Array<[string, FieldGrants]> = [["anonymousFields", config.anonymousFields ?? {}], ...Object.entries(config.fields ?? {}).map(([role, grant]): [string, FieldGrants] => [`fields.${role}`, grant])];
-  for (const [label, byResource] of grants) {
+  for (const cut of [...cuts.values()].flat()) {
+    const listAsItem = listCutAsItemProblem(config, cut);
+    if (listAsItem !== undefined) problems.push(listAsItem);
+    problems.push(...terminalProblems(config, cut));
+  }
+  for (const [label, byResource] of grantEntries(config)) {
     for (const [resource, paths] of Object.entries(byResource)) {
       const resourceCuts = cuts.get(resource);
       if (resourceCuts === undefined) {

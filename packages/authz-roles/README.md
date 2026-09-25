@@ -54,8 +54,11 @@ answer per audience (`anonymous`, `role:<name>`), so `kestrel-openapi` documents
 At `attach()` boot fails, one line per problem, when a step runs after `authz.fields`; when the
 declared output does not fit the shape parameter (`item` fits any object, `list` an object whose
 `items` is an array of objects, `array` an array of objects, `file` a pipeline with a `binary`
-step; every branch of a union must fit); when a pipeline an anonymous caller reaches does not end with the step (an HTTP trigger, no
-step besides `authz.require` declaring `security: "required"`, every `authz.require` permission in
+step; every branch of a union must fit); when `?shape=item` cuts an answer that reads as a list (an
+object whose `items` is an array of objects) and the object declares no member besides `items` and
+`total`, or a grant names a path only its elements declare — the step would keep whole elements the
+grant meant to cut, so boot asks for `?shape=list`; when a pipeline an anonymous caller reaches does
+not end with the step (an HTTP trigger, no step besides `authz.require` declaring `security: "required"`, every `authz.require` permission in
 `anonymous`, a step writing `result`, and no step up to that one writing `identity` unconditionally,
 which exempts a login); when such a pipeline's resource has no anonymous grant; when an answer a step
 before the cut ends the run with (`terminalOutput`) is open or carries a member the anonymous grant

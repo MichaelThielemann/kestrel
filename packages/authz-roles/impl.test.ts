@@ -330,6 +330,50 @@ describe("fieldGrantProblems", () => {
     expect(fieldGrantProblems(config, fieldManifest(pipelines))).toEqual(['authz/roles: pipeline "getMedia" ends with authz.fields:media?shape=file, but its declared output is not a file – write authz.fields:media?shape=item']);
   });
 
+  describe("a list cut as one item", () => {
+    const LINK = { type: "object", properties: { label: { type: "string" }, path: { type: "string" } }, required: ["label", "path"] };
+    const MENU = { type: "object", properties: { id: { type: "string" }, title: { type: "string" }, secret: { type: "string" }, items: { type: "array", items: LINK } }, required: ["id", "title", "secret", "items"] };
+    const getMenu = described("menus.get", { writes: ["result"], output: MENU });
+    const listMenus = described("menus.list", { writes: ["result"], output: { type: "object", properties: { items: { type: "array", items: MENU }, total: { type: "number" } }, required: ["items", "total"] } });
+    const menus: Config = { roles: { editor: ["*"], reviewer: ["menus.read"] }, roleClaim: "roles", anonymous: ["menus.read"], anonymousFields: { menu: ["id", "title", "items"] }, fields: {} };
+
+    const pagedMenus = described("menus.page", { writes: ["result"], output: { type: "object", properties: { items: { type: "array", items: MENU }, total: { type: "number" }, cursor: { type: "string" } }, required: ["items", "total"] } });
+
+    it("refuses ?shape=item on a { items, total } answer with no member of its own, whatever the grant", () => {
+      for (const menu of [["id", "title", "items"], ["items"], ["items", "total"]]) {
+        const manifest = fieldManifest([
+          ["getMenu", [identify, gate("menus.read"), getMenu, fields("menu?shape=item")]],
+          ["listMenus", [identify, gate("menus.read"), listMenus, fields("menu?shape=item")]],
+        ]);
+        expect(fieldGrantProblems({ ...menus, anonymousFields: { menu } }, manifest).filter((p) => p.includes('"listMenus"'))).toEqual([
+          'authz/roles: pipeline "listMenus" ends with authz.fields:menu?shape=item, but its declared output is a list ({ items, total }) with no member of its own – write authz.fields:menu?shape=list',
+        ]);
+      }
+    });
+
+    it("refuses ?shape=item on an answer that reads as a list when a granted path exists only on its elements", () => {
+      const manifest = fieldManifest([
+        ["getMenu", [identify, gate("menus.read"), getMenu, fields("menu?shape=item")]],
+        ["pageMenus", [identify, gate("menus.read"), pagedMenus, fields("menu?shape=item")]],
+      ]);
+      expect(fieldGrantProblems(menus, manifest)).toEqual([
+        'authz/roles: pipeline "pageMenus" ends with authz.fields:menu?shape=item, but its declared output reads as a list ({ items, total }) and anonymousFields.menu names "id", which only its items declare – write authz.fields:menu?shape=list',
+      ]);
+      expect(fieldGrantProblems({ ...menus, anonymousFields: { menu: ["items"] }, fields: { reviewer: { menu: ["title"] } } }, manifest)).toEqual([
+        'authz/roles: pipeline "pageMenus" ends with authz.fields:menu?shape=item, but its declared output reads as a list ({ items, total }) and fields.reviewer.menu names "title", which only its items declare – write authz.fields:menu?shape=list',
+      ]);
+    });
+
+    it("accepts ?shape=item on one menu whose items member is a list, and ?shape=list on the lists", () => {
+      const manifest = fieldManifest([
+        ["getMenu", [identify, gate("menus.read"), getMenu, fields("menu?shape=item")]],
+        ["listMenus", [identify, gate("menus.read"), listMenus, fields("menu?shape=list")]],
+        ["pageMenus", [identify, gate("menus.read"), pagedMenus, fields("menu?shape=list")]],
+      ]);
+      expect(fieldGrantProblems(menus, manifest)).toEqual([]);
+    });
+  });
+
   it("accepts ?shape=item for an item whose output has an items member, and finds its paths", () => {
     const itemWithItems = described("media.get", { writes: ["result"], output: { type: "object", properties: { id: { type: "string" }, items: { type: "array", items: { type: "object", properties: { label: { type: "string" } }, required: ["label"] } } }, required: ["id", "items"] } });
     const manifest = fieldManifest([["getBundle", [identify, gate("media.read"), itemWithItems, fields("bundle?shape=item")]]]);

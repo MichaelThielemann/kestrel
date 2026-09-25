@@ -453,6 +453,13 @@ describe("authz/roles: authz.fields cuts the answer to the caller's field grant"
     await kestrel.stop();
   });
 
+  it("fails boot for a list copied with ?shape=item whose granted fields exist only on its elements", async () => {
+    const pipelines = [RECORD_PIPELINES[0]!, definePipeline({ name: "listRecords", steps: ["records.signIn", "authz.require:records.read", "records.list", "authz.fields:records?shape=item"] })];
+    await expect(bootRecords({ ...grants, anonymousFields: { records: ["id", "nested.open", "items"] }, fields: {} }, pipelines)).rejects.toThrow(
+      'authz/roles: pipeline "listRecords" ends with authz.fields:records?shape=item, but its declared output reads as a list ({ items, total }) and anonymousFields.records names "id", which only its items declare – write authz.fields:records?shape=list',
+    );
+  });
+
   it("fails boot for a step argument without a resource and a shape", async () => {
     await expect(bootRecords(grants, [definePipeline({ name: "getRecord", steps: ["records.get", "authz.fields:records"] })])).rejects.toThrow('authz.fields:records – write authz.fields:<resource>?shape=<item|list|array|file>, e.g. authz.fields:media?shape=list');
   });

@@ -173,7 +173,8 @@ without an identity, or with one that holds no configured role, keeps the anonym
 everything; any other signed-in caller keeps everything when one of its roles has no grant for the
 resource, otherwise the union of its roles' grants and the anonymous one. At `attach()` boot fails
 when a pipeline an anonymous caller reaches over HTTP does not end with the step or its resource has
-no anonymous grant, when the declared output does not fit the shape parameter, when a grant names a
+no anonymous grant, when the declared output does not fit the shape parameter or `?shape=item` cuts
+a list whose granted paths only its elements declare, when a grant names a
 field no pipeline of its resource declares, and when an answer a step ends the run with before the
 step carries a member the anonymous grant or a role's grant does not cover. Such an early answer is
 always a declared one: a step that ends the run without declaring `terminalOutput` fails the run. Like

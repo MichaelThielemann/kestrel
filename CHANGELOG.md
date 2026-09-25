@@ -444,7 +444,8 @@ Net changes since 5.8.1.
   one of its roles has a grant for the resource, and then the union of those grants and the anonymous
   one. Boot fails when a pipeline anonymous callers reach over HTTP does not end with the step, when
   `anonymousFields` grants nothing for its resource, when the pipeline's declared output does not fit
-  the shape, when a grant names a field no pipeline of that resource declares or a resource no
+  the shape or `?shape=item` cuts a `{ items, total }` answer as one object, when a grant names a
+  field no pipeline of that resource declares or a resource no
   pipeline cuts, or when the pipeline can end earlier with an answer the anonymous grant or a role's
   grant does not cover. Add the step and the grants to every pipeline your anonymous
   callers read; `examples/minimal` shows the lists, and `kestrel-upgrade`'s `pipelines/field-step`

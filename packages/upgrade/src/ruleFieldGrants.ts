@@ -18,7 +18,7 @@ const OTHER_FIELD_PROBLEMS = [
   /^authz\/roles: (?:anonymousFields|fields\.\S+)\.[A-Za-z][\w-]* names "[^"]+", which no pipeline ending with authz\.fields:\S+ declares/,
   /^authz\/roles: (?:anonymousFields|fields\.\S+) grants fields of "[^"]+", but no pipeline ends with authz\.fields:/,
   /^authz\/roles: pipeline "[^"]+" runs \S+ after authz\.fields:/,
-  /^authz\/roles: pipeline "[^"]+" ends with authz\.fields:\S+, but its declared output is /,
+  /^authz\/roles: pipeline "[^"]+" ends with authz\.fields:\S+, but its declared output (?:is|reads as) /,
   /^authz\/roles: pipeline "[^"]+" can end at \S+ before authz\.fields:/,
 ];
 

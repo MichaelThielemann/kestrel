@@ -179,10 +179,12 @@ The same pipeline serves both callers, so its answer is cut at the end.
 signed-in one without a configured role (`pages: ["id", "slug", "title", …]`), `fields` names them
 for a role that should see less than everything, and a signed-in caller one of whose roles has no
 such grant keeps the whole answer. The parameter says where the items are: `item` (one document,
-also one with an `items` member), `list` (every element of `items` in `{ items, total }`; `total`
-stays), `array` (every element), `file` (bytes, type and name stay; the grant names response headers
-as `headers.<name>`). Boot checks that the pipeline's declared output fits it. A path reaches into an item — `provenance.origin`, `variants[].path` — and a map or a
-free-form value (`_translations`, a `json` field) is granted whole.
+also one with an `items` member of its own; boot refuses it on a bare `{ items, total }` answer),
+`list` (every element of `items` in `{ items, total }`; `total` stays), `array` (every element),
+`file` (bytes, type and name stay; the grant names response headers as `headers.<name>`). Boot
+checks that the pipeline's declared output fits it. A path reaches into an item —
+`provenance.origin`, `variants[].path` — and a map or a free-form value (`_translations`, a `json`
+field) is granted whole.
 
 Boot fails for a pipeline an anonymous caller reaches over HTTP that does not end with the step, for
 a resource without an anonymous grant and for a grant naming a field no pipeline declares, so a field

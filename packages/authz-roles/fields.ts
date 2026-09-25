@@ -154,6 +154,11 @@ export function shapeFits(fold: JsonSchema | undefined, binary: boolean, shape: 
   return branchesOf(fold).every((branch) => branchFits(branch, shape));
 }
 
+/** Whether every branch of `fold` is a list envelope that declares no member besides `items` and `total`. */
+export function isBareList(fold: JsonSchema): boolean {
+  return branchesOf(fold).every((branch) => branchShape(branch) === "list" && Object.keys(propertiesOf(branch) ?? {}).every((key) => key === "items" || key === "total"));
+}
+
 /** The item schemas of an answer declared by `fold` and cut as `shape`. */
 export function itemSchemas(fold: JsonSchema | undefined, shape: AnswerShape): JsonSchema[] {
   if (fold === undefined || shape === "file") return [];
