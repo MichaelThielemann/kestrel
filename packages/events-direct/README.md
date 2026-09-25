@@ -7,9 +7,12 @@ stop the rest — but this is not a guarantee: **the pipelines subscribed to one
 independent of each other; work that must happen in sequence belongs in one pipeline.**
 `events.emit:<name>` builds the shared envelope
 (`{ eventId, event, at, runId, identity, params, id }`, plus `ids`/`result` where they apply) and
-waits for every subscribed handler. A failing handler is not swallowed: the step answers 500
-`INTERNAL` with the aggregated failure as `cause`, so it shows up in the run's log line and in
-`describe().errors` instead of being logged and ignored.
+waits for every subscribed handler. A subscribed pipeline that answers with a status ≥ 400 does not
+fail the emit step: it is logged, counted towards `events.readDeliveryStatus`, and recorded for
+`events.relay` to report — the emitting run still answers 200 (or whatever its own steps return)
+with `_events` naming the failure. Only a subscribed pipeline that *throws* escalates: the step
+answers 500 `INTERNAL` with the aggregated failure as `cause`, so it shows up in the run's log line
+and in `describe().errors` instead of being logged and ignored.
 
 Requires `events@1` (`@michaelthielemann/kestrel-events-inmemory` or another bus module) and
 provides the core's `triggers.event` hook, so exactly one of `events/direct` or `events/queue` must

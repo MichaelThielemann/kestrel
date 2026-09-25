@@ -565,7 +565,8 @@ Net changes since 5.8.1.
 - `@michaelthielemann/kestrel-contracts` gains `defineStepSet`/`stepSets`
   (`contracts/stepSet.ts`): a declared step set names a role (e.g. `events.delivery`), the step
   prefix it governs and the exact steps every provider of that role registers. `AUTHN_STEPS` and
-  the new `EVENT_DELIVERY_STEPS` (`events.emit`) are collected in `STEP_SETS`. The generated
+  the new `EVENT_DELIVERY_STEPS` (`events.emit`, `events.relay`, `events.readDeliveryStatus`) are
+  collected in `STEP_SETS`. The generated
   README step tables and the new `docs/step-portability.md` mark every step as portable (a set
   member), beside (under a governed prefix but not a member) or none.
 - `@michaelthielemann/kestrel-contracts` gains `EventIdentity`, `EventEnvelope`,

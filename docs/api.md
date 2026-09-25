@@ -301,10 +301,10 @@ identical paths.
 | GET | `/admin/pages` | same as above | every status (permission `pages.manage`) |
 | GET | `/admin/pages/:id` | `?locale=` | document, every status (permission `pages.manage`) |
 | GET | `/pages/:id` | `?locale=` | document (strict, no fallback) – published only, otherwise 404 |
-| POST | `/pages` | fields (+ `locale`) | `{ document, delivery: [{ locale, state, path, error, publishedAt }], llms: { entries, full } }` – the document plus the outcome of static delivery per language and of the freshly rewritten `llms.txt`; 400 with a field name on a validation error, e.g. `pages: slug must be unique, "home" exists` or `pages: hero references media/<id> which does not exist` |
-| PATCH | `/pages/:id` | partial fields (+ `locale`) | `{ document, delivery: [...], llms }` as with POST |
-| DELETE | `/pages/:id/translations/:locale` | – | `{ …document in the default language, delivery: [...], llms }` – deletes only this translation, see below (`pages.write`) |
-| DELETE | `/pages/:id` | – | `{ ok: true, llms }`; 409 if other documents reference it, e.g. `pages/<id> is referenced by pages/<id2> (hero)` (no 409 on `PATCH`, only on `DELETE`) |
+| POST | `/pages` | fields (+ `locale`) | `{ …document, _events }` – the saved document plus `_events` reporting the triggered `publishPage` run (static delivery per language, then `llms.txt`), which happens after this response, not inside it; 400 with a field name on a validation error, e.g. `pages: slug must be unique, "home" exists` or `pages: hero references media/<id> which does not exist` |
+| PATCH | `/pages/:id` | partial fields (+ `locale`) | `{ …document, _events }` as with POST |
+| DELETE | `/pages/:id/translations/:locale` | – | `{ …document in the default language, _events }` – deletes only this translation, see below (`pages.write`) |
+| DELETE | `/pages/:id` | – | `{ ok: true, _events }`; 409 if other documents reference it, e.g. `pages/<id> is referenced by pages/<id2> (hero)` (no 409 on `PATCH`, only on `DELETE`) |
 
 `sort` is a field name, a leading `-` means descending; an unknown field → 400 (`unknown sort field
 …`). `limit` and `offset` must be integers (`limit` ≥ 1, `offset` ≥ 0); an invalid value or a
@@ -340,7 +340,7 @@ revision need `pages.manage`, restoring and labelling need `pages.write` (a rest
 |---|---|---|---|
 | GET | `/admin/pages/:id/revisions` | `?locale=&limit=&offset=` | `{ items: [Revision], total, head }` – newest first, without `snapshot`; `head` is the revision the next save will hang off (`pages.manage`) |
 | GET | `/admin/pages/:id/revisions/:revisionId` | – | one `Revision` plus `snapshot` (the saved fields, `null` when the revision was skipped) and `restore` (see below); 404 for an unknown revision (`pages.manage`) |
-| POST | `/admin/pages/:id/revisions/:revisionId/restore` | – | `{ document, delivery: [...], llms, restore }` – the shape `PATCH /pages/:id` returns plus `restore`; 404 for an unknown revision, 409 when the revision carries no snapshot, and every 400 a normal save can produce (`pages.write`); event `page.restored` |
+| POST | `/admin/pages/:id/revisions/:revisionId/restore` | – | `{ …document, restore, _events }` – the shape `PATCH /pages/:id` returns plus `restore`; 404 for an unknown revision, 409 when the revision carries no snapshot, and every 400 a normal save can produce (`pages.write`); event `page.restored` |
 | PATCH | `/admin/pages/:id/revisions/:revisionId` | `{ label: string \| null }` | the `Revision` – names a revision so retention keeps it forever; `null` or an empty string clears the name (`pages.write`) |
 
 `Revision`: `{ id, collection, documentId, locale, parentId, createdAt, author: { id, name },
@@ -646,9 +646,10 @@ themselves: set `publicCopy` on both (see [Media](#media) and [Image variants](#
 `{ prefix: "site/" }` matching `delivery-static`'s own `prefix`, so every file anonymous visitors may
 read lands under the same `site/` tree the pages do. `reservedPaths` (typically
 `["/api", "/admin", "/media"]`) keeps `delivery-static` from ever writing a page or an asset under a
-path the origin — or a media module's public copy — owns; a page whose slug collides is rejected
-before it is saved, and a publish that still collides fails with `state: "error"` instead of writing
-the file.
+path the origin — or a media module's public copy — owns; a publish whose slug collides with a
+reserved path fails with `state: "error"` instead of writing the file. Kestrel itself does not
+reject the save for a colliding slug; a consumer that wants the collision rejected earlier validates
+it itself before the document reaches `content.create`/`content.update`.
 
 ### llms.txt and llms-full.txt (GEO)
 
