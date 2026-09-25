@@ -151,14 +151,31 @@ describe("media/default download and serve steps", () => {
     expect(expectErr(await steps.serve(fakeCtx([], {}, { id: "missing", name: "a.png" })), "NOT_FOUND").status).toBe(404);
   });
 
-  it("serve: answers with the same neutral type as the public copy for a type that is not a known inert one", async () => {
+  it("serve and download: answer with the same neutral type as the public copy for a type that is not a known inert one", async () => {
     const { media, steps } = await make({ allowedTypes: ["*"], publicCopy: { prefix: "site/" } });
     const item = expectOk(await media.upload({ filename: "x.html", contentType: "text/html", data: new TextEncoder().encode("<p>x</p>") })).item;
     const served = boundaryCast<{ contentType: string; filename: string }>(expectOk(await steps.serve(fakeCtx([], {}, { id: item.id, name: "x-html.bin" }))).result, "host");
     expect(served.contentType).toBe("application/octet-stream");
     expect(served.filename).toBe("x-html.bin");
     const downloaded = boundaryCast<{ contentType: string }>(expectOk(await steps.download(fakeCtx([], {}, { id: item.id }))).result, "host");
-    expect(downloaded.contentType).toBe("text/html");
+    expect(downloaded.contentType).toBe("application/octet-stream");
+  });
+
+  it("download: a row stored with a list of types or an empty type goes out as application/octet-stream, never as stored", async () => {
+    const { steps, db, blobs } = await make();
+    const rows: Array<[string, string, string]> = [
+      ["l1", "image/png; x=1, text/html", "application/octet-stream"],
+      ["l2", "image/x-foo, text/html", "application/octet-stream"],
+      ["l3", "", "application/octet-stream"],
+      ["l4", "IMAGE/PNG; x=1", "image/png"],
+    ];
+    for (const [id, contentType, expected] of rows) {
+      const key = `media/${id}/a.png`;
+      expectOk(await db.createOne("media_items", { id, filename: "a.png", folder: "", location: `${id}.png`, contentType, size: 1, key, checksum: "x", status: "ready", createdAt: 1, updatedAt: 1, provenance: { origin: "human" }, width: null, height: null, alt: {}, title: {}, description: {} }));
+      expectOk(await blobs.put(key, new Uint8Array([1]), { contentType }));
+      const downloaded = boundaryCast<{ contentType: string }>(expectOk(await steps.download(fakeCtx([], {}, { id }))).result, "host");
+      expect(downloaded.contentType).toBe(expected);
+    }
   });
 
   it("upload and serve: an SVG is stored as one only in a run whose pipeline runs sanitize.svg before media.upload", async () => {

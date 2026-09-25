@@ -146,7 +146,13 @@ export interface Media {
   toPublicItem(item: MediaItem): PublicMediaItem;
   publicCopyEnabled(): boolean;
   anonymousListAllowed(): boolean;
-  /** Whether the run is at a `media.upload` step of a pipeline that runs `sanitize.svg` before it, with no step in between that writes the uploaded files; known once attached. */
+  /**
+   * Whether the run is at a `media.upload` step of a pipeline that runs `sanitize.svg` before it, with no
+   * step in between that declares a write to `files`. Known from `attach()` and the run's step events, so
+   * only for a run of the booted instance this was attached to: an unknown run id — a run outside a booted
+   * kestrel, such as one through the `testing/runPipeline` helper, or any run before `attach()` — answers
+   * `false`, and an SVG it uploads is stored and published as `.bin` with `application/octet-stream`.
+   */
   sanitizesSvg(runId: string): boolean;
   attach(kestrel: Introspection): () => void;
 }

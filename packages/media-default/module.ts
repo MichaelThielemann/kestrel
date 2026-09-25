@@ -1,7 +1,7 @@
 import { z } from "zod";
 import "@michaelthielemann/kestrel-contracts/authn";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
-import { mediaTypeEssence, NEUTRAL_TYPE, publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
+import { publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { binaryResult, first, stepFactory, type Context, type StepResult } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
@@ -27,8 +27,6 @@ export const configSchema = z
     anonymousList: z.enum(["ids", "all"]).default("ids"),
   })
   .strict();
-
-const SVG = "image/svg+xml";
 
 function localeOf(ctx: Context): string | undefined {
   return ctx.params.locale ?? first(ctx.payload.locale);
@@ -234,7 +232,7 @@ export default defineModule({
       if (isErr(found)) return ctx.fail(found.error);
       if (found.value === null) return notFound();
       const { item, data } = found.value;
-      const result = binaryResult(data, mediaTypeEssence(item.contentType) === SVG && !item.svgSanitized ? NEUTRAL_TYPE : item.contentType, item.filename);
+      const result = binaryResult(data, publicFormOf(item.contentType, item.svgSanitized).contentType, item.filename);
       if (item.provenance.origin !== "human") result.headers = { "x-content-provenance": item.provenance.origin };
       return ok({ ...ctx, result });
     },

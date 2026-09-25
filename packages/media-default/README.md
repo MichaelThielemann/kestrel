@@ -39,18 +39,21 @@ extension are always the same one:
   becomes `x-html.png`. None of them is a type a browser runs as a document;
 - every other type gets `.bin` and keeps the uploaded extension in the stem: `x.html` sent as
   `image/x-foo` or `text/html` becomes `x-html.bin`, `app.js` sent as `text/javascript` becomes
-  `app-js.bin`. Its public copy is stored as `application/octet-stream`, and `media.serve` answers
-  with that type too, so every host offers it as a download and no browser runs it;
+  `app-js.bin`. Its public copy is stored as `application/octet-stream`, and `media.serve` and
+  `media.download` answer with that type too, so every host offers it as a download and no browser
+  runs it;
 - an SVG is listed, but only an SVG whose bytes passed `sanitize.svg` is stored as `<name>.svg` and
   served as `image/svg+xml`. `media.upload` records that per row, from what `attach()` found out
   about the pipeline it runs in: `sanitize.svg` runs before it, and no step in between declares a
-  write to `files`. Nothing in the request can set it. Every other SVG is stored and served like an
-  unlisted type (`logo.svg` becomes `logo-svg.bin`, `application/octet-stream`, also on
-  `media.download`).
+  write to `files`. Nothing in the request can set it, and a run the booted instance did not start —
+  one through the `testing/runPipeline` helper, say — never counts as sanitising. Every other SVG is
+  stored and served like an unlisted type (`logo.svg` becomes `logo-svg.bin`,
+  `application/octet-stream`).
 
 Every writer of a public copy — this module's upload and `media.syncPublic`, and `images-default`'s
-variants and placeholders — takes the `Content-Type` from `publicFormOf` in the same helper, never
-from the stored value as it is. A row that already holds a type this version refuses (a list, an
+variants and placeholders — and every step that answers a file (`media.serve`, `media.download`,
+`images.serve`) takes the `Content-Type` from `publicFormOf` in the same helper, never from the
+stored value as it is. A row that already holds a type this version refuses (a list, an
 empty type) is therefore published as `application/octet-stream`. A row whose key's name does not end
 in the extension of its published type — such a row, or an SVG stored without the `sanitize.svg`
 record — is published under that name with every `.` turned into `-` plus the right extension
