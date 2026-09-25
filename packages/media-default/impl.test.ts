@@ -986,17 +986,30 @@ describe("media/default", () => {
       const kept = expectOk(await media.upload({ ...png, filename: "kept.png" })).item;
       const lost = expectOk(await media.upload({ ...png, filename: "lost.png" })).item;
       blobs.blobs.delete(lost.key);
-      expectOk(await blobs.put("media/stray.png", png.data, { contentType: "image/png" }));
+      expectOk(await blobs.put("media/stray-id/stray.png", png.data, { contentType: "image/png" }));
       expectOk(await blobs.put("media-variants/x/thumb.webp", png.data, { contentType: "image/webp" }));
 
-      expect(expectOk(await media.reconcile())).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: [lost.key] });
-      expect(blobs.blobs.has("media/stray.png")).toBe(true);
+      expect(expectOk(await media.reconcile())).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [lost.key] });
+      expect(blobs.blobs.has("media/stray-id/stray.png")).toBe(true);
 
-      expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: [lost.key] });
-      expect(blobs.blobs.has("media/stray.png")).toBe(false);
+      expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [lost.key] });
+      expect(blobs.blobs.has("media/stray-id/stray.png")).toBe(false);
       expect(blobs.blobs.has("media-variants/x/thumb.webp")).toBe(true);
       expect(blobs.blobs.has(kept.key)).toBe(true);
       expect(expectOk(await db.count(COLLECTION, {}))).toBe(2);
+    });
+
+    it("considers only keys of its own <prefix><id>/<name> shape, so another module's files nested under its prefix survive a deleting reconcile", async () => {
+      const { media, blobs } = await make({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" });
+      const kept = expectOk(await media.upload({ ...png, filename: "kept.png" })).item;
+      const nested = [`media/variants/${kept.id}/thumb.webp`, `media/variants/${kept.id}/hero.jpg`, "media/variants/gone-id/thumb.webp", "media/loose.png", `media/${kept.id}/deeper/file.png`];
+      for (const key of nested) expectOk(await blobs.put(key, png.data, { contentType: "image/webp" }));
+      expectOk(await blobs.put("media/orphan-id/orphan.png", png.data, { contentType: "image/png" }));
+
+      expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/orphan-id/orphan.png"], rowsWithoutBlob: [] });
+      for (const key of nested) expect(blobs.blobs.has(key), key).toBe(true);
+      expect(blobs.blobs.has(kept.key)).toBe(true);
+      expect(blobs.blobs.has("media/orphan-id/orphan.png")).toBe(false);
     });
   });
 

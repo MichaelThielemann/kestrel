@@ -320,7 +320,6 @@ function exportTargetPath(base: string, folder: string, filename: string, used: 
 }
 
 const MAX_NAME_BYTES = 200;
-const VARIANTS_PREFIX = "media-variants/";
 
 function capName(name: string): string {
   if (Buffer.byteLength(name) <= MAX_NAME_BYTES) return name;
@@ -372,9 +371,16 @@ export function urlNameOf(key: string): string {
   return slash === -1 ? key : key.slice(slash + 1);
 }
 
+function canonicalIdOf(key: string, prefix: string): string | null {
+  if (!key.startsWith(prefix)) return null;
+  const rest = key.slice(prefix.length);
+  const slash = rest.indexOf("/");
+  if (slash <= 0 || slash === rest.length - 1 || rest.includes("/", slash + 1)) return null;
+  return rest.slice(0, slash);
+}
+
 function isCanonicalKey(key: string, id: string, prefix: string): boolean {
-  const want = `${prefix}${id}/`;
-  return key.startsWith(want) && key.length > want.length && !key.slice(want.length).includes("/");
+  return canonicalIdOf(key, prefix) === id;
 }
 
 /** `<publicCopy.prefix><publicPath without its leading "/">/`: the root under which the public copy of every original lives. */
@@ -1013,7 +1019,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const rowsWithoutBlob: string[] = [];
       const listed = await blobs.list(config.prefix);
       if (isErr(listed)) return listed;
-      const present = new Set(listed.value.map((info) => info.key).filter((key) => !key.startsWith(VARIANTS_PREFIX)));
+      const present = new Set(listed.value.map((info) => info.key).filter((key) => canonicalIdOf(key, config.prefix) !== null));
       const walked = await eachItem({}, async (item) => {
         stored.add(item.key);
         if (!present.has(item.key)) rowsWithoutBlob.push(item.key);

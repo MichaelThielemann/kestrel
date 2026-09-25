@@ -336,23 +336,23 @@ describe("media/default list and listFolders: anonymous reads by id only", () =>
 describe("media/default reconcile and syncPublic steps", () => {
   it("reconcile reports orphans and deletes them only when payload.delete is set", async () => {
     const { blobs, steps } = await make();
-    expectOk(await blobs.put("media/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
+    expectOk(await blobs.put("media/stray-id/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
 
     const reported = expectOk(await steps.reconcile(fakeCtx()));
-    expect(reported.result).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: [] });
-    expect(expectOk(await blobs.get("media/stray.png"))).not.toBeNull();
+    expect(reported.result).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [] });
+    expect(expectOk(await blobs.get("media/stray-id/stray.png"))).not.toBeNull();
 
     expectOk(await steps.reconcile(fakeCtx([], { delete: true })));
-    expect(expectOk(await blobs.get("media/stray.png"))).toBeNull();
+    expect(expectOk(await blobs.get("media/stray-id/stray.png"))).toBeNull();
   });
 
   it("reconcileDelete deletes without a payload flag", async () => {
     const { blobs, steps } = await make();
-    expectOk(await blobs.put("media/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
+    expectOk(await blobs.put("media/stray-id/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
 
     const ctx = expectOk(await steps.reconcileDelete(fakeCtx()));
-    expect(ctx.result).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: [] });
-    expect(expectOk(await blobs.get("media/stray.png"))).toBeNull();
+    expect(ctx.result).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [] });
+    expect(expectOk(await blobs.get("media/stray-id/stray.png"))).toBeNull();
   });
 
   it("syncPublic merges _publicMedia into the result", async () => {
@@ -524,12 +524,12 @@ describe("media/default steps via runPipeline", () => {
 
   it("reconcile: reports and, with body.delete, removes orphan blobs", async () => {
     const { media, blobs } = await makeInstance();
-    expectOk(await blobs.put("media/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
+    expectOk(await blobs.put("media/stray-id/stray.png", new Uint8Array([1]), { contentType: "image/png" }));
     const reported = await runPipeline(pipeline("media.reconcile"), {}, { modules: [{ module, instance: media }] });
-    expect(reported.result).toEqual({ blobsWithoutRow: ["media/stray.png"], rowsWithoutBlob: [] });
+    expect(reported.result).toEqual({ blobsWithoutRow: ["media/stray-id/stray.png"], rowsWithoutBlob: [] });
     const deleted = await runPipeline(pipeline("media.reconcile"), { body: { delete: true } }, { modules: [{ module, instance: media }] });
     expect(deleted.status).toBe(200);
-    expect(expectOk(await blobs.get("media/stray.png"))).toBeNull();
+    expect(expectOk(await blobs.get("media/stray-id/stray.png"))).toBeNull();
   });
 
   it("export: copies every media item to the target directory", async () => {

@@ -123,7 +123,7 @@ Three key families share the blobstore, with three owners:
 | Key | Owner | What it is |
 |---|---|---|
 | `media/<id>/<name>` | this module (`prefix` configurable) | the original bytes, one blob per `media_items` row |
-| `media-variants/<id>/<size>.<ext>` | `images/default` | the generated variants of a medium; this module ignores them in `media.reconcile` |
+| `media-variants/<id>/<size>.<ext>` | `images/default` (its own `prefix`) | the generated variants of a medium; `media.reconcile` never considers them, see below |
 | `site/media/<id>/<name>` and `site/media/<id>/variants/<size>.<ext>` | this module and `images/default`, each writing only its own depth-1 files | the public copies, served directly by a static host or a bucket in front of the origin |
 
 The row is the truth, the blobstore only the storage. `media_items.key` is `unique`, and is always
@@ -221,9 +221,12 @@ unavailable):
 `{ blobsWithoutRow, rowsWithoutBlob }`. With `delete: true` it deletes the blobs nothing points at;
 `media.reconcileDelete` is the same step with the deletion fixed in the pipeline instead of the
 request, so a route can offer the report and the cleanup as two different endpoints;
-rows are never deleted, because a row is the only record that a file was ever meant to exist. Keys
-under `media-variants/` are ignored — they belong to `images/default`, which this module cannot
-query. A row of an upload that is in flight right now shows up under `rowsWithoutBlob`, so run it
+rows are never deleted, because a row is the only record that a file was ever meant to exist. Only
+keys of this module's own shape, `<prefix><id>/<name>` with exactly one segment for each, are
+considered; anything else under `prefix` — `images-default`'s variants when its `prefix` lies under
+this one (`media/variants/` under `media/`), a file directly under `prefix`, a deeper key — is never
+reported or deleted. The two modules' `prefix`es must differ, since `<prefix><id>/<name>` is also the
+shape of a variant key. A row of an upload that is in flight right now shows up under `rowsWithoutBlob`, so run it
 from a cron trigger rather than after every write; no trigger is wired here, that is the
 consumer's job.
 

@@ -506,7 +506,8 @@ replaces that row (no lasting 409). Only `ready` items are visible: `GET /media`
 hides everything else, `GET /media/:id`, `GET /media/:id/file` and `GET /media/:id/:name` answer 404.
 A reconciliation between the private blob store and `media_items` is available as the step
 `media.reconcile` (`{ blobsWithoutRow, rowsWithoutBlob }`; with `delete: true`, blobs without a row
-are deleted, rows never); [`../examples/minimal`](../examples/minimal) doesn't wire up a route or a
+are deleted, rows never; only keys of the shape `<prefix><id>/<name>` are considered, so variants
+stored under a nested prefix are never touched); [`../examples/minimal`](../examples/minimal) doesn't wire up a route or a
 cron for it yet.
 
 No data migration: setup fails on start if a stored item's key is not `<prefix><id>/<name>`, naming
