@@ -114,6 +114,7 @@ export default defineConfig({
     { event: "settings.updated", pipeline: "settingsDependents" },
     { event: "media.updated", pipeline: "mediaDependents" },
     { event: "media.deleted", pipeline: "mediaDependents" },
+    { event: "images.variantsChanged", pipeline: "mediaDependents" },
     { cron: "*/5 * * * *", pipeline: "resumeStalePages" },
     { http: "GET /admin/pages/:id/revisions", pipeline: "pageRevisions" },
     { http: "GET /admin/pages/:id/revisions/:revisionId", pipeline: "pageRevision" },

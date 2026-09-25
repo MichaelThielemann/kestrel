@@ -337,9 +337,12 @@ Net changes since 5.8.1.
   - A sync job that cannot start after a size-set change is logged instead of being dropped.
   - `images.remove` stops a render of the same item in this process after the size it is rendering,
     instead of waiting for every size.
-  - `images-default` raises `media.updated` with `ids` through `events@1` for items it made available,
-    after `images.prune`, and for items whose variants changed because a size was added or its spec
-    changed. It declares the event in `emits` and uses `events@1` optionally.
+  - `images-default` raises its own event `images.variantsChanged` (`{ id: null, ids, identity: null,
+    params: {} }`) through `events@1` for items it made available, after `images.prune`, and for items
+    whose variants changed because a size was added or its spec changed. It declares the event in
+    `emits` and uses `events@1` optionally. It never raises `media.updated`, which stays the fact of a
+    pipeline that edits a medium: a pipeline that re-renders what shows media subscribes to both, as
+    `mediaDependents` does in `examples/minimal`.
   - When a size is added or a size's spec changes (via `images.register` or at start), `images-default`
     notices and its background sync places the new or changed variants of every existing image.
 - **Public copies.** `media-default` and `images-default` gain an optional `publicCopy: { prefix }`.

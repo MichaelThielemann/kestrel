@@ -283,6 +283,12 @@ describe("image variants wiring", () => {
     const crons = config.triggers.filter((t) => "cron" in t).map((t) => [(t as { cron: string }).cron, t.pipeline]);
     expect(crons).toEqual(expect.arrayContaining([["*/5 * * * *", "resumeImages"]]));
   });
+  it("marks the pages that show a medium on media.updated, media.deleted and images.variantsChanged alike", async () => {
+    const config = await loadConfig(join(root, "kestrel.config.ts"));
+    const events = config.triggers.filter((t) => "event" in t).map((t) => [(t as { event: string }).event, t.pipeline]);
+    expect(events.filter(([, pipeline]) => pipeline === "mediaDependents").map(([event]) => event).sort()).toEqual(["images.variantsChanged", "media.deleted", "media.updated"]);
+  });
+
   it("wires the image pipelines", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
     expect(pipelines.get("registerImageSizes")).toEqual(["authn.requireUser", "authz.require:images.write", "images.register"]);

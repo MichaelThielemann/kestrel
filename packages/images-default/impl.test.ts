@@ -183,17 +183,17 @@ describe("images/default planning (images.plan)", () => {
     for (const row of rows) expect(blobs.blobs.has(`site/media/${id}/variants/${row.size}.${row.format}`)).toBe(true);
   });
 
-  it("raises media.updated for the ids it made available", async () => {
+  it("raises images.variantsChanged for the ids it made available", async () => {
     const events = fakeEvents();
     const { images, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, undefined, events);
     const id = addMedia(media, "m1", await jpeg(400, 300));
     expectOk(await images.plan([id]));
     expect(events.emitted).toHaveLength(1);
-    expect(events.emitted[0]?.name).toBe("media.updated");
+    expect(events.emitted[0]?.name).toBe("images.variantsChanged");
     expect(events.emitted[0]?.data).toMatchObject({ id: null, ids: [id], identity: null });
   });
 
-  it("raises media.updated for the items it placed before one it could not place", async () => {
+  it("raises images.variantsChanged for the items it placed before one it could not place", async () => {
     const events = fakeEvents();
     const { images, blobs, media } = await make({ publicCopy: { prefix: "site/" } }, undefined, undefined, events);
     for (const id of ["a", "b"]) {
@@ -206,7 +206,7 @@ describe("images/default planning (images.plan)", () => {
     expect(events.emitted.map((e) => boundaryCast<{ ids: string[] }>(e.data, "host").ids)).toEqual([["a"]]);
   });
 
-  it("a sync job stopped by a TRANSIENT failure still raises media.updated for the items it placed before it", async () => {
+  it("a sync job stopped by a TRANSIENT failure still raises images.variantsChanged for the items it placed before it", async () => {
     const events = fakeEvents();
     const { images, blobs, media } = await make({ publicCopy: { prefix: "site/" }, sizes: [{ name: "thumb", width: 320, fit: "inside", format: "webp", quality: 82 }] }, undefined, fixedRenderer, events);
     for (const id of ["a", "b"]) {
@@ -405,7 +405,7 @@ describe("images/default reads media only through media@1", () => {
   });
 });
 
-describe("images/default media.updated outside an upload", () => {
+describe("images/default images.variantsChanged outside an upload", () => {
   const THUMB = { name: "thumb", width: 320, fit: "inside" as const, format: "webp" as const, quality: 82 };
   const HERO = { name: "hero", width: 800, fit: "inside" as const, format: "original" as const, quality: 82 };
 
@@ -431,7 +431,7 @@ describe("images/default media.updated outside an upload", () => {
     const narrowed = await open([THUMB]);
     expectOk(await narrowed.prune(["hero"]));
     expect(events.emitted).toHaveLength(1);
-    expect(events.emitted[0]).toMatchObject({ name: "media.updated", data: { id: null, identity: null, params: {} } });
+    expect(events.emitted[0]).toMatchObject({ name: "images.variantsChanged", data: { event: "images.variantsChanged", id: null, identity: null, params: {} } });
     expect(boundaryCast<{ ids: string[] }>(events.emitted[0]!.data, "host").ids.sort()).toEqual(ids);
   });
 
@@ -442,7 +442,7 @@ describe("images/default media.updated outside an upload", () => {
     const reformed = await open([THUMB, { ...HERO, format: "webp" }], 2);
     reformed.attach(introspectionOf(manifestWithPipelines([{ pipeline: "serveImageVariant", module: "images/default", step: "images.serve" }])));
     await whenIdle(reformed);
-    const updates = events.emitted.filter((e) => e.name === "media.updated").map((e) => boundaryCast<{ ids: string[] }>(e.data, "host").ids);
+    const updates = events.emitted.filter((e) => e.name === "images.variantsChanged").map((e) => boundaryCast<{ ids: string[] }>(e.data, "host").ids);
     expect(updates).toEqual([["a", "b"], ["c"]]);
   });
 
@@ -461,7 +461,7 @@ describe("images/default media.updated outside an upload", () => {
     const narrowed = await open([THUMB]);
     expectOk(await narrowed.prune(["hero"]));
     await new Promise((resolve) => setImmediate(resolve));
-    expect(logged.some((entry) => entry.message.includes("media.updated") && Array.isArray(entry.ids) && entry.ids.length === 3)).toBe(true);
+    expect(logged.some((entry) => entry.message === "images: images.variantsChanged was rejected by a subscriber" && Array.isArray(entry.ids) && entry.ids.length === 3)).toBe(true);
     expect(expectOk(await db.count(VARIANTS, { size: "hero" }))).toBe(0);
     expect(expectOk(await db.count(RETIRED, {}))).toBe(3);
     expect(blobs.blobs.has("site/media/a/variants/hero.jpg")).toBe(true);

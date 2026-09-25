@@ -65,7 +65,7 @@ export default defineModule({
   provides: [],
   requires: [BLOBSTORE, PERSISTENCE, MEDIA],
   optional: [EVENTS],
-  emits: ["media.updated"],
+  emits: ["images.variantsChanged"],
   configSchema,
 
   async setup(config, deps): Promise<Images> {

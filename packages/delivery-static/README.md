@@ -123,6 +123,7 @@ triggers: [
   { event: "settings.updated", pipeline: "settingsDependents" },
   { event: "media.updated", pipeline: "mediaDependents" },
   { event: "media.deleted", pipeline: "mediaDependents" },
+  { event: "images.variantsChanged", pipeline: "mediaDependents" },
   { event: "delivery.outputStale", pipeline: "republishOutput" },
   { event: "delivery.llmsStale", pipeline: "refreshLlms" },
   { cron: "*/5 * * * *", pipeline: "resumeStalePages" },
@@ -243,7 +244,7 @@ Not included: sitemap, CDN invalidation.
 
 Pipelines in `examples/minimal` using these steps:
 
-- **mediaDependents** (event media.updated, event media.deleted): **`delivery.markDependents:media`**
+- **mediaDependents** (event media.updated, event media.deleted, event images.variantsChanged): **`delivery.markDependents:media`**
 - **pageDependents** (event page.created, event page.updated, event page.restored, event page.translationRemoved, event page.deleted): **`delivery.markDependents:pages`**
 - **pagePublishStatus** (GET /admin/publish-status/pages/:id): `authn.requireUser` → `authz.require:pages.manage` → **`delivery.readStatus:pages`**
 - **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.require:pages.manage` → **`delivery.publishAll:pages`** → `redirects.export` → **`delivery.exportLlms`**

@@ -60,7 +60,7 @@ at setup, with a log line naming the count; a variant or retired row without a `
 6.0.0) stops setup instead, since this version cannot read it. Whenever the effective size set changes — a new size, or
 an existing one with a new width/height/fit/format/quality — this module compares it against the
 stored rows and starts its background sync job to place and render the difference on every existing
-item, raising `media.updated` (see below) per chunk it touches. The comparison counts the ready items
+item, raising `images.variantsChanged` (see below) per chunk it touches. The comparison counts the ready items
 `media@1` reports as eligible (`count(ELIGIBLE)`) against the rows of each size, so an image that has
 no rows yet — its plan is still queued, or its provider has lost its bytes — also starts that job at
 every start until it is placed or deleted; the job then skips it after logging why. The job pages
@@ -129,14 +129,17 @@ that never got its render: always the original's bytes and type. This is what le
 before a size or format changed keep working without a republish; only `images.attach`'s own
 `variants[]` stops listing the retired path for pages rendered afterwards.
 
-## `media.updated`
+## `images.variantsChanged`
 
-`images-default` raises `media.updated` (`{ id: null, ids, identity: null, params: {} }`) through the
-optional `events@1` contract — declared in `emits`, never required — whenever it changes what a
-page would need to re-render for: an item it placed (made `available`), the items a size-set change
-or `images.prune` touched. A rejected emit (no subscriber, or a subscriber that throws) is logged
-with the affected ids and does not undo the change; without any `events@1` provider nothing is
-raised at all, since nothing could be subscribed.
+`images-default` raises its own event `images.variantsChanged` (`{ id: null, ids, identity: null,
+params: {} }`, at most 200 ids per event) through the optional `events@1` contract — declared in
+`emits`, never required — whenever it changes what a page would need to re-render for: an item it
+placed (made `available`), the items a size-set change or `images.prune` touched. It never raises
+`media.updated`, which belongs to the pipeline that edits a medium; a pipeline that marks the pages
+showing a medium (`delivery.markDependents:media`) subscribes to both. A rejected emit (no
+subscriber, or a subscriber that throws) is logged with the affected ids and does not undo the
+change; without any `events@1` provider nothing is raised at all, since nothing could be
+subscribed.
 
 ## Behaviour
 

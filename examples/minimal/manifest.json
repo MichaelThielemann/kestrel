@@ -823,7 +823,7 @@
       "eventHook": false,
       "atomicScope": false,
       "emits": [
-        "media.updated"
+        "images.variantsChanged"
       ]
     },
     {
@@ -24195,6 +24195,10 @@
       },
       {
         "event": "media.deleted",
+        "pipeline": "mediaDependents"
+      },
+      {
+        "event": "images.variantsChanged",
         "pipeline": "mediaDependents"
       },
       {

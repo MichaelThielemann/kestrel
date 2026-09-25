@@ -85,11 +85,13 @@ In both cases: only pipelines with a trigger are reachable from outside.
    `kestrel:<type>:<id>` in public paths — therefore lives in `site@1`, not in `content@1`;
    `content@1` is generic document CRUD.
 3. **Submodules provide steps, not triggers.** No submodule has a route or throws events. The
-   one exception: a submodule emits from a contract method itself when the fact arises without a
-   pipeline (`apply()` also runs at boot) or when a partial failure of that method has already
-   produced the fact (a `fail` would end the pipeline before an `events.emit` step); only
-   `migrations.applied` does this. Every further exception needs a row with its reason in the event
-   table of `pipelines.md`.
+   one exception: a submodule emits from its own code when the fact arises without a pipeline
+   (`apply()` also runs at boot; a variant set changes in a background job) or when a partial
+   failure of a contract method has already produced the fact (a `fail` would end the pipeline
+   before an `events.emit` step). Such an event is the module's own fact, declared in its `emits`;
+   an event name has exactly one producer, so a module never raises an event that belongs to another
+   module or to a pipeline. `migrations.applied` and `images.variantsChanged` are the two, and every
+   one needs a row with its reason in the event table of `pipelines.md`.
 4. **Business logic lives in pipelines.** A pipeline file shows the complete flow.
 5. **Errors at boot, not at runtime.** A missing contract, a missing method, an unknown step,
    a cycle → Kestrel doesn't start, and names the module and the cause.

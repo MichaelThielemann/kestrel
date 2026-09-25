@@ -33,6 +33,7 @@ const REPAIR_SAMPLE = 200;
 const NEW_ITEM_WINDOW_MS = 24 * 60 * 60 * 1000;
 const PAGE = 500;
 const EVENT_CHUNK = 200;
+const VARIANTS_CHANGED = "images.variantsChanged";
 const UNDECODABLE = "cannot decode";
 
 export type Config = z.output<typeof configSchema>;
@@ -308,12 +309,12 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return run;
   }
 
-  function raiseMediaUpdated(ids: string[]): void {
+  function raiseVariantsChanged(ids: string[]): void {
     if (bus === undefined || ids.length === 0) return;
     for (let i = 0; i < ids.length; i += EVENT_CHUNK) {
       const chunk = ids.slice(i, i + EVENT_CHUNK);
-      void bus.emit("media.updated", withEventIdentity("media.updated", { id: null, ids: chunk, identity: null, params: {} })).catch((cause: unknown) => {
-        logger.error("images: media.updated was rejected by a subscriber", { ids: chunk, error: errorMessage(cause) });
+      void bus.emit(VARIANTS_CHANGED, withEventIdentity(VARIANTS_CHANGED, { id: null, ids: chunk, identity: null, params: {} })).catch((cause: unknown) => {
+        logger.error(`images: ${VARIANTS_CHANGED} was rejected by a subscriber`, { ids: chunk, error: errorMessage(cause) });
       });
     }
   }
@@ -646,12 +647,12 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     for (const mediaId of mediaIds) {
       const planned = await planOne(mediaId);
       if (isErr(planned)) {
-        raiseMediaUpdated(changedIds);
+        raiseVariantsChanged(changedIds);
         return planned;
       }
       if (planned.value.changed) changedIds.push(mediaId);
     }
-    raiseMediaUpdated(changedIds);
+    raiseVariantsChanged(changedIds);
     return ok(undefined);
   }
 
@@ -828,7 +829,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const placed = await planOne(media.id);
       if (isErr(placed)) {
         if (placed.error.retryable) {
-          raiseMediaUpdated(changedIds);
+          raiseVariantsChanged(changedIds);
           return placed;
         }
         logger.error(`images: sync job skipped media/${media.id}, it could not be placed`, { mediaId: media.id, error: placed.error.message });
@@ -838,7 +839,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         const variants = await generate(media.id);
         if (isErr(variants)) {
           if (variants.error.retryable) {
-            raiseMediaUpdated(changedIds);
+            raiseVariantsChanged(changedIds);
             return variants;
           }
           logger.error(`images: sync job skipped media/${media.id}, it could not be rendered`, { mediaId: media.id, error: variants.error.message });
@@ -852,7 +853,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
       const progressed = await db.updateOne<Job>(JOBS, job.id, { done, failed, updatedAt: now() });
       if (isErr(progressed)) return progressed;
     }
-    raiseMediaUpdated(changedIds);
+    raiseVariantsChanged(changedIds);
     const cursor = page.value.next ?? page.value.items[page.value.items.length - 1]!.id;
     const finished = page.value.next === null;
     const advanced = await db.updateOne<Job>(JOBS, job.id, finished ? { done, failed, cursor, state: "done", finishedAt: now(), updatedAt: now() } : { done, failed, cursor, updatedAt: now() });
@@ -1194,7 +1195,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         placedIds.push(id);
         if (placed.value.changed) changedIds.push(id);
       }
-      raiseMediaUpdated(changedIds);
+      raiseVariantsChanged(changedIds);
       for (const id of placedIds) {
         const generated = await generate(id);
         if (isErr(generated)) logger.error(`images: repair pass could not render media/${id}`, { mediaId: id, error: generated.error.message });
@@ -1265,7 +1266,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         }
         sizesDeleted += 1;
       }
-      raiseMediaUpdated([...affectedIds]);
+      raiseVariantsChanged([...affectedIds]);
       return ok({ sizes: sizesDeleted, variants: variantsDeleted });
     },
 
@@ -1430,7 +1431,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         const placed = await planOne(mediaId);
         if (isErr(placed)) {
           if (placed.error.retryable) {
-            raiseMediaUpdated(changedIds);
+            raiseVariantsChanged(changedIds);
             return placed;
           }
           logger.error(`images: public-copy sync could not place media/${mediaId}`, { mediaId, error: placed.error.message });
@@ -1443,7 +1444,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
           changedIds.push(mediaId);
         }
       }
-      raiseMediaUpdated(changedIds);
+      raiseVariantsChanged(changedIds);
 
       const tree = publicTree();
       const listed = await blobs.list(tree);
