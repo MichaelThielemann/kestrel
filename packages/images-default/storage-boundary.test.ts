@@ -175,3 +175,34 @@ describe("images/default: storage boundary", { timeout: 60_000 }, () => {
     await runLifecycle((store) => store);
   });
 });
+
+describe("images/default: an interrupted media delete without publicCopy", () => {
+  it("leaves nothing of the item after the next start: media-default finishes its row and blob, images-default removes its rows and private variants", async () => {
+    const store = createFakePersistence();
+    const blobs = memoryBlobs();
+    const mediaConfig: MediaConfig = { ...MEDIA_CONFIG, publicCopy: undefined };
+    const imagesConfig: Config = { prefix: "media-variants/", publicPath: "/media", chunk: 2, staleAfterMs: 60000, maxAttempts: 1, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS, sizes: [THUMB] };
+    const media = await createMediaDefault(mediaConfig, blobs, store, quiet);
+    const images = await createImages(imagesConfig, { blobs, db: store, media, logger: quiet, render: renderer });
+    const photo = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#446688" } }).jpeg().toBuffer();
+    const item = expectOk(await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: photo })).item;
+    const kept = expectOk(await media.upload({ filename: "kept.jpg", contentType: "image/jpeg", data: photo })).item;
+    for (const id of [item.id, kept.id]) expect(expectOk(await images.generate(id)).map((row) => row.state)).toEqual(["done"]);
+    const remove = blobs.remove.bind(blobs);
+    blobs.remove = async () => err(failure("TRANSIENT", "store down"));
+    expect((await media.remove(item.id)).ok).toBe(false);
+    blobs.remove = remove;
+    await images.close();
+
+    const restarted = await createMediaDefault(mediaConfig, blobs, store, quiet);
+    const reopened = await createImages(imagesConfig, { blobs, db: store, media: restarted, logger: quiet, render: renderer });
+    reopened.attach(introspection);
+    await whenIdle(reopened);
+    await reopened.close();
+
+    expect([...blobs.blobs.keys()].filter((key) => key.includes(item.id))).toEqual([]);
+    expect(expectOk(await store.count(VARIANTS, { mediaId: item.id }))).toBe(0);
+    expect(expectOk(await store.count(VARIANTS, { mediaId: kept.id }))).toBe(1);
+    expect(blobs.blobs.has(`media-variants/${kept.id}/thumb.webp`)).toBe(true);
+  });
+});

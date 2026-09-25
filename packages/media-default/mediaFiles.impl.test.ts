@@ -231,6 +231,55 @@ describe("media/default: a delete ends readiness before it removes a byte", () =
   });
 });
 
+describe("media/default: an interrupted delete without publicCopy", () => {
+  async function interrupted(logger: Logger = quiet) {
+    const blobs = memoryBlobs();
+    const db = createFakePersistence();
+    const media = await createMediaDefault(CONFIG, blobs, db, logger);
+    const photo = expectOk(await media.upload({ filename: "photo.png", contentType: "image/png", data: new Uint8Array([1, 2, 3]) }, "album")).item;
+    const other = expectOk(await media.upload({ filename: "other.png", contentType: "image/png", data: new Uint8Array([4]) })).item;
+    const remove = blobs.remove.bind(blobs);
+    blobs.remove = async () => err(failure("TRANSIENT", "store down"));
+    expectErr(await media.remove(photo.id), "TRANSIENT");
+    blobs.remove = remove;
+    expect(blobs.blobs.has(photo.key)).toBe(true);
+    return { blobs, db, media, photo, other };
+  }
+
+  it("leaves no trace a user can see: the folder counts as empty and the name is free for a move", async () => {
+    const { blobs, db, media, photo, other } = await interrupted();
+    expect(expectOk(await media.folders())).toEqual([{ folder: "album", count: 0 }]);
+    expect(expectOk(await media.folderItems("album", false))).toEqual({ path: "album", ids: [] });
+    expect(expectOk(await media.update(photo.id, { alt: "gone" }))).toBeNull();
+    const moved = expectOk(await media.update(other.id, { folder: "album", filename: "photo.png" }));
+    expect(moved).toMatchObject({ folder: "album", filename: "photo.png" });
+    expect(expectOk(await db.findOne(COLLECTION, { id: photo.id }))).toBeNull();
+    expect(blobs.blobs.has(photo.key)).toBe(false);
+  });
+
+  it("a folder rename that meets it finishes it instead of moving it", async () => {
+    const { blobs, db, media, photo } = await interrupted();
+    expect(expectOk(await media.renameFolder("album", "archive"))).toEqual({ folder: "archive", moved: 0 });
+    expect(expectOk(await db.findOne(COLLECTION, { id: photo.id }))).toBeNull();
+    expect(blobs.blobs.has(photo.key)).toBe(false);
+  });
+
+  it("is finished by the next start, blob and row, and a start that cannot finish it still starts and logs it", async () => {
+    const errors: string[] = [];
+    const logger: Logger = { step() {}, info() {}, error: (message) => errors.push(message) };
+    const { blobs, db, photo } = await interrupted();
+    const remove = blobs.remove.bind(blobs);
+    blobs.remove = async () => err(failure("TRANSIENT", "store down"));
+    await createMediaDefault(CONFIG, blobs, db, logger);
+    expect(errors).toEqual(["media/default: could not finish an interrupted delete at start"]);
+    expect(expectOk(await db.findOne(COLLECTION, { id: photo.id }))).not.toBeNull();
+    blobs.remove = remove;
+    await createMediaDefault(CONFIG, blobs, db, quiet);
+    expect(expectOk(await db.findOne(COLLECTION, { id: photo.id }))).toBeNull();
+    expect(blobs.blobs.has(photo.key)).toBe(false);
+  });
+});
+
 describe("media/default: media@1 answers", () => {
   it("publishes a file with the type media.serve sends, and describes its stored dimensions", async () => {
     const blobs = memoryBlobs();

@@ -1108,6 +1108,31 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     });
   }
 
+  async function removeRowsOfGoneItems(): Promise<Result<void, KestrelError>> {
+    const ids = new Set<string>();
+    const collect = async (row: { mediaId: string }): Promise<Result<void, KestrelError>> => {
+      ids.add(row.mediaId);
+      return ok(undefined);
+    };
+    const variants = await eachRow<Variant>(VARIANTS, {}, collect);
+    if (isErr(variants)) return variants;
+    const retired = await eachRow<Retired>(RETIRED, {}, collect);
+    if (isErr(retired)) return retired;
+    const all = [...ids];
+    for (let i = 0; i < all.length; i += EVENT_CHUNK) {
+      const chunk = all.slice(i, i + EVENT_CHUNK);
+      const ready = await library.files(chunk);
+      if (isErr(ready)) return ready;
+      const live = new Set(ready.value.map((file) => file.id));
+      for (const mediaId of chunk) {
+        if (live.has(mediaId)) continue;
+        const removed = await removeCopiesOfGoneItem(mediaId);
+        if (isErr(removed)) return removed;
+      }
+    }
+    return ok(undefined);
+  }
+
   async function removeForeignCopy(key: string, mediaId: string, file: string): Promise<Result<boolean, KestrelError>> {
     const media = await readMedia(mediaId);
     if (isErr(media)) return media;
@@ -1506,9 +1531,19 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     },
 
     attach(kestrel) {
-      const detecting = detectAndStartSync().catch((cause: unknown) => {
-        logger.error("images: could not check for a size-set shortfall", { error: errorMessage(cause) });
-      });
+      const detecting = removeRowsOfGoneItems()
+        .then(
+          (swept) => {
+            if (isErr(swept)) logger.error("images: could not remove the variants of items that are no longer ready", { error: swept.error.message });
+          },
+          (cause: unknown) => {
+            logger.error("images: could not remove the variants of items that are no longer ready", { error: errorMessage(cause) });
+          },
+        )
+        .then(() => detectAndStartSync())
+        .catch((cause: unknown) => {
+          logger.error("images: could not check for a size-set shortfall", { error: errorMessage(cause) });
+        });
       detections.add(detecting);
       void detecting.then(() => detections.delete(detecting));
       const pipelines = kestrel.describe().pipelines;

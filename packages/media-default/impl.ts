@@ -127,6 +127,8 @@ export interface Upload {
 
 const MEDIA_READ_TYPE = "media";
 const READY = { status: "ready" } as const;
+const REMOVING = "removing";
+const PRESENT = { status: { ne: REMOVING } } as const;
 const SCAN_PAGE = 500;
 const MAX_SCAN_LIMIT = 500;
 const IDS_CHUNK = 200;
@@ -417,7 +419,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
   const locationTaken = async (location: string, exceptId?: string): Promise<Result<boolean, MediaError>> => {
     const row = await db.findOne<MediaItem>(COLLECTION, { location });
     if (isErr(row)) return row;
-    return ok(row.value !== null && row.value.id !== exceptId);
+    if (row.value === null || row.value.id === exceptId) return ok(false);
+    if (row.value.status !== REMOVING) return ok(true);
+    const finished = await removeItem(row.value.id);
+    return isErr(finished) ? finished : ok(false);
   };
   const locationConflict = (location: string): MediaError => failure("CONFLICT", `media/default: ${location} already exists`, { details: { collection: COLLECTION, field: "location" } });
   const assertFreeLocation = async (location: string, exceptId?: string): Promise<Result<void, MediaError>> => {
@@ -437,7 +442,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     if (isErr(row)) return row;
     if (row.value === null) return ok();
     const item = row.value;
-    if (item.status === "removing") return removeItem(item.id);
+    if (item.status === REMOVING) return removeItem(item.id);
     if (item.status === "uploading") {
       if (now() - item.updatedAt < config.uploadStaleAfterMs) return ok();
       const abandoned = await db.updateMany<MediaItem>(COLLECTION, { id: item.id, status: "uploading" }, { status: "failed", updatedAt: now() });
@@ -527,12 +532,12 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     const row = await db.findOne(FOLDERS, { path });
     if (isErr(row)) return row;
     if (row.value !== null) return ok(true);
-    const direct = await db.count(COLLECTION, { folder: path });
+    const direct = await db.count(COLLECTION, { folder: path, ...PRESENT });
     if (isErr(direct)) return direct;
     if (direct.value > 0) return ok(true);
     let found = false;
-    const nestedItems = await eachInSubtree<MediaItem>(COLLECTION, "folder", path, async () => {
-      found = true;
+    const nestedItems = await eachInSubtree<MediaItem>(COLLECTION, "folder", path, async (item) => {
+      if (item.status !== REMOVING) found = true;
       return ok();
     });
     if (isErr(nestedItems)) return nestedItems;
@@ -603,8 +608,8 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     if (isErr(found)) return found;
     if (found.value !== null) {
       const item = found.value;
-      if (item.status !== "removing") {
-        const ended = await db.updateMany(COLLECTION, { id }, { status: "removing" });
+      if (item.status !== REMOVING) {
+        const ended = await db.updateMany(COLLECTION, { id }, { status: REMOVING });
         if (isErr(ended)) return ended;
       }
       if (config.publicCopy !== undefined) {
@@ -655,6 +660,21 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
   if (layoutViolations > 0) {
     throw new Error(`media/default: ${layoutViolations} stored item(s) use a blob key other than "${config.prefix}<id>/<name>" (first: ${firstViolation!.id} at "${firstViolation!.key}") – this version reads no other layout; start with an empty media store`);
   }
+  const interrupted = await eachItem({ status: REMOVING }, async (item) => removeItem(item.id));
+  if (isErr(interrupted)) logger.error("media/default: could not finish an interrupted delete at start", { error: interrupted.error.message });
+
+  const finishRemoving = async (items: readonly MediaItem[]): Promise<Result<MediaItem[], MediaError>> => {
+    const present: MediaItem[] = [];
+    for (const item of items) {
+      if (item.status !== REMOVING) {
+        present.push(item);
+        continue;
+      }
+      const finished = await removeItem(item.id);
+      if (isErr(finished)) return finished;
+    }
+    return ok(present);
+  };
 
   const api: Media = {
     async upload(file, folder = "", provenance, svgSanitized = false) {
@@ -782,7 +802,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       for (let offset = 0; ; offset += 500) {
         const page = await db.findMany<MediaItem>(COLLECTION, {}, { sort: { folder: "asc" }, limit: 500, offset });
         if (isErr(page)) return page;
-        for (const item of page.value.items) counts.set(item.folder, (counts.get(item.folder) ?? 0) + 1);
+        for (const item of page.value.items) if (item.status !== REMOVING) counts.set(item.folder, (counts.get(item.folder) ?? 0) + 1);
         if (page.value.items.length < 500) break;
       }
       for (let offset = 0; ; offset += 500) {
@@ -802,6 +822,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (isErr(found)) return found;
       const existing = found.value;
       if (existing === null) return ok(null);
+      if (existing.status === REMOVING) {
+        const finished = await removeItem(id);
+        return isErr(finished) ? finished : ok(null);
+      }
       const key = localeKey(locale);
       if (isErr(key)) return key;
       const fields: Record<string, unknown> = { updatedAt: now() };
@@ -921,7 +945,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (clean.value === "") return err(failure("VALIDATION", "media/default: folder path must not be empty"));
       const created = await ensureFolder(clean.value);
       if (isErr(created)) return created;
-      const count = await db.count(COLLECTION, { folder: clean.value });
+      const count = await db.count(COLLECTION, { folder: clean.value, ...PRESENT });
       if (isErr(count)) return count;
       return ok({ folder: clean.value, count: count.value });
     },
@@ -938,7 +962,9 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const targetExists = await folderExists(target.value);
       if (isErr(targetExists)) return targetExists;
       if (targetExists.value) return err(failure("CONFLICT", `media/default: folder ${target.value} already exists`));
-      const found = await subtreeItems(source.value);
+      const inSubtree = await subtreeItems(source.value);
+      if (isErr(inSubtree)) return inSubtree;
+      const found = await finishRemoving(inSubtree.value);
       if (isErr(found)) return found;
       const retarget = (folder: string): string => target.value + folder.slice(source.value.length);
       for (const item of found.value) {
@@ -974,16 +1000,17 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const exists = await folderExists(clean.value);
       if (isErr(exists)) return exists;
       if (!exists.value) return ok(null);
-      const found = await subtreeItems(clean.value);
-      if (isErr(found)) return found;
+      const inSubtree = await subtreeItems(clean.value);
+      if (isErr(inSubtree)) return inSubtree;
+      const found = inSubtree.value.filter((item) => item.status !== REMOVING);
       let subfolders = 0;
       const nested = await eachInSubtree<{ id: string; path: string }>(FOLDERS, "path", clean.value, async () => {
         subfolders += 1;
         return ok();
       });
       if (isErr(nested)) return nested;
-      if (!recursive && (found.value.length > 0 || subfolders > 0)) return err(failure("CONFLICT", `media/default: folder ${clean.value} is not empty`));
-      return ok({ path: clean.value, ids: found.value.map((i) => i.id) });
+      if (!recursive && (found.length > 0 || subfolders > 0)) return err(failure("CONFLICT", `media/default: folder ${clean.value} is not empty`));
+      return ok({ path: clean.value, ids: found.map((i) => i.id) });
     },
     async removeFolder(path) {
       const clean = safeFolder(path);

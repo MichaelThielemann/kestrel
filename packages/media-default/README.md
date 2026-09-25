@@ -146,9 +146,12 @@ broken attempt never blocks a filename. `media.remove` and `media.removeFolder` 
 readiness (`status: "removing"`), then remove the public copy, then the private blob, then the row,
 then sweep the item's own files once more. From the first of these writes on the item is answered by
 nothing: `media.serve` and `media.download` answer 404 while a delete is under way, and no reader
-meets a ready item without its bytes. A failing blob delete fails the step and leaves the item
-invisible; repeating the delete, an upload of the same name into the same folder, or
-`media.syncPublic` finishes it.
+meets a ready item without its bytes. A failing blob delete fails the step and leaves an item a user
+can no longer see or trip over: its name is free and it counts in no folder. Whatever meets it next
+finishes it — repeating the delete, an upload, rename or move to its name, a folder rename or
+delete, `media.update` of its id (which then answers 404), `media.syncPublic` — and every start of
+the module finishes each such item before it answers anything, with or without `publicCopy`. A start
+that cannot finish one logs it and starts anyway.
 
 Uploading is idempotent: same folder, same filename and the same bytes return the item that is
 already there — no second row, no second blob write, no second variant folder — and `media.upload`

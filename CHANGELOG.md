@@ -725,9 +725,12 @@ Net changes since 5.8.1.
   `prefix` or deeper than `<id>/<name>` is no longer reported.
 - `media-default` provides `media@1`; `Media` extends `MediaFiles`. A delete ends the item's
   readiness before it removes any byte (`MediaStatus` gains `removing`): `media.serve` and
-  `media.download` answer 404 during a delete instead of failing, and a delete that stopped midway
-  leaves the item invisible until repeating it, an upload of the same name into the same folder, or
-  the next `media.syncPublic` finishes it. Every reader of the module — `media.get`, `media.list`,
+  `media.download` answer 404 during a delete instead of failing. A delete that stopped midway leaves
+  the item invisible, its name free and its folder without it; every start of the module finishes
+  such items, with or without `publicCopy`, and so does whatever meets one first (repeating the
+  delete, an upload, rename or move to its name, a folder rename or delete, `media.update` of its id,
+  `media.syncPublic`). `images-default` removes, when attached, the rows and private variants of every
+  item `media@1` no longer reports as ready. Every reader of the module — `media.get`, `media.list`,
   `media.serve`, `media.download`, `media.syncPublic`, `media.export:<dir>` and `media@1` — asks one
   readiness rule, so `media.syncPublic` no longer treats an unknown status as ready and
   `media.export:<dir>` copies ready items only.

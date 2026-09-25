@@ -637,11 +637,17 @@ describe("images/default size-set check at attach", () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let arrive: () => void = () => {};
+    const reached = new Promise<void>((resolve) => {
+      arrive = resolve;
+    });
     db.count = async () => {
+      arrive();
       await held;
       throw new Error("database is not open");
     };
     images.attach(introspectionOf(manifestWithPipelines([{ pipeline: "serveImageVariant", module: "images/default", step: "images.serve" }])));
+    await reached;
     let closed = false;
     const closing = images.close().then(() => {
       closed = true;
