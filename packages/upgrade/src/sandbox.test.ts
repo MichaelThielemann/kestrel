@@ -76,6 +76,34 @@ describe("sandboxBootInput", () => {
     expect(result.setup.only).not.toContain("@acme/kestrel-persistence-sqlite");
   });
 
+  it("rewrites a module-list entry through a table entry keyed by its full use string, whatever the package scope", () => {
+    const withThirdParty: BootInput = { ...input(), config: { ...input().config, modules: [...input().config.modules, { use: "@acme/kestrel-archive", config: { dir: "/srv/archive" } }] } };
+    const result = sandboxBootInput(withThirdParty, { dir: "/tmp/scratch-1", entries: { "@acme/kestrel-archive": (_config, scratch) => ({ dir: `${scratch}/sandbox/archive` }) } });
+    const archive = result.input.config.modules.find((m) => m.use === "@acme/kestrel-archive");
+    expect(archive?.config).toEqual({ dir: "/tmp/scratch-1/sandbox/archive" });
+    expect(result.rewritten).toContain("@acme/kestrel-archive");
+    expect(result.outside).not.toContain("@acme/kestrel-archive");
+  });
+
+  it("matches a table entry for a local module by its use string, ignoring a query or fragment", () => {
+    const withLocal: BootInput = { ...input(), config: { ...input().config, modules: [...input().config.modules.slice(0, 3), { use: "./modules/notes.ts#second", config: { apiKey: "secret" } }] } };
+    const result = sandboxBootInput(withLocal, { dir: "/tmp/scratch-1", entries: { "./modules/notes.ts": () => ({ apiKey: "none" }) } });
+    expect(result.rewritten).toContain("./modules/notes.ts#second");
+    expect(result.outside).toEqual([]);
+  });
+
+  it("does not match a table entry keyed by a bare module name", () => {
+    const withExtra: BootInput = { ...input(), config: { ...input().config, modules: [...input().config.modules, { use: "@michaelthielemann/kestrel-archive", config: {} }] } };
+    const result = sandboxBootInput(withExtra, { dir: "/tmp/scratch-1", entries: { archive: () => ({}) } });
+    expect(result.outside).toContain("@michaelthielemann/kestrel-archive");
+  });
+
+  it("refuses a table entry that would replace a built-in rewrite, naming the entry", () => {
+    expect(() => sandboxBootInput(input(), { dir: "/tmp/scratch-1", entries: { "@michaelthielemann/kestrel-persistence-sqlite": (config) => config } })).toThrow(
+      /sandbox entry "@michaelthielemann\/kestrel-persistence-sqlite" collides with a built-in rewrite/,
+    );
+  });
+
   it("never mutates the original input", () => {
     const original = input();
     const before = JSON.stringify(original);

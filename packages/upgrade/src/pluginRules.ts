@@ -1,4 +1,6 @@
 import type { LoadIssue, Rule, UpgradePlugin } from "./plugin.ts";
+import type { SandboxTable } from "./sandbox.ts";
+import { collidingSandboxEntries } from "./sandboxTable.ts";
 
 export async function detectPlugin(plugins: readonly UpgradePlugin[], root: string): Promise<{ plugin?: UpgradePlugin; issues: LoadIssue[] }> {
   const issues: LoadIssue[] = [];
@@ -26,4 +28,11 @@ export function mergeRules(defaultRules: readonly Rule[], plugin: UpgradePlugin 
   const issues: LoadIssue[] = colliding.map((r) => ({ message: `plugin "${plugin?.kind ?? ""}" registers a rule id "${r.id}" that collides with a built-in rule; rename it` }));
   const collidingIds = new Set(colliding.map((r) => r.id));
   return { rules: [...defaultRules, ...pluginRules.filter((r) => !collidingIds.has(r.id))], issues };
+}
+
+export function mergeSandboxEntries(plugin: UpgradePlugin): { entries?: SandboxTable; issues: LoadIssue[] } {
+  if (plugin.sandbox === undefined) return { issues: [] };
+  const colliding = new Set(collidingSandboxEntries(plugin.sandbox));
+  const issues: LoadIssue[] = [...colliding].map((key) => ({ message: `plugin "${plugin.kind}" registers a sandbox entry for "${key}", which a built-in sandbox entry already rewrites; remove it` }));
+  return { entries: Object.fromEntries(Object.entries(plugin.sandbox).filter(([key]) => !colliding.has(key))), issues };
 }

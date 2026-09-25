@@ -483,7 +483,9 @@ the problem.
 
 #### plugin-api
 A `plugin.rules` id that collides with a built-in one is a load error, naming the id and the plugin;
-that rule is dropped from the merge and the built-in keeps running under the id. See "Programmatic
+that rule is dropped from the merge and the built-in keeps running under the id. A `plugin.sandbox`
+key the built-in sandbox table already rewrites is a load error the same way, naming the key and the
+plugin; that entry is dropped and the built-in rewrite applies. See "Programmatic
 use" below for the full plugin API surface.
 
 ## What the tool never does
@@ -543,9 +545,13 @@ directory) with only the built-in rules.
   list of `{ file, pipelines }` — more than one pipeline name per entry for a layout that keeps
   several in one file — instead of one file per pipeline name, so a rule that walks every pipeline
   file reports at most once per file even then.
-- `sandbox?: Record<string, (config, scratch) => unknown>` — extra sandbox config-rewrite entries,
-  keyed like `DEFAULT_SANDBOX_ENTRIES` (see `sandbox-blobstore-standin` above), merged with the
-  built-in table.
+- `sandbox?: Record<string, (config, scratch) => unknown>` — extra sandbox config rewrites, added to
+  the built-in table. A key is a module-list entry's full `use` string without a `?`/`#` suffix: a
+  package name in any scope (`"@acme/kestrel-archive"`), or a local path exactly as the config writes
+  it. The rewrite receives the entry's config and the scratch directory and returns the config that
+  module's `setup()` gets during the boot tier, which then counts it as sandboxed. A key the built-in
+  table already rewrites (kestrel's SQLite, blob store, backup, migrations and JSON Schema modules) is a
+  load error naming the plugin and the key; the built-in rewrite stays in force.
 - `rules?: readonly Rule[]` — extra rules, run alongside every built-in one. An id that collides with
   a built-in one is a load error naming both, and that rule is dropped from the merge; reach for a
   locator or hook (`locateSteps`, `locateModelFields`, `dataModel`, `switchEdits`) when a built-in

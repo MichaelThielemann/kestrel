@@ -161,6 +161,22 @@ describe("a plugin rule id colliding with a built-in", () => {
   });
 });
 
+describe("a plugin sandbox entry colliding with a built-in rewrite", () => {
+  it("is a load error naming the plugin and the entry", async () => {
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject()), sandbox: { "@michaelthielemann/kestrel-persistence-sqlite": (config) => config } };
+    const { report } = await runJson([plugin]);
+    const issue = report.findings.find((f) => f.rule === "load/failed");
+    expect(issue?.message).toContain("custom-host");
+    expect(issue?.message).toContain("@michaelthielemann/kestrel-persistence-sqlite");
+  });
+
+  it("does not fire for an entry keyed by another package's full use string", async () => {
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject()), sandbox: { "@acme/kestrel-archive": (config) => config } };
+    const { report } = await runJson([plugin]);
+    expect(report.findings.some((f) => f.rule === "load/failed")).toBe(false);
+  });
+});
+
 describe("a plugin hook that throws is reported, not silently swallowed", () => {
   it("dataModel() throwing surfaces a plugin/hook-failed error finding naming the plugin and the hook", async () => {
     const plugin: UpgradePlugin = {

@@ -184,6 +184,12 @@ export interface UpgradePlugin {
    * earlier `scratch` silently points at a directory this call already removed.
    */
   load(root: string, scratch: string, cache: Map<string, unknown>): Promise<LoadResult>;
+  /**
+   * Sandbox config rewrites added to the built-in table, keyed by a module-list entry's full `use`
+   * string without a `?`/`#` suffix (`"@acme/kestrel-archive"`, `"./modules/archive.ts"`). A key the
+   * built-in table already rewrites is a load error naming the plugin and the key, and the built-in
+   * rewrite stays in force.
+   */
   sandbox?: Record<string, (config: unknown, scratch: string) => unknown>;
   rules?: readonly Rule[];
   /** Locates a pipeline's own step array(s) directly, for a project layout where a pipeline is not a `definePipeline({ name, steps })` call; the built-in search runs when this is absent. */

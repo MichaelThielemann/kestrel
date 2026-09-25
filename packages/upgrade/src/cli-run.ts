@@ -13,7 +13,7 @@ import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { loadBackendProject, loadIssuesAsFindings, type LoadIssue, type LoadResult } from "./project.ts";
 import type { AskFix, LoadedProject, Rule, RuleContext, RunUpgradeCliOptions, SourceRuleContext, SwitchEditsResult, UpgradePlugin } from "./plugin.ts";
-import { detectPlugin, mergeRules } from "./pluginRules.ts";
+import { detectPlugin, mergeRules, mergeSandboxEntries } from "./pluginRules.ts";
 import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity, type UpgradeReport } from "./report.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
 import { hookFailedFinding, ruleCheckFailedFinding, verifyEditsWith, type VerifyEditsResult } from "./ruleHelpers.ts";
@@ -69,8 +69,10 @@ async function resolveProject(root: string, entry: string | undefined, scratchDi
     const reload = (dir: string): Promise<LoadResult> => loadBackendProject(dir, entry === undefined ? undefined : resolve(root, entry));
     return { ...(project === undefined ? {} : { project }), issues, rules: DEFAULT_RULES, reload };
   }
-  const { rules, issues: mergeIssues } = mergeRules(DEFAULT_RULES, plugin);
-  const sandboxEntries = plugin.sandbox === undefined ? {} : { sandboxEntries: plugin.sandbox };
+  const { rules, issues: ruleIssues } = mergeRules(DEFAULT_RULES, plugin);
+  const { entries, issues: sandboxIssues } = mergeSandboxEntries(plugin);
+  const mergeIssues = [...ruleIssues, ...sandboxIssues];
+  const sandboxEntries = entries === undefined ? {} : { sandboxEntries: entries };
   const switchEditsHook = plugin.switchEdits;
   const locators = {
     ...(plugin.locateSteps === undefined ? {} : { locateSteps: plugin.locateSteps }),

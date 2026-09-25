@@ -574,7 +574,11 @@ Net changes since 5.8.1.
   every `load()` call within a single `check`/`fix` invocation, so an expensive prepare step runs once
   per invocation, not once per re-ask round or edit preview. `UpgradePlugin.rules` merges into the
   built-in rules; an id colliding with a built-in one is a load error naming both, and that rule is
-  dropped from the merge. `locateSteps`/`locateModelFields` locate a pipeline's step array or a content
+  dropped from the merge. `UpgradePlugin.sandbox` adds sandbox config rewrites keyed by a module-list
+  entry's full `use` string, in any package scope or as a local path; a key the built-in table
+  already rewrites is a load error naming the plugin and the key, and the built-in rewrite stays in
+  force. `sandboxBootInput`'s `entries` option takes the same keys and throws on such a key.
+  `locateSteps`/`locateModelFields` locate a pipeline's step array or a content
   type's fields object literal directly, for a project layout the built-in search does not recognize —
   additive, not a replacement: an empty result (or `undefined` from `locateModelFields`) falls back to
   the exact built-in search for that target, so a locator only answers for the layouts it actually
