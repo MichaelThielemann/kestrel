@@ -92,8 +92,8 @@ const STEP_SHAPE_CHANGES: Record<string, string> = {
   "images.retryFailed": "answers 404 for an item that is not ready (still uploading, failed, or being deleted)",
   "images.sync": "job.total counts the ready items that get variants, and done/failed count the same items, not every media item",
   "images.readStatus": "job.total counts the ready items that get variants, and done/failed count the same items, not every media item",
-  "media.reconcile": "considers only keys of the module's own <prefix><id>/<name> shape: a file directly under prefix or deeper than <id>/<name> is no longer reported, and never deleted",
-  "media.reconcileDelete": "considers only keys of the module's own <prefix><id>/<name> shape: a file directly under prefix or deeper than <id>/<name> is no longer reported, and never deleted",
+  "media.reconcile": "counts a key as orphaned only when it has the module's own <prefix><id>/<name> shape and no item has that id: a file directly under prefix, deeper than <id>/<name> or under an existing item's id is no longer reported, and never deleted",
+  "media.reconcileDelete": "counts a key as orphaned only when it has the module's own <prefix><id>/<name> shape and no item has that id: a file directly under prefix, deeper than <id>/<name> or under an existing item's id is no longer reported, and never deleted",
   "insights.readManifest": "its output schema follows Manifest's two new fields, atomicScope and warnings",
   "events.listDead": "its items now carry pipeline and runId, and rows are no longer ordered across pipelines",
 };

@@ -999,15 +999,17 @@ describe("media/default", () => {
       expect(expectOk(await db.count(COLLECTION, {}))).toBe(2);
     });
 
-    it("considers only keys of its own <prefix><id>/<name> shape, so another module's files nested under its prefix survive a deleting reconcile", async () => {
+    it("counts a key as orphaned only when it has its own <prefix><id>/<name> shape and no item has that id, so another module's files survive a deleting reconcile", async () => {
       const { media, blobs } = await make({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], prefix: "media/" });
       const kept = expectOk(await media.upload({ ...png, filename: "kept.png" })).item;
       const nested = [`media/variants/${kept.id}/thumb.webp`, `media/variants/${kept.id}/hero.jpg`, "media/variants/gone-id/thumb.webp", "media/loose.png", `media/${kept.id}/deeper/file.png`];
       for (const key of nested) expectOk(await blobs.put(key, png.data, { contentType: "image/webp" }));
       expectOk(await blobs.put("media/orphan-id/orphan.png", png.data, { contentType: "image/png" }));
 
+      expectOk(await blobs.put(`media/${kept.id}/thumb.webp`, png.data, { contentType: "image/webp" }));
       expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/orphan-id/orphan.png"], rowsWithoutBlob: [] });
       for (const key of nested) expect(blobs.blobs.has(key), key).toBe(true);
+      expect(blobs.blobs.has(`media/${kept.id}/thumb.webp`)).toBe(true);
       expect(blobs.blobs.has(kept.key)).toBe(true);
       expect(blobs.blobs.has("media/orphan-id/orphan.png")).toBe(false);
     });

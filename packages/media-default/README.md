@@ -127,8 +127,9 @@ Three key families share the blobstore, with three owners:
 | `site/media/<id>/<name>` and `site/media/<id>/variants/<size>.<ext>` | this module and `images/default`, each writing only its own depth-1 files | the public copies, served directly by a static host or a bucket in front of the origin |
 
 The original's URL and its variants' URLs share one directory per item, so `publicPath` and
-`publicCopy` must be configured identically on this module and on `images-default`; their private
-`prefix`es must differ (see `media.reconcile` below).
+`publicCopy` must be configured identically on this module and on `images-default`. Their private
+`prefix`es should differ: `images-default` removes everything under `<its prefix><id>/` when it
+removes an item's variants, which with an equal `prefix` includes the original.
 
 The row is the truth, the blobstore only the storage. `media_items.key` is `unique`, and is always
 id-based, so it never collides on its own; the folder+filename clash check runs against `location`
@@ -228,12 +229,12 @@ unavailable):
 `{ blobsWithoutRow, rowsWithoutBlob }`. With `delete: true` it deletes the blobs nothing points at;
 `media.reconcileDelete` is the same step with the deletion fixed in the pipeline instead of the
 request, so a route can offer the report and the cleanup as two different endpoints;
-rows are never deleted, because a row is the only record that a file was ever meant to exist. Only
-keys of this module's own shape, `<prefix><id>/<name>` with exactly one segment for each, are
-considered; anything else under `prefix` — `images-default`'s variants when its `prefix` lies under
-this one (`media/variants/` under `media/`), a file directly under `prefix`, a deeper key — is never
-reported or deleted. The two modules' `prefix`es must differ, since `<prefix><id>/<name>` is also the
-shape of a variant key. A row of an upload that is in flight right now shows up under `rowsWithoutBlob`, so run it
+rows are never deleted, because a row is the only record that a file was ever meant to exist. A key
+is reported only when it has this module's own shape, `<prefix><id>/<name>` with exactly one segment
+for each, and no item has that id at all. Anything else under `prefix` is never reported or deleted:
+`images-default`'s variants whether its `prefix` lies under this one (`media/variants/` under
+`media/`) or equals it (`media/<id>/thumb.webp` next to the original), a file directly under
+`prefix`, a deeper key, or any file under the id of an item that exists. A row of an upload that is in flight right now shows up under `rowsWithoutBlob`, so run it
 from a cron trigger rather than after every write; no trigger is wired here, that is the
 consumer's job.
 

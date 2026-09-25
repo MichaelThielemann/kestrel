@@ -718,11 +718,12 @@ Net changes since 5.8.1.
 
 ### Changed
 
-- `media-default`: `media.reconcile` and `media.reconcileDelete` consider only keys of the module's
-  own shape, `<prefix><id>/<name>`, instead of every key under `prefix` except a hard-coded
-  `media-variants/`. `images-default`'s variants survive a deleting reconcile whatever its `prefix`,
-  also one nested under this module's (`media/variants/` under `media/`); a file directly under
-  `prefix` or deeper than `<id>/<name>` is no longer reported.
+- `media-default`: `media.reconcile` and `media.reconcileDelete` count a key as orphaned only when it
+  has the module's own shape, `<prefix><id>/<name>`, and no item has that id, instead of every key
+  under `prefix` without a row except a hard-coded `media-variants/`. `images-default`'s variants
+  survive a deleting reconcile with its `prefix` nested under this module's (`media/variants/` under
+  `media/`) or equal to it; a file directly under `prefix`, deeper than `<id>/<name>`, or under the id
+  of an existing item is no longer reported.
 - `media-default` provides `media@1`; `Media` extends `MediaFiles`. A delete ends the item's
   readiness before it removes any byte (`MediaStatus` gains `removing`): `media.serve` and
   `media.download` answer 404 during a delete instead of failing. A delete that stopped midway leaves

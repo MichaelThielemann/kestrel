@@ -206,3 +206,24 @@ describe("images/default: an interrupted media delete without publicCopy", () =>
     expect(blobs.blobs.has(`media-variants/${kept.id}/thumb.webp`)).toBe(true);
   });
 });
+
+describe("images/default and media-default storing under the same prefix", () => {
+  it("a deleting media.reconcile keeps every private variant and removes only a key whose id no item has", async () => {
+    const store = createFakePersistence();
+    const blobs = memoryBlobs();
+    const media = await createMediaDefault({ ...MEDIA_CONFIG, publicCopy: undefined, prefix: "media/" }, blobs, store, quiet);
+    const images = await createImages({ prefix: "media/", publicPath: "/media", chunk: 2, staleAfterMs: 60000, maxAttempts: 1, renderTimeoutMs: DEFAULT_RENDER_TIMEOUT_MS, sizes: [THUMB] }, { blobs, db: store, media, logger: quiet, render: renderer });
+    const photo = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#446688" } }).jpeg().toBuffer();
+    const item = expectOk(await media.upload({ filename: "photo.jpg", contentType: "image/jpeg", data: photo })).item;
+    expect(expectOk(await images.generate(item.id)).map((row) => row.state)).toEqual(["done"]);
+    expect(blobs.blobs.has(`media/${item.id}/thumb.webp`)).toBe(true);
+    expectOk(await blobs.put("media/no-such-item/orphan.png", new Uint8Array([1]), { contentType: "image/png" }));
+
+    expect(expectOk(await media.reconcile({ delete: true }))).toEqual({ blobsWithoutRow: ["media/no-such-item/orphan.png"], rowsWithoutBlob: [] });
+    expect(blobs.blobs.has(`media/${item.id}/thumb.webp`)).toBe(true);
+    expect(blobs.blobs.has(item.key)).toBe(true);
+    expect(blobs.blobs.has("media/no-such-item/orphan.png")).toBe(false);
+    expect(expectOk(await images.read(item.id, "thumb.webp"))).toMatchObject({ variant: "done" });
+    await images.close();
+  });
+});

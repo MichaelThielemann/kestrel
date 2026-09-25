@@ -1042,18 +1042,22 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       return ok({ ok: true, removed: ids.length, ids });
     },
     async reconcile(options = {}) {
-      const stored = new Set<string>();
+      const storedIds = new Set<string>();
       const rowsWithoutBlob: string[] = [];
       const listed = await blobs.list(config.prefix);
       if (isErr(listed)) return listed;
-      const present = new Set(listed.value.map((info) => info.key).filter((key) => canonicalIdOf(key, config.prefix) !== null));
+      const present = new Map<string, string>();
+      for (const info of listed.value) {
+        const id = canonicalIdOf(info.key, config.prefix);
+        if (id !== null) present.set(info.key, id);
+      }
       const walked = await eachItem({}, async (item) => {
-        stored.add(item.key);
+        storedIds.add(item.id);
         if (!present.has(item.key)) rowsWithoutBlob.push(item.key);
         return ok();
       });
       if (isErr(walked)) return walked;
-      const blobsWithoutRow = [...present].filter((key) => !stored.has(key)).sort();
+      const blobsWithoutRow = [...present].filter(([, id]) => !storedIds.has(id)).map(([key]) => key).sort();
       if (options.delete === true) {
         for (const key of blobsWithoutRow) {
           const dropped = await blobs.remove(key);
