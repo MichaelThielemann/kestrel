@@ -416,4 +416,8 @@ describe("authz/roles: authz.fields cuts the answer to the caller's field grant"
   it("fails boot for a step argument without a resource and a shape", async () => {
     await expect(bootRecords(grants, [definePipeline({ name: "getRecord", steps: ["records.get", "authz.fields:records"] })])).rejects.toThrow('authz.fields:records – write authz.fields:<resource>?shape=<item|list|array|file>, e.g. authz.fields:media?shape=list');
   });
+
+  it("fails boot when an anonymously answered pipeline does not end with the step", async () => {
+    await expect(bootRecords(grants, [definePipeline({ name: "getRecord", steps: ["records.signIn", "authz.require:records.read", "records.get"] }), definePipeline({ name: "listRecords", steps: ["records.list", "authz.fields:records?shape=list"] })])).rejects.toThrow('authz/roles: pipeline "getRecord" answers anonymous callers but does not end with authz.fields:<resource>?shape=item');
+  });
 });

@@ -125,7 +125,10 @@ async function bootExample(options: Options): Promise<Example> {
     if (m.use === "@michaelthielemann/kestrel-replication-sqlite") return { ...m, config: { ...config, file: join(dataDir, "replication.db") } };
     if (m.use === "@michaelthielemann/kestrel-blobstore-filesystem") return { ...m, config: { ...config, root: join(dataDir, "blobs") } };
     if (m.use === "@michaelthielemann/kestrel-renderer-plain") return { use: "renderer/reading", config: {} };
-    if (m.use === "@michaelthielemann/kestrel-authz-roles") return { ...m, config: { ...config, anonymous: [...boundaryCast<string[]>(config.anonymous, "host"), "speakers.read", "lineups.read"] } };
+    if (m.use === "@michaelthielemann/kestrel-authz-roles") {
+      const fields = boundaryCast<Record<string, string[]>>(config.anonymousFields, "host");
+      return { ...m, config: { ...config, anonymous: [...boundaryCast<string[]>(config.anonymous, "host"), "speakers.read", "lineups.read"], anonymousFields: { ...fields, pages: [...(fields.pages ?? []), "lineups"] } } };
+    }
     if (m.use === "@michaelthielemann/kestrel-delivery-static") return { ...m, config: { ...config, dependencies: { render: queue ? "events" : "background", rendererReadsDocument: true, renderTimeoutSeconds: 5, claimTtlSeconds: 30 } } };
     if (m.use === "@michaelthielemann/kestrel-content-default") {
       const content = boundaryCast<{ types: Record<string, { fields: Record<string, unknown> }> }>(config, "host");
@@ -277,11 +280,11 @@ for (const mode of ["direct", "queue"] as const) {
         expect(page(example, "/programm")).toContain("<li>Ada</li><li>Grace</li>");
         expect(page(example, "/programm")).not.toContain("Linus");
         const infoBefore = mtime(example, "/info");
-        const pageBefore = boundaryCast<{ updatedAt: number }>(await call(example, "readPage", { params: { id: ids.programm } }), "json").updatedAt;
+        const pageBefore = boundaryCast<{ updatedAt: number }>(await call(example, "readPage", { token: ids.token, params: { id: ids.programm } }), "json").updatedAt;
 
         await call(example, "updateSpeaker", { token: ids.token, params: { id: ids.grace }, body: { name: "Grace H." } });
         await pollUntil(() => (page(example, "/programm") ?? "").includes("<li>Grace H.</li>") && (page(example, "/en/program") ?? "").includes("<li>Grace H.</li>"));
-        expect(boundaryCast<{ updatedAt: number }>(await call(example, "readPage", { params: { id: ids.programm } }), "json").updatedAt).toBe(pageBefore);
+        expect(boundaryCast<{ updatedAt: number }>(await call(example, "readPage", { token: ids.token, params: { id: ids.programm } }), "json").updatedAt).toBe(pageBefore);
         expect(mtime(example, "/info")).toBe(infoBefore);
 
         await call(example, "updateSpeaker", { token: ids.token, params: { id: ids.linus }, body: { status: "published" } });
@@ -375,7 +378,7 @@ describe("examples/minimal dependent pages: lanes keep uploads ahead of re-rende
       let staleWhenAvailable = -1;
       let staleWhenDone = -1;
       await pollUntil(async () => {
-        const item = boundaryCast<{ available: boolean; variantCounts: { done: number; pending: number } }>(await call(example, "getMedia", { params: { id } }), "json");
+        const item = boundaryCast<{ available: boolean; variantCounts: { done: number; pending: number } }>(await call(example, "getMedia", { token, params: { id } }), "json");
         const now = (await stale(example)).stale;
         if (item.available && staleWhenAvailable < 0) staleWhenAvailable = now;
         if (item.variantCounts.pending === 0 && item.variantCounts.done > 0 && staleWhenDone < 0) staleWhenDone = now;

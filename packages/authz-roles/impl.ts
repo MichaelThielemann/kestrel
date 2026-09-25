@@ -294,6 +294,8 @@ export function createAuthzRoles(config: Config): AuthzRoles {
     attach(kestrel) {
       const manifest = kestrel.describe();
       assertAnonymousAccess(config, manifest);
+      const problems = fieldGrantProblems(config, manifest);
+      if (problems.length > 0) throw new Error(problems.join("\n"));
       gates = new Map(manifest.pipelines.map((p): [string, readonly string[]] => [p.name, requiredPermissions(p)]));
       return () => {
         gates = undefined;

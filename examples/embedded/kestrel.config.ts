@@ -25,7 +25,7 @@ export default defineConfig({
         roles: ["editor"],
       },
     },
-    { use: "@michaelthielemann/kestrel-authz-roles", config: { roles: { editor: ["pages.*"] } } },
+    { use: "@michaelthielemann/kestrel-authz-roles", config: { roles: { editor: ["pages.*"] }, anonymousFields: { pages: ["id", "slug", "title", "status", "_locale", "_locales", "_translations", "_links"] } } },
     {
       use: "@michaelthielemann/kestrel-content-default",
       config: {

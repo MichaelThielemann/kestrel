@@ -365,4 +365,14 @@ describe("fieldGrantProblems", () => {
     pipelines[3] = ["resolvePage", [identify, gate("pages.read"), openLookup, described("site.resolve", { writes: ["result"], output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } }), fields("pages?shape=item")]];
     expect(fieldGrantProblems(config, fieldManifest(pipelines))).toEqual(['authz/roles: pipeline "resolvePage" can end at redirects.lookup before authz.fields:pages, and that answer is an open object at the root, which no grant can bound']);
   });
+
+  it("is what attach throws, one problem per line", () => {
+    const pipelines = passing();
+    pipelines[0] = ["getMedia", [identify, gate("media.read"), getMedia]];
+    pipelines[1] = ["listMedia", [identify, gate("media.read"), listMedia]];
+    const authz = createAuthzRoles({ ...config, anonymousFields: { mediaFile: ["headers.cache-control"], pages: ["redirect", "id"] } });
+    expect(() => authz.attach({ describe: () => fieldManifest(pipelines), observe: () => () => {}, health: () => ({ ok: true, restartRequired: false, modules: [] }) })).toThrow(
+      'authz/roles: pipeline "getMedia" answers anonymous callers but does not end with authz.fields:<resource>?shape=item – end it with the step, so that its answer carries only the fields anonymous callers may see\nauthz/roles: pipeline "listMedia" answers anonymous callers but does not end with authz.fields:<resource>?shape=list – end it with the step, so that its answer carries only the fields anonymous callers may see',
+    );
+  });
 });

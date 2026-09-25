@@ -2,5 +2,5 @@ import { definePipeline } from "../modules.ts";
 
 export default definePipeline({
   name: "serveMediaFile",
-  steps: ["authn.identifyUser", "authz.require:media.read", "media.serve"],
+  steps: ["authn.identifyUser", "authz.require:media.read", "media.serve", "authz.fields:mediaFile?shape=file"],
 });

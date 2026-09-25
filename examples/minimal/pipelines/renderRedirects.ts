@@ -2,5 +2,5 @@ import { definePipeline } from "../modules.ts";
 
 export default definePipeline({
   name: "renderRedirects",
-  steps: ["redirects.render"],
+  steps: ["redirects.render", "authz.fields:redirectRules?shape=array"],
 });

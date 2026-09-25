@@ -1135,9 +1135,60 @@
             "type": "record",
             "required": false,
             "secret": false,
-            "set": false,
-            "status": "default",
-            "value": {},
+            "set": true,
+            "status": "set",
+            "value": {
+              "pages": [
+                "id",
+                "slug",
+                "title",
+                "body",
+                "status",
+                "hero",
+                "seo",
+                "_locale",
+                "_locales",
+                "_translations",
+                "_links",
+                "redirect"
+              ],
+              "settings": [
+                "id",
+                "title",
+                "description",
+                "navigation",
+                "_locales",
+                "_translations"
+              ],
+              "media": [
+                "id",
+                "path",
+                "filename",
+                "contentType",
+                "size",
+                "width",
+                "height",
+                "alt",
+                "title",
+                "description",
+                "provenance",
+                "variants[].size",
+                "variants[].width",
+                "variants[].height",
+                "variants[].format",
+                "variants[].path"
+              ],
+              "mediaFile": [
+                "headers.cache-control",
+                "headers.x-content-provenance",
+                "headers.x-kestrel-variant"
+              ],
+              "redirectRules": [
+                "pattern",
+                "target",
+                "status"
+              ]
+            },
             "redacted": false,
             "default": {}
           },
@@ -13430,6 +13481,34 @@
               "404": "not found"
             }
           }
+        },
+        {
+          "spec": "authz.fields:mediaFile?shape=file",
+          "name": "authz.fields",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity; with one, everything when one of its roles has no field grant for mediaFile, otherwise the union of its roles' grants and the anonymous one",
+            "reads": [
+              "identity?",
+              "result?"
+            ],
+            "writes": [
+              "result?"
+            ],
+            "errors": {
+              "403": "no field grant for anonymous callers on mediaFile"
+            },
+            "narrows": {
+              "shape": "file",
+              "answers": {
+                "anonymous": [
+                  "headers.cache-control",
+                  "headers.x-content-provenance",
+                  "headers.x-kestrel-variant"
+                ]
+              }
+            }
+          }
         }
       ]
     },
@@ -14105,6 +14184,47 @@
               ]
             }
           }
+        },
+        {
+          "spec": "authz.fields:media?shape=item",
+          "name": "authz.fields",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Keep only the media fields the caller may see: anonymousFields.media without an identity; with one, everything when one of its roles has no field grant for media, otherwise the union of its roles' grants and the anonymous one",
+            "reads": [
+              "identity?",
+              "result?"
+            ],
+            "writes": [
+              "result?"
+            ],
+            "errors": {
+              "403": "no field grant for anonymous callers on media"
+            },
+            "narrows": {
+              "shape": "item",
+              "answers": {
+                "anonymous": [
+                  "id",
+                  "path",
+                  "filename",
+                  "contentType",
+                  "size",
+                  "width",
+                  "height",
+                  "alt",
+                  "title",
+                  "description",
+                  "provenance",
+                  "variants[].size",
+                  "variants[].width",
+                  "variants[].height",
+                  "variants[].format",
+                  "variants[].path"
+                ]
+              }
+            }
+          }
         }
       ]
     },
@@ -14324,6 +14444,37 @@
               "400": "unknown locale"
             },
             "atomicSafe": true
+          }
+        },
+        {
+          "spec": "authz.fields:settings?shape=item",
+          "name": "authz.fields",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Keep only the settings fields the caller may see: anonymousFields.settings without an identity; with one, everything when one of its roles has no field grant for settings, otherwise the union of its roles' grants and the anonymous one",
+            "reads": [
+              "identity?",
+              "result?"
+            ],
+            "writes": [
+              "result?"
+            ],
+            "errors": {
+              "403": "no field grant for anonymous callers on settings"
+            },
+            "narrows": {
+              "shape": "item",
+              "answers": {
+                "anonymous": [
+                  "id",
+                  "title",
+                  "description",
+                  "navigation",
+                  "_locales",
+                  "_translations"
+                ]
+              }
+            }
           }
         }
       ]
@@ -16310,6 +16461,47 @@
               ]
             }
           }
+        },
+        {
+          "spec": "authz.fields:media?shape=list",
+          "name": "authz.fields",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Keep only the media fields the caller may see: anonymousFields.media without an identity; with one, everything when one of its roles has no field grant for media, otherwise the union of its roles' grants and the anonymous one",
+            "reads": [
+              "identity?",
+              "result?"
+            ],
+            "writes": [
+              "result?"
+            ],
+            "errors": {
+              "403": "no field grant for anonymous callers on media"
+            },
+            "narrows": {
+              "shape": "list",
+              "answers": {
+                "anonymous": [
+                  "id",
+                  "path",
+                  "filename",
+                  "contentType",
+                  "size",
+                  "width",
+                  "height",
+                  "alt",
+                  "title",
+                  "description",
+                  "provenance",
+                  "variants[].size",
+                  "variants[].width",
+                  "variants[].height",
+                  "variants[].format",
+                  "variants[].path"
+                ]
+              }
+            }
+          }
         }
       ]
     },
@@ -16666,6 +16858,43 @@
               "400": "invalid limit, offset, sort or locale"
             },
             "atomicSafe": true
+          }
+        },
+        {
+          "spec": "authz.fields:pages?shape=list",
+          "name": "authz.fields",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Keep only the pages fields the caller may see: anonymousFields.pages without an identity; with one, everything when one of its roles has no field grant for pages, otherwise the union of its roles' grants and the anonymous one",
+            "reads": [
+              "identity?",
+              "result?"
+            ],
+            "writes": [
+              "result?"
+            ],
+            "errors": {
+              "403": "no field grant for anonymous callers on pages"
+            },
+            "narrows": {
+              "shape": "list",
+              "answers": {
+                "anonymous": [
+                  "id",
+                  "slug",
+                  "title",
+                  "body",
+                  "status",
+                  "hero",
+                  "seo",
+                  "_locale",
+                  "_locales",
+                  "_translations",
+                  "_links",
+                  "redirect"
+                ]
+              }
+            }
           }
         }
       ]
@@ -18861,6 +19090,43 @@
             },
             "atomicSafe": true
           }
+        },
+        {
+          "spec": "authz.fields:pages?shape=item",
+          "name": "authz.fields",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Keep only the pages fields the caller may see: anonymousFields.pages without an identity; with one, everything when one of its roles has no field grant for pages, otherwise the union of its roles' grants and the anonymous one",
+            "reads": [
+              "identity?",
+              "result?"
+            ],
+            "writes": [
+              "result?"
+            ],
+            "errors": {
+              "403": "no field grant for anonymous callers on pages"
+            },
+            "narrows": {
+              "shape": "item",
+              "answers": {
+                "anonymous": [
+                  "id",
+                  "slug",
+                  "title",
+                  "body",
+                  "status",
+                  "hero",
+                  "seo",
+                  "_locale",
+                  "_locales",
+                  "_translations",
+                  "_links",
+                  "redirect"
+                ]
+              }
+            }
+          }
         }
       ]
     },
@@ -19518,6 +19784,34 @@
                   }
                 },
                 "required": [
+                  "pattern",
+                  "target",
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "spec": "authz.fields:redirectRules?shape=array",
+          "name": "authz.fields",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Keep only the redirectRules fields the caller may see: anonymousFields.redirectRules without an identity; with one, everything when one of its roles has no field grant for redirectRules, otherwise the union of its roles' grants and the anonymous one",
+            "reads": [
+              "identity?",
+              "result?"
+            ],
+            "writes": [
+              "result?"
+            ],
+            "errors": {
+              "403": "no field grant for anonymous callers on redirectRules"
+            },
+            "narrows": {
+              "shape": "array",
+              "answers": {
+                "anonymous": [
                   "pattern",
                   "target",
                   "status"
@@ -20286,6 +20580,43 @@
                 }
               },
               "required": []
+            }
+          }
+        },
+        {
+          "spec": "authz.fields:pages?shape=item",
+          "name": "authz.fields",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Keep only the pages fields the caller may see: anonymousFields.pages without an identity; with one, everything when one of its roles has no field grant for pages, otherwise the union of its roles' grants and the anonymous one",
+            "reads": [
+              "identity?",
+              "result?"
+            ],
+            "writes": [
+              "result?"
+            ],
+            "errors": {
+              "403": "no field grant for anonymous callers on pages"
+            },
+            "narrows": {
+              "shape": "item",
+              "answers": {
+                "anonymous": [
+                  "id",
+                  "slug",
+                  "title",
+                  "body",
+                  "status",
+                  "hero",
+                  "seo",
+                  "_locale",
+                  "_locales",
+                  "_translations",
+                  "_links",
+                  "redirect"
+                ]
+              }
             }
           }
         }
@@ -21363,6 +21694,34 @@
             },
             "anonymous": "required"
           }
+        },
+        {
+          "spec": "authz.fields:mediaFile?shape=file",
+          "name": "authz.fields",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity; with one, everything when one of its roles has no field grant for mediaFile, otherwise the union of its roles' grants and the anonymous one",
+            "reads": [
+              "identity?",
+              "result?"
+            ],
+            "writes": [
+              "result?"
+            ],
+            "errors": {
+              "403": "no field grant for anonymous callers on mediaFile"
+            },
+            "narrows": {
+              "shape": "file",
+              "answers": {
+                "anonymous": [
+                  "headers.cache-control",
+                  "headers.x-content-provenance",
+                  "headers.x-kestrel-variant"
+                ]
+              }
+            }
+          }
         }
       ]
     },
@@ -21416,6 +21775,34 @@
               "404": "not found, not ready, or not the name the file was uploaded under"
             },
             "anonymous": "required"
+          }
+        },
+        {
+          "spec": "authz.fields:mediaFile?shape=file",
+          "name": "authz.fields",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity; with one, everything when one of its roles has no field grant for mediaFile, otherwise the union of its roles' grants and the anonymous one",
+            "reads": [
+              "identity?",
+              "result?"
+            ],
+            "writes": [
+              "result?"
+            ],
+            "errors": {
+              "403": "no field grant for anonymous callers on mediaFile"
+            },
+            "narrows": {
+              "shape": "file",
+              "answers": {
+                "anonymous": [
+                  "headers.cache-control",
+                  "headers.x-content-provenance",
+                  "headers.x-kestrel-variant"
+                ]
+              }
+            }
           }
         }
       ]

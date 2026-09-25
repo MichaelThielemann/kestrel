@@ -18,7 +18,20 @@ export default defineConfig({
         bootstrap: { username: "admin", passwordHash: "scrypt$154f59bdfe2d034df7e9e4656a660413$5da171463df807a5e548951ba97f43f10af3b1992559e028c24fce6a65fe3664e410689a9ae565b1ff6b48d22c25a8d3652f06389dcbffd2d406b116148739fd", roles: ["admin"] },
       },
     },
-    { use: "@michaelthielemann/kestrel-authz-roles", config: { roles: { admin: ["*"], editor: ["pages.*", "media.*", "images.read", "settings.read", "redirects.*"] }, anonymous: ["pages.read", "settings.read", "media.read"] } },
+    {
+      use: "@michaelthielemann/kestrel-authz-roles",
+      config: {
+        roles: { admin: ["*"], editor: ["pages.*", "media.*", "images.read", "settings.read", "redirects.*"] },
+        anonymous: ["pages.read", "settings.read", "media.read"],
+        anonymousFields: {
+          pages: ["id", "slug", "title", "body", "status", "hero", "seo", "_locale", "_locales", "_translations", "_links", "redirect"],
+          settings: ["id", "title", "description", "navigation", "_locales", "_translations"],
+          media: ["id", "path", "filename", "contentType", "size", "width", "height", "alt", "title", "description", "provenance", "variants[].size", "variants[].width", "variants[].height", "variants[].format", "variants[].path"],
+          mediaFile: ["headers.cache-control", "headers.x-content-provenance", "headers.x-kestrel-variant"],
+          redirectRules: ["pattern", "target", "status"],
+        },
+      },
+    },
     {
       use: "@michaelthielemann/kestrel-content-default",
       config: {

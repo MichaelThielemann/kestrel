@@ -196,8 +196,8 @@ async function upload(example: Example, token: string, filename: string, content
   return boundaryCast<Item>(uploaded.result, "json");
 }
 
-async function getItem(example: Example, id: string): Promise<Item> {
-  const got = await example.kestrel.run("getMedia", { trigger, params: { id } });
+async function getItem(example: Example, id: string, token: string): Promise<Item> {
+  const got = await example.kestrel.run("getMedia", { trigger, headers: bearer(token), params: { id } });
   expect(got.status).toBe(200);
   return boundaryCast<Item>(got.result, "json");
 }
@@ -230,7 +230,7 @@ describe("examples/minimal media: a published page and the public copies", () =>
     try {
       const token = await adminToken(example);
       const item = await upload(example, token, "photo.jpg", "image/jpeg", TEST_JPEG);
-      const listed = await getItem(example, item.id);
+      const listed = await getItem(example, item.id, token);
       expect(listed.available).toBe(true);
       const thumb = listed.variants.find((variant) => variant.size === "thumb")!;
       const fields = { slug: "gallery", title: "Gallery", status: "published", hero: item.id, body: [{ type: "image", props: { image: thumb.path } }] };
@@ -262,7 +262,7 @@ describe("examples/minimal media: a published page and the public copies", () =>
       const viewer = boundaryCast<{ token: string }>(session.result, "json").token;
       const original = await example.kestrel.run("serveMediaFile", { trigger, headers: bearer(viewer), params: { id: item.id, name: fileOf(item.path) } });
       expect(original.status).toBe(200);
-      const listed = await getItem(example, item.id);
+      const listed = await getItem(example, item.id, token);
       for (const variant of listed.variants) expect((await serveVariant(example, item.id, fileOf(variant.path), bearer(viewer))).status).toBe(200);
       const read = await example.kestrel.run("downloadMedia", { trigger, headers: bearer(viewer), params: { id: item.id } });
       expect(read.status).toBe(200);
@@ -335,8 +335,8 @@ describe("examples/minimal media: an image whose render fails", () => {
       const token = await adminToken(example);
       const png = pngWithTruncatedPixels(16, 12);
       const item = await upload(example, token, "broken.png", "image/png", png);
-      await pollUntil(async () => (await getItem(example, item.id)).available);
-      const placed = await getItem(example, item.id);
+      await pollUntil(async () => (await getItem(example, item.id, token)).available);
+      const placed = await getItem(example, item.id, token);
       expect(placed.variants.length).toBe(5);
       for (const variant of placed.variants) {
         expect(variant.state).toBe("pending");
@@ -350,7 +350,7 @@ describe("examples/minimal media: an image whose render fails", () => {
 
       const synced = await example.kestrel.run("syncImages", { trigger, headers: bearer(token) });
       expect(synced.status).toBe(200);
-      await pollUntil(async () => (await getItem(example, item.id)).variants.every((variant) => variant.state === "error"));
+      await pollUntil(async () => (await getItem(example, item.id, token)).variants.every((variant) => variant.state === "error"));
       for (const variant of placed.variants) {
         const file = fileOf(variant.path);
         expect(Buffer.compare(readFileSync(join(example.blobRoot, "site", "media", item.id, "variants", file)), png)).toBe(0);
@@ -397,24 +397,24 @@ describe("examples/minimal media: placing and rendering in separate lanes of eve
       const items: Item[] = [];
       for (let i = 0; i < 20; i++) {
         const item = await upload(example, token, `p${i}.jpg`, "image/jpeg", TEST_JPEG);
-        await pollUntil(async () => (await getItem(example, item.id)).available);
+        await pollUntil(async () => (await getItem(example, item.id, token)).available);
         if (i === 0) await hold.reached;
         items.push(item);
       }
       expect(filesUnder(join(example.blobRoot, "media-variants"))).toEqual([]);
       for (const item of items) {
-        const listed = await getItem(example, item.id);
+        const listed = await getItem(example, item.id, token);
         expect(listed.variants.map((variant) => variant.state)).toEqual(["pending", "pending", "pending", "pending", "pending"]);
         expect((await serveVariant(example, item.id, fileOf(listed.variants[0]!.path))).headers["x-kestrel-variant"]).toBe("original");
       }
 
       hold.open();
       await pollUntil(async () => {
-        for (const item of items) if ((await getItem(example, item.id)).variantCounts.done !== 5) return false;
+        for (const item of items) if ((await getItem(example, item.id, token)).variantCounts.done !== 5) return false;
         return true;
       }, 30_000);
       for (const item of items) {
-        const listed = await getItem(example, item.id);
+        const listed = await getItem(example, item.id, token);
         for (const variant of listed.variants) {
           const served = await serveVariant(example, item.id, fileOf(variant.path));
           expect(served.status).toBe(200);
@@ -433,13 +433,13 @@ describe("examples/minimal media: placing and rendering in separate lanes of eve
     try {
       const token = await adminToken(example);
       const first = await upload(example, token, "p0.jpg", "image/jpeg", TEST_JPEG);
-      await pollUntil(async () => (await getItem(example, first.id)).available);
+      await pollUntil(async () => (await getItem(example, first.id, token)).available);
       await hold.reached;
       const second = await upload(example, token, "p1.jpg", "image/jpeg", TEST_JPEG);
       await new Promise((resolve) => setTimeout(resolve, 300));
-      expect((await getItem(example, second.id)).available).toBe(false);
+      expect((await getItem(example, second.id, token)).available).toBe(false);
       hold.open();
-      await pollUntil(async () => (await getItem(example, second.id)).available, 10_000);
+      await pollUntil(async () => (await getItem(example, second.id, token)).available, 10_000);
     } finally {
       await example.dispose();
     }

@@ -49,6 +49,7 @@ describe("site wiring", () => {
       "redirects.lookup",
       "site.resolve:pages?home=home&status=published&fallback=true",
       "site.resolveLinks:pages?home=home&status=published&fallback=true",
+      "authz.fields:pages?shape=item",
     ]);
   });
 });
@@ -70,7 +71,7 @@ describe("examples/minimal redirects wiring", () => {
     expect(resolve.indexOf("redirects.lookup")).toBeLessThan(resolve.findIndex((s) => s.startsWith("site.resolve:pages")));
     expect(pipelines.get("setRedirects")).toEqual(["authn.requireUser", "authz.require:redirects.write", "validate.check:redirects.rules", "redirects.validate", "content.set:redirects", "redirects.export"]);
     expect(pipelines.get("publishAllPages")).toEqual(["authn.requireUser", "authz.require:pages.manage", "delivery.publishAll:pages", "redirects.export", "delivery.exportLlms"]);
-    expect(pipelines.get("renderRedirects")).toEqual(["redirects.render"]);
+    expect(pipelines.get("renderRedirects")).toEqual(["redirects.render", "authz.fields:redirectRules?shape=array"]);
   });
 });
 
@@ -297,8 +298,8 @@ describe("image variants wiring", () => {
     expect(pipelines.get("syncImages")).toEqual(["authn.requireUser", "authz.require:images.manage", "images.sync"]);
     expect(pipelines.get("pruneImages")).toEqual(["authn.requireUser", "authz.require:images.manage", "images.prune"]);
     expect(pipelines.get("imagesStatus")).toEqual(["authn.requireUser", "authz.require:images.read", "images.readStatus"]);
-    expect(pipelines.get("serveImageVariant")).toEqual(["authn.identifyUser", "authz.require:media.read", "images.serve"]);
-    expect(pipelines.get("serveMediaFile")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.serve"]);
+    expect(pipelines.get("serveImageVariant")).toEqual(["authn.identifyUser", "authz.require:media.read", "images.serve", "authz.fields:mediaFile?shape=file"]);
+    expect(pipelines.get("serveMediaFile")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.serve", "authz.fields:mediaFile?shape=file"]);
     expect(pipelines.get("generateImageVariants")).toEqual(["images.generate"]);
     expect(pipelines.get("resumeImages")).toEqual(["images.resume"]);
   });
@@ -308,8 +309,8 @@ describe("image variants wiring", () => {
   });
   it("attaches variants to media reads and export, removes on delete", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("getMedia")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.get", "images.attach"]);
-    expect(pipelines.get("listMedia")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.list", "images.attach"]);
+    expect(pipelines.get("getMedia")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.get", "images.attach", "authz.fields:media?shape=item"]);
+    expect(pipelines.get("listMedia")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.list", "images.attach", "authz.fields:media?shape=list"]);
     expect(pipelines.get("deleteMedia")).toEqual(["authn.requireUser", "authz.require:media.delete", "references.guard:media", "media.remove", "images.remove", "events.emit:media.deleted", "events.relay"]);
     expect(pipelines.get("exportMedia")).toEqual(["authn.requireUser", "authz.require:media.manage", "media.export:./data/export", "images.export:./data/export"]);
   });
@@ -1034,6 +1035,7 @@ describe("events/direct relay: a forced delivery.publish failure through POST /p
 
 interface OpenApiSchemaDoc {
   paths: Record<string, Record<string, { responses: Record<string, { content: { "application/json": { schema: Record<string, unknown> } } }> }>>;
+  components: { schemas: Record<string, Record<string, unknown>> };
 }
 
 describe("terminal output shapes at the HTTP boundary", () => {
@@ -1050,13 +1052,15 @@ describe("terminal output shapes at the HTTP boundary", () => {
       expect(hit.result).toEqual({ redirect: { to: "/neu", status: 301 } });
 
       const openapi = boundaryCast<OpenApiSchemaDoc>(JSON.parse(readFileSync(join(root, "openapi.json"), "utf8")), "json");
-      const schema = openapi.paths["/site/{path}"]?.get?.responses["200"]?.content["application/json"].schema;
-      if (schema === undefined) throw new Error("missing schema for GET /site/{path} 200");
-      expect(validateSchema(schema, hit.result)).toEqual([]);
-
-      const pageBranchOnly = boundaryCast<{ anyOf: Record<string, unknown>[] }>(schema, "json").anyOf[0];
-      if (pageBranchOnly === undefined) throw new Error("missing the page branch of the anyOf");
-      expect(validateSchema(pageBranchOnly, hit.result)).not.toEqual([]);
+      expect(openapi.paths["/site/{path}"]?.get?.responses["200"]?.content["application/json"].schema).toEqual({ anyOf: [{ $ref: "#/components/schemas/resolvePage" }, { $ref: "#/components/schemas/resolvePage.anonymous" }] });
+      for (const name of ["resolvePage", "resolvePage.anonymous"]) {
+        const schema = openapi.components.schemas[name];
+        if (schema === undefined) throw new Error(`missing component ${name}`);
+        expect(validateSchema(schema, hit.result), name).toEqual([]);
+        const pageBranchOnly = boundaryCast<{ anyOf: Record<string, unknown>[] }>(schema, "json").anyOf[0];
+        if (pageBranchOnly === undefined) throw new Error(`missing the page branch of ${name}`);
+        expect(validateSchema(pageBranchOnly, hit.result), name).not.toEqual([]);
+      }
     } finally {
       await dispose();
     }

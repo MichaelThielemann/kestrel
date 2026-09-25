@@ -7162,7 +7162,7 @@
     "/media": {
       "get": {
         "operationId": "listMedia",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → List media, newest first; anonymous callers may only fetch by ids → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → List media, newest first; anonymous callers may only fetch by ids → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed → Keep only the media fields the caller may see: anonymousFields.media without an identity; with one, everything when one of its roles has no field grant for media, otherwise the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -7171,7 +7171,8 @@
           "authn.identifyUser",
           "authz.require:media.read",
           "media.list",
-          "images.attach"
+          "images.attach",
+          "authz.fields:media?shape=list"
         ],
         "parameters": [
           {
@@ -7241,201 +7242,24 @@
         ],
         "responses": {
           "200": {
-            "description": "ok",
+            "description": "ok; x-kestrel-answers names the answer each audience receives",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "path": {
-                            "type": "string",
-                            "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
-                          },
-                          "filename": {
-                            "type": "string"
-                          },
-                          "folder": {
-                            "type": "string"
-                          },
-                          "contentType": {
-                            "type": "string"
-                          },
-                          "size": {
-                            "type": "number"
-                          },
-                          "createdAt": {
-                            "type": "number"
-                          },
-                          "updatedAt": {
-                            "type": "number"
-                          },
-                          "provenance": {
-                            "type": "object",
-                            "properties": {
-                              "origin": {
-                                "type": "string",
-                                "enum": [
-                                  "human",
-                                  "ai",
-                                  "mixed",
-                                  "unknown"
-                                ]
-                              },
-                              "tool": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              },
-                              "at": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "origin"
-                            ],
-                            "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
-                          },
-                          "width": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
-                          },
-                          "height": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
-                          },
-                          "alt": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "title": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "description": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "available": {
-                            "type": "boolean"
-                          },
-                          "variants": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "size": {
-                                  "type": "string"
-                                },
-                                "width": {
-                                  "type": "number"
-                                },
-                                "height": {
-                                  "type": "number"
-                                },
-                                "format": {
-                                  "type": "string"
-                                },
-                                "bytes": {
-                                  "type": "number"
-                                },
-                                "state": {
-                                  "type": "string",
-                                  "enum": [
-                                    "pending",
-                                    "done",
-                                    "error",
-                                    "failed"
-                                  ]
-                                },
-                                "path": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "size",
-                                "width",
-                                "height",
-                                "format",
-                                "bytes",
-                                "state",
-                                "path"
-                              ]
-                            }
-                          },
-                          "variantCounts": {
-                            "type": "object",
-                            "properties": {
-                              "done": {
-                                "type": "number"
-                              },
-                              "pending": {
-                                "type": "number"
-                              },
-                              "error": {
-                                "type": "number"
-                              },
-                              "failed": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "done",
-                              "pending",
-                              "error",
-                              "failed"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "alt",
-                          "available",
-                          "contentType",
-                          "createdAt",
-                          "description",
-                          "filename",
-                          "folder",
-                          "height",
-                          "id",
-                          "path",
-                          "provenance",
-                          "size",
-                          "title",
-                          "updatedAt",
-                          "variantCounts",
-                          "variants",
-                          "width"
-                        ],
-                        "additionalProperties": false
-                      }
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/listMedia"
                     },
-                    "total": {
-                      "type": "number"
+                    {
+                      "$ref": "#/components/schemas/listMedia.anonymous"
                     }
-                  },
-                  "required": [
-                    "items",
-                    "total"
                   ]
                 }
+              }
+            },
+            "x-kestrel-answers": {
+              "anonymous": {
+                "$ref": "#/components/schemas/listMedia.anonymous"
               }
             }
           },
@@ -7460,7 +7284,7 @@
             }
           },
           "403": {
-            "description": "missing permission media.read",
+            "description": "no field grant for anonymous callers on media",
             "content": {
               "application/json": {
                 "schema": {
@@ -8479,7 +8303,7 @@
       },
       "get": {
         "operationId": "getMedia",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → Media metadata → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → Media metadata → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed → Keep only the media fields the caller may see: anonymousFields.media without an identity; with one, everything when one of its roles has no field grant for media, otherwise the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -8488,7 +8312,8 @@
           "authn.identifyUser",
           "authz.require:media.read",
           "media.get",
-          "images.attach"
+          "images.attach",
+          "authz.fields:media?shape=item"
         ],
         "parameters": [
           {
@@ -8510,186 +8335,24 @@
         ],
         "responses": {
           "200": {
-            "description": "ok",
+            "description": "ok; x-kestrel-answers names the answer each audience receives",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/getMedia"
                     },
-                    "path": {
-                      "type": "string",
-                      "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
-                    },
-                    "filename": {
-                      "type": "string"
-                    },
-                    "folder": {
-                      "type": "string"
-                    },
-                    "contentType": {
-                      "type": "string"
-                    },
-                    "size": {
-                      "type": "number"
-                    },
-                    "createdAt": {
-                      "type": "number"
-                    },
-                    "updatedAt": {
-                      "type": "number"
-                    },
-                    "provenance": {
-                      "type": "object",
-                      "properties": {
-                        "origin": {
-                          "type": "string",
-                          "enum": [
-                            "human",
-                            "ai",
-                            "mixed",
-                            "unknown"
-                          ]
-                        },
-                        "tool": {
-                          "type": "string"
-                        },
-                        "model": {
-                          "type": "string"
-                        },
-                        "at": {
-                          "type": "number"
-                        }
-                      },
-                      "required": [
-                        "origin"
-                      ],
-                      "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
-                    },
-                    "width": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
-                    },
-                    "height": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
-                    },
-                    "alt": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "title": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "description": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "available": {
-                      "type": "boolean"
-                    },
-                    "variants": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "size": {
-                            "type": "string"
-                          },
-                          "width": {
-                            "type": "number"
-                          },
-                          "height": {
-                            "type": "number"
-                          },
-                          "format": {
-                            "type": "string"
-                          },
-                          "bytes": {
-                            "type": "number"
-                          },
-                          "state": {
-                            "type": "string",
-                            "enum": [
-                              "pending",
-                              "done",
-                              "error",
-                              "failed"
-                            ]
-                          },
-                          "path": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "size",
-                          "width",
-                          "height",
-                          "format",
-                          "bytes",
-                          "state",
-                          "path"
-                        ]
-                      }
-                    },
-                    "variantCounts": {
-                      "type": "object",
-                      "properties": {
-                        "done": {
-                          "type": "number"
-                        },
-                        "pending": {
-                          "type": "number"
-                        },
-                        "error": {
-                          "type": "number"
-                        },
-                        "failed": {
-                          "type": "number"
-                        }
-                      },
-                      "required": [
-                        "done",
-                        "pending",
-                        "error",
-                        "failed"
-                      ]
+                    {
+                      "$ref": "#/components/schemas/getMedia.anonymous"
                     }
-                  },
-                  "required": [
-                    "alt",
-                    "available",
-                    "contentType",
-                    "createdAt",
-                    "description",
-                    "filename",
-                    "folder",
-                    "height",
-                    "id",
-                    "path",
-                    "provenance",
-                    "size",
-                    "title",
-                    "updatedAt",
-                    "variantCounts",
-                    "variants",
-                    "width"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
+              }
+            },
+            "x-kestrel-answers": {
+              "anonymous": {
+                "$ref": "#/components/schemas/getMedia.anonymous"
               }
             }
           },
@@ -8714,7 +8377,7 @@
             }
           },
           "403": {
-            "description": "missing permission media.read",
+            "description": "no field grant for anonymous callers on media",
             "content": {
               "application/json": {
                 "schema": {
@@ -9130,7 +8793,7 @@
     "/media/{id}/{name}": {
       "get": {
         "operationId": "serveMediaFile",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The file at its public URL (params.id, params.name); the name must be the one it was uploaded under",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The file at its public URL (params.id, params.name); the name must be the one it was uploaded under → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity; with one, everything when one of its roles has no field grant for mediaFile, otherwise the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -9138,7 +8801,8 @@
         "x-kestrel-steps": [
           "authn.identifyUser",
           "authz.require:media.read",
-          "media.serve"
+          "media.serve",
+          "authz.fields:mediaFile?shape=file"
         ],
         "parameters": [
           {
@@ -9168,6 +8832,15 @@
                   "format": "binary"
                 }
               }
+            },
+            "x-kestrel-answers": {
+              "anonymous": {
+                "headers": [
+                  "cache-control",
+                  "x-content-provenance",
+                  "x-kestrel-variant"
+                ]
+              }
             }
           },
           "401": {
@@ -9181,7 +8854,7 @@
             }
           },
           "403": {
-            "description": "missing permission media.read",
+            "description": "no field grant for anonymous callers on mediaFile",
             "content": {
               "application/json": {
                 "schema": {
@@ -9239,7 +8912,7 @@
     "/media/{id}/file": {
       "get": {
         "operationId": "downloadMedia",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The file itself",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The file itself → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity; with one, everything when one of its roles has no field grant for mediaFile, otherwise the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -9247,7 +8920,8 @@
         "x-kestrel-steps": [
           "authn.identifyUser",
           "authz.require:media.read",
-          "media.download"
+          "media.download",
+          "authz.fields:mediaFile?shape=file"
         ],
         "parameters": [
           {
@@ -9269,6 +8943,15 @@
                   "format": "binary"
                 }
               }
+            },
+            "x-kestrel-answers": {
+              "anonymous": {
+                "headers": [
+                  "cache-control",
+                  "x-content-provenance",
+                  "x-kestrel-variant"
+                ]
+              }
             }
           },
           "401": {
@@ -9282,7 +8965,7 @@
             }
           },
           "403": {
-            "description": "missing permission media.read",
+            "description": "no field grant for anonymous callers on mediaFile",
             "content": {
               "application/json": {
                 "schema": {
@@ -9340,7 +9023,7 @@
     "/media/{id}/variants/{file}": {
       "get": {
         "operationId": "serveImageVariant",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback",
+        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity; with one, everything when one of its roles has no field grant for mediaFile, otherwise the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -9348,7 +9031,8 @@
         "x-kestrel-steps": [
           "authn.identifyUser",
           "authz.require:media.read",
-          "images.serve"
+          "images.serve",
+          "authz.fields:mediaFile?shape=file"
         ],
         "parameters": [
           {
@@ -9378,6 +9062,15 @@
                   "format": "binary"
                 }
               }
+            },
+            "x-kestrel-answers": {
+              "anonymous": {
+                "headers": [
+                  "cache-control",
+                  "x-content-provenance",
+                  "x-kestrel-variant"
+                ]
+              }
             }
           },
           "400": {
@@ -9401,7 +9094,7 @@
             }
           },
           "403": {
-            "description": "missing permission media.read",
+            "description": "no field grant for anonymous callers on mediaFile",
             "content": {
               "application/json": {
                 "schema": {
@@ -10040,7 +9733,7 @@
     "/pages": {
       "get": {
         "operationId": "listPages",
-        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → List pages",
+        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → List pages → Keep only the pages fields the caller may see: anonymousFields.pages without an identity; with one, everything when one of its roles has no field grant for pages, otherwise the union of its roles' grants and the anonymous one",
         "tags": [
           "pages"
         ],
@@ -10048,7 +9741,8 @@
         "x-kestrel-steps": [
           "authn.identifyUser",
           "authz.require:pages.read",
-          "content.list:pages?status=published"
+          "content.list:pages?status=published",
+          "authz.fields:pages?shape=list"
         ],
         "parameters": [
           {
@@ -10094,120 +9788,24 @@
         ],
         "responses": {
           "200": {
-            "description": "ok",
+            "description": "ok; x-kestrel-answers names the answer each audience receives",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "createdAt": {
-                            "type": "number"
-                          },
-                          "updatedAt": {
-                            "type": "number"
-                          },
-                          "slug": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "title": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "body": {
-                            "anyOf": [
-                              {},
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "status": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "draft",
-                                  "finished",
-                                  "published"
-                                ]
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "hero": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "description": "id of a media"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "seo": {
-                            "anyOf": [
-                              {},
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "_locales": {
-                            "type": "object",
-                            "additionalProperties": {
-                              "type": "string"
-                            },
-                            "description": "origin locale per field, only with fallback"
-                          },
-                          "_translations": {
-                            "type": "object",
-                            "additionalProperties": {
-                              "type": "boolean"
-                            },
-                            "description": "per locale: required localized fields present"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "createdAt",
-                          "updatedAt"
-                        ]
-                      }
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/listPages"
                     },
-                    "total": {
-                      "type": "number"
+                    {
+                      "$ref": "#/components/schemas/listPages.anonymous"
                     }
-                  },
-                  "required": [
-                    "items",
-                    "total"
                   ]
                 }
+              }
+            },
+            "x-kestrel-answers": {
+              "anonymous": {
+                "$ref": "#/components/schemas/listPages.anonymous"
               }
             }
           },
@@ -10232,7 +9830,7 @@
             }
           },
           "403": {
-            "description": "missing permission pages.read",
+            "description": "no field grant for anonymous callers on pages",
             "content": {
               "application/json": {
                 "schema": {
@@ -10803,7 +10401,7 @@
       },
       "get": {
         "operationId": "readPage",
-        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → One pages document",
+        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → One pages document → Keep only the pages fields the caller may see: anonymousFields.pages without an identity; with one, everything when one of its roles has no field grant for pages, otherwise the union of its roles' grants and the anonymous one",
         "tags": [
           "pages"
         ],
@@ -10811,7 +10409,8 @@
         "x-kestrel-steps": [
           "authn.identifyUser",
           "authz.require:pages.read",
-          "content.get:pages?status=published"
+          "content.get:pages?status=published",
+          "authz.fields:pages?shape=item"
         ],
         "parameters": [
           {
@@ -10837,105 +10436,24 @@
         ],
         "responses": {
           "200": {
-            "description": "ok",
+            "description": "ok; x-kestrel-answers names the answer each audience receives",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/readPage"
                     },
-                    "createdAt": {
-                      "type": "number"
-                    },
-                    "updatedAt": {
-                      "type": "number"
-                    },
-                    "slug": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "title": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "body": {
-                      "anyOf": [
-                        {},
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "status": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "draft",
-                            "finished",
-                            "published"
-                          ]
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "hero": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "description": "id of a media"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "seo": {
-                      "anyOf": [
-                        {},
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "_locales": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "string"
-                      },
-                      "description": "origin locale per field, only with fallback"
-                    },
-                    "_translations": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "boolean"
-                      },
-                      "description": "per locale: required localized fields present"
+                    {
+                      "$ref": "#/components/schemas/readPage.anonymous"
                     }
-                  },
-                  "required": [
-                    "id",
-                    "createdAt",
-                    "updatedAt"
                   ]
                 }
+              }
+            },
+            "x-kestrel-answers": {
+              "anonymous": {
+                "$ref": "#/components/schemas/readPage.anonymous"
               }
             }
           },
@@ -10960,7 +10478,7 @@
             }
           },
           "403": {
-            "description": "missing permission pages.read",
+            "description": "no field grant for anonymous callers on pages",
             "content": {
               "application/json": {
                 "schema": {
@@ -11996,47 +11514,45 @@
     "/redirects.json": {
       "get": {
         "operationId": "renderRedirects",
-        "summary": "The compiled redirect list (same content as redirects.json)",
+        "summary": "The compiled redirect list (same content as redirects.json) → Keep only the redirectRules fields the caller may see: anonymousFields.redirectRules without an identity; with one, everything when one of its roles has no field grant for redirectRules, otherwise the union of its roles' grants and the anonymous one",
         "tags": [
           "redirects.json"
         ],
         "x-kestrel-pipeline": "renderRedirects",
         "x-kestrel-steps": [
-          "redirects.render"
+          "redirects.render",
+          "authz.fields:redirectRules?shape=array"
         ],
         "parameters": [],
         "responses": {
           "200": {
-            "description": "ok",
+            "description": "ok; x-kestrel-answers names the answer each audience receives",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "pattern": {
-                        "type": "string"
-                      },
-                      "target": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "type": "integer",
-                        "enum": [
-                          301,
-                          302,
-                          307,
-                          308
-                        ]
-                      }
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/renderRedirects"
                     },
-                    "required": [
-                      "pattern",
-                      "target",
-                      "status"
-                    ]
-                  }
+                    {
+                      "$ref": "#/components/schemas/renderRedirects.anonymous"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-kestrel-answers": {
+              "anonymous": {
+                "$ref": "#/components/schemas/renderRedirects.anonymous"
+              }
+            }
+          },
+          "403": {
+            "description": "no field grant for anonymous callers on redirectRules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -12167,7 +11683,7 @@
     "/settings": {
       "get": {
         "operationId": "getSettings",
-        "summary": "Identify the caller if a valid token is present → Requires permission settings.read → One settings document",
+        "summary": "Identify the caller if a valid token is present → Requires permission settings.read → One settings document → Keep only the settings fields the caller may see: anonymousFields.settings without an identity; with one, everything when one of its roles has no field grant for settings, otherwise the union of its roles' grants and the anonymous one",
         "tags": [
           "settings"
         ],
@@ -12175,7 +11691,8 @@
         "x-kestrel-steps": [
           "authn.identifyUser",
           "authz.require:settings.read",
-          "content.get:settings"
+          "content.get:settings",
+          "authz.fields:settings?shape=item"
         ],
         "parameters": [
           {
@@ -12193,70 +11710,24 @@
         ],
         "responses": {
           "200": {
-            "description": "ok",
+            "description": "ok; x-kestrel-answers names the answer each audience receives",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/getSettings"
                     },
-                    "createdAt": {
-                      "type": "number"
-                    },
-                    "updatedAt": {
-                      "type": "number"
-                    },
-                    "title": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "description": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "navigation": {
-                      "anyOf": [
-                        {},
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "_locales": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "string"
-                      },
-                      "description": "origin locale per field, only with fallback"
-                    },
-                    "_translations": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "boolean"
-                      },
-                      "description": "per locale: required localized fields present"
+                    {
+                      "$ref": "#/components/schemas/getSettings.anonymous"
                     }
-                  },
-                  "required": [
-                    "id",
-                    "createdAt",
-                    "updatedAt"
                   ]
                 }
+              }
+            },
+            "x-kestrel-answers": {
+              "anonymous": {
+                "$ref": "#/components/schemas/getSettings.anonymous"
               }
             }
           },
@@ -12281,7 +11752,7 @@
             }
           },
           "403": {
-            "description": "missing permission settings.read",
+            "description": "no field grant for anonymous callers on settings",
             "content": {
               "application/json": {
                 "schema": {
@@ -12585,7 +12056,7 @@
     "/site/{path}": {
       "get": {
         "operationId": "resolvePage",
-        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → End the pipeline with { redirect: { to, status } } when the request path matches a rule; pass through otherwise → Resolve a site path to a pages document (default locale unprefixed) → Replace internal kestrel:<type>:<id> references in the pages document with public paths (_links map added)",
+        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → End the pipeline with { redirect: { to, status } } when the request path matches a rule; pass through otherwise → Resolve a site path to a pages document (default locale unprefixed) → Replace internal kestrel:<type>:<id> references in the pages document with public paths (_links map added) → Keep only the pages fields the caller may see: anonymousFields.pages without an identity; with one, everything when one of its roles has no field grant for pages, otherwise the union of its roles' grants and the anonymous one",
         "tags": [
           "site"
         ],
@@ -12595,7 +12066,8 @@
           "authz.require:pages.read",
           "redirects.lookup",
           "site.resolve:pages?home=home&status=published&fallback=true",
-          "site.resolveLinks:pages?home=home&status=published&fallback=true"
+          "site.resolveLinks:pages?home=home&status=published&fallback=true",
+          "authz.fields:pages?shape=item"
         ],
         "parameters": [
           {
@@ -12618,163 +12090,24 @@
         ],
         "responses": {
           "200": {
-            "description": "ok",
+            "description": "ok; x-kestrel-answers names the answer each audience receives",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "createdAt": {
-                          "type": "number"
-                        },
-                        "updatedAt": {
-                          "type": "number"
-                        },
-                        "slug": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "title": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "body": {
-                          "anyOf": [
-                            {},
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "status": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "draft",
-                                "finished",
-                                "published"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "hero": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "description": "id of a media"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "seo": {
-                          "anyOf": [
-                            {},
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "_locales": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "type": "string"
-                          },
-                          "description": "origin locale per field, only with fallback"
-                        },
-                        "_translations": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "type": "boolean"
-                          },
-                          "description": "per locale: required localized fields present"
-                        },
-                        "_locale": {
-                          "type": "string",
-                          "description": "effective locale of a site-resolved document"
-                        },
-                        "_links": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "type": "object",
-                            "properties": {
-                              "path": {
-                                "type": "string"
-                              },
-                              "locale": {
-                                "type": "string"
-                              },
-                              "broken": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": []
-                          },
-                          "description": "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve"
-                        }
-                      },
-                      "required": [
-                        "createdAt",
-                        "id",
-                        "updatedAt"
-                      ]
+                      "$ref": "#/components/schemas/resolvePage"
                     },
                     {
-                      "type": "object",
-                      "properties": {
-                        "redirect": {
-                          "type": "object",
-                          "properties": {
-                            "to": {
-                              "type": "string"
-                            },
-                            "status": {
-                              "type": "integer",
-                              "enum": [
-                                301,
-                                302,
-                                307,
-                                308
-                              ]
-                            }
-                          },
-                          "required": [
-                            "to",
-                            "status"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": [
-                        "redirect"
-                      ],
-                      "additionalProperties": false
+                      "$ref": "#/components/schemas/resolvePage.anonymous"
                     }
                   ]
                 }
+              }
+            },
+            "x-kestrel-answers": {
+              "anonymous": {
+                "$ref": "#/components/schemas/resolvePage.anonymous"
               }
             }
           },
@@ -12789,7 +12122,7 @@
             }
           },
           "403": {
-            "description": "missing permission pages.read",
+            "description": "no field grant for anonymous callers on pages",
             "content": {
               "application/json": {
                 "schema": {
@@ -14241,6 +13574,1513 @@
           "code",
           "retryable",
           "runId"
+        ]
+      },
+      "listMedia": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                },
+                "filename": {
+                  "type": "string"
+                },
+                "folder": {
+                  "type": "string"
+                },
+                "contentType": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "number"
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                },
+                "provenance": {
+                  "type": "object",
+                  "properties": {
+                    "origin": {
+                      "type": "string",
+                      "enum": [
+                        "human",
+                        "ai",
+                        "mixed",
+                        "unknown"
+                      ]
+                    },
+                    "tool": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "origin"
+                  ],
+                  "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
+                },
+                "width": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "height": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "alt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "variants": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "size": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "type": "number"
+                      },
+                      "height": {
+                        "type": "number"
+                      },
+                      "format": {
+                        "type": "string"
+                      },
+                      "bytes": {
+                        "type": "number"
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "pending",
+                          "done",
+                          "error",
+                          "failed"
+                        ]
+                      },
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "size",
+                      "width",
+                      "height",
+                      "format",
+                      "bytes",
+                      "state",
+                      "path"
+                    ]
+                  }
+                },
+                "variantCounts": {
+                  "type": "object",
+                  "properties": {
+                    "done": {
+                      "type": "number"
+                    },
+                    "pending": {
+                      "type": "number"
+                    },
+                    "error": {
+                      "type": "number"
+                    },
+                    "failed": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "done",
+                    "pending",
+                    "error",
+                    "failed"
+                  ]
+                }
+              },
+              "required": [
+                "alt",
+                "available",
+                "contentType",
+                "createdAt",
+                "description",
+                "filename",
+                "folder",
+                "height",
+                "id",
+                "path",
+                "provenance",
+                "size",
+                "title",
+                "updatedAt",
+                "variantCounts",
+                "variants",
+                "width"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ]
+      },
+      "listMedia.anonymous": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+                },
+                "filename": {
+                  "type": "string"
+                },
+                "contentType": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "number"
+                },
+                "provenance": {
+                  "type": "object",
+                  "properties": {
+                    "origin": {
+                      "type": "string",
+                      "enum": [
+                        "human",
+                        "ai",
+                        "mixed",
+                        "unknown"
+                      ]
+                    },
+                    "tool": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "origin"
+                  ],
+                  "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
+                },
+                "width": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "height": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "alt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "variants": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "size": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "type": "number"
+                      },
+                      "height": {
+                        "type": "number"
+                      },
+                      "format": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "size",
+                      "width",
+                      "height",
+                      "format",
+                      "path"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "alt",
+                "contentType",
+                "description",
+                "filename",
+                "height",
+                "id",
+                "path",
+                "provenance",
+                "size",
+                "title",
+                "variants",
+                "width"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "getMedia": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "folder": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "enum": [
+                  "human",
+                  "ai",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "tool": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "origin"
+            ],
+            "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
+          },
+          "width": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "height": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "alt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "size": {
+                  "type": "string"
+                },
+                "width": {
+                  "type": "number"
+                },
+                "height": {
+                  "type": "number"
+                },
+                "format": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "type": "number"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "done",
+                    "error",
+                    "failed"
+                  ]
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "size",
+                "width",
+                "height",
+                "format",
+                "bytes",
+                "state",
+                "path"
+              ]
+            }
+          },
+          "variantCounts": {
+            "type": "object",
+            "properties": {
+              "done": {
+                "type": "number"
+              },
+              "pending": {
+                "type": "number"
+              },
+              "error": {
+                "type": "number"
+              },
+              "failed": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "done",
+              "pending",
+              "error",
+              "failed"
+            ]
+          }
+        },
+        "required": [
+          "alt",
+          "available",
+          "contentType",
+          "createdAt",
+          "description",
+          "filename",
+          "folder",
+          "height",
+          "id",
+          "path",
+          "provenance",
+          "size",
+          "title",
+          "updatedAt",
+          "variantCounts",
+          "variants",
+          "width"
+        ],
+        "additionalProperties": false
+      },
+      "getMedia.anonymous": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "the file's one public URL, <publicPath>/<id>/<name>; the name is fixed at upload, so renaming or moving the item never changes it"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "enum": [
+                  "human",
+                  "ai",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "tool": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "origin"
+            ],
+            "description": "who made the file; anything but human is flagged on download (X-Content-Provenance); an upload without provenance is recorded as unknown"
+          },
+          "width": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "height": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "alt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "size": {
+                  "type": "string"
+                },
+                "width": {
+                  "type": "number"
+                },
+                "height": {
+                  "type": "number"
+                },
+                "format": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "size",
+                "width",
+                "height",
+                "format",
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "alt",
+          "contentType",
+          "description",
+          "filename",
+          "height",
+          "id",
+          "path",
+          "provenance",
+          "size",
+          "title",
+          "variants",
+          "width"
+        ],
+        "additionalProperties": false
+      },
+      "listPages": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                },
+                "slug": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "title": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "body": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "status": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "finished",
+                        "published"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "hero": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a media"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "seo": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "_locales": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "origin locale per field, only with fallback"
+                },
+                "_translations": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "description": "per locale: required localized fields present"
+                }
+              },
+              "required": [
+                "id",
+                "createdAt",
+                "updatedAt"
+              ]
+            }
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ]
+      },
+      "listPages.anonymous": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "slug": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "title": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "body": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "status": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "finished",
+                        "published"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "hero": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a media"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "seo": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "_locales": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "origin locale per field, only with fallback"
+                },
+                "_translations": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "description": "per locale: required localized fields present"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "readPage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "body": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "finished",
+                  "published"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hero": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "id of a media"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seo": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "_locales": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "origin locale per field, only with fallback"
+          },
+          "_translations": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "per locale: required localized fields present"
+          }
+        },
+        "required": [
+          "id",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "readPage.anonymous": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "body": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "finished",
+                  "published"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hero": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "id of a media"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seo": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "_locales": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "origin locale per field, only with fallback"
+          },
+          "_translations": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "per locale: required localized fields present"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "renderRedirects": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            },
+            "status": {
+              "type": "integer",
+              "enum": [
+                301,
+                302,
+                307,
+                308
+              ]
+            }
+          },
+          "required": [
+            "pattern",
+            "target",
+            "status"
+          ]
+        }
+      },
+      "renderRedirects.anonymous": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            },
+            "status": {
+              "type": "integer",
+              "enum": [
+                301,
+                302,
+                307,
+                308
+              ]
+            }
+          },
+          "required": [
+            "pattern",
+            "target",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "getSettings": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "navigation": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "_locales": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "origin locale per field, only with fallback"
+          },
+          "_translations": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "per locale: required localized fields present"
+          }
+        },
+        "required": [
+          "id",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "getSettings.anonymous": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "navigation": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "_locales": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "origin locale per field, only with fallback"
+          },
+          "_translations": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "per locale: required localized fields present"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "resolvePage": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "number"
+              },
+              "updatedAt": {
+                "type": "number"
+              },
+              "slug": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "body": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "finished",
+                      "published"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "hero": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "id of a media"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "seo": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "_locales": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "origin locale per field, only with fallback"
+              },
+              "_translations": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "description": "per locale: required localized fields present"
+              },
+              "_locale": {
+                "type": "string",
+                "description": "effective locale of a site-resolved document"
+              },
+              "_links": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "locale": {
+                      "type": "string"
+                    },
+                    "broken": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": []
+                },
+                "description": "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve"
+              }
+            },
+            "required": [
+              "createdAt",
+              "id",
+              "updatedAt"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "redirect": {
+                "type": "object",
+                "properties": {
+                  "to": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "integer",
+                    "enum": [
+                      301,
+                      302,
+                      307,
+                      308
+                    ]
+                  }
+                },
+                "required": [
+                  "to",
+                  "status"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "redirect"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "resolvePage.anonymous": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "slug": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "body": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "finished",
+                      "published"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "hero": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "id of a media"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "seo": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "_locales": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "origin locale per field, only with fallback"
+              },
+              "_translations": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "description": "per locale: required localized fields present"
+              },
+              "_locale": {
+                "type": "string",
+                "description": "effective locale of a site-resolved document"
+              },
+              "_links": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "locale": {
+                      "type": "string"
+                    },
+                    "broken": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": []
+                },
+                "description": "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "redirect": {
+                "type": "object",
+                "properties": {
+                  "to": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "integer",
+                    "enum": [
+                      301,
+                      302,
+                      307,
+                      308
+                    ]
+                  }
+                },
+                "required": [
+                  "to",
+                  "status"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "redirect"
+            ],
+            "additionalProperties": false
+          }
         ]
       }
     },

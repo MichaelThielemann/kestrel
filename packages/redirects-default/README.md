@@ -59,8 +59,8 @@ on every request.
 Pipelines in `examples/minimal` using these steps:
 
 - **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.require:pages.manage` → `delivery.publishAll:pages` → **`redirects.export`** → `delivery.exportLlms`
-- **renderRedirects** (GET /redirects.json): **`redirects.render`**
-- **resolvePage** (GET /site/*path): `authn.identifyUser` → `authz.require:pages.read` → **`redirects.lookup`** → `site.resolve:pages?home=home&status=published&fallback=true` → `site.resolveLinks:pages?home=home&status=published&fallback=true`
+- **renderRedirects** (GET /redirects.json): **`redirects.render`** → `authz.fields:redirectRules?shape=array`
+- **resolvePage** (GET /site/*path): `authn.identifyUser` → `authz.require:pages.read` → **`redirects.lookup`** → `site.resolve:pages?home=home&status=published&fallback=true` → `site.resolveLinks:pages?home=home&status=published&fallback=true` → `authz.fields:pages?shape=item`
 - **setRedirects** (PUT /redirects): `authn.requireUser` → `authz.require:redirects.write` → `validate.check:redirects.rules` → **`redirects.validate`** → `content.set:redirects` → **`redirects.export`**
 
 <!-- kestrel-docs:end -->

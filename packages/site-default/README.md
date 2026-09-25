@@ -39,6 +39,6 @@ Config: `{}` – nothing to set.
 
 Pipelines in `examples/minimal` using these steps:
 
-- **resolvePage** (GET /site/*path): `authn.identifyUser` → `authz.require:pages.read` → `redirects.lookup` → **`site.resolve:pages?home=home&status=published&fallback=true`** → **`site.resolveLinks:pages?home=home&status=published&fallback=true`**
+- **resolvePage** (GET /site/*path): `authn.identifyUser` → `authz.require:pages.read` → `redirects.lookup` → **`site.resolve:pages?home=home&status=published&fallback=true`** → **`site.resolveLinks:pages?home=home&status=published&fallback=true`** → `authz.fields:pages?shape=item`
 
 <!-- kestrel-docs:end -->
