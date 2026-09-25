@@ -21,7 +21,9 @@ and any other collection is a wiring error that names this module. Boot fails wh
 Readiness is the provider's: an item is live exactly while `file(id)` answers it. When attached, this
 module removes the rows, private variants and public copies of every item that has rows here but is
 no longer ready (a delete whose `images.remove` never ran, for example after it failed midway), so
-such leftovers disappear with the next start in every deployment. An item that is
+such leftovers disappear with the next start in every deployment. The sweep runs in the background
+and stops between chunks of 200 items once the module is closed, so a shutdown never waits for it;
+the next start picks up what is left. An item that is
 not ready — still uploading, failed, or being deleted — is never planned, rendered, served,
 exported or counted, and `images.generate` or `images.retryFailed` with its id answers `NOT_FOUND`.
 Which types get variants is one rule, `ELIGIBLE` in `generate.ts`: `image/*` except `image/gif` and

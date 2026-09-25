@@ -14,7 +14,7 @@ import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, JOBS, RETIRED, VARIANTS, createImages, whenIdle } from "./impl.ts";
-import type { Config, Retired } from "./impl.ts";
+import type { Config, Images, Retired } from "./impl.ts";
 import { ELIGIBLE, type Renderer } from "./generate.ts";
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
@@ -657,6 +657,44 @@ describe("images/default size-set check at attach", () => {
     release();
     await closing;
     expect(errors).toContain("images: could not check for a size-set shortfall");
+  });
+});
+
+describe("images/default attach: rows of items that are no longer ready", () => {
+  it("removes them in the background and stops between chunks once closed", async () => {
+    const blobs = fakeBlobstore();
+    const db = createFakePersistence();
+    let images: Images | undefined;
+    let closing: Promise<void> | undefined;
+    const media = createFakeMedia({
+      beforeCall: (method) => {
+        if (method === "files" && closing === undefined) closing = images?.close();
+      },
+    });
+    images = await createImages(baseConfig, { blobs, db, media, logger: noLogger }, () => 1000);
+    for (let i = 0; i < 450; i += 1) {
+      const mediaId = `gone-${String(i).padStart(3, "0")}`;
+      expectOk(await db.createOne(VARIANTS, { mediaId, size: "thumb", slot: `${mediaId}/thumb`, spec: "x", width: 1, height: 1, format: "webp", key: `media-variants/${mediaId}/thumb.webp`, bytes: 0, state: "done", error: null, attempts: 0, updatedAt: 1 }));
+    }
+    images.attach(introspectionOf(manifestWithPipelines([])));
+    await whenIdle(images);
+    await closing;
+    expect(media.calls.filter((call) => call.method === "files")).toHaveLength(1);
+    expect(expectOk(await db.count(VARIANTS, {}))).toBeGreaterThan(250);
+  });
+
+  it("removes them all when left to finish", async () => {
+    const { images, db, media } = await make();
+    for (let i = 0; i < 3; i += 1) {
+      const mediaId = `gone-${i}`;
+      expectOk(await db.createOne(VARIANTS, { mediaId, size: "thumb", slot: `${mediaId}/thumb`, spec: "x", width: 1, height: 1, format: "webp", key: `media-variants/${mediaId}/thumb.webp`, bytes: 0, state: "done", error: null, attempts: 0, updatedAt: 1 }));
+    }
+    addMedia(media, "kept", await jpeg(40, 30));
+    expectOk(await images.generate("kept"));
+    images.attach(introspectionOf(manifestWithPipelines([])));
+    await whenIdle(images);
+    expect(expectOk(await db.findMany<{ id: string; mediaId: string }>(VARIANTS, {})).items.every((row) => row.mediaId === "kept")).toBe(true);
+    await images.close();
   });
 });
 

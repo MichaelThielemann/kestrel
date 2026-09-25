@@ -1120,12 +1120,13 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const retired = await eachRow<Retired>(RETIRED, {}, collect);
     if (isErr(retired)) return retired;
     const all = [...ids];
-    for (let i = 0; i < all.length; i += EVENT_CHUNK) {
+    for (let i = 0; i < all.length && !closed; i += EVENT_CHUNK) {
       const chunk = all.slice(i, i + EVENT_CHUNK);
       const ready = await library.files(chunk);
       if (isErr(ready)) return ready;
       const live = new Set(ready.value.map((file) => file.id));
       for (const mediaId of chunk) {
+        if (closed) return ok(undefined);
         if (live.has(mediaId)) continue;
         const removed = await removeCopiesOfGoneItem(mediaId);
         if (isErr(removed)) return removed;
