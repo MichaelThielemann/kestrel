@@ -168,8 +168,26 @@ sits `authn.identifyUser`, which sets an identity if a valid token is present bu
 aborts (`requireUser` enforces login).
 
 ```ts
-steps: ["authn.identifyUser", "authz.require:pages.read", "content.list:pages?status=published"]
+steps: ["authn.identifyUser", "authz.require:pages.read", "content.list:pages?status=published", "authz.fields:pages?shape=list"]
 ```
+
+### What an Anonymous Caller Receives
+
+The same pipeline serves both callers, so its answer is cut at the end.
+`authz.fields:<resource>?shape=<shape>` keeps of `result` only the members the caller may see:
+`anonymousFields` in the authz config names them for a caller without an identity
+(`pages: ["id", "slug", "title", …]`), `fields` names them for a role that should see less than
+everything, and a signed-in caller whose roles have no such grant keeps the whole answer. The
+parameter says where the items are: `item` (one document), `list` (every element of `items` in
+`{ items, total }`; `total` stays), `array` (every element), `file` (bytes, type and name stay; the
+grant names response headers as `headers.<name>`). Boot checks it against the pipeline's declared
+output. A path reaches into an item — `provenance.origin`, `variants[].path` — and a map or a
+free-form value (`_translations`, a `json` field) is granted whole.
+
+Boot fails for a pipeline an anonymous caller reaches over HTTP that does not end with the step, for
+a resource without an anonymous grant and for a grant naming a field no pipeline declares, so a field
+the grant does not name — one a module adds later included — never reaches a visitor. An answer a
+step ends the run with before the cut (`resolvePage`'s redirect hit) must be closed and fully granted.
 
 ### What a Client Can Rely On
 
@@ -184,8 +202,8 @@ The instance's configured role names are a separate, narrower fact: `authz.listR
 `authz.listRoles` behind whatever permission a deployment already uses for user management
 (`examples/minimal` uses `authz.require:users.manage`), not behind bare `authn.requireUser`.
 
-Whether a route is public is therefore decided by the authz config, not by a second
-pipeline.
+Whether a route is public, and what it answers a visitor, is therefore decided by the authz
+config, not by a second pipeline.
 
 ### Validating Role Names on Write
 

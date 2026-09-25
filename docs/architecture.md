@@ -127,7 +127,10 @@ In both cases: only pipelines with a trigger are reachable from outside.
    the booted instance: `describe()` is the static manifest (`kestrel.describe()`), `observe()`
    registers a run observer that sees every run and step start and end (`kestrel.observe()`),
    `health()` is the aggregate instance health (`kestrel.health()`, see below); a returned function
-   runs on `stop()`. `insights/default` is the module that uses `describe`/`observe`.
+   runs on `stop()`. `insights/default` is the module that uses `describe`/`observe`; `authz/roles`
+   checks there that every pipeline running an `anonymous: "required"` step lets anonymous callers
+   through, and that every pipeline an anonymous caller reaches over HTTP ends with `authz.fields`
+   and fits the field grants.
 
 If any step fails: abort with `KestrelBootError { module, reason }`.
 

@@ -94,7 +94,9 @@ without Nuxt: [`../examples/h3`](../examples/h3).
 - **Errors** always look like
   `{ "error": "<text>", "code": "<CODE>", "retryable": boolean, "runId": "<uuid>", "step"?: "<step>", "details"?: { … } }`.
   `code` is stable and machine-readable — the frontend should branch on it, not on `error` (the
-  text can change). The status follows unambiguously from `code`:
+  text can change). A step that throws (a bug) answers `INTERNAL` with
+  `error: "<pipeline>/<step>: unexpected <ErrorName>"`; its message and stack are in the server log
+  under the answer's `runId`. The status follows unambiguously from `code`:
 
   | Code | Status | Meaning |
   |---|---|---|
@@ -132,6 +134,14 @@ without Nuxt: [`../examples/h3`](../examples/h3).
 - **Permissions**: anonymous callers may read (`pages.read`, `settings.read`, `media.read`), and so
   may every signed-in caller, whatever its role; anything that writes needs a login and a role. Roles: `admin` (everything), `editor`
   (`pages.*`, `media.*`, `images.read`, `settings.read`, `redirects.*`).
+- **What an anonymous caller receives**: the fields `anonymousFields` grants, cut by the last step of
+  every public read (`authz.fields`). A document comes without `createdAt` and `updatedAt`; a media
+  item without `folder`, `createdAt`, `updatedAt`, `available` and `variantCounts`, and each variant
+  without `bytes` and `state`; a file answer keeps `cache-control`, `x-content-provenance` and
+  `x-kestrel-variant` of the headers its step sets. A signed-in caller receives the whole answer. The
+  OpenAPI document describes both: `#/components/schemas/<operationId>` and
+  `#/components/schemas/<operationId>.anonymous`, named per audience in the 200's
+  `x-kestrel-answers`.
 - **Languages**: the model has `locales: ["de", "en"]`, `defaultLocale: "de"`. `?locale=en` on read
   returns **only** English values, a missing translation = `null`. On write, `locale` (query or
   body) sets only that language. Non-localized fields apply to every language. A `?locale=` outside
@@ -235,8 +245,8 @@ removed. The same list lives in
 (`HTML_ALLOWLIST`) and is reused when rendering.
 `status = published` can only be set for a language once that language's localized required fields
 (`slug`, `title`) are present — otherwise `400 pages: status cannot be "published" for en: slug,
-title missing` (model rule `completeWhen`). Documents always carry `id`, `createdAt`, `updatedAt`,
-and, for models with languages, `_translations: { de: true, en: false }` (a translation is present
+title missing` (model rule `completeWhen`). Documents always carry `id`, and `createdAt` and
+`updatedAt` for a signed-in caller, and, for models with languages, `_translations: { de: true, en: false }` (a translation is present
 once that language's localized required fields are set). `slug` matches
 `^[a-z0-9]+(-[a-z0-9]+)*$`. On write, `id`, `createdAt` and `updatedAt` are forbidden (400).
 
@@ -286,7 +296,7 @@ identical paths.
 
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
-| GET | `/pages` | `?locale=&limit=&offset=&sort=-updatedAt` | `{ items: [...], total }` – published only |
+| GET | `/pages` | `?locale=&limit=&offset=&sort=-updatedAt` | `{ items: [...], total }` – published only; `sort=-updatedAt` also orders an anonymous caller's list, whose items carry no `updatedAt` |
 | GET | `/admin/pages` | same as above | every status (permission `pages.manage`) |
 | GET | `/admin/pages/:id` | `?locale=` | document, every status (permission `pages.manage`) |
 | GET | `/pages/:id` | `?locale=` | document (strict, no fallback) – published only, otherwise 404 |
@@ -398,9 +408,9 @@ builds a media URL from an id; it always reads `path` from the response.
 | POST | `/media/folders` | `{ path }` | `{ folder, count }` – creates the folder (idempotent), including implicit parent folders (`media.write`); `count` is the number of files already there (0 for a new folder, otherwise the existing count) |
 | PATCH | `/media/folders/*path` | `{ path }` | `{ folder, moved }` – renames or moves the folder; a metadata-only change: no blob moves, and no file's `path` changes (`media.write`); 404 if the folder doesn't exist, 409 on a target conflict |
 | DELETE | `/media/folders/*path` | `?recursive=true` | `{ ok: true, removed, ids }` – deletes a folder (`media.delete`); 409 if it isn't empty (without `recursive`); 409 if one of the contained files is referenced (nothing gets deleted); `ids` lists the removed items, for a step after it (e.g. removing their image variants) |
-| GET | `/media` | `?folder=&recursive=true&q=&sort=&limit=&offset=` | `{ items, total }`; `folder` matches exactly, with `recursive=true` the exact subtree (`2026` → `2026` and `2026/…`, not `2026x` or `2026-alt`); `q` = substring match on `filename` (case-sensitive); `sort` = `createdAt`, `filename`, `size`, a leading `-` = descending (default `-createdAt`); every item also carries `available` and `variants[]`, see [Image variants](#image-variants). Without a signed-in caller and without `ids`, 401 (`UNAUTHENTICATED`) — anonymous callers read media by id only |
+| GET | `/media` | `?folder=&recursive=true&q=&sort=&limit=&offset=` | `{ items, total }`; `folder` matches exactly, with `recursive=true` the exact subtree (`2026` → `2026` and `2026/…`, not `2026x` or `2026-alt`); `q` = substring match on `filename` (case-sensitive); `sort` = `createdAt`, `filename`, `size`, a leading `-` = descending (default `-createdAt`); every item also carries `variants[]`, and for a signed-in caller `available`, see [Image variants](#image-variants). Without a signed-in caller and without `ids`, 401 (`UNAUTHENTICATED`) — anonymous callers read media by id only |
 | GET | `/media?ids=a,b,c` | – | `{ items, total }` – exactly these items in the requested order (missing ones are skipped, max. 200); other parameters ignored; this form is anonymous |
-| GET | `/media/:id` | `?locale=` | metadata incl. `path` (the file's one public URL), `updatedAt`, `width`/`height` (from the file header for PNG/JPEG/GIF/WebP, otherwise `null`), `alt`/`title`/`description` for the requested language (`null` if not set; default language `de`), `available` and `variants[]` (see [Image variants](#image-variants)); anonymous |
+| GET | `/media/:id` | `?locale=` | metadata incl. `path` (the file's one public URL), `updatedAt` (signed-in callers only), `width`/`height` (from the file header for PNG/JPEG/GIF/WebP, otherwise `null`), `alt`/`title`/`description` for the requested language (`null` if not set; default language `de`), `available` (signed-in callers only) and `variants[]` (see [Image variants](#image-variants)); anonymous, with the public fields |
 | GET | `/media/:id/file` | – | raw bytes by id, with the `Content-Type` the file is published with (its stored `type/subtype` when listed, else `application/octet-stream`, see below), always `Cache-Control: no-store`; images (incl. sanitized SVG)/audio/video `inline`, otherwise `attachment`; header `X-Content-Provenance: ai|mixed|unknown` when `provenance.origin` ≠ `human` (`media.read`, `identifyUser`) |
 | GET | `/media/:id/:name` | – | the file at its one public URL; `:name` must be the exact name it was uploaded under, else 404; `Cache-Control: public, max-age=31536000, immutable`; anonymous (`media.read`, `identifyUser`), and so open to every signed-in caller as well |
 | GET | `/media/:id/variants/:file` | – | image variant, `:file` = `<size>.<ext>` (e.g. `thumb.webp`), see [Image variants](#image-variants); anonymous, like `/media/:id/:name` |

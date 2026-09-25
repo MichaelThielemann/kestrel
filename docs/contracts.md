@@ -157,6 +157,26 @@ does this at `attach()` and fails boot otherwise. `authz@1` itself carries no an
 this is a residual gap: another `authz@1` provider has to perform the same check itself, or the flag
 goes unchecked for that provider.
 
+A step's `narrows` (on `StepDescription`) declares that the step only removes members from `result`:
+`shape` says where the items of the answer are (`item`, `list` for `{ items, total }`, `array`,
+`file`), and `answers` lists, per audience label, the member paths that audience keeps of one item.
+Boot accepts it as the declaration of the step's `result` write, the folded output schema passes
+through the step unchanged, and `validateOutput` checks the answer after it without the schema's
+`required` lists. The core never evaluates the labels or the paths; `kestrel-openapi` documents one
+answer per label.
+
+`authz-roles` uses it for field grants. `anonymousFields` (resource → field paths) and `fields` (role
+→ resource → field paths) say which members of an answer a caller keeps, and its step
+`authz.fields:<resource>?shape=<shape>`, last in a pipeline, cuts the answer to them: a caller
+without an identity keeps the anonymous grant; a signed-in caller keeps everything when one of its
+roles has no grant for the resource, otherwise the union of its roles' grants and the anonymous one.
+At `attach()` boot fails when a pipeline an anonymous caller reaches over HTTP does not end with the
+step or its resource has no anonymous grant, when the shape parameter contradicts the declared
+output, when a grant names a field no pipeline of its resource declares, and when an answer a step
+ends the run with before the step carries a member the anonymous grant does not cover. Like
+`anonymous: "required"`, this is `authz-roles`' own check: another `authz@1` provider has neither the
+step nor the checks, so under it every caller receives the whole answer.
+
 ## Contract test: `contracts/persistence.contract.test.ts`
 
 Every implementation calls this function with a factory.

@@ -436,9 +436,42 @@ Net changes since 5.8.1.
   status is 503 while a module reports `restartRequired: true`, 200 otherwise (also while `ok` is
   false). `uptimeSeconds` is gone from the body. A probe that expected `{ ok: true }` on every 200,
   or 200 on every request, reads the new body and status.
+- **Field grants in `authz-roles`.** `anonymousFields` (resource → field paths) and `fields` (role →
+  resource → field paths) say which fields of an answer a caller keeps; the new step
+  `authz.fields:<resource>?shape=<item|list|array|file>`, last in a pipeline, cuts the answer to them.
+  A caller without an identity keeps its resource's `anonymousFields`; a signed-in caller keeps
+  everything unless every one of its roles has a grant for the resource, and then the union of those
+  grants and the anonymous one. Boot fails when a pipeline anonymous callers reach over HTTP does not
+  end with the step, when `anonymousFields` grants nothing for its resource, when the shape
+  contradicts the pipeline's declared output, when a grant names a field no pipeline of that resource
+  declares or a resource no pipeline cuts, or when the pipeline can end earlier with an answer the
+  anonymous grant does not cover. Add the step and the grants to every pipeline your anonymous
+  callers read; `examples/minimal` shows the lists, and `kestrel-upgrade`'s `pipelines/field-step`
+  proposes them. An anonymous caller of the example receives no `createdAt` or `updatedAt`, and no
+  media item's `folder`, `available`, `variantCounts` or variant `bytes` and `state`.
+- A step that throws answers `"<pipeline>/<step>: unexpected <ErrorName>"` as its `error`, for every
+  caller, instead of its message; the message and the stack are in the log under the answer's `runId`.
+  A failure a step returns with `ctx.fail` keeps its message.
+- OpenAPI: the 200 of an operation ending with a narrowing step is `anyOf`
+  `#/components/schemas/<operationId>` and one `#/components/schemas/<operationId>.<label>` per
+  audience (`.anonymous`, `.role.<name>`); types generated from the 200 become a union — use the
+  components.
+- The boot error for a step writing `result` without a declaration names `narrows` among the
+  keywords that declare it.
 
 ### Added
 
+- `StepDescription.narrows` (`NarrowsDeclaration`: the answer's `shape` and, per audience label, the
+  member paths it keeps) declares a step that only removes members of `result`; boot accepts it as
+  the declaration of the `result` write, and `validateOutput` checks the answer after it without the
+  schema's `required` lists. The insights manifest schema describes it.
+- `authz-roles`' `./impl` exports `fieldSet`, `answersOf`, `anonymousPipelines` and
+  `fieldGrantProblems`.
+- The OpenAPI extension `x-kestrel-answers` on a 200 maps each audience label to its component, or
+  for a file operation to the response headers the audience receives.
+- `kestrel-upgrade` rules `pipelines/field-step`, `authz/field-grant-unknown`,
+  `responses/anonymous-fields` and `responses/thrown-error-text`; `pipelines/media-serve` creates its
+  serve pipelines ending with `authz.fields:mediaFile?shape=file`.
 - `references-default`: a target can be `{ media: true }`, the ready files of the `media@1` provider
   (`optional: [media@1]`; setup fails naming the target when no module provides it). A file counts as
   existing exactly while `media@1` reports it as ready. `examples/minimal` uses it for its `media`

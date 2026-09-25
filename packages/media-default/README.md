@@ -199,7 +199,11 @@ or `"all"` for a public catalogue), `locales`/`defaultLocale`.
 different: without a signed-in caller, `media.list` answers only when the request names `ids`
 explicitly (401 `UNAUTHENTICATED` otherwise), and `media.listFolders` always needs a signed-in
 caller. Set `anonymousList: "all"` to restore anonymous listing for a deployment that wants a public
-media catalogue; it is never the default.
+media catalogue; it is never the default. Which fields of an item an anonymous caller receives is up
+to the pipeline's last step, `authz-roles`' `authz.fields:media`: `examples/minimal` grants `id`,
+`path`, `filename`, `contentType`, `size`, `width`, `height`, `alt`, `title`, `description`,
+`provenance` and the variants' `size`, `width`, `height`, `format` and `path`, so `folder`,
+`createdAt`, `updatedAt` and the render state stay with signed-in callers.
 
 Steps: `media.upload` processes every file in `ctx.files`, in the order given, with the same checks
 applied to each. A single file returns the item unchanged. Two or more files return
