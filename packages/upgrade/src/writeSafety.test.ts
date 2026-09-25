@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -355,5 +355,56 @@ describe("fix --write runs the dirty guard for every touched file before writing
     }
     expect(code).toBe(1);
     expect(readFileSync(touchedFile, "utf8")).toBe("export const changed = 1;\n");
+  });
+});
+
+describe("fix never writes through a project-level file symlink to outside the project", () => {
+  it("downgrades the finding to manual on check, and leaves the outside file untouched on fix --write", async () => {
+    const outsideDir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-outside-"));
+    try {
+      const outsideFile = join(outsideDir, "shared.ts");
+      const originalOutsideSource = "export const shared = 1;\n";
+      await writeFile(outsideFile, originalOutsideSource);
+
+      await run("git", ["init"], { cwd: dir });
+      await run("git", ["config", "user.email", "t@example.com"], { cwd: dir });
+      await run("git", ["config", "user.name", "t"], { cwd: dir });
+      const linkedFile = join(dir, "shared.ts");
+      await symlink(outsideFile, linkedFile);
+      await run("git", ["add", "-A"], { cwd: dir });
+      await run("git", ["commit", "-m", "initial"], { cwd: dir });
+
+      const configFile = join(dir, "host.config.ts");
+      await writeFile(configFile, "export default {};\n");
+      const rule: Rule = {
+        id: "plugin/through-symlink",
+        check: () => [
+          {
+            id: "plugin/through-symlink",
+            rule: "plugin/through-symlink",
+            severity: "error",
+            tier: "source",
+            where: {},
+            message: "edits a file that is a symlink out of the project",
+            suggestion: "n/a",
+            fix: { kind: "auto", edits: [{ file: linkedFile, start: originalOutsideSource.indexOf("1"), end: originalOutsideSource.indexOf("1") + 1, text: "2" }] },
+            docs: "n/a",
+          },
+        ],
+      };
+      const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [rule] };
+
+      const lines: string[] = [];
+      await runUpgradeCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
+      const report = boundaryCast<UpgradeReport>(JSON.parse(lines[0]!), "json");
+      const finding = report.findings.find((f) => f.rule === "plugin/through-symlink");
+      expect(finding?.fix.kind).toBe("manual");
+      expect(finding?.suggestion).toContain("outside the project");
+
+      await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin] });
+      expect(readFileSync(outsideFile, "utf8")).toBe(originalOutsideSource);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
   });
 });

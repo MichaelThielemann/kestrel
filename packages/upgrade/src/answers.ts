@@ -43,12 +43,22 @@ export interface ResolveOptions {
 
 /**
  * Resolves one question's answer in order: `--answers`, then a TTY prompt when interactive, then
- * `--yes`'s default. `undefined` means the finding stays open — no edit, no crash.
+ * `--yes`'s default. `undefined` means the finding stays open — no edit, no crash. `fix.closedChoices`
+ * decides whether the answer is checked against `fix.choices` at all: a question whose `choices` are
+ * only a default or example (a comma list, a free-form name, a literal path) never validates, since
+ * the rule parses the raw answer itself. A rejected answer from `--answers` leaves the question open;
+ * from a TTY prompt, the question is asked again.
  */
 export async function resolveAnswer(fix: AskFix, message: string, options: ResolveOptions): Promise<string | undefined> {
+  const validate = fix.closedChoices === true;
   const fromFile = options.fromFile?.get(fix.question);
-  if (fromFile !== undefined) return fromFile;
-  if (options.interactive) return options.prompt(`${message}\n${fix.prompt}`, fix.choices, fix.defaultValue);
+  if (fromFile !== undefined) return !validate || fix.choices.includes(fromFile) ? fromFile : undefined;
+  if (options.interactive) {
+    for (;;) {
+      const answer = await options.prompt(`${message}\n${fix.prompt}`, fix.choices, fix.defaultValue);
+      if (!validate || fix.choices.includes(answer)) return answer;
+    }
+  }
   if (options.yes) return fix.defaultValue;
   return undefined;
 }
@@ -56,4 +66,14 @@ export async function resolveAnswer(fix: AskFix, message: string, options: Resol
 /** Every id in the answers file that never matched an asked question: `--answers` refuses these (exit 2). */
 export function unknownAnswerIds(fromFile: ReadonlyMap<string, string>, everAsked: ReadonlySet<string>): string[] {
   return [...fromFile.keys()].filter((id) => !everAsked.has(id));
+}
+
+/** Every answers-file value that named an asked, closed-choice question but does not match its choices: `--answers` refuses these (exit 2), naming the id and the value, instead of leaving the question silently open. */
+export function invalidClosedAnswers(fromFile: ReadonlyMap<string, string>, askedFixes: ReadonlyMap<string, AskFix>): Array<{ id: string; value: string }> {
+  const invalid: Array<{ id: string; value: string }> = [];
+  for (const [id, value] of fromFile) {
+    const fix = askedFixes.get(id);
+    if (fix !== undefined && fix.closedChoices === true && !fix.choices.includes(value)) invalid.push({ id, value });
+  }
+  return invalid;
 }

@@ -551,6 +551,18 @@ export function setStepRequired(file: string, source: string, stepName: string, 
   return appendProperty(source, output, file, `required: ${literal}`);
 }
 
+/** Every key declared in a non-factory step's `output.properties`; `undefined` when the step, its `output` object or `properties` cannot be found this way — the caller reports why instead of guessing at "every property". */
+export function stepOutputPropertyNames(source: string, stepName: string): string[] | undefined {
+  const obj = describeStepObject(parseTs(source), stepName);
+  const output = obj && objectProperty(obj, "output");
+  const properties = output?.type === "ObjectExpression" ? objectProperty(output, "properties") : undefined;
+  if (properties === undefined || properties.type !== "ObjectExpression") return undefined;
+  const names = objectPropertyNodes(properties)
+    .map(propertyKeyName)
+    .filter((n): n is string => n !== undefined);
+  return names;
+}
+
 export type ModelFieldsLocator = (root: AstNode, options: { use: string; typeName: string }) => AstNode | undefined;
 
 function builtInModelFields(root: AstNode, use: string, typeName: string): AstNode | undefined {

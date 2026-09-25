@@ -48,8 +48,10 @@ in turn, with its default shown; pressing enter takes the default. Without a ter
 prompts: pass `--answers <file>` (a JSON object of `{ "<question id>": "<answer>" }`) to supply
 them, or `--yes` to take every default — a question with no safe default (whether an output
 property is always present, for one) stays open under `--yes` either way. `--answers` naming an id
-this run never asked is refused (exit 2). `--save-answers <file>` writes down what was answered
-interactively, to replay with `--answers` next time.
+this run never asked, or giving a closed-choice question (`yes`/`no`, say) a value outside its
+choices, is refused (exit 2), naming the id and, for the latter, the offending value.
+`--save-answers <file>` writes down what was answered interactively, to replay with `--answers` next
+time.
 
 `fix`'s preview always shows the boot result the edited project would have: how many errors remain,
 how many still need an answer, how many stay manual.
@@ -162,7 +164,9 @@ Every finding's `docs` field links to one of the anchors below.
 | `boot/not-checked` | boot | none (warning) | a module or pipeline `checkBoot()` could not check safely |
 | `load/failed` | source | manual | a config, module or pipeline file that failed to load |
 | [`sandbox/blobstore-standin`](#sandbox-blobstore-standin) | boot | none (info) | a `blobstore@1` provider the sandbox replaced to keep the boot tier open |
-| [`plugin/rule-replaced`, `plugin/rule-disabled`](#plugin-api) | source | none (info) | a built-in rule a plugin's `overrides` replaced or disabled |
+| [`plugin/hook-failed`](#plugin-hook-failed) | source | manual | a plugin hook (`dataModel`, so far) threw instead of returning |
+| [`preview/edit-refused`](#preview-edit-refused) | boot | none (warning) | a boot-preview edit could not be verified (its target escaped the preview copy, or the copy could not reload) |
+| [`data/config-load-failed`](#data-config-load-failed) | data | manual | `kestrel.config.ts` exists but could not be loaded, so the `data` command's underscore-field count was skipped |
 
 #### modules-event-delivery
 An event trigger or `events.emit` needs exactly one delivery module (`events-direct` or
@@ -421,10 +425,29 @@ tier swaps it for a local, filesystem-backed stand-in scoped to the scratch dire
 images, delivery, replication and backup modules still get checked. The real module's own `setup()`
 never runs during the check.
 
+#### plugin-hook-failed
+A plugin hook threw instead of returning or resolving; the message names the plugin and the hook.
+`dataModel()` is the one hook this covers so far, in `check`/`fix` and in `data`. Always manual: the
+plugin's own code needs fixing, not the project being checked.
+
+#### preview-edit-refused
+A boot preview received an edit it could not verify: the edit's own file, or its mapped location in
+the throwaway preview copy, resolved outside that copy (even through a symlink), or the preview copy
+could not be reloaded after applying every edit. The affected rule's own finding still reports
+unverified rather than clean; this finding names the specific path and the reason.
+
+#### data-config-load-failed
+`kestrel.config.ts` exists at the project root but threw while loading; the `data` command's
+underscore-field counter has no content model to count against, so it reports nothing rather than
+guessing. A project with no `kestrel.config.ts` at all is unaffected — the counter simply has nothing
+to read. Error severity, unless a detected plugin provides no `dataModel` hook and needs its own
+aliases to load the config — then it is a warning naming the plugin, since the config itself is not
+the problem.
+
 #### plugin-api
-`plugin/rule-replaced` and `plugin/rule-disabled` report a plugin's `overrides` taking effect: a
-built-in rule's id maps to a replacement rule (`plugin/rule-replaced`) or to `null` (`plugin/rule-disabled`),
-naming the plugin. See "Programmatic use" below for the full plugin API surface.
+A `plugin.rules` id that collides with a built-in one is a load error, naming the id and the plugin;
+that rule is dropped from the merge and the built-in keeps running under the id. See "Programmatic
+use" below for the full plugin API surface.
 
 ## What the tool never does
 
@@ -486,21 +509,11 @@ directory) with only the built-in rules.
 - `sandbox?: Record<string, (config, scratch) => unknown>` — extra sandbox config-rewrite entries,
   keyed like `DEFAULT_SANDBOX_ENTRIES` (see `sandbox-blobstore-standin` above), merged with the
   built-in table.
-- `rules?: readonly Rule[]` — extra rules, run alongside every built-in one.
-- `overrides?: Record<string, Rule | null>` — replaces a built-in rule by id with a different `Rule`,
-  or disables it entirely (`null`). A replacement is reported as an info finding, `plugin/rule-replaced`
-  naming the id and the plugin; a disable is reported the same way as `plugin/rule-disabled`. Two
-  plugins registered in the same `plugins` array claiming the same id, whether or not both would ever
-  be the active one for the same project, is a load error — nothing loads until that's fixed. Reach
-  for `overrides` for a rule that is genuinely project-specific; for a built-in rule that only needs a
-  different project layout, a locator or hook (`locateSteps`, `locateModelFields`, `dataModel`,
-  `switchEdits`) keeps the plugin on the built-in rule's own future fixes instead. A replaced rule is
-  entirely the plugin's own from then on — a later fix to the built-in rule's own logic never reaches
-  a project using the replacement.
-- `ownsPackages?: readonly string[]` — package names this plugin owns the versioning of. The built-in
-  dependency rules (`deps/kestrel-range` and the mixed-majors check) only ever read or edit this
-  repo's own backend packages; a plugin's own package range is never rewritten or counted as a
-  mixed-major break, even if its name happens to fall under this repo's own npm scope.
+- `rules?: readonly Rule[]` — extra rules, run alongside every built-in one. An id that collides with
+  a built-in one is a load error naming both, and that rule is dropped from the merge; reach for a
+  locator or hook (`locateSteps`, `locateModelFields`, `dataModel`, `switchEdits`) when a built-in
+  rule only needs a different project layout, so a later fix to the built-in rule's own logic still
+  reaches every project.
 - `locateSteps?`, `locateModelFields?` — locate a pipeline's step array(s) or a content type's fields
   object literal directly, for a project layout where a pipeline is not a
   `definePipeline({ name, steps })` call or a content type does not sit at
@@ -529,22 +542,40 @@ directory) with only the built-in rules.
   `combineEditParts` takes, and `blockers` names deployment markers that forbid the switch outright (a
   `nitro.preset` with no long-running worker, say), the same role the built-in SERVERLESS_MARKERS
   check plays for a CLI/server backend project. The built-in rule keeps every gate (an open
-  event-payload or emits finding, the boot preview, no default when unverified) and only asks this
-  hook for the edits and the extra markers — a plugin never has to replace `offer/event-queue` itself;
-  absent, the built-in kestrel.config.ts-shaped switch runs unchanged.
-- `questions?: readonly Question[]` — reserved for a plugin's own standalone questions.
+  event-payload or emits finding, the serverless markers, no default when unverified) and only asks
+  this hook for the edits and the extra markers, adding them to its own rather than replacing them;
+  absent, the built-in kestrel.config.ts-shaped switch runs unchanged. Whichever edits end up in play,
+  one boot preview of the full set is the one authority on whether the switch actually happened — with
+  or without a plugin: the offer blocks unless the booted module list shows events-queue and not
+  events-direct, naming this hook when it supplied the edits. A literal `"...events-direct"` string (any
+  quote style, found by walking the parsed AST so a comment or a partial match never counts) decides
+  nothing on its own; it only improves the blocker's message, naming the file and site to edit, so a
+  module list built by a helper function or an imported constant is checked exactly the same way.
 
-`RuleContext` (passed to every `Rule.check()`) additionally carries `ownsPackages`, `locateSteps`,
-`locateModelFields` and `switchEdits` from the active plugin, and two forms of boot verification.
-`previewBoot(edits)` is the low-level form: it applies the given edits to a scratch copy, reloads the
-project (through the active plugin's own `load()`, or the built-in loader) and runs `checkBoot()` on
-it, returning the raw `BootCheck` or `undefined` when the boot tier is not available — the mechanism
-`fix` itself uses to report what remains after writing. `verifyEdits(edits, { pipelines })` is the
-higher-level form built on it: it diffs the preview's errors against this run's own baseline and folds
-in whether every name in `pipelines` was actually checked, answering `{ verified, newErrors,
-unchecked }` — `verified` only when the preview booted and none of `pipelines` is in the result's
-`notChecked`, so a rule that only diffed errors cannot mistake an unchecked pipeline for a clean one.
-`offer/event-queue` verifies its own switch this way.
+A `Rule` answers one of its own `ask` questions the same way every other finding changes: through
+`ctx.answers` on the next `check()` call — there is no separate answer-to-edit path a plugin's rule
+implements. `AskFix.closedChoices: true` marks `choices` as the complete, exhaustive set of valid
+answers; only then is an answer checked against it before it reaches a rule — a question whose
+`choices` are only a default or example (a comma list, a free-form name, a literal path) is never
+validated, since the rule parses the raw answer itself. A rejected answer from `--answers` exits `fix`
+with 2, naming the id and the value, the same as an unknown id, on every `fix` run (`--write` or not);
+a rejected TTY answer is asked again instead.
+
+`RuleContext` (passed to every `Rule.check()`) additionally carries `locateSteps`, `locateModelFields`
+and `switchEdits` from the active plugin, and two forms of boot verification. `previewBoot(edits)` is
+the low-level form: it applies the given edits to a scratch copy, reloads the project (through the
+active plugin's own `load()`, or the built-in loader) and runs `checkBoot()` on it, returning the raw
+`BootCheck` or `undefined` when the boot tier is not available, an edit's target could not be verified
+this way (see `preview-edit-refused` above), or the reload itself failed — the mechanism `fix` itself
+uses to report what remains after writing. A package a switch's own edits add but that is not
+installed yet is not a refusal: the preview genuinely reloaded, so it stays on its own "install it"
+line, never a `preview-edit-refused` finding. Repeated preview calls for the identical edit set within
+one `check`/`fix` round may reuse the first boot instead of reloading again. `verifyEdits(edits, {
+pipelines })` is the higher-level form built on it: it diffs the preview's errors against this run's own
+baseline and folds in whether every name in `pipelines` was actually checked, answering `{ verified,
+newErrors, unchecked }` — `verified` only when the preview booted and none of `pipelines` is in the
+result's `notChecked`, so a rule that only diffed errors cannot mistake an unchecked pipeline for a
+clean one. `offer/event-queue` verifies its own switch this way.
 
 `@michaelthielemann/kestrel-upgrade/codemods` exports the primitives a plugin's own `Rule` or locator
 writes edits with, so it never needs a second copy of this engine's own edit machinery:

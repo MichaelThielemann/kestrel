@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { runUpgradeCli } from "./plugin.ts";
+import { runCli } from "./cli-run.ts";
 import type { Rule, UpgradePlugin } from "./plugin.ts";
 import { loadBackendProject } from "./project.ts";
 
@@ -31,7 +31,7 @@ describe("previewBoot reloads from a fresh directory instead of the ESM-cached s
     };
 
     const lines: string[] = [];
-    await runUpgradeCli(["check", "--root", FIXTURE, "--json", "--run-setup", "./notes.ts"], {
+    await runCli(["check", "--root", FIXTURE, "--json", "--run-setup", "./notes.ts"], {
       stdout: (l) => lines.push(l),
       stderr: () => undefined,
       forceInstalledMajor: 6,

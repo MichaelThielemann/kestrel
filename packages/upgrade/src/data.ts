@@ -14,9 +14,12 @@ import { trackTempDir, untrackTempDir } from "./cleanup.ts";
 import { isRecord } from "./guards.ts";
 import type { DataContentModel, UpgradePlugin } from "./plugin.ts";
 import { detectPlugin } from "./pluginRules.ts";
+import { loadIssuesAsFindings } from "./project.ts";
 import type { Finding, UpgradeReport } from "./report.ts";
 import { summarize } from "./report.ts";
+import { hookFailedFinding } from "./ruleHelpers.ts";
 import { useToken } from "./useToken.ts";
+import { toolVersion } from "./versions.ts";
 
 export interface DataStepResult {
   exitCode: number;
@@ -139,22 +142,56 @@ function contentDefaultModel(config: unknown): DataContentModel | undefined {
   return { types, ...(Array.isArray(locales) ? { locales: locales.filter((l): l is string => typeof l === "string") } : {}) };
 }
 
-async function builtInDataModel(root: string): Promise<DataContentModel | undefined> {
+function configLoadFailedFinding(err: unknown, pluginKind: string | undefined): Finding {
+  const detail = err instanceof Error ? err.message : String(err);
+  if (pluginKind !== undefined) {
+    return {
+      id: "data/config-load-failed",
+      rule: "data/config-load-failed",
+      severity: "warning",
+      tier: "data",
+      where: {},
+      message: `the "${pluginKind}" plugin provides no dataModel hook, and kestrel.config.ts could not be loaded without it: ${detail}`,
+      suggestion: `implement dataModel(root) on the "${pluginKind}" plugin, or count again with --data-report`,
+      fix: { kind: "manual" },
+      docs: "docs/upgrading.md#data-config-load-failed",
+    };
+  }
+  return {
+    id: "data/config-load-failed",
+    rule: "data/config-load-failed",
+    severity: "error",
+    tier: "data",
+    where: {},
+    message: `kestrel.config.ts could not be loaded: ${detail}`,
+    suggestion: "fix the config so it loads, then run data again to check underscore fields",
+    fix: { kind: "manual" },
+    docs: "docs/upgrading.md#data-config-load-failed",
+  };
+}
+
+async function builtInDataModel(root: string, pluginKind: string | undefined): Promise<{ model?: DataContentModel | undefined; issue?: Finding }> {
+  const configFile = join(root, "kestrel.config.ts");
+  if (!existsSync(configFile)) return {};
   try {
-    const config = await loadConfig(join(root, "kestrel.config.ts"));
-    return contentDefaultModel(config.modules.find((m) => useToken(m.use) === "content-default")?.config);
-  } catch {
-    return undefined;
+    const config = await loadConfig(configFile);
+    return { model: contentDefaultModel(config.modules.find((m) => useToken(m.use) === "content-default")?.config) };
+  } catch (err) {
+    return { issue: configLoadFailedFinding(err, pluginKind) };
   }
 }
 
-async function activeDataModel(root: string, plugins: readonly UpgradePlugin[]): Promise<DataContentModel | undefined> {
-  const { plugin } = await detectPlugin(plugins, root);
-  if (plugin?.dataModel === undefined) return builtInDataModel(root);
+async function activeDataModel(root: string, plugins: readonly UpgradePlugin[]): Promise<{ model?: DataContentModel | undefined; issues: Finding[] }> {
+  const { plugin, issues: detectIssues } = await detectPlugin(plugins, root);
+  const issues = loadIssuesAsFindings(detectIssues);
+  if (plugin?.dataModel === undefined) {
+    const { model, issue } = await builtInDataModel(root, plugin?.kind);
+    return { model, issues: issue ? [...issues, issue] : issues };
+  }
   try {
-    return await plugin.dataModel(root);
-  } catch {
-    return undefined;
+    return { model: await plugin.dataModel(root), issues };
+  } catch (err) {
+    return { issues: [...issues, hookFailedFinding(plugin.kind, "dataModel", err)] };
   }
 }
 
@@ -437,20 +474,22 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
     let queued: { findings: Finding[]; error?: string };
     let counts: Record<string, Record<string, number | null>>;
     let mediaLayout: Finding[];
+    let dataModelIssues: Finding[];
     try {
       queued = await queueFindings(db);
       if (queued.error !== undefined) return { exitCode: 2, error: queued.error };
-      const contentModel = await activeDataModel(root, plugins);
+      const { model: contentModel, issues } = await activeDataModel(root, plugins);
+      dataModelIssues = issues;
       counts = contentModel === undefined ? {} : await underscoreFieldCounts(copy, db, contentModel);
       mediaLayout = await mediaLayoutFindings(root, db);
     } finally {
       db.close();
     }
     const [siteMediaLeftovers, blobstoreTmpSuffix] = await Promise.all([siteMediaLeftoversFindings(root), blobstoreTmpSuffixFindings(root)]);
-    const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...siteMediaLeftovers, ...blobstoreTmpSuffix];
+    const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...siteMediaLeftovers, ...blobstoreTmpSuffix, ...dataModelIssues];
     const report: UpgradeReport = {
       schema: 1,
-      tool: { name: "kestrel-upgrade", version: "0.0.0" },
+      tool: { name: "kestrel-upgrade", version: toolVersion() },
       target: "6.0.0",
       project: { root, kind: "data", installed: {} },
       tiers: { source: "not-run", load: "not-run", boot: "not-run", data: "done" },

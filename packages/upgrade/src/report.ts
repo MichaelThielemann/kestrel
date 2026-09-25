@@ -15,6 +15,8 @@ export interface AskFix {
   question: string;
   prompt: string;
   choices: readonly string[];
+  /** `choices` is the complete, exhaustive set of valid answers, so an answer outside it is rejected rather than passed through. Absent when `choices` is only a default or example and the rule parses the raw answer itself — a comma list, a free-form name, a literal path. */
+  closedChoices?: true;
   defaultValue?: string;
 }
 
@@ -42,23 +44,18 @@ export interface Finding {
   docs: string;
 }
 
-export interface AppliedEdit {
-  file: string;
-  rules: string[];
-}
-
 export interface UpgradeReport {
   schema: 1;
   tool: { name: string; version: string };
   target: "6.0.0";
   project: { root: string; kind: string; installed: Record<string, string> };
   tiers: Record<Tier, "done" | "skipped" | "failed" | "not-run">;
-  sandbox?: { rewritten: string[]; consented: string[]; outside: string[] };
+  /** Which of the project's own module-list entries the boot-tier sandbox rewrote to reach only the scratch directory, let through as known-safe or explicitly consented, or left outside the sandbox entirely; absent when the boot tier did not run. */
+  sandbox?: { rewritten: readonly string[]; consented: readonly string[]; outside: readonly string[] };
   /** `data`'s stored-value count per `<type>.<field>` starting with `_`, keyed by locale (`"unlocalized"` for a field with none); `null` where the table, the column or the count itself could not be read. */
   underscoreFields?: Record<string, Record<string, number | null>>;
   summary: { error: number; warning: number; info: number; auto: number; ask: number; manual: number };
   findings: Finding[];
-  applied?: AppliedEdit[];
 }
 
 type MaybeLocation = { [K in keyof FindingLocation]?: FindingLocation[K] | undefined };

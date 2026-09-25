@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, stat, symlink, copyFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, readlink, rm, stat, symlink, copyFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { trackTempDir, untrackTempDir } from "./cleanup.ts";
 
@@ -106,6 +106,16 @@ export async function createScratchCopy(root: string): Promise<ScratchCopy> {
       const from = join(root, file);
       const to = join(dir, file);
       await mkdir(dirname(to), { recursive: true });
+      const info = await lstat(from);
+      if (info.isSymbolicLink()) {
+        const target = await readlink(from);
+        const absoluteTarget = isAbsolute(target) ? target : resolve(dirname(from), target);
+        const relToRoot = relative(root, absoluteTarget);
+        const insideRoot = !relToRoot.startsWith("..") && !isAbsolute(relToRoot);
+        const linkTarget = insideRoot ? (isAbsolute(target) ? resolve(dir, relToRoot) : target) : absoluteTarget;
+        await symlink(linkTarget, to);
+        continue;
+      }
       await copyFile(from, to);
     }
     await symlinkNodeModules(root, dir);

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { runUpgradeCli } from "./plugin.ts";
+import { runCli } from "./cli-run.ts";
 import type { UpgradeReport } from "./report.ts";
 import { createScratchCopy } from "./scratch.ts";
 
@@ -14,7 +14,7 @@ const RUN_SETUP = ["--run-setup", "./notes.ts"];
 
 async function runJson(argv: string[]): Promise<{ code: number; report: UpgradeReport }> {
   const lines: string[] = [];
-  const code = await runUpgradeCli(argv, { stdout: (line) => lines.push(line), stderr: () => undefined, forceInstalledMajor: 6 });
+  const code = await runCli(argv, { stdout: (line) => lines.push(line), stderr: () => undefined, forceInstalledMajor: 6 });
   return { code, report: boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json") };
 }
 
@@ -41,7 +41,7 @@ describe("kestrel-upgrade against the queue-offer-5.8 fixture, with the installe
     await writeFile(answersFile, JSON.stringify({ "switch-to-queue": "yes", "idempotent:onNoteCreated": "yes", "relay-pipelines": "" }));
 
     const lines: string[] = [];
-    const code = await runUpgradeCli(["fix", "--root", scratch.dir, "--write", "--yes", "--answers", answersFile, ...RUN_SETUP], {
+    const code = await runCli(["fix", "--root", scratch.dir, "--write", "--yes", "--answers", answersFile, ...RUN_SETUP], {
       stdout: (line) => lines.push(line),
       stderr: (line) => { throw new Error(line); },
       forceInstalledMajor: 6,
@@ -57,12 +57,30 @@ describe("kestrel-upgrade against the queue-offer-5.8 fixture, with the installe
     expect(pkg.dependencies["@michaelthielemann/kestrel-events-queue"]).toBe("^6.0.0");
     expect(pkg.dependencies["@michaelthielemann/kestrel-events-direct"]).toBeUndefined();
   });
+
+  it("exits 2, naming the id and the value, when the answers file gives a closed-choice question an answer outside its choices", async () => {
+    const scratch = await createScratchCopy(FIXTURE);
+    cleanupDirs.push(scratch.dir);
+    const answersFile = join(scratch.dir, "answers.json");
+    await writeFile(answersFile, JSON.stringify({ "switch-to-queue": "maybe" }));
+    let errored = "";
+    const code = await runCli(["fix", "--root", scratch.dir, "--write", "--yes", "--answers", answersFile, ...RUN_SETUP], {
+      stdout: () => undefined,
+      stderr: (line) => {
+        errored = line;
+      },
+      forceInstalledMajor: 6,
+    });
+    expect(code).toBe(2);
+    expect(errored).toContain("switch-to-queue");
+    expect(errored).toContain("maybe");
+  });
 });
 
 describe("kestrel-upgrade check against the queue-offer-5.8 fixture, unforced", () => {
   it("leaves the checked-in fixture on the source tier only", async () => {
     const lines: string[] = [];
-    const code = await runUpgradeCli(["check", "--root", FIXTURE, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined });
+    const code = await runCli(["check", "--root", FIXTURE, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined });
     const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
     expect(report.tiers.load).toBe("not-run");
     expect(report.tiers.boot).toBe("not-run");

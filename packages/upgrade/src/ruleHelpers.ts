@@ -33,6 +33,22 @@ export function infoFinding(id: string, rule: string, message: string, suggestio
   return { id, rule, severity: "info", tier: "source", where, message, suggestion, fix: { kind: "none" }, docs };
 }
 
+/** An error finding naming the plugin and the hook that threw. Named `plugin/hook-failed:<plugin kind>:<hook>` so more than one failing hook in the same run reports separately. */
+export function hookFailedFinding(pluginKind: string, hook: string, err: unknown): Finding {
+  const message = `plugin "${pluginKind}"'s ${hook}() threw: ${err instanceof Error ? err.message : String(err)}`;
+  return {
+    id: `plugin/hook-failed:${pluginKind}:${hook}`,
+    rule: "plugin/hook-failed",
+    severity: "error",
+    tier: "source",
+    where: {},
+    message,
+    suggestion: `fix ${hook}() in the "${pluginKind}" plugin so it does not throw`,
+    fix: { kind: "manual" },
+    docs: "docs/upgrading.md#plugin-hook-failed",
+  };
+}
+
 export function moduleEntry(ctx: RuleContext, token: string) {
   return ctx.project.input.config.modules.find((m) => useToken(m.use) === token);
 }

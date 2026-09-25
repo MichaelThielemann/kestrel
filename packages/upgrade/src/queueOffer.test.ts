@@ -7,7 +7,8 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { BootCheck, BootProblem, ModuleDefinition, PipelineDefinition } from "@michaelthielemann/kestrel";
 import { defineContract } from "@michaelthielemann/kestrel/defineContract";
 import { applyEdits } from "./apply.ts";
-import type { LoadedProject, RuleContext } from "./plugin.ts";
+import type { InternalRuleContext } from "./cli-run.ts";
+import type { LoadedProject, LoadIssue, RuleContext } from "./plugin.ts";
 import type { Edit } from "./report.ts";
 import { readFileOrUndefined } from "./rules.ts";
 import { queueOfferRule } from "./ruleQueueOffer.ts";
@@ -34,7 +35,7 @@ function contextFor(
   previewBoot: (edits: readonly Edit[]) => Promise<BootCheck | undefined> = cleanPreviewBoot,
 ): RuleContext {
   const check: BootCheck = { errors: [], warnings: [], notChecked: [] };
-  return { root: dir, scratch: dir, project, bootCheck: check, readFile: readFileOrUndefined, answers, ownsPackages: [], previewBoot };
+  return { root: dir, scratch: dir, project, bootCheck: check, readFile: readFileOrUndefined, answers, previewBoot };
 }
 
 async function directProject(options: { sqliteFile?: string; publishPipeline?: boolean; groupedEmit?: boolean } = {}): Promise<LoadedProject> {
@@ -228,11 +229,16 @@ export const definePipeline = pipelineDefiner<KnownStep>();
       p.configFile,
       'const DELIVERY = "@michaelthielemann/kestrel-events-direct";\nexport default defineConfig({ modules: [{ use: "@michaelthielemann/kestrel-events-inmemory" }, { use: DELIVERY }, { use: "@michaelthielemann/kestrel-persistence-sqlite" }], triggers: [] });\n',
     );
-    const findings = await queueOfferRule.check(contextFor(p));
+    const previewDetails = async (): Promise<{ moduleUses?: readonly string[]; issues: readonly LoadIssue[] }> => ({
+      moduleUses: ["@michaelthielemann/kestrel-events-inmemory", "@michaelthielemann/kestrel-events-direct", "@michaelthielemann/kestrel-persistence-sqlite"],
+      issues: [],
+    });
+    const ctx: InternalRuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), previewBoot: cleanPreviewBoot, previewDetails };
+    const findings = await queueOfferRule.check(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).not.toBe("ask");
     expect(findings[0]?.fix.kind).not.toBe("auto");
-    expect(findings[0]?.message).toContain(p.configFile);
+    expect(findings[0]?.message).toContain("events-direct is still in the booted module list");
   });
 
   it("produces valid, parseable JSON when events-direct was appended last in an unsorted package.json", async () => {
@@ -278,7 +284,7 @@ export const definePipeline = pipelineDefiner<KnownStep>();
   it("treats no boot tier at all (kestrel not yet on 6) as unverified, not clean", async () => {
     const p = await directProject();
     const check: BootCheck = { errors: [], warnings: [], notChecked: [] };
-    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: check, readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [] };
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: check, readFile: readFileOrUndefined, answers: new Map() };
     const findings = await queueOfferRule.check(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");
@@ -299,7 +305,7 @@ export const definePipeline = pipelineDefiner<KnownStep>();
     const existing: BootProblem = { code: "setup-failed", owner: "events-direct", reason: "already broken" };
     const check: BootCheck = { errors: [existing], warnings: [], notChecked: [] };
     const previewBoot = async (): Promise<BootCheck> => ({ errors: [existing], warnings: [], notChecked: [] });
-    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: check, readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [], previewBoot };
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: check, readFile: readFileOrUndefined, answers: new Map(), previewBoot };
     const findings = await queueOfferRule.check(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");
@@ -345,13 +351,18 @@ export const definePipeline = pipelineDefiner<KnownStep>();
 describe("offer/event-queue: UpgradePlugin.switchEdits", () => {
   it("uses the plugin's own edits for the switch, keeping every built-in gate", async () => {
     const p = await directProject({ publishPipeline: true });
+    await writeFile(p.configFile, 'export default defineConfig(presetModuleConfig({ persistenceFile: "./data/kestrel.db" }));\n');
     const markerFile = join(dir, "marker.ts");
     const pluginSwitchEdits = async (): Promise<{ parts: Record<string, Edit[] | undefined>; blockers: readonly string[] }> => ({
       parts: { "plugin's own module swap": [{ file: markerFile, start: 0, end: 0, text: "// switched\n" }] },
       blockers: [],
     });
+    const previewDetails = async (): Promise<{ moduleUses?: readonly string[]; issues: readonly LoadIssue[] }> => ({
+      moduleUses: ["@michaelthielemann/kestrel-events-inmemory", "@michaelthielemann/kestrel-events-queue", "@michaelthielemann/kestrel-persistence-sqlite"],
+      issues: [],
+    });
     const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
-    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers, ownsPackages: [], previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits };
+    const ctx: InternalRuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers, previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits, previewDetails };
     const findings = await queueOfferRule.check(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("auto");
@@ -359,25 +370,70 @@ describe("offer/event-queue: UpgradePlugin.switchEdits", () => {
     expect(edits).toEqual([{ file: markerFile, start: 0, end: 0, text: "// switched\n" }]);
   });
 
-  it("blocks the offer using the plugin's own deployment markers, not the built-in SERVERLESS_MARKERS check", async () => {
+  it("blocks the offer using the plugin's own deployment markers", async () => {
     const p = await directProject();
     const pluginSwitchEdits = async (): Promise<{ parts: Record<string, Edit[] | undefined>; blockers: readonly string[] }> => ({ parts: {}, blockers: ['nitro.preset is "vercel" with no long-running worker'] });
-    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [], previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits };
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits };
     const findings = await queueOfferRule.check(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("none");
     expect(findings[0]?.message).toContain("nitro.preset");
   });
 
+  it("still runs the built-in SERVERLESS_MARKERS check alongside the plugin's own blockers, instead of replacing it", async () => {
+    const p = await directProject();
+    await writeFile(join(dir, "vercel.json"), "{}");
+    const pluginSwitchEdits = async (): Promise<{ parts: Record<string, Edit[] | undefined>; blockers: readonly string[] }> => ({ parts: {}, blockers: ["the plugin's own marker"] });
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain("vercel.json");
+    expect(findings[0]?.message).toContain("the plugin's own marker");
+  });
+
   it("goes manual, naming the missing part, when the plugin's switchEdits cannot locate one", async () => {
     const p = await directProject({ publishPipeline: true });
+    await writeFile(p.configFile, 'export default defineConfig(presetModuleConfig({ persistenceFile: "./data/kestrel.db" }));\n');
     const pluginSwitchEdits = async (): Promise<{ parts: Record<string, Edit[] | undefined>; blockers: readonly string[] }> => ({ parts: { "plugin's own module swap": undefined }, blockers: [] });
     const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "yes"], ["relay-pipelines", "publishPage"]]);
-    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers, ownsPackages: [], previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits };
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers, previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits };
     const findings = await queueOfferRule.check(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).not.toBe("auto");
     expect(findings[0]?.suggestion).toContain("plugin's own module swap");
+  });
+
+  it("lets a plugin's switchEdits handle a config that never literally names events-direct, verified through the booted module list", async () => {
+    const p = await directProject();
+    await writeFile(p.configFile, 'export default defineConfig(presetModuleConfig({ persistenceFile: "./data/kestrel.db" }));\n');
+    const pluginSwitchEdits = async (): Promise<{ parts: Record<string, Edit[] | undefined>; blockers: readonly string[] }> => ({
+      parts: { "plugin's own module swap": [{ file: join(dir, "shared", "model.ts"), start: 0, end: 0, text: "// switched\n" }] },
+      blockers: [],
+    });
+    const previewDetails = async (): Promise<{ moduleUses?: readonly string[]; issues: readonly LoadIssue[] }> => ({
+      moduleUses: ["@michaelthielemann/kestrel-events-inmemory", "@michaelthielemann/kestrel-events-queue", "@michaelthielemann/kestrel-persistence-sqlite"],
+      issues: [],
+    });
+    const ctx: InternalRuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits, previewDetails };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("ask");
+  });
+
+  it("blocks, naming the plugin, when the preview boot shows events-direct still in the booted module list", async () => {
+    const p = await directProject();
+    await writeFile(p.configFile, 'export default defineConfig(presetModuleConfig({ persistenceFile: "./data/kestrel.db" }));\n');
+    const pluginSwitchEdits = async (): Promise<{ parts: Record<string, Edit[] | undefined>; blockers: readonly string[] }> => ({ parts: {}, blockers: [] });
+    const previewDetails = async (): Promise<{ moduleUses?: readonly string[]; issues: readonly LoadIssue[] }> => ({
+      moduleUses: ["@michaelthielemann/kestrel-events-inmemory", "@michaelthielemann/kestrel-events-direct", "@michaelthielemann/kestrel-persistence-sqlite"],
+      issues: [],
+    });
+    const ctx: InternalRuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits, previewDetails, pluginKind: "test-layer" };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).not.toBe("ask");
+    expect(findings[0]?.message).toContain("did not remove it");
+    expect(findings[0]?.message).toContain('"test-layer" plugin');
   });
 });
 
@@ -385,7 +441,7 @@ describe("offer/event-queue: verifyEdits' notChecked-awareness", () => {
   it("treats a relay pipeline the boot preview did not check as unverified, even with no new errors", async () => {
     const p = await directProject({ publishPipeline: true });
     const previewBoot = async (): Promise<BootCheck> => ({ errors: [], warnings: [], notChecked: [{ kind: "pipeline", name: "publishPage", because: "excluded by --run-setup" }] });
-    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [], previewBoot };
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), previewBoot };
     const findings = await queueOfferRule.check(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");
@@ -395,7 +451,7 @@ describe("offer/event-queue: verifyEdits' notChecked-awareness", () => {
   it("names the unchecked relay pipeline and its own reason in the prompt, instead of guessing events-queue is not installed", async () => {
     const p = await directProject({ publishPipeline: true });
     const previewBoot = async (): Promise<BootCheck> => ({ errors: [], warnings: [], notChecked: [{ kind: "pipeline", name: "publishPage", because: "config.modules does not pair reliably with the loaded modules" }] });
-    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [], previewBoot };
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), previewBoot };
     const findings = await queueOfferRule.check(ctx);
     expect(findings).toHaveLength(1);
     const prompt = findings[0]?.fix.kind === "ask" ? findings[0].fix.prompt : "";
@@ -407,7 +463,7 @@ describe("offer/event-queue: verifyEdits' notChecked-awareness", () => {
   it("still offers the switch when every relay pipeline was checked and no new error appeared", async () => {
     const p = await directProject({ publishPipeline: true });
     const previewBoot = async (): Promise<BootCheck> => ({ errors: [], warnings: [], notChecked: [{ kind: "pipeline", name: "someOtherPipeline", because: "unrelated" }] });
-    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [], previewBoot };
+    const ctx: RuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), previewBoot };
     const findings = await queueOfferRule.check(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");

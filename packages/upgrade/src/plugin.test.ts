@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { isString } from "./guards.ts";
-import { runUpgradeCli } from "./plugin.ts";
+import { runCli } from "./cli-run.ts";
 import type { LoadResult, Rule, UpgradePlugin } from "./plugin.ts";
 import type { UpgradeReport } from "./report.ts";
 
@@ -42,7 +42,7 @@ const customRule: Rule = {
 
 async function runJsonAt(root: string, plugins: readonly UpgradePlugin[]): Promise<{ code: number; report: UpgradeReport }> {
   const lines: string[] = [];
-  const code = await runUpgradeCli(["check", "--root", root, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined, plugins });
+  const code = await runCli(["check", "--root", root, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined, plugins });
   return { code, report: boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json") };
 }
 
@@ -126,72 +126,64 @@ describe("UpgradePlugin.load()'s LoadResult", () => {
   });
 });
 
-describe("UpgradePlugin.ownsPackages", () => {
-  it("keeps deps/kestrel-range from touching a package the plugin owns", async () => {
-    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-example-plugin": "^1.0.0" } }));
-    const plugin: UpgradePlugin = {
-      kind: "custom-host",
-      detect: () => true,
-      load: () => Promise.resolve(customProject()),
-      ownsPackages: ["@michaelthielemann/kestrel-example-plugin"],
-    };
-    const { report } = await runJson([plugin]);
-    expect(report.findings.some((f) => f.rule === "deps/kestrel-range")).toBe(false);
-  });
-
-  it("still flags an out-of-range backend package the plugin does not own", async () => {
+describe("a backend package stays checked with a plugin active", () => {
+  it("still flags an out-of-range backend package regardless of the active plugin", async () => {
     await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-persistence-sqlite": "^5.8.0" } }));
     const plugin: UpgradePlugin = {
       kind: "custom-host",
       detect: () => true,
       load: () => Promise.resolve(customProject()),
-      ownsPackages: ["@michaelthielemann/kestrel-example-plugin"],
     };
     const { report } = await runJson([plugin]);
     expect(report.findings.some((f) => f.rule === "deps/kestrel-range")).toBe(true);
   });
 });
 
-describe("UpgradePlugin.overrides", () => {
-  it("replaces a built-in rule's finding with the plugin's own, and reports the replacement", async () => {
-    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-persistence-sqlite": "^5.8.0" } }));
-    const replacement: Rule = {
+describe("a plugin rule id colliding with a built-in", () => {
+  it("is a load error, and the plugin's colliding rule never runs alongside the built-in", async () => {
+    const collidingRule: Rule = {
       id: "deps/kestrel-range",
       check: () => [{ id: "deps/kestrel-range:custom", rule: "deps/kestrel-range", severity: "info", tier: "source", where: {}, message: "custom range check", suggestion: "n/a", fix: { kind: "none" }, docs: "n/a" }],
     };
-    const plugin: UpgradePlugin = {
-      kind: "custom-host",
-      detect: () => true,
-      load: () => Promise.resolve(customProject()),
-      overrides: { "deps/kestrel-range": replacement },
-    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject()), rules: [collidingRule] };
     const { report } = await runJson([plugin]);
-    expect(report.findings.find((f) => f.rule === "deps/kestrel-range")?.message).toBe("custom range check");
-    expect(report.findings.some((f) => f.rule === "plugin/rule-replaced")).toBe(true);
-  });
-
-  it("disables a built-in rule entirely when overridden with null", async () => {
-    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-persistence-sqlite": "^5.8.0" } }));
-    const plugin: UpgradePlugin = {
-      kind: "custom-host",
-      detect: () => true,
-      load: () => Promise.resolve(customProject()),
-      overrides: { "deps/kestrel-range": null },
-    };
-    const { report } = await runJson([plugin]);
-    expect(report.findings.some((f) => f.rule === "deps/kestrel-range")).toBe(false);
-    expect(report.findings.some((f) => f.rule === "plugin/rule-disabled")).toBe(true);
-  });
-
-  it("is a load error when two registered plugins override the same rule id", async () => {
-    const ruleA: Rule = { id: "deps/kestrel-range", check: () => [] };
-    const ruleB: Rule = { id: "deps/kestrel-range", check: () => [] };
-    const pluginA: UpgradePlugin = { kind: "plugin-a", detect: () => true, load: () => Promise.resolve(customProject()), overrides: { "deps/kestrel-range": ruleA } };
-    const pluginB: UpgradePlugin = { kind: "plugin-b", detect: () => false, load: () => Promise.resolve(customProject()), overrides: { "deps/kestrel-range": ruleB } };
-    const { report } = await runJson([pluginA, pluginB]);
     const issue = report.findings.find((f) => f.rule === "load/failed");
     expect(issue?.message).toContain("deps/kestrel-range");
-    expect(issue?.message).toContain("more than one");
+    expect(issue?.message).toContain("custom-host");
+    expect(report.findings.some((f) => f.message === "custom range check")).toBe(false);
+  });
+
+  it("does not fire, and the plugin's own rule runs normally, when its ids do not collide", async () => {
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject()), rules: [customRule] };
+    const { report } = await runJson([plugin]);
+    expect(report.findings.some((f) => f.rule === "load/failed")).toBe(false);
+    expect(report.findings.some((f) => f.rule === "plugin/custom")).toBe(true);
+  });
+});
+
+describe("a plugin hook that throws is reported, not silently swallowed", () => {
+  it("dataModel() throwing surfaces a plugin/hook-failed error finding naming the plugin and the hook", async () => {
+    const plugin: UpgradePlugin = {
+      kind: "custom-host",
+      detect: () => true,
+      load: () => Promise.resolve(customProject()),
+      dataModel: () => {
+        throw new Error("boom");
+      },
+    };
+    const { report } = await runJson([plugin]);
+    const finding = report.findings.find((f) => f.rule === "plugin/hook-failed");
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe("error");
+    expect(finding?.message).toContain("custom-host");
+    expect(finding?.message).toContain("dataModel");
+    expect(finding?.message).toContain("boom");
+  });
+
+  it("does not fire when dataModel() resolves normally", async () => {
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject()), dataModel: () => Promise.resolve(undefined) };
+    const { report } = await runJson([plugin]);
+    expect(report.findings.some((f) => f.rule === "plugin/hook-failed")).toBe(false);
   });
 });
 
@@ -242,7 +234,7 @@ describe("UpgradePlugin.load()'s cache parameter", () => {
         return Promise.resolve(customProject());
       },
     };
-    const code = await runUpgradeCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    const code = await runCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
     expect(code === 0 || code === 1).toBe(true);
     expect(prepareCount).toBe(1);
   });
@@ -260,8 +252,8 @@ describe("UpgradePlugin.load()'s cache parameter", () => {
         return Promise.resolve(customProject());
       },
     };
-    await runUpgradeCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
-    await runUpgradeCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    await runCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    await runCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
     expect(prepareCount).toBe(2);
   });
 
@@ -283,7 +275,7 @@ describe("UpgradePlugin.load()'s cache parameter", () => {
         });
       },
     };
-    await runUpgradeCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    await runCli(["fix", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
     expect(seenScratchDirs.length).toBeGreaterThan(1);
     expect(new Set(seenScratchDirs).size).toBeGreaterThan(1);
     expect(cachedConfigFile).toBe(join(seenScratchDirs[0]!, "host.config.ts"));
@@ -318,7 +310,7 @@ describe("--data-report alongside a plugin that stores its own project.data", ()
       rules: [probeRule],
     };
     const lines: string[] = [];
-    await runUpgradeCli(["check", "--root", dir, "--json", "--data-report", reportFile], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
+    await runCli(["check", "--root", dir, "--json", "--data-report", reportFile], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
 
     expect(seenData).toEqual({ pluginOwnKey: "plugin value" });
     expect(seenDataReport).toEqual({ underscoreFields: { "page._hint": { unlocalized: 0 } } });
@@ -379,12 +371,218 @@ describe("cli-run's remap: a path outside the scratch copy", () => {
       };
 
       const lines: string[] = [];
-      const code = await runUpgradeCli(["fix", "--root", deepRoot, "--write", "--yes", "--allow-dirty", "--json", "--data-report", reportFile], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+      const code = await runCli(["fix", "--root", deepRoot, "--write", "--yes", "--allow-dirty", "--json", "--data-report", reportFile], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
       expect(code === 0 || code === 1).toBe(true);
       const text = await readFile(modelFile, "utf8");
       expect(text).toContain("fields: { hint:");
     } finally {
       await rm(nestedBase, { recursive: true, force: true });
     }
+  });
+});
+
+describe("a read-only check never writes into the real project through previewBoot", () => {
+  it("refuses (returns undefined) a preview edit targeting a real-root path, and never touches the file", async () => {
+    const realConfigFile = join(dir, "host.config.ts");
+    const originalSource = "export default { modules: [], triggers: [] };\n";
+    await writeFile(realConfigFile, originalSource);
+    let previewResult: unknown = "not-called";
+    const probeRule: Rule = {
+      id: "probe/real-root",
+      async check(ctx) {
+        if (!ctx.previewBoot) return [];
+        const edit = { file: ctx.project.configFile, start: 0, end: 0, text: "// injected by the probe\n" };
+        previewResult = await ctx.previewBoot([edit]);
+        return [];
+      },
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject()), rules: [probeRule] };
+
+    await runCli(["check", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    expect(previewResult).toBeUndefined();
+    expect(await readFile(realConfigFile, "utf8")).toBe(originalSource);
+  });
+
+  it("still runs a normal preview when the edit targets a path inside scratch", async () => {
+    let previewResult: unknown = "not-called";
+    const probeRule: Rule = {
+      id: "probe/in-scratch",
+      async check(ctx) {
+        if (!ctx.previewBoot) return [];
+        const edit = { file: ctx.project.configFile, start: 0, end: 0, text: "" };
+        previewResult = await ctx.previewBoot([edit]);
+        return [];
+      },
+    };
+    const plugin: UpgradePlugin = {
+      kind: "custom-host",
+      detect: () => true,
+      load: (_root, scratch) => {
+        const configFile = join(scratch, "host.config.ts");
+        return Promise.resolve({ project: { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: "custom-host", configFile, moduleFiles: new Map(), pipelineFiles: [] }, issues: [] });
+      },
+      rules: [probeRule],
+    };
+    await runCli(["check", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    expect(previewResult).not.toBe("not-called");
+    expect(previewResult).toBeDefined();
+  });
+
+  it("refuses a create edit that would land inside the scratch copy's own symlinked node_modules, so writeFileSync cannot follow it into the real package", async () => {
+    await writeFile(join(dir, "host.config.ts"), "export default { modules: [], triggers: [] };\n");
+    const realPkgDir = join(dir, "node_modules", "widget");
+    await mkdir(realPkgDir, { recursive: true });
+    await writeFile(join(realPkgDir, "package.json"), JSON.stringify({ name: "widget", version: "1.0.0" }));
+    let previewResult: unknown = "not-called";
+    let scratchPkgFile = "";
+    const probeRule: Rule = {
+      id: "probe/node-modules-symlink",
+      async check(ctx) {
+        if (!ctx.previewBoot) return [];
+        scratchPkgFile = join(ctx.scratch, "node_modules", "widget", "injected.js");
+        const edit = { file: scratchPkgFile, start: 0, end: 0, text: "// injected by the probe\n", create: true as const };
+        previewResult = await ctx.previewBoot([edit]);
+        return [];
+      },
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject()), rules: [probeRule] };
+    const lines: string[] = [];
+    await runCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    expect(previewResult).toBeUndefined();
+    expect(existsSync(join(realPkgDir, "injected.js"))).toBe(false);
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    const refused = report.findings.find((f) => f.rule === "preview/edit-refused");
+    expect(refused?.message).toContain("through a symlink");
+    expect(refused?.where.file).toBe(join(dir, "node_modules", "widget", "injected.js"));
+    expect(refused?.where.file).not.toBe(scratchPkgFile);
+  });
+
+  it("still runs a normal create-edit preview when the whole scratch copy sits behind a symlinked TMPDIR", async () => {
+    await writeFile(join(dir, "host.config.ts"), "export default { modules: [], triggers: [] };\n");
+    const realTmp = join(dir, "real-tmp");
+    const linkedTmp = join(dir, "tmp-link");
+    await mkdir(realTmp, { recursive: true });
+    await symlink(realTmp, linkedTmp, "dir");
+    const originalTmpdir = process.env.TMPDIR;
+    process.env.TMPDIR = linkedTmp;
+    try {
+      let previewResult: unknown = "not-called";
+      const probeRule: Rule = {
+        id: "probe/symlinked-tmpdir",
+        async check(ctx) {
+          if (!ctx.previewBoot) return [];
+          const newFile = join(ctx.scratch, "new-pipeline.ts");
+          const edit = { file: newFile, start: 0, end: 0, text: "export default {};\n", create: true as const };
+          previewResult = await ctx.previewBoot([edit]);
+          return [];
+        },
+      };
+      const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject()), rules: [probeRule] };
+      await runCli(["check", "--root", dir, "--json"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+      expect(previewResult).not.toBe("not-called");
+      expect(previewResult).toBeDefined();
+    } finally {
+      if (originalTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = originalTmpdir;
+    }
+  });
+
+  it("adds a preview/edit-refused finding naming the path and the reason, instead of leaving the cause invisible", async () => {
+    const realConfigFile = join(dir, "host.config.ts");
+    await writeFile(realConfigFile, "export default { modules: [], triggers: [] };\n");
+    const probeRule: Rule = {
+      id: "probe/real-root-finding",
+      async check(ctx) {
+        if (!ctx.previewBoot) return [];
+        const edit = { file: ctx.project.configFile, start: 0, end: 0, text: "// injected\n" };
+        await ctx.previewBoot([edit]);
+        return [];
+      },
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject()), rules: [probeRule] };
+    const lines: string[] = [];
+    await runCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    const refused = report.findings.find((f) => f.rule === "preview/edit-refused");
+    expect(refused).toBeDefined();
+    expect(refused?.message).toContain("outside its own scratch copy");
+    expect(refused?.where.file).toBe(realConfigFile);
+  });
+});
+
+function scratchProject(scratch: string): LoadResult {
+  return { project: { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: "custom-host", configFile: join(scratch, "host.config.ts"), moduleFiles: new Map(), pipelineFiles: [] }, issues: [] };
+}
+
+describe("fix's own final preview, before any write", () => {
+  it("reports could not verify the boot result instead of a clean 0-errors summary, when an auto edit's own create target has no directory", async () => {
+    await writeFile(join(dir, "host.config.ts"), "export default { modules: [], triggers: [] };\n");
+    const badCreateRule: Rule = {
+      id: "probe/create-missing-dir",
+      check: (ctx) => [
+        {
+          id: "probe/create-missing-dir",
+          rule: "probe/create-missing-dir",
+          severity: "warning",
+          tier: "source",
+          where: {},
+          message: "probe: creates a file in a directory that does not exist",
+          suggestion: "n/a",
+          fix: { kind: "auto", edits: [{ file: join(dirname(ctx.project.configFile), "does-not-exist", "new-file.ts"), start: 0, end: 0, text: "export {};\n", create: true as const }] },
+          docs: "n/a",
+        },
+      ],
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: (_root, scratch) => Promise.resolve(scratchProject(scratch)), rules: [badCreateRule] };
+    const lines: string[] = [];
+    await runCli(["fix", "--root", dir], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    expect(lines.some((l) => l.startsWith("after these edits:"))).toBe(false);
+    expect(lines.some((l) => l.startsWith("could not verify the boot result:") && l.includes("ENOENT"))).toBe(true);
+  });
+});
+
+describe("fix never writes through a scratch path that maps into the real project's node_modules", () => {
+  it("refuses the finding instead of writing, and the dry-run shows the refusal instead of a diff", async () => {
+    await writeFile(join(dir, "host.config.ts"), "export default { modules: [], triggers: [] };\n");
+    const realPkgDir = join(dir, "node_modules", "widget");
+    await mkdir(realPkgDir, { recursive: true });
+    const pkgFile = join(realPkgDir, "package.json");
+    const originalPkgSource = JSON.stringify({ name: "widget", version: "1.0.0" });
+    await writeFile(pkgFile, originalPkgSource);
+    const badRule: Rule = {
+      id: "probe/node-modules-write",
+      check: (ctx) => {
+        const target = join(ctx.scratch, "node_modules", "widget", "package.json");
+        const source = ctx.readFile(target) ?? "{}";
+        return [
+          {
+            id: "probe/node-modules-write",
+            rule: "probe/node-modules-write",
+            severity: "warning",
+            tier: "source",
+            where: {},
+            message: "probe: edits a file under node_modules",
+            suggestion: "n/a",
+            fix: { kind: "auto", edits: [{ file: target, start: 0, end: source.length, text: JSON.stringify({ name: "widget", version: "2.0.0" }) }] },
+            docs: "n/a",
+          },
+        ];
+      },
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: (_root, scratch) => Promise.resolve(scratchProject(scratch)), rules: [badRule] };
+
+    const dryLines: string[] = [];
+    await runCli(["check", "--root", dir, "--json"], { stdout: (l) => dryLines.push(l), stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    const checkReport = boundaryCast<UpgradeReport>(JSON.parse(dryLines.join("\n")), "json");
+    const checkFinding = checkReport.findings.find((f) => f.rule === "probe/node-modules-write");
+    expect(checkFinding?.fix.kind).toBe("manual");
+    expect(checkFinding?.suggestion).toContain("node_modules");
+
+    const fixLines: string[] = [];
+    await runCli(["fix", "--root", dir], { stdout: (l) => fixLines.push(l), stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    expect(fixLines.some((l) => l.includes("package.json") && l.startsWith("---"))).toBe(false);
+
+    await runCli(["fix", "--root", dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    expect(await readFile(pkgFile, "utf8")).toBe(originalPkgSource);
   });
 });

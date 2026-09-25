@@ -48,10 +48,14 @@ export const verifiedUserRule: Rule = {
 
       const { hasHttp, hasEvent } = triggerKinds(ctx, def.name);
       const answer = ctx.answers.get(questionId(def.name));
+      if (answer === "other" || answer === "split manually") {
+        findings.push(finding(`${RULE_ID}:${def.name}`, RULE_ID, message, "left manual: pick authn.verifyUser's path by hand and insert it before revisions.reassignAuthor", where, undefined, "docs/upgrading.md#pipelines-verified-user"));
+        continue;
+      }
       let path: string | undefined;
       if (hasEvent && !hasHttp) path = "result.reassignTo";
       else if (hasHttp && !hasEvent) path = "reassignTo";
-      else if (answer !== undefined && answer !== "other" && answer !== "split") path = answer;
+      else if (answer !== undefined) path = answer;
 
       if (path === undefined) {
         findings.push({
@@ -62,7 +66,7 @@ export const verifiedUserRule: Rule = {
           where,
           message: `${message}, and its triggers do not decide the path by themselves`,
           suggestion: "choose where authn.verifyUser reads the target user id from",
-          fix: { kind: "ask", question: questionId(def.name), prompt: "authn.verifyUser reads which path?", choices: ["reassignTo", "result.reassignTo", "other", "split manually"], defaultValue: "reassignTo" },
+          fix: { kind: "ask", question: questionId(def.name), prompt: "authn.verifyUser reads which path?", choices: ["reassignTo", "result.reassignTo", "other", "split manually"], closedChoices: true, defaultValue: "reassignTo" },
           docs: "docs/upgrading.md#pipelines-verified-user",
         });
         continue;
@@ -77,14 +81,5 @@ export const verifiedUserRule: Rule = {
       findings.push(finding(`${RULE_ID}:${def.name}`, RULE_ID, message, `insert authn.verifyUser:${path} before revisions.reassignAuthor (it now rejects an unknown or inactive target with 404/400, where 5.8 accepted one)`, where, edits, "docs/upgrading.md#pipelines-verified-user"));
     }
     return findings;
-  },
-  applyAnswer(id, value, ctx) {
-    if (!id.startsWith("verified-user-path:") || value === "other" || value === "split manually") return undefined;
-    const pipelineName = id.slice("verified-user-path:".length);
-    const file = fileForPipeline(ctx, pipelineName);
-    const source = file === undefined ? undefined : ctx.readFile(file);
-    if (file === undefined || source === undefined) return undefined;
-    const edit = insertPipelineStep(file, source, { pipelineName, anchorStep: "revisions.reassignAuthor", position: "before", newStep: `authn.verifyUser:${value}`, ...(ctx.locateSteps === undefined ? {} : { locateSteps: ctx.locateSteps }) });
-    return edit ? [edit] : undefined;
   },
 };

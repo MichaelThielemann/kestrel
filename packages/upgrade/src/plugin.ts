@@ -13,7 +13,16 @@ export interface PipelineFile {
   pipelines: readonly string[];
 }
 
-/** A project a plugin knows how to find and load; the layer registers one of these for its own project shape. */
+/**
+ * A project a plugin knows how to find and load; the layer registers one of these for its own
+ * project shape. Every path here (`configFile`, `moduleFiles`' and `pipelineFiles`' entries) must sit
+ * inside the `scratch` directory `load()` was given, since a rule's edits target these paths and a
+ * boot preview maps them onto its own throwaway copy by their position relative to that same
+ * `scratch` — a real-root path escaping that mapping is refused rather than written, even through a
+ * symlink (see `previewBootRaw`'s own confinement check). `DataContentModel.file` is the one
+ * documented exception: it is always a real-root path, since `dataModel(root)` only ever receives
+ * that root.
+ */
 export interface LoadedProject {
   input: BootInput;
   kind: string;
@@ -83,8 +92,6 @@ export interface RuleContext {
   readFile(file: string): string | undefined;
   /** Answers already known for this run (from `--answers`, a TTY prompt, or a `--yes` default), so a rule whose question only makes sense after another one's answer can look it up. */
   answers: ReadonlyMap<string, string>;
-  /** The active plugin's own `ownsPackages`, empty when none is active; built-in dependency rules never read or edit one of these. */
-  ownsPackages: readonly string[];
   /** The active plugin's own step-list locator, when it supplies one; a rule that edits a pipeline's step list (like `pipelines/verified-user`) passes it through to `insertPipelineStep`. */
   locateSteps?: StepListLocator;
   /** The active plugin's own content-model locator, when it supplies one; `model/underscore-field` passes it through to `renameContentField`. */
@@ -110,19 +117,10 @@ export interface RuleContext {
   verifyEdits?: (edits: readonly Edit[], options?: { pipelines?: readonly string[] }) => Promise<{ verified: boolean; newErrors: readonly BootProblem[]; unchecked: readonly { name: string; because: string }[] }>;
 }
 
-/** One 5.8 -> 6.0 rule: turns a loaded project (plus the boot check it produced) into findings. */
+/** One 5.8 -> 6.0 rule: turns a loaded project (plus the boot check it produced) into findings. An answer to one of this rule's `ask` questions reaches it only through `ctx.answers` on the next `check()` call — there is no separate answer-to-edit path. */
 export interface Rule {
   id: string;
   check(ctx: RuleContext): readonly Finding[] | Promise<readonly Finding[]>;
-  /** Turns a chosen answer to one of this rule's `ask` questions into edits; `undefined` when the answer needs no edit or the id is not this rule's. */
-  applyAnswer?(questionId: string, value: string, ctx: RuleContext): Edit[] | undefined;
-}
-
-export interface Question {
-  id: string;
-  prompt: string;
-  choices?: readonly string[];
-  defaultValue?: string;
 }
 
 export interface UpgradePlugin {
@@ -149,11 +147,6 @@ export interface UpgradePlugin {
   load(root: string, scratch: string, cache: Map<string, unknown>): Promise<LoadResult>;
   sandbox?: Record<string, (config: unknown, scratch: string) => unknown>;
   rules?: readonly Rule[];
-  questions?: readonly Question[];
-  /** Package names this plugin owns the versioning of; built-in dependency rules (`deps/kestrel-range` and the mixed-majors check) never read or edit one of these, even under this repo's own npm scope. */
-  ownsPackages?: readonly string[];
-  /** Replaces or disables a built-in rule by id (`null` disables it); two plugins naming the same id is a load error. */
-  overrides?: Record<string, Rule | null>;
   /** Locates a pipeline's own step array(s) directly, for a project layout where a pipeline is not a `definePipeline({ name, steps })` call; the built-in search runs when this is absent. */
   locateSteps?: StepListLocator;
   /** Locates a content type's `fields` object literal directly, for a project layout where it does not sit at `config.types.<typeName>.fields` on a module-list entry; the built-in search runs when this is absent. */
@@ -187,12 +180,6 @@ export interface RunUpgradeCliOptions {
   isInteractive?: boolean;
   /** Overrides the real `node:readline` prompt, for a host with its own UI or a test. */
   prompt?: PromptFn;
-  /**
-   * Overrides the installed `@michaelthielemann/kestrel` major the load/boot tier gate reads, for a
-   * test running against a project whose own packages are not yet labelled 6.0.0. The report's
-   * `project.installed` field still shows what is actually on disk.
-   */
-  forceInstalledMajor?: number;
 }
 
 /** Runs the `check` / `fix` / `data` CLI against `argv`, returning the process exit code. A host bin (the layer's own) passes its plugin here instead of shipping a second copy of the engine. */

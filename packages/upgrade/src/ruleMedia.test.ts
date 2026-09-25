@@ -56,7 +56,7 @@ async function project(
 }
 
 function contextFor(p: LoadedProject): RuleContext {
-  return { root: dir, scratch: dir, project: p, bootCheck: bootCheck(), readFile: readFileOrUndefined, answers: new Map(), ownsPackages: [] };
+  return { root: dir, scratch: dir, project: p, bootCheck: bootCheck(), readFile: readFileOrUndefined, answers: new Map() };
 }
 
 const DELIVERY = "@michaelthielemann/kestrel-delivery-static";

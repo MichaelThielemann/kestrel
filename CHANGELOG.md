@@ -517,87 +517,101 @@ Net changes since 5.8.1.
   data answers. `fix` shows a unified diff per file and asks `y`/`n`/`d` before writing; without a
   terminal, `--write` needs `--yes` or is refused. Questions are answered over a real
   `node:readline` prompt, from `--answers <file>`, or from `--yes`'s defaults — a question with no
-  safe default stays open regardless. It never installs, commits, pushes or reaches the network;
+  safe default stays open regardless, and an answer that does not match a closed set of choices is
+  rejected rather than passed through. It never installs, commits, pushes or reaches the network;
   see `docs/upgrading.md`. It exports a sandbox helper (`@michaelthielemann/kestrel-upgrade/sandbox`)
   that composes with `checkBoot()` for a CI gate, and a plugin API
   (`@michaelthielemann/kestrel-upgrade/plugin`) a host CLI registers its own project loader and
   rules through instead of shipping a second copy of the engine.
-- `kestrel-upgrade`'s plugin API, finalized against its first real host: `UpgradePlugin.load()`
-  returns `LoadResult` (`{ project?, issues }`), the same shape the built-in loader already has, so a
-  partial load failure surfaces as `load/failed` findings instead of losing the rest of the project;
-  it also takes a third parameter, `cache: Map<string, unknown>`, shared by every `load()` call within
-  one `check`/`fix` invocation (every re-ask round, every edit preview) so a plugin can skip repeating
-  an expensive prepare step. `UpgradePlugin` gains `overrides` (replaces or disables a built-in rule
-  by id, reported as `plugin/rule-replaced`/`plugin/rule-disabled`; two plugins claiming the same id
-  is a load error), `ownsPackages` (package names the built-in dependency rules never read or edit,
-  even under this repo's own npm scope), and `locateSteps`/`locateModelFields` (locates a pipeline's
-  step array or a content type's fields object literal directly, for a project layout the built-in
-  search does not recognize; `RuleContext` carries the active plugin's own locators to
-  `pipelines/verified-user` and `model/underscore-field`). Version detection
-  (`mixedMajors`, `deps/kestrel-range`) now checks this repo's own fixed package list instead of a
-  name prefix, so a plugin's own package is never mistaken for one of this repo's own. The edit,
-  verify and all-or-nothing combine primitives (`applyEdits`, `verifiesAfterEdit`,
-  `combineEditParts`), plus the AST reading primitives a locator is written with, are published from
-  a new `@michaelthielemann/kestrel-upgrade/codemods` export.
-- `kestrel-upgrade`'s plugin API gains three more pieces closing gaps found against its first real
-  host: `insertStepAfterEmitOutsideGroup` (and `emitStepIsLocatable`) now take the same optional
-  `locateSteps` as `insertPipelineStep`/`renameContentField`, threaded from `RuleContext` the same
-  way, and both are published from `@michaelthielemann/kestrel-upgrade/codemods` alongside them.
-  `--data-report`'s parsed content now lands in a separate `LoadedProject.dataReport`, instead of
-  overwriting `LoadedProject.data`, so a plugin's own `load()`-stored data survives a `data`-report
-  run (`model/underscore-field` reads its stored counts from `dataReport`). `UpgradePlugin` gains
-  `dataModel?(root)`, supplying the typed content model (`DataContentModel`/`DataContentType`/
-  `DataContentField`) the `data` command's underscore-field counter needs for a project layout where
-  it cannot be read from a `content-default` module's config on `kestrel.config.ts`; the counter
-  itself, and the rest of the `data` command, stays SQLite-only either way.
-- `kestrel-upgrade`'s plugin API moves from wholesale rule replacement toward hooks the built-in rules
-  themselves consult, after a real host's plugin needed to re-implement two of them and missed later
-  fixes to both. `LoadedProject` gains `contentModel?: DataContentModel`, which `model/underscore-field`
-  (including its orphaned-column warning) reads directly when present, instead of a `content-default`
-  module's config on `kestrel.config.ts`; `check`/`fix` derives it from `UpgradePlugin.dataModel` when
-  `load()` did not set it directly, so a plugin need only describe its content model once.
-  `UpgradePlugin` gains `switchEdits?(ctx, relayPipelines)`, supplying `offer/event-queue`'s switch (its
-  edits as the same all-or-nothing parts `combineEditParts` takes, plus deployment markers that forbid
-  it) for a project layout where events-direct is not a `kestrel.config.ts` module-list entry; the
-  built-in rule keeps every one of its own gates (an open event-payload or emits finding, the boot
-  preview, no default when unverified) and only asks the hook for the edits and the markers, so a
-  plugin no longer has to replace this rule to support its own layout. `RuleContext` gains `verifyEdits(edits, { pipelines })`, the diffed,
-  higher-level form of `previewBoot` (now documented as the low-level one): it folds a boot-preview
-  error diff together with whether every named pipeline was actually checked, so a rule cannot mistake
-  an unchecked pipeline for a verified one; `offer/event-queue` now verifies its own switch this way.
-  `LoadedProject.pipelineFiles` is a list of `{ file, pipelines }` instead of one file per pipeline
-  name, so a project layout keeping several pipelines in one file is reported once per file by a rule
-  that walks every one, not once per pipeline sharing it. `UpgradePlugin.load()`'s TSDoc documents that
-  a cached value in its `cache` parameter must be path-independent, or rebased onto the current
-  `scratch` on every call, and that `load()` itself (a config import, a plugin's own prepare step) runs
-  unconditionally, before any consent question — `--run-setup` only ever gates a module's own `setup()`.
-- `kestrel-upgrade`'s plugin API closes three more gaps a real host's plugin met once it moved onto the
-  hooks above. `DataContentModel` gains `file?: string`, the file `model/underscore-field` reads and
-  splices a verified-zero-count rename into; `LoadedProject.configFile` (previously always the target,
-  even for a plugin whose content model lives elsewhere) is used when absent, so the rename is auto
-  again instead of manual for such a project. `replaceModuleListEntry` (and its
-  `ReplaceModuleEntryOptions`) is published from `@michaelthielemann/kestrel-upgrade/codemods`, so a
-  plugin's own `switchEdits` can build a hand-written-module-list switch without reimplementing it.
-  `locateSteps` and `locateModelFields` are additive, not a replacement: previously supplying either
-  one to `insertPipelineStep`, `insertStepAfterEmitOutsideGroup` or `renameContentField` disabled the
-  built-in search entirely, even for a pipeline or type the locator itself had nothing to say about;
-  now an empty result from `locateSteps`, or `undefined` from `locateModelFields`, falls back to the
-  exact built-in search for that target, so a plugin's locator only needs to answer for the layouts it
-  actually recognizes.
-- `kestrel-upgrade` gains five rules for the `media`/`images`/`delivery-static`/`authz-roles` change:
+- `kestrel-upgrade`'s plugin API: `UpgradePlugin.load(root, scratch, cache)` returns `LoadResult`
+  (`{ project?, issues }`), the same shape the built-in loader has, so a partial load failure surfaces
+  as a `load/failed` finding instead of losing the rest of the project; `cache` is one `Map` shared by
+  every `load()` call within a single `check`/`fix` invocation, so an expensive prepare step runs once
+  per invocation, not once per re-ask round or edit preview. `UpgradePlugin.rules` merges into the
+  built-in rules; an id colliding with a built-in one is a load error naming both, and that rule is
+  dropped from the merge. `locateSteps`/`locateModelFields` locate a pipeline's step array or a content
+  type's fields object literal directly, for a project layout the built-in search does not recognize —
+  additive, not a replacement: an empty result (or `undefined` from `locateModelFields`) falls back to
+  the exact built-in search for that target, so a locator only answers for the layouts it actually
+  recognizes. `dataModel?(root)` supplies the typed content model
+  (`DataContentModel`/`DataContentType`/`DataContentField`) the `data` command's underscore-field
+  counter needs for a project layout where it cannot be read from a `content-default` module's config;
+  `check`/`fix` also derives `LoadedProject.contentModel` from it when `load()` did not set the field
+  directly, and `DataContentModel.file` (falling back to `LoadedProject.configFile`) is where a
+  verified-zero-count rename is spliced in. `switchEdits?(ctx, relayPipelines)` supplies
+  `offer/event-queue`'s switch (edits as the all-or-nothing parts `combineEditParts` takes, plus
+  deployment markers) for a project layout where events-direct is not a `kestrel.config.ts` module-list
+  entry; the built-in rule always runs its own gates first (an open event-payload or emits finding, the
+  serverless markers) and only asks the hook for the edits and any extra markers, adding them to its own
+  rather than replacing them. Once the switch's edits are known (built-in or a plugin's), one boot
+  preview of that full set is the sole authority on whether the switch actually happened — with or
+  without a plugin: the offer blocks unless the booted module list shows events-queue and not
+  events-direct, naming the plugin's own `switchEdits` when one supplied it. A literal
+  `"...events-direct"` string, in any quote style and found by walking the parsed AST so a comment or a
+  partial match never counts, decides nothing on its own; it only improves the blocker's message, naming
+  the file and site to edit, so a module list built by a helper function or an imported constant is
+  checked exactly the same way. `verifyEdits(edits, { pipelines })` is the
+  diffed, higher-level form of the lower-level `previewBoot`: it folds a boot-preview error diff together
+  with whether every named pipeline was actually checked, so a rule cannot mistake an unchecked pipeline
+  for a verified one; a preview never applies an edit whose target lies outside its own scratch copy,
+  even through a symlink (a package inside the copy's own linked `node_modules`, say), refusing and
+  reporting a `preview/edit-refused` finding naming the path and the reason instead of a path escaping
+  back onto the real project — a package a switch's own edits add but that is not installed yet stays on
+  its own existing "install it" line, never this finding, since the preview genuinely reloaded. A hook
+  that throws (`dataModel`, so far) surfaces as a `plugin/hook-failed` error finding naming the plugin
+  and the hook, in `check`/`fix` and in `data`, instead of being silently swallowed. `AskFix.closedChoices:
+  true` marks a question's `choices` as the complete, exhaustive answer set; only then is an answer
+  validated against it, rejected rather than passed through when it does not match — a rejected
+  `--answers` value exits `fix` with 2, naming the id and the value, on every `fix` run, `--write` or
+  not, the same as an unknown id; a rejected TTY answer is asked again — a question whose `choices` are
+  only a default or example is never validated, since the rule parses the raw answer itself.
+  `pipelines/verified-user`'s path question is one such closed set: choosing "other" or "split
+  manually" now goes manual (pick the path by hand) instead of re-asking the same question forever.
+  `LoadedProject.pipelineFiles`
+  is a list of `{ file, pipelines }`, more than one name per entry for a layout keeping several
+  pipelines in one file, so a rule that walks every pipeline file reports at most once per file. A
+  plugin's own `load()` (a config import, a prepare step) runs unconditionally, before any consent
+  question — `--run-setup` only ever gates a module's own `setup()`. `--data-report`'s parsed content
+  lands in the separate `LoadedProject.dataReport`, so a plugin's own `load()`-stored `data` survives a
+  `data`-report run. The edit, verify and all-or-nothing combine primitives (`applyEdits`,
+  `verifiesAfterEdit`, `combineEditParts`), the AST reading primitives a locator is written with,
+  `insertPipelineStep`, `insertStepAfterEmitOutsideGroup` (and `emitStepIsLocatable`),
+  `renameContentField`, `replaceModuleListEntry`, `insertTriggers`/`insertTrigger`,
+  `createPipelineFile`/`newPipelineFileContent` and `swapPipelineSteps` are published from a
+  `@michaelthielemann/kestrel-upgrade/codemods` export, so a plugin's own rule or locator never needs a
+  second copy of this engine's edit machinery.
+- `kestrel-upgrade` gains rules for the `media`/`images`/`delivery-static`/`authz-roles` change:
   `modules/delivery-media` auto-migrates `delivery-static`'s removed `media` option to `publicCopy` on
   `media-default`/`images-default` and a `reservedPaths` entry on `delivery-static`, falling back to
   manual when `reservedPaths` already has entries it cannot safely merge into;
   `modules/media-public-path` auto-fixes (warning) `images-default`'s `publicPath` not matching
-  `media-default`'s; `pipelines/media-serve` reports, manual only since the tool does not create
-  pipeline files, a `publicCopy` with no pipeline serving it and an `authz-roles` `anonymous` list
-  missing `media.read` for one that does; `runtime/authz-anonymous-floor` reports (no fix) that a
-  signed-in caller now also holds whatever `authz-roles`'s `anonymous` list grants;
-  `imports/removed-export` reports (manual) custom code importing `rewriteMedia`, `MediaMatch`,
-  `MediaConfig` or `contentTypeByExtension` from `kestrel-delivery-static/impl`, or calling the
-  removed `migrateKeys`. `types/breaking-signatures` and `responses/breaking-step-shapes` are
-  extended for `Media`/`Images`'s own shape changes and the `media.*`/`images.*` steps affected. See
-  `docs/upgrading.md`.
+  `media-default`'s; `pipelines/media-serve` scaffolds `serveMediaFile.ts`/`serveImageVariant.ts` and
+  their HTTP triggers (auto) when the project has a pipelines directory to create them in, and reports
+  (manual) an `authz-roles` `anonymous` list missing `media.read` for a `publicCopy` that needs it;
+  `runtime/authz-anonymous-floor` reports (no fix) that a signed-in caller now also holds whatever
+  `authz-roles`'s `anonymous` list grants; `imports/removed-export` reports (manual) custom code
+  importing `rewriteMedia`, `MediaMatch`, `MediaConfig` or `contentTypeByExtension` from
+  `kestrel-delivery-static/impl`, or calling the removed `migrateKeys`; `pipelines/media-repair`
+  scaffolds `repairPublicMedia.ts`/`syncPublicMedia.ts` and their admin/cron triggers (auto) when
+  `publicCopy` is set and neither `media.syncPublic` nor `images.syncPublic` runs anywhere;
+  `pipelines/images-resume-cron` reports (manual) images-default configured without a cron-triggered
+  `images.resume`; `pipelines/media-delete-order` auto-swaps `images.remove`/`images.removeMany` run
+  before the `media.remove`/`media.removeFolder` they depend on, and reports (info) a
+  `media.removeFolder` missing `events.emit:media.deleted` afterwards; `runtime/anonymous-media-list`
+  reports (info) an anonymous `media.read` grant while `anonymousList` stays at its `"ids"` default;
+  `responses/binary-cache-control` reports (info) a local module mentioning `cache-control` near a
+  binary step result; `pipelines/images-plan` reports (manual) a pipeline calling `images.plan`
+  directly, since the right replacement depends on delivery mode and lane adoption.
+  `types/breaking-signatures` and `responses/breaking-step-shapes` are extended for `Media`/`Images`'s own shape
+  changes and the `media.*`/`images.*` steps affected. Three `data` command checks:
+  `data/media-layout` (error) reads `media_items` for an off-layout key and
+  `images_variants`/`images_retired` for a pre-6.0.0 row with no `slot`, both of which now fail the
+  matching module's `setup()`; `data/site-media-leftovers` (warning, manual) lists files still sitting
+  under the 5.x delivery-static media export directory; `data/blobstore-tmp-suffix` (info) lists stored
+  filesystem-blobstore keys already ending in the suffix 6.0.0 reserves for its own atomic writes. An
+  edit can also create a brand-new file (a `create` edit, refused if the path already exists, or if a
+  second edit races to create the same one) — how `pipelines/media-serve` and `pipelines/media-repair`
+  scaffold their pipeline files. See `docs/upgrading.md`.
 
 - `events-queue` coalesces: an event whose data carries a string `coalesceKey` is queued at most
   once per subscribed pipeline and key while an earlier row of that key has not started; a claim,
@@ -619,30 +633,6 @@ Net changes since 5.8.1.
   retried dead row of one) never strands its rows.
   `events.readQueueStatus` reports every lane this process currently knows of — configured, or
   found holding a row — with `pending`, `running` and `oldestPendingAt` under `lanes`.
-- `kestrel-upgrade` closes the rest of the media/images/delivery-static/authz-roles rule table:
-  `modules/delivery-media`'s `pipelines/media-serve` now scaffolds `serveMediaFile.ts` /
-  `serveImageVariant.ts` and their HTTP triggers itself (auto), instead of always going manual, using
-  a new all-or-nothing `create` edit kind — a `create` edit's target file must not already exist, and
-  two edits racing to create the same one downgrade to manual naming the conflict, the same as any
-  other unresolved edit conflict. `pipelines/media-repair` (new, auto) scaffolds `repairPublicMedia.ts`
-  and `syncPublicMedia.ts` with their admin and cron triggers when `publicCopy` is set and neither
-  `media.syncPublic` nor `images.syncPublic` runs anywhere. `pipelines/images-resume-cron` (new,
-  manual) reports images-default configured without a cron-triggered `images.resume`.
-  `pipelines/media-delete-order` (new) auto-swaps `images.remove`/`images.removeMany` run before the
-  `media.remove`/`media.removeFolder` they depend on, and reports (info) a `media.removeFolder`
-  missing `events.emit:media.deleted` afterwards. `runtime/anonymous-media-list` (new, info) reports
-  an anonymous `media.read` grant while `anonymousList` stays at its `"ids"` default.
-  `responses/binary-cache-control` (new, info) points at a local module mentioning `cache-control`
-  near a binary step result. `pipelines/images-plan` (new, manual) reports a pipeline calling
-  `images.plan` directly, since the right replacement depends on delivery mode and lane adoption.
-  Three new `data` command checks: `data/media-layout` (error) reads `media_items` for an off-layout
-  key and `images_variants`/`images_retired` for a pre-6.0.0 row with no `slot`, both of which now
-  fail the matching module's `setup()`; `data/site-media-leftovers` (warning, manual) lists files
-  still sitting under the 5.x delivery-static media export directory; `data/blobstore-tmp-suffix`
-  (info) lists stored filesystem-blobstore keys already ending in the suffix 6.0.0 reserves for its
-  own atomic writes. New primitives published for the plugin API's own rule authors:
-  `insertTriggers`/`insertTrigger` (append one or more trigger literals to `triggers: [...]` in one
-  edit), `createPipelineFile`/`newPipelineFileContent` and `swapPipelineSteps`.
 - **Published outputs are refreshed when what they show changes.** `delivery-static` records, per
   output and locale, what its render read — the paths `site.resolveLinks` answered, and every read
   the renderer made through this instance in the same process — and `delivery.markDependents:<type>`
@@ -769,6 +759,14 @@ Net changes since 5.8.1.
   edit (the intentional case, where one rule replaces a value inside a construct another rule replaces
   or deletes whole) now rejects the whole finding, downgrading it to manual and naming the rule it
   conflicts with instead of writing a partial result.
+- `kestrel-upgrade`: a plugin's `detect()` throwing surfaces as a `load/failed` finding naming the
+  plugin, and the `data` command's `kestrel.config.ts` existing but failing to load surfaces as
+  `data/config-load-failed`; a project with no `kestrel.config.ts` at the given root is unaffected. A
+  detected plugin with no `dataModel` hook whose own config needs its aliases to load reports
+  `data/config-load-failed` as a warning naming the plugin, not an error implying the config itself is
+  broken. `steps/undeclared-required`'s `"all"` answer for a step this cannot locate this way (a
+  factory step, say) reports why, naming the step, instead of repeating the same question with no
+  explanation.
 
 ## 5.8.1 – 2026-09-22
 

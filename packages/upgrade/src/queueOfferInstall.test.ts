@@ -111,7 +111,7 @@ export default definePipeline({
 async function runInCleanProcess(root: string, argv: string[], answers: Record<string, string> | undefined, forceInstalledMajor: number | undefined): Promise<{ code: number; lines: string[] }> {
   const scriptFile = join(root, "__run.mjs");
   const resultFile = join(root, "__result.json");
-  const pluginModule = join(PACKAGES_DIR, "upgrade", "src", "plugin.ts");
+  const cliRunModule = join(PACKAGES_DIR, "upgrade", "src", "cli-run.ts");
   let answersFileArg = "";
   if (answers !== undefined) {
     const answersFile = join(root, "__answers.json");
@@ -122,9 +122,9 @@ async function runInCleanProcess(root: string, argv: string[], answers: Record<s
   await writeFile(
     scriptFile,
     `import { writeFile } from "node:fs/promises";
-import { runUpgradeCli } from ${JSON.stringify(pluginModule)};
+import { runCli } from ${JSON.stringify(cliRunModule)};
 const lines = [];
-const code = await runUpgradeCli([${argv.map((a) => JSON.stringify(a)).join(", ")}${answersFileArg}], { stdout: (l) => lines.push(l), stderr: (l) => lines.push("STDERR: " + l)${forceMajorProp} });
+const code = await runCli([${argv.map((a) => JSON.stringify(a)).join(", ")}${answersFileArg}], { stdout: (l) => lines.push(l), stderr: (l) => lines.push("STDERR: " + l)${forceMajorProp} });
 await writeFile(${JSON.stringify(resultFile)}, JSON.stringify({ code, lines }));
 `,
   );
@@ -172,11 +172,11 @@ describe("offer/event-queue when events-queue is not installed", () => {
     await buildDirectProject(dir, false);
     const { lines } = await runInCleanProcess(dir, ["fix", "--root", dir, "--json"], { "switch-to-queue": "yes", "idempotent:onNoteCreated": "yes", "relay-pipelines": "" }, 6);
     const reportLine = lines.find((l) => l.startsWith("{"));
-    const report = boundaryCast<{ findings: Array<{ rule: string; message: string; fix: { kind: string } }> }>(JSON.parse(reportLine ?? "{}"), "json");
+    const report = boundaryCast<{ findings: Array<{ rule: string; message: string; suggestion: string; fix: { kind: string } }> }>(JSON.parse(reportLine ?? "{}"), "json");
     const offer = report.findings.find((f) => f.rule === "offer/event-queue");
     expect(offer?.fix.kind).toBe("manual");
     expect(offer?.message).toContain("could not verify");
-    expect(offer?.message).toContain("@michaelthielemann/kestrel-events-queue");
+    expect(offer?.suggestion).toContain("@michaelthielemann/kestrel-events-queue");
   });
 });
 

@@ -1,5 +1,4 @@
 import type { LoadIssue, Rule, UpgradePlugin } from "./plugin.ts";
-import type { Finding } from "./report.ts";
 
 export async function detectPlugin(plugins: readonly UpgradePlugin[], root: string): Promise<{ plugin?: UpgradePlugin; issues: LoadIssue[] }> {
   const issues: LoadIssue[] = [];
@@ -13,60 +12,18 @@ export async function detectPlugin(plugins: readonly UpgradePlugin[], root: stri
   return { issues };
 }
 
-export function overrideConflicts(plugins: readonly UpgradePlugin[]): LoadIssue[] {
-  const owners = new Map<string, string>();
-  const conflicts = new Set<string>();
-  for (const plugin of plugins) {
-    for (const id of Object.keys(plugin.overrides ?? {})) {
-      const owner = owners.get(id);
-      if (owner !== undefined && owner !== plugin.kind) conflicts.add(id);
-      else owners.set(id, plugin.kind);
-    }
-  }
-  return [...conflicts].sort().map((id) => ({ message: `rule "${id}" is overridden by more than one registered plugin` }));
-}
-
-export function mergeRules(defaultRules: readonly Rule[], plugin: UpgradePlugin | undefined): { rules: Rule[]; notices: Finding[] } {
-  const kind = plugin?.kind ?? "";
-  const overrides = new Map(Object.entries(plugin?.overrides ?? {}));
-  const notices: Finding[] = [];
-  const rules: Rule[] = [];
-  for (const rule of defaultRules) {
-    if (!overrides.has(rule.id)) {
-      rules.push(rule);
-      continue;
-    }
-    const replacement = overrides.get(rule.id);
-    overrides.delete(rule.id);
-    if (replacement === null || replacement === undefined) {
-      notices.push({
-        id: `plugin/rule-disabled:${rule.id}`,
-        rule: "plugin/rule-disabled",
-        severity: "info",
-        tier: "source",
-        where: {},
-        message: `rule "${rule.id}" disabled by plugin "${kind}"`,
-        suggestion: "see the plugin's own documentation for what replaces this check, if anything",
-        fix: { kind: "none" },
-        docs: "docs/upgrading.md#plugin-api",
-      });
-      continue;
-    }
-    rules.push(replacement);
-    notices.push({
-      id: `plugin/rule-replaced:${rule.id}`,
-      rule: "plugin/rule-replaced",
-      severity: "info",
-      tier: "source",
-      where: {},
-      message: `rule "${rule.id}" replaced by plugin "${kind}"`,
-      suggestion: "see the plugin's own documentation for the replacement's behaviour",
-      fix: { kind: "none" },
-      docs: "docs/upgrading.md#plugin-api",
-    });
-  }
-  for (const replacement of overrides.values()) {
-    if (replacement !== null) rules.push(replacement);
-  }
-  return { rules: [...rules, ...(plugin?.rules ?? [])], notices };
+/**
+ * Merges a plugin's own `rules` alongside `defaultRules`. A plugin rule id that collides with a
+ * built-in one is a load error naming both the id and the plugin, and the merged list excludes that
+ * rule — the built-in keeps running under that id, since a plugin needing different behaviour for a
+ * built-in rule reaches for a hook (`locateSteps`, `locateModelFields`, `dataModel`, `switchEdits`),
+ * never a same-id replacement.
+ */
+export function mergeRules(defaultRules: readonly Rule[], plugin: UpgradePlugin | undefined): { rules: Rule[]; issues: LoadIssue[] } {
+  const builtInIds = new Set(defaultRules.map((r) => r.id));
+  const pluginRules = plugin?.rules ?? [];
+  const colliding = pluginRules.filter((r) => builtInIds.has(r.id));
+  const issues: LoadIssue[] = colliding.map((r) => ({ message: `plugin "${plugin?.kind ?? ""}" registers a rule id "${r.id}" that collides with a built-in rule; rename it` }));
+  const collidingIds = new Set(colliding.map((r) => r.id));
+  return { rules: [...defaultRules, ...pluginRules.filter((r) => !collidingIds.has(r.id))], issues };
 }

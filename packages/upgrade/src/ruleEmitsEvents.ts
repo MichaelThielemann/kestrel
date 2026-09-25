@@ -62,20 +62,6 @@ export const emitsRule: Rule = {
     }
     return findings;
   },
-  applyAnswer(id, value, ctx) {
-    if (!id.startsWith("emits:") || value === "none") return undefined;
-    const moduleName = id.slice("emits:".length);
-    const file = ctx.project.moduleFiles.get(moduleName);
-    const source = file === undefined ? undefined : ctx.readFile(file);
-    if (file === undefined || source === undefined) return undefined;
-    const events = value
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s !== "");
-    if (events.length === 0) return undefined;
-    const edit = addModuleEmits(file, source, events);
-    return edit ? [edit] : undefined;
-  },
 };
 
 const ENVELOPE_KEYS = ["eventId", "event", "at"];

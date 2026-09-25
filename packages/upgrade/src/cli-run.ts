@@ -1,10 +1,10 @@
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { checkBoot, type BootCheck, type BootProblem } from "@michaelthielemann/kestrel";
 import { applyEdits } from "./apply.ts";
-import { askFindings, parseAnswersFile, resolveAnswer, ttyPrompt, unknownAnswerIds, type PromptFn } from "./answers.ts";
+import { askFindings, invalidClosedAnswers, parseAnswersFile, resolveAnswer, ttyPrompt, unknownAnswerIds, type PromptFn } from "./answers.ts";
 import { boolFlag, parseArgs, stringFlag, type ParsedArgs } from "./args.ts";
 import { unifiedDiff } from "./diff.ts";
 import { runDataStep } from "./data.ts";
@@ -12,53 +12,65 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { loadBackendProject, loadIssuesAsFindings, type LoadIssue, type LoadResult } from "./project.ts";
-import type { LoadedProject, Rule, RuleContext, RunUpgradeCliOptions, SwitchEditsResult, UpgradePlugin } from "./plugin.ts";
-import { detectPlugin, mergeRules, overrideConflicts } from "./pluginRules.ts";
+import type { AskFix, LoadedProject, Rule, RuleContext, RunUpgradeCliOptions, SwitchEditsResult, UpgradePlugin } from "./plugin.ts";
+import { detectPlugin, mergeRules } from "./pluginRules.ts";
 import { renderHuman, summarize, whereOf, type Edit, type Finding, type Severity, type UpgradeReport } from "./report.ts";
 import { DEFAULT_RULES, readFileOrUndefined } from "./rules.ts";
-import { verifyEditsWith, type VerifyEditsResult } from "./ruleHelpers.ts";
+import { hookFailedFinding, verifyEditsWith, type VerifyEditsResult } from "./ruleHelpers.ts";
 import { sandboxBootInput, type SandboxTable } from "./sandbox.ts";
-import { createScratchCopy, removeScratchCopy } from "./scratch.ts";
+import { createScratchCopy, removeScratchCopy, type ScratchCopy } from "./scratch.ts";
 import { verifiesAfterEdit } from "./verify.ts";
-import { installedVersions, majorOf } from "./versions.ts";
+import { installedVersions, majorOf, toolVersion } from "./versions.ts";
+
+interface InternalRunOptions extends RunUpgradeCliOptions {
+  forceInstalledMajor?: number;
+}
+
+/**
+ * `RuleContext` plus a seam only a built-in rule reaches, never a plugin's own: `pluginKind` is the
+ * active plugin's own `UpgradePlugin.kind` (absent without one), and `previewDetails` runs a preview
+ * boot the same way `previewBoot` does but additionally returns the reloaded project's own active
+ * module list and every load issue it reported, separately from a refused edit (see `BootPreview`) —
+ * `offer/event-queue` uses both to confirm a switch actually took effect at the module-list level and
+ * to name the real cause when it could not verify one. Exported for this package's own built-in rules
+ * to import; `cli-run.ts` is not part of the package's published entry points, so this never reaches a
+ * plugin author through `RuleContext`, which stays as published.
+ */
+export interface InternalRuleContext extends RuleContext {
+  pluginKind?: string;
+  previewDetails?: (edits: readonly Edit[]) => Promise<{ moduleUses?: readonly string[]; issues: readonly LoadIssue[]; failed?: LoadIssue } | undefined>;
+}
 
 interface ResolvedProject {
   project?: LoadedProject;
   issues: LoadIssue[];
+  findings?: Finding[];
   rules: readonly Rule[];
   sandboxEntries?: SandboxTable;
-  ownsPackages: readonly string[];
   locateSteps?: StepListLocator;
   locateModelFields?: ModelFieldsLocator;
   switchEdits?: (ctx: RuleContext, relayPipelines: readonly string[]) => Promise<SwitchEditsResult>;
-  notices: Finding[];
   reload: (scratchDir: string) => Promise<LoadResult>;
 }
 
-async function withDerivedContentModel(project: LoadedProject | undefined, plugin: UpgradePlugin, root: string): Promise<LoadedProject | undefined> {
-  if (project === undefined || project.contentModel !== undefined || plugin.dataModel === undefined) return project;
+async function withDerivedContentModel(project: LoadedProject | undefined, plugin: UpgradePlugin, root: string): Promise<{ project: LoadedProject | undefined; finding?: Finding }> {
+  if (project === undefined || project.contentModel !== undefined || plugin.dataModel === undefined) return { project };
   try {
     const derived = await plugin.dataModel(root);
-    return derived === undefined ? project : { ...project, contentModel: derived };
-  } catch {
-    return project;
+    return { project: derived === undefined ? project : { ...project, contentModel: derived } };
+  } catch (err) {
+    return { project, finding: hookFailedFinding(plugin.kind, "dataModel", err) };
   }
 }
 
-async function resolveProject(root: string, entry: string | undefined, scratchDir: string, plugins: readonly UpgradePlugin[], cache: Map<string, unknown>): Promise<ResolvedProject> {
-  const conflicts = overrideConflicts(plugins);
-  const { plugin, issues: detectIssues } = await detectPlugin(plugins, root);
+async function resolveProject(root: string, entry: string | undefined, scratchDir: string, plugin: UpgradePlugin | undefined, cache: Map<string, unknown>): Promise<ResolvedProject> {
   if (plugin === undefined) {
     const { project, issues } = await loadBackendProject(scratchDir, entry === undefined ? undefined : resolve(root, entry));
     const reload = (dir: string): Promise<LoadResult> => loadBackendProject(dir, entry === undefined ? undefined : resolve(root, entry));
-    return { ...(project === undefined ? {} : { project }), issues: [...conflicts, ...detectIssues, ...issues], rules: DEFAULT_RULES, ownsPackages: [], notices: [], reload };
+    return { ...(project === undefined ? {} : { project }), issues, rules: DEFAULT_RULES, reload };
   }
-  if (conflicts.length > 0) {
-    return { issues: [...conflicts, ...detectIssues], rules: DEFAULT_RULES, ownsPackages: [], notices: [], reload: async () => ({ issues: conflicts }) };
-  }
-  const { rules, notices } = mergeRules(DEFAULT_RULES, plugin);
+  const { rules, issues: mergeIssues } = mergeRules(DEFAULT_RULES, plugin);
   const sandboxEntries = plugin.sandbox === undefined ? {} : { sandboxEntries: plugin.sandbox };
-  const ownsPackages = plugin.ownsPackages ?? [];
   const switchEditsHook = plugin.switchEdits;
   const locators = {
     ...(plugin.locateSteps === undefined ? {} : { locateSteps: plugin.locateSteps }),
@@ -74,15 +86,15 @@ async function resolveProject(root: string, entry: string | undefined, scratchDi
   };
   try {
     const { project: loaded, issues } = await plugin.load(root, scratchDir, cache);
-    const project = await withDerivedContentModel(loaded, plugin, root);
-    return { ...(project === undefined ? {} : { project }), issues: [...detectIssues, ...issues], rules, ownsPackages, notices, ...sandboxEntries, ...locators, reload };
+    const { project, finding } = await withDerivedContentModel(loaded, plugin, root);
+    return { ...(project === undefined ? {} : { project }), issues: [...mergeIssues, ...issues], findings: finding ? [finding] : [], rules, ...sandboxEntries, ...locators, reload };
   } catch (err) {
-    return { issues: [...detectIssues, { message: err instanceof Error ? err.message : String(err) }], rules, ownsPackages, notices, ...sandboxEntries, ...locators, reload };
+    return { issues: [...mergeIssues, { message: err instanceof Error ? err.message : String(err) }], rules, ...sandboxEntries, ...locators, reload };
   }
 }
 
 const execFileAsync = promisify(execFile);
-const TOOL_VERSION = "5.8.0";
+const TOOL_VERSION = toolVersion();
 
 function realpathOrSelf(path: string): string {
   try {
@@ -92,13 +104,68 @@ function realpathOrSelf(path: string): string {
   }
 }
 
-function insideScratch(file: string, scratch: string): boolean {
-  const rel = relative(realpathOrSelf(scratch), realpathOrSelf(file));
-  return !rel.startsWith("..") && !isAbsolute(rel);
+function deepestExistingAncestor(path: string): string {
+  let current = path;
+  for (;;) {
+    if (existsSync(current)) return current;
+    const parent = dirname(current);
+    if (parent === current) return current;
+    current = parent;
+  }
+}
+
+function hasSymlinkBelow(candidate: string, root: string): boolean {
+  const rel = relative(root, candidate);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false;
+  let current = root;
+  for (const part of rel.split(sep)) {
+    if (part === "") continue;
+    current = join(current, part);
+    if (!existsSync(current)) return false;
+    try {
+      if (lstatSync(current).isSymbolicLink()) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+type PathEscape = "outside" | "symlink";
+
+function pathEscapeReason(candidate: string, root: string): PathEscape | undefined {
+  if (!existsSync(root)) {
+    const rel = relative(root, candidate);
+    return rel.startsWith("..") || isAbsolute(rel) ? "outside" : undefined;
+  }
+  if (hasSymlinkBelow(candidate, root)) return "symlink";
+  const rootReal = realpathOrSelf(root);
+  const existingReal = realpathOrSelf(deepestExistingAncestor(candidate));
+  const rel = relative(rootReal, existingReal);
+  return rel.startsWith("..") || isAbsolute(rel) ? "outside" : undefined;
+}
+
+function escapeText(reason: PathEscape, copyLabel: string): string {
+  return reason === "symlink" ? `reaches outside its own ${copyLabel} through a symlink` : `resolves outside its own ${copyLabel}`;
+}
+
+function stripTempDirs(raw: string, dirs: readonly (string | undefined)[]): string {
+  let out = raw;
+  for (const dir of dirs) {
+    if (dir === undefined) continue;
+    out = out.split(`${dir}${sep}`).join("").split(dir).join("");
+  }
+  return out;
+}
+
+function displayPath(file: string, root: string): string {
+  const rel = relative(root, file);
+  return rel.startsWith("..") || isAbsolute(rel) ? file : rel;
 }
 
 function remap(file: string, scratch: string, root: string): string {
-  return insideScratch(file, scratch) ? resolve(root, relative(scratch, file)) : file;
+  const rel = relative(scratch, file);
+  return rel.startsWith("..") || isAbsolute(rel) ? file : resolve(root, rel);
 }
 
 function remapFinding(finding: Finding, scratch: string, root: string): Finding {
@@ -163,9 +230,38 @@ function groupByFile(edits: readonly Edit[]): Map<string, Edit[]> {
   return grouped;
 }
 
+function refusedEditFinding(issue: LoadIssue): Finding {
+  return {
+    id: `preview/edit-refused:${issue.file ?? issue.message}`,
+    rule: "preview/edit-refused",
+    severity: "warning",
+    tier: "boot",
+    where: whereOf({ file: issue.file }),
+    message: issue.message,
+    suggestion: "review the edit and the rule or plugin hook that produced it",
+    fix: { kind: "none" },
+    docs: "docs/upgrading.md#preview-edit-refused",
+  };
+}
+
+function refusedEditFindings(issues: readonly LoadIssue[]): Finding[] {
+  const seen = new Set<string>();
+  const findings: Finding[] = [];
+  for (const issue of issues) {
+    const key = `${issue.file ?? ""}:${issue.message}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    findings.push(refusedEditFinding(issue));
+  }
+  return findings;
+}
+
 interface BootPreview {
   bootCheck: BootCheck;
   issues: LoadIssue[];
+  refused?: LoadIssue;
+  failed?: LoadIssue;
+  moduleUses?: readonly string[];
 }
 
 interface BuildResult {
@@ -174,10 +270,11 @@ interface BuildResult {
 }
 
 async function buildReport(root: string, entry: string | undefined, options: BuildOptions): Promise<BuildResult> {
+  const { plugin, issues: detectIssues } = await detectPlugin(options.plugins ?? [], root);
   const versions = installedVersions(root);
   const kestrelVersion = versions.installed["@michaelthielemann/kestrel"];
   const kestrelMajor = options.forceMajor ?? (kestrelVersion === undefined ? undefined : majorOf(kestrelVersion));
-  const findings: Finding[] = [];
+  const findings: Finding[] = [...loadIssuesAsFindings(detectIssues)];
   const scratch = await createScratchCopy(root);
   try {
     if (versions.mixedMajors) {
@@ -195,15 +292,19 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
     }
 
     const pluginCache = options.pluginCache ?? new Map<string, unknown>();
-    const { project, issues, rules, sandboxEntries, ownsPackages, locateSteps, locateModelFields, switchEdits, notices, reload } = await resolveProject(root, entry, scratch.dir, options.plugins ?? [], pluginCache);
-    findings.push(...loadIssuesAsFindings(issues), ...notices);
+    const { project, issues, findings: resolvedFindings, rules, sandboxEntries, locateSteps, locateModelFields, switchEdits, reload } = await resolveProject(root, entry, scratch.dir, plugin, pluginCache);
+    findings.push(...loadIssuesAsFindings(issues), ...(resolvedFindings ?? []));
 
     let tiers: UpgradeReport["tiers"] = { source: "not-run", load: "not-run", boot: "not-run", data: "not-run" };
     let bootCheck: Awaited<ReturnType<typeof checkBoot>> = { errors: [], warnings: [], notChecked: [] };
     let outside: readonly string[] = [];
+    let sandboxInfo: { rewritten: readonly string[]; consented: readonly string[]; outside: readonly string[] } | undefined;
 
     let previewBootRaw: ((edits: readonly Edit[]) => Promise<BootPreview | undefined>) | undefined;
     let previewBoot: ((edits: readonly Edit[]) => Promise<BootCheck | undefined>) | undefined;
+    const previewRefusals: LoadIssue[] = [];
+    const previewCache = new Map<string, Promise<BootPreview | undefined>>();
+    const editsCacheKey = (edits: readonly Edit[]): string => JSON.stringify(edits.map((e) => [e.file, e.start, e.end, e.text, e.create === true]));
 
     if (project) {
       tiers = { ...tiers, source: "done" };
@@ -212,6 +313,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         tiers = { ...tiers, load: "done" };
         const box = sandboxBootInput(project.input, { dir: scratch.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
         outside = box.outside;
+        sandboxInfo = { rewritten: box.rewritten, consented: box.consented, outside: box.outside };
         bootCheck = await checkBoot(box.input, { setup: box.setup });
         tiers = { ...tiers, boot: "done" };
         for (const use of box.replaced) {
@@ -228,29 +330,60 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
           });
         }
 
-        previewBootRaw = async (edits) => {
-          const preview = await createScratchCopy(root);
+        const previewBootRawUncached = async (edits: readonly Edit[]): Promise<BootPreview | undefined> => {
+          let preview: ScratchCopy | undefined;
           try {
-            const grouped = groupByFile(edits);
-            for (const [file, fileEdits] of grouped) {
-              const target = resolve(preview.dir, relative(scratch.dir, file));
-              const creating = fileEdits.some((e) => e.create === true);
-              if (!existsSync(target) && !creating) continue;
-              const targetSource = creating ? "" : readFileSync(target, "utf8");
-              writeFileSync(target, applyEdits(targetSource, fileEdits).text);
+            try {
+              preview = await createScratchCopy(root);
+              const grouped = groupByFile(edits);
+              for (const [file, fileEdits] of grouped) {
+                const fileEscape = pathEscapeReason(file, scratch.dir);
+                if (fileEscape !== undefined) {
+                  const issue: LoadIssue = { file, message: `an edit targeting "${displayPath(file, scratch.dir)}" ${escapeText(fileEscape, "scratch copy")}; refused, not applied to this preview` };
+                  previewRefusals.push(issue);
+                  return { bootCheck: { errors: [], warnings: [], notChecked: [] }, issues: [], refused: issue };
+                }
+                const target = resolve(preview.dir, relative(scratch.dir, file));
+                const targetEscape = pathEscapeReason(target, preview.dir);
+                if (targetEscape !== undefined) {
+                  const issue: LoadIssue = { file, message: `an edit targeting "${displayPath(file, scratch.dir)}" maps to a preview location that ${escapeText(targetEscape, "preview copy")}; refused, not applied to this preview` };
+                  previewRefusals.push(issue);
+                  return { bootCheck: { errors: [], warnings: [], notChecked: [] }, issues: [], refused: issue };
+                }
+                const creating = fileEdits.some((e) => e.create === true);
+                if (!existsSync(target) && !creating) continue;
+                const targetSource = creating ? "" : readFileSync(target, "utf8");
+                writeFileSync(target, applyEdits(targetSource, fileEdits).text);
+              }
+              const { project: reloadedProject, issues: reloadIssues } = await reload(preview.dir);
+              if (!reloadedProject) {
+                const detail = reloadIssues.map((i) => i.message).join("; ") || "no reason was given";
+                return { bootCheck: { errors: [], warnings: [], notChecked: [] }, issues: [{ message: `the edited copy could not be reloaded: ${detail}` }] };
+              }
+              const previewSandbox = sandboxBootInput(reloadedProject.input, { dir: preview.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
+              const bootCheck = await checkBoot(previewSandbox.input, { setup: previewSandbox.setup });
+              return { bootCheck, issues: reloadIssues, moduleUses: reloadedProject.input.config.modules.map((m) => m.use) };
+            } catch (err) {
+              const raw = err instanceof Error ? err.message : String(err);
+              const message = stripTempDirs(raw, [preview?.dir, scratch.dir]);
+              const issue: LoadIssue = { message: `the preview could not apply its edits or reload: ${message}` };
+              return { bootCheck: { errors: [], warnings: [], notChecked: [] }, issues: [], failed: issue };
             }
-            const { project: reloadedProject, issues: reloadIssues } = await reload(preview.dir);
-            if (!reloadedProject) return undefined;
-            const previewSandbox = sandboxBootInput(reloadedProject.input, { dir: preview.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
-            const bootCheck = await checkBoot(previewSandbox.input, { setup: previewSandbox.setup });
-            return { bootCheck, issues: reloadIssues };
           } finally {
-            await removeScratchCopy(preview);
+            if (preview !== undefined) await removeScratchCopy(preview);
           }
+        };
+        previewBootRaw = (edits) => {
+          const key = editsCacheKey(edits);
+          const cached = previewCache.get(key);
+          if (cached !== undefined) return cached;
+          const promise = previewBootRawUncached(edits);
+          previewCache.set(key, promise);
+          return promise;
         };
         previewBoot = async (edits) => {
           const raw = await previewBootRaw!(edits);
-          return raw === undefined || raw.issues.length > 0 ? undefined : raw.bootCheck;
+          return raw === undefined || raw.issues.length > 0 || raw.refused !== undefined || raw.failed !== undefined ? undefined : raw.bootCheck;
         };
       } else if (kestrelMajor !== undefined && kestrelMajor < 6) {
         findings.push({
@@ -272,6 +405,16 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         boundPreviewBoot === undefined
           ? undefined
           : (edits: readonly Edit[], verifyOptions?: { pipelines?: readonly string[] }): Promise<VerifyEditsResult> => verifyEditsWith(boundPreviewBoot, bootCheck, edits, verifyOptions?.pipelines ?? []);
+      const boundPreviewBootRaw = previewBootRaw;
+      const previewDetails =
+        boundPreviewBootRaw === undefined
+          ? undefined
+          : async (edits: readonly Edit[]): Promise<{ moduleUses?: readonly string[]; issues: readonly LoadIssue[]; failed?: LoadIssue } | undefined> => {
+              const raw = await boundPreviewBootRaw(edits);
+              if (raw === undefined) return undefined;
+              const issues = raw.refused ? [raw.refused, ...raw.issues] : raw.issues;
+              return { ...(raw.moduleUses === undefined ? {} : { moduleUses: raw.moduleUses }), issues, ...(raw.failed === undefined ? {} : { failed: raw.failed }) };
+            };
       const ctx = {
         root: scratch.dir,
         scratch: scratch.dir,
@@ -279,14 +422,16 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         bootCheck,
         readFile: readFileOrUndefined,
         answers: options.answers,
-        ownsPackages,
         ...(locateSteps === undefined ? {} : { locateSteps }),
         ...(locateModelFields === undefined ? {} : { locateModelFields }),
         ...(switchEdits === undefined ? {} : { switchEdits }),
         ...(previewBoot === undefined ? {} : { previewBoot }),
         ...(verifyEdits === undefined ? {} : { verifyEdits }),
+        ...(previewDetails === undefined ? {} : { previewDetails }),
+        ...(plugin === undefined ? {} : { pluginKind: plugin.kind }),
       };
       for (const rule of rules) findings.push(...(await rule.check(ctx)));
+      findings.push(...refusedEditFindings(previewRefusals));
 
       const claimed = new Set(findings.map((f) => `${f.where.module ?? ""}|${f.where.pipeline ?? ""}|${f.where.step ?? ""}`));
       for (const problem of bootCheck.errors) {
@@ -316,10 +461,20 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       target: "6.0.0",
       project: { root, kind: project?.kind ?? "unknown", installed: versions.installed },
       tiers,
+      ...(sandboxInfo === undefined ? {} : { sandbox: sandboxInfo }),
       summary: summarize(remapped),
       findings: remapped,
     };
-    const boundPreviewBoot = previewBootRaw === undefined ? undefined : (edits: readonly Edit[]): Promise<BootPreview | undefined> => previewBootRaw(edits.map((e) => ({ ...e, file: resolve(scratch.dir, relative(root, e.file)) })));
+    const boundPreviewBoot =
+      previewBootRaw === undefined
+        ? undefined
+        : async (edits: readonly Edit[]): Promise<BootPreview | undefined> => {
+            const mapped = edits.map((e) => ({ ...e, file: resolve(scratch.dir, relative(root, e.file)) }));
+            const raw = await previewBootRaw(mapped);
+            if (raw === undefined) return undefined;
+            const remapIssue = (issue: LoadIssue): LoadIssue => (issue.file === undefined ? issue : { ...issue, file: remap(issue.file, scratch.dir, root) });
+            return { ...raw, issues: raw.issues.map(remapIssue), ...(raw.refused === undefined ? {} : { refused: remapIssue(raw.refused) }) };
+          };
     return { report, ...(boundPreviewBoot === undefined ? {} : { previewBoot: boundPreviewBoot }) };
   } finally {
     await removeScratchCopy(scratch);
@@ -331,15 +486,15 @@ function printReport(report: UpgradeReport, args: ParsedArgs, stdout: (line: str
   else stdout(renderHuman(report));
 }
 
-async function runCheck(args: ParsedArgs, stdout: (line: string) => void, options: RunUpgradeCliOptions): Promise<number> {
+async function runCheck(args: ParsedArgs, stdout: (line: string) => void, options: InternalRunOptions): Promise<number> {
   const root = resolve(stringFlag(args, "root") ?? ".");
   const entry = stringFlag(args, "entry");
   const failOn = failOnOf(args);
   const runSetupUses = args.repeated.get("run-setup") ?? [];
   const dataReport = readDataReport(stringFlag(args, "data-report"));
   const { report } = await buildReport(root, entry, { runSetupUses, answers: new Map(), dataReport, forceMajor: options.forceInstalledMajor, plugins: options.plugins });
-  const { rejectedIds, conflictsWith, pathExists } = verifyAndApply(report.findings);
-  const findings = downgradeRejected(report.findings, rejectedIds, conflictsWith, pathExists);
+  const { rejectedIds, conflictsWith, pathExists, unsafeTargets } = verifyAndApply(report.findings, root);
+  const findings = downgradeRejected(report.findings, rejectedIds, conflictsWith, pathExists, unsafeTargets);
   const verifiedReport: UpgradeReport = { ...report, findings, summary: summarize(findings) };
   printReport(verifiedReport, args, stdout);
   return exitCodeFor(verifiedReport.findings, failOn);
@@ -369,7 +524,13 @@ interface FileState {
   current: string;
 }
 
-function verifyAndApply(findings: readonly Finding[]): { states: Map<string, FileState>; rejectedIds: Set<string>; conflictsWith: Map<string, string[]>; pathExists: Set<string> } {
+function isUnsafeWriteTarget(file: string, root: string): boolean {
+  if (pathEscapeReason(file, root) !== undefined) return true;
+  const rel = relative(root, file);
+  return rel.split(sep).includes("node_modules");
+}
+
+function verifyAndApply(findings: readonly Finding[], root: string): { states: Map<string, FileState>; rejectedIds: Set<string>; conflictsWith: Map<string, string[]>; pathExists: Set<string>; unsafeTargets: Set<string> } {
   const sources = new Map<string, string>();
   const accepted = new Map<string, Edit[]>();
   const ownerOf = new Map<Edit, Finding>();
@@ -380,6 +541,7 @@ function verifyAndApply(findings: readonly Finding[]): { states: Map<string, Fil
   const rejectedIds = new Set<string>();
   const conflictsWith = new Map<string, string[]>();
   const pathExists = new Set<string>();
+  const unsafeTargets = new Set<string>();
   const sourceFor = (file: string): string | undefined => {
     const existing = sources.get(file);
     if (existing !== undefined) return existing;
@@ -402,7 +564,13 @@ function verifyAndApply(findings: readonly Finding[]): { states: Map<string, Fil
     let ok = true;
     const conflictingRules = new Set<string>();
     let createdPathExists = false;
+    let unsafeTarget = false;
     for (const [file, edits] of perFile) {
+      if (isUnsafeWriteTarget(file, root)) {
+        ok = false;
+        unsafeTarget = true;
+        break;
+      }
       const creating = edits.some((e) => e.create === true);
       if (creating) {
         if (existsSync(file)) {
@@ -439,6 +607,7 @@ function verifyAndApply(findings: readonly Finding[]): { states: Map<string, Fil
     if (!ok) {
       rejectedIds.add(finding.id);
       if (createdPathExists) pathExists.add(finding.id);
+      if (unsafeTarget) unsafeTargets.add(finding.id);
       if (conflictingRules.size > 0) conflictsWith.set(finding.id, [...conflictingRules]);
       continue;
     }
@@ -452,18 +621,20 @@ function verifyAndApply(findings: readonly Finding[]): { states: Map<string, Fil
     const { text } = applyEdits(source, accepted.get(file) ?? []);
     states.set(file, { source, current: text });
   }
-  return { states, rejectedIds, conflictsWith, pathExists };
+  return { states, rejectedIds, conflictsWith, pathExists, unsafeTargets };
 }
 
-function downgradeRejected(findings: readonly Finding[], rejectedIds: ReadonlySet<string>, conflictsWith: ReadonlyMap<string, string[]>, pathExists: ReadonlySet<string>): Finding[] {
+function downgradeRejected(findings: readonly Finding[], rejectedIds: ReadonlySet<string>, conflictsWith: ReadonlyMap<string, string[]>, pathExists: ReadonlySet<string>, unsafeTargets: ReadonlySet<string>): Finding[] {
   return findings.map((f) => {
     if (!rejectedIds.has(f.id)) return f;
     const conflicting = conflictsWith.get(f.id);
     const reason = pathExists.has(f.id)
       ? "the file it would create already exists"
-      : conflicting && conflicting.length > 0
-        ? `conflicts with ${conflicting.join(", ")} on the same file span`
-        : "the edit did not verify after applying";
+      : unsafeTargets.has(f.id)
+        ? "its own edit targets a path inside node_modules or outside the project"
+        : conflicting && conflicting.length > 0
+          ? `conflicts with ${conflicting.join(", ")} on the same file span`
+          : "the edit did not verify after applying";
     return { ...f, fix: { kind: "manual" as const }, suggestion: `${f.suggestion} (${reason}; do this by hand)` };
   });
 }
@@ -474,15 +645,19 @@ interface AskLoopResult {
   previewBoot?: (edits: readonly Edit[]) => Promise<BootPreview | undefined>;
 }
 
-async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined, plugins: readonly UpgradePlugin[] | undefined): Promise<AskLoopResult & { unknownIds: string[] }> {
+async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined, plugins: readonly UpgradePlugin[] | undefined): Promise<AskLoopResult & { unknownIds: string[]; invalidAnswers: Array<{ id: string; value: string }> }> {
   const answers = new Map<string, string>();
   const everAsked = new Set<string>();
+  const askedFixes = new Map<string, AskFix>();
   const pluginCache = new Map<string, unknown>();
   let built: BuildResult | undefined;
   for (let round = 0; round < 8; round++) {
     built = await buildReport(root, entry, { runSetupUses, answers, dataReport, forceMajor, plugins, pluginCache });
     const asks = askFindings(built.report.findings);
-    for (const { fix } of asks) everAsked.add(fix.question);
+    for (const { fix } of asks) {
+      everAsked.add(fix.question);
+      askedFixes.set(fix.question, fix);
+    }
     const unresolved = asks.filter(({ fix }) => !answers.has(fix.question));
     if (unresolved.length === 0) break;
     let resolvedAny = false;
@@ -496,7 +671,8 @@ async function resolveQuestions(root: string, entry: string | undefined, runSetu
     if (!resolvedAny) break;
   }
   const unknownIds = fromFile === undefined ? [] : unknownAnswerIds(fromFile, everAsked);
-  return { report: built!.report, answers, ...(built!.previewBoot === undefined ? {} : { previewBoot: built!.previewBoot }), unknownIds };
+  const invalidAnswers = fromFile === undefined ? [] : invalidClosedAnswers(fromFile, askedFixes);
+  return { report: built!.report, answers, ...(built!.previewBoot === undefined ? {} : { previewBoot: built!.previewBoot }), unknownIds, invalidAnswers };
 }
 
 async function confirmFile(file: string, root: string, before: string, after: string, prompt: PromptFn): Promise<boolean> {
@@ -511,7 +687,7 @@ async function confirmFile(file: string, root: string, before: string, after: st
   }
 }
 
-async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: (line: string) => void, options: RunUpgradeCliOptions): Promise<number> {
+async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: (line: string) => void, options: InternalRunOptions): Promise<number> {
   const root = resolve(stringFlag(args, "root") ?? ".");
   const entry = stringFlag(args, "entry");
   const failOn = failOnOf(args);
@@ -530,14 +706,18 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     return 2;
   }
 
-  const { report, unknownIds, answers, previewBoot } = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins);
+  const { report, unknownIds, invalidAnswers, answers, previewBoot } = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins);
+  if (invalidAnswers.length > 0) {
+    for (const { id, value } of invalidAnswers) stderr(`--answers: "${id}" is "${value}", which is not one of its choices`);
+    return 2;
+  }
   if (unknownIds.length > 0) {
     stderr(`--answers names an id this run never asked: ${unknownIds.join(", ")}`);
     return 2;
   }
 
-  const { states, rejectedIds, conflictsWith, pathExists } = verifyAndApply(report.findings);
-  const adjustedFindings = downgradeRejected(report.findings, rejectedIds, conflictsWith, pathExists);
+  const { states, rejectedIds, conflictsWith, pathExists, unsafeTargets } = verifyAndApply(report.findings, root);
+  const adjustedFindings = downgradeRejected(report.findings, rejectedIds, conflictsWith, pathExists, unsafeTargets);
   const adjustedReport: UpgradeReport = { ...report, findings: adjustedFindings, summary: summarize(adjustedFindings) };
   const changed = [...states].filter(([, state]) => state.current !== state.source);
 
@@ -580,11 +760,22 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
       stdout(`  ${f.message}: ${f.suggestion}`);
     }
   } else {
-    printReport(adjustedReport, args, stdout);
     const isRawBootError = (f: Finding): boolean => f.rule.startsWith("boot/");
     const finalEdits = adjustedFindings.flatMap((f) => (f.fix.kind === "auto" ? f.fix.edits : []));
     const preview = previewBoot ? await previewBoot(finalEdits) : undefined;
-    if (preview && preview.issues.length > 0) {
+    const refusedFinding = preview?.refused ? refusedEditFinding(preview.refused) : undefined;
+    if (refusedFinding !== undefined) {
+      adjustedFindings.push(refusedFinding);
+      adjustedReport.summary = summarize(adjustedFindings);
+    }
+    printReport(adjustedReport, args, stdout);
+    if (refusedFinding !== undefined) {
+      stdout(`could not verify the boot result: ${refusedFinding.message}`);
+      for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);
+    } else if (preview?.failed !== undefined) {
+      stdout(`could not verify the boot result: ${preview.failed.message}`);
+      for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);
+    } else if (preview && preview.issues.length > 0) {
       const missingPackages = [...new Set(preview.issues.map((i) => i.use).filter((use): use is string => use !== undefined))];
       if (missingPackages.length > 0) {
         const plural = missingPackages.length > 1;
@@ -603,11 +794,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
         const notCheckedSuffix = notChecked > 0 ? ` (${notChecked} not checked)` : "";
         stdout(`after these edits: ${afterEdits.error} errors remain (${afterEdits.ask} need your answer, ${afterEdits.manual} manual)${notCheckedSuffix}`);
       } else {
-        stdout(
-          previewBoot === undefined
-            ? "could not verify the boot result: no boot check ran; upgrade @michaelthielemann/kestrel to 6 first, then run `fix` again to verify"
-            : "could not verify the boot result: the edited copy could not be reloaded; run `fix` again to verify",
-        );
+        stdout("could not verify the boot result: no boot check ran; upgrade @michaelthielemann/kestrel to 6 first, then run `fix` again to verify");
         for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);
       }
     }
@@ -616,7 +803,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
   return exitCodeFor(adjustedReport.findings, failOn);
 }
 
-async function runData(args: ParsedArgs, stdout: (line: string) => void, stderr: (line: string) => void, options: RunUpgradeCliOptions): Promise<number> {
+async function runData(args: ParsedArgs, stdout: (line: string) => void, stderr: (line: string) => void, options: InternalRunOptions): Promise<number> {
   const db = stringFlag(args, "db");
   if (db === undefined) {
     stderr("data requires --db <sqlite file>");
@@ -637,7 +824,7 @@ async function runData(args: ParsedArgs, stdout: (line: string) => void, stderr:
   return result.exitCode;
 }
 
-export async function runCli(argv: readonly string[], options: RunUpgradeCliOptions): Promise<number> {
+export async function runCli(argv: readonly string[], options: InternalRunOptions): Promise<number> {
   const stdout = options.stdout ?? ((line: string) => console.log(line));
   const stderr = options.stderr ?? ((line: string) => console.error(line));
   const [command, ...rest] = argv;

@@ -1,11 +1,13 @@
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import type { BootProblem } from "@michaelthielemann/kestrel";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
+import { importSpans, literalStringSpans } from "./ast.ts";
+import type { InternalRuleContext } from "./cli-run.ts";
 import { emitStepIsLocatable, insertStepAfterEmitOutsideGroup, replaceModuleListEntry, replaceModulesTsEntry } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { replaceDependency } from "./packageJson.ts";
-import type { Rule, RuleContext, SwitchEditsResult } from "./plugin.ts";
+import type { LoadIssue, Rule, RuleContext, SwitchEditsResult } from "./plugin.ts";
 import type { AskFix, Edit, Finding } from "./report.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { KESTREL_RANGE, combineEditParts, fileForPipeline, infoFinding, moduleEntry, packageJsonPath, verifyEditsWith, type UncheckedPipeline } from "./ruleHelpers.ts";
@@ -32,64 +34,108 @@ function otherFilesImporting(ctx: RuleContext, packageName: string): string[] {
     const source = ctx.readFile(file);
     if (source !== undefined) candidates.set(file, source);
   }
-  return [...candidates].filter(([, source]) => importsPackage(source, packageName)).map(([file]) => file);
+  return [...candidates].filter(([, source]) => importSpans(source, packageName).length > 0).map(([file]) => file);
 }
 
-function switchBlockers(ctx: RuleContext): string[] {
-  const directEntry = moduleEntry(ctx, "events-direct");
-  if (directEntry === undefined) return [];
-  const blockers: string[] = [];
-  const configSource = ctx.readFile(ctx.project.configFile);
-  const configLocatable = configSource !== undefined && replaceModuleListEntry(ctx.project.configFile, configSource, { use: directEntry.use, newUse: EVENTS_QUEUE_PACKAGE, config: "{}" }) !== undefined;
-  if (!configLocatable) blockers.push(ctx.project.configFile);
-  const modulesTsPath = modulesTsFile(ctx);
-  const modulesTsSource = ctx.readFile(modulesTsPath);
-  if (modulesTsSource !== undefined && importsPackage(modulesTsSource, directEntry.use)) {
-    const replaced = replaceModulesTsEntry(modulesTsPath, modulesTsSource, directEntry.use, EVENTS_QUEUE_PACKAGE);
-    if (replaced === undefined) blockers.push(modulesTsPath);
+function relativeToProject(ctx: RuleContext, file: string): string {
+  const rel = relative(ctx.scratch, file);
+  return rel.startsWith("..") || isAbsolute(rel) ? file : rel;
+}
+
+function uncoveredRanges(ranges: readonly { start: number; end: number }[], fileEdits: readonly Edit[]): boolean {
+  return ranges.some((r) => !fileEdits.some((e) => e.start <= r.start && e.end >= r.end));
+}
+
+function literalSite(ctx: RuleContext, packageName: string): string | undefined {
+  for (const file of [ctx.project.configFile, modulesTsFile(ctx)]) {
+    const source = ctx.readFile(file);
+    if (source !== undefined && literalStringSpans(source, packageName).length > 0) return relativeToProject(ctx, file);
   }
-  blockers.push(...otherFilesImporting(ctx, directEntry.use));
-  return blockers;
+  return undefined;
 }
 
-type SwitchVerification = { verified: true; newErrors: readonly BootProblem[] } | { verified: false; noBootTier: boolean; unchecked: readonly UncheckedPipeline[] };
+function modulesTsBlocker(ctx: RuleContext, packageName: string, edits: readonly Edit[]): string | undefined {
+  const modulesTsPath = modulesTsFile(ctx);
+  const source = ctx.readFile(modulesTsPath);
+  if (source === undefined) return undefined;
+  const spans = importSpans(source, packageName);
+  if (spans.length === 0) return undefined;
+  const fileEdits = edits.filter((e) => e.file === modulesTsPath);
+  return uncoveredRanges(spans, fileEdits) ? relativeToProject(ctx, modulesTsPath) : undefined;
+}
 
-function builtInBlockers(ctx: RuleContext): string[] {
+type SwitchVerification = { verified: true; newErrors: readonly BootProblem[] } | { verified: false; noBootTier: boolean; unchecked: readonly UncheckedPipeline[]; issues: readonly LoadIssue[] };
+
+async function builtInBlockers(ctx: InternalRuleContext, edits: readonly Edit[]): Promise<string[]> {
   const unmet: string[] = [];
   const marker = SERVERLESS_MARKERS.find((m) => existsSync(join(ctx.root, m)));
   if (marker !== undefined) unmet.push(`"${marker}" suggests the process does not stay alive between requests`);
-  const blockers = switchBlockers(ctx);
-  if (blockers.length > 0) unmet.push(`events-direct is imported where the switch cannot rewrite it: ${blockers.join(", ")}`);
+
+  const directEntry = moduleEntry(ctx, "events-direct");
+  if (directEntry === undefined) return unmet;
+
+  const uncoveredSites: string[] = [];
+  const modulesTsSite = modulesTsBlocker(ctx, directEntry.use, edits);
+  if (modulesTsSite !== undefined) uncoveredSites.push(modulesTsSite);
+  uncoveredSites.push(...otherFilesImporting(ctx, directEntry.use).map((f) => relativeToProject(ctx, f)));
+  if (uncoveredSites.length > 0) unmet.push(`events-direct is imported where the switch cannot rewrite it: ${uncoveredSites.join(", ")}`);
+
+  if (ctx.previewDetails === undefined) return unmet;
+  const details = await ctx.previewDetails(edits);
+  if (details?.failed !== undefined) {
+    unmet.push(`the switch's own edits could not be verified: ${details.failed.message}`);
+    return unmet;
+  }
+  if (details?.moduleUses === undefined) return unmet;
+  const stillDirect = details.moduleUses.includes(directEntry.use);
+  const missingQueue = !details.moduleUses.includes(EVENTS_QUEUE_PACKAGE);
+  if (stillDirect || missingQueue) {
+    const site = literalSite(ctx, directEntry.use);
+    const named = site !== undefined ? ` (still named at ${site})` : "";
+    const who = ctx.switchEdits === undefined ? "the switch" : ctx.pluginKind === undefined ? "the plugin's switchEdits" : `the "${ctx.pluginKind}" plugin's switchEdits`;
+    unmet.push(`after applying its edits, events-direct is still in the booted module list${named}; ${who} did not remove it`);
+  }
   return unmet;
 }
 
-async function switchAvailability(ctx: RuleContext, relayPipelines: readonly string[]): Promise<{ edits: Edit[]; blockers: string[] }> {
+async function switchAvailability(ctx: InternalRuleContext, relayPipelines: readonly string[]): Promise<{ edits: Edit[]; blockers: string[] }> {
   if (ctx.switchEdits !== undefined) {
     const result: SwitchEditsResult = await ctx.switchEdits(ctx, relayPipelines);
-    return { edits: Object.values(result.parts).flatMap((edits) => edits ?? []), blockers: [...result.blockers] };
+    const edits = Object.values(result.parts).flatMap((edits) => edits ?? []);
+    return { edits, blockers: [...(await builtInBlockers(ctx, edits)), ...result.blockers] };
   }
-  return { edits: switchEdits(ctx, relayPipelines), blockers: builtInBlockers(ctx) };
+  const edits = switchEdits(ctx, relayPipelines);
+  return { edits, blockers: await builtInBlockers(ctx, edits) };
 }
 
-async function verifySwitch(ctx: RuleContext, relayPipelines: readonly string[]): Promise<SwitchVerification> {
+async function verifySwitch(ctx: InternalRuleContext, relayPipelines: readonly string[]): Promise<SwitchVerification> {
   const previewBoot = ctx.previewBoot;
-  if (!previewBoot) return { verified: false, noBootTier: true, unchecked: [] };
+  if (!previewBoot) return { verified: false, noBootTier: true, unchecked: [], issues: [] };
   const { edits } = await switchAvailability(ctx, relayPipelines);
   const result = ctx.verifyEdits ? await ctx.verifyEdits(edits, { pipelines: relayPipelines }) : await verifyEditsWith(previewBoot, ctx.bootCheck, edits, relayPipelines);
-  return result.verified ? { verified: true, newErrors: result.newErrors } : { verified: false, noBootTier: false, unchecked: result.unchecked };
+  if (result.verified) return { verified: true, newErrors: result.newErrors };
+  const details = ctx.previewDetails ? await ctx.previewDetails(edits) : undefined;
+  return { verified: false, noBootTier: false, unchecked: result.unchecked, issues: details?.issues ?? [] };
 }
 
-function unverifiedGuidance(noBootTier: boolean, unchecked: readonly UncheckedPipeline[]): { subject: string; instruction: string } {
+function unverifiedGuidance(noBootTier: boolean, unchecked: readonly UncheckedPipeline[], issues: readonly LoadIssue[]): { subject: string; instruction: string } {
   if (noBootTier) return { subject: "no boot check ran", instruction: `upgrade @michaelthielemann/kestrel to 6 first, then run \`fix\` again to verify` };
   if (unchecked.length > 0) {
     const plural = unchecked.length > 1;
     const named = unchecked.map((u) => `"${u.name}" (${u.because})`).join("; ");
     return { subject: `relay pipeline${plural ? "s were" : " was"} not checked: ${named}`, instruction: "resolve why, then run `fix` again to verify" };
   }
-  return { subject: `${EVENTS_QUEUE_PACKAGE} may not be installed`, instruction: `install ${EVENTS_QUEUE_PACKAGE}, then run \`fix\` again to verify` };
+  const missingPackages = [...new Set(issues.map((i) => i.use).filter((use): use is string => use !== undefined))];
+  if (missingPackages.length > 0) {
+    const plural = missingPackages.length > 1;
+    return { subject: `${missingPackages.join(", ")} ${plural ? "are" : "is"} added by the switch but not installed yet`, instruction: `install ${missingPackages.join(", ")}, then run \`fix\` again to verify` };
+  }
+  const other = issues.find((i) => i.use === undefined);
+  if (other !== undefined) return { subject: `the preview could not verify the switch: ${other.message}`, instruction: "resolve the error above, then run `fix` again to verify" };
+  return { subject: "the switch's own preview did not run", instruction: `see the preview/edit-refused finding above for why, or install ${EVENTS_QUEUE_PACKAGE}, then run \`fix\` again to verify` };
 }
 
-async function offerGate(ctx: RuleContext): Promise<{ unmet: string[]; unverified: boolean; noBootTier: boolean; unchecked: readonly UncheckedPipeline[] }> {
+async function offerGate(ctx: InternalRuleContext): Promise<{ unmet: string[]; unverified: boolean; noBootTier: boolean; unchecked: readonly UncheckedPipeline[]; issues: readonly LoadIssue[] }> {
   const unmet: string[] = [];
   if (!ctx.project.input.config.triggers.some((t) => "event" in t)) unmet.push("no event trigger to move to the queue");
   if (!ctx.project.input.modules.some((m) => m.provides.some((c) => c.name === "persistence@1"))) unmet.push("no loaded module provides persistence@1");
@@ -100,9 +146,9 @@ async function offerGate(ctx: RuleContext): Promise<{ unmet: string[]; unverifie
   const { blockers } = await switchAvailability(ctx, defaultRelayPipelines(ctx));
   unmet.push(...blockers);
   const verification = await verifySwitch(ctx, defaultRelayPipelines(ctx));
-  if (!verification.verified) return { unmet, unverified: true, noBootTier: verification.noBootTier, unchecked: verification.unchecked };
+  if (!verification.verified) return { unmet, unverified: true, noBootTier: verification.noBootTier, unchecked: verification.unchecked, issues: verification.issues };
   if (verification.newErrors.length > 0) unmet.push(`the switched project fails to boot: ${verification.newErrors.map((e) => e.reason).join("; ")}`);
-  return { unmet, unverified: false, noBootTier: false, unchecked: [] };
+  return { unmet, unverified: false, noBootTier: false, unchecked: [], issues: [] };
 }
 
 function consumerEventPipelines(ctx: RuleContext): string[] {
@@ -212,20 +258,21 @@ const CONSEQUENCES = "uploads and other requests answer at once; a subscriber no
  */
 export const queueOfferRule: Rule = {
   id: RULE_ID,
-  async check(ctx) {
+  async check(untypedCtx) {
+    const ctx = untypedCtx as InternalRuleContext;
     if (!ctx.project.input.config.modules.some((m) => m.use.includes("events-direct"))) return [];
 
-    const { unmet, unverified, noBootTier, unchecked } = await offerGate(ctx);
+    const { unmet, unverified, noBootTier, unchecked, issues } = await offerGate(ctx);
     if (unmet.length > 0) {
       return [infoFinding(RULE_ID, RULE_ID, `cannot switch to the queue: ${unmet.join("; ")}`, "resolve the conditions above and run check again", {}, "docs/upgrading.md#offer-event-queue")];
     }
 
     const switchAnswer = ctx.answers.get("switch-to-queue");
     if (switchAnswer === undefined) {
-      let fix: AskFix = { kind: "ask", question: "switch-to-queue", prompt: `switch event delivery to the queue? ${CONSEQUENCES}`, choices: ["no", "yes"], defaultValue: "no" };
+      let fix: AskFix = { kind: "ask", question: "switch-to-queue", prompt: `switch event delivery to the queue? ${CONSEQUENCES}`, choices: ["no", "yes"], closedChoices: true, defaultValue: "no" };
       if (unverified) {
-        const { subject, instruction } = unverifiedGuidance(noBootTier, unchecked);
-        fix = { kind: "ask", question: "switch-to-queue", prompt: `switch event delivery to the queue? could not verify: ${subject}; ${instruction}. ${CONSEQUENCES}`, choices: ["no", "yes"] };
+        const { subject, instruction } = unverifiedGuidance(noBootTier, unchecked, issues);
+        fix = { kind: "ask", question: "switch-to-queue", prompt: `switch event delivery to the queue? could not verify: ${subject}; ${instruction}. ${CONSEQUENCES}`, choices: ["no", "yes"], closedChoices: true };
       }
       return [{ id: RULE_ID, rule: RULE_ID, severity: "info", tier: "source", where: {}, message: "can switch to the queue", suggestion: "run fix to be asked; check never decides this on its own", fix, docs: "docs/upgrading.md#offer-event-queue" }];
     }
@@ -235,7 +282,7 @@ export const queueOfferRule: Rule = {
     const unresolvedIdempotent = eventPipelines.filter((p) => ctx.answers.get(`idempotent:${p}`) === undefined);
     if (unresolvedIdempotent.length > 0) {
       return unresolvedIdempotent.map((p): Finding => {
-        const fix: AskFix = { kind: "ask", question: `idempotent:${p}`, prompt: `is pipeline "${p}" safe to run twice for one event, or does it deduplicate by eventId?`, choices: ["no", "yes"], defaultValue: "no" };
+        const fix: AskFix = { kind: "ask", question: `idempotent:${p}`, prompt: `is pipeline "${p}" safe to run twice for one event, or does it deduplicate by eventId?`, choices: ["no", "yes"], closedChoices: true, defaultValue: "no" };
         return { id: `${RULE_ID}:idempotent:${p}`, rule: RULE_ID, severity: "info", tier: "source", where: { pipeline: p }, message: `at-least-once delivery may run "${p}" more than once for one event`, suggestion: "a \"no\" withdraws the switch", fix, docs: "docs/upgrading.md#offer-event-queue" };
       });
     }
@@ -273,7 +320,7 @@ export const queueOfferRule: Rule = {
 
     const finalVerification = await verifySwitch(ctx, relayPipelines);
     if (!finalVerification.verified) {
-      const { subject, instruction } = unverifiedGuidance(finalVerification.noBootTier, finalVerification.unchecked);
+      const { subject, instruction } = unverifiedGuidance(finalVerification.noBootTier, finalVerification.unchecked, finalVerification.issues);
       return [
         {
           id: `${RULE_ID}:relay-pipelines`,

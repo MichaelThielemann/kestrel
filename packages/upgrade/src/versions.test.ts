@@ -58,4 +58,14 @@ describe("installedVersions", () => {
     expect(installed["@michaelthielemann/kestrel-example-plugin"]).toBe("1.0.0");
     expect(mixedMajors).toBe(false);
   });
+
+  it("flags a real backend package at another major as mixed with no way to exempt it", async () => {
+    await installFakePackage(dir, "@michaelthielemann/kestrel-events-inmemory", "6.0.0");
+    await installFakePackage(dir, "@michaelthielemann/kestrel-persistence-sqlite", "5.8.0");
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-events-inmemory": "^6.0.0", "@michaelthielemann/kestrel-persistence-sqlite": "^5.8.0" } }),
+    );
+    expect(installedVersions(dir).mixedMajors).toBe(true);
+  });
 });

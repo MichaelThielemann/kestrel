@@ -23,6 +23,10 @@ export interface SandboxResult {
   setup: { only: readonly string[] };
   outside: readonly string[];
   replaced: readonly string[];
+  /** Entries whose config was rewritten to reach only the scratch directory (a table-driven entry, or a `blobstore@1` provider swapped for a stand-in — see `replaced`). */
+  rewritten: readonly string[];
+  /** Entries let through unrewritten because they are known-safe (reach nothing but `persistence@1`/`blobstore@1` and need no rewrite) or named in `consent`. */
+  consented: readonly string[];
 }
 
 function asRecord(config: unknown): Record<string, unknown> {
@@ -55,27 +59,32 @@ export function sandboxBootInput(input: BootInput, options: SandboxOptions): San
   const only: string[] = [];
   const outside: string[] = [];
   const replaced: string[] = [];
+  const rewritten: string[] = [];
+  const consented: string[] = [];
   const loadedModules = [...input.modules];
   const configModules = input.config.modules.map((entry, i) => {
     const official = officialModuleName(entry.use);
     const rewrite = official === undefined ? undefined : table[official];
     if (rewrite) {
       only.push(entry.use);
+      rewritten.push(entry.use);
       return { ...entry, config: rewrite(entry.config, options.dir) };
     }
     if ((official !== undefined && KNOWN_SAFE_SUFFIXES.includes(official)) || consent.has(entry.use)) {
       only.push(entry.use);
+      consented.push(entry.use);
       return entry;
     }
     const loaded: ModuleDefinition | undefined = loadedModules[i];
     if (loaded !== undefined && providesBlobstore(loaded)) {
       only.push(entry.use);
       replaced.push(entry.use);
+      rewritten.push(entry.use);
       loadedModules[i] = blobstoreStandIn(loaded.name, options.dir, loaded.configSchema);
       return entry;
     }
     outside.push(entry.use);
     return entry;
   });
-  return { input: { ...input, config: { ...input.config, modules: configModules }, modules: loadedModules }, setup: { only }, outside, replaced };
+  return { input: { ...input, config: { ...input.config, modules: configModules }, modules: loadedModules }, setup: { only }, outside, replaced, rewritten, consented };
 }

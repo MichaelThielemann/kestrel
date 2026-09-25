@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AskFix } from "./report.ts";
-import { parseAnswersFile, resolveAnswer, unknownAnswerIds } from "./answers.ts";
+import { invalidClosedAnswers, parseAnswersFile, resolveAnswer, unknownAnswerIds } from "./answers.ts";
 
-const fix: AskFix = { kind: "ask", question: "binary:notes/local.create", prompt: "should this step's result be binary?", choices: ["no", "yes"], defaultValue: "no" };
+const fix: AskFix = { kind: "ask", question: "binary:notes/local.create", prompt: "should this step's result be binary?", choices: ["no", "yes"], closedChoices: true, defaultValue: "no" };
 
 describe("resolveAnswer", () => {
   it("prefers an answer from the file over everything else", async () => {
@@ -39,12 +39,63 @@ describe("resolveAnswer", () => {
     const value = await resolveAnswer(noDefault, "msg", { yes: true, interactive: false, prompt: () => Promise.reject(new Error("must not prompt")) });
     expect(value).toBeUndefined();
   });
+
+  it("rejects a file answer that is not one of a closed choice set, leaving the question open", async () => {
+    const value = await resolveAnswer(fix, "msg", { fromFile: new Map([["binary:notes/local.create", "split manually"]]), yes: true, interactive: true, prompt: () => Promise.resolve("no") });
+    expect(value).toBeUndefined();
+  });
+
+  it("accepts a file answer that matches one of a closed choice set", async () => {
+    const value = await resolveAnswer(fix, "msg", { fromFile: new Map([["binary:notes/local.create", "yes"]]), yes: false, interactive: false, prompt: () => Promise.reject(new Error("must not prompt")) });
+    expect(value).toBe("yes");
+  });
+
+  it("re-prompts on a TTY answer outside a closed choice set instead of accepting it", async () => {
+    const answers = ["maybe", "yes"];
+    let asked = 0;
+    const value = await resolveAnswer(fix, "msg", {
+      yes: false,
+      interactive: true,
+      prompt: () => {
+        asked++;
+        return Promise.resolve(answers.shift()!);
+      },
+    });
+    expect(value).toBe("yes");
+    expect(asked).toBe(2);
+  });
+
+  it("never validates against an open choice set (a template entry, or a pre-joined example)", async () => {
+    const openFix: AskFix = { kind: "ask", question: "relay-pipelines", prompt: "which pipelines?", choices: ["publishPage, unpublishPage"], defaultValue: "publishPage, unpublishPage" };
+    const value = await resolveAnswer(openFix, "msg", { fromFile: new Map([["relay-pipelines", "otherPipeline"]]), yes: false, interactive: false, prompt: () => Promise.reject(new Error("must not prompt")) });
+    expect(value).toBe("otherPipeline");
+  });
 });
 
 describe("unknownAnswerIds", () => {
   it("flags an id from the file that no question ever asked", () => {
     const fromFile = new Map([["binary:x", "yes"], ["nope:y", "yes"]]);
     expect(unknownAnswerIds(fromFile, new Set(["binary:x"]))).toEqual(["nope:y"]);
+  });
+});
+
+describe("invalidClosedAnswers", () => {
+  it("flags a value that does not match its question's closed choices", () => {
+    const fromFile = new Map([["binary:x", "maybe"]]);
+    const askedFixes = new Map([["binary:x", fix]]);
+    expect(invalidClosedAnswers(fromFile, askedFixes)).toEqual([{ id: "binary:x", value: "maybe" }]);
+  });
+
+  it("never flags a question whose choices are not closed", () => {
+    const openFix: AskFix = { kind: "ask", question: "relay-pipelines", prompt: "which pipelines?", choices: ["publishPage"], defaultValue: "publishPage" };
+    const fromFile = new Map([["relay-pipelines", "otherPipeline"]]);
+    const askedFixes = new Map([["relay-pipelines", openFix]]);
+    expect(invalidClosedAnswers(fromFile, askedFixes)).toEqual([]);
+  });
+
+  it("never flags an id no question asked (unknownAnswerIds already covers it)", () => {
+    const fromFile = new Map([["nope:y", "yes"]]);
+    expect(invalidClosedAnswers(fromFile, new Map())).toEqual([]);
   });
 });
 

@@ -153,19 +153,6 @@ export const underscoreFieldRule: Rule = {
     }
     return findings;
   },
-  applyAnswer(id, value, ctx) {
-    if (!id.startsWith("underscore-field:") || value === "remove") return undefined;
-    const rest = id.slice("underscore-field:".length);
-    const dot = rest.lastIndexOf(".");
-    if (dot === -1) return undefined;
-    const typeName = rest.slice(0, dot);
-    const field = rest.slice(dot + 1);
-    const model = modelSourceOf(ctx.project.contentModel, moduleEntry(ctx, "content-default"), ctx.project.configFile);
-    const source = model === undefined ? undefined : ctx.readFile(model.file);
-    if (model === undefined || source === undefined) return undefined;
-    const edit = renameContentField(model.file, source, { use: model.use, typeName, from: field, to: value, ...(ctx.locateModelFields === undefined ? {} : { locateModelFields: ctx.locateModelFields }) });
-    return edit ? [edit] : undefined;
-  },
 };
 
 export const underscoreFieldRules: readonly Rule[] = [underscoreFieldRule];

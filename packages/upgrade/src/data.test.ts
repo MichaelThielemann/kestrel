@@ -289,6 +289,27 @@ describe("runDataStep: underscore-field counts for a plugin project", () => {
     expect(result.report?.underscoreFields).toEqual({});
   });
 
+  it("reports a plugin/hook-failed error, instead of silently skipping the count, when dataModel() throws", async () => {
+    const root = await pluginProjectRoot();
+    const file = join(dir, "kestrel.db");
+    await makeDb(file, [{ id: "1", name: "page.created", pipeline: "publishPage", state: "done" }]);
+    const plugin: UpgradePlugin = {
+      kind: "test-plugin",
+      detect: (candidate) => candidate === root,
+      load: () => Promise.resolve({ issues: [] }),
+      dataModel: () => {
+        throw new Error("boom");
+      },
+    };
+    const result = await runDataStep(file, root, [plugin]);
+    expect(result.exitCode).toBe(1);
+    const finding = result.report?.findings.find((f) => f.rule === "plugin/hook-failed");
+    expect(finding).toBeDefined();
+    expect(finding?.message).toContain("test-plugin");
+    expect(finding?.message).toContain("dataModel");
+    expect(result.report?.underscoreFields).toEqual({});
+  });
+
   it("falls back to the built-in content-default search when the active plugin declares no dataModel hook", async () => {
     const root = await contentProjectRoot({ types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } });
     const file = join(dir, "kestrel.db");
@@ -304,6 +325,67 @@ describe("runDataStep: underscore-field counts for a plugin project", () => {
     const result = await runDataStep(file, root, [plugin]);
     expect(result.exitCode).toBe(0);
     expect(result.report?.underscoreFields).toEqual({ "page._hint": { unlocalized: 1 } });
+  });
+
+  it("reports a plugin's detect() throwing, instead of silently skipping it, and still falls back to the built-in data model", async () => {
+    const root = await contentProjectRoot({ types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } });
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { _hint: "string" });
+    await db.createOne("page", { id: "1", _hint: "legacy value" });
+    db.close();
+    const plugin: UpgradePlugin = {
+      kind: "test-plugin",
+      detect: () => {
+        throw new Error("detect boom");
+      },
+      load: () => Promise.resolve({ issues: [] }),
+    };
+    const result = await runDataStep(file, root, [plugin]);
+    expect(result.exitCode).toBe(1);
+    const finding = result.report?.findings.find((f) => f.rule === "load/failed");
+    expect(finding).toBeDefined();
+    expect(finding?.message).toContain("test-plugin");
+    expect(finding?.message).toContain("detect() threw");
+    expect(result.report?.underscoreFields).toEqual({ "page._hint": { unlocalized: 1 } });
+  });
+
+  it("reports a data/config-load-failed error, instead of silently skipping the count, when kestrel.config.ts cannot be loaded", async () => {
+    const root = await mkdtemp(join(PROJECT_ROOT, "__fixtures__", ".tmp-data-broken-config-test-"));
+    projectRoots.push(root);
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "tmp", type: "module" }));
+    await writeFile(join(root, "kestrel.config.ts"), "this is not valid TypeScript {{{\n");
+    const file = join(dir, "kestrel.db");
+    await makeDb(file, [{ id: "1", name: "page.created", pipeline: "publishPage", state: "done" }]);
+    const result = await runDataStep(file, root);
+    expect(result.exitCode).toBe(1);
+    const finding = result.report?.findings.find((f) => f.rule === "data/config-load-failed");
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe("error");
+    expect(finding?.message).toContain("kestrel.config.ts");
+    expect(result.report?.underscoreFields).toEqual({});
+  });
+
+  it("names the plugin, as a warning not an error, when a detected plugin has no dataModel hook and its own config cannot be loaded without it", async () => {
+    const root = await mkdtemp(join(PROJECT_ROOT, "__fixtures__", ".tmp-data-plugin-broken-config-test-"));
+    projectRoots.push(root);
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "tmp", type: "module" }));
+    await writeFile(join(root, "kestrel.config.ts"), "export default presetModuleConfig({ persistenceFile: './data/kestrel.db' });\n");
+    const file = join(dir, "kestrel.db");
+    await makeDb(file, [{ id: "1", name: "page.created", pipeline: "publishPage", state: "done" }]);
+    const plugin: UpgradePlugin = {
+      kind: "test-layer-plugin",
+      detect: (candidate) => candidate === root,
+      load: () => Promise.resolve({ issues: [] }),
+    };
+    const result = await runDataStep(file, root, [plugin]);
+    expect(result.exitCode).toBe(0);
+    const finding = result.report?.findings.find((f) => f.rule === "data/config-load-failed");
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe("warning");
+    expect(finding?.message).toContain("test-layer-plugin");
+    expect(finding?.message).toContain("no dataModel hook");
+    expect(result.report?.underscoreFields).toEqual({});
   });
 });
 

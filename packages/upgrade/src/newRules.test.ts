@@ -40,7 +40,6 @@ function contextFor(project: LoadedProject, options: { check?: BootCheck; answer
     bootCheck: options.check ?? bootCheck(),
     readFile: readFileOrUndefined,
     answers: options.answers ?? new Map(),
-    ownsPackages: [],
     ...(options.locateSteps === undefined ? {} : { locateSteps: options.locateSteps }),
     ...(options.locateModelFields === undefined ? {} : { locateModelFields: options.locateModelFields }),
   };
@@ -191,6 +190,54 @@ describe("pipelines/verified-user", () => {
     });
     expect(await verifiedUserRule.check(contextFor(p))).toEqual([]);
   });
+
+  it('choosing the listed "split manually" choice goes manual instead of inserting a bogus authn.verifyUser:split manually step', async () => {
+    const file = join(dir, "retry.ts");
+    const source = 'definePipeline({ name: "retry", steps: ["revisions.reassignAuthor"] });\n';
+    await writeFile(file, source);
+    const ambiguousProject = await project({
+      configModules: [{ use: "@michaelthielemann/kestrel-authn-multi" }],
+      triggers: [{ http: "POST /retry", pipeline: "retry" }, { event: "revision.retry", pipeline: "retry" }],
+      pipelines: [{ name: "retry", steps: ["revisions.reassignAuthor"] }],
+      pipelineFiles: { retry: file },
+    });
+    const findings = await verifiedUserRule.check(contextFor(ambiguousProject, { answers: new Map([["verified-user-path:retry", "split manually"]]) }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+    expect(readFileOrUndefined(file)).toBe(source);
+  });
+
+  it('choosing "other" also goes manual, instead of leaving the question open forever', async () => {
+    const file = join(dir, "retry.ts");
+    const source = 'definePipeline({ name: "retry", steps: ["revisions.reassignAuthor"] });\n';
+    await writeFile(file, source);
+    const ambiguousProject = await project({
+      configModules: [{ use: "@michaelthielemann/kestrel-authn-multi" }],
+      triggers: [{ http: "POST /retry", pipeline: "retry" }, { event: "revision.retry", pipeline: "retry" }],
+      pipelines: [{ name: "retry", steps: ["revisions.reassignAuthor"] }],
+      pipelineFiles: { retry: file },
+    });
+    const findings = await verifiedUserRule.check(contextFor(ambiguousProject, { answers: new Map([["verified-user-path:retry", "other"]]) }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+    expect(readFileOrUndefined(file)).toBe(source);
+  });
+
+  it("marks the question's choices as closed, so a custom answer outside them is never written as a literal path", async () => {
+    const file = join(dir, "retry.ts");
+    const source = 'definePipeline({ name: "retry", steps: ["revisions.reassignAuthor"] });\n';
+    await writeFile(file, source);
+    const ambiguousProject = await project({
+      configModules: [{ use: "@michaelthielemann/kestrel-authn-multi" }],
+      triggers: [{ http: "POST /retry", pipeline: "retry" }, { event: "revision.retry", pipeline: "retry" }],
+      pipelines: [{ name: "retry", steps: ["revisions.reassignAuthor"] }],
+      pipelineFiles: { retry: file },
+    });
+    const findings = await verifiedUserRule.check(contextFor(ambiguousProject, {}));
+    const fix = findings[0]?.fix;
+    expect(fix?.kind).toBe("ask");
+    expect(fix?.kind === "ask" ? fix.closedChoices : undefined).toBe(true);
+  });
 });
 
 describe("steps/undeclared-output (boot wrap)", () => {
@@ -228,6 +275,20 @@ describe("steps/undeclared-required (boot wrap)", () => {
     expect(text).toContain('required: ["id"]');
   });
 
+  it('answering "all" declares every property the schema actually lists as required, not none', async () => {
+    const file = join(dir, "notes.ts");
+    const source = 'export default defineModule({ describe: () => ({ create: { summary: "x", reads: [], writes: ["result"], output: { type: "object", properties: { id: { type: "string" }, title: { type: "string" } } } } }) });\n';
+    await writeFile(file, source);
+    const p = await project({ modules: [fakeModule("notes/local")], moduleFiles: { "notes/local": file } });
+    const problem: BootProblem = { code: "undeclared-required", owner: "pipelines/p", reason: "declares properties without required", pipeline: "p", step: "notes.create", path: "$.output" };
+    const ctxAll = contextFor(p, { check: bootCheck([problem]), answers: new Map([["required:notes/local.create:$.output", "all"]]) });
+    const applied = await undeclaredRequiredRule.check(ctxAll);
+    expect(applied[0]?.fix.kind).toBe("auto");
+    const edits = applied[0]!.fix.kind === "auto" ? applied[0]!.fix.edits : [];
+    const { text } = applyEdits(source, edits);
+    expect(text).toContain('required: ["id", "title"]');
+  });
+
   it("has no default answer (a question without one)", async () => {
     const file = join(dir, "notes.ts");
     await writeFile(file, 'export default defineModule({ describe: () => ({ create: { summary: "x", reads: [], writes: ["result"], output: { type: "object", properties: { id: { type: "string" } } } } }) });\n');
@@ -236,6 +297,21 @@ describe("steps/undeclared-required (boot wrap)", () => {
     const findings = await undeclaredRequiredRule.check(contextFor(p, { check: bootCheck([problem]) }));
     expect(findings[0]?.fix.kind).toBe("ask");
     expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
+  });
+
+  it('answering "all" reports why, instead of silently making no edit, when the step is a factory this cannot locate', async () => {
+    const file = join(dir, "notes.ts");
+    const source =
+      'function buildDescribe() { return { create: { summary: "x", reads: [], writes: ["result"], output: { type: "object", properties: { id: { type: "string" } } } } }; }\nexport default defineModule({ describe: buildDescribe });\n';
+    await writeFile(file, source);
+    const p = await project({ modules: [fakeModule("notes/local")], moduleFiles: { "notes/local": file } });
+    const problem: BootProblem = { code: "undeclared-required", owner: "pipelines/p", reason: "declares properties without required", pipeline: "p", step: "notes.create", path: "$.output" };
+    const ctxAll = contextFor(p, { check: bootCheck([problem]), answers: new Map([["required:notes/local.create:$.output", "all"]]) });
+    const findings = await undeclaredRequiredRule.check(ctxAll);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).not.toBe("auto");
+    expect(findings[0]?.message).toBe(problem.reason);
+    expect(findings[0]?.suggestion).toContain('"all"');
   });
 });
 

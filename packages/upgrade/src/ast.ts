@@ -65,6 +65,73 @@ export function stringValue(node: AstNode | undefined): string | undefined {
   return typeof node.value === "string" ? node.value : undefined;
 }
 
+function templateLiteralValue(node: AstNode): string | undefined {
+  if (node.type !== "TemplateLiteral") return undefined;
+  const expressions: unknown[] = Array.isArray(node.expressions) ? node.expressions : [];
+  const quasis: unknown[] = Array.isArray(node.quasis) ? node.quasis : [];
+  if (expressions.length > 0 || quasis.length !== 1) return undefined;
+  const quasi = quasis[0];
+  const quasiValue = isNode(quasi) ? quasi.value : undefined;
+  const cooked = quasiValue !== null && typeof quasiValue === "object" ? (quasiValue as { cooked?: unknown }).cooked : undefined;
+  return typeof cooked === "string" ? cooked : undefined;
+}
+
+/**
+ * Every span in `source` where a string literal — `"..."`, `'...'` or a no-substitution
+ * `` `...` `` — reads exactly `value`, found by walking the parsed AST rather than searching the
+ * text, so a comment or a partial match inside another literal never counts.
+ */
+export function literalStringSpans(source: string, value: string): Array<{ start: number; end: number }> {
+  let root: AstNode;
+  try {
+    root = parseTs(source);
+  } catch {
+    return [];
+  }
+  const spans: Array<{ start: number; end: number }> = [];
+  walk(root, (node) => {
+    if (node.start === null || node.end === null) return;
+    if (stringValue(node) === value || templateLiteralValue(node) === value) spans.push({ start: node.start, end: node.end });
+  });
+  return spans;
+}
+
+function moduleSpecifierSpan(node: AstNode, packageName: string): { start: number; end: number } | undefined {
+  const span = (specifier: unknown): { start: number; end: number } | undefined => {
+    if (!isAstNode(specifier) || specifier.start === null || specifier.end === null) return undefined;
+    return stringValue(specifier) === packageName ? { start: specifier.start, end: specifier.end } : undefined;
+  };
+  if (node.type === "ImportDeclaration" || node.type === "ExportNamedDeclaration" || node.type === "ExportAllDeclaration") return span(node.source);
+  if (node.type === "CallExpression") {
+    const callee = node.callee;
+    const args: unknown[] = Array.isArray(node.arguments) ? node.arguments : [];
+    const isDynamicImport = isAstNode(callee) && callee.type === "Import";
+    const isRequire = isAstNode(callee) && callee.type === "Identifier" && callee.name === "require";
+    if (isDynamicImport || isRequire) return span(args[0]);
+  }
+  return undefined;
+}
+
+/**
+ * Every span in `source` where `packageName` is imported as code — a static `import`/`export …
+ * from`, a dynamic `import(...)`, or a `require(...)` call — found by walking the parsed AST, so a
+ * comment or an unrelated string literal reading the same value never counts.
+ */
+export function importSpans(source: string, packageName: string): Array<{ start: number; end: number }> {
+  let root: AstNode;
+  try {
+    root = parseTs(source);
+  } catch {
+    return [];
+  }
+  const spans: Array<{ start: number; end: number }> = [];
+  walk(root, (node) => {
+    const span = moduleSpecifierSpan(node, packageName);
+    if (span !== undefined) spans.push(span);
+  });
+  return spans;
+}
+
 export function propertyKeyName(prop: AstNode): string | undefined {
   const key = prop.key;
   if (!isNode(key)) return undefined;

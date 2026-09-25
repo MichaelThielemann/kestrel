@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { runUpgradeCli } from "./plugin.ts";
+import { runCli } from "./cli-run.ts";
 import type { UpgradeReport } from "./report.ts";
 import { createScratchCopy } from "./scratch.ts";
 
@@ -13,7 +13,7 @@ const FIXTURE = join(HERE, "..", "__fixtures__", "minimal-5.8");
 
 async function runJson(argv: string[], forceInstalledMajor?: number): Promise<{ code: number; report: UpgradeReport }> {
   const lines: string[] = [];
-  const code = await runUpgradeCli(argv, { stdout: (line) => lines.push(line), stderr: () => undefined, ...(forceInstalledMajor === undefined ? {} : { forceInstalledMajor }) });
+  const code = await runCli(argv, { stdout: (line) => lines.push(line), stderr: () => undefined, ...(forceInstalledMajor === undefined ? {} : { forceInstalledMajor }) });
   return { code, report: boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json") };
 }
 
@@ -49,7 +49,7 @@ describe("kestrel-upgrade fix --write against a copy of the fixture", () => {
     const scratch = await createScratchCopy(FIXTURE);
     cleanupDirs.push(scratch.dir);
 
-    const code = await runUpgradeCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: (line) => { throw new Error(line); } });
+    const code = await runCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: (line) => { throw new Error(line); } });
     expect(code).toBe(1);
 
     const configText = readFileSync(join(scratch.dir, "kestrel.config.ts"), "utf8");
@@ -70,9 +70,9 @@ describe("kestrel-upgrade fix --write against a copy of the fixture", () => {
   it("makes no further edit on a second run", async () => {
     const scratch = await createScratchCopy(FIXTURE);
     cleanupDirs.push(scratch.dir);
-    await runUpgradeCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined });
+    await runCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined });
     const before = readFileSync(join(scratch.dir, "kestrel.config.ts"), "utf8");
-    const code = await runUpgradeCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined });
+    const code = await runCli(["fix", "--root", scratch.dir, "--write", "--yes"], { stdout: () => undefined, stderr: () => undefined });
     const after = readFileSync(join(scratch.dir, "kestrel.config.ts"), "utf8");
     expect(after).toBe(before);
     expect(code).toBe(0);
@@ -87,7 +87,7 @@ describe("kestrel-upgrade fix --write against a copy of the fixture", () => {
 describe("kestrel-upgrade fix preview (no --write)", () => {
   it("counts what its own edits would still leave behind, not the pre-edit total", async () => {
     const lines: string[] = [];
-    const code = await runUpgradeCli(["fix", "--root", FIXTURE, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined, forceInstalledMajor: 6 });
+    const code = await runCli(["fix", "--root", FIXTURE, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined, forceInstalledMajor: 6 });
     expect(code).toBe(1);
     const reportLine = lines.find((l) => l.startsWith("{"));
     const report = boundaryCast<UpgradeReport>(JSON.parse(reportLine ?? "{}"), "json");
@@ -97,7 +97,7 @@ describe("kestrel-upgrade fix preview (no --write)", () => {
 
   it("never prints a remaining-errors count when no boot tier ran at all", async () => {
     const lines: string[] = [];
-    await runUpgradeCli(["fix", "--root", FIXTURE], { stdout: (line) => lines.push(line), stderr: () => undefined });
+    await runCli(["fix", "--root", FIXTURE], { stdout: (line) => lines.push(line), stderr: () => undefined });
     expect(lines.some((l) => l.startsWith("after these edits:"))).toBe(false);
     expect(lines).toContain("could not verify the boot result: no boot check ran; upgrade @michaelthielemann/kestrel to 6 first, then run `fix` again to verify");
   });

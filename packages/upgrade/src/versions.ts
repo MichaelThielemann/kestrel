@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { findPackageJSON } from "node:module";
+import { createRequire, findPackageJSON } from "node:module";
 import { resolve } from "node:path";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { BACKEND_PACKAGE_NAMES } from "./backendPackages.ts";
@@ -35,7 +35,7 @@ function dependencyNames(pkg: unknown): string[] {
 /**
  * Every `@michaelthielemann/kestrel*` package the project's own `package.json` names, with its
  * installed version where resolvable. `mixedMajors` looks only at this repo's own backend packages
- * (`BACKEND_PACKAGE_NAMES`), never at a plugin's own package, even one under the same npm scope.
+ * (`BACKEND_PACKAGE_NAMES`) — never at a plugin's own package, even one under the same npm scope.
  */
 export function installedVersions(root: string): InstalledVersions {
   const pkg = boundaryCast<unknown>(JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")), "json");
@@ -47,4 +47,15 @@ export function installedVersions(root: string): InstalledVersions {
   }
   const backendMajors = new Set(Object.entries(installed).filter(([name]) => BACKEND_PACKAGE_NAMES.includes(name)).map(([, version]) => majorOf(version)));
   return { installed, mixedMajors: backendMajors.size > 1 };
+}
+
+/** This package's own version, read from its `package.json`; `"0.0.0"` when it cannot be resolved (a bundling layout this lookup does not expect). */
+export function toolVersion(): string {
+  try {
+    const require = createRequire(import.meta.url);
+    const pkg = boundaryCast<unknown>(JSON.parse(readFileSync(require.resolve("../package.json"), "utf8")), "json");
+    return isRecord(pkg) && isString(pkg.version) ? pkg.version : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
 }

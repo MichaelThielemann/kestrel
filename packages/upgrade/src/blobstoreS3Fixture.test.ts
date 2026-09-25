@@ -2,7 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { runUpgradeCli } from "./plugin.ts";
+import { runCli } from "./cli-run.ts";
 import type { UpgradeReport } from "./report.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -11,7 +11,7 @@ const INVALID_FIXTURE = join(HERE, "..", "__fixtures__", "blobstore-s3-invalid-5
 
 async function runJson(argv: string[], forceInstalledMajor?: number): Promise<{ code: number; report: UpgradeReport }> {
   const lines: string[] = [];
-  const code = await runUpgradeCli(argv, { stdout: (line) => lines.push(line), stderr: () => undefined, ...(forceInstalledMajor === undefined ? {} : { forceInstalledMajor }) });
+  const code = await runCli(argv, { stdout: (line) => lines.push(line), stderr: () => undefined, ...(forceInstalledMajor === undefined ? {} : { forceInstalledMajor }) });
   return { code, report: boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json") };
 }
 

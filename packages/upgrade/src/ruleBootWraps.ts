@@ -1,4 +1,4 @@
-import { markStepBinary, setStepRequired } from "./edits.ts";
+import { markStepBinary, setStepRequired, stepOutputPropertyNames } from "./edits.ts";
 import type { Rule } from "./plugin.ts";
 import type { AskFix, Edit, Finding } from "./report.ts";
 import { finding, moduleOwningStep, shortStepKey, whereOf } from "./ruleHelpers.ts";
@@ -38,20 +38,9 @@ export const undeclaredOutputRule: Rule = {
           return finding(id, "steps/undeclared-output", e.reason, `binary: true added to ${e.step}'s describe() entry`, where, edits, "docs/upgrading.md#steps-undeclared-output");
         }
         if (answer === "no") return finding(id, "steps/undeclared-output", e.reason, "declare output, extendsOutput or extendsItems by hand", where, undefined, "docs/upgrading.md#steps-undeclared-output");
-        const fix: AskFix = { kind: "ask", question: `binary:${owner.name}.${shortStepKey(e.step ?? "")}`, prompt: `is "${e.step}"'s result a binary body?`, choices: ["no", "yes"], defaultValue: "no" };
+        const fix: AskFix = { kind: "ask", question: `binary:${owner.name}.${shortStepKey(e.step ?? "")}`, prompt: `is "${e.step}"'s result a binary body?`, choices: ["no", "yes"], closedChoices: true, defaultValue: "no" };
         return { id, rule: "steps/undeclared-output", severity: "error", tier: "boot", where, message: e.reason, suggestion: "a \"yes\" adds binary: true; a \"no\" stays manual (declare output/extendsOutput/extendsItems by hand)", fix, docs: "docs/upgrading.md#steps-undeclared-output" } satisfies Finding;
       });
-  },
-  applyAnswer(id, value, ctx) {
-    if (!id.startsWith("binary:") || value !== "yes") return undefined;
-    const rest = id.slice("binary:".length);
-    const dot = rest.lastIndexOf(".");
-    if (dot === -1) return undefined;
-    const file = ctx.project.moduleFiles.get(rest.slice(0, dot));
-    const source = file === undefined ? undefined : ctx.readFile(file);
-    if (file === undefined || source === undefined) return undefined;
-    const edit = markStepBinary(file, source, rest.slice(dot + 1));
-    return edit ? [edit] : undefined;
   },
 };
 
@@ -71,9 +60,9 @@ export const undeclaredRequiredRule: Rule = {
         }
         const answer = ctx.answers.get(questionId);
         if (answer !== undefined && answer !== "manual") {
-          const properties = answer === "all" ? undefined : answer === "none" ? [] : answer.split(",").map((s) => s.trim()).filter((s) => s !== "");
+          const source = ctx.readFile(owner.file);
+          const properties = answer === "all" ? (source === undefined ? undefined : stepOutputPropertyNames(source, shortStepKey(e.step ?? ""))) : answer === "none" ? [] : answer.split(",").map((s) => s.trim()).filter((s) => s !== "");
           if (properties !== undefined) {
-            const source = ctx.readFile(owner.file);
             const edits: Edit[] = [];
             if (source !== undefined) {
               const edit = setStepRequired(owner.file, source, shortStepKey(e.step ?? ""), properties);
@@ -81,23 +70,11 @@ export const undeclaredRequiredRule: Rule = {
             }
             return finding(id, "steps/undeclared-required", e.reason, `required: [${properties.map((p) => `"${p}"`).join(", ")}] added`, where, edits, "docs/upgrading.md#steps-undeclared-required");
           }
+          return finding(id, "steps/undeclared-required", e.reason, `"all" could not locate "${e.step}"'s output.properties this way (a factory step, or a shape this cannot parse); list the always-present properties by hand instead of "all"`, where, undefined, "docs/upgrading.md#steps-undeclared-required");
         }
         const fix: AskFix = { kind: "ask", question: questionId, prompt: `which of "${e.step}"'s output properties are always present? (comma-separated, "all", or "none")`, choices: ["all", "none", "<comma-separated>", "manual"] };
         return { id, rule: "steps/undeclared-required", severity: "error", tier: "boot", where, message: e.reason, suggestion: "no default: declaring required makes a claim nobody verified yet", fix, docs: "docs/upgrading.md#steps-undeclared-required" } satisfies Finding;
       });
-  },
-  applyAnswer(id, value, ctx) {
-    if (!id.startsWith("required:") || value === "manual") return undefined;
-    const rest = id.slice("required:".length);
-    const [target] = rest.split(":");
-    const dot = target?.lastIndexOf(".") ?? -1;
-    if (target === undefined || dot === -1) return undefined;
-    const file = ctx.project.moduleFiles.get(target.slice(0, dot));
-    const source = file === undefined ? undefined : ctx.readFile(file);
-    if (file === undefined || source === undefined) return undefined;
-    const properties = value === "all" ? [] : value === "none" ? [] : value.split(",").map((s) => s.trim()).filter((s) => s !== "");
-    const edit = setStepRequired(file, source, target.slice(dot + 1), properties);
-    return edit ? [edit] : undefined;
   },
 };
 
