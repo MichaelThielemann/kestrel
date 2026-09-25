@@ -120,6 +120,24 @@ describe("offer/event-queue", () => {
     expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.question : undefined).toBe("idempotent:publishPage");
   });
 
+  it("skips idempotent:<pipeline> for a name the active plugin's own idempotentPipelines vouches for, and still asks about the rest", async () => {
+    const p = await directProject();
+    p.input.pipelines = [...p.input.pipelines, { name: "notifySubscribers", steps: ["events.emit:noop"] }];
+    p.input.config.triggers = [...p.input.config.triggers, { event: "page.updated", pipeline: "notifySubscribers" }];
+    const ctx: InternalRuleContext = { ...contextFor(p, new Map([["switch-to-queue", "yes"]])), vouchedIdempotentPipelines: ["notifySubscribers"] };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.question : undefined).toBe("idempotent:publishPage");
+  });
+
+  it("moves straight to relay-pipelines once idempotentPipelines vouches for every consumer event pipeline", async () => {
+    const p = await directProject();
+    const ctx: InternalRuleContext = { ...contextFor(p, new Map([["switch-to-queue", "yes"]])), vouchedIdempotentPipelines: ["publishPage"] };
+    const findings = await queueOfferRule.check(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.question : undefined).toBe("relay-pipelines");
+  });
+
   it("withdraws the switch once an idempotent answer is no", async () => {
     const p = await directProject();
     const answers = new Map([["switch-to-queue", "yes"], ["idempotent:publishPage", "no"]]);

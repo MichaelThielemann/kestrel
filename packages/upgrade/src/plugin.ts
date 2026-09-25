@@ -20,7 +20,7 @@ export type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
  * plugin that relies on one compares `PLUGIN_API_VERSION` first. The number only grows: a new major
  * of this package continues from the previous major's value and never resets it.
  */
-export const PLUGIN_API_VERSION = 1;
+export const PLUGIN_API_VERSION = 2;
 
 /** One file a plugin's own pipeline layout lives in, and the pipeline(s) it defines — more than one when a layout keeps several pipelines in one file; a rule that iterates every pipeline file reports at most once per entry. */
 export interface PipelineFile {
@@ -253,6 +253,15 @@ export interface UpgradePlugin {
    * is absent.
    */
   switchEdits?: (ctx: RuleContext, relayPipelines: readonly string[]) => Promise<SwitchEditsResult>;
+  /**
+   * Names pipelines this plugin already knows are safe to run more than once for the same event —
+   * its own preset's, say, already documented and audited for idempotency, and offering a
+   * `switch-to-queue` question the project's own owner cannot judge. `offer/event-queue` asks its own
+   * `idempotent:<pipeline>` question, gating the switch on a "yes", for every consumer event pipeline
+   * except the ones named here, which it treats as already answered "yes" without needing one in
+   * `--answers`. Absent, every consumer event pipeline is asked about, unchanged.
+   */
+  idempotentPipelines?(project: LoadedProject): readonly string[];
 }
 
 export interface RunUpgradeCliOptions {

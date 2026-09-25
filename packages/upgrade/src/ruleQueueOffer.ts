@@ -254,7 +254,8 @@ const CONSEQUENCES = "uploads and other requests answer at once; a subscriber no
  * failing, or the preview throwing — is unverified, never treated as clean: the offer still appears, but
  * its question has no default (so `--yes` never answers it) and names what to fix first (upgrade kestrel,
  * or install events-queue) before running `fix` again. At-least-once safety is then the
- * `idempotent:<pipeline>` question per consumer event pipeline, asked only after `switch-to-queue: yes`.
+ * `idempotent:<pipeline>` question per consumer event pipeline, asked only after `switch-to-queue: yes`
+ * and skipped for a pipeline the active plugin's own `idempotentPipelines(project)` already names.
  */
 export const queueOfferRule: Rule = {
   id: RULE_ID,
@@ -279,7 +280,8 @@ export const queueOfferRule: Rule = {
     if (switchAnswer !== "yes") return [];
 
     const eventPipelines = consumerEventPipelines(ctx);
-    const unresolvedIdempotent = eventPipelines.filter((p) => ctx.answers.get(`idempotent:${p}`) === undefined);
+    const vouched = new Set(ctx.vouchedIdempotentPipelines ?? []);
+    const unresolvedIdempotent = eventPipelines.filter((p) => !vouched.has(p) && ctx.answers.get(`idempotent:${p}`) === undefined);
     if (unresolvedIdempotent.length > 0) {
       return unresolvedIdempotent.map((p): Finding => {
         const fix: AskFix = { kind: "ask", question: `idempotent:${p}`, prompt: `is pipeline "${p}" safe to run twice for one event, or does it deduplicate by eventId?`, choices: ["no", "yes"], closedChoices: true, defaultValue: "no" };

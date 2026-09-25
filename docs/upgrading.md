@@ -684,6 +684,13 @@ directory) with only the built-in rules.
   quote style, found by walking the parsed AST so a comment or a partial match never counts) decides
   nothing on its own; it only improves the blocker's message, naming the file and site to edit, so a
   module list built by a helper function or an imported constant is checked exactly the same way.
+- `idempotentPipelines?(project): readonly string[]` — names pipelines this plugin already knows are
+  safe to run more than once for the same event (its own preset's, audited and documented elsewhere,
+  say). `offer/event-queue`'s own `idempotent:<pipeline>` question, gating the queue switch on a "yes"
+  per consumer event pipeline, skips every name this hook lists, treating it as already answered "yes"
+  without one in `--answers`; absent, every consumer event pipeline is asked about, unchanged. A
+  project's own pipelines still get their own question — this only covers what the active plugin's own
+  layout already vouches for.
 
 A `Rule` answers one of its own `ask` questions the same way every other finding changes: through
 `ctx.answers` on the next `check()` call — there is no separate answer-to-edit path a plugin's rule
