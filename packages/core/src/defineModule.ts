@@ -78,9 +78,10 @@ export interface StepDescription {
   /**
    * The step only removes members from `result`: it adds none and changes no value it keeps. It declares
    * the step's write of `result`, and the folded output schema passes through it unchanged and stays the
-   * answer of a caller the step leaves untouched. Under `validateOutput` the answer right before the step
-   * is checked against that schema, and the answer after it must be a member-wise subset of it: no new
-   * member, no changed value, every array as long as before. A step after it is validated against the
+   * answer of a caller the step leaves untouched. Under `validateOutput` the answer the step receives has
+   * been checked against that schema by the step that wrote it, and the answer after it must be a
+   * member-wise subset of it: no new member, no changed value, every array as long as before; a plain
+   * object and one without a prototype count alike. A step after it is validated against the
    * full schema as usual. The core never evaluates the labels or the paths; a tool such as an OpenAPI
    * generator prints one answer per label from them.
    */

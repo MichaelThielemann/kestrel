@@ -161,9 +161,9 @@ A step's `narrows` (on `StepDescription`) declares that the step only removes me
 `shape` says where the items of the answer are (`item`, `list` for `{ items, total }`, `array`,
 `file`), and `answers` lists, per audience label, the member paths that audience keeps of one item.
 Boot accepts it as the declaration of the step's `result` write, the folded output schema passes
-through the step unchanged, and under `validateOutput` the answer right before the step must match
-that schema and the answer after it must be a member-wise subset of it (no new member, no changed
-value). The core never evaluates the labels or the paths; `kestrel-openapi` documents one
+through the step unchanged, and under `validateOutput` the answer after the step must be a
+member-wise subset of the answer it received (no new member, no changed value), which the step that
+wrote it has already checked against that schema. The core never evaluates the labels or the paths; `kestrel-openapi` documents one
 answer per label.
 
 `authz-roles` uses it for field grants. `anonymousFields` (resource → field paths) and `fields` (role

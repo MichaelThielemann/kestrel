@@ -131,6 +131,12 @@ function checkOutput(step: ResolvedStep, descriptionsSoFar: readonly StepDescrip
   }
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === null || prototype === Object.prototype;
+}
+
 function memberPath(path: string, key: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
 }
@@ -145,7 +151,7 @@ function narrowingProblem(before: unknown, after: unknown, path: string): string
     }
     return undefined;
   }
-  if (isRecord(before) && isRecord(after) && Object.getPrototypeOf(before) === Object.getPrototypeOf(after)) {
+  if (isPlainObject(before) && isPlainObject(after)) {
     for (const key of Object.keys(after)) {
       if (!Object.hasOwn(before, key)) return `added ${memberPath(path, key)}`;
       const problem = narrowingProblem(before[key], after[key], memberPath(path, key));
@@ -156,13 +162,8 @@ function narrowingProblem(before: unknown, after: unknown, path: string): string
   return `changed ${path}`;
 }
 
-function checkNarrowing(step: ResolvedStep, descriptionsSoFar: readonly StepDescription[], before: Context, after: Context): void {
+function checkNarrowing(step: ResolvedStep, before: Context, after: Context): void {
   if (Object.is(before.result, after.result)) return;
-  const schema = resolveOutputSchema(descriptionsSoFar);
-  const problems = schema === undefined ? [] : validateSchema(schema, before.result);
-  if (problems.length > 0) {
-    throw new Error(`step "${step.name}": result before it does not match describe().output (${problems.map((p) => `${p.path} ${p.message}`).join("; ")})`);
-  }
   const problem = narrowingProblem(before.result, after.result, "$");
   if (problem !== undefined) throw new Error(`step "${step.name}" declares narrows but ${problem}`);
 }
@@ -291,7 +292,7 @@ async function runStep(
       } else {
         descriptionsSoFar.push(step.description);
         checkOnlyTerminal(step, before, after);
-        if (step.description.narrows !== undefined) checkNarrowing(step, descriptionsSoFar, before, after);
+        if (step.description.narrows !== undefined) checkNarrowing(step, before, after);
         else if (writesResult(step)) checkOutput(step, descriptionsSoFar, before, after);
       }
     }

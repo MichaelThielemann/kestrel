@@ -65,11 +65,26 @@ describe("a step declaring narrows", () => {
     expect(res).toMatchObject({ status: 200, result: { id: "1", meta: { a: 1 } } });
   });
 
-  it("under validateOutput, checks the answer against the full declared output right before the narrowing step", async () => {
+  it("under validateOutput, rejects a narrowing step that invents an answer where there was none", async () => {
     const silent = { name: "produce", description: { summary: "p", reads: [], writes: ["result?"], output: ITEM }, fn: async (ctx: Context) => ok(ctx) };
     const { res, log } = await validated([silent, narrower(() => ({ id: "1" }))]);
     expect(res.status).toBe(500);
-    expect(log).toContain('step "cut": result before it does not match describe().output ($ expected object, got undefined)');
+    expect(log).toContain('step "cut" declares narrows but changed $');
+    expect(log).not.toContain("result before it");
+  });
+
+  it("under validateOutput, narrows an answer read as a row without a prototype into a plain object, and back", async () => {
+    const bare = (members: Record<string, unknown>): Record<string, unknown> => {
+      const empty: unknown = Object.create(null);
+      return Object.assign(boundaryCast<Record<string, unknown>>(empty, "host"), members);
+    };
+    const row = bare({ id: "1", secret: "s", meta: bare({ a: 1, b: 2 }) });
+    const toPlain = await validated([producer(row), narrower(() => ({ id: "1", meta: { a: 1 } }))]);
+    expect(toPlain.res).toMatchObject({ status: 200, result: { id: "1", meta: { a: 1 } } });
+    const toRow = await validated([producer(full), narrower(() => bare({ id: "1" }))]);
+    expect(toRow.res.status).toBe(200);
+    const added = await validated([producer(row), narrower(() => ({ id: "1", extra: true }))]);
+    expect(added.log).toContain('step "cut" declares narrows but added $.extra');
   });
 
   it("under validateOutput, rejects a narrowed answer that changes a kept value", async () => {
