@@ -58,6 +58,26 @@ describe("createScratchCopy, outside a git repository", () => {
     expect(existsSync(join(scratch.dir, "data.db-wal"))).toBe(false);
   });
 
+  it("skips every hidden directory and dist, and still copies a hidden file", async () => {
+    await writeFile(join(dir, "kestrel.config.ts"), "export default {};\n");
+    await writeFile(join(dir, ".npmrc"), "engine-strict=true\n");
+    for (const generated of [".generated", ".cache", "dist"]) {
+      await mkdir(join(dir, generated), { recursive: true });
+      await writeFile(join(dir, generated, "out.js"), "export {};\n");
+    }
+    await mkdir(join(dir, "pipelines"), { recursive: true });
+    await writeFile(join(dir, "pipelines", "createNote.ts"), "export default {};\n");
+
+    const scratch = await createScratchCopy(dir);
+    cleanupDirs.push(scratch.dir);
+
+    expect(existsSync(join(scratch.dir, ".npmrc"))).toBe(true);
+    expect(existsSync(join(scratch.dir, "pipelines", "createNote.ts"))).toBe(true);
+    expect(existsSync(join(scratch.dir, ".generated"))).toBe(false);
+    expect(existsSync(join(scratch.dir, ".cache"))).toBe(false);
+    expect(existsSync(join(scratch.dir, "dist"))).toBe(false);
+  });
+
   it("removes its own partial copy if it fails partway through, instead of leaking the tracked directory", async () => {
     await writeFile(join(dir, "kestrel.config.ts"), "export default {};\n");
     await writeFile(join(dir, "package.json"), "{}\n");

@@ -41,6 +41,11 @@ against (anything beyond kestrel's own storage modules) does not run unless name
 `--run-setup <use>`; its pipelines are then reported as not checked instead of run against a real
 config.
 
+The scratch copy holds the files git tracks or would add (untracked files that are not ignored).
+Outside a git repository it holds every file except `.env` files, database files, files over 10 MB,
+and anything under a hidden directory (a name starting with `.`), `node_modules` or `dist`. Either
+way, the project's own `node_modules` is linked into it, not copied.
+
 ## 4. Answering questions
 
 A finding whose fix needs a person's decision carries a question. `fix` on a terminal asks each one
@@ -590,7 +595,7 @@ directory) with only the built-in rules.
   switch for a project layout where events-direct is not a `kestrel.config.ts` module-list entry:
   `parts` is the switch's edits as the same all-or-nothing `Record<label, Edit[] | undefined>` shape
   `combineEditParts` takes, and `blockers` names deployment markers that forbid the switch outright (a
-  `nitro.preset` with no long-running worker, say), the same role the built-in SERVERLESS_MARKERS
+  build setting that deploys the server as short-lived functions, say), the same role the built-in SERVERLESS_MARKERS
   check plays for a CLI/server backend project. The built-in rule keeps every gate (an open
   event-payload or emits finding, the serverless markers, no default when unverified) and only asks
   this hook for the edits and the extra markers, adding them to its own rather than replacing them;

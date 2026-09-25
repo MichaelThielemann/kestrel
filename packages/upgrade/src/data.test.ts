@@ -374,7 +374,7 @@ describe("runDataStep: underscore-field counts for a plugin project", () => {
     const file = join(dir, "kestrel.db");
     await makeDb(file, [{ id: "1", name: "page.created", pipeline: "publishPage", state: "done" }]);
     const plugin: UpgradePlugin = {
-      kind: "test-layer-plugin",
+      kind: "test-host-plugin",
       detect: (candidate) => candidate === root,
       load: () => Promise.resolve({ issues: [] }),
     };
@@ -383,7 +383,7 @@ describe("runDataStep: underscore-field counts for a plugin project", () => {
     const finding = result.report?.findings.find((f) => f.rule === "data/config-load-failed");
     expect(finding).toBeDefined();
     expect(finding?.severity).toBe("warning");
-    expect(finding?.message).toContain("test-layer-plugin");
+    expect(finding?.message).toContain("test-host-plugin");
     expect(finding?.message).toContain("no dataModel hook");
     expect(result.report?.underscoreFields).toEqual({});
   });

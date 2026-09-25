@@ -74,8 +74,8 @@ const res = await kestrel.run("resolvePage", { trigger: { kind: "http", name: "s
 // res.status 200 → res.result is the document or { redirect: { to, status } }; 404 → res.error
 ```
 
-Notes: `node:sqlite` needs Node ≥ 22 (no edge runtime). Nuxt itself handles the health route and
-CORS. Rate limiting per IP only works behind a proxy with `trustProxy: true`. A runnable example
+Notes: `node:sqlite` needs Node ≥ 22 (no edge runtime). With `http: null` the host serves its own
+health route, answered from `kestrel.health()`, and handles CORS. Rate limiting per IP only works behind a proxy with `trustProxy: true`. A runnable example
 without Nuxt: [`../examples/h3`](../examples/h3).
 
 ## Ground rules
@@ -830,7 +830,7 @@ up on. With `events-queue`, `scope` is `"store"` — the dead-letter count acros
 same number as `events.readQueueStatus.dead`, `since` is `null`. With `events-direct`, `scope` is
 `"process"` — the failed deliveries of the process that answers, counted since it started at
 `since`; another process of the same site has its own count, and a restart starts at 0. Neither
-number reaches `health()` or `/api/ready`.
+number reaches `health()`, `http.healthPath` or a host's readiness probe.
 
 ## Personal data
 

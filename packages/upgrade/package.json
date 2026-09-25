@@ -1,7 +1,7 @@
 {
   "name": "@michaelthielemann/kestrel-upgrade",
   "version": "5.8.0",
-  "description": "5.8 -> 6.0 upgrade assistant: check, fix and data commands, an exported sandbox helper and a plugin API a host layer can register rules and a project loader through.",
+  "description": "5.8 -> 6.0 upgrade assistant: check, fix and data commands, an exported sandbox helper and a plugin API a host package registers its own rules and project loader through.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {

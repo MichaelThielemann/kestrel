@@ -428,12 +428,12 @@ describe("offer/event-queue: UpgradePlugin.switchEdits", () => {
       moduleUses: ["@michaelthielemann/kestrel-events-inmemory", "@michaelthielemann/kestrel-events-direct", "@michaelthielemann/kestrel-persistence-sqlite"],
       issues: [],
     });
-    const ctx: InternalRuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits, previewDetails, pluginKind: "test-layer" };
+    const ctx: InternalRuleContext = { root: dir, scratch: dir, project: p, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), previewBoot: cleanPreviewBoot, switchEdits: pluginSwitchEdits, previewDetails, pluginKind: "test-host" };
     const findings = await queueOfferRule.check(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).not.toBe("ask");
     expect(findings[0]?.message).toContain("did not remove it");
-    expect(findings[0]?.message).toContain('"test-layer" plugin');
+    expect(findings[0]?.message).toContain('"test-host" plugin');
   });
 });
 

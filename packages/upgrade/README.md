@@ -39,8 +39,8 @@ write target, a copy that fails `quick_check`, an unknown `--answers` id).
 functions below.
 
 **Library.** The root export carries the report types (`Finding`, `UpgradeReport`) and
-`runUpgradeCli(argv, options?)`, the same function the bin calls, so a host CLI (a layer's own
-bin) can register its own project loader and rules as a plugin and delegate to this engine instead
+`runUpgradeCli(argv, options?)`, the same function the bin calls, so a host package's own CLI
+can register its own project loader and rules as a plugin and delegate to this engine instead
 of shipping a second copy of it; `options.prompt`/`options.isInteractive` let a host supply its own
 UI instead of a terminal. `./plugin` carries the plugin API (`UpgradePlugin`, `Rule`, `RuleContext`)
 — see `docs/upgrading.md`'s "The plugin API" for the full surface, and `./codemods` for the edit,

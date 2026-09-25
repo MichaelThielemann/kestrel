@@ -818,8 +818,8 @@ by `events.retryDead`; `since` is always `null`. `events-direct` answers `scope:
 counts the failed deliveries of the process that answers, since it started at `since` — another
 process of the same site keeps its own count, and a restart starts at 0, because nothing here
 retries and every failure is final at once. Neither number is a readiness or liveness signal:
-`kestrel.health()` and `/api/ready`/`/api/health` never read it, and a module never puts it in its
-own `health()` hook. A consumer wires one route to it — the step and its shape are identical across
+`kestrel.health()` never reads it, so neither does `http.healthPath` or a host's own readiness
+probe, and a module never puts it in its own `health()` hook. A consumer wires one route to it — the step and its shape are identical across
 both delivery modules, so the route works whichever one is configured.
 
 ## Replaying a Stored Payload

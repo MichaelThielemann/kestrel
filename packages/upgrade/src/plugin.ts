@@ -14,9 +14,9 @@ export interface PipelineFile {
 }
 
 /**
- * A project a plugin knows how to find and load; the layer registers one of these for its own
- * project shape. Every path here (`configFile`, `moduleFiles`' and `pipelineFiles`' entries) must sit
- * inside the `scratch` directory `load()` was given, since a rule's edits target these paths and a
+ * A project a plugin knows how to find and load, in the project shape that plugin supports. Every
+ * path here (`configFile`, `moduleFiles`' and `pipelineFiles`' entries) must sit inside the
+ * `scratch` directory `load()` was given, since a rule's edits target these paths and a
  * boot preview maps them onto its own throwaway copy by their position relative to that same
  * `scratch` — a real-root path escaping that mapping is refused rather than written, even through a
  * symlink (see `previewBootRaw`'s own confinement check). `DataContentModel.file` is the one
@@ -80,7 +80,7 @@ export interface DataContentModel {
 export interface SwitchEditsResult {
   /** All-or-nothing edit parts for the switch, one label per file or step the project's own layout needs touched; `offer/event-queue` combines them the same way it combines the built-in kestrel.config.ts-shaped switch's own parts — a part that could not be located is `undefined`, making the whole switch manual and naming every missing label. */
   parts: Record<string, Edit[] | undefined>;
-  /** Deployment markers making the queue's own long-running worker unsafe here (a `nitro.preset` with no such worker, a serverless platform's own config file, …); non-empty keeps the offer's gate unmet, the same way the built-in check does for a CLI/server backend project. */
+  /** Deployment markers making the queue's own long-running worker unsafe here (a build setting that deploys the server as short-lived functions, a serverless platform's own config file, …); non-empty keeps the offer's gate unmet, the same way the built-in check does for a CLI/server backend project. */
   blockers: readonly string[];
 }
 
@@ -227,7 +227,7 @@ export interface RunUpgradeCliOptions {
   prompt?: PromptFn;
 }
 
-/** Runs the `check` / `fix` / `data` CLI against `argv`, returning the process exit code. A host bin (the layer's own) passes its plugin here instead of shipping a second copy of the engine. */
+/** Runs the `check` / `fix` / `data` CLI against `argv`, returning the process exit code. A host package's own bin passes its plugin here instead of shipping a second copy of the engine. */
 export function runUpgradeCli(argv: readonly string[], options: RunUpgradeCliOptions = {}): Promise<number> {
   return runCli(argv, options);
 }

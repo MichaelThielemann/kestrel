@@ -168,7 +168,7 @@ describe("offer/event-queue: the preview boot is the authority, with or without 
     const otherFile = join(dir, "shared-marker.ts");
     await writeFile(otherFile, "export const marker = 1;\n");
     const plugin: UpgradePlugin = {
-      kind: "test-layer",
+      kind: "test-host",
       detect: (root) => root === dir,
       load: (_root, scratchDir) => loadBackendProject(scratchDir),
       switchEdits: async (ctx) => {
@@ -181,7 +181,7 @@ describe("offer/event-queue: the preview boot is the authority, with or without 
     expect(offer?.fix.kind).not.toBe("ask");
     expect(offer?.message).toContain("events-direct is still in the booted module list");
     expect(offer?.message).toContain("still named at kestrel.config.ts");
-    expect(offer?.message).toContain('"test-layer" plugin');
+    expect(offer?.message).toContain('"test-host" plugin');
   });
 
   it("still offers the switch when a plugin's switchEdits genuinely remove events-direct from a preset config, even with a misleading comment naming the package", async () => {
@@ -189,7 +189,7 @@ describe("offer/event-queue: the preview boot is the authority, with or without 
     cleanupDirs.push(dir);
     await buildProject(dir, "helper-with-comment");
     const plugin: UpgradePlugin = {
-      kind: "test-layer",
+      kind: "test-host",
       detect: (root) => root === dir,
       load: (_root, scratchDir) => loadBackendProject(scratchDir),
       switchEdits: async (ctx) => {
@@ -223,7 +223,7 @@ describe("offer/event-queue: the preview boot is the authority, with or without 
     cleanupDirs.push(dir);
     await buildProject(dir, "literal");
     const plugin: UpgradePlugin = {
-      kind: "test-layer",
+      kind: "test-host",
       detect: (root) => root === dir,
       load: (_root, scratchDir) => loadBackendProject(scratchDir),
       switchEdits: async (ctx) => {
@@ -249,7 +249,7 @@ describe("offer/event-queue: the preview boot is the authority, with or without 
     const modulesTsFile = join(dir, "modules.ts");
     await writeFile(modulesTsFile, 'import * as eventsDirect from "@michaelthielemann/kestrel-events-direct";\n\nexport default eventsDirect;\n');
     const plugin: UpgradePlugin = {
-      kind: "test-layer",
+      kind: "test-host",
       detect: (root) => root === dir,
       load: (_root, scratchDir) => loadBackendProject(scratchDir),
       switchEdits: async (ctx) => {
@@ -274,7 +274,7 @@ describe("offer/event-queue: the preview boot is the authority, with or without 
     await buildProject(dir, "literal");
     let loadCount = 0;
     const plugin: UpgradePlugin = {
-      kind: "test-layer",
+      kind: "test-host",
       detect: (root) => root === dir,
       load: async (_root, scratchDir) => {
         loadCount++;

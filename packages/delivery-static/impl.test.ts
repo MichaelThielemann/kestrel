@@ -81,7 +81,7 @@ function fakeRenderer(failFor: Set<string> = new Set()): Renderer & { calls: str
         data: `<h1>${String(input.document.title)}</h1>`,
         contentType: input.format === "pdf" ? "application/pdf" : "text/html",
         extension: input.format,
-        assets: input.format === "html" ? [{ path: "/_nuxt/app.js", data: "console.log(1)", contentType: "text/javascript" }] : [],
+        assets: input.format === "html" ? [{ path: "/_app/app.js", data: "console.log(1)", contentType: "text/javascript" }] : [],
       });
     },
   };
@@ -125,7 +125,7 @@ describe("delivery/static", () => {
     put("p1", { slug__de: "kontakt", title__de: "Kontakt", status__de: "published", status__en: "published" });
     const result = expectOk(await delivery.publish("pages", "p1"));
     expect(result.map((s) => [s.locale, s.state, s.path])).toEqual([["de", "live", "/kontakt"], ["en", "live", "/en/kontakt"]]);
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_nuxt/app.js", "site/en/kontakt/index.html", "site/kontakt/index.html"]);
+    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_app/app.js", "site/en/kontakt/index.html", "site/kontakt/index.html"]);
     expect(renderer.calls.filter((c) => c.startsWith("html")).length).toBe(2);
     expect(new TextDecoder().decode(blobs.blobs.get("site/en/kontakt/index.html")?.data)).toBe("<h1>Kontakt</h1>");
     expect(renderer.documents.every((d) => d._links !== undefined)).toBe(true);
@@ -134,7 +134,7 @@ describe("delivery/static", () => {
     put("p1", { status__en: "draft" });
     const again = expectOk(await delivery.publish("pages", "p1"));
     expect(again.map((s) => [s.locale, s.state])).toEqual([["de", "live"], ["en", "draft"]]);
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_nuxt/app.js", "site/kontakt/index.html"]);
+    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_app/app.js", "site/kontakt/index.html"]);
     expect(expectOk(await db.count(STATUS, {}))).toBe(2);
   });
 
@@ -159,12 +159,12 @@ describe("delivery/static", () => {
     const delivery = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
     put("p1", { slug__de: "home", title__de: "Start", status__de: "published" });
     expectOk(await delivery.publish("pages", "p1"));
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_nuxt/app.js", "site/index.html", "site/index.pdf"]);
+    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_app/app.js", "site/index.html", "site/index.pdf"]);
     put("p1", { slug__de: "start" });
     expectOk(await delivery.publish("pages", "p1"));
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_nuxt/app.js", "site/start/index.html", "site/start/index.pdf"]);
+    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_app/app.js", "site/start/index.html", "site/start/index.pdf"]);
     expect(expectOk(await delivery.unpublish("pages", "p1"))).toBe(2);
-    expect([...blobs.blobs.keys()]).toEqual(["site/_nuxt/app.js"]);
+    expect([...blobs.blobs.keys()]).toEqual(["site/_app/app.js"]);
     expect(expectOk(await delivery.status("pages", "p1"))).toEqual([]);
   });
 

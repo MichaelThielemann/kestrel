@@ -7,7 +7,7 @@ import { trackTempDir, untrackTempDir } from "./cleanup.ts";
 
 const run = promisify(execFile);
 
-const EXCLUDED_DIRS = new Set(["node_modules", ".git", ".nuxt", ".output", "dist"]);
+const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
 const MAX_BYTES = 10 * 1024 * 1024;
 const EXCLUDED_FILE_PATTERNS = [/^\.env(\..*)?$/, /\.db(-wal|-shm)?$/i, /\.sqlite3?(-wal|-shm)?$/i];
 
@@ -29,7 +29,7 @@ async function walk(root: string, dir: string, out: string[]): Promise<void> {
   for (const entry of entries) {
     const relPath = dir === "" ? entry.name : `${dir}/${entry.name}`;
     if (entry.isDirectory()) {
-      if (EXCLUDED_DIRS.has(entry.name)) continue;
+      if (entry.name.startsWith(".") || EXCLUDED_DIRS.has(entry.name)) continue;
       await walk(root, relPath, out);
       continue;
     }
