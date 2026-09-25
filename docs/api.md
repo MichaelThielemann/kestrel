@@ -440,7 +440,12 @@ same display name in the same folder answers 409 (`details: { collection: "media
 bytes again are idempotent, as described below.
 
 Rules: allows `image/*` (including SVG) and `application/pdf`, forbids `text/html` (415,
-`UNSUPPORTED`); max. 5 MB (413, `PAYLOAD_TOO_LARGE`). **SVG** is sanitized on upload
+`UNSUPPORTED`); max. 5 MB (413, `PAYLOAD_TOO_LARGE`). `allowedTypes`/`deniedTypes` entries are patterns
+matched against the stored `type/subtype`, ignoring parameters and case: `*` and `*/*` match every
+type, `type/*` every type of that top-level type, anything else the one type it names, and an entry
+that is none of these matches nothing; a type is accepted when it matches an allowed entry and no
+denied one (`mediaTypeMatches`/`mediaTypeAllowed` in `@michaelthielemann/kestrel-contracts/mediaType`,
+for any client that checks a type before uploading). **SVG** is sanitized on upload
 (`sanitize.svg` before `media.upload`): `script`, `style`, event handlers, `foreignObject`, `image`
 and external `href`/`xlink:href` are removed, only internal references (`#id`) survive; the XML
 prolog and comments are dropped; > 2 MB → 413 (`PAYLOAD_TOO_LARGE`), no `<svg>` root → 400

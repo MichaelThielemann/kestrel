@@ -390,6 +390,19 @@ describe("media/default", () => {
     });
   });
 
+  it("reads */* like *: as allowedTypes it accepts any upload, as deniedTypes it refuses every one and counts as denying SVG at boot", async () => {
+    const anything = await make({ ...BASE_CONFIG, allowedTypes: ["*/*"], deniedTypes: [] });
+    expect(expectOk(await anything.media.upload({ ...png, filename: "notes.txt", contentType: "text/plain" })).item.contentType).toBe("text/plain");
+    expectOk(await anything.media.upload(png));
+    const nothing = await make({ ...BASE_CONFIG, allowedTypes: ["image/*"], deniedTypes: ["*/*"], publicCopy: { prefix: "site/" } });
+    expect(expectErr(await nothing.media.upload(png), "UNSUPPORTED").status).toBe(415);
+    const serve = { pipeline: "serveMediaFile", module: "media/default", step: "media.serve" };
+    const upload = { pipeline: "importMedia", module: "media/default", step: "media.upload" };
+    expect(() => nothing.media.attach(introspectionOf(manifestWithPipelines([serve, upload])))).not.toThrow();
+    const svgAllowed = await make({ ...BASE_CONFIG, allowedTypes: ["*/*"], deniedTypes: [], publicCopy: { prefix: "site/" } });
+    expect(() => svgAllowed.media.attach(introspectionOf(manifestWithPipelines([serve, upload])))).toThrow(/pipeline "importMedia" runs media\.upload without sanitize\.svg before it/);
+  });
+
   it("matches allowed and denied types on the media type alone, whatever its parameters or case", async () => {
     const { media } = await make();
     expect(expectErr(await media.upload({ ...png, contentType: "image/svg+xml; charset=utf-8" }), "UNSUPPORTED").status).toBe(415);

@@ -29,8 +29,13 @@ characters, optionally followed by `;` parameters, with no comma. Anything else 
 as `UNSUPPORTED` (415). What is stored and written to the blob store is the lower-cased
 `type/subtype`, plus the `charset` of a `text/*` type when its value is a token, lower-cased; no other
 parameter survives: `IMAGE/PNG; x=1` is stored as `image/png`, `Text/Plain; Charset=UTF-8;
-format=flowed` as `text/plain; charset=utf-8`. `allowedTypes`/`deniedTypes` match the `type/subtype`
-alone, and so do their own entries, ignoring parameters and case on both sides. A static host that
+format=flowed` as `text/plain; charset=utf-8`. `allowedTypes`/`deniedTypes` entries are patterns,
+matched by `mediaTypeMatches` from `@michaelthielemann/kestrel-contracts/mediaType` against the
+`type/subtype` alone, ignoring parameters and case on both sides: `*` and `*/*` match every type,
+`image/*` every image type, `image/png` that one type, and any other entry — a list, a bare `image`,
+an empty string — nothing. A type is accepted when it matches an `allowedTypes` entry and no
+`deniedTypes` entry (`mediaTypeAllowed`); `deniedTypes: ["*/*"]` refuses every upload and counts as
+denying SVG for the boot check below. A static host that
 types a file by its extension decides the charset itself; the stored one reaches only a host that
 sends the stored header (a bucket), `media.serve` and `media.download`.
 
@@ -147,9 +152,9 @@ Why: a plain blobstore has no metadata, folders, locale texts or provenance trac
 adds the bookkeeping other modules (`delivery-static`, `references-default`) rely on, without
 depending on an image library.
 
-Config: `allowedTypes` (`image/*`, `application/pdf`, `*`), `deniedTypes` (default
-`image/svg+xml`, `text/html`, `application/xhtml+xml` — they can carry scripts; both lists are matched
-against the media type without parameters, ignoring case), `maxBytes`,
+Config: `allowedTypes` (`image/*`, `application/pdf`, `*` or `*/*`), `deniedTypes` (default
+`image/svg+xml`, `text/html`, `application/xhtml+xml` — they can carry scripts; both lists are
+patterns matched against the media type without parameters, ignoring case, see above), `maxBytes`,
 `prefix` (default `media/`, must end with `/`), `publicPath` (default `/media`), `publicCopy`
 (optional `{ prefix }`), `uploadStaleAfterMs` (default 15 minutes), `anonymousList` (`"ids"` default,
 or `"all"` for a public catalogue), `locales`/`defaultLocale`.

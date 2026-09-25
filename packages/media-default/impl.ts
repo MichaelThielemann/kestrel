@@ -3,7 +3,7 @@ import { mkdir, stat, utimes, writeFile } from "node:fs/promises";
 import { dirname, extname, relative, resolve as resolvePath, sep } from "node:path";
 import type { Introspection, PipelineManifest, PipelineStepManifest } from "@michaelthielemann/kestrel";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
-import { canonicalMediaType, mediaTypeEssence, NEUTRAL_EXTENSION, NEUTRAL_TYPE, publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
+import { canonicalMediaType, mediaTypeAllowed, mediaTypeEssence, NEUTRAL_EXTENSION, NEUTRAL_TYPE, publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
 import type { Document, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -176,13 +176,6 @@ export function keyFor(folder: string, filename: string): string {
 function parentsOf(folder: string): string[] {
   const parts = folder.split("/");
   return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
-}
-
-function typeAllowed(allowed: string[], mediaType: string): boolean {
-  return allowed.some((entry) => {
-    const pattern = mediaTypeEssence(entry) ?? entry.trim().toLowerCase();
-    return pattern === "*" || pattern === mediaType || (pattern.endsWith("/*") && mediaType.startsWith(pattern.slice(0, -1)));
-  });
 }
 
 const SVG = "image/svg+xml";
@@ -560,7 +553,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     async upload(file, folder = "", provenance, svgSanitized = false) {
       const contentType = canonicalMediaType(file.contentType);
       const essence = contentType === null ? null : mediaTypeEssence(contentType);
-      if (contentType === null || essence === null || !typeAllowed(config.allowedTypes, essence) || typeAllowed(config.deniedTypes, essence)) {
+      if (contentType === null || essence === null || !mediaTypeAllowed(config.allowedTypes, config.deniedTypes, essence)) {
         return err(failure("UNSUPPORTED", `media/default: type ${JSON.stringify(file.contentType)} is not allowed`));
       }
       if (file.data.byteLength > config.maxBytes) return err(failure("PAYLOAD_TOO_LARGE", `media/default: file exceeds ${config.maxBytes} bytes`));
@@ -1014,7 +1007,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         if (!runs("media.serve")) {
           throw new Error(`media/default: publicCopy is set, but no pipeline runs media.serve – the public URL ${config.publicPath}/<id>/<name> must also resolve on this origin`);
         }
-        if (typeAllowed(config.allowedTypes, SVG) && !typeAllowed(config.deniedTypes, SVG)) {
+        if (mediaTypeAllowed(config.allowedTypes, config.deniedTypes, SVG)) {
           for (const pipeline of uploading) {
             const gap = unsanitisedUpload(pipeline);
             if (gap !== null) throw new Error(`media/default: publicCopy is set and SVG uploads are allowed, but pipeline "${pipeline.name}" ${gap} – an unsanitised SVG would be published; run sanitize.svg before media.upload or deny image/svg+xml`);

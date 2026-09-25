@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { EXTENSION_BY_TYPE, NEUTRAL_EXTENSION, NEUTRAL_TYPE, canonicalMediaType, mediaTypeEssence, parseMediaType, publicFormOf } from "./mediaType.ts";
+import { EXTENSION_BY_TYPE, NEUTRAL_EXTENSION, NEUTRAL_TYPE, canonicalMediaType, mediaTypeAllowed, mediaTypeEssence, mediaTypeMatches, parseMediaType, publicFormOf } from "./mediaType.ts";
 
 const neutral = { contentType: NEUTRAL_TYPE, extension: NEUTRAL_EXTENSION };
 
@@ -52,6 +52,53 @@ describe("canonicalMediaType", () => {
     expect(canonicalMediaType("")).toBeNull();
     expect(parseMediaType("text/plain; charset=utf-8, text/html")).toBeNull();
     expect(parseMediaType("TEXT/PLAIN; CHARSET=UTF-8")).toEqual({ essence: "text/plain", charset: "utf-8" });
+  });
+});
+
+describe("mediaTypeMatches", () => {
+  const table: Array<[string, string, boolean]> = [
+    ["*", "image/png", true],
+    ["*", "application/x-unknown", true],
+    [" * ", "text/html", true],
+    ["*/*", "image/png", true],
+    ["*/*", "application/pdf; version=1.7", true],
+    ["*/*; q=1", "text/plain", true],
+    ["image/*", "image/png", true],
+    ["IMAGE/*", "image/svg+xml", true],
+    ["image/*", "IMAGE/PNG; x=1", true],
+    ["image/*", "application/pdf", false],
+    ["image/*", "imagex/png", false],
+    ["image/png", "image/png", true],
+    ["IMAGE/PNG; x=1", "image/png", true],
+    ["image/png", "Image/Png; Charset=utf-8", true],
+    ["image/svg+xml; charset=utf-8", "IMAGE/SVG+XML", true],
+    ["image/png", "image/jpeg", false],
+    ["*/png", "image/png", false],
+    ["image", "image/png", false],
+    ["", "image/png", false],
+    ["image/png, text/html", "image/png", false],
+    ["image/*, text/*", "text/html", false],
+    ["image/p ng", "image/png", false],
+    ["**", "image/png", false],
+    ["*", "", false],
+    ["*/*", "image/png, text/html", false],
+    ["image/*", "not a type", false],
+  ];
+  for (const [pattern, mediaType, matches] of table) {
+    it(`${JSON.stringify(pattern)} ${matches ? "matches" : "does not match"} ${JSON.stringify(mediaType)}`, () => {
+      expect(mediaTypeMatches(pattern, mediaType)).toBe(matches);
+    });
+  }
+});
+
+describe("mediaTypeAllowed", () => {
+  it("needs an allowed pattern and no denied one", () => {
+    expect(mediaTypeAllowed(["image/*"], ["image/svg+xml"], "image/png")).toBe(true);
+    expect(mediaTypeAllowed(["image/*"], ["image/svg+xml"], "image/svg+xml; charset=utf-8")).toBe(false);
+    expect(mediaTypeAllowed(["*/*"], [], "text/html")).toBe(true);
+    expect(mediaTypeAllowed(["*"], ["*/*"], "image/png")).toBe(false);
+    expect(mediaTypeAllowed([], [], "image/png")).toBe(false);
+    expect(mediaTypeAllowed(["*"], [], "image/png, text/html")).toBe(false);
   });
 });
 

@@ -23,7 +23,9 @@ essence, plus the charset of a `text/*` type when it is a token. `publicFormOf` 
 `Content-Type` and extension every module publishes a stored type with — a type from
 `EXTENSION_BY_TYPE`, none of which a browser runs as a document, or `application/octet-stream` and
 `bin` for anything else, including an SVG that did not pass `sanitize.svg`. The list only ever grows,
-since a published name keeps its extension.
+since a published name keeps its extension. `mediaTypeMatches` and `mediaTypeAllowed` are the
+`allowedTypes`/`deniedTypes` pattern rule: `*` and `*/*` match every type, `type/*` a top-level type,
+any other pattern one type, with case and parameters ignored on both sides.
 `content-locale` is not a contract either: `satisfiesFilter`, `publishedLocale` and
 `narrowListTranslations` implement one rule on top of `content@1` — a locale that fails a filter is
 never a fallback source and never counted in `_translations` — for every module that builds a
