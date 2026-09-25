@@ -823,6 +823,10 @@ Net changes since 5.8.1.
   a project it was never given — becomes a `plugin/hook-failed` finding naming the rule instead of
   aborting the run for every other one. Every rule without `needs` keeps running only once the
   project loaded, exactly as before.
+- `kestrel-upgrade`: `KESTREL_UPGRADE_FORCE_MAJOR=6` in the environment opens `check`/`fix`'s load and
+  boot tiers against a build whose own `package.json` does not report major `6` yet — testing a build
+  from this branch before it is published, say — the same way a real 6.0.0 install would. A CLI/
+  environment escape hatch only: `RunUpgradeCliOptions`, `UpgradePlugin` and `Rule` gain nothing.
 
 ### Changed
 

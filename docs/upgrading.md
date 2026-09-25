@@ -571,6 +571,18 @@ use" below for the full plugin API surface.
 it against your own tooling before trusting the exit code. Exit codes: `0` nothing at or above
 `--fail-on` (default `error`), `1` at least one finding, `2` the tool could not run.
 
+## Testing before a 6.0.0 release
+
+`check`/`fix` open the load and boot tiers only once the installed `@michaelthielemann/kestrel`
+reports major `6` — a package built from this branch but not yet published still carries its last
+released version, so testing against it sees the source tier only. Set
+`KESTREL_UPGRADE_FORCE_MAJOR=6` in the environment to make that check treat the installed major as
+`6` regardless of what `package.json` says, opening every tier the same way a real 6.0.0 install
+would. This is a CLI/environment escape hatch for testing a not-yet-published build, never part of
+the plugin API: `RunUpgradeCliOptions`, `UpgradePlugin` and `Rule` are unaffected, and a host
+embedding `runUpgradeCli` should rely on its own project's real installed version instead of setting
+this.
+
 ## Programmatic use
 
 The sandbox helper composes with `checkBoot()` directly — see `docs/configuration.md` § Checking a

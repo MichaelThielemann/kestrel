@@ -275,11 +275,18 @@ function withHostUpgradeCommand(findings: readonly Finding[], command: string): 
   return findings.map((f) => (f.rule === "load/failed" ? { ...f, suggestion: `this project depends on "${command}", which already runs @michaelthielemann/kestrel-upgrade's own rules against it; run "${command}" instead of this standalone command` } : f));
 }
 
+function envForceMajor(): number | undefined {
+  const raw = process.env.KESTREL_UPGRADE_FORCE_MAJOR;
+  if (raw === undefined || raw === "") return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) ? parsed : undefined;
+}
+
 async function buildReport(root: string, entry: string | undefined, options: BuildOptions): Promise<BuildResult> {
   const { plugin, issues: detectIssues } = await detectPlugin(options.plugins ?? [], root);
   const versions = installedVersions(root);
   const kestrelVersion = versions.installed["@michaelthielemann/kestrel"];
-  const kestrelMajor = options.forceMajor ?? (kestrelVersion === undefined ? undefined : majorOf(kestrelVersion));
+  const kestrelMajor = options.forceMajor ?? envForceMajor() ?? (kestrelVersion === undefined ? undefined : majorOf(kestrelVersion));
   const findings: Finding[] = [...loadIssuesAsFindings(detectIssues)];
   const scratch = await createScratchCopy(root);
   try {

@@ -42,6 +42,18 @@ describe("kestrel-upgrade check against the minimal-5.8 fixture", () => {
     expect(byRule.get("boot/not-checked")?.tier).toBe("boot");
     expect(code).toBe(1);
   });
+
+  it("also opens the load and boot tiers via KESTREL_UPGRADE_FORCE_MAJOR, for testing an unreleased tarball still reporting an old version", async () => {
+    const original = process.env.KESTREL_UPGRADE_FORCE_MAJOR;
+    process.env.KESTREL_UPGRADE_FORCE_MAJOR = "6";
+    try {
+      const { report } = await runJson(["check", "--root", FIXTURE, "--json"]);
+      expect(report.tiers).toEqual({ source: "done", load: "done", boot: "done", data: "not-run" });
+    } finally {
+      if (original === undefined) delete process.env.KESTREL_UPGRADE_FORCE_MAJOR;
+      else process.env.KESTREL_UPGRADE_FORCE_MAJOR = original;
+    }
+  });
 });
 
 describe("kestrel-upgrade fix --write against a copy of the fixture", () => {
