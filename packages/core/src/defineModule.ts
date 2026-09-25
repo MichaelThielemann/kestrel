@@ -77,10 +77,12 @@ export interface StepDescription {
   anonymous?: "required";
   /**
    * The step only removes members from `result`: it adds none and changes no value it keeps. It declares
-   * the step's write of `result`, the folded output schema passes through it unchanged and stays the
-   * answer of a caller the step leaves untouched, and under `validateOutput` the answer after it is
-   * checked against that schema without its `required` lists. The core never evaluates the labels or the
-   * paths; a tool such as an OpenAPI generator prints one answer per label from them.
+   * the step's write of `result`, and the folded output schema passes through it unchanged and stays the
+   * answer of a caller the step leaves untouched. Under `validateOutput` the answer right before the step
+   * is checked against that schema, and the answer after it must be a member-wise subset of it: no new
+   * member, no changed value, every array as long as before. A step after it is validated against the
+   * full schema as usual. The core never evaluates the labels or the paths; a tool such as an OpenAPI
+   * generator prints one answer per label from them.
    */
   narrows?: NarrowsDeclaration;
 }

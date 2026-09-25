@@ -206,10 +206,11 @@ and the JSON path of the offending schema, for one that has `properties` but no 
 `boot({ validateOutput: true })` and `testing/runPipeline`
 (always on) additionally validate `ctx.result` after every step that writes it (skipped when the
 write is declared optional, `result?`, and `ctx.result` is unchanged) against the schema its
-`output`/`extendsOutput`/`extendsItems` fold to at that point (after a `narrows` step, without the
-schema's `required` lists), failing the run on a mismatch; the log names the step and the JSON path,
-and a `testing/runPipeline` test given no `logger` gets it as the answer's `error`. Production leaves `validateOutput` off by default, so it pays nothing for
-this check unless a deployment opts in.
+`output`/`extendsOutput`/`extendsItems` fold to at that point, failing the run on a mismatch; the
+log names the step and the JSON path, and a `testing/runPipeline` test given no `logger` gets it as
+the answer's `error`. A `narrows` step is checked differently: the answer right before it must match
+the fold, and the answer after it must be a member-wise subset of that one. Production leaves
+`validateOutput` off by default, so it pays nothing for this check unless a deployment opts in.
 
 ## `impl.test.ts`
 

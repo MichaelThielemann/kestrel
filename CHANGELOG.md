@@ -467,8 +467,9 @@ Net changes since 5.8.1.
 
 - `StepDescription.narrows` (`NarrowsDeclaration`: the answer's `shape` and, per audience label, the
   member paths it keeps) declares a step that only removes members of `result`; boot accepts it as
-  the declaration of the `result` write, and `validateOutput` checks the answer after it without the
-  schema's `required` lists. The insights manifest schema describes it.
+  the declaration of the `result` write; under `validateOutput` the answer right before it must match
+  the folded output schema and the answer after it must be a member-wise subset of it. The insights
+  manifest schema describes it.
 - `authz-roles`' `./impl` exports `fieldSet`, `answersOf`, `anonymousPipelines` and
   `fieldGrantProblems`.
 - `RunPipelineOptions.thrownMessages` (test only) answers a thrown step's message instead of its error

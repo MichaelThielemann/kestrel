@@ -8,7 +8,7 @@ import { failure, isKestrelError, type KestrelError } from "./errors.ts";
 import { isErr, type Result } from "./result.ts";
 import { coerceQuery, resolveOutputSchema, validateSchema, type SchemaProblem } from "./schema.ts";
 import { isRecord } from "./guards.ts";
-import type { JsonSchema, StepDescription } from "./defineModule.ts";
+import type { StepDescription } from "./defineModule.ts";
 import { logWarn } from "./logger.ts";
 import { writeRoot } from "./writes.ts";
 
@@ -121,30 +121,50 @@ function optionalResultWrite(step: ResolvedStep): boolean {
   return step.description.writes.includes("result?");
 }
 
-function withoutRequired(schema: JsonSchema): JsonSchema {
-  const relaxed: JsonSchema = {};
-  for (const [key, value] of Object.entries(schema)) {
-    if (key === "required" && Array.isArray(value)) continue;
-    relaxed[key] = relaxedValue(value);
-  }
-  return relaxed;
-}
-
-function relaxedValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(relaxedValue);
-  return isRecord(value) ? withoutRequired(value) : value;
-}
-
 function checkOutput(step: ResolvedStep, descriptionsSoFar: readonly StepDescription[], before: Context, after: Context): void {
   if (optionalResultWrite(step) && Object.is(before.result, after.result)) return;
-  const folded = resolveOutputSchema(descriptionsSoFar);
-  if (folded === undefined) return;
-  const narrowed = descriptionsSoFar.some((d) => d.narrows !== undefined);
-  const schema = narrowed ? withoutRequired(folded) : folded;
+  const schema = resolveOutputSchema(descriptionsSoFar);
+  if (schema === undefined) return;
   const problems = validateSchema(schema, after.result);
   if (problems.length > 0) {
     throw new Error(`step "${step.name}": result does not match describe().output (${problems.map((p) => `${p.path} ${p.message}`).join("; ")})`);
   }
+}
+
+function memberPath(path: string, key: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
+}
+
+function narrowingProblem(before: unknown, after: unknown, path: string): string | undefined {
+  if (Object.is(before, after)) return undefined;
+  if (Array.isArray(before) && Array.isArray(after)) {
+    if (before.length !== after.length) return `changed the length of ${path}`;
+    for (const [index, element] of after.entries()) {
+      const problem = narrowingProblem(before[index], element, `${path}[${index}]`);
+      if (problem !== undefined) return problem;
+    }
+    return undefined;
+  }
+  if (isRecord(before) && isRecord(after) && Object.getPrototypeOf(before) === Object.getPrototypeOf(after)) {
+    for (const key of Object.keys(after)) {
+      if (!Object.hasOwn(before, key)) return `added ${memberPath(path, key)}`;
+      const problem = narrowingProblem(before[key], after[key], memberPath(path, key));
+      if (problem !== undefined) return problem;
+    }
+    return undefined;
+  }
+  return `changed ${path}`;
+}
+
+function checkNarrowing(step: ResolvedStep, descriptionsSoFar: readonly StepDescription[], before: Context, after: Context): void {
+  if (Object.is(before.result, after.result)) return;
+  const schema = resolveOutputSchema(descriptionsSoFar);
+  const problems = schema === undefined ? [] : validateSchema(schema, before.result);
+  if (problems.length > 0) {
+    throw new Error(`step "${step.name}": result before it does not match describe().output (${problems.map((p) => `${p.path} ${p.message}`).join("; ")})`);
+  }
+  const problem = narrowingProblem(before.result, after.result, "$");
+  if (problem !== undefined) throw new Error(`step "${step.name}" declares narrows but ${problem}`);
 }
 
 function declaresOnlyTerminal(description: StepDescription): boolean {
@@ -271,7 +291,8 @@ async function runStep(
       } else {
         descriptionsSoFar.push(step.description);
         checkOnlyTerminal(step, before, after);
-        if (writesResult(step)) checkOutput(step, descriptionsSoFar, before, after);
+        if (step.description.narrows !== undefined) checkNarrowing(step, descriptionsSoFar, before, after);
+        else if (writesResult(step)) checkOutput(step, descriptionsSoFar, before, after);
       }
     }
     log("ok", 200);
