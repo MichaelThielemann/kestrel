@@ -511,7 +511,8 @@ it against your own tooling before trusting the exit code. Exit codes: `0` nothi
 
 The sandbox helper composes with `checkBoot()` directly — see `docs/configuration.md` § Checking a
 boot without starting it, which also lists every boot error code. `@michaelthielemann/kestrel-upgrade/plugin`
-exports the plugin API (`UpgradePlugin`, `Rule`, `RuleContext`, `runUpgradeCli`) a host CLI registers
+exports the plugin API (`UpgradePlugin`, `Rule`, `RuleContext`, `runUpgradeCli`,
+`createRuleContext`, `PLUGIN_API_VERSION`) a host CLI registers
 its own project loader and rules through, instead of shipping a second copy of the check-and-fix
 engine; `runUpgradeCli` also takes a `prompt` and `isInteractive` override for a host with its own UI.
 
@@ -631,6 +632,17 @@ baseline and folds in whether every name in `pipelines` was actually checked, an
 newErrors, unchecked }` — `verified` only when the preview booted and none of `pipelines` is in the
 result's `notChecked`, so a rule that only diffed errors cannot mistake an unchecked pipeline for a
 clean one. `offer/event-queue` verifies its own switch this way.
+
+`createRuleContext(project, overrides?)` builds that `RuleContext` for a plugin's own rule tests,
+without running the CLI: `root` and `scratch` default to the directory of `project.configFile`,
+`bootCheck` to a check with no problems, `readFile` to reading from disk and `answers` to none;
+`overrides` replaces any of them. A member `RuleContext` gains later gets its default there, so a
+test built on it keeps compiling.
+
+`PLUGIN_API_VERSION` is the version of this plugin API, `1` as 6.0.0 ships it. A later member of
+`UpgradePlugin`, `RuleContext` or `SourceRuleContext` is added as an optional one and raises the
+number by one. An engine older than such an addition ignores a hook it does not know, so a plugin
+that relies on one compares `PLUGIN_API_VERSION` first and reports the engine as too old instead.
 
 `@michaelthielemann/kestrel-upgrade/codemods` exports the primitives a plugin's own `Rule` or locator
 writes edits with, so it never needs a second copy of this engine's own edit machinery:

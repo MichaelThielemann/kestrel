@@ -585,6 +585,9 @@ Net changes since 5.8.1.
   entry's full `use` string, in any package scope or as a local path; a key the built-in table
   already rewrites is a load error naming the plugin and the key, and the built-in rewrite stays in
   force. `sandboxBootInput`'s `entries` option takes the same keys and throws on such a key.
+  `PLUGIN_API_VERSION` (`1`) names the plugin API version; a later addition to `UpgradePlugin`,
+  `RuleContext` or `SourceRuleContext` is optional and raises it. `createRuleContext(project,
+  overrides?)` builds a `RuleContext` with defaults for a plugin's own rule tests.
   `locateSteps`/`locateModelFields` locate a pipeline's step array or a content
   type's fields object literal directly, for a project layout the built-in search does not recognize —
   additive, not a replacement: an empty result (or `undefined` from `locateModelFields`) falls back to

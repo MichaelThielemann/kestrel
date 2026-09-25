@@ -42,8 +42,8 @@ functions below.
 `runUpgradeCli(argv, options?)`, the same function the bin calls, so a host package's own CLI
 can register its own project loader and rules as a plugin and delegate to this engine instead
 of shipping a second copy of it; `options.prompt`/`options.isInteractive` let a host supply its own
-UI instead of a terminal. `./plugin` carries the plugin API (`UpgradePlugin`, `Rule`, `RuleContext`)
-— see `docs/upgrading.md`'s "The plugin API" for the full surface, and `./codemods` for the edit,
+UI instead of a terminal. `./plugin` carries the plugin API (`UpgradePlugin`, `Rule`, `RuleContext`,
+`PLUGIN_API_VERSION`, and `createRuleContext` for a plugin's own rule tests) — see `docs/upgrading.md`'s "The plugin API" for the full surface, and `./codemods` for the edit,
 verify and AST-reading primitives a plugin's own rule or locator is written with, so it never needs
 a second copy of this engine's own edit machinery. A registered plugin's own `load()` (its config
 import, any prepare step it runs) executes unconditionally, before any consent question — `--run-setup`

@@ -1,11 +1,21 @@
+import { dirname } from "node:path";
 import type { BootCheck, BootInput, BootProblem } from "@michaelthielemann/kestrel";
 import type { PromptFn } from "./answers.ts";
 import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import type { Edit, Finding } from "./report.ts";
 import { runCli } from "./cli-run.ts";
+import { readFileOrUndefined } from "./rules.ts";
 
 export type { AskFix, Edit, Finding, FindingFix, FindingLocation, Severity, Tier, UpgradeReport } from "./report.ts";
 export type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
+
+/**
+ * The version of this plugin API. A member added to `UpgradePlugin`, `RuleContext` or
+ * `SourceRuleContext` is optional and raises this number by one, so a plugin that relies on an
+ * addition checks `PLUGIN_API_VERSION` first: an engine older than the addition ignores a hook it
+ * does not know.
+ */
+export const PLUGIN_API_VERSION = 1;
 
 /** One file a plugin's own pipeline layout lives in, and the pipeline(s) it defines — more than one when a layout keeps several pipelines in one file; a rule that iterates every pipeline file reports at most once per entry. */
 export interface PipelineFile {
@@ -131,6 +141,18 @@ export interface RuleContext {
    * conditions `previewBoot` is.
    */
   verifyEdits?: (edits: readonly Edit[], options?: { pipelines?: readonly string[] }) => Promise<{ verified: boolean; newErrors: readonly BootProblem[]; unchecked: readonly { name: string; because: string }[] }>;
+}
+
+/**
+ * Builds the `RuleContext` a rule's `check()` receives, for testing a plugin's rule without running
+ * the CLI. `root` and `scratch` default to the directory of `project.configFile`, `bootCheck` to a
+ * check with no problems, `readFile` to reading the file from disk (`undefined` when it cannot be
+ * read) and `answers` to none; the optional members stay absent. `overrides` replaces any of them.
+ * A member `RuleContext` gains gets its default here, so a test built on this keeps compiling.
+ */
+export function createRuleContext(project: LoadedProject, overrides: Partial<Omit<RuleContext, "project">> = {}): RuleContext {
+  const root = dirname(project.configFile);
+  return { root, scratch: root, bootCheck: { errors: [], warnings: [], notChecked: [] }, readFile: readFileOrUndefined, answers: new Map(), ...overrides, project };
 }
 
 /** A rule needing the loaded project, its boot check, or a preview — the default when `needs` is absent. */
