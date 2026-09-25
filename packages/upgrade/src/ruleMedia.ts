@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { pipelineSteps } from "@michaelthielemann/kestrel/definePipeline";
-import { createPipelineFile, insertTriggers, removeModuleConfigProperty, replaceModuleConfigProperty, setModuleConfigProperties, swapPipelineSteps } from "./edits.ts";
+import { createPipelineFile, insertTriggers, removeModuleConfigProperty, replaceModuleConfigProperty, replaceModuleConfigValue, setModuleConfigProperties, swapPipelineSteps } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
@@ -448,7 +448,88 @@ export const imagesPlanRule: Rule = {
   },
 };
 
+const IMAGES_MEDIA_OPTION_RULE_ID = "modules/images-media-option";
+const MEDIA_COLLECTION = "media_items";
+
+/** `modules/images-media-option`: images-default's `media` option (the collection it read media-default's rows from) is removed; it reads media only through `media@1` now. */
+export const imagesMediaOptionRule: Rule = {
+  id: IMAGES_MEDIA_OPTION_RULE_ID,
+  check(ctx) {
+    const images = moduleEntry(ctx, "images-default");
+    if (images === undefined || !isRecord(images.config) || !("media" in images.config)) return [];
+    const collection = isRecord(images.config.media) ? stringConfig(images.config.media, "collection") : undefined;
+    const custom = collection !== undefined && collection !== MEDIA_COLLECTION;
+    const where = { module: images.use, path: "media" };
+    const message = custom
+      ? `images-default's "media" option (collection "${collection}") is removed in 6.0.0; images-default reads media only through media@1 and fails boot while the option is set`
+      : 'images-default\'s "media" option is removed in 6.0.0; images-default reads media only through media@1 (media-default provides it) and fails boot while the option is set';
+    const suggestion = custom ? 'remove "media" from images-default; images-default reads media only through media@1 now, so make sure the module that owns that store provides media@1' : 'remove "media" from images-default';
+    const docs = "docs/upgrading.md#modules-images-media-option";
+    const severity = custom ? "warning" : "error";
+    const source = ctx.readFile(ctx.project.configFile);
+    const edit = source === undefined ? undefined : removeModuleConfigProperty(ctx.project.configFile, source, { use: images.use, key: "media" });
+    return [finding(IMAGES_MEDIA_OPTION_RULE_ID, IMAGES_MEDIA_OPTION_RULE_ID, message, edit === undefined ? `${suggestion} by hand` : suggestion, where, edit === undefined ? undefined : [edit], docs, severity)];
+  },
+};
+
+const REFERENCES_MEDIA_TARGET_RULE_ID = "modules/references-media-target";
+
+/** `modules/references-media-target`: a references-default target reading media-default's collection becomes `{ media: true }`, which reads the ready files through `media@1`; any other `{ collection }` target must name the project's own collection. */
+export const referencesMediaTargetRule: Rule = {
+  id: REFERENCES_MEDIA_TARGET_RULE_ID,
+  check(ctx) {
+    const references = moduleEntry(ctx, "references-default");
+    if (references === undefined || !isRecord(references.config) || !isRecord(references.config.targets)) return [];
+    const mediaProvided = hasModule(ctx, "media-default");
+    const docs = "docs/upgrading.md#modules-references-media-target";
+    const source = ctx.readFile(ctx.project.configFile);
+    const findings: Finding[] = [];
+    for (const [name, target] of Object.entries(references.config.targets)) {
+      const collection = isRecord(target) ? stringConfig(target, "collection") : undefined;
+      if (collection === undefined) continue;
+      const id = `${REFERENCES_MEDIA_TARGET_RULE_ID}:${name}`;
+      const where = { module: references.use, path: `targets.${name}` };
+      if (collection !== MEDIA_COLLECTION) {
+        findings.push(infoFinding(id, REFERENCES_MEDIA_TARGET_RULE_ID, `references-default's target "${name}" reads the collection "${collection}" directly`, 'keep it only if the collection is the project\'s own; for another module\'s data, use a target that reads through that module\'s contract ({ content: "<type>" }, { media: true })', where, docs));
+        continue;
+      }
+      if (!mediaProvided) continue;
+      const message = `references-default's target "${name}" reads media-default's collection "${MEDIA_COLLECTION}" directly; { media: true } reads the ready files through media@1 instead, so an upload in flight or a file being deleted no longer counts as existing`;
+      const suggestion = `set references-default's target "${name}" to { media: true }`;
+      const edit = source === undefined ? undefined : replaceModuleConfigValue(ctx.project.configFile, source, { use: references.use, path: ["targets", name], toText: "{ media: true }" });
+      findings.push(finding(id, REFERENCES_MEDIA_TARGET_RULE_ID, message, edit === undefined ? `${suggestion} by hand` : suggestion, where, edit === undefined ? undefined : [edit], docs, "warning"));
+    }
+    return findings;
+  },
+};
+
+const IMAGES_VARIANTS_CHANGED_RULE_ID = "events/images-variants-changed";
+
+/** `events/images-variants-changed`: images-default announces a changed variant set as its own event, `images.variantsChanged`, never as `media.updated`. */
+export const imagesVariantsChangedRule: Rule = {
+  id: IMAGES_VARIANTS_CHANGED_RULE_ID,
+  check(ctx) {
+    if (!hasModule(ctx, "images-default")) return [];
+    const triggers = ctx.project.input.config.triggers.flatMap((t) => ("event" in t ? [t] : []));
+    const onVariants = new Set(triggers.filter((t) => t.event === "images.variantsChanged").map((t) => t.pipeline));
+    const pipelines = [...new Set(triggers.filter((t) => t.event === "media.updated" && !onVariants.has(t.pipeline)).map((t) => t.pipeline))];
+    return pipelines.map((pipeline) =>
+      infoFinding(
+        `${IMAGES_VARIANTS_CHANGED_RULE_ID}:${pipeline}`,
+        IMAGES_VARIANTS_CHANGED_RULE_ID,
+        `pipeline "${pipeline}" runs on media.updated; images-default announces that an item's variants changed (placed, a size added or changed, a size pruned) as images.variantsChanged, never as media.updated`,
+        `if "${pipeline}" should also react to variant changes (it re-renders pages that show media, for one), add the trigger { event: "images.variantsChanged", pipeline: "${pipeline}" }`,
+        { pipeline },
+        "docs/upgrading.md#events-images-variants-changed",
+      ),
+    );
+  },
+};
+
 export const mediaRules: readonly Rule[] = [
+  imagesMediaOptionRule,
+  referencesMediaTargetRule,
+  imagesVariantsChangedRule,
   deliveryMediaRule,
   mediaPublicPathRule,
   mediaServeRule,

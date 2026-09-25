@@ -139,6 +139,9 @@ Every finding's `docs` field links to one of the anchors below.
 | [`modules/emits`](#modules-emits) | source | ask | a local module's heuristic `.emit(` calls, undeclared in `emits` |
 | [`modules/delivery-media`](#modules-delivery-media) | source | auto | `delivery-static`'s removed `media` option |
 | [`modules/media-public-path`](#modules-media-public-path) | source | auto (warning) | `images-default`'s `publicPath` not matching `media-default`'s |
+| [`modules/images-media-option`](#modules-images-media-option) | source | auto (error / warning) | `images-default`'s removed `media` option |
+| [`modules/references-media-target`](#modules-references-media-target) | source | auto (warning) / none (info) | a `references-default` target reading `media_items`, or any other collection, directly |
+| [`events/images-variants-changed`](#events-images-variants-changed) | source | none (info) | a pipeline on `media.updated` that does not also listen to `images.variantsChanged` |
 | [`pipelines/media-serve`](#pipelines-media-serve) | source | auto (pipeline files + trigger) / manual | `publicCopy` set with no pipeline serving it, or anonymous callers refused it |
 | [`pipelines/media-repair`](#pipelines-media-repair) | source | auto (info) | `publicCopy` set with no pipeline running the public-copy repair |
 | [`pipelines/images-resume-cron`](#pipelines-images-resume-cron) | source | manual (warning) | `images-default` configured with no cron-triggered `images.resume` |
@@ -271,6 +274,31 @@ entries the tool cannot safely merge into, or `media-default` is not configured 
 `images-default`'s `publicPath` must match `media-default`'s exactly — no trailing slash, which a
 5.x regex allowed on either. A mismatch answers 404 for every image variant path.
 
+#### modules-images-media-option
+`images-default`'s `media` option (`media.collection`, the collection it read `media-default`'s rows
+from) is removed in 6.0.0: `images-default` requires `media@1` and reads media only through it, and a
+config that still sets the option fails boot. The fix removes the option. It is an error when the
+collection is `media_items` (or unset), since `media-default` provides `media@1` already; a warning
+when it names another collection, since whichever module owns that store has to provide `media@1`
+now for `images-default` to boot. Without any `media@1` provider, boot reports
+`boot/missing-provider`.
+
+#### modules-references-media-target
+A `references-default` target `{ collection: "media_items" }` reads `media-default`'s collection
+directly. With `media-default` configured, the fix sets the target to `{ media: true }`, which reads
+the ready files through `media@1`: an upload still in flight or a file being deleted then counts as a
+dangling reference instead of an existing one. A target on any other collection gets an info
+finding: `{ collection }` is meant for a collection the project owns itself, and data another module
+owns is read through that module's contract.
+
+#### events-images-variants-changed
+`images-default` announces that an item's variants changed — it placed the item, a size was added or
+changed, a size was pruned — as its own event `images.variantsChanged` (`{ id: null, ids,
+identity: null, params: {} }`), never as `media.updated`, which belongs to the pipeline that edits a
+medium. A pipeline triggered by `media.updated` that should also follow variant changes, such as one
+running `delivery.markDependents:media`, needs a second trigger on `images.variantsChanged`; the info
+finding names the trigger to add for each such pipeline.
+
 #### pipelines-media-serve
 `publicCopy` set on `media-default` or `images-default` (including one `modules/delivery-media`'s
 fix is about to add) needs a pipeline running `media.serve` / `images.serve`, or boot fails. Auto
@@ -303,8 +331,8 @@ A pipeline running `images.remove` before `media.remove`, or `images.removeMany`
 `media.removeFolder`: a render finishing in the gap between the two can leave a public copy or a
 private blob behind. Auto-swaps the two steps' own text in place when the pipeline's file can be
 read; manual otherwise. A separate, info-only finding fires when a pipeline runs
-`media.removeFolder` without `events.emit:media.deleted` afterwards, since a subscriber (the
-191 media-deleted-ids marking, for one) never sees the deleted ids.
+`media.removeFolder` without `events.emit:media.deleted` afterwards, since a subscriber (a
+`delivery.markDependents:media` pipeline, for one) never sees the deleted ids.
 
 #### runtime-authz-anonymous-floor
 `authz-roles` with a non-empty `anonymous` list: a signed-in caller now also holds every permission
@@ -325,14 +353,17 @@ through the API's own `path` field and set `publicCopy` on the media modules for
 #### types-breaking-signatures
 `Deps`, `Introspection`, `PipelineDefinition["steps"]`, `ModuleManifest`, `FakePersistence`,
 `Manifest`, `Kestrel["contracts"]`, `Media` and `Images` all gained required members or new ones
-worth knowing about; only the consumer's own typecheck sees a violation in a hand-built
+worth knowing about — among them `createImages`'s required `deps.media`, `Media` extending
+`MediaFiles` and `MediaStatus`'s `removing`; only the consumer's own typecheck sees a violation in a hand-built
 implementation of one of them.
 
 #### responses-breaking-step-shapes
 A pipeline runs a step whose 6.0.0 response or manifest shape differs from 5.8's — `redirects.lookup`,
 `media.upload`, `media.get`, `media.list`, `media.update`, `media.listFolders`, `media.remove`,
-`media.removeFolder`, `media.renameFolder`, `images.attach`, `images.serve`, `images.prune`,
-`images.generate`, `insights.readManifest` or `events.listDead`; the finding names which one and how.
+`media.removeFolder`, `media.renameFolder`, `media.reconcile`, `media.reconcileDelete`,
+`images.attach`, `images.serve`, `images.prune`, `images.generate`, `images.retryFailed`,
+`images.sync`, `images.readStatus`, `insights.readManifest` or `events.listDead`; the finding names
+which one and how.
 `media.upload`'s own change also covers the declared type: one that is not exactly one
 `type/subtype` (a list such as `image/png, text/html`, or an empty type) is refused with 415, and
 only its lower-cased `type/subtype` is stored, plus a `text/*` type's charset, so

@@ -714,6 +714,21 @@ describe("info rules", () => {
     expect(findings.map((f) => f.where.step).sort()).toEqual(["events.listDead", "insights.readManifest"]);
   });
 
+  it("types/breaking-signatures names what reading media through media@1 changed", async () => {
+    const findings = await typeSignaturesRule.check(contextFor(await project({})));
+    for (const part of ["createImages takes deps.media", "Media extends MediaFiles", "MediaStatus gained removing", "images-default's Config lost media"]) expect(findings[0]?.message).toContain(part);
+  });
+
+  it("responses/breaking-step-shapes names the not-ready 404 and the sync job's eligible total", async () => {
+    const p = await project({ pipelines: [{ name: "images", steps: ["images.generate", "images.retryFailed", "images.sync", "images.readStatus", "media.reconcile"] }] });
+    const byStep = new Map((await breakingStepShapesRule.check(contextFor(p))).map((f) => [f.where.step, f.message]));
+    expect(byStep.get("images.generate")).toContain("404 for an item that is not ready");
+    expect(byStep.get("images.retryFailed")).toContain("404 for an item that is not ready");
+    expect(byStep.get("images.sync")).toContain("job.total counts the ready items that get variants");
+    expect(byStep.get("images.readStatus")).toContain("job.total counts the ready items that get variants");
+    expect(byStep.get("media.reconcile")).toContain("<prefix><id>/<name>");
+  });
+
   it("responses/breaking-step-shapes stays quiet for a pipeline using none of these steps", async () => {
     const p = await project({ pipelines: [{ name: "createPage", steps: ["content.create"] }] });
     expect(await breakingStepShapesRule.check(contextFor(p))).toEqual([]);

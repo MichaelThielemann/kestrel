@@ -69,7 +69,7 @@ export const typeSignaturesRule: Rule = {
   id: "types/breaking-signatures",
   check() {
     return [
-      infoFinding("types/breaking-signatures", "types/breaking-signatures", "Deps.eventTriggers, Introspection.health(), PipelineDefinition[\"steps\"] (readonly PipelineEntry[]), ModuleManifest.atomicScope, FakePersistence's atomic members, Manifest.warnings and Kestrel[\"contracts\"].names() are all required now. Media: Media lost migrateKeys, gained serveFile, syncPublic, toPublicItem, publicCopyEnabled, anonymousListAllowed, sanitizesSvg and attach, and upload takes a fourth svgSanitized argument; MediaItem gained location and svgSanitized. Images: Images gained plan, syncPublic, publicCopyEnabled, publicPath and attach, and its Renderer takes a third planned argument; VariantState gained planned", "run your own typecheck after installing the 6.0.0 packages; a hand-built implementation of any of these needs the new members", {}, "docs/upgrading.md#types-breaking-signatures"),
+      infoFinding("types/breaking-signatures", "types/breaking-signatures", "Deps.eventTriggers, Introspection.health(), PipelineDefinition[\"steps\"] (readonly PipelineEntry[]), ModuleManifest.atomicScope, FakePersistence's atomic members, Manifest.warnings and Kestrel[\"contracts\"].names() are all required now. Media: Media lost migrateKeys, gained serveFile, syncPublic, toPublicItem, publicCopyEnabled, anonymousListAllowed, sanitizesSvg and attach, and upload takes a fourth svgSanitized argument; MediaItem gained location and svgSanitized. Images: Images gained plan, syncPublic, publicCopyEnabled, publicPath and attach, and its Renderer takes a third planned argument; VariantState gained planned. Reading media through media@1: createImages takes deps.media (a media@1 provider) and images-default's Config lost media; Media extends MediaFiles (file, files, load, scan, count); MediaStatus gained removing", "run your own typecheck after installing the 6.0.0 packages; a hand-built implementation of any of these needs the new members", {}, "docs/upgrading.md#types-breaking-signatures"),
     ];
   },
 };
@@ -88,7 +88,12 @@ const STEP_SHAPE_CHANGES: Record<string, string> = {
   "images.attach": "gains available (false while a size still lacks a variant path, and such a size lists no path); no row is ever in state planned in an output; an attached variant carries its final width/height and path in every state",
   "images.serve": "answers the size's current file and every file a format change or a prune retired, never 404 for either; a size that never rendered, or whose render failed for good, answers with the original's bytes and type instead of 404; any other file is 404",
   "images.prune": "a pruned size's old path keeps answering with the original's bytes and type until the item is deleted, instead of 404 right away",
-  "images.generate": "renders for ready media items only, and a variant row can be in state planned before it is called",
+  "images.generate": "renders for ready media items only, and a variant row can be in state planned before it is called; it answers 404 for an item that is not ready (still uploading, failed, or being deleted), where it answered 200 with no variants",
+  "images.retryFailed": "answers 404 for an item that is not ready (still uploading, failed, or being deleted)",
+  "images.sync": "job.total counts the ready items that get variants, and done/failed count the same items, not every media item",
+  "images.readStatus": "job.total counts the ready items that get variants, and done/failed count the same items, not every media item",
+  "media.reconcile": "considers only keys of the module's own <prefix><id>/<name> shape: a file directly under prefix or deeper than <id>/<name> is no longer reported, and never deleted",
+  "media.reconcileDelete": "considers only keys of the module's own <prefix><id>/<name> shape: a file directly under prefix or deeper than <id>/<name> is no longer reported, and never deleted",
   "insights.readManifest": "its output schema follows Manifest's two new fields, atomicScope and warnings",
   "events.listDead": "its items now carry pipeline and runId, and rows are no longer ordered across pipelines",
 };

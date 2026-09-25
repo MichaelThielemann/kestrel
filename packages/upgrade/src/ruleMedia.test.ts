@@ -11,12 +11,15 @@ import {
   authzAnonymousFloorRule,
   binaryCacheControlRule,
   deliveryMediaRule,
+  imagesMediaOptionRule,
   imagesPlanRule,
   imagesResumeCronRule,
+  imagesVariantsChangedRule,
   mediaDeleteOrderRule,
   mediaPublicPathRule,
   mediaRepairRule,
   mediaServeRule,
+  referencesMediaTargetRule,
   removedExportRule,
 } from "./ruleMedia.ts";
 
@@ -63,6 +66,11 @@ const DELIVERY = "@michaelthielemann/kestrel-delivery-static";
 const MEDIA_DEFAULT = "@michaelthielemann/kestrel-media-default";
 const IMAGES_DEFAULT = "@michaelthielemann/kestrel-images-default";
 const AUTHZ_ROLES = "@michaelthielemann/kestrel-authz-roles";
+const REFERENCES = "@michaelthielemann/kestrel-references-default";
+
+function applied(p: LoadedProject, edits: Parameters<typeof applyEdits>[1]): string {
+  return applyEdits(readFileOrUndefined(p.configFile)!, edits).text;
+}
 
 describe("modules/delivery-media", () => {
   it("does not fire without an old media option", async () => {
@@ -492,5 +500,90 @@ describe("pipelines/images-plan", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("manual");
     expect(findings[0]?.severity).toBe("warning");
+  });
+});
+
+describe("modules/images-media-option", () => {
+  it("does not fire without images-default, or without its media option", async () => {
+    expect(await imagesMediaOptionRule.check(contextFor(await project([{ use: MEDIA_DEFAULT, config: {} }])))).toEqual([]);
+    expect(await imagesMediaOptionRule.check(contextFor(await project([{ use: IMAGES_DEFAULT, config: { publicCopy: { prefix: "site/" } } }])))).toEqual([]);
+  });
+
+  it("removes the option with an auto fix, an error since the config fails boot", async () => {
+    const p = await project([
+      { use: MEDIA_DEFAULT, config: {} },
+      { use: IMAGES_DEFAULT, config: { chunk: 10, media: { collection: "media_items" }, publicCopy: { prefix: "site/" } } },
+    ]);
+    const findings = await imagesMediaOptionRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ rule: "modules/images-media-option", severity: "error", where: { module: IMAGES_DEFAULT, path: "media" }, docs: "docs/upgrading.md#modules-images-media-option" });
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const text = applied(p, edits);
+    expect(text).toContain('kestrel-images-default", config: {"chunk":10,"publicCopy":{"prefix":"site/"}}');
+    expect(text).not.toContain("media_items");
+  });
+
+  it("still removes a custom collection, as a warning that the store behind it must provide media@1", async () => {
+    const p = await project([{ use: IMAGES_DEFAULT, config: { media: { collection: "asset_rows" } } }]);
+    const findings = await imagesMediaOptionRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe("warning");
+    expect(findings[0]?.fix.kind).toBe("auto");
+    expect(findings[0]?.suggestion).toContain("provides media@1");
+    expect(findings[0]?.message).toContain("asset_rows");
+  });
+});
+
+describe("modules/references-media-target", () => {
+  it("does not fire without references-default, or for a content target", async () => {
+    expect(await referencesMediaTargetRule.check(contextFor(await project([{ use: MEDIA_DEFAULT, config: {} }])))).toEqual([]);
+    const p = await project([{ use: MEDIA_DEFAULT, config: {} }, { use: REFERENCES, config: { targets: { pages: { content: "pages" }, media: { media: true } } } }]);
+    expect(await referencesMediaTargetRule.check(contextFor(p))).toEqual([]);
+  });
+
+  it("turns a target on media-default's collection into { media: true } with an auto fix", async () => {
+    const p = await project([
+      { use: MEDIA_DEFAULT, config: {} },
+      { use: REFERENCES, config: { targets: { pages: { content: "pages" }, media: { collection: "media_items" } } } },
+    ]);
+    const findings = await referencesMediaTargetRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ rule: "modules/references-media-target", severity: "warning", where: { module: REFERENCES, path: "targets.media" }, docs: "docs/upgrading.md#modules-references-media-target" });
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    expect(applied(p, edits)).toContain('"targets":{"pages":{"content":"pages"},"media":{ media: true }}');
+  });
+
+  it("leaves the media_items target alone without media-default, which would provide media@1", async () => {
+    const p = await project([{ use: REFERENCES, config: { targets: { media: { collection: "media_items" } } } }]);
+    expect(await referencesMediaTargetRule.check(contextFor(p))).toEqual([]);
+  });
+
+  it("notes a target on any other collection: it must be the project's own", async () => {
+    const p = await project([{ use: MEDIA_DEFAULT, config: {} }, { use: REFERENCES, config: { targets: { products: { collection: "shop_products" } } } }]);
+    const findings = await referencesMediaTargetRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe("info");
+    expect(findings[0]?.message).toContain("shop_products");
+  });
+});
+
+describe("events/images-variants-changed", () => {
+  it("does not fire without images-default, or when the pipeline also listens to images.variantsChanged", async () => {
+    const triggers = [{ event: "media.updated", pipeline: "mediaDependents" }];
+    expect(await imagesVariantsChangedRule.check(contextFor(await project([{ use: MEDIA_DEFAULT, config: {} }], { triggers })))).toEqual([]);
+    const both = [...triggers, { event: "images.variantsChanged", pipeline: "mediaDependents" }];
+    expect(await imagesVariantsChangedRule.check(contextFor(await project([{ use: IMAGES_DEFAULT, config: {} }], { triggers: both })))).toEqual([]);
+  });
+
+  it("notes each pipeline on media.updated that does not also listen to images.variantsChanged", async () => {
+    const triggers = [
+      { event: "media.updated", pipeline: "mediaDependents" },
+      { event: "media.updated", pipeline: "auditMedia" },
+      { event: "images.variantsChanged", pipeline: "auditMedia" },
+    ];
+    const findings = await imagesVariantsChangedRule.check(contextFor(await project([{ use: IMAGES_DEFAULT, config: {} }], { triggers })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ rule: "events/images-variants-changed", severity: "info", where: { pipeline: "mediaDependents" }, docs: "docs/upgrading.md#events-images-variants-changed" });
+    expect(findings[0]?.suggestion).toContain('{ event: "images.variantsChanged", pipeline: "mediaDependents" }');
   });
 });

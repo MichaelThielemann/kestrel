@@ -638,7 +638,13 @@ Net changes since 5.8.1.
   reports (info) an anonymous `media.read` grant while `anonymousList` stays at its `"ids"` default;
   `responses/binary-cache-control` reports (info) a local module mentioning `cache-control` near a
   binary step result; `pipelines/images-plan` reports (manual) a pipeline calling `images.plan`
-  directly, since the right replacement depends on delivery mode and lane adoption.
+  directly, since the right replacement depends on delivery mode and lane adoption;
+  `modules/images-media-option` removes (auto) `images-default`'s removed `media` option, an error for
+  `media_items` and a warning for another collection whose owner must provide `media@1` now;
+  `modules/references-media-target` turns (auto, warning) a `references-default` target on
+  `media_items` into `{ media: true }` when `media-default` is configured, and reports (info) a target on
+  any other collection; `events/images-variants-changed` reports (info) a pipeline on `media.updated`
+  that does not also listen to `images.variantsChanged`.
   `types/breaking-signatures` and `responses/breaking-step-shapes` are extended for `Media`/`Images`'s own shape
   changes and the `media.*`/`images.*` steps affected. Three `data` command checks:
   `data/media-layout` (error) reads `media_items` for an off-layout key and

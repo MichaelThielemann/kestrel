@@ -180,6 +180,32 @@ export function removeModuleConfigProperty(file: string, source: string, options
   return { file, start: propStart, end: propEnd, text: "" };
 }
 
+export interface ReplaceModuleConfigValueOptions {
+  use: string;
+  path: readonly string[];
+  toText: string;
+}
+
+/**
+ * Replaces the value at `path` inside a module-list entry's `config` object literal — each segment a
+ * property of the object the previous one named — with the literal `toText`, keeping the key as
+ * written. `undefined` when the entry, its `config` object, or any segment cannot be found.
+ */
+export function replaceModuleConfigValue(file: string, source: string, options: ReplaceModuleConfigValueOptions): Edit | undefined {
+  const array = moduleListArray(source);
+  if (array === undefined) return undefined;
+  const entry = elements(array).find((e) => entryUse(e) === options.use);
+  if (entry === undefined) return undefined;
+  let node = objectProperty(entry, "config");
+  for (const key of options.path) {
+    if (node === undefined || node.type !== "ObjectExpression") return undefined;
+    node = objectProperty(node, key);
+  }
+  if (node === undefined) return undefined;
+  const { start, end } = span(node);
+  return { file, start, end, text: options.toText };
+}
+
 export interface ReplaceModuleConfigKeyOptions {
   use: string;
   fromKey: string;
