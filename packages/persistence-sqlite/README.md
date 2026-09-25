@@ -61,9 +61,12 @@ One FIFO queue makes every public method – inside a group or not – wait for 
 order; a step's own calls made from inside the group's own async flow run directly, without
 queueing behind themselves. Everything waits, including a concurrent read: the module has one
 connection, so a read outside the group must not observe the group's uncommitted rows. Two
-independent budgets bound the wait: `acquireTimeoutMs` bounds how long a call may wait for its turn,
-`scopeTimeoutMs` bounds how long a group may hold the connection once it has it, timed from
-`BEGIN IMMEDIATE`. `acquireTimeoutMs` defaults to `busyTimeoutMs + 10000` (`15000` when `busyTimeoutMs`
+independent budgets bound the wait: `acquireTimeoutMs` bounds how long a call or a group may wait
+for its turn, `scopeTimeoutMs` bounds how long a group may hold the connection once it has it, timed
+from `BEGIN IMMEDIATE`. A call still waiting when `acquireTimeoutMs` runs out answers
+`Err(TRANSIENT)`, a group a failed `begin`, and neither runs afterwards, even if the connection
+frees up in that same moment. `checkpoint()` and `snapshot()` wait for their turn without this
+budget. `acquireTimeoutMs` defaults to `busyTimeoutMs + 10000` (`15000` when `busyTimeoutMs`
 is also left at its own default of `5000`). Setup rejects an explicit `acquireTimeoutMs` that does not
 exceed `busyTimeoutMs`, naming the key – `BEGIN IMMEDIATE` blocks the event loop for up to
 `busyTimeoutMs`, so an equal budget would expire exactly when the wait succeeded.
@@ -75,7 +78,9 @@ late call throws – it is not executed – because the group's writes are gone 
 a fragment of a transaction that never happened. After a rollback that itself fails, the store
 answers `Err(TRANSIENT)` to every subsequent call, naming the reason and that the process needs a
 restart; the connection's state can no longer be proven, and continuing to serve writes from it
-would turn one incident into silent corruption.
+would turn one incident into silent corruption. The same holds for the transaction `createMany`
+runs on its own outside a group: when its `ROLLBACK` fails, that `createMany` already answers the
+same `Err(TRANSIENT)`, or rethrows the wiring error it was rolling back for.
 
 That unusable state is also readable without provoking a call: the module declares `health()`,
 synchronous and with no I/O, so a host's readiness probe learns it needs to stop routing traffic

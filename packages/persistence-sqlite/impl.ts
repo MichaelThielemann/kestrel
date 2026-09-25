@@ -114,10 +114,13 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
   let unusable = false;
 
   let tail: Promise<void> = Promise.resolve();
-  const enqueue = <T>(fn: () => Promise<T> | T, deadline?: number, onStart?: () => void): Promise<T> => {
+  const enqueue = <T>(fn: () => Promise<T> | T, acquireMs?: number): Promise<T> => {
+    let turn: "waiting" | "started" | "abandoned" = "waiting";
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const handOff = (): Promise<T> | T => {
-      if (deadline !== undefined && Date.now() > deadline) return Promise.reject(new AcquireTimeout());
-      onStart?.();
+      if (turn === "abandoned") return Promise.reject(new AcquireTimeout());
+      turn = "started";
+      clearTimeout(timer);
       return fn();
     };
     const run = tail.then(handOff, handOff);
@@ -125,8 +128,17 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
       () => undefined,
       () => undefined,
     );
-    return run;
+    if (acquireMs === undefined) return run;
+    const abandoned = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        turn = "abandoned";
+        reject(new AcquireTimeout());
+      }, acquireMs);
+      timer.unref?.();
+    });
+    return Promise.race([run, abandoned]);
   };
+  const timedOutWaiting = (): PersistenceError => failure("TRANSIENT", "persistence/sqlite: timed out waiting for the connection");
 
   const unusableError = (): PersistenceError =>
     failure("TRANSIENT", "persistence/sqlite: the store is unusable after a failed rollback; restart the process", {
@@ -140,10 +152,17 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
     if (store?.state === "open") return Promise.resolve(fn());
     if (unusable) return Promise.resolve(err(unusableError()));
     if (store?.state === "committed") logWarn(logger, "persistence/sqlite: call after the atomic scope committed", { collection });
-    return enqueue(fn, undefined).catch((cause: unknown) => {
-      if (cause instanceof AcquireTimeout) return err(failure("TRANSIENT", "persistence/sqlite: timed out waiting for the connection"));
+    return enqueue(fn, acquireTimeoutMs).catch((cause: unknown) => {
+      if (cause instanceof AcquireTimeout) return err(timedOutWaiting());
       throw cause;
     });
+  };
+  const rollbackOrFail = (): PersistenceError | null => {
+    const rollbackError = execOrFail(db, "ROLLBACK", "rollback");
+    if (rollbackError === null) return null;
+    unusable = true;
+    logger.error("persistence/sqlite: rollback failed; the store is now unusable", { cause: rollbackError });
+    return unusableError();
   };
 
   const schemaOf = (collection: string): Record<string, FieldDefinition> => {
@@ -312,19 +331,10 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
     if (als.getStore() !== undefined) {
       return { kind: "failed", phase: "begin", error: failure("INTERNAL", "persistence/sqlite: an atomic scope is already open in this call chain") };
     }
-    const deadline = Date.now() + acquireTimeoutMs;
-    let acquireTimer: ReturnType<typeof setTimeout> | undefined;
-    const queued: Promise<AtomicOutcome> = enqueue(() => runScope(body), deadline, () => {
-      if (acquireTimer !== undefined) clearTimeout(acquireTimer);
-    }).catch((cause: unknown) => {
-      if (cause instanceof AcquireTimeout) return { kind: "failed", phase: "begin", error: failure("TRANSIENT", "persistence/sqlite: timed out waiting for the connection") };
+    return enqueue(() => runScope(body), acquireTimeoutMs).catch((cause: unknown): AtomicOutcome => {
+      if (cause instanceof AcquireTimeout) return { kind: "failed", phase: "begin", error: timedOutWaiting() };
       throw cause;
     });
-    const acquireTimeout = new Promise<AtomicOutcome>((resolve) => {
-      acquireTimer = setTimeout(() => resolve({ kind: "failed", phase: "begin", error: failure("TRANSIENT", "persistence/sqlite: timed out waiting for the connection") }), acquireTimeoutMs);
-      acquireTimer.unref?.();
-    });
-    return Promise.race([queued, acquireTimeout]);
   };
 
   return {
@@ -408,22 +418,21 @@ export function createPersistenceSqlite(config: Config, deps: PersistenceSqliteD
         if (als.getStore()?.state === "open") return insertAll<T>(collection, data);
         const begun = run(() => db.exec("BEGIN IMMEDIATE"));
         if (isErr(begun)) return begun;
+        let failed: PersistenceError;
         try {
           const out = insertAll<T>(collection, data);
           if (isErr(out)) {
-            db.exec("ROLLBACK");
-            return out;
+            failed = out.error;
+          } else {
+            const committed = run(() => db.exec("COMMIT"));
+            if (!isErr(committed)) return out;
+            failed = committed.error;
           }
-          const committed = run(() => db.exec("COMMIT"));
-          if (isErr(committed)) {
-            db.exec("ROLLBACK");
-            return committed;
-          }
-          return out;
         } catch (cause) {
-          db.exec("ROLLBACK");
+          rollbackOrFail();
           throw cause;
         }
+        return err(rollbackOrFail() ?? failed);
       });
     },
 

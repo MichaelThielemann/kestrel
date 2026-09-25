@@ -27,7 +27,9 @@ Net changes since 5.8.1.
     `createMany` now uses `BEGIN IMMEDIATE` and joins an outer scope instead of opening its own.
     Two new config keys, `acquireTimeoutMs` and `scopeTimeoutMs`. `scopeTimeoutMs` defaults to
     `5000`; `acquireTimeoutMs` defaults to `busyTimeoutMs + 10000`. An explicit `acquireTimeoutMs`
-    that does not exceed `busyTimeoutMs` is rejected at setup, naming the key. A persistence call
+    that does not exceed `busyTimeoutMs` is rejected at setup, naming the key. `acquireTimeoutMs`
+    bounds every wait for the connection: a `persistence@1` call still waiting when it runs out
+    answers `Err(TRANSIENT)` and a group a failed `begin`, and neither runs afterwards. A persistence call
     made after its own atomic scope rolled back or timed out **throws** instead of writing (only
     reachable from work a step did not await); a call made after the scope committed writes
     normally, with a warning logged.
@@ -541,7 +543,10 @@ Net changes since 5.8.1.
   `Introspection` in `attach()`. A hook that throws lists its module as
   `{ ok: false, reason: "health() threw", restartRequired: false }` and logs the error once per
   module; `kestrel.health()` itself never throws. `persistence-sqlite` reports the store unusable, with
-  `restartRequired: true`, once a rollback has failed; contention is never reported.
+  `restartRequired: true`, once a rollback has failed, a group's or the one `createMany` runs for its
+  own transaction outside a group; contention is never reported. A `createMany` whose `ROLLBACK`
+  fails answers that unusable state's `Err(TRANSIENT)` itself, or rethrows the wiring error it
+  rolled back for.
   `replication-sqlite` reports a prepared restore as `{ ok: true, note }`, since the instance
   keeps serving until a host restarts it to apply the restore.
 - `images-default`: `images.attach` also adds `variantCounts: { done, pending, error, failed }` to a

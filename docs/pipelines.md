@@ -110,11 +110,11 @@ Rules:
   pipeline and the step.
 - A group holds the store's write lock for its whole duration. On `persistence/sqlite` every call
   made outside the group, reads included, waits in one queue until the group commits or rolls
-  back; such a call has no deadline of its own. Another group waiting for the connection gives up
-  after `acquireTimeoutMs` and answers 503 `TRANSIENT`. A group still open `scopeTimeoutMs` after
-  its `BEGIN` rolls back and answers 503 `TRANSIENT`, which bounds how long a group holds the lock
-  and so how long a queued call waits for it. Group only the steps that must commit together; a
-  step whose work grows with a collection holds the lock that long.
+  back. A call or another group still waiting for the connection after `acquireTimeoutMs` gives up
+  with `TRANSIENT` (503) and never runs afterwards. A group still open `scopeTimeoutMs` after its
+  `BEGIN` rolls back and answers 503 `TRANSIENT`, which bounds how long a group holds the lock.
+  Group only the steps that must commit together; a step whose work grows with a collection holds
+  the lock that long.
 - A group needs a module that provides the scope (the `atomicScope` hook on `ModuleDefinition`,
   next to `attach` and `triggers.event`) — in practice the module providing `persistence@1`. Boot
   rejects a grouped pipeline with no such module, and rejects two modules that both provide one.
