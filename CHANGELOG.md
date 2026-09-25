@@ -396,7 +396,8 @@ Net changes since 5.8.1.
   `type/subtype` and a `text/*` type's charset, else `null`), `publicFormOf` (the `Content-Type` and
   extension a stored type is published with), `mediaTypeMatches` and `mediaTypeAllowed` (the
   `allowedTypes`/`deniedTypes` pattern rule: `*` and `*/*` match every type, `type/*` a top-level type,
-  any other pattern one type, case and parameters ignored) and `EXTENSION_BY_TYPE`, shared by
+  `type/*+suffix` every subtype of a top-level type that ends in `+suffix` (`*/*+suffix` of every
+  top-level type), any other pattern one type, case and parameters ignored) and `EXTENSION_BY_TYPE`, shared by
   `media-default`, `images-default` and any client that checks a type before uploading.
 - `@michaelthielemann/kestrel-contracts/content-locale`: `satisfiesFilter`, `publishedLocale` and
   `narrowListTranslations` — the shared rule behind the two entries above, for any module that

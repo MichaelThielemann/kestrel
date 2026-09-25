@@ -61,6 +61,7 @@ const ESSENCE = new RegExp(`[\\t ]*(${TOKEN})/(${TOKEN})`, "y");
 const PARAMETER = new RegExp(`[\\t ]*;[\\t ]*(?:(${TOKEN})=(${TOKEN}|${QUOTED}))?`, "y");
 const TRAILING = /[\t ]*$/y;
 const QUOTE = '"';
+const SUFFIX_WILDCARD = "*+";
 
 /** A declared content type that is exactly one media type, reduced to what is kept of it. */
 export interface MediaType {
@@ -104,9 +105,12 @@ export function mediaTypeEssence(declared: string): string | null {
 /**
  * Whether a media type matches one `allowedTypes`/`deniedTypes` pattern. `*` matches every type, and so
  * does a pattern whose type and subtype are both `*`; `type/*` matches every type of that top-level type
- * (`image/*` matches `image/png`), and any other pattern the one type it names. Case and parameters are ignored on both sides. A pattern that is none of these — empty,
- * a list of types, stray characters — matches nothing, and so does a `mediaType` that is not exactly one
- * media type.
+ * (`image/*` matches `image/png`); `type/*+suffix` matches every type of that top-level type whose
+ * subtype is longer than `+suffix` and ends in it (`image/*+xml` matches `image/svg+xml`, not
+ * `image/+xml`), and the same pattern with `*` as its type does so for every top-level type; any other
+ * pattern matches the one type it names. Case and parameters are ignored on both sides. A pattern that
+ * is none of these — empty, a list of types, stray characters — matches nothing, and so does a
+ * `mediaType` that is not exactly one media type.
  */
 export function mediaTypeMatches(pattern: string, mediaType: string): boolean {
   const type = mediaTypeEssence(mediaType);
@@ -116,11 +120,19 @@ export function mediaTypeMatches(pattern: string, mediaType: string): boolean {
   if (wanted === null) return false;
   if (wanted === "*/*") return true;
   const slash = wanted.indexOf("/");
-  if (wanted.slice(slash + 1) === "*") return type.startsWith(wanted.slice(0, slash + 1));
+  const wantedType = wanted.slice(0, slash);
+  const wantedSubtype = wanted.slice(slash + 1);
+  if (wantedSubtype === "*") return type.startsWith(`${wantedType}/`);
+  if (wantedSubtype.startsWith(SUFFIX_WILDCARD) && wantedSubtype.length > SUFFIX_WILDCARD.length) {
+    const typeSlash = type.indexOf("/");
+    const subtype = type.slice(typeSlash + 1);
+    const suffix = wantedSubtype.slice(1);
+    return (wantedType === "*" || type.slice(0, typeSlash) === wantedType) && subtype.length > suffix.length && subtype.endsWith(suffix);
+  }
   return wanted === type;
 }
 
-/** Whether a media type matches at least one `allowed` pattern and no `denied` pattern, each as {@link mediaTypeMatches} decides. */
+/** Whether a media type matches at least one `allowed` pattern and no `denied` pattern, each as {@link mediaTypeMatches} decides, including the `type/*+suffix` form. */
 export function mediaTypeAllowed(allowed: readonly string[], denied: readonly string[], mediaType: string): boolean {
   return allowed.some((pattern) => mediaTypeMatches(pattern, mediaType)) && !denied.some((pattern) => mediaTypeMatches(pattern, mediaType));
 }

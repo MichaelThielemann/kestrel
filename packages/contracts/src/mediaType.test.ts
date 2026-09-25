@@ -83,6 +83,21 @@ describe("mediaTypeMatches", () => {
     ["*", "", false],
     ["*/*", "image/png, text/html", false],
     ["image/*", "not a type", false],
+    ["image/*+xml", "image/svg+xml", true],
+    ["image/*+xml", "Image/Foo+XML; charset=utf-8", true],
+    ["IMAGE/*+XML; x=1", "image/svg+xml", true],
+    ["image/*+xml", "image/+xml", false],
+    ["image/*+xml", "image/svg+xmlx", false],
+    ["image/*+xml", "image/png", false],
+    ["image/*+xml", "application/xhtml+xml", false],
+    ["image/*+xml", "image/*+xml", true],
+    ["*/*+xml", "application/xhtml+xml", true],
+    ["*/*+xml", "image/svg+xml", true],
+    ["*/*+xml", "text/html", false],
+    ["*/*+json", "application/ld+json", true],
+    ["*/*+json", "application/json", false],
+    ["image/*+", "image/a+", false],
+    ["image/*+xml, text/*", "image/svg+xml", false],
   ];
   for (const [pattern, mediaType, matches] of table) {
     it(`${JSON.stringify(pattern)} ${matches ? "matches" : "does not match"} ${JSON.stringify(mediaType)}`, () => {
@@ -99,6 +114,15 @@ describe("mediaTypeAllowed", () => {
     expect(mediaTypeAllowed(["*"], ["*/*"], "image/png")).toBe(false);
     expect(mediaTypeAllowed([], [], "image/png")).toBe(false);
     expect(mediaTypeAllowed(["*"], [], "image/png, text/html")).toBe(false);
+  });
+
+  it("leaves out every XML image type through one suffix pattern", () => {
+    const denied = ["image/gif", "image/*+xml"];
+    expect(mediaTypeAllowed(["image/*"], denied, "image/png")).toBe(true);
+    expect(mediaTypeAllowed(["image/*"], denied, "image/svg+xml")).toBe(false);
+    expect(mediaTypeAllowed(["image/*"], denied, "image/foo+xml; charset=utf-8")).toBe(false);
+    expect(mediaTypeAllowed(["image/*"], denied, "IMAGE/GIF")).toBe(false);
+    expect(mediaTypeAllowed(["image/*"], denied, "application/xhtml+xml")).toBe(false);
   });
 });
 

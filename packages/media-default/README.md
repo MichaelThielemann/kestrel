@@ -32,8 +32,9 @@ parameter survives: `IMAGE/PNG; x=1` is stored as `image/png`, `Text/Plain; Char
 format=flowed` as `text/plain; charset=utf-8`. `allowedTypes`/`deniedTypes` entries are patterns,
 matched by `mediaTypeMatches` from `@michaelthielemann/kestrel-contracts/mediaType` against the
 `type/subtype` alone, ignoring parameters and case on both sides: `*` and `*/*` match every type,
-`image/*` every image type, `image/png` that one type, and any other entry — a list, a bare `image`,
-an empty string — nothing. A type is accepted when it matches an `allowedTypes` entry and no
+`image/*` every image type, `image/*+xml` every image type whose subtype ends in `+xml` (`*/*+xml` the
+same for every top-level type), `image/png` that one type, and any other entry — a list, a bare
+`image`, an empty string — nothing. A type is accepted when it matches an `allowedTypes` entry and no
 `deniedTypes` entry (`mediaTypeAllowed`); `deniedTypes: ["*/*"]` refuses every upload and counts as
 denying SVG for the boot check below. A static host that
 types a file by its extension decides the charset itself; the stored one reaches only a host that
