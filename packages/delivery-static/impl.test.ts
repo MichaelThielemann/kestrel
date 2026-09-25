@@ -502,10 +502,10 @@ describe("delivery/static: removes exactly the keys it wrote", () => {
     const wide = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
     put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published" });
     expectOk(await wide.publish("pages", "p1"));
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_nuxt/app.js", "site/seite/index.html", "site/seite/index.pdf"]);
+    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_app/app.js", "site/seite/index.html", "site/seite/index.pdf"]);
     const narrow = await createDeliveryStatic({ ...config, formats: ["html"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
     expectOk(await narrow.publish("pages", "p1"));
-    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_nuxt/app.js", "site/seite/index.html"]);
+    expect([...blobs.blobs.keys()].sort()).toEqual(["site/_app/app.js", "site/seite/index.html"]);
   });
 
   it("a row published before written keys were recorded still loses every real file on unpublish", async () => {
