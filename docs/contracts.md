@@ -25,6 +25,13 @@ may define its own contracts with the same `defineContract`; the core treats the
   type it returns by reference, such as `Manifest` from `insights@1`'s `manifest()`, belongs to the
   core and grows additively with the core's major; an implementation that passes the core's value
   through needs no change.
+- A contract's shared suite states its meaning in executable form. A suite may tighten that
+  meaning only in a major release of the contracts package, and only to close a leak of
+  unpublished data; it never weakens one. `site@1`'s suite did so in 6.0.0: a provider falls back
+  only from a published default locale, narrows `_translations` to the locales that pass the
+  filter, and answers 404 for a path reachable only through a draft slug. Boot cannot tell a
+  provider written against the looser suite, so a provider runs the new major's suite before it
+  widens its dependency range to that major.
 - The query vocabulary types (`Filter`, `Condition`, `FindOptions`, `Page`) live in
   `contracts/query.ts` and are shared by `persistence@1`, `content@1` and `site@1`, so no contract
   file has to import another one for them.
