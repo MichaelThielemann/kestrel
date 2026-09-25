@@ -852,6 +852,22 @@ describe("delivery/static dependencies: dependency sets survive failures", () =>
   });
 });
 
+describe("delivery/static dependencies: the change sequence cannot be bumped", () => {
+  it("markDependents answers the error, marks nothing, and a later call recovers", async () => {
+    const fake = createFakePersistence();
+    const db = failingOnce(fake, "updateMany", STATE);
+    const h = await harness({ db });
+    const ids = await seed(h);
+    expectOk(await h.delivery.markDependents("pages", []));
+    expect(db.tripped()).toBe(false);
+    expectErr(await h.delivery.markDependents("speakers", [ids.grace]), "TRANSIENT");
+    expect(db.tripped()).toBe(true);
+    expect(await h.marked()).toEqual([]);
+    expect(expectOk(await h.delivery.markDependents("speakers", [ids.grace]))).toEqual({ marked: 2 });
+    expect(await h.marked()).toEqual([`${ids.programm}/de`, `${ids.programm}/en`].sort());
+  });
+});
+
 describe("delivery/static dependencies: a failed render whose own rows cannot be written", () => {
   it("leaves the previous set's rows in place until its status write, and the output then counts as unknown", async () => {
     const fake = createFakePersistence();
