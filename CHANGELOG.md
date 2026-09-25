@@ -586,7 +586,9 @@ Net changes since 5.8.1.
   dropped from the merge. `UpgradePlugin.sandbox` adds sandbox config rewrites keyed by a module-list
   entry's full `use` string, in any package scope or as a local path; a key the built-in table
   already rewrites is a load error naming the plugin and the key, and the built-in rewrite stays in
-  force. `sandboxBootInput`'s `entries` option takes the same keys and throws on such a key.
+  force; a key that matches no module-list entry is a `sandbox/unmatched-entry` warning naming it.
+  `sandboxBootInput`'s `entries` option takes the same keys and throws on a colliding one; its
+  result's `unmatched` lists the keys that matched nothing.
   `PLUGIN_API_VERSION` (`1`) names the plugin API version, covering every type `./plugin` exports
   (`UpgradePlugin`, `LoadResult`, `LoadedProject`, `SwitchEditsResult`, `Rule` and its `needs`
   values, the rule contexts, `Finding`/`Edit` and the rest); a later addition to any of them is

@@ -25,6 +25,8 @@ export interface SandboxResult {
   rewritten: readonly string[];
   /** Entries let through unrewritten because they are known-safe (reach nothing but `persistence@1`/`blobstore@1` and need no rewrite) or named in `consent`. */
   consented: readonly string[];
+  /** Keys of `options.entries` that match no module-list entry, in the order given; a key carrying a `?`/`#` suffix is always one of them. */
+  unmatched: readonly string[];
 }
 
 /**
@@ -72,5 +74,7 @@ export function sandboxBootInput(input: BootInput, options: SandboxOptions): San
     outside.push(entry.use);
     return entry;
   });
-  return { input: { ...input, config: { ...input.config, modules: configModules }, modules: loadedModules }, setup: { only }, outside, replaced, rewritten, consented };
+  const configured = new Set(input.config.modules.map((entry) => sandboxKey(entry.use)));
+  const unmatched = Object.keys(extra).filter((key) => !configured.has(key));
+  return { input: { ...input, config: { ...input.config, modules: configModules }, modules: loadedModules }, setup: { only }, outside, replaced, rewritten, consented, unmatched };
 }

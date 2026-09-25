@@ -172,6 +172,7 @@ Every finding's `docs` field links to one of the anchors below.
 | `boot/not-checked` | boot | none (warning) | a module or pipeline `checkBoot()` could not check safely |
 | `load/failed` | source | manual | a config, module or pipeline file that failed to load |
 | [`sandbox/blobstore-standin`](#sandbox-blobstore-standin) | boot | none (info) | a `blobstore@1` provider the sandbox replaced to keep the boot tier open |
+| [`sandbox/unmatched-entry`](#sandbox-unmatched-entry) | boot | manual (warning) | a plugin's sandbox key that matches no module-list entry |
 | [`plugin/hook-failed`](#plugin-hook-failed) | source | manual | a plugin hook (`dataModel`) or a rule's own `check()` threw instead of returning |
 | [`preview/edit-refused`](#preview-edit-refused) | boot | none (warning) | a boot-preview edit could not be verified (its target escaped the preview copy, or the copy could not reload) |
 | [`data/config-load-failed`](#data-config-load-failed) | data | manual | `kestrel.config.ts` exists but could not be loaded, so the `data` command's underscore-field count was skipped |
@@ -464,6 +465,13 @@ tier swaps it for a local, filesystem-backed stand-in scoped to the scratch dire
 images, delivery, replication and backup modules still get checked. The real module's own `setup()`
 never runs during the check.
 
+#### sandbox-unmatched-entry
+A key of the active plugin's `sandbox` table matches no entry of the loaded project's module list,
+so it rewrites nothing and the module it was meant for, if configured under another `use` string,
+runs outside the sandbox or not at all. A key must be a module-list entry's full `use` string
+without a `?`/`#` suffix; a key that carries such a suffix, or a bare module name, never matches.
+The finding names the key and the plugin; the plugin's table needs fixing, not the project.
+
 #### plugin-hook-failed
 A plugin hook, or a rule's own `check()`, threw instead of returning or resolving; the message names
 the plugin and the hook, or the rule's own id. `dataModel()` is the one plugin hook this covers, in
@@ -557,7 +565,8 @@ directory) with only the built-in rules.
   it. The rewrite receives the entry's config and the scratch directory and returns the config that
   module's `setup()` gets during the boot tier, which then counts it as sandboxed. A key the built-in
   table already rewrites (kestrel's SQLite, blob store, backup, migrations and JSON Schema modules) is a
-  load error naming the plugin and the key; the built-in rewrite stays in force.
+  load error naming the plugin and the key; the built-in rewrite stays in force. A key that matches no
+  module-list entry is a `sandbox/unmatched-entry` warning naming the key.
 - `rules?: readonly Rule[]` — extra rules, run alongside every built-in one. An id that collides with
   a built-in one is a load error naming both, and that rule is dropped from the merge; reach for a
   locator or hook (`locateSteps`, `locateModelFields`, `dataModel`, `switchEdits`) when a built-in

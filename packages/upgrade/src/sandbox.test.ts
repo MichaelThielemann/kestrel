@@ -98,6 +98,15 @@ describe("sandboxBootInput", () => {
     expect(result.outside).toContain("@michaelthielemann/kestrel-archive");
   });
 
+  it("reports each table entry no module-list entry matched, including one keyed with a query or fragment", () => {
+    const result = sandboxBootInput(input(), { dir: "/tmp/scratch-1", entries: { "./modules/notes.ts": () => ({}), "@acme/kestrel-archive": () => ({}), "./modules/notes.ts#second": () => ({}) } });
+    expect(result.unmatched).toEqual(["@acme/kestrel-archive", "./modules/notes.ts#second"]);
+  });
+
+  it("reports no unmatched entry when there are no extra entries", () => {
+    expect(sandboxBootInput(input(), { dir: "/tmp/scratch-1" }).unmatched).toEqual([]);
+  });
+
   it("refuses a table entry that would replace a built-in rewrite, naming the entry", () => {
     expect(() => sandboxBootInput(input(), { dir: "/tmp/scratch-1", entries: { "@michaelthielemann/kestrel-persistence-sqlite": (config) => config } })).toThrow(
       /sandbox entry "@michaelthielemann\/kestrel-persistence-sqlite" collides with a built-in rewrite/,

@@ -339,6 +339,19 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         sandboxInfo = { rewritten: box.rewritten, consented: box.consented, outside: box.outside };
         bootCheck = await checkBoot(box.input, { setup: box.setup });
         tiers = { ...tiers, boot: "done" };
+        for (const key of box.unmatched) {
+          findings.push({
+            id: `sandbox/unmatched-entry:${key}`,
+            rule: "sandbox/unmatched-entry",
+            severity: "warning",
+            tier: "boot",
+            where: {},
+            message: `plugin "${plugin?.kind ?? ""}"'s sandbox entry "${key}" matches no module-list entry, so it rewrites nothing`,
+            suggestion: "key the entry by a module-list entry's full use string, without a ?/# suffix",
+            fix: { kind: "manual" },
+            docs: "docs/upgrading.md#sandbox-unmatched-entry",
+          });
+        }
         for (const use of box.replaced) {
           findings.push({
             id: `sandbox/blobstore-standin:${use}`,

@@ -161,13 +161,29 @@ describe("a plugin rule id colliding with a built-in", () => {
   });
 });
 
-describe("a plugin sandbox entry colliding with a built-in rewrite", () => {
-  it("is a load error naming the plugin and the entry", async () => {
+describe("a plugin's sandbox entries", () => {
+  it("are a load error naming the plugin and the entry when one collides with a built-in rewrite", async () => {
     const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(customProject()), sandbox: { "@michaelthielemann/kestrel-persistence-sqlite": (config) => config } };
     const { report } = await runJson([plugin]);
     const issue = report.findings.find((f) => f.rule === "load/failed");
     expect(issue?.message).toContain("custom-host");
     expect(issue?.message).toContain("@michaelthielemann/kestrel-persistence-sqlite");
+  });
+
+  it("reports a key that matches no configured module as a warning naming the key and the plugin", async () => {
+    const withArchive = (): LoadResult => {
+      const loaded = customProject();
+      return loaded.project === undefined ? loaded : { ...loaded, project: { ...loaded.project, input: { ...loaded.project.input, config: { modules: [{ use: "@acme/kestrel-archive", config: {} }], triggers: [] } } } };
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve(withArchive()), sandbox: { "@acme/kestrel-archive": (config) => config, "@acme/kestrel-archive?copy": (config) => config, archive: (config) => config } };
+    const lines: string[] = [];
+    await runCli(["check", "--root", dir, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined, plugins: [plugin], forceInstalledMajor: 6 });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    const unmatched = report.findings.filter((f) => f.rule === "sandbox/unmatched-entry");
+    expect(unmatched.map((f) => f.severity)).toEqual(["warning", "warning"]);
+    expect(unmatched.map((f) => f.message).join("\n")).toContain('"@acme/kestrel-archive?copy"');
+    expect(unmatched.map((f) => f.message).join("\n")).toContain('"archive"');
+    expect(unmatched.every((f) => f.message.includes("custom-host"))).toBe(true);
   });
 
   it("does not fire for an entry keyed by another package's full use string", async () => {

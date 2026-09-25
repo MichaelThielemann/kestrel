@@ -215,7 +215,8 @@ export interface UpgradePlugin {
    * Sandbox config rewrites added to the built-in table, keyed by a module-list entry's full `use`
    * string without a `?`/`#` suffix (`"@acme/kestrel-archive"`, `"./modules/archive.ts"`). A key the
    * built-in table already rewrites is a load error naming the plugin and the key, and the built-in
-   * rewrite stays in force.
+   * rewrite stays in force; a key that matches no module-list entry is a `sandbox/unmatched-entry`
+   * warning.
    */
   sandbox?: Record<string, (config: unknown, scratch: string) => unknown>;
   rules?: readonly Rule[];
