@@ -3,15 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
-import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import { BLOBSTORE, type Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
+import { MEDIA } from "@michaelthielemann/kestrel-contracts/media";
+import { PERSISTENCE, type Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createMediaDefault, type Config as MediaConfig, type Media } from "@michaelthielemann/kestrel-media-default/impl";
 import type { Introspection, Manifest } from "@michaelthielemann/kestrel";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { createContext, type Step } from "@michaelthielemann/kestrel/context";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, ok } from "@michaelthielemann/kestrel/result";
+import module, { configSchema } from "./module.ts";
 import { DEFAULT_RENDER_TIMEOUT_MS, JOBS, RETIRED, SIZES, VARIANTS, createImages, whenIdle, type Config, type Images } from "./impl.ts";
 import type { Renderer } from "./generate.ts";
 import type { Size } from "./sizes.ts";
@@ -97,14 +101,49 @@ async function readyIds(media: Media, library: Library): Promise<string[]> {
   return ready.sort();
 }
 
-async function runLifecycle(handleFor: (store: FakePersistence) => Persistence): Promise<void> {
+interface Env {
+  store: FakePersistence;
+  blobs: MemoryBlobs;
+  media: Media;
+}
+
+type Opener = (env: Env) => (sizes: Size[]) => Promise<Images>;
+
+function directly(handleFor: (store: FakePersistence) => Persistence): Opener {
+  return (env) => {
+    const db = handleFor(env.store);
+    return (sizes) => createImages({ ...IMAGES_CONFIG, sizes }, { blobs: env.blobs, db, media: env.media, logger: quiet, render: renderer });
+  };
+}
+
+const throughModuleSetup: Opener = (env) => async (sizes) => {
+  const providers = new Map<unknown, unknown>([[BLOBSTORE, env.blobs], [PERSISTENCE, env.store], [MEDIA, env.media]]);
+  const config = configSchema.parse({ prefix: "media-variants/", publicPath: "/media", publicCopy: { prefix: "site/" }, chunk: 2, maxAttempts: 1, sizes });
+  const deps = {
+    get<T>(contract: { name: string }): T {
+      if (!providers.has(contract)) throw new Error(`unexpected contract ${contract.name}`);
+      return boundaryCast<T>(providers.get(contract), "host");
+    },
+    find: () => undefined,
+    logger: quiet,
+    root: process.cwd(),
+    eventTriggers: [],
+  };
+  return boundaryCast<Images>(await module.setup(config, deps), "host");
+};
+
+async function removeMany(images: Images, ids: string[]): Promise<void> {
+  const steps = boundaryCast<{ removeMany: Step }>(module.steps!(images), "host");
+  expectOk(await steps.removeMany({ ...createContext({ trigger: { kind: "http", name: "t" } }), result: { ids } }));
+}
+
+async function runLifecycle(opener: Opener, cardRenders: boolean): Promise<void> {
   const store = createFakePersistence();
   const blobs = memoryBlobs();
   const media = await createMediaDefault(MEDIA_CONFIG, blobs, store, quiet);
   const library = await upload(media);
   const all = idsOf(library);
-  const db = handleFor(store);
-  const open = (sizes: Size[]): Promise<Images> => createImages({ ...IMAGES_CONFIG, sizes }, { blobs, db, media, logger: quiet, render: renderer });
+  const open = opener({ store, blobs, media });
 
   const first = await open([THUMB, HERO]);
   first.attach(introspection);
@@ -121,13 +160,13 @@ async function runLifecycle(handleFor: (store: FakePersistence) => Persistence):
 
   expectOk(await first.register([{ name: "card", width: 40 }]));
   await whenIdle(first);
-  expect(expectOk(await first.read(library.jpeg, "card.webp"))).toMatchObject({ variant: "original", fallback: true, contentType: "image/jpeg" });
-  expect(expectOk(await first.retryFailed()).variants).toBe(2);
+  expect(expectOk(await first.read(library.jpeg, "card.webp"))).toMatchObject(cardRenders ? { variant: "done", fallback: false } : { variant: "original", fallback: true, contentType: "image/jpeg" });
+  expect(expectOk(await first.retryFailed()).variants).toBe(cardRenders ? 0 : 2);
   await whenIdle(first);
-  expect(expectOk(await first.retryFailed(library.jpeg)).variants).toBe(1);
+  expect(expectOk(await first.retryFailed(library.jpeg)).variants).toBe(cardRenders ? 0 : 1);
   const midway = expectOk(await first.status());
   expect(midway.job).toMatchObject({ state: "done", total: 2 });
-  expect(midway.failed.variants).toBe(2);
+  expect(midway.failed.variants).toBe(cardRenders ? 0 : 2);
   await first.close();
   expect(await readyIds(media, library)).toEqual([...all].sort());
 
@@ -147,9 +186,12 @@ async function runLifecycle(handleFor: (store: FakePersistence) => Persistence):
     await rm(dir, { recursive: true, force: true });
   }
   expect(expectOk(await second.status()).sizes.map((size) => [size.name, size.variants.done])).toEqual([["thumb", 2]]);
+  expect(expectOk(await second.exists(library.png))).toBe(true);
+  expect(expectOk(await second.exists(library.pdf))).toBe(true);
 
   expectOk(await media.remove(library.png));
-  expectOk(await second.remove(library.png));
+  expect(expectOk(await second.exists(library.png))).toBe(false);
+  await removeMany(second, [library.png]);
   expectOk(await second.syncPublic());
   await whenIdle(second);
   await second.close();
@@ -167,12 +209,12 @@ async function runLifecycle(handleFor: (store: FakePersistence) => Persistence):
 describe("images/default: storage boundary", { timeout: 60_000 }, () => {
   it("reaches no collection but its own through a full lifecycle while media-default's collection holds ready items", async () => {
     const reached = new Set<string>();
-    await runLifecycle((store) => ownCollectionsOnly(store, reached));
+    await runLifecycle(directly((store) => ownCollectionsOnly(store, reached)), false);
     expect([...reached].sort()).toEqual([JOBS, RETIRED, SIZES, VARIANTS].sort());
   });
 
-  it("runs the same lifecycle on the store that holds media-default's collection, guarded only by its own handle", async () => {
-    await runLifecycle((store) => store);
+  it("runs the same lifecycle through the module's own setup on the store that holds media-default's collection, guarded only by the handle setup hands it", async () => {
+    await runLifecycle(throughModuleSetup, true);
   });
 });
 

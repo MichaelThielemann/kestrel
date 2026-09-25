@@ -7,7 +7,6 @@ import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/events.e
 import type { MediaFile, MediaFiles, MediaFilter, MediaScan } from "@michaelthielemann/kestrel-contracts/media";
 import { publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
 import type { Document, Filter, Persistence, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
-import { ownedPersistence } from "@michaelthielemann/kestrel-contracts/persistence.owned";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
@@ -23,6 +22,9 @@ export const SIZES = "images_sizes";
 export const VARIANTS = "images_variants";
 export const JOBS = "images_jobs";
 export const RETIRED = "images_retired";
+
+/** Every collection this module stores; the persistence handle it is given reaches these and no other. */
+export const COLLECTIONS: readonly string[] = [SIZES, VARIANTS, JOBS, RETIRED];
 
 export const DEFAULT_MAX_ATTEMPTS = 5;
 export const DEFAULT_RENDER_TIMEOUT_MS = 30000;
@@ -212,8 +214,7 @@ async function pool<T>(tasks: Array<() => Promise<Result<T, KestrelError>>>, lim
 }
 
 export async function createImages(config: Config, deps: { blobs: Blobstore; db: Persistence; media: MediaFiles; logger: Logger; render?: Renderer; events?: Events }, now: () => number = Date.now): Promise<Images> {
-  const { blobs, logger } = deps;
-  const db = ownedPersistence(deps.db, "images/default", [SIZES, VARIANTS, JOBS, RETIRED]);
+  const { blobs, db, logger } = deps;
   const library = deps.media;
   const renderImage: Renderer = deps.render ?? render;
   const bus = deps.events;

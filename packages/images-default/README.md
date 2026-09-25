@@ -12,9 +12,10 @@ keep the source format (JPEG for a type sharp cannot re-encode as itself, e.g. H
 This module requires `media@1` (`@michaelthielemann/kestrel-contracts/media`) and reads media only
 through it: whether an item exists and is ready, its type, the type the provider publishes it with,
 its size, stored dimensions, folder and display name, and its bytes. It never reads another module's
-collection or a storage key of the original; its own `persistence@1` handle reaches only
-`images_sizes`, `images_variants`, `images_jobs` and `images_retired`, and any other collection is a
-wiring error that names this module. Boot fails when no active module provides `media@1`
+collection or a storage key of the original. The module's setup wraps the `persistence@1` handle
+with `ownedPersistence` before `createImages` ever sees it, so the only handle the implementation
+holds reaches `images_sizes`, `images_variants`, `images_jobs` and `images_retired` (`COLLECTIONS`),
+and any other collection is a wiring error that names this module. Boot fails when no active module provides `media@1`
 (`missing-provider`), and a config that still sets the removed `media` option fails its schema.
 
 Readiness is the provider's: an item is live exactly while `file(id)` answers it. When attached, this

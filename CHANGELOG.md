@@ -394,8 +394,10 @@ Net changes since 5.8.1.
 - `images-default` requires `media@1` and reads media only through it. A config with
   `images-default` and no `media@1` provider fails boot (`missing-provider`); its `media` option
   (`media.collection`) is removed, so a config that still sets it fails boot; `createImages` takes
-  `deps.media`. Its own persistence handle reaches only `images_sizes`, `images_variants`,
-  `images_jobs` and `images_retired` and throws a wiring error for any other collection.
+  `deps.media`. The module's setup hands `createImages` only a persistence handle limited by
+  `ownedPersistence` to `images_sizes`, `images_variants`, `images_jobs` and `images_retired` (exported
+  as `COLLECTIONS`), which throws a wiring error for any other collection; `createImages` uses the
+  handle it is given as it is.
   - `images.generate` and `images.retryFailed` answer 404 for an item that is not ready (an upload in
     flight, a failed upload, an item being deleted); they answered 200 with no variants.
   - The sync job's `total`, `done` and `failed` count the ready items that get variants, not every

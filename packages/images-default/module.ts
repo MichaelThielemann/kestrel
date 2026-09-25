@@ -4,12 +4,13 @@ import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { EVENTS } from "@michaelthielemann/kestrel-contracts/events";
 import { MEDIA } from "@michaelthielemann/kestrel-contracts/media";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
+import { ownedPersistence } from "@michaelthielemann/kestrel-contracts/persistence.owned";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { binaryResult, first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { eligible } from "./generate.ts";
-import { DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, createImages, type Images, type Variant, type VariantCounts } from "./impl.ts";
+import { COLLECTIONS, DEFAULT_MAX_ATTEMPTS, DEFAULT_RENDER_TIMEOUT_MS, createImages, type Images, type Variant, type VariantCounts } from "./impl.ts";
 import { sizeSchema } from "./sizes.ts";
 
 export const configSchema = z
@@ -70,7 +71,8 @@ export default defineModule({
 
   async setup(config, deps): Promise<Images> {
     const bus = deps.find(EVENTS);
-    return createImages(config, { blobs: deps.get(BLOBSTORE), db: deps.get(PERSISTENCE), media: deps.get(MEDIA), logger: deps.logger, ...(bus ? { events: bus } : {}) });
+    const db = ownedPersistence(deps.get(PERSISTENCE), "images/default", COLLECTIONS);
+    return createImages(config, { blobs: deps.get(BLOBSTORE), db, media: deps.get(MEDIA), logger: deps.logger, ...(bus ? { events: bus } : {}) });
   },
 
   attach: (images, kestrel) => images.attach(kestrel),
