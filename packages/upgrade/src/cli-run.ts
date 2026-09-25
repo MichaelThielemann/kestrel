@@ -783,7 +783,18 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
 
   if (write) {
     for (const file of applied) stdout(`wrote ${file}`);
-    if (applied.length > 0) stdout("run `pnpm install` to pick up any dependency range changes, then run `check` again");
+    if (applied.length > 0) {
+      stdout("run `pnpm install` to pick up any dependency range changes, then run `check` again");
+    } else if (changed.length > 0) {
+      stdout("wrote nothing: every write was declined");
+    } else if (rejectedIds.size > 0) {
+      stdout("wrote nothing: every proposed edit failed to verify");
+      for (const f of adjustedFindings) {
+        if (rejectedIds.has(f.id)) stdout(`  ${f.id}: ${f.suggestion}`);
+      }
+    } else {
+      stdout("wrote nothing: no finding had an edit to apply");
+    }
     const writtenFiles = new Set(changed.filter(([file]) => applied.includes(relative(root, file))).map(([file]) => file));
     for (const f of adjustedFindings) {
       if (f.severity !== "warning" || f.fix.kind !== "auto") continue;

@@ -408,3 +408,39 @@ describe("fix never writes through a project-level file symlink to outside the p
     }
   });
 });
+
+describe("fix --write always says what happened, even when it wrote nothing", () => {
+  it("names the finding and the reason, instead of printing nothing, when its only edit fails to verify", async () => {
+    const configFile = join(dir, "host.config.ts");
+    await writeFile(configFile, "export default { a: 1 };\n");
+    const badRule: Rule = {
+      id: "plugin/bad",
+      check: () => [
+        { id: "plugin/bad", rule: "plugin/bad", severity: "error", tier: "source", where: {}, message: "bad", suggestion: "replace a", fix: { kind: "auto", edits: [{ file: configFile, start: 0, end: 0, text: "}}}not valid ts{{{" }] }, docs: "n/a" },
+      ],
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [badRule] };
+    const lines: string[] = [];
+    const code = await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
+    expect(code).toBe(1);
+    expect(readFileSync(configFile, "utf8")).toBe("export default { a: 1 };\n");
+    expect(lines.some((l) => l.startsWith("wrote ") && !l.startsWith("wrote nothing:"))).toBe(false);
+    expect(lines).toContain("wrote nothing: every proposed edit failed to verify");
+    expect(lines.some((l) => l.includes("plugin/bad") && l.includes("replace a"))).toBe(true);
+  });
+
+  it("says so, instead of printing nothing, when no open finding has an edit to apply at all", async () => {
+    const configFile = join(dir, "host.config.ts");
+    await writeFile(configFile, "export default { a: 1 };\n");
+    const manualRule: Rule = {
+      id: "plugin/manual-only",
+      check: () => [{ id: "plugin/manual-only", rule: "plugin/manual-only", severity: "error", tier: "source", where: {}, message: "needs a human", suggestion: "fix it by hand", fix: { kind: "manual" }, docs: "n/a" }],
+    };
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.resolve({ project: customProject(configFile), issues: [] }), rules: [manualRule] };
+    const lines: string[] = [];
+    const code = await runUpgradeCli(["fix", "--root", dir, "--write", "--yes"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
+    expect(code).toBe(1);
+    expect(lines.some((l) => l.startsWith("wrote ") && !l.startsWith("wrote nothing:"))).toBe(false);
+    expect(lines).toContain("wrote nothing: no finding had an edit to apply");
+  });
+});
