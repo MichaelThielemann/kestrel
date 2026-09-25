@@ -126,6 +126,10 @@ Three key families share the blobstore, with three owners:
 | `media-variants/<id>/<size>.<ext>` | `images/default` (its own `prefix`) | the generated variants of a medium; `media.reconcile` never considers them, see below |
 | `site/media/<id>/<name>` and `site/media/<id>/variants/<size>.<ext>` | this module and `images/default`, each writing only its own depth-1 files | the public copies, served directly by a static host or a bucket in front of the origin |
 
+The original's URL and its variants' URLs share one directory per item, so `publicPath` and
+`publicCopy` must be configured identically on this module and on `images-default`; their private
+`prefix`es must differ (see `media.reconcile` below).
+
 The row is the truth, the blobstore only the storage. `media_items.key` is `unique`, and is always
 id-based, so it never collides on its own; the folder+filename clash check runs against `location`
 instead (see above). An upload writes the row first (`status: "uploading"`, `checksum` = sha256 of
