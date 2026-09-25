@@ -165,6 +165,48 @@ describe("setModuleConfigProperties", () => {
     expect(text).toContain('{ use: "kestrel-events-inmemory", config: { relayPipelines: [] } }');
   });
 
+  it("adds config: {} on its own line, without moving the entry's closing brace, on a multi-line entry with no config yet", () => {
+    const source = `export default defineConfig({
+  modules: [
+    {
+      use: "@michaelthielemann/kestrel-delivery-static",
+    },
+  ],
+  triggers: [],
+});
+`;
+    const edits = setModuleConfigProperties("kestrel.config.ts", source, {
+      use: "@michaelthielemann/kestrel-delivery-static",
+      assignments: { dependencies: '{ render: "background", rendererReadsDocument: true }' },
+    });
+    const { text } = applyEdits(source, edits!);
+    expect(text).toBe(`export default defineConfig({
+  modules: [
+    {
+      use: "@michaelthielemann/kestrel-delivery-static",
+      config: { dependencies: { render: "background", rendererReadsDocument: true } },
+    },
+  ],
+  triggers: [],
+});
+`);
+  });
+
+  it("adds a missing trailing comma after the last property on a multi-line entry with no config yet", () => {
+    const source = `export default defineConfig({
+  modules: [
+    {
+      use: "@michaelthielemann/kestrel-delivery-static"
+    },
+  ],
+  triggers: [],
+});
+`;
+    const edits = setModuleConfigProperties("kestrel.config.ts", source, { use: "@michaelthielemann/kestrel-delivery-static", assignments: { prefix: '"site/"' } });
+    const { text } = applyEdits(source, edits!);
+    expect(text).toContain('use: "@michaelthielemann/kestrel-delivery-static",\n      config: { prefix: "site/" },\n    },');
+  });
+
   it("only splices the replaced property's value, leaving an unrelated comment on another property untouched", () => {
     const source = `export default defineConfig({
   modules: [
@@ -213,6 +255,25 @@ describe("removeModuleConfigProperty", () => {
     const edit = removeModuleConfigProperty("kestrel.config.ts", source, { use: "kestrel-delivery-static", key: "media" });
     const { text } = applyEdits(source, [edit!]);
     expect(text).toContain("config: {  }");
+  });
+
+  it("removes the only property and its own trailing comma on a multi-line entry, instead of leaving a leading comma behind", () => {
+    const source = `export default defineConfig({
+  modules: [
+    {
+      use: "@michaelthielemann/kestrel-delivery-static",
+      config: {
+        media: { publicPath: "/media" },
+      },
+    },
+  ],
+  triggers: [],
+});
+`;
+    const edit = removeModuleConfigProperty("kestrel.config.ts", source, { use: "@michaelthielemann/kestrel-delivery-static", key: "media" });
+    const { text } = applyEdits(source, [edit!]);
+    expect(text).not.toMatch(/config:\s*\{\s*,/);
+    expect(() => parseTs(text)).not.toThrow();
   });
 
   it("returns undefined when the entry, its config, or the key cannot be found", () => {

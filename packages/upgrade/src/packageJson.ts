@@ -37,6 +37,17 @@ function indentOf(source: string, pos: number): string {
   return /^[ \t]*/.exec(source.slice(lineStart))?.[0] ?? "  ";
 }
 
+function containerIndent(source: string, openBrace: number): string {
+  return indentOf(source, openBrace);
+}
+
+function childIndent(source: string, openBrace: number, closeBrace: number): string {
+  const inner = source.slice(openBrace + 1, closeBrace);
+  const contentIndex = /\S/.exec(inner)?.index;
+  if (contentIndex !== undefined) return indentOf(source, openBrace + 2 + contentIndex);
+  return `${containerIndent(source, openBrace)}  `;
+}
+
 function entries(block: string): Array<{ name: string; valueStart: number; valueEnd: number }> {
   const out: Array<{ name: string; valueStart: number; valueEnd: number }> = [];
   const pattern = /"([^"\\]+)"\s*:\s*"([^"\\]*)"/g;
@@ -53,11 +64,11 @@ export function setDependencyRange(file: string, source: string, mapKey: "depend
   const block = findObjectBlock(source, mapKey);
   if (block === undefined) {
     const rootOpen = source.indexOf("{");
-    const indent = indentOf(source, rootOpen + 1);
     const insertAt = source.lastIndexOf("}");
+    const indent = childIndent(source, rootOpen, insertAt);
     const before = source.slice(0, insertAt).replace(/\s*$/, "");
     const needsComma = !before.endsWith("{") && !before.endsWith(",");
-    return { file, start: insertAt, end: insertAt, text: `${needsComma ? "," : ""}\n${indent}"${mapKey}": {\n${indent}  "${name}": "${range}"\n${indent}}\n${indent.slice(0, -2)}` };
+    return { file, start: insertAt, end: insertAt, text: `${needsComma ? "," : ""}\n${indent}"${mapKey}": {\n${indent}  "${name}": "${range}"\n${indent}}\n${containerIndent(source, rootOpen)}` };
   }
   const inner = source.slice(block.openBrace + 1, block.closeBrace);
   const existing = entries(inner).find((e) => e.name === name);
@@ -65,11 +76,11 @@ export function setDependencyRange(file: string, source: string, mapKey: "depend
     return { file, start: block.openBrace + 1 + existing.valueStart, end: block.openBrace + 1 + existing.valueEnd, text: range };
   }
   const list = entries(inner);
-  const indent = indentOf(source, block.openBrace + 1) || "  ";
+  const indent = childIndent(source, block.openBrace, block.closeBrace);
   const sorted = list.every((e, i) => i === 0 || list[i - 1]!.name.localeCompare(e.name) <= 0);
   const newLine = `${indent}"${name}": "${range}"`;
   if (list.length === 0) {
-    return { file, start: block.openBrace + 1, end: block.closeBrace, text: `\n${newLine}\n${indent.slice(0, -2)}` };
+    return { file, start: block.openBrace + 1, end: block.closeBrace, text: `\n${newLine}\n${containerIndent(source, block.openBrace)}` };
   }
   if (sorted) {
     const insertBefore = list.find((e) => name.localeCompare(e.name) < 0);

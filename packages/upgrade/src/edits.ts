@@ -143,9 +143,22 @@ export function setModuleConfigProperties(file: string, source: string, options:
       .join(", ");
     const { end } = span(entry);
     const closeBrace = source.lastIndexOf("}", end);
-    let insertAt = closeBrace;
-    while (insertAt > 0 && /\s/.test(source[insertAt - 1] ?? "")) insertAt--;
-    return [{ file, start: insertAt, end: closeBrace, text: `, config: { ${props} } ` }];
+    let lineStart = closeBrace;
+    while (lineStart > 0 && (source[lineStart - 1] === " " || source[lineStart - 1] === "\t")) lineStart--;
+    if (lineStart === 0 || source[lineStart - 1] !== "\n") {
+      const before = source.slice(0, lineStart).replace(/[ \t]*$/, "");
+      const needsComma = !before.endsWith("{") && !before.endsWith(",");
+      return [{ file, start: before.length, end: closeBrace, text: `${needsComma ? "," : ""} config: { ${props} } ` }];
+    }
+    const closingIndent = source.slice(lineStart, closeBrace);
+    let trimEnd = lineStart - 1;
+    while (trimEnd > 0 && (source[trimEnd - 1] === " " || source[trimEnd - 1] === "\t")) trimEnd--;
+    const before = source.slice(0, trimEnd);
+    const needsComma = !before.endsWith("{") && !before.endsWith(",");
+    const eol = eolOf(source);
+    const useNode = entryUseNode(entry);
+    const { indent } = lineOf(source, useNode ? span(useNode).start : trimEnd);
+    return [{ file, start: trimEnd, end: closeBrace, text: `${needsComma ? "," : ""}${eol}${indent}config: { ${props} },${eol}${closingIndent}` }];
   }
   const members = Array.isArray(config.properties) ? config.properties : [];
   if (members.some((m) => isAstNode(m) && m.type !== "ObjectProperty")) return undefined;
@@ -197,7 +210,10 @@ export function removeModuleConfigProperty(file: string, source: string, options
     const prevEnd = span(props[index - 1]!).end;
     return { file, start: prevEnd, end: propEnd, text: "" };
   }
-  return { file, start: propStart, end: propEnd, text: "" };
+  let lookahead = propEnd;
+  while (lookahead < source.length && (source[lookahead] === " " || source[lookahead] === "\t")) lookahead++;
+  const trailingEnd = source[lookahead] === "," ? lookahead + 1 : propEnd;
+  return { file, start: propStart, end: trailingEnd, text: "" };
 }
 
 export interface ReplaceModuleConfigValueOptions {
