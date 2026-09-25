@@ -30,6 +30,7 @@ const expectations: Expectation[] = [
   { file: "packages/contracts/restricted-contracts-import.ts", ruleId: "no-restricted-imports", message: "'zod' import is restricted from being used by a pattern. A contract file is domain-neutral TypeScript: no validation library, no host framework." },
   { file: "packages/contracts/restricted-pipeline-import.ts", ruleId: "no-restricted-imports", message: "'@michaelthielemann/kestrel/definePipeline' import is restricted from being used by a pattern. A contract file stays runner-free; definePipeline and runPipeline belong to *.contract.test.ts and src/testing/*." },
   { file: "packages/contracts/restricted-pipeline-import.ts", ruleId: "no-restricted-imports", message: "'@michaelthielemann/kestrel/testing/runPipeline' import is restricted from being used by a pattern. A contract file stays runner-free; definePipeline and runPipeline belong to *.contract.test.ts and src/testing/*." },
+  { file: "packages/contracts/restricted-imports.contract.test.ts", ruleId: "no-restricted-imports", message: "'zod' import is restricted from being used by a pattern. A contract file is domain-neutral TypeScript: no validation library, no host framework." },
   { file: "packages/h3/restricted-h3-import.ts", ruleId: "no-restricted-imports", message: "'@michaelthielemann/kestrel-other-module' import is restricted from being used by a pattern. The adapter knows neither contracts nor modules; it binds the core to h3." },
   { file: "examples/some-example/pipelines/restricted-pipeline-import.ts", ruleId: "no-restricted-imports", message: "'@michaelthielemann/kestrel-other-module' import is restricted from being used by a pattern. Pipelines reference steps by name only." },
 ];
@@ -75,5 +76,10 @@ describe("project-specific ESLint rules", () => {
     const messages = messagesByFile.get(file) ?? [];
     const match = messages.find((m) => m.ruleId === ruleId && (message === undefined || m.message === message));
     expect(match, `expected ${ruleId}${message ? ` (${JSON.stringify(message)})` : ""} in ${file}, got ${JSON.stringify(messages.map((m) => [m.ruleId, m.message]))}`).toBeTruthy();
+  });
+
+  it("lets a contract test file import the pipeline runner", () => {
+    const messages = messagesByFile.get("packages/contracts/restricted-imports.contract.test.ts") ?? [];
+    expect(messages.filter((m) => m.message.includes("definePipeline") || m.message.includes("runPipeline"))).toEqual([]);
   });
 });

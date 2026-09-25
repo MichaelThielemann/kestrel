@@ -1,6 +1,11 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
+const contractImportPatterns = [
+  { group: ["@michaelthielemann/*", "!@michaelthielemann/kestrel", "!@michaelthielemann/kestrel/*", "!@michaelthielemann/kestrel-contracts", "!@michaelthielemann/kestrel-contracts/*"], message: "A contract imports only the core and its own files." },
+  { group: ["zod", "h3", "nuxt", "nuxt/*", "\\#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "A contract file is domain-neutral TypeScript: no validation library, no host framework." },
+];
+
 export default tseslint.config(
   { ignores: ["**/node_modules/**", "**/dist/**", "**/.*/**", "examples/nginx-njs/**", "test-fixtures/**"] },
   js.configs.recommended,
@@ -89,17 +94,7 @@ export default tseslint.config(
   },
   {
     files: ["packages/contracts/**/*.ts"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            { group: ["@michaelthielemann/*", "!@michaelthielemann/kestrel", "!@michaelthielemann/kestrel/*", "!@michaelthielemann/kestrel-contracts", "!@michaelthielemann/kestrel-contracts/*"], message: "A contract imports only the core and its own files." },
-            { group: ["zod", "h3", "nuxt", "nuxt/*", "\\#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "A contract file is domain-neutral TypeScript: no validation library, no host framework." },
-          ],
-        },
-      ],
-    },
+    rules: { "no-restricted-imports": ["error", { patterns: contractImportPatterns }] },
   },
   {
     files: ["packages/contracts/**/*.ts"],
@@ -109,8 +104,7 @@ export default tseslint.config(
         "error",
         {
           patterns: [
-            { group: ["@michaelthielemann/*", "!@michaelthielemann/kestrel", "!@michaelthielemann/kestrel/*", "!@michaelthielemann/kestrel-contracts", "!@michaelthielemann/kestrel-contracts/*"], message: "A contract imports only the core and its own files." },
-            { group: ["zod", "h3", "nuxt", "nuxt/*", "\\#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "A contract file is domain-neutral TypeScript: no validation library, no host framework." },
+            ...contractImportPatterns,
             { group: ["@michaelthielemann/kestrel/definePipeline", "@michaelthielemann/kestrel/testing/runPipeline"], message: "A contract file stays runner-free; definePipeline and runPipeline belong to *.contract.test.ts and src/testing/*." },
           ],
         },
