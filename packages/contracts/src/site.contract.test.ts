@@ -113,6 +113,20 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
         expect(await resolve("en/launch")).toMatchObject({ title: "Launch EN" });
       });
 
+      it("finds a published locale without its own slug through the default locale's slug, even while the default locale is only a draft", async () => {
+        const doc = expectOk(await content.create("pages", { slug: "sommerfest", title: "Sommerfest", status: "draft", body: "Text DE" }));
+        expectOk(await content.update("pages", doc.id, { title: "Summer party", status: "published" }, { locale: "en" }));
+        expect(await resolve("en/sommerfest")).toMatchObject({ id: doc.id, title: "Summer party", slug: null, body: null, _locale: "en" });
+        expect(await resolve("sommerfest")).toBeNull();
+      });
+
+      it("never serves a locale without its own slug through the default locale's slug while that locale is only a draft", async () => {
+        const doc = expectOk(await content.create("pages", { slug: "herbstfest", title: "Herbstfest", status: "published" }));
+        expectOk(await content.update("pages", doc.id, { title: "Autumn party", status: "draft" }, { locale: "en" }));
+        expect(await resolve("en/herbstfest")).toBeNull();
+        expect(await resolve("herbstfest")).toMatchObject({ title: "Herbstfest" });
+      });
+
       it("prefixPrimary requires the locale prefix for every locale", async () => {
         expect(await resolve("", { prefixPrimary: true })).toBeNull();
         expect(await resolve("kontakt", { prefixPrimary: true })).toBeNull();

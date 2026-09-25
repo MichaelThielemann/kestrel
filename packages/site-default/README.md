@@ -6,10 +6,12 @@ default locale has no prefix unless `?prefixPrimary=true` – onto one document 
 strings and richtext, `{ type: "internal", collection, id }` objects) to public paths in the
 document's locale; targets not served there become `href="#" data-kestrel-broken="…"` / `broken: true`,
 and `_links` maps every referenced id to its path. With `?fallback=true` a locale without its own
-slug is found by the same slug in the default locale, but the default locale's own values must pass
-the filter too — the same rule as any other inherited field — so a locale that is not published
-itself, or whose default locale is only a draft, stays unserved and is never replaced by another
-locale's content; the two are indistinguishable from the outside (both 404). An empty field of a
+slug is found by the same slug in the default locale; that lookup matches the slug and only the
+filter's locale-independent fields, and the requested locale must then pass the whole filter
+itself. A locale that is not published itself stays unserved and is never replaced by another
+locale's content (404). A locale with a slug of its own is reachable through the default locale's
+slug only while the default locale passes the filter too, so a draft default slug never becomes a
+second address for it. An empty field of a
 served locale — including a linked page's slug inside `resolveLinks` — is filled from the default
 locale only when the default locale's own values pass the filter too; with no such default the field
 stays empty. `_translations` lists only the locales that pass the filter themselves. Every `site@1`
@@ -18,9 +20,10 @@ implementation must follow this rule; the shared contract suite
 Cost: with `?fallback=true` and N locales configured, resolving a non-default locale reads up to two
 `content.get` calls (the requested locale's own values, the merged fallback read) and up to N+2
 `content.list` calls (the slug lookup, a filter check each for the requested and the default locale,
-one per remaining locale to narrow `_translations`) — one more list call when the requested locale
-has no slug of its own, so the default-locale slug lookup runs too. Measured at 4 locales: 8 calls
-for `resolve`. Every locale's filter membership is decided fresh at read time, on the store itself,
+one per remaining locale to narrow `_translations`) — when the requested locale's own slug lookup
+finds nothing, the default-locale slug lookup adds one list call, plus one `content.get` (and one
+filter check if the requested locale has a slug of its own) to decide whether that slug routes
+there. Measured at 4 locales: 8 calls for `resolve`. Every locale's filter membership is decided fresh at read time, on the store itself,
 never cached or reused across these calls; that correctness is preferred over the read count.
 Steps: `site.resolve:<t>?home=home&status=published&fallback=true` (`NOT_FOUND` otherwise) and
 `site.resolveLinks:<t>?…` with the same arguments. Config `{}`.

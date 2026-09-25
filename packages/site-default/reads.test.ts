@@ -47,7 +47,18 @@ describe("site/default notes what it answers inside a read scope", () => {
       { kind: "query", type: "pages", filter: { status: "published", slug: "kontakt" }, locale: "en" },
       { kind: "document", type: "pages", id: ids.kontakt, locale: "en" },
       { kind: "query", type: "pages", filter: { status: "published", slug: "entwurf" }, locale: "en" },
-      { kind: "query", type: "pages", filter: { status: "published", slug: "entwurf" }, locale: "de" },
+      { kind: "document", type: "pages", id: ids.entwurf, locale: "en" },
+    ]);
+  });
+
+  it("resolve with no page at the default locale's slug either notes that lookup with only the filter's locale-independent fields", async () => {
+    const { site } = await seeded();
+    const { reads } = await observeReads(async () => {
+      expect(expectOk(await site.resolve("pages", "en/neu", { rules }))).toBeNull();
+    });
+    expect(reads).toEqual([
+      { kind: "query", type: "pages", filter: { status: "published", slug: "neu" }, locale: "en" },
+      { kind: "query", type: "pages", filter: { slug: "neu" }, locale: "de" },
     ]);
   });
 

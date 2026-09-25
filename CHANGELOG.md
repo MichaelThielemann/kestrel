@@ -235,9 +235,9 @@ Net changes since 5.8.1.
   move it into the step argument for the narrowing to see it. The narrowing applies to every fixed
   filter alike, not only a public one: an editorial step such as
   `content.list:pages?status=draft` now reports `_translations` as "complete and matching that
-  filter" too, not just "complete". `site-default`'s slug-through-the-default-locale lookup now applies the
-  full filter, not only its non-localized entries, so a locale whose only route to a path is a
-  draft default locale's slug answers 404, the same as an unknown path, instead of 200.
+  filter" too, not just "complete". `site-default`'s slug-through-the-default-locale lookup no longer routes
+  a locale that has a slug of its own through a draft default locale's slug: that path answers
+  404, the same as an unknown path, instead of 200.
   `delivery.exportLlms` re-checks a source locale's own current values instead of trusting its
   `delivery_publish_status` row being `live` (that row can lag one failed or queued publish behind).
   `delivery.publish` removes a locale's previous static output once it can no longer be published at
@@ -908,6 +908,12 @@ Net changes since 5.8.1.
 
 ### Fixed
 
+- `site-default`: with `fallback=true`, `site.resolve` finds a locale that has no slug of its own
+  through the default locale's slug again when the filter holds a localized field such as `status`
+  and the default locale fails it: a page published in one locale but still a draft in the default
+  locale is served there instead of answering 404. The default-locale lookup matches the slug and
+  only the filter's locale-independent fields; the requested locale must pass the whole filter
+  itself, and no field is filled from the draft default locale.
 - `delivery-static`: unpublish, a slug or locale change and the tombstone sweep derived the blob keys to remove
   from the format name (`html`, `pdf`, …) instead of the renderer's own `extension`, so a renderer whose extension
   differs from its format name left its files behind; `delivery.exportLlms`'s `llms-full.txt` made the same

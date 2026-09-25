@@ -1,5 +1,5 @@
 import type { Content, ContentDocument, ContentError, ContentModel, LocaleOptions } from "@michaelthielemann/kestrel-contracts/content";
-import { publishedLocale } from "@michaelthielemann/kestrel-contracts/content-locale";
+import { publishedLocale, satisfiesFilter } from "@michaelthielemann/kestrel-contracts/content-locale";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { LinkTarget } from "@michaelthielemann/kestrel-contracts/links";
 import { INTERNAL_REF, collectInternalRefs } from "@michaelthielemann/kestrel-contracts/links";
@@ -71,6 +71,24 @@ function rewrite(value: unknown, paths: Map<string, string | null>): unknown {
   return value;
 }
 
+function localeIndependent(model: ContentModel, type: string, filter: Filter): Filter {
+  const fields = model.types[type]?.fields ?? {};
+  return Object.fromEntries(
+    Object.entries(filter).filter(([name]) => {
+      const field = fields[name];
+      return field === undefined || typeof field === "string" || field.localized !== true;
+    }),
+  );
+}
+
+async function routesThroughDefaultSlug(content: Content, type: string, id: string, locale: string, rules: Rules): Promise<Result<boolean, ContentError>> {
+  const own = await content.get(type, id, { locale });
+  if (isErr(own)) return own;
+  const slug = own.value?.[rules.slugField];
+  if (slug === null || slug === undefined || slug === "") return ok(true);
+  return satisfiesFilter(content, type, id, content.model().defaultLocale, rules.filter);
+}
+
 export interface SiteDefault extends Site {
   /** The model the paths are resolved against; the module describes its steps from it. */
   model(): ContentModel;
@@ -103,18 +121,24 @@ export function createSiteDefault(content: Content): SiteDefault {
       if (parsed.locale !== undefined) read.locale = parsed.locale;
       const slug = parsed.slug === "" ? rules.home : parsed.slug;
       const lookup = { ...rules.filter, [rules.slugField]: slug };
+      const defaultLookup = { ...localeIndependent(model, type, rules.filter), [rules.slugField]: slug };
       const effective = parsed.locale ?? model.defaultLocale;
-      const missed: Array<string | undefined> = [];
+      const missed: Array<{ locale: string | undefined; filter: Filter }> = [];
       const answered = await unobserved(async (): Promise<Result<{ candidate: string | null; doc: ContentDocument | null }, SiteError>> => {
         const page = await content.list(type, lookup, { ...read, limit: 1 });
         if (isErr(page)) return err(transientOnly(page.error));
         let candidate: ContentDocument | undefined = page.value.items[0];
-        if (!candidate) missed.push(effective);
+        if (!candidate) missed.push({ locale: effective, filter: lookup });
         if (!candidate && rules.fallback && read.locale !== undefined && read.locale !== model.defaultLocale) {
-          const viaDefaultPage = await content.list(type, lookup, { limit: 1 });
+          const viaDefaultPage = await content.list(type, defaultLookup, { limit: 1 });
           if (isErr(viaDefaultPage)) return err(transientOnly(viaDefaultPage.error));
           candidate = viaDefaultPage.value.items[0];
-          if (!candidate) missed.push(model.defaultLocale);
+          if (!candidate) missed.push({ locale: model.defaultLocale, filter: defaultLookup });
+          else {
+            const routes = await routesThroughDefaultSlug(content, type, candidate.id, read.locale, rules);
+            if (isErr(routes)) return err(transientOnly(routes.error));
+            if (!routes.value) return ok({ candidate: candidate.id, doc: null });
+          }
         }
         if (!candidate) return ok({ candidate: null, doc: null });
         const viewResult = await publishedLocale(content, type, candidate.id, read.locale, rules.filter, { fallback: rules.fallback });
@@ -122,7 +146,7 @@ export function createSiteDefault(content: Content): SiteDefault {
         return ok({ candidate: candidate.id, doc: viewResult.value });
       });
       if (isErr(answered)) return answered;
-      for (const locale of missed) noteRead({ kind: "query", type, filter: lookup, ...(locale === undefined ? {} : { locale }) });
+      for (const { locale, filter } of missed) noteRead({ kind: "query", type, filter, ...(locale === undefined ? {} : { locale }) });
       const { candidate, doc } = answered.value;
       if (candidate !== null) noteRead({ kind: "document", type, id: candidate, ...(effective === undefined ? {} : { locale: effective }) });
       if (!doc) return ok(null);
