@@ -178,8 +178,9 @@ files by type pattern and creation time, paged by id, so a cursor resumes in ano
 `size`, the `width`/`height` read at upload, `folder`, the display `filename` and `createdAt`; never
 the storage key. `load` answers `null` for a ready item whose bytes are missing from the blob store
 and logs it, and answers `null` without a log when the item's delete began meanwhile. `scan` and
-`count` read the ready rows by id, `scan` first a page the size of its `limit`, doubled only while
-the filter drops rows; `count` of one `*`, `type/*` or exact pattern (not a `text/*`
+`count` page through the rows by id alone (plus `createdAt` for `createdSince`) and decide readiness
+and type in code, so a store that counts the rows left on every page counts them on its key; `scan`
+reads a page the size of its `limit` first and doubles it only while rows are left out; `count` of one `*`, `type/*` or exact pattern (not a `text/*`
 type) without `excludeTypes` is a single store count, any other filter counts through a scan. Every
 method notes its reads like `media.get` and `media.list` do: a `document` read per id asked of
 `file`, `files` and `load`, a `type` read per `scan` and `count`.

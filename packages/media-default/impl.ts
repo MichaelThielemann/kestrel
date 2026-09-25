@@ -156,18 +156,6 @@ function mediaFileOf(item: MediaItem): MediaFile {
   };
 }
 
-function sharedTopLevelType(patterns: readonly string[]): string | null {
-  let shared: string | null = null;
-  for (const pattern of patterns) {
-    const essence = mediaTypeEssence(pattern);
-    if (essence === null) return null;
-    const type = essence.slice(0, essence.indexOf("/"));
-    if (type === "*" || /[%_]/.test(type) || (shared !== null && shared !== type)) return null;
-    shared = type;
-  }
-  return shared;
-}
-
 function countableByStore(filter: MediaFilter): Filter | null {
   if ((filter.excludeTypes ?? []).length > 0) return null;
   const types = filter.types ?? ["*"];
@@ -584,10 +572,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     const types = filter.types ?? ["*"];
     const excluded = filter.excludeTypes ?? [];
     if (types.length === 0) return ok({ items: [], next: null });
-    const base: Filter = { ...READY };
-    if (filter.createdSince !== undefined) base.createdAt = { gte: filter.createdSince };
-    const shared = sharedTopLevelType(types);
-    if (shared !== null) base.contentType = { like: `${shared}/%` };
+    const base: Filter = filter.createdSince === undefined ? {} : { createdAt: { gte: filter.createdSince } };
     const items: MediaFile[] = [];
     let cursor = after;
     let pageSize = Math.min(SCAN_PAGE, limit);
@@ -595,7 +580,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const page = await db.findMany<MediaItem>(COLLECTION, cursor === null ? base : { ...base, id: { gt: cursor } }, { sort: { id: "asc" }, limit: pageSize });
       if (isErr(page)) return page;
       for (const row of page.value.items) {
-        if (!mediaTypeAllowed(types, excluded, row.contentType)) continue;
+        if (!isReady(row) || !mediaTypeAllowed(types, excluded, row.contentType)) continue;
         items.push(mediaFileOf(row));
         if (items.length === limit) return ok({ items, next: row.id });
       }

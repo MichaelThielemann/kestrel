@@ -309,36 +309,41 @@ describe("media/default: an interrupted delete without publicCopy", () => {
 });
 
 describe("media/default: scan reads only the rows it needs", () => {
-  it("reads a page the size of limit when every row matches, and grows the page only while the filter drops rows", async () => {
+  async function library(kinds: ReadonlyArray<"png" | "pdf">) {
     const blobs = memoryBlobs();
     const db = createFakePersistence();
     const media = await createMediaDefault(CONFIG, blobs, db, quiet);
-    for (let i = 0; i < 30; i += 1) {
-      expectOk(await media.upload({ filename: `p${i}.png`, contentType: "image/png", data: new Uint8Array([i]) }));
-      expectOk(await media.upload({ filename: `d${i}.pdf`, contentType: "application/pdf", data: new Uint8Array([i]) }));
+    for (const [i, kind] of kinds.entries()) {
+      expectOk(await media.upload({ filename: `f${i}.${kind}`, contentType: kind === "png" ? "image/png" : "application/pdf", data: new Uint8Array([i]) }));
     }
-    const limits: number[] = [];
-    let rowsRead = 0;
+    const reads: Array<{ filter: Record<string, unknown>; limit: number; rows: number }> = [];
     const findMany = db.findMany.bind(db);
     db.findMany = async <T extends Document>(collection: string, filter: Record<string, unknown>, options?: { limit?: number }) => {
       const page = await findMany<T>(collection, filter, options);
-      if (collection === COLLECTION) {
-        limits.push(options?.limit ?? Number.POSITIVE_INFINITY);
-        if (page.ok) rowsRead += page.value.items.length;
-      }
+      if (collection === COLLECTION) reads.push({ filter, limit: options?.limit ?? Number.POSITIVE_INFINITY, rows: page.ok ? page.value.items.length : 0 });
       return page;
     };
-    expect(expectOk(await media.scan({ types: ["image/*"] }, { limit: 5 })).items).toHaveLength(5);
-    expect(limits).toEqual([5]);
-    expect(rowsRead).toBe(5);
+    return { media, reads };
+  }
 
-    limits.length = 0;
-    rowsRead = 0;
-    const mixed = expectOk(await media.scan({ types: ["*"], excludeTypes: ["application/pdf"] }, { limit: 5 }));
-    expect(mixed.items).toHaveLength(5);
+  it("pages by id alone and leaves readiness and type to its own filter, so a store count per page stays on the key", async () => {
+    const { media, reads } = await library(["png", "pdf", "png", "pdf", "png"]);
+    expectOk(await media.scan({ types: ["image/*"], createdSince: 0 }, { limit: 2 }));
+    expect(reads.length).toBeGreaterThan(0);
+    for (const read of reads) expect(Object.keys(read.filter).filter((key) => key !== "id" && key !== "createdAt")).toEqual([]);
+  });
+
+  it("reads a page the size of limit when every row matches, and grows the page only while the filter drops rows", async () => {
+    const images = await library(Array.from({ length: 30 }, () => "png" as const));
+    expect(expectOk(await images.media.scan({ types: ["image/*"] }, { limit: 5 })).items).toHaveLength(5);
+    expect(images.reads.map((read) => [read.limit, read.rows])).toEqual([[5, 5]]);
+
+    const mixed = await library(Array.from({ length: 60 }, (_, i) => (i % 2 === 0 ? "png" : "pdf")));
+    expect(expectOk(await mixed.media.scan({ types: ["*"], excludeTypes: ["application/pdf"] }, { limit: 5 })).items).toHaveLength(5);
+    const limits = mixed.reads.map((read) => read.limit);
     expect(limits[0]).toBe(5);
     for (let i = 1; i < limits.length; i += 1) expect(limits[i]).toBe(Math.min(500, limits[i - 1]! * 2));
-    expect(rowsRead).toBeLessThanOrEqual(35);
+    expect(mixed.reads.reduce((sum, read) => sum + read.rows, 0)).toBeLessThanOrEqual(35);
   });
 });
 
