@@ -662,8 +662,25 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
   if (layoutViolations > 0) {
     throw new Error(`media/default: ${layoutViolations} stored item(s) use a blob key other than "${config.prefix}<id>/<name>" (first: ${firstViolation!.id} at "${firstViolation!.key}") – this version reads no other layout; start with an empty media store`);
   }
-  const interrupted = await eachItem({ status: REMOVING }, async (item) => removeItem(item.id));
-  if (isErr(interrupted)) logger.error("media/default: could not finish an interrupted delete at start", { error: interrupted.error.message });
+  const interrupted: string[] = [];
+  const causeText = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
+  try {
+    const listed = await eachItem({ status: REMOVING }, async (item) => {
+      interrupted.push(item.id);
+      return ok();
+    });
+    if (isErr(listed)) logger.error("media/default: could not list the interrupted deletes at start", { error: listed.error.message });
+  } catch (cause) {
+    logger.error("media/default: could not list the interrupted deletes at start", { error: causeText(cause) });
+  }
+  for (const id of interrupted) {
+    try {
+      const finished = await removeItem(id);
+      if (isErr(finished)) logger.error("media/default: could not finish an interrupted delete at start", { id, error: finished.error.message });
+    } catch (cause) {
+      logger.error("media/default: could not finish an interrupted delete at start", { id, error: causeText(cause) });
+    }
+  }
 
   const finishRemoving = async (items: readonly MediaItem[]): Promise<Result<MediaItem[], MediaError>> => {
     const present: MediaItem[] = [];

@@ -151,8 +151,10 @@ meets a ready item without its bytes. A failing blob delete fails the step and l
 can no longer see or trip over: its name is free and it counts in no folder. Whatever meets it next
 finishes it — repeating the delete, an upload, rename or move to its name, a folder rename or
 delete, `media.update` of its id (which then answers 404), `media.syncPublic` — and every start of
-the module finishes each such item before it answers anything, with or without `publicCopy`. A start
-that cannot finish one logs it and starts anyway.
+the module finishes each such item before it answers anything, with or without `publicCopy`. Each
+item is finished on its own: one the start cannot finish — the blob store answers an error or throws —
+is logged with its id and left for the next start, and the start goes on with the others and never
+fails because of it.
 
 Uploading is idempotent: same folder, same filename and the same bytes return the item that is
 already there — no second row, no second blob write, no second variant folder — and `media.upload`

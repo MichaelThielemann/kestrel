@@ -288,6 +288,24 @@ describe("media/default: an interrupted delete without publicCopy", () => {
     expect(expectOk(await db.findOne(COLLECTION, { id: photo.id }))).toBeNull();
     expect(blobs.blobs.has(photo.key)).toBe(false);
   });
+
+  it("a blob store that throws for one item's blob fails neither the start nor the finishing of the others", async () => {
+    const logged: Array<{ message: string; fields: unknown }> = [];
+    const logger: Logger = { step() {}, info() {}, error: (message, fields) => logged.push({ message, fields }) };
+    const { blobs, db, media, photo, other } = await interrupted();
+    const remove = blobs.remove.bind(blobs);
+    blobs.remove = async () => err(failure("TRANSIENT", "store down"));
+    expectErr(await media.remove(other.id), "TRANSIENT");
+    blobs.remove = async (key) => {
+      if (key === photo.key) throw new Error("EACCES: permission denied");
+      return remove(key);
+    };
+    await createMediaDefault(CONFIG, blobs, db, logger);
+    expect(logged).toEqual([{ message: "media/default: could not finish an interrupted delete at start", fields: { id: photo.id, error: "EACCES: permission denied" } }]);
+    expect(expectOk(await db.findOne(COLLECTION, { id: photo.id }))).not.toBeNull();
+    expect(expectOk(await db.findOne(COLLECTION, { id: other.id }))).toBeNull();
+    expect(blobs.blobs.has(other.key)).toBe(false);
+  });
 });
 
 describe("media/default: scan reads only the rows it needs", () => {
