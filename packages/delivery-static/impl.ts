@@ -405,7 +405,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     if (path === null) return {};
     if (row.writtenKeys !== null && Object.values(row.writtenKeys).some((key) => underPath(key, path))) return row.writtenKeys;
     const derived = legacyKeysFor(path);
-    const recorded = await db.updateMany<StatusRow>(STATUS, { id: row.id, writtenKeys: row.writtenKeys }, { writtenKeys: derived });
+    const recorded = await db.updateMany<StatusRow>(STATUS, { id: row.id, path, writtenKeys: row.writtenKeys }, { writtenKeys: derived });
     if (isErr(recorded)) logger.error("delivery/static: could not record the keys derived for an output with no keys recorded under its own path, the next removal derives them again", { id: row.id, error: recorded.error.message });
     return derived;
   };
@@ -714,9 +714,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         if (stale.length > 0) logged("could not remove files a re-render no longer writes", { ...output, path: oldPath })(await removeOwnStaleKeys(oldPath, stale, ownId));
       }
       if (work.renderPath !== null && work.renderPath !== target.path && Object.keys(work.written).length > 0) {
-        const owned = await pathOwned(work.renderPath);
-        if (isErr(owned)) return owned;
-        if (!owned.value) logged("could not remove the files of a render that failed partway", { ...output, path: work.renderPath })(await removeFiles(work.renderPath, Object.values(work.written)));
+        logged("could not remove the files of a render that failed partway", { ...output, path: work.renderPath })(await removeStaleKeys(work.renderPath, Object.values(work.written)));
       }
       const previousSet = before?.depSet ?? null;
       if (previousSet !== null && previousSet !== set?.setId) logged("could not retire the previous dependency set, the sweep removes it", output)(await setState(previousSet, "retired"));
@@ -920,7 +918,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
             locale: row.locale,
             docId: row.docId,
             html: async () => {
-              const key = row.writtenKeys?.html ?? keyFor(config.prefix, path, "html");
+              const recordedHtml = row.writtenKeys?.html;
+              const key = recordedHtml !== undefined && underPath(recordedHtml, path) ? recordedHtml : keyFor(config.prefix, path, "html");
               const blob = await blobs.get(key);
               if (isErr(blob)) return err(transientOnly(blob.error, "blobstore@1"));
               return ok(blob.value ? new TextDecoder().decode(blob.value) : null);

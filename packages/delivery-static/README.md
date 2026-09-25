@@ -171,10 +171,12 @@ under the path being cleaned up is ever touched, and a path or key that another 
 never removed. A row written before this was recorded derives its keys once, the same way an unpublish always did,
 from its path and the currently configured formats, and remembers the result for the next removal instead of
 deriving it again; recorded keys that no longer lie under the row's own path (an older process moved it without
-knowing about them) are never trusted and are derived afresh the same way. A re-render that writes fewer keys at the
+knowing about them) are never trusted and are derived afresh the same way; that derivation is only ever recorded onto
+a row still at the path it was derived for, so a render that lands back on its own recorded path right after the
+move never has its own, correct write overwritten by the stale derivation. A re-render that writes fewer keys at the
 same path removes the difference without recording a path change, so it never marks its own output stale over its
-own cleanup; `delivery.exportLlms`'s `llms-full.txt` reads each page's own recorded `html` key the same way, instead
-of assuming the format name is the file's extension.
+own cleanup; `delivery.exportLlms`'s `llms-full.txt` reads each page's own recorded `html` key the same way, falling
+back to the format-name assumption only when that key does not lie under the page's own path.
 
 **Changes that overlap a render.** A render reads a document for the first time; the document changes and is
 marked before the render has recorded its dependencies, so the mark finds nothing. To close that gap without

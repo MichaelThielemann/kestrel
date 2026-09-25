@@ -816,7 +816,13 @@ Net changes since 5.8.1.
   recorded keys no longer lie under its own path (an older process having moved it without knowing about them),
   derives its keys once, the same way removal always did, and remembers the result for the next removal. A render
   that wrote some of its keys before a later write, or its whole first write, failed no longer leaves those orphaned:
-  they are removed the same way a losing render's files are.
+  they are removed the same way a losing render's files are. Recording a row's freshly derived keys now also
+  compares the path they were derived for, so a render that lands back on a row's own recorded path right after an
+  older process moved it can no longer overwrite that render's own, correct write with the stale derivation; the
+  `llms-full.txt` read falls back the same way, deriving the page's key afresh when the recorded one does not lie
+  under the page's own path. A transient failure checking ownership of a failed render's abandoned path is logged
+  like every other cleanup here, not returned as the step's own result, since the status write it follows already
+  succeeded.
 - `authz-roles`: a caller whose role claim is `constructor`, `toString`, `valueOf`,
   `hasOwnProperty`, `__proto__` or another `Object.prototype` key no longer trips an inherited,
   non-array value and a 500; role lookups go through a `Map`, not a plain object index, in both

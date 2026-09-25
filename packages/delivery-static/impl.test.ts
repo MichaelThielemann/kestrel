@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentDocument, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import { err, failure, ok } from "@michaelthielemann/kestrel-contracts/errors";
+import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { renderFailed, type Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
 import type { Site } from "@michaelthielemann/kestrel-contracts/site";
 import { createContentDefault } from "@michaelthielemann/kestrel-content-default/impl";
@@ -623,6 +624,95 @@ describe("delivery/static: removes exactly the keys it wrote", () => {
     const narrow = await createDeliveryStatic({ ...config, formats: ["html"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
     const status = expectOk(await narrow.publish("pages", "p1"));
     expect(status.find((s) => s.locale === "de")).toMatchObject({ state: "live", stale: false });
+  });
+
+  it("keeps its own recorded key after a raw path move and back, so llms-full.txt reads its own body", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const renderer: Renderer = {
+      formats: () => ["html"],
+      async render() {
+        return ok({ data: "<main>A's own body</main>", contentType: "text/html", extension: "html" });
+      },
+    };
+    const withFull = configSchema.parse({ ...config, formats: ["html"], llms: { full: true } });
+    const delivery = await createDeliveryStatic(withFull, { content, site, renderer, blobs, db, logger: fakeLogger() });
+    put("a", { slug__de: "x", title__de: "A", status__de: "published" });
+    expectOk(await delivery.publish("pages", "a"));
+    expect(blobs.blobs.has("site/x/index.html")).toBe(true);
+
+    const rowA = expectOk(await db.findOne<{ id: string }>(STATUS, { type: "pages", docId: "a", locale: "de" }))!;
+    expectOk(await db.updateMany(STATUS, { id: rowA.id }, { path: "/y" }));
+
+    expectOk(await delivery.publish("pages", "a"));
+    expect(blobs.blobs.has("site/x/index.html")).toBe(true);
+
+    expectOk(await delivery.exportLlms());
+    const full = blobs.blobs.get("site/llms-full.txt");
+    expect(full).toBeDefined();
+    expect(new TextDecoder().decode(full!.data)).toContain("A's own body");
+  });
+
+  it("unpublish of a row moved by an older process removes its files at its current path", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const delivery = await createDeliveryStatic({ ...config, formats: ["html"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    put("a", { slug__de: "x", title__de: "A", status__de: "published" });
+    expectOk(await delivery.publish("pages", "a"));
+    const rowA = expectOk(await db.findOne<{ id: string }>(STATUS, { type: "pages", docId: "a", locale: "de" }))!;
+    blobs.blobs.delete("site/x/index.html");
+    blobs.blobs.set("site/y/index.html", { data: new TextEncoder().encode("<h1>A</h1>"), contentType: "text/html" });
+    expectOk(await db.updateMany(STATUS, { id: rowA.id }, { path: "/y" }));
+
+    expect(expectOk(await delivery.unpublish("pages", "a"))).toBe(2);
+    expect(blobs.blobs.has("site/y/index.html")).toBe(false);
+  });
+
+  it("removing a path's files never touches a key recorded under a different path, even if it slipped into the same row's map", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const delivery = await createDeliveryStatic({ ...config, formats: ["html"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    put("z", { slug__de: "z", title__de: "Z", status__de: "published" });
+    expectOk(await delivery.publish("pages", "z"));
+    expect(blobs.blobs.has("site/z/index.html")).toBe(true);
+
+    put("a", { slug__de: "x", title__de: "A", status__de: "published" });
+    expectOk(await delivery.publish("pages", "a"));
+    const rowA = expectOk(await db.findOne<{ id: string }>(STATUS, { type: "pages", docId: "a", locale: "de" }))!;
+    expectOk(await db.updateMany(STATUS, { id: rowA.id }, { writtenKeys: { html: "site/x/index.html", stray: "site/z/index.html" } }));
+
+    expect(expectOk(await delivery.unpublish("pages", "a"))).toBe(2);
+    expect(blobs.blobs.has("site/x/index.html")).toBe(false);
+    expect(blobs.blobs.has("site/z/index.html")).toBe(true);
+  });
+
+  it("a transient failure checking ownership of a failed render's new path is logged, not returned, since the status write already succeeded", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const fake = createFakePersistence();
+    let failNextCount = false;
+    const db: Persistence = {
+      ...fake,
+      count: (collection, filter) => {
+        if (failNextCount && collection === STATUS) {
+          failNextCount = false;
+          return Promise.resolve(err(failure("TRANSIENT", "store busy")));
+        }
+        return fake.count(collection, filter);
+      },
+    };
+    const delivery = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "alt", title__de: "Alt", status__de: "published" });
+    expectOk(await delivery.publish("pages", "p1"));
+    put("p1", { slug__de: "neu" });
+    const failingBlobs = failingPutOnce(blobs, (key) => key === "site/neu/index.pdf");
+    const delivery2 = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs: failingBlobs, db, logger: fakeLogger() });
+    failNextCount = true;
+    const status = expectOk(await delivery2.publish("pages", "p1"));
+    expect(status.find((s) => s.locale === "de")).toMatchObject({ state: "error", path: "/alt" });
   });
 });
 
