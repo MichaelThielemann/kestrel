@@ -161,6 +161,18 @@ describe("media/default download and serve steps", () => {
     expect(downloaded.contentType).toBe("application/octet-stream");
   });
 
+  it("serve and download: a text type keeps its charset, and a name stored as .bin stays application/octet-stream", async () => {
+    const { media, steps, db, blobs } = await make({ allowedTypes: ["*"] });
+    const typeOf = (result: unknown): string => boundaryCast<{ contentType: string }>(result, "host").contentType;
+    const notes = expectOk(await media.upload({ filename: "notes.txt", contentType: "Text/Plain; Charset=UTF-8; format=flowed", data: new Uint8Array([1]) })).item;
+    expect(typeOf(expectOk(await steps.serve(fakeCtx([], {}, { id: notes.id, name: "notes.txt" }))).result)).toBe("text/plain; charset=utf-8");
+    expect(typeOf(expectOk(await steps.download(fakeCtx([], {}, { id: notes.id }))).result)).toBe("text/plain; charset=utf-8");
+    expectOk(await db.createOne("media_items", { id: "z1", filename: "archive-7z.bin", folder: "", location: "archive-7z.bin", contentType: "application/x-7z-compressed", size: 1, key: "media/z1/archive-7z.bin", checksum: "x", status: "ready", createdAt: 1, updatedAt: 1, provenance: { origin: "human" }, width: null, height: null, alt: {}, title: {}, description: {} }));
+    expectOk(await blobs.put("media/z1/archive-7z.bin", new Uint8Array([1]), { contentType: "application/x-7z-compressed" }));
+    expect(typeOf(expectOk(await steps.serve(fakeCtx([], {}, { id: "z1", name: "archive-7z.bin" }))).result)).toBe("application/octet-stream");
+    expect(typeOf(expectOk(await steps.download(fakeCtx([], {}, { id: "z1" }))).result)).toBe("application/octet-stream");
+  });
+
   it("download: a row stored with a list of types or an empty type goes out as application/octet-stream, never as stored", async () => {
     const { steps, db, blobs } = await make();
     const rows: Array<[string, string, string]> = [

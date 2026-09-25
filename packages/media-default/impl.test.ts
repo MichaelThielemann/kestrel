@@ -8,11 +8,13 @@ import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Document, NewDocument, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { EXTENSION_BY_TYPE } from "@michaelthielemann/kestrel-contracts/mediaType";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok } from "@michaelthielemann/kestrel/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
 import type { Introspection, Manifest, RunObserver } from "@michaelthielemann/kestrel";
-import { COLLECTION, FOLDERS, createMediaDefault, nameFor, parseProvenance, publicTreeOf, safeName, urlNameOf, type Config } from "./impl.ts";
+import { COLLECTION, FOLDERS, createMediaDefault, nameFor, parseProvenance, publicTreeOf, publishedFileOf, safeName, urlNameOf, type Config } from "./impl.ts";
 
 function fakeBlobstore(): Blobstore & { blobs: Map<string, { data: Uint8Array; contentType: string }> } {
   const blobs = new Map<string, { data: Uint8Array; contentType: string }>();
@@ -176,7 +178,7 @@ describe("media/default", () => {
       ["X.XHTML", "application/xhtml+xml", "application/xhtml+xml", "X-XHTML.bin"],
       ["app.js", "text/javascript", "text/javascript", "app-js.bin"],
       ["feed.xml", "application/xml", "application/xml", "feed-xml.bin"],
-      ["x.svg.html", "text/html; charset=utf-8", "text/html", "x-svg-html.bin"],
+      ["x.svg.html", "text/html; charset=utf-8", "text/html; charset=utf-8", "x-svg-html.bin"],
     ];
     for (const [filename, contentType, stored, name] of cases) {
       it(`${filename} sent as ${contentType} is published as ${name}, application/octet-stream`, async () => {
@@ -190,10 +192,19 @@ describe("media/default", () => {
       });
     }
 
-    it("a known inert type keeps its own type in the public copy, without parameters", async () => {
+    it("a known inert type keeps its own type in the public copy, a text type its charset too, and no other parameter", async () => {
       const { media, blobs } = await make(allowAll);
-      const item = expectOk(await media.upload({ filename: "notes.TXT", contentType: "text/plain; charset=utf-8", data: new Uint8Array([1]) })).item;
-      expect(blobs.blobs.get(`site/media/${item.id}/notes.txt`)?.contentType).toBe("text/plain");
+      const cases: Array<[string, string, string, string]> = [
+        ["notes.TXT", "Text/Plain; Charset=UTF-8; format=flowed", "text/plain; charset=utf-8", "notes.txt"],
+        ["table.csv", 'text/csv; charset="utf-8"', "text/csv", "table.csv"],
+        ["data.json", "application/json; charset=utf-8", "application/json", "data.json"],
+      ];
+      for (const [filename, contentType, published, name] of cases) {
+        const item = expectOk(await media.upload({ filename, contentType, data: new Uint8Array([1]) })).item;
+        expect(item.contentType).toBe(published);
+        expect(blobs.blobs.get(item.key)?.contentType).toBe(published);
+        expect(blobs.blobs.get(`site/media/${item.id}/${name}`)?.contentType).toBe(published);
+      }
     });
 
     it("syncPublic rewrites such a copy with the neutral type too", async () => {
@@ -249,6 +260,52 @@ describe("media/default", () => {
         expect(expectOk(await media.serveFile("r1", name))).not.toBeNull();
       });
     }
+  });
+
+  describe("a stored public name", () => {
+    const withCopy: Config = { ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, publicCopy: { prefix: "site/" } };
+    const copies = (blobs: ReturnType<typeof fakeBlobstore>): string[] => [...blobs.blobs.keys()].filter((key) => key.startsWith("site/"));
+
+    it("stored as .bin while its type was not listed, keeps that name and application/octet-stream once the list holds the type", async () => {
+      const blobs = fakeBlobstore();
+      const db = createFakePersistence();
+      const media = await createMediaDefault(withCopy, blobs, db, noLogger, () => 7);
+      await seedRow(db, blobs, { id: "a1", key: "media/a1/archive-7z.bin", contentType: "application/x-7z-compressed" });
+      expectOk(await blobs.put("site/media/a1/archive-7z.bin", new Uint8Array([1, 2, 3]), { contentType: "application/octet-stream" }));
+      expect(expectOk(await media.syncPublic())).toEqual({ written: 0, removed: 0, missing: 0 });
+      expect(copies(blobs)).toEqual(["site/media/a1/archive-7z.bin"]);
+      expect(blobs.blobs.get("site/media/a1/archive-7z.bin")?.contentType).toBe("application/octet-stream");
+      const item = expectOk(await media.get("a1"));
+      expect(item === null ? null : publishedFileOf(item)).toEqual({ name: "archive-7z.bin", contentType: "application/octet-stream" });
+      expect(item === null ? null : media.toPublicItem(item).path).toBe("/media/a1/archive-7z.bin");
+      expect(expectOk(await media.serveFile("a1", "archive-7z.bin"))).not.toBeNull();
+      expect(expectOk(await media.serveFile("a1", "archive-7z-bin.7z"))).toBeNull();
+    });
+
+    it("uploaded under an unlisted type, keeps its name, type and copy when the list learns the type later", async () => {
+      const list = boundaryCast<Record<string, string>>(EXTENSION_BY_TYPE, "host");
+      const { media, blobs } = await make(withCopy);
+      const item = expectOk(await media.upload({ filename: "scene.kst", contentType: "application/x-kestrel-scene", data: new Uint8Array([1, 2]) })).item;
+      expect(copies(blobs)).toEqual([`site/media/${item.id}/scene-kst.bin`]);
+      list["application/x-kestrel-scene"] = "kst";
+      try {
+        expect(expectOk(await media.syncPublic())).toEqual({ written: 0, removed: 0, missing: 0 });
+        expect(copies(blobs)).toEqual([`site/media/${item.id}/scene-kst.bin`]);
+        expect(blobs.blobs.get(`site/media/${item.id}/scene-kst.bin`)?.contentType).toBe("application/octet-stream");
+        expect(media.toPublicItem(item).path).toBe(`/media/${item.id}/scene-kst.bin`);
+        expect(publishedFileOf(item)).toEqual({ name: "scene-kst.bin", contentType: "application/octet-stream" });
+      } finally {
+        delete list["application/x-kestrel-scene"];
+      }
+    });
+
+    it("is demoted to .bin only when its extension is not the one its type may be published with", () => {
+      expect(publishedFileOf({ key: "media/a/logo.svg", contentType: "image/svg+xml", svgSanitized: true })).toEqual({ name: "logo.svg", contentType: "image/svg+xml" });
+      expect(publishedFileOf({ key: "media/a/logo.svg", contentType: "image/svg+xml", svgSanitized: false })).toEqual({ name: "logo-svg.bin", contentType: "application/octet-stream" });
+      expect(publishedFileOf({ key: "media/a/a.png", contentType: "image/png; x=1, text/html" })).toEqual({ name: "a-png.bin", contentType: "application/octet-stream" });
+      expect(publishedFileOf({ key: "media/a/notes.txt", contentType: "text/plain; charset=utf-8" })).toEqual({ name: "notes.txt", contentType: "text/plain; charset=utf-8" });
+      expect(publishedFileOf({ key: "media/a/page-html.bin", contentType: "text/html" })).toEqual({ name: "page-html.bin", contentType: "application/octet-stream" });
+    });
   });
 
   describe("an SVG's public copy", () => {

@@ -3,7 +3,7 @@ import { mkdir, stat, utimes, writeFile } from "node:fs/promises";
 import { dirname, extname, relative, resolve as resolvePath, sep } from "node:path";
 import type { Introspection, PipelineManifest, PipelineStepManifest } from "@michaelthielemann/kestrel";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
-import { mediaTypeEssence, NEUTRAL_EXTENSION, NEUTRAL_TYPE, publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
+import { canonicalMediaType, mediaTypeEssence, NEUTRAL_EXTENSION, NEUTRAL_TYPE, publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
 import type { Document, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -126,7 +126,7 @@ export interface Upload {
 const MEDIA_READ_TYPE = "media";
 
 export interface Media {
-  /** Stores a file under the essence of its declared type, refusing a type that is not exactly one media type. `svgSanitized` says an SVG's bytes passed `sanitize.svg`; `media.upload` sets it from {@link Media.sanitizesSvg}, never from the request. */
+  /** Stores a file under the `canonicalMediaType` form of its declared type, refusing a type that is not exactly one media type. `svgSanitized` says an SVG's bytes passed `sanitize.svg`; `media.upload` sets it from {@link Media.sanitizesSvg}, never from the request. */
   upload(file: { filename: string; contentType: string; data: Uint8Array }, folder?: string, provenance?: unknown, svgSanitized?: boolean): Promise<Result<Upload, MediaError>>;
   get(id: string, locale?: string): Promise<Result<MediaItem | null, MediaError>>;
   list(options?: ListOptions & { locale?: string }): Promise<Result<{ items: MediaItem[]; total: number }, MediaError>>;
@@ -290,12 +290,23 @@ export function nameFor(filename: string, contentType: string, svgSanitized = fa
   return capName(`${stem === "" ? "file" : stem}.${extension}`);
 }
 
-/** The name a stored file is published under, the last segment of its public URL and of its public copy: the last segment of its key when that ends in the extension of the file's public form, as it does for every file this version stored, else that segment with every `.` turned into `-`, plus `.` and that extension. */
-export function publicNameOf(item: Pick<MediaItem, "key" | "contentType"> & { svgSanitized?: boolean | null }): string {
+/**
+ * The name and `Content-Type` a stored file is published with — the last segment of its public URL and
+ * of its public copy, and the type every host, `media.serve` and `media.download` send. The name is the
+ * last segment of its key, which never changes: a name stored as `.bin` stays `.bin` and is published as
+ * `application/octet-stream`, even once `EXTENSION_BY_TYPE` lists its type, so the name and the
+ * type always agree for a static host that types by extension. A name that ends in the extension of
+ * `publicFormOf(contentType, svgSanitized)` is published with that type. Any other name — an SVG that
+ * did not pass `sanitize.svg`, a stored type that is not one media type — is demoted: every `.` turned
+ * into `-`, plus `.bin`, published as `application/octet-stream`.
+ */
+export function publishedFileOf(item: Pick<MediaItem, "key" | "contentType"> & { svgSanitized?: boolean | null }): { name: string; contentType: string } {
   const name = urlNameOf(item.key);
-  const { extension } = publicFormOf(item.contentType, item.svgSanitized === true);
-  if (extname(name) === `.${extension}`) return name;
-  return capName(`${name.replace(/\./g, "-")}.${extension}`);
+  const extension = extname(name).slice(1);
+  if (extension === NEUTRAL_EXTENSION) return { name, contentType: NEUTRAL_TYPE };
+  const form = publicFormOf(item.contentType, item.svgSanitized === true);
+  if (extension === form.extension) return { name, contentType: form.contentType };
+  return { name: capName(`${name.replace(/\./g, "-")}.${NEUTRAL_EXTENSION}`), contentType: NEUTRAL_TYPE };
 }
 
 /** The last path segment of a blob key: for `<prefix><id>/<name>` this is the upload-time `<name>`. */
@@ -336,10 +347,9 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
   const idKey = (id: string, name: string): string => `${config.prefix}${id}/${name}`;
   const sanitizedRuns = new Set<string>();
   const copyKey = (id: string, name: string): string => copyKeyOf(config, id, name);
-  const publishedTypeOf = (item: Pick<MediaItem, "id" | "contentType"> & { svgSanitized?: boolean | null }): string => {
-    const sanitized = item.svgSanitized === true;
-    if (!sanitized && mediaTypeEssence(item.contentType) === SVG) logWarn(logger, `media/default: SVG ${item.id} did not pass sanitize.svg before it was stored, so its public copy is written as ${NEUTRAL_TYPE}`, { id: item.id });
-    return publicFormOf(item.contentType, sanitized).contentType;
+  const publishedTypeOf = (item: Pick<MediaItem, "id" | "key" | "contentType"> & { svgSanitized?: boolean | null }): string => {
+    if (item.svgSanitized !== true && mediaTypeEssence(item.contentType) === SVG) logWarn(logger, `media/default: SVG ${item.id} did not pass sanitize.svg before it was stored, so its public copy is written as ${NEUTRAL_TYPE}`, { id: item.id });
+    return publishedFileOf(item).contentType;
   };
   const locationTaken = async (location: string, exceptId?: string): Promise<Result<boolean, MediaError>> => {
     const row = await db.findOne<MediaItem>(COLLECTION, { location });
@@ -371,7 +381,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (abandoned.value === 0) return ok();
     } else if (item.status !== "failed") return ok();
     if (config.publicCopy !== undefined) {
-      const droppedCopy = await blobs.remove(copyKey(item.id, publicNameOf(item)));
+      const droppedCopy = await blobs.remove(copyKey(item.id, publishedFileOf(item).name));
       if (isErr(droppedCopy)) return droppedCopy;
     }
     const droppedBlob = await blobs.remove(item.key);
@@ -492,7 +502,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     if (found.value !== null) {
       const item = found.value;
       if (config.publicCopy !== undefined) {
-        const droppedCopy = await blobs.remove(copyKey(id, publicNameOf(item)));
+        const droppedCopy = await blobs.remove(copyKey(id, publishedFileOf(item).name));
         if (isErr(droppedCopy)) return droppedCopy;
       }
       const droppedBlob = await blobs.remove(item.key);
@@ -542,14 +552,15 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
 
   const api: Media = {
     async upload(file, folder = "", provenance, svgSanitized = false) {
-      const contentType = mediaTypeEssence(file.contentType);
-      if (contentType === null || !typeAllowed(config.allowedTypes, contentType) || typeAllowed(config.deniedTypes, contentType)) {
+      const contentType = canonicalMediaType(file.contentType);
+      const essence = contentType === null ? null : mediaTypeEssence(contentType);
+      if (contentType === null || essence === null || !typeAllowed(config.allowedTypes, essence) || typeAllowed(config.deniedTypes, essence)) {
         return err(failure("UNSUPPORTED", `media/default: type ${JSON.stringify(file.contentType)} is not allowed`));
       }
       if (file.data.byteLength > config.maxBytes) return err(failure("PAYLOAD_TOO_LARGE", `media/default: file exceeds ${config.maxBytes} bytes`));
       const folderPath = safeFolder(folder);
       if (isErr(folderPath)) return folderPath;
-      const sanitized = svgSanitized && contentType === SVG;
+      const sanitized = svgSanitized && essence === SVG;
       const name = nameFor(file.filename, contentType, sanitized);
       const location = keyFor(folderPath.value, name);
       const released = await releaseFailed(location);
@@ -560,7 +571,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (existing.value !== null) return ok({ item: existing.value, created: false });
       const parsedProvenance = parseProvenance(provenance);
       if (isErr(parsedProvenance)) return parsedProvenance;
-      const size = contentType.startsWith("image/") ? imageSize(file.data) : null;
+      const size = essence.startsWith("image/") ? imageSize(file.data) : null;
       const id = randomUUID();
       const key = idKey(id, name);
       const at = now();
@@ -579,7 +590,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         return stored;
       }
       if (config.publicCopy !== undefined) {
-        const copied = await blobs.put(copyKey(id, name), file.data, { contentType: publishedTypeOf({ id, contentType, svgSanitized: sanitized }) });
+        const copied = await blobs.put(copyKey(id, name), file.data, { contentType: publishedTypeOf({ id, key, contentType, svgSanitized: sanitized }) });
         if (isErr(copied)) {
           const removedBlob = await blobs.remove(key);
           if (isErr(removedBlob)) logger.error(`media/default: could not delete blob ${key} after a failed public copy`, { id, key, error: removedBlob.error.message });
@@ -747,7 +758,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       if (isErr(row)) return row;
       if (row.value === null) return ok(null);
       const item = resolveWith(row.value, fallbackLocale);
-      if (item.status !== "ready" || publicNameOf(item) !== name) return ok(null);
+      if (item.status !== "ready" || publishedFileOf(item).name !== name) return ok(null);
       const blob = await blobs.get(item.key);
       if (isErr(blob)) return blob;
       if (blob.value === null) throw new Error(`media/default: blob ${item.key} for ${id} is missing`);
@@ -919,13 +930,13 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
           }
         }
         if (status === "failed") {
-          const droppedCopy = await removeCopyIfListed(copyKey(item.id, publicNameOf(item)));
+          const droppedCopy = await removeCopyIfListed(copyKey(item.id, publishedFileOf(item).name));
           if (isErr(droppedCopy)) return droppedCopy;
           const droppedBlob = await blobs.remove(item.key);
           if (isErr(droppedBlob)) return droppedBlob;
           return ok();
         }
-        const key = copyKey(item.id, publicNameOf(item));
+        const key = copyKey(item.id, publishedFileOf(item).name);
         expected.add(key);
         const entry = depth1.get(key);
         if (entry !== undefined && entry.size === item.size) return ok();
@@ -961,7 +972,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     toPublicItem(item) {
       return {
         id: item.id,
-        path: publicUrlOf(config, item.id, publicNameOf(item)),
+        path: publicUrlOf(config, item.id, publishedFileOf(item).name),
         filename: item.filename,
         folder: item.folder,
         contentType: item.contentType,

@@ -422,14 +422,19 @@ The blob key is `<prefix><id>/<name>` (the `media/` prefix is configurable and s
 replication snapshots, the site export and `redirects.json`), so on disk e.g.
 `data/blobs/media/3f2e…-…/photo.jpg`. The declared content type must be exactly one media type
 (`type/subtype`, optionally with `;` parameters, no comma); a list such as `image/png, text/html` or
-an empty type answers 415 (`UNSUPPORTED`), and only the lower-cased `type/subtype` is stored
-(`IMAGE/PNG; x=1` is stored as `image/png`). `<name>` is `filename` reduced to `[A-Za-z0-9_-]`, with
+an empty type answers 415 (`UNSUPPORTED`). Only the lower-cased `type/subtype` is stored, plus the
+`charset` of a `text/*` type when it is a token (`IMAGE/PNG; x=1` is stored as `image/png`,
+`text/plain; Charset=UTF-8` as `text/plain; charset=utf-8`); a static host that types by extension
+picks its own charset. `<name>` is `filename` reduced to `[A-Za-z0-9_-]`, with
 one extension, taken from that stored type and never from the uploaded name (`Photo 1.JPG` sent as
 `image/jpeg` becomes `Photo-1.jpg`), so that a static host deriving `Content-Type` from the extension
 serves the type the upload was checked as; a type outside the list in
 `@michaelthielemann/kestrel-contracts/mediaType` becomes `.bin` (`x.html` sent as `image/x-foo` becomes
 `x-html.bin`) and is published as `application/octet-stream`. `<name>` is fixed at upload and never
-changes again — renaming the item only changes the display `filename`, never the key or `path`. The
+changes again — renaming the item only changes the display `filename`, never the key or `path`, and a
+name stored as `.bin` stays `.bin` even once the list holds its type. The one exception is a name
+whose file may no longer be published as the type its extension names, such as an unsanitized SVG
+(below): it is published as `<name with - for every .>.bin`. The
 same display name in the same folder answers 409 (`details: { collection: "media_items", field:
 "location" }`; for multi-file uploads, as an entry in `errors` rather than an HTTP status) — the same
 bytes again are idempotent, as described below.

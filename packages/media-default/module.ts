@@ -1,12 +1,11 @@
 import { z } from "zod";
 import "@michaelthielemann/kestrel-contracts/authn";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
-import { publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { binaryResult, first, stepFactory, type Context, type StepResult } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { createMediaDefault, SORTABLE, type ListOptions, type Media, type MediaItem, type SortField } from "./impl.ts";
+import { createMediaDefault, publishedFileOf, SORTABLE, type ListOptions, type Media, type MediaItem, type SortField } from "./impl.ts";
 
 export const configSchema = z
   .object({
@@ -232,7 +231,7 @@ export default defineModule({
       if (isErr(found)) return ctx.fail(found.error);
       if (found.value === null) return notFound();
       const { item, data } = found.value;
-      const result = binaryResult(data, publicFormOf(item.contentType, item.svgSanitized).contentType, item.filename);
+      const result = binaryResult(data, publishedFileOf(item).contentType, item.filename);
       if (item.provenance.origin !== "human") result.headers = { "x-content-provenance": item.provenance.origin };
       return ok({ ...ctx, result });
     },
@@ -245,7 +244,7 @@ export default defineModule({
       if (isErr(found)) return ctx.fail(found.error);
       if (found.value === null) return notFound();
       const { item, data } = found.value;
-      const result = binaryResult(data, publicFormOf(item.contentType, item.svgSanitized).contentType, name);
+      const result = binaryResult(data, publishedFileOf(item).contentType, name);
       const headers: Record<string, string> = { "cache-control": media.publicCopyEnabled() ? "public, max-age=31536000, immutable" : "private, max-age=31536000, immutable" };
       if (item.provenance.origin !== "human") headers["x-content-provenance"] = item.provenance.origin;
       result.headers = headers;

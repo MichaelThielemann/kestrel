@@ -19,14 +19,20 @@ script) is the one that knows.
 ## One public URL per file
 
 Every item has exactly one public URL, `path`: `<publicPath>/<id>/<name>` (default `publicPath`:
-`/media`). `<name>` is decided once, at upload, and never changes again.
+`/media`). `<name>` is decided once, at upload, and never changes again — with one exception: it is
+demoted to `.bin` when its file may no longer be published as the type its extension names (see
+below).
 
 The declared content type has to be exactly one media type: `type/subtype` of RFC 9110 token
 characters, optionally followed by `;` parameters, with no comma. Anything else — a list such as
 `image/png; x=1, text/html` (a browser uses the last type of a list), or an empty type — is refused
-as `UNSUPPORTED` (415). Only the lower-cased `type/subtype` is stored, checked against
-`allowedTypes`/`deniedTypes` and written to the blob store: `IMAGE/PNG; x=1` is stored as
-`image/png`.
+as `UNSUPPORTED` (415). What is stored and written to the blob store is the lower-cased
+`type/subtype`, plus the `charset` of a `text/*` type when its value is a token, lower-cased; no other
+parameter survives: `IMAGE/PNG; x=1` is stored as `image/png`, `Text/Plain; Charset=UTF-8;
+format=flowed` as `text/plain; charset=utf-8`. `allowedTypes`/`deniedTypes` match the `type/subtype`
+alone, and so do their own entries, ignoring parameters and case on both sides. A static host that
+types a file by its extension decides the charset itself; the stored one reaches only a host that
+sends the stored header (a bucket), `media.serve` and `media.download`.
 
 `<name>`'s extension comes from that stored type, never from the uploaded name, so the checks on the
 type (`allowedTypes`, `deniedTypes`, `sanitize.svg`) and the type a static host serves by the
@@ -53,11 +59,15 @@ extension are always the same one:
 Every writer of a public copy — this module's upload and `media.syncPublic`, and `images-default`'s
 variants and placeholders — and every step that answers a file (`media.serve`, `media.download`,
 `images.serve`) takes the `Content-Type` from `publicFormOf` in the same helper, never from the
-stored value as it is. A row that already holds a type this version refuses (a list, an
-empty type) is therefore published as `application/octet-stream`. A row whose key's name does not end
-in the extension of its published type — such a row, or an SVG stored without the `sanitize.svg`
-record — is published under that name with every `.` turned into `-` plus the right extension
-(`logo.svg` as `logo-svg.bin`); `path` and `media.serve` follow that name.
+stored value as it is, and the published name is the stored one. A name stored as `.bin` stays `.bin`
+and is published as `application/octet-stream`, also once the list holds its type (`archive-7z.bin`
+stored while 7Z was not listed keeps that name and type), so the name and the type always agree for a
+static host that types by extension. A name that ends in the extension its type is listed with is
+published with that type. Any other name is demoted: every `.` turned into `-`, plus `.bin`, published
+as `application/octet-stream` — an SVG stored without the `sanitize.svg` record (`logo.svg` as
+`logo-svg.bin`), a row that holds a type this version refuses (a list, an empty type). `path`,
+`media.serve` and the public copy follow the demoted name. The list therefore only ever grows: a
+type's extension never changes and a type never leaves it.
 
 The stem is the uploaded name reduced to `[A-Za-z0-9_-]`: any other dot becomes `-`, so a name
 carries exactly one extension and a host that maps several extensions (`x.html.png`) sees only the
