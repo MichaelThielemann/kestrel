@@ -738,6 +738,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
   const write = boolFlag(args, "write");
   const allowDirty = boolFlag(args, "allow-dirty");
   const yes = boolFlag(args, "yes");
+  const humanLine = boolFlag(args, "json") ? stderr : stdout;
   const runSetupUses = args.repeated.get("run-setup") ?? [];
   const dataReport = readDataReport(stringFlag(args, "data-report"));
   const answersFile = stringFlag(args, "answers");
@@ -785,7 +786,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
   for (const [file, state] of changed) {
     if (!write) {
       const diff = unifiedDiff(relative(root, file), state.source, state.current);
-      if (diff !== "") stdout(diff);
+      if (diff !== "") humanLine(diff);
       continue;
     }
     const proceed = skipConfirmation || (await confirmFile(file, root, state.source, state.current, prompt));
@@ -795,24 +796,24 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
   }
 
   if (write) {
-    for (const file of applied) stdout(`wrote ${file}`);
+    for (const file of applied) humanLine(`wrote ${file}`);
     if (applied.length > 0) {
-      stdout("run `pnpm install` to pick up any dependency range changes, then run `check` again");
+      humanLine("run `pnpm install` to pick up any dependency range changes, then run `check` again");
     } else if (changed.length > 0) {
-      stdout("wrote nothing: every write was declined");
+      humanLine("wrote nothing: every write was declined");
     } else if (rejectedIds.size > 0) {
-      stdout("wrote nothing: every proposed edit failed to verify");
+      humanLine("wrote nothing: every proposed edit failed to verify");
       for (const f of adjustedFindings) {
-        if (rejectedIds.has(f.id)) stdout(`  ${f.id}: ${f.suggestion}`);
+        if (rejectedIds.has(f.id)) humanLine(`  ${f.id}: ${f.suggestion}`);
       }
     } else {
-      stdout("wrote nothing: no finding had an edit to apply");
+      humanLine("wrote nothing: no finding had an edit to apply");
     }
     const writtenFiles = new Set(changed.filter(([file]) => applied.includes(relative(root, file))).map(([file]) => file));
     for (const f of adjustedFindings) {
       if (f.severity !== "warning" || f.fix.kind !== "auto") continue;
       if (!f.fix.edits.some((e) => writtenFiles.has(e.file))) continue;
-      stdout(`  ${f.message}: ${f.suggestion}`);
+      humanLine(`  ${f.message}: ${f.suggestion}`);
     }
   } else {
     const isRawBootError = (f: Finding): boolean => f.rule.startsWith("boot/");
@@ -825,21 +826,21 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     }
     printReport(adjustedReport, args, stdout);
     if (refusedFinding !== undefined) {
-      stdout(`could not verify the boot result: ${refusedFinding.message}`);
-      for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);
+      humanLine(`could not verify the boot result: ${refusedFinding.message}`);
+      for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) humanLine(`  not verified: ${f.id}`);
     } else if (preview?.failed !== undefined) {
-      stdout(`could not verify the boot result: ${preview.failed.message}`);
-      for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);
+      humanLine(`could not verify the boot result: ${preview.failed.message}`);
+      for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) humanLine(`  not verified: ${f.id}`);
     } else if (preview && preview.issues.length > 0) {
       const missingPackages = [...new Set(preview.issues.map((i) => i.use).filter((use): use is string => use !== undefined))];
       if (missingPackages.length > 0) {
         const plural = missingPackages.length > 1;
-        stdout(`could not verify the boot result: ${missingPackages.join(", ")} ${plural ? "are" : "is"} added by these edits but not installed yet; install ${plural ? "them" : "it"}, then run \`fix\` again to verify`);
+        humanLine(`could not verify the boot result: ${missingPackages.join(", ")} ${plural ? "are" : "is"} added by these edits but not installed yet; install ${plural ? "them" : "it"}, then run \`fix\` again to verify`);
       }
       for (const issue of preview.issues.filter((i) => i.use === undefined)) {
-        stdout(`could not verify the boot result: ${issue.file ?? "a file"} failed to load: ${issue.message}`);
+        humanLine(`could not verify the boot result: ${issue.file ?? "a file"} failed to load: ${issue.message}`);
       }
-      for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);
+      for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) humanLine(`  not verified: ${f.id}`);
     } else {
       const nonBootRemaining = adjustedFindings.filter((f) => f.fix.kind !== "auto" && !isRawBootError(f));
       if (preview) {
@@ -847,13 +848,13 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
         const afterEdits = summarize([...nonBootRemaining, ...bootRemaining]);
         const notChecked = preview.bootCheck.notChecked.length;
         const notCheckedSuffix = notChecked > 0 ? ` (${notChecked} not checked)` : "";
-        stdout(`after these edits: ${afterEdits.error} errors remain (${afterEdits.ask} need your answer, ${afterEdits.manual} manual)${notCheckedSuffix}`);
+        humanLine(`after these edits: ${afterEdits.error} errors remain (${afterEdits.ask} need your answer, ${afterEdits.manual} manual)${notCheckedSuffix}`);
       } else if (adjustedReport.tiers.source === "failed") {
-        stdout("could not verify the boot result: the project itself did not load; resolve the load failure above, then run `check` again once its own fix (a dependency range bump, say) is installed");
-        for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);
+        humanLine("could not verify the boot result: the project itself did not load; resolve the load failure above, then run `check` again once its own fix (a dependency range bump, say) is installed");
+        for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) humanLine(`  not verified: ${f.id}`);
       } else {
-        stdout("could not verify the boot result: no boot check ran; upgrade @michaelthielemann/kestrel to 6 first, then run `fix` again to verify");
-        for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) stdout(`  not verified: ${f.id}`);
+        humanLine("could not verify the boot result: no boot check ran; upgrade @michaelthielemann/kestrel to 6 first, then run `fix` again to verify");
+        for (const f of adjustedFindings.filter((f) => isRawBootError(f) && f.fix.kind !== "auto")) humanLine(`  not verified: ${f.id}`);
       }
     }
   }

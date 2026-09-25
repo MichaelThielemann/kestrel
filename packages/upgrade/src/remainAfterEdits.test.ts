@@ -100,6 +100,20 @@ describe("fix preview counts what a boot of the fully edited copy would still re
   });
 });
 
+describe("fix --json never mixes a plain-text line into stdout", () => {
+  it("puts only the JSON report on stdout, and the human boot summary on stderr instead", async () => {
+    const stdoutLines: string[] = [];
+    const stderrLines: string[] = [];
+    await runCli(["fix", "--root", join(HERE, "..", "__fixtures__", "event-emit-5.8"), "--json"], { stdout: (l) => stdoutLines.push(l), stderr: (l) => stderrLines.push(l), forceInstalledMajor: 6 });
+    expect(stdoutLines).toHaveLength(1);
+    expect(stdoutLines[0]).toMatch(/^\{/);
+    expect(() => {
+      JSON.parse(stdoutLines[0]!);
+    }).not.toThrow();
+    expect(stderrLines).toContain("after these edits: 0 errors remain (0 need your answer, 0 manual)");
+  });
+});
+
 describe("fix preview when an edit adds a package the project does not have installed", () => {
   let dir: string;
   afterEach(async () => {
