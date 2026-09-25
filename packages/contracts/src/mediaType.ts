@@ -2,7 +2,8 @@
  * The extension of every media type a published file may be served as: types a browser shows or offers
  * as a download from a static host, never one it opens as a document that runs script (no HTML, XHTML,
  * XML or JavaScript). `image/svg+xml` is listed, but {@link publicFormOf} publishes an SVG as one only
- * when its bytes passed `sanitize.svg`.
+ * when its bytes passed `sanitize.svg`. Entries are only ever added, never changed or removed: a stored
+ * name keeps its extension, and one that no longer matches its type's entry is published as `.bin`.
  */
 export const EXTENSION_BY_TYPE: Readonly<Record<string, string>> = {
   "image/jpeg": "jpg",
@@ -57,40 +58,75 @@ const SVG = "image/svg+xml";
 const TOKEN = "[-!#$%&'*+.^_`|~0-9A-Za-z]+";
 const QUOTED = '"(?:[\\t \\x21\\x23-\\x5b\\x5d-\\x7e]|\\\\[\\t \\x21-\\x7e])*"';
 const ESSENCE = new RegExp(`[\\t ]*(${TOKEN})/(${TOKEN})`, "y");
-const PARAMETER = new RegExp(`[\\t ]*;[\\t ]*(?:${TOKEN}=(?:${TOKEN}|${QUOTED}))?`, "y");
+const PARAMETER = new RegExp(`[\\t ]*;[\\t ]*(?:(${TOKEN})=(${TOKEN}|${QUOTED}))?`, "y");
 const TRAILING = /[\t ]*$/y;
+const QUOTE = '"';
+
+/** A declared content type that is exactly one media type, reduced to what is kept of it. */
+export interface MediaType {
+  /** `type/subtype`, lower-cased. */
+  essence: string;
+  /** The first `charset` parameter, lower-cased, when its value is a token; `null` otherwise, and for a quoted value. */
+  charset: string | null;
+}
 
 /**
- * The essence `type/subtype`, lower-cased, of a declared content type that is exactly one media type as
- * RFC 9110 defines it: a type and a subtype of token characters, optionally followed by `;` parameters,
- * with no comma anywhere. `null` for anything else — an empty string, a list of types, a stray
- * character — since a browser reading a list uses the last type in it.
+ * Parses a declared content type that is exactly one media type as RFC 9110 defines it: a type and a
+ * subtype of token characters, optionally followed by `;` parameters, with no comma anywhere. `null` for
+ * anything else — an empty string, a list of types, a stray character — since a browser reading a list
+ * uses the last type in it.
  */
-export function mediaTypeEssence(declared: string): string | null {
+export function parseMediaType(declared: string): MediaType | null {
   if (declared.includes(",")) return null;
   ESSENCE.lastIndex = 0;
   const essence = ESSENCE.exec(declared);
   if (essence === null) return null;
+  let charset: string | null | undefined;
   let at = ESSENCE.lastIndex;
   for (;;) {
     PARAMETER.lastIndex = at;
-    if (PARAMETER.exec(declared) === null) break;
+    const parameter = PARAMETER.exec(declared);
+    if (parameter === null) break;
     at = PARAMETER.lastIndex;
+    const [, name, value] = parameter;
+    if (charset === undefined && name !== undefined && value !== undefined && name.toLowerCase() === "charset") charset = value.startsWith(QUOTE) ? null : value.toLowerCase();
   }
   TRAILING.lastIndex = at;
-  return TRAILING.test(declared) ? `${essence[1]}/${essence[2]}`.toLowerCase() : null;
+  if (!TRAILING.test(declared)) return null;
+  return { essence: `${essence[1]}/${essence[2]}`.toLowerCase(), charset: charset ?? null };
+}
+
+/** The lower-cased `type/subtype` of a declared content type, or `null` unless it is exactly one media type (see {@link parseMediaType}). */
+export function mediaTypeEssence(declared: string): string | null {
+  return parseMediaType(declared)?.essence ?? null;
+}
+
+function canonicalOf(parsed: MediaType): string {
+  return parsed.essence.startsWith("text/") && parsed.charset !== null ? `${parsed.essence}; charset=${parsed.charset}` : parsed.essence;
 }
 
 /**
- * How a stored file is published wherever a host serves it without an access check (a public copy, a
- * variant path, its public URL): the essence of its content type and that type's extension from
- * {@link EXTENSION_BY_TYPE}, or {@link NEUTRAL_TYPE} and {@link NEUTRAL_EXTENSION} when the type is not
- * listed, is not exactly one media type, or is `image/svg+xml` without `svgSanitized`. Every writer of a
- * published object takes its `Content-Type` from here, never from the stored value as it is.
+ * The form a declared content type is stored in: its lower-cased `type/subtype`, plus `; charset=<value>`
+ * for a `text/*` type whose `charset` parameter is a token (`Text/Plain; Charset=Latin1; format=flowed`
+ * becomes `text/plain; charset=latin1`). No other parameter survives. `null` unless it is exactly one
+ * media type (see {@link parseMediaType}).
+ */
+export function canonicalMediaType(declared: string): string | null {
+  const parsed = parseMediaType(declared);
+  return parsed === null ? null : canonicalOf(parsed);
+}
+
+/**
+ * How a stored type is published wherever a host serves it without an access check (a public copy, a
+ * variant path, its public URL, its download): its {@link canonicalMediaType} form and that type's
+ * extension from {@link EXTENSION_BY_TYPE}, or {@link NEUTRAL_TYPE} and {@link NEUTRAL_EXTENSION} when
+ * the type is not listed, is not exactly one media type, or is `image/svg+xml` without `svgSanitized`.
+ * Every writer of a published object takes its `Content-Type` from here, never from the stored value as
+ * it is.
  */
 export function publicFormOf(contentType: string, svgSanitized = false): { contentType: string; extension: string } {
-  const essence = mediaTypeEssence(contentType);
-  const extension = essence === null ? undefined : EXTENSION_BY_TYPE[essence];
-  if (essence === null || extension === undefined || (essence === SVG && !svgSanitized)) return { contentType: NEUTRAL_TYPE, extension: NEUTRAL_EXTENSION };
-  return { contentType: essence, extension };
+  const parsed = parseMediaType(contentType);
+  const extension = parsed === null ? undefined : EXTENSION_BY_TYPE[parsed.essence];
+  if (parsed === null || extension === undefined || (parsed.essence === SVG && !svgSanitized)) return { contentType: NEUTRAL_TYPE, extension: NEUTRAL_EXTENSION };
+  return { contentType: canonicalOf(parsed), extension };
 }

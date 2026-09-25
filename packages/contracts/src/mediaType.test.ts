@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { EXTENSION_BY_TYPE, NEUTRAL_EXTENSION, NEUTRAL_TYPE, mediaTypeEssence, publicFormOf } from "./mediaType.ts";
+import { EXTENSION_BY_TYPE, NEUTRAL_EXTENSION, NEUTRAL_TYPE, canonicalMediaType, mediaTypeEssence, parseMediaType, publicFormOf } from "./mediaType.ts";
 
 const neutral = { contentType: NEUTRAL_TYPE, extension: NEUTRAL_EXTENSION };
 
@@ -33,11 +33,34 @@ describe("mediaTypeEssence", () => {
   });
 });
 
+describe("canonicalMediaType", () => {
+  it("keeps a text type's first charset when it is a token, lower-cased, and no other parameter", () => {
+    expect(canonicalMediaType("Text/Plain; Charset=UTF-8; format=flowed")).toBe("text/plain; charset=utf-8");
+    expect(canonicalMediaType("text/csv; header=present; charset=ISO-8859-1; charset=utf-8")).toBe("text/csv; charset=iso-8859-1");
+    expect(canonicalMediaType("text/plain")).toBe("text/plain");
+  });
+
+  it("drops a quoted charset, and the charset of a type that is not text", () => {
+    expect(canonicalMediaType('text/plain; charset="utf-8"')).toBe("text/plain");
+    expect(canonicalMediaType('text/plain; charset="utf-8"; charset=latin1')).toBe("text/plain");
+    expect(canonicalMediaType("image/svg+xml; charset=utf-8")).toBe("image/svg+xml");
+    expect(canonicalMediaType("application/json; charset=utf-8")).toBe("application/json");
+  });
+
+  it("refuses what parseMediaType refuses", () => {
+    expect(canonicalMediaType("text/plain; charset=utf-8, text/html")).toBeNull();
+    expect(canonicalMediaType("")).toBeNull();
+    expect(parseMediaType("text/plain; charset=utf-8, text/html")).toBeNull();
+    expect(parseMediaType("TEXT/PLAIN; CHARSET=UTF-8")).toEqual({ essence: "text/plain", charset: "utf-8" });
+  });
+});
+
 describe("publicFormOf", () => {
-  it("publishes a listed type as its essence with its extension", () => {
+  it("publishes a listed type in its canonical form with its extension", () => {
     expect(publicFormOf("image/jpeg")).toEqual({ contentType: "image/jpeg", extension: "jpg" });
     expect(publicFormOf("IMAGE/PNG; x=1")).toEqual({ contentType: "image/png", extension: "png" });
-    expect(publicFormOf("text/plain; charset=utf-8")).toEqual({ contentType: "text/plain", extension: "txt" });
+    expect(publicFormOf("text/plain; Charset=UTF-8; format=flowed")).toEqual({ contentType: "text/plain; charset=utf-8", extension: "txt" });
+    expect(publicFormOf("text/html; charset=utf-8")).toEqual(neutral);
   });
 
   it("publishes an unlisted type, a list of types and an empty type as a neutral download", () => {
