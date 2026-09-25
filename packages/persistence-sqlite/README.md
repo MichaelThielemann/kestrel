@@ -87,22 +87,28 @@ A scope that closes leaves the store in one of two terminal states, and a call a
 without awaiting behaves differently depending on which: after a **commit**, a late call takes the
 normal queued path and writes for real (with a warning logged); after a **rollback or a timeout**, a
 late call throws – it is not executed – because the group's writes are gone and the call would store
-a fragment of a transaction that never happened. After a rollback that itself fails, the store
-answers `Err(TRANSIENT)` to every subsequent call, naming the reason and that the process needs a
-restart; the connection's state can no longer be proven, and continuing to serve writes from it
-would turn one incident into silent corruption. That includes every call and group already waiting
-for its turn when the rollback failed: none of them runs on the connection. A group answers a failed
-`begin` with that error, and `checkpoint()`/`snapshot()` reject with an error the steps answer as
-the same `TRANSIENT`. The same holds for the transaction `createMany` runs on its own outside a
-group: when its `ROLLBACK` fails, that `createMany` already answers the same `Err(TRANSIENT)`, or
-rethrows the wiring error it was rolling back for. A `ROLLBACK` that fails because SQLite already
-rolled the transaction back on its own (after some I/O errors, for example) leaves no transaction
-open and does not count as a failed rollback.
+a fragment of a transaction that never happened.
 
-That unusable state is also readable without provoking a call: the module declares `health()`,
-synchronous and with no I/O, so a host's readiness probe learns it needs to stop routing traffic
-here, and a liveness probe learns the process needs a restart, before the next request would have
-hit `TRANSIENT` anyway. See `kestrel.health()` in the core's `architecture.md`.
+**A `ROLLBACK` that fails while a transaction stays open.** Rolling back is not expected to fail;
+when it does and the connection still reports an open transaction, or the database was closed
+underneath the group so its state cannot be read, the module can neither finish that transaction
+nor prove it finished. It then marks the store unusable: from that point every call answers
+`Err(TRANSIENT)`, naming the reason and that the process needs a restart, because serving writes
+from that connection could turn one incident into silent corruption. That covers the calls and
+groups already waiting for their turn too: none of them runs on the connection. A group answers a
+failed `begin` with that error, and `checkpoint()`/`snapshot()` reject with an error the steps
+answer as the same `TRANSIENT`. The transaction `createMany` runs on its own outside a group is
+treated the same way: when its `ROLLBACK` fails with the transaction still open, that `createMany`
+answers the same `Err(TRANSIENT)`, or rethrows the wiring error it was rolling back for. A
+`ROLLBACK` that fails because SQLite already rolled the transaction back on its own (after some I/O
+errors, for example) leaves no transaction open, so it is not a failed rollback and the store stays
+usable.
+
+The module declares `health()`, synchronous and with no I/O, which reports that unusable state as
+`{ ok: false, reason, restartRequired: true }` and otherwise `{ ok: true }`; lock contention and ordinary
+failed calls never change it. A host's readiness and liveness probes can read it through
+`kestrel.health()` (see the core's `architecture.md`) instead of waiting for a request to hit
+`TRANSIENT`.
 
 Not included: migrations beyond adding columns, savepoints or nested groups, full-text search.
 
