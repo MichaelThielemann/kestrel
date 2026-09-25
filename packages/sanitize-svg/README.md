@@ -11,6 +11,13 @@ without this module (or another one registering `sanitize.svg`) fails the boot. 
 publishes an SVG as `image/svg+xml` only when this step ran before `media.upload` in the same
 pipeline, with no step in between that declares a write to `files`.
 
+Not included: deciding whether SVG uploads are allowed at all, storage, naming and serving of the
+file (`media-default`'s `allowedTypes`/`deniedTypes` and the pipeline order that makes an upload
+count as sanitized); full XML well-formedness or schema validation – a tag or attribute outside the
+allowlist is dropped, not rejected, and the file only fails when no `<svg>` root element survives
+that; reading width/height or any other rasterization (`media-default` reads image dimensions from
+the file header, not from this module).
+
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
 `@michaelthielemann/kestrel-sanitize-svg` – module `sanitize/svg`: provides no contract.
