@@ -12,7 +12,8 @@ may define its own contracts with the same `defineContract`; the core treats the
 - Name: `<capability>@<major>`, e.g. `persistence@1`. A new major version = a new contract.
 - Domain-neutral. No words like `user`, `page`, `email` in the contract.
 - Every contract has exactly one file `<name>.ts` and one test `<name>.contract.test.ts`
-  (in the package under `packages/contracts/src/`).
+  (in the package under `packages/contracts/src/`). The package also holds step sets and shared
+  runtime helpers that are not contracts; see "What else lives in the contracts package" below.
 - The package exports each shared suite by name
   (`@michaelthielemann/kestrel-contracts/<name>.contract.test`), listed in the package's `exports`
   and in the `files` of its `tsconfig.json`. Every other `*.test.ts` in the package is its own unit
@@ -257,6 +258,30 @@ persistenceContractTests(async () => createPersistenceSqlite({ file: ":memory:" 
 `blobstore@1.move(from, to)` against a missing `from` key fails with an error message that
 contains `not found` (pinned by the contract test) — an adapter must not let a technical error
 (e.g. `NoSuchKey`) through untranslated.
+
+## What else lives in the contracts package
+
+Not every file under `packages/contracts/src/` is a contract plus its test. The package also holds:
+
+- **Step sets** (`stepSet.ts`): `defineStepSet`/`stepSets` validate and collect a `StepSet`, the
+  declaration that every module in a role (e.g. `authn`) registers the same steps with the same
+  context reads and writes. `authn.steps.ts` declares `AUTHN_STEPS` (`authn.login`,
+  `authn.identifyUser`, `authn.requireUser`, `authn.loadIdentity`, `authn.logout`); `events.steps.ts`
+  declares `EVENT_DELIVERY_STEPS` (`events.emit`, `events.relay`, `events.readDeliveryStatus`),
+  registered by every event delivery module (`events-direct`, `events-queue`), never by the bus
+  module (`events-inmemory`). `steps.ts` collects both into `STEP_SETS`.
+- **Shared event runtime logic** (`events.envelope.ts`, part of `events.steps.ts`): `eventEnvelope`
+  builds the payload an `events.emit` step hands to the bus; `withEventIdentity` guarantees
+  `eventId`/`event`/`at` on data raised through `events@1`, run once per emit by each delivery
+  module before any subscribed pipeline sees it; `mergeRelayReport` and `relaySummary` fold
+  per-pipeline delivery outcomes into the `_events` a result carries.
+- **A shared suite for a capability that is not itself a contract** (`atomic.contract.test.ts`):
+  `atomicScopeTests(make)` is the suite every `persistence@1` provider that also exposes an
+  `AtomicScope` (the atomic-group hook from `@michaelthielemann/kestrel/atomic`) must pass. It is
+  exported the same way a contract's suite is (`@michaelthielemann/kestrel-contracts/atomic.contract.test`)
+  even though `atomic` names a core capability, not a `contracts` file.
+- **`persistence.owned`, `links`, `mediaType` and `content-locale`**, documented in
+  `packages/contracts/README.md`, are pure helpers shared by modules — not contracts either.
 
 ## Reads a render can see
 

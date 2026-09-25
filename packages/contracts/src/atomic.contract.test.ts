@@ -38,6 +38,7 @@ async function holdStore(scope: AtomicScope): Promise<{ release: () => void; hol
   return { release: release.open, holder };
 }
 
+/** The shared suite a `persistence@1` provider that also exposes an `AtomicScope` must pass, against a fresh fixture per test. */
 export function atomicScopeTests(make: () => Promise<AtomicScopeFixture>): void {
   describe("atomic scope", () => {
     it("a committed scope's writes are visible afterwards", async () => {
