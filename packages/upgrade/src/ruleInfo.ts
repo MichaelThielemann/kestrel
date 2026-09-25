@@ -95,7 +95,7 @@ const STEP_SHAPE_CHANGES: Record<string, string> = {
   "images.readStatus": "job.total counts the ready items that get variants, and done/failed count the same items, not every media item",
   "media.reconcile": "counts a key as orphaned only when it has the module's own <prefix><id>/<name> shape and no item has that id: a file directly under prefix, deeper than <id>/<name> or under an existing item's id is no longer reported, and never deleted",
   "media.reconcileDelete": "counts a key as orphaned only when it has the module's own <prefix><id>/<name> shape and no item has that id: a file directly under prefix, deeper than <id>/<name> or under an existing item's id is no longer reported, and never deleted",
-  "insights.readManifest": "its output schema follows Manifest's two new fields, atomicScope and warnings",
+  "insights.readManifest": "its output schema follows Manifest's two new fields, atomicScope and warnings, and a step description's new narrows (the shape of a narrowed answer and the member paths each audience keeps)",
   "events.listDead": "its items now carry pipeline and runId, and rows are no longer ordered across pipelines",
 };
 

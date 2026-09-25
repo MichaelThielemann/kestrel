@@ -219,8 +219,8 @@ export const mediaServeRule: Rule = {
       const missingSteps = [needsMediaServe ? "media.serve" : undefined, needsImagesServe ? "images.serve" : undefined].filter((s): s is string => s !== undefined);
       const message = `no pipeline runs ${missingSteps.join(" or ")}; boot fails once publicCopy is set without a pipeline serving it`;
       const suggestionParts = [
-        needsMediaServe ? `a serveMediaFile pipeline (steps: authn.identifyUser, authz.require:media.read, media.serve) with an HTTP trigger GET ${publicPath}/:id/:name` : undefined,
-        needsImagesServe ? `a serveImageVariant pipeline (steps: authn.identifyUser, authz.require:media.read, images.serve) with an HTTP trigger GET ${publicPath}/:id/variants/:file` : undefined,
+        needsMediaServe ? `a serveMediaFile pipeline (steps: authn.identifyUser, authz.require:media.read, media.serve, authz.fields:mediaFile?shape=file) with an HTTP trigger GET ${publicPath}/:id/:name` : undefined,
+        needsImagesServe ? `a serveImageVariant pipeline (steps: authn.identifyUser, authz.require:media.read, images.serve, authz.fields:mediaFile?shape=file) with an HTTP trigger GET ${publicPath}/:id/variants/:file` : undefined,
       ].filter((s): s is string => s !== undefined);
       const suggestion = `add ${suggestionParts.join(" and ")}`;
       const dir = pipelinesDirOf(ctx);
@@ -231,11 +231,11 @@ export const mediaServeRule: Rule = {
         const parts: Record<string, Edit[] | undefined> = {};
         const triggers: string[] = [];
         if (needsMediaServe) {
-          parts["serveMediaFile pipeline file"] = [createPipelineFile(join(dir, "serveMediaFile.ts"), { name: "serveMediaFile", steps: ["authn.identifyUser", "authz.require:media.read", "media.serve"] })];
+          parts["serveMediaFile pipeline file"] = [createPipelineFile(join(dir, "serveMediaFile.ts"), { name: "serveMediaFile", steps: ["authn.identifyUser", "authz.require:media.read", "media.serve", "authz.fields:mediaFile?shape=file"] })];
           triggers.push(`{ http: "GET ${publicPath}/:id/:name", pipeline: "serveMediaFile" }`);
         }
         if (needsImagesServe) {
-          parts["serveImageVariant pipeline file"] = [createPipelineFile(join(dir, "serveImageVariant.ts"), { name: "serveImageVariant", steps: ["authn.identifyUser", "authz.require:media.read", "images.serve"] })];
+          parts["serveImageVariant pipeline file"] = [createPipelineFile(join(dir, "serveImageVariant.ts"), { name: "serveImageVariant", steps: ["authn.identifyUser", "authz.require:media.read", "images.serve", "authz.fields:mediaFile?shape=file"] })];
           triggers.push(`{ http: "GET ${publicPath}/:id/variants/:file", pipeline: "serveImageVariant" }`);
         }
         const triggerEdit = insertTriggers(ctx.project.configFile, configSource, triggers);

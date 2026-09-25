@@ -286,9 +286,9 @@ describe("pipelines/media-serve", () => {
     const mediaFile = join(dir, "pipelines", "serveMediaFile.ts");
     const imagesFile = join(dir, "pipelines", "serveImageVariant.ts");
     expect(byFile.get(mediaFile)?.create).toBe(true);
-    expect(byFile.get(mediaFile)?.text).toContain('"media.serve"');
+    expect(byFile.get(mediaFile)?.text).toContain('"media.serve", "authz.fields:mediaFile?shape=file"');
     expect(byFile.get(imagesFile)?.create).toBe(true);
-    expect(byFile.get(imagesFile)?.text).toContain('"images.serve"');
+    expect(byFile.get(imagesFile)?.text).toContain('"images.serve", "authz.fields:mediaFile?shape=file"');
     const configEdit = edits.find((e) => e.file === p.configFile)!;
     const source = readFileOrUndefined(p.configFile)!;
     const { text } = applyEdits(source, [configEdit]);

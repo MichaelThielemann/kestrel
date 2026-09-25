@@ -152,6 +152,10 @@ Every finding's `docs` field links to one of the anchors below.
 | [`pipelines/images-resume-cron`](#pipelines-images-resume-cron) | source | manual (warning) | `images-default` configured with no cron-triggered `images.resume` |
 | [`pipelines/media-delete-order`](#pipelines-media-delete-order) | source | auto (warning) / none (info) | an images cleanup step running before the media delete it follows from, or a folder delete not raising `media.deleted` |
 | [`runtime/authz-anonymous-floor`](#runtime-authz-anonymous-floor) | source | none (info) | `authz-roles` with a non-empty `anonymous` |
+| [`pipelines/field-step`](#pipelines-field-step) | boot | ask (no default) | a pipeline anonymous callers reach without `authz.fields` at its end, or without an anonymous field grant |
+| [`authz/field-grant-unknown`](#authz-field-grant-unknown) | boot | manual | a field grant or an `authz.fields` step that does not fit the declared output |
+| [`responses/anonymous-fields`](#responses-anonymous-fields) | load | none (info) | an HTTP pipeline anonymous callers reach and the members they stop receiving |
+| [`responses/thrown-error-text`](#responses-thrown-error-text) | load | none (info) | a file next to a local module matching on an answer's `error` text |
 | [`runtime/anonymous-media-list`](#runtime-anonymous-media-list) | source | none (info) | anonymous `media.read` granted while `anonymousList` stays `"ids"` |
 | [`imports/removed-export`](#imports-removed-export) | source | manual | an import or call of a `delivery-static` export removed in 6.0.0 |
 | [`types/breaking-signatures`](#types-breaking-signatures) | source | none (info), always | type-level members a hand-built implementation must add |
@@ -309,7 +313,8 @@ finding names the trigger to add for each such pipeline.
 `publicCopy` set on `media-default` or `images-default` (including one `modules/delivery-media`'s
 fix is about to add) needs a pipeline running `media.serve` / `images.serve`, or boot fails. Auto
 when the project has a pipelines directory to scaffold into: creates `serveMediaFile.ts` /
-`serveImageVariant.ts` (steps `authn.identifyUser`, `authz.require:media.read`, and the serve step)
+`serveImageVariant.ts` (steps `authn.identifyUser`, `authz.require:media.read`, the serve step and
+`authz.fields:mediaFile?shape=file`, whose grant `pipelines/field-step` proposes)
 next to the project's other pipeline files, and adds the matching HTTP trigger(s)
 (`GET <publicPath>/:id/:name` and `GET <publicPath>/:id/variants/:file`) in one edit; falls back to
 manual, naming the steps and triggers to add by hand, when the directory or the config file cannot
@@ -345,6 +350,41 @@ read; manual otherwise. A separate, info-only finding fires when a pipeline runs
 `anonymous` grants, in `authz.require`, `can` and `describePipelineAccess` — a signed-in caller
 refused something an anonymous visitor could do before is served now.
 
+#### pipelines-field-step
+Every pipeline an anonymous caller reaches over HTTP must end with `authz.fields:<resource>?shape=<shape>`,
+and `authz-roles`' `anonymousFields` must grant fields of that resource, or boot fails. The rule takes
+the pipelines and shapes from boot's own message and the resource from the step that reads the answer
+(`content.get`/`content.list`/`site.resolve:<type>` → `<type>`, `media.get`/`media.list` → `media`, a
+file step → `mediaFile`, `redirects.render` → `redirectRules`). It proposes the grants from the loaded
+project: `id` and every model field of a content type, `_locales` and `_translations` with locales,
+`_locale` and `_links` behind `site.resolve`, `redirect` behind `redirects.lookup`; the public media
+fields, and the variant fields behind `images.attach`; the file headers `cache-control`,
+`x-content-provenance` and, with `images-default`, `x-kestrel-variant`; the redirect rules' `pattern`,
+`target` and `status`. It asks once, with no default, since every granted field is served to callers
+without a session: "yes" appends the step to each pipeline file and sets `anonymousFields` (existing
+grants kept), "manual" leaves both to you. A pipeline whose resource it cannot tell stays manual.
+
+#### authz-field-grant-unknown
+A grant names a field no pipeline of its resource declares, grants a resource no pipeline cuts, or an
+`authz.fields` step does not fit its pipeline (a step after it, a shape the declared output
+contradicts, an answer an earlier step ends the run with that the anonymous grant does not cover).
+Manual; the suggestion is the hint boot gives, for example `"variants" is a list, write
+"variants[].path"`.
+
+#### responses-anonymous-fields
+An HTTP pipeline that anonymous callers reach answers them only the fields `anonymousFields` grants once
+it ends with `authz.fields`. The finding names the members they stop receiving with the example's
+grants: `createdAt` and `updatedAt` of a document; `folder`, `createdAt`, `updatedAt`, and behind
+`images.attach` `available`, `variantCounts` and each variant's `bytes` and `state` of a media item;
+any header of a file the grant does not name. Signed-in callers whose roles have no field grant keep
+the whole answer.
+
+#### responses-thrown-error-text
+A file next to a local module compares the `error` text of an answer (`res.error` with `toContain`,
+`includes` and the like). A step that throws now answers `"<pipeline>/<step>: unexpected <ErrorName>"`
+for every caller; its message and stack are in the log under the answer's `runId`. Match on `code` and
+`step`, or read the log. Answers a step fails on purpose with `ctx.fail` keep their message.
+
 #### runtime-anonymous-media-list
 `authz-roles` grants anonymous `media.read`, but `media-default`'s own `anonymousList` stays at its
 `"ids"` default: an anonymous caller can still only fetch media by explicit ids, not browse the full
@@ -368,8 +408,8 @@ A pipeline runs a step whose 6.0.0 response or manifest shape differs from 5.8's
 `media.upload`, `media.get`, `media.list`, `media.update`, `media.listFolders`, `media.remove`,
 `media.removeFolder`, `media.renameFolder`, `media.reconcile`, `media.reconcileDelete`,
 `images.attach`, `images.serve`, `images.prune`, `images.generate`, `images.retryFailed`,
-`images.sync`, `images.readStatus`, `insights.readManifest` or `events.listDead`; the finding names
-which one and how.
+`images.sync`, `images.readStatus`, `insights.readManifest` (a step description gains `narrows`) or
+`events.listDead`; the finding names which one and how.
 `media.upload`'s own change also covers the declared type: one that is not exactly one
 `type/subtype` (a list such as `image/png, text/html`, or an empty type) is refused with 415, and
 only its lower-cased `type/subtype` is stored, plus a `text/*` type's charset, so

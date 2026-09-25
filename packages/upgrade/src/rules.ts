@@ -10,6 +10,7 @@ import type { Edit, Finding } from "./report.ts";
 import { combineEditParts, finding, KESTREL_RANGE, moduleEntry, packageJsonPath } from "./ruleHelpers.ts";
 import { bootWrapRules } from "./ruleBootWraps.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
+import { fieldGrantRules } from "./ruleFieldGrants.ts";
 import { INFO_RULES } from "./ruleInfo.ts";
 import { mediaRules } from "./ruleMedia.ts";
 import { queueOfferRule } from "./ruleQueueOffer.ts";
@@ -151,6 +152,7 @@ export const DEFAULT_RULES: readonly Rule[] = [
   eventPayloadRule,
   queueOfferRule,
   ...mediaRules,
+  ...fieldGrantRules,
   ...INFO_RULES,
 ];
 
