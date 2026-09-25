@@ -14,6 +14,13 @@ function stringConfig(config: unknown, key: string): string | undefined {
   return isRecord(config) && typeof config[key] === "string" ? config[key] : undefined;
 }
 
+const RESERVED_MOUNT_SEGMENTS = new Set(["api", "admin"]);
+
+function underReservedMount(path: string): boolean {
+  const [, first] = path.split("/");
+  return first !== undefined && RESERVED_MOUNT_SEGMENTS.has(first);
+}
+
 const DELIVERY_MEDIA_RULE_ID = "modules/delivery-media";
 
 /** `modules/delivery-media`: delivery-static's old `media` option is removed; media-default/images-default's `publicCopy` replaces the rewriting it did. */
@@ -27,9 +34,15 @@ export const deliveryMediaRule: Rule = {
     const deliveryPrefix = stringConfig(delivery.config, "prefix") ?? "";
     const where = { module: delivery.use, path: "media" };
     const message = 'delivery-static\'s "media" option is removed in 6.0.0; media-default and images-default\'s publicCopy replace the URL rewriting and copying it did';
+    const docs = upgradingDocs("modules-delivery-media");
+
+    if (underReservedMount(publicPath)) {
+      const suggestion = `the old media.publicPath ("${publicPath}") lies under a path many projects reserve for their own API or admin UI; pick a publicPath outside your project's own mounts (commonly "/media"), add it to delivery-static's reservedPaths alongside your actual mounts, and set publicCopy: { prefix: "${deliveryPrefix}" } on media-default and images-default by hand — this assistant cannot see where your project mounts its API`;
+      return [finding(DELIVERY_MEDIA_RULE_ID, DELIVERY_MEDIA_RULE_ID, message, suggestion, where, undefined, docs)];
+    }
+
     const publicPathNote = publicPath === "/media" ? "" : `, and publicPath: "${publicPath}" on media-default and images-default`;
     const suggestion = `remove "media" from delivery-static, set publicCopy: { prefix: "${deliveryPrefix}" } on media-default and images-default, add reservedPaths: ["${publicPath}"] to delivery-static${publicPathNote}`;
-    const docs = upgradingDocs("modules-delivery-media");
 
     const mediaDefault = moduleEntry(ctx, "media-default");
     const source = ctx.readFile(ctx.project.configFile);

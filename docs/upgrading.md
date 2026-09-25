@@ -280,7 +280,11 @@ validation. The fix removes `media`, sets `publicCopy: { prefix: <delivery-stati
 on `media-default` and `images-default`, adds `reservedPaths: [<the old media.publicPath,
 normalised>]` to `delivery-static`, and carries a non-default `publicPath` over to both media
 modules. Falls back to manual, naming what it could not locate, when `reservedPaths` already has
-entries the tool cannot safely merge into, or `media-default` is not configured at all.
+entries the tool cannot safely merge into, or `media-default` is not configured at all. It also
+falls back to manual, without guessing a value, when the old `media.publicPath`'s first segment is
+`api` or `admin` — many projects reserve both for their own API and admin UI, and this
+check cannot see where a given project actually mounts either one; pick a `publicPath` outside your
+own project's mounts by hand (commonly `/media`) and list it in `reservedPaths` alongside them.
 
 #### modules-media-public-path
 `images-default`'s `publicPath` must match `media-default`'s exactly — no trailing slash, which a

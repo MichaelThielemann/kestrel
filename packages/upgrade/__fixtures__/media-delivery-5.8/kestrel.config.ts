@@ -7,7 +7,7 @@ export default defineConfig({
     { use: "@michaelthielemann/kestrel-images-default", config: { publicPath: "/api/", media: { collection: "media_items" } } },
     {
       use: "@michaelthielemann/kestrel-delivery-static",
-      config: { types: { pages: {} }, prefix: "site/", media: { publicPath: "/api", target: "media/" } },
+      config: { types: { pages: {} }, prefix: "site/", media: { publicPath: "/media", target: "media/" } },
     },
     { use: "@michaelthielemann/kestrel-authz-roles", config: { anonymous: [] } },
     { use: "./modules/customMediaLinks.ts", config: {} },

@@ -99,7 +99,7 @@ describe("modules/delivery-media", () => {
 
   it("carries a non-default publicPath over to both media modules", async () => {
     const p = await project([
-      { use: DELIVERY, config: { prefix: "site/", media: { publicPath: "/api" } } },
+      { use: DELIVERY, config: { prefix: "site/", media: { publicPath: "/gallery" } } },
       { use: MEDIA_DEFAULT, config: {} },
       { use: IMAGES_DEFAULT, config: {} },
     ]);
@@ -107,20 +107,45 @@ describe("modules/delivery-media", () => {
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
     const source = readFileOrUndefined(p.configFile)!;
     const { text } = applyEdits(source, edits);
-    expect(text).toContain('reservedPaths: ["/api"]');
-    expect(text).toContain('publicPath: "/api"');
+    expect(text).toContain('reservedPaths: ["/gallery"]');
+    expect(text).toContain('publicPath: "/gallery"');
   });
 
   it("normalises a trailing slash on the old media.publicPath", async () => {
     const p = await project([
-      { use: DELIVERY, config: { media: { publicPath: "/api/" } } },
+      { use: DELIVERY, config: { media: { publicPath: "/gallery/" } } },
       { use: MEDIA_DEFAULT, config: {} },
     ]);
     const findings = await deliveryMediaRule.check(contextFor(p));
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
     const source = readFileOrUndefined(p.configFile)!;
     const { text } = applyEdits(source, edits);
-    expect(text).toContain('reservedPaths: ["/api"]');
+    expect(text).toContain('reservedPaths: ["/gallery"]');
+  });
+
+  it("goes manual, never guessing a path, when the old media.publicPath nests under a reserved API or admin mount", async () => {
+    const p = await project([
+      { use: DELIVERY, config: { prefix: "site/", media: { publicPath: "/api/media" } } },
+      { use: MEDIA_DEFAULT, config: {} },
+      { use: IMAGES_DEFAULT, config: {} },
+    ]);
+    const findings = await deliveryMediaRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).not.toBe("auto");
+    expect(findings[0]?.suggestion).toContain("reserve for their own API or admin UI");
+    expect(findings[0]?.suggestion).not.toContain('reservedPaths: ["/api/media"]');
+    expect(findings[0]?.suggestion).not.toContain('publicPath: "/api/media"');
+    expect(findings[0]?.suggestion).toContain("cannot see where your project mounts its API");
+  });
+
+  it("goes manual for a bare /admin publicPath the same way", async () => {
+    const p = await project([
+      { use: DELIVERY, config: { media: { publicPath: "/admin" } } },
+      { use: MEDIA_DEFAULT, config: {} },
+    ]);
+    const findings = await deliveryMediaRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).not.toBe("auto");
   });
 
   it("falls back to manual, naming the missing part, when reservedPaths already has entries", async () => {
