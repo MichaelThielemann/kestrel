@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentDocument, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
-import { err, ok } from "@michaelthielemann/kestrel-contracts/errors";
+import { err, failure, ok } from "@michaelthielemann/kestrel-contracts/errors";
 import { renderFailed, type Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
 import type { Site } from "@michaelthielemann/kestrel-contracts/site";
 import { createContentDefault } from "@michaelthielemann/kestrel-content-default/impl";
@@ -433,6 +433,16 @@ describe("delivery/static: rendered output is stored byte for byte, no media rew
   });
 });
 
+function failingPutOnce(blobs: ReturnType<typeof fakeBlobs>, matches: (key: string) => boolean): Blobstore {
+  return {
+    ...blobs,
+    async put(key, data, options) {
+      if (matches(key)) return err(failure("TRANSIENT", "disk full"));
+      return blobs.put(key, data, options);
+    },
+  };
+}
+
 function mismatchedRenderer(): Renderer {
   return {
     formats: () => ["html", "pdf"],
@@ -506,7 +516,7 @@ describe("delivery/static: removes exactly the keys it wrote", () => {
     expectOk(await delivery.publish("pages", "p1"));
     const before = expectOk(await db.findOne<{ id: string }>(STATUS, { type: "pages", docId: "p1", locale: "de" }));
     expectOk(await db.updateMany(STATUS, { id: before!.id }, { writtenKeys: null }));
-    expect(expectOk(await db.findOne<{ id: string; writtenKeys: string[] | null }>(STATUS, { id: before!.id }))?.writtenKeys).toBeNull();
+    expect(expectOk(await db.findOne<{ id: string; writtenKeys: Record<string, string> | null }>(STATUS, { id: before!.id }))?.writtenKeys).toBeNull();
     expect(expectOk(await delivery.unpublish("pages", "p1"))).toBe(2);
     expect(blobs.blobs.has("site/seite/index.html")).toBe(false);
     expect(blobs.blobs.has("site/seite/index.pdf")).toBe(false);
@@ -525,6 +535,94 @@ describe("delivery/static: removes exactly the keys it wrote", () => {
     const narrow = await createDeliveryStatic({ ...config, formats: ["html"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
     expectOk(await narrow.publish("pages", "p1"));
     expect(blobs.blobs.has("site/seite/index.pdf")).toBe(true);
+  });
+
+  it("never deletes another live output's file when a row's recorded keys point at a path it no longer has", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const delivery = await createDeliveryStatic({ ...config, formats: ["html"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    put("a", { slug__de: "x", title__de: "A", status__de: "published" });
+    expectOk(await delivery.publish("pages", "a"));
+    expect(blobs.blobs.has("site/x/index.html")).toBe(true);
+
+    put("a", { slug__de: "y" });
+    const rowA = expectOk(await db.findOne<{ id: string }>(STATUS, { type: "pages", docId: "a", locale: "de" }))!;
+    expectOk(await db.updateMany(STATUS, { id: rowA.id }, { path: "/y" }));
+
+    put("c", { slug__de: "x", title__de: "C", status__de: "published" });
+    expectOk(await delivery.publish("pages", "c"));
+    expect(blobs.blobs.has("site/x/index.html")).toBe(true);
+
+    expectOk(await delivery.publish("pages", "a"));
+    expect(blobs.blobs.has("site/y/index.html")).toBe(true);
+    expect(blobs.blobs.has("site/x/index.html")).toBe(true);
+  });
+
+  it("exports llms-full.txt from the real stored file even when the renderer's extension differs from the format name", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const renderer: Renderer = {
+      formats: () => ["html"],
+      async render() {
+        return ok({ data: "<main>Rendered body text</main>", contentType: "text/html", extension: "htm" });
+      },
+    };
+    const withFull = configSchema.parse({ ...config, formats: ["html"], llms: { full: true } });
+    const delivery = await createDeliveryStatic(withFull, { content, site, renderer, blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published" });
+    expectOk(await delivery.publish("pages", "p1"));
+    expect(blobs.blobs.has("site/seite/index.htm")).toBe(true);
+    expectOk(await delivery.exportLlms());
+    const full = blobs.blobs.get("site/llms-full.txt");
+    expect(full).toBeDefined();
+    expect(new TextDecoder().decode(full!.data)).toContain("Rendered body text");
+  });
+
+  it("removes a first render's earlier-written files when a later format's write fails", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const failingBlobs = failingPutOnce(blobs, (key) => key.endsWith(".pdf"));
+    const db = createFakePersistence();
+    const delivery = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs: failingBlobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published" });
+    const status = expectOk(await delivery.publish("pages", "p1"));
+    expect(status.find((s) => s.locale === "de")).toMatchObject({ state: "error" });
+    expect(blobs.blobs.has("site/seite/index.html")).toBe(false);
+  });
+
+  it("removes a rename's partly written new-path files when a later format's write fails, keeping the old output live", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const delivery = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "alt", title__de: "Alt", status__de: "published" });
+    expectOk(await delivery.publish("pages", "p1"));
+    expect(blobs.blobs.has("site/alt/index.html")).toBe(true);
+    expect(blobs.blobs.has("site/alt/index.pdf")).toBe(true);
+
+    const failingBlobs = failingPutOnce(blobs, (key) => key === "site/neu/index.pdf");
+    const delivery2 = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs: failingBlobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "neu" });
+    const status = expectOk(await delivery2.publish("pages", "p1"));
+    expect(status.find((s) => s.locale === "de")).toMatchObject({ state: "error", path: "/alt" });
+    expect(blobs.blobs.has("site/alt/index.html")).toBe(true);
+    expect(blobs.blobs.has("site/alt/index.pdf")).toBe(true);
+    expect(blobs.blobs.has("site/neu/index.html")).toBe(false);
+    expect(blobs.blobs.has("site/neu/index.pdf")).toBe(false);
+  });
+
+  it("a same-path format shrink does not mark the page's own output stale", async () => {
+    const { content, put } = fakeContent();
+    const blobs = fakeBlobs();
+    const db = createFakePersistence();
+    const wide = await createDeliveryStatic({ ...config, formats: ["html", "pdf"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    put("p1", { slug__de: "seite", title__de: "Seite", status__de: "published" });
+    expectOk(await wide.publish("pages", "p1"));
+    const narrow = await createDeliveryStatic({ ...config, formats: ["html"] }, { content, site, renderer: fakeRenderer(), blobs, db, logger: fakeLogger() });
+    const status = expectOk(await narrow.publish("pages", "p1"));
+    expect(status.find((s) => s.locale === "de")).toMatchObject({ state: "live", stale: false });
   });
 });
 

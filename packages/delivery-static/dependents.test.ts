@@ -1778,7 +1778,7 @@ describe("delivery/static dependencies: markAll and rows with older ids", () => 
     await seed(h);
     const late = await h.page({ slug: "spaet", title: "Spät", status: "published" });
     const at = Date.now();
-    const row = (locale: string, id: string): StatusRow => ({ id, type: "pages", docId: late, locale, state: "draft", path: null, writtenKeys: [], error: null, publishedAt: null, updatedAt: at, version: 0, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null });
+    const row = (locale: string, id: string): StatusRow => ({ id, type: "pages", docId: late, locale, state: "draft", path: null, writtenKeys: {}, error: null, publishedAt: null, updatedAt: at, version: 0, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null });
     for (const locale of ["fr", "it", "es", "nl", "pl", "pt", "sv", "da", "fi", "cs", "hu", "ro"]) expectOk(await h.db.createOne<StatusRow>(STATUS, row(locale, `old-${locale}`)));
     expectOk(await h.db.createOne<StatusRow>(STATUS, row("de", "zz-older-random-id")));
     expectOk(await h.delivery.markAll("pages"));
@@ -1877,7 +1877,7 @@ describe("delivery/static dependencies: keys recorded before this version", () =
     const brokenBlobs = failingRemoveOnce(h1.blobs, "site/seite/index.html");
     const h2 = await harness({ db: fake, content, blobs: brokenBlobs, renderer, formats: ["html", "json"] });
     expectErr(await h2.delivery.unpublish("pages", page), "TRANSIENT");
-    expect(expectOk(await fake.findOne<StatusRow>(STATUS, { id: row.id }))?.writtenKeys).toEqual(["site/seite/index.html", "site/seite/index.json"]);
+    expect(expectOk(await fake.findOne<StatusRow>(STATUS, { id: row.id }))?.writtenKeys).toEqual({ html: "site/seite/index.html", json: "site/seite/index.json" });
     expect(h1.blobs.files.has("site/seite/index.json")).toBe(true);
 
     const h3 = await harness({ db: fake, content, blobs: h1.blobs, renderer, formats: ["html"] });

@@ -44,8 +44,8 @@ export interface StatusRow extends Document {
   locale: string;
   state: RowState;
   path: string | null;
-  /** The blob keys this row's live or error output currently owns; `null` when they are not recorded yet. */
-  writtenKeys: string[] | null;
+  /** The blob key each format wrote for this row's live or error output; `null` when they are not recorded yet. */
+  writtenKeys: Record<string, string> | null;
   error: string | null;
   publishedAt: number | null;
   updatedAt: number;
@@ -175,7 +175,7 @@ type SetPlan = { kind: "none" } | { kind: "empty" } | { kind: "known"; reads: Ob
 
 interface Work {
   renderPath: string | null;
-  written: string[];
+  written: Record<string, string>;
   set: SetPlan;
   failure: string | null;
 }
@@ -390,7 +390,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     }
     return ok();
   };
-  const legacyKeysFor = (path: string): string[] => config.formats.map((format) => keyFor(config.prefix, path, format));
+  const legacyKeysFor = (path: string): Record<string, string> => Object.fromEntries(config.formats.map((format) => [format, keyFor(config.prefix, path, format)]));
+  const underPath = (key: string, path: string): boolean => key.startsWith(keyFor(config.prefix, path, ""));
 
   const pathOwned = async (path: string, excludeId?: string): Promise<Result<boolean, DeliveryError>> => {
     const filter: Filter = excludeId === undefined ? { path, state: { in: MARKABLE } } : { path, state: { in: MARKABLE }, id: { ne: excludeId } };
@@ -399,21 +400,32 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return ok(owners.value > 0);
   };
 
-  const ownedKeys = async (row: Pick<StatusRow, "id" | "path" | "writtenKeys">): Promise<string[]> => {
-    if (row.writtenKeys !== null) return row.writtenKeys;
-    if (row.path === null) return [];
-    const derived = legacyKeysFor(row.path);
-    const recorded = await db.updateMany<StatusRow>(STATUS, { id: row.id, writtenKeys: null }, { writtenKeys: derived });
-    if (isErr(recorded)) logger.error("delivery/static: could not record the keys derived for an output with no recorded keys, the next removal derives them again", { id: row.id, error: recorded.error.message });
+  const ownedKeys = async (row: Pick<StatusRow, "id" | "path" | "writtenKeys">): Promise<Record<string, string>> => {
+    const path = row.path;
+    if (path === null) return {};
+    if (row.writtenKeys !== null && Object.values(row.writtenKeys).some((key) => underPath(key, path))) return row.writtenKeys;
+    const derived = legacyKeysFor(path);
+    const recorded = await db.updateMany<StatusRow>(STATUS, { id: row.id, writtenKeys: row.writtenKeys }, { writtenKeys: derived });
+    if (isErr(recorded)) logger.error("delivery/static: could not record the keys derived for an output with no keys recorded under its own path, the next removal derives them again", { id: row.id, error: recorded.error.message });
     return derived;
   };
 
   const removeStaleKeys = async (path: string, keys: readonly string[], excludeId?: string): Promise<Result<void, DeliveryError>> => {
-    if (keys.length === 0) return ok();
+    const scoped = keys.filter((key) => underPath(key, path));
+    if (scoped.length === 0) return ok();
     const owned = await pathOwned(path, excludeId);
     if (isErr(owned)) return owned;
     if (owned.value) return ok();
-    return removeFiles(path, keys);
+    return removeFiles(path, scoped);
+  };
+
+  const removeOwnStaleKeys = async (path: string, keys: readonly string[], excludeId: string): Promise<Result<void, DeliveryError>> => {
+    const scoped = keys.filter((key) => underPath(key, path));
+    if (scoped.length === 0) return ok();
+    const owned = await pathOwned(path, excludeId);
+    if (isErr(owned)) return owned;
+    if (owned.value) return ok();
+    return removeKeys(scoped);
   };
 
   const removeFiles = async (path: string, keys: readonly string[]): Promise<Result<void, DeliveryError>> => {
@@ -639,7 +651,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       if (isErr(removed)) logger.error("delivery/static: could not remove the dependency set of a render that lost, the sweep removes it", { ...output, error: removed.error.message });
     };
     const at = now();
-    const newKeys: string[] | null = target.state === "live" ? work.written : target.path === null ? [] : null;
+    const newKeys: Record<string, string> | null = target.state === "live" ? work.written : target.path === null ? {} : null;
     const fields: Partial<Omit<StatusRow, "id">> = {
       state: target.state,
       path: target.path,
@@ -693,12 +705,18 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       const ownId = before?.id ?? statusIdOf(output.type, output.docId, output.locale);
       const oldPath = before === null ? null : before.path;
       if (before !== null && oldPath !== null && oldPath !== target.path) {
-        const staleKeys = await ownedKeys(before);
+        const staleKeys = Object.values(await ownedKeys(before));
         logged("could not remove the files of a path this output left", { ...output, path: oldPath })(await removeStaleKeys(oldPath, staleKeys));
       } else if (before !== null && oldPath !== null && oldPath === target.path && target.state === "live") {
-        const priorKeys = await ownedKeys(before);
-        const stale = priorKeys.filter((key) => !work.written.includes(key));
-        if (stale.length > 0) logged("could not remove files a re-render no longer writes", { ...output, path: oldPath })(await removeStaleKeys(oldPath, stale, ownId));
+        const priorKeys = Object.values(await ownedKeys(before));
+        const currentKeys = new Set(Object.values(work.written));
+        const stale = priorKeys.filter((key) => !currentKeys.has(key));
+        if (stale.length > 0) logged("could not remove files a re-render no longer writes", { ...output, path: oldPath })(await removeOwnStaleKeys(oldPath, stale, ownId));
+      }
+      if (work.renderPath !== null && work.renderPath !== target.path && Object.keys(work.written).length > 0) {
+        const owned = await pathOwned(work.renderPath);
+        if (isErr(owned)) return owned;
+        if (!owned.value) logged("could not remove the files of a render that failed partway", { ...output, path: work.renderPath })(await removeFiles(work.renderPath, Object.values(work.written)));
       }
       const previousSet = before?.depSet ?? null;
       if (previousSet !== null && previousSet !== set?.setId) logged("could not retire the previous dependency set, the sweep removes it", output)(await setState(previousSet, "retired"));
@@ -731,10 +749,10 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       return commit(flight, output, null, renderId, target, work);
     }
     const stillServed = current !== null && (current.state === "live" || current.state === "error");
-    if (work.written.length > 0 && work.renderPath !== null && !(stillServed && current.path === work.renderPath)) {
+    if (Object.keys(work.written).length > 0 && work.renderPath !== null && !(stillServed && current.path === work.renderPath)) {
       const owned = await pathOwned(work.renderPath);
       if (isErr(owned)) return owned;
-      if (!owned.value) logged("could not remove the files of a render that lost", { ...output, path: work.renderPath })(await removeFiles(work.renderPath, work.written));
+      if (!owned.value) logged("could not remove the files of a render that lost", { ...output, path: work.renderPath })(await removeFiles(work.renderPath, Object.values(work.written)));
     }
     await dropOwnSet();
     if (stillServed) {
@@ -791,8 +809,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     return winner.value;
   };
 
-  const renderFormats = async (type: string, id: string, locale: string | undefined, path: string, document: Record<string, unknown>): Promise<{ outputs: RenderOutput[] } | { failure: string }> => {
-    const outputs: RenderOutput[] = [];
+  const renderFormats = async (type: string, id: string, locale: string | undefined, path: string, document: Record<string, unknown>): Promise<{ outputs: Array<{ format: string; output: RenderOutput }> } | { failure: string }> => {
+    const outputs: Array<{ format: string; output: RenderOutput }> = [];
     for (const format of config.formats) {
       const rendered = await renderWithTimeout({ type, id, ...(locale === undefined ? {} : { locale }), path, format, document });
       if (rendered === "timeout") return { failure: `render timed out after ${dependencies.renderTimeoutSeconds}s` };
@@ -803,7 +821,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         const reservedAsset = reservedMatch(`/${assetPath}`, config.reservedPaths);
         if (reservedAsset !== undefined) return { failure: `asset /${assetPath} lies under the reserved path ${reservedAsset}` };
       }
-      outputs.push(rendered.value);
+      outputs.push({ format, output: rendered.value });
     }
     return { outputs };
   };
@@ -827,7 +845,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     const view = viewResult.value;
     if (!view) {
       if (before?.state === "deleted") return ok({ status: null, failure: null });
-      return commit(flight, output, before, renderId, { state: "draft", path: null, error: null }, { renderPath: null, written: [], set: { kind: "none" }, failure: null });
+      return commit(flight, output, before, renderId, { state: "draft", path: null, error: null }, { renderPath: null, written: {}, set: { kind: "none" }, failure: null });
     }
     const rules = { home: tc.home, slugField: tc.slugField, prefixPrimary: config.prefixPrimary, fallback: config.fallback, filter: statusFilter };
     const options = { ...(locale === undefined ? {} : { locale }), rules };
@@ -840,21 +858,21 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     const keptPath = before !== null && (before.state === "live" || before.state === "error") ? before.path : null;
     const failed = (message: string, work: Omit<Work, "failure" | "set">, reads: ObservedRead[]): Promise<Result<RenderOutcome, DeliveryError>> =>
       commit(flight, output, before, renderId, { state: "error", path: keptPath, error: message }, { ...work, set: { kind: "failure", reads }, failure: message });
-    if (path === null) return commit(flight, output, before, renderId, { state: "error", path: null, error: `no ${tc.slugField}` }, { renderPath: null, written: [], set: { kind: "empty" }, failure: null });
+    if (path === null) return commit(flight, output, before, renderId, { state: "error", path: null, error: `no ${tc.slugField}` }, { renderPath: null, written: {}, set: { kind: "empty" }, failure: null });
     const reservedPage = reservedMatch(path, config.reservedPaths);
-    if (reservedPage !== undefined) return failed(`path ${path} is reserved (${reservedPage})`, { renderPath: null, written: [] }, linkScope.reads);
+    if (reservedPage !== undefined) return failed(`path ${path} is reserved (${reservedPage})`, { renderPath: null, written: {} }, linkScope.reads);
 
     const renderScope = await observeReads(() => renderFormats(type, id, locale, path, doc));
     const reads = [...linkScope.reads, ...renderScope.reads];
-    if (renderScope.result.status === "rejected") return failed(errorText(renderScope.result.reason), { renderPath: null, written: [] }, reads);
+    if (renderScope.result.status === "rejected") return failed(errorText(renderScope.result.reason), { renderPath: null, written: {} }, reads);
     const rendered = renderScope.result.value;
-    if ("failure" in rendered) return failed(rendered.failure, { renderPath: null, written: [] }, reads);
+    if ("failure" in rendered) return failed(rendered.failure, { renderPath: null, written: {} }, reads);
 
-    const written: string[] = [];
+    const written: Record<string, string> = {};
     try {
-      for (const out of rendered.outputs) {
+      for (const { format, output: out } of rendered.outputs) {
         const key = keyFor(config.prefix, path, out.extension);
-        written.push(key);
+        written[format] = key;
         const stored = await blobs.put(key, bytes(out.data), { contentType: out.contentType });
         if (isErr(stored)) return failed(stored.error.message, { renderPath: path, written }, reads);
         for (const asset of out.assets ?? []) {
@@ -902,7 +920,8 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
             locale: row.locale,
             docId: row.docId,
             html: async () => {
-              const blob = await blobs.get(keyFor(config.prefix, path, "html"));
+              const key = row.writtenKeys?.html ?? keyFor(config.prefix, path, "html");
+              const blob = await blobs.get(key);
               if (isErr(blob)) return err(transientOnly(blob.error, "blobstore@1"));
               return ok(blob.value ? new TextDecoder().decode(blob.value) : null);
             },
@@ -1145,7 +1164,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
               locale,
               state: "draft",
               path: null,
-              writtenKeys: [],
+              writtenKeys: {},
               error: null,
               publishedAt: null,
               updatedAt: at,
@@ -1177,7 +1196,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       const present = new Set(pending.map((r) => r.locale));
       for (const locale of locales.length > 0 ? locales : [""]) {
         if (present.has(locale)) continue;
-        const blocked = await db.createOne<StatusRow>(STATUS, { id: statusIdOf(type, id, locale), type, docId: id, locale, state: "deleted", path: null, writtenKeys: [], error: null, publishedAt: null, updatedAt: now(), version: 1, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null });
+        const blocked = await db.createOne<StatusRow>(STATUS, { id: statusIdOf(type, id, locale), type, docId: id, locale, state: "deleted", path: null, writtenKeys: {}, error: null, publishedAt: null, updatedAt: now(), version: 1, depSet: null, depCount: null, staleAt: null, staleToken: null, staleRetryAt: null, staleAttempts: 0, staleError: null, claimedBy: null, claimedAt: null });
         if (!isErr(blocked)) continue;
         if (blocked.error.code !== "CONFLICT") return err(dbFailure(blocked.error));
         const raced = await readRow(type, id, locale);
@@ -1204,10 +1223,10 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
         if (current === null) continue;
         if (tombstoned) count += 1;
         if (current.path !== null) {
-          const keys = await ownedKeys(current);
+          const keys = Object.values(await ownedKeys(current));
           const removed = await removeStaleKeys(current.path, keys);
           if (isErr(removed)) return removed;
-          const cleared = await db.updateMany<StatusRow>(STATUS, { id: current.id, state: "deleted" }, { path: null, writtenKeys: [] });
+          const cleared = await db.updateMany<StatusRow>(STATUS, { id: current.id, state: "deleted" }, { path: null, writtenKeys: {} });
           if (isErr(cleared)) return err(dbFailure(cleared.error));
         }
         if (tombstoned && current.depSet !== null) logged("could not remove the dependency set of an unpublished output, the sweep removes it", output)(await retireSet(current.depSet, false));
@@ -1295,10 +1314,10 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       if (isErr(tombstones)) return err(dbFailure(tombstones.error));
       for (const row of tombstones.value.items) {
         if (row.path !== null) {
-          const keys = await ownedKeys(row);
+          const keys = Object.values(await ownedKeys(row));
           const removed = await removeStaleKeys(row.path, keys);
           if (isErr(removed)) continue;
-          const cleared = await db.updateMany<StatusRow>(STATUS, { id: row.id, version: row.version }, { path: null, writtenKeys: [] });
+          const cleared = await db.updateMany<StatusRow>(STATUS, { id: row.id, version: row.version }, { path: null, writtenKeys: {} });
           if (isErr(cleared) || cleared.value === 0) continue;
         }
         const deleted = await db.deleteMany(STATUS, { id: row.id, version: row.version });

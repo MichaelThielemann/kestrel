@@ -807,11 +807,16 @@ Net changes since 5.8.1.
 
 - `delivery-static`: unpublish, a slug or locale change and the tombstone sweep derived the blob keys to remove
   from the format name (`html`, `pdf`, …) instead of the renderer's own `extension`, so a renderer whose extension
-  differs from its format name left its files behind. Each status row now records the exact keys its own `live` or
-  `error` output wrote and removals delete exactly those, never re-derived; a re-render that stops writing a key at
-  the same path removes that key too, without touching a path another live or error output still owns. A row
-  written before this change derives its keys once, the same way removal always did, and remembers them for the
-  next removal.
+  differs from its format name left its files behind; `delivery.exportLlms`'s `llms-full.txt` made the same
+  assumption reading a page's stored HTML back, so it silently skipped that page's body. Each status row now
+  records the key its own `live` or `error` output wrote per format and every removal deletes exactly those, never
+  re-derived, only ever within the path being cleaned up: a re-render that stops writing a key at the same path
+  removes that key too, without recording a path change or marking its own output stale over its own cleanup, and a
+  path or key another live or error output still owns is never touched. A row written before this change, or whose
+  recorded keys no longer lie under its own path (an older process having moved it without knowing about them),
+  derives its keys once, the same way removal always did, and remembers the result for the next removal. A render
+  that wrote some of its keys before a later write, or its whole first write, failed no longer leaves those orphaned:
+  they are removed the same way a losing render's files are.
 - `authz-roles`: a caller whose role claim is `constructor`, `toString`, `valueOf`,
   `hasOwnProperty`, `__proto__` or another `Object.prototype` key no longer trips an inherited,
   non-array value and a 500; role lookups go through a `Map`, not a plain object index, in both

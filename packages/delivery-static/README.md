@@ -162,14 +162,19 @@ is always followed by a render of the current content. `delivery.unpublish` leav
 (also one that was never rendered), which blocks a render still in flight, and which `delivery.resumeStale` removes
 after `claimTtlSeconds`; reads never return it.
 
-**Removes exactly what it wrote.** Each status row keeps the blob keys its own `live` or `error` output currently
-owns, taken from the renderer's own `extension` for each write, not derived from the format name – a renderer whose
-extension differs from its format leaves nothing behind. Unpublish, a slug or locale change, a losing render's
+**Removes exactly what it wrote.** Each status row keeps the blob key its own `live` or `error` output wrote per
+format, taken from the renderer's own `extension`, not derived from the format name – a renderer whose extension
+differs from its format leaves nothing behind. Unpublish, a slug or locale change, a losing or partly failed render's
 cleanup and the tombstone sweep all remove exactly those recorded keys, and a re-render that no longer writes a key
-its previous render did removes that one key too, whether or not the path itself changed; a path that another live
-or error output still owns is never touched. A row written before this was recorded derives its keys once, the same
-way an unpublish always did, from its path and the currently configured formats, and remembers the result for the
-next removal instead of deriving it again.
+its previous render did removes that one key too, whether or not the path itself changed; only a key that still lies
+under the path being cleaned up is ever touched, and a path or key that another live or error output still owns is
+never removed. A row written before this was recorded derives its keys once, the same way an unpublish always did,
+from its path and the currently configured formats, and remembers the result for the next removal instead of
+deriving it again; recorded keys that no longer lie under the row's own path (an older process moved it without
+knowing about them) are never trusted and are derived afresh the same way. A re-render that writes fewer keys at the
+same path removes the difference without recording a path change, so it never marks its own output stale over its
+own cleanup; `delivery.exportLlms`'s `llms-full.txt` reads each page's own recorded `html` key the same way, instead
+of assuming the format name is the file's extension.
 
 **Changes that overlap a render.** A render reads a document for the first time; the document changes and is
 marked before the render has recorded its dependencies, so the mark finds nothing. To close that gap without
