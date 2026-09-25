@@ -172,7 +172,7 @@ function solelyOptionalResultWrite(description: StepDescription): boolean {
 }
 
 function declaresOutput(description: StepDescription): boolean {
-  if (description.output !== undefined || description.extendsOutput !== undefined || description.extendsItems !== undefined || description.binary === true) return true;
+  if (description.output !== undefined || description.extendsOutput !== undefined || description.extendsItems !== undefined || description.binary === true || description.narrows !== undefined) return true;
   return description.terminalOutput !== undefined && solelyOptionalResultWrite(description);
 }
 
@@ -180,7 +180,7 @@ function checkUndeclaredOutput(sink: Sink, pipelines: ReadonlyMap<string, Resolv
   for (const pipeline of pipelines.values()) {
     for (const step of pipeline.steps) {
       if (!step.description.writes.some((path) => writeRoot(path) === "result") || declaresOutput(step.description)) continue;
-      sink.fail("undeclared-output", `pipelines/${pipeline.name}`, `step "${step.name}" writes result without declaring output, extendsOutput, extendsItems or binary: true (terminalOutput alone only covers an optional "result?" write)`, { step: step.name });
+      sink.fail("undeclared-output", `pipelines/${pipeline.name}`, `step "${step.name}" writes result without declaring output, extendsOutput, extendsItems, narrows or binary: true (terminalOutput alone only covers an optional "result?" write)`, { step: step.name });
     }
   }
 }

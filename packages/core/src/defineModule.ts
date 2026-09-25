@@ -74,6 +74,30 @@ export interface StepDescription {
    * another `authz@1` provider must perform the same check itself, or the flag goes unchecked.
    */
   anonymous?: "required";
+  /**
+   * The step only removes members from `result`: it adds none and changes no value it keeps. It declares
+   * the step's write of `result`, the folded output schema passes through it unchanged and stays the
+   * answer of a caller the step leaves untouched, and under `validateOutput` the answer after it is
+   * checked against that schema without its `required` lists. The core never evaluates the labels or the
+   * paths; a tool such as an OpenAPI generator prints one answer per label from them.
+   */
+  narrows?: NarrowsDeclaration;
+}
+
+/** Where the items of a narrowed answer are, and which member paths each audience keeps of one item. */
+export interface NarrowsDeclaration {
+  /**
+   * `item`: the answer is one item. `list`: the answer is `{ items, total }` and every element of `items`
+   * is an item; `total` is kept. `array`: the answer is an array of items. `file`: the answer is a binary
+   * file whose bytes, type and name are kept; its paths name response headers as `headers.<name>`.
+   */
+  shape: "item" | "list" | "array" | "file";
+  /**
+   * Per audience label, the member paths that audience keeps of one item: `name` keeps a member with
+   * everything below it, `name.sub` keeps `name` holding only `sub`, `name[].sub` keeps the array `name`
+   * whose elements hold only `sub`. Every member no path names is removed.
+   */
+  answers: Readonly<Record<string, readonly string[]>>;
 }
 
 type DescriptionOf<F> = F extends StepFactory ? (arg: string) => StepDescription : StepDescription;

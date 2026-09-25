@@ -9977,6 +9977,33 @@
                         "enum": [
                           "required"
                         ]
+                      },
+                      "narrows": {
+                        "type": "object",
+                        "properties": {
+                          "shape": {
+                            "type": "string",
+                            "enum": [
+                              "item",
+                              "list",
+                              "array",
+                              "file"
+                            ]
+                          },
+                          "answers": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "required": [
+                          "shape",
+                          "answers"
+                        ]
                       }
                     },
                     "required": [
@@ -10087,6 +10114,33 @@
                               "type": "string",
                               "enum": [
                                 "required"
+                              ]
+                            },
+                            "narrows": {
+                              "type": "object",
+                              "properties": {
+                                "shape": {
+                                  "type": "string",
+                                  "enum": [
+                                    "item",
+                                    "list",
+                                    "array",
+                                    "file"
+                                  ]
+                                },
+                                "answers": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                }
+                              },
+                              "required": [
+                                "shape",
+                                "answers"
                               ]
                             }
                           },
@@ -14853,6 +14907,33 @@
                             "enum": [
                               "required"
                             ]
+                          },
+                          "narrows": {
+                            "type": "object",
+                            "properties": {
+                              "shape": {
+                                "type": "string",
+                                "enum": [
+                                  "item",
+                                  "list",
+                                  "array",
+                                  "file"
+                                ]
+                              },
+                              "answers": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            },
+                            "required": [
+                              "shape",
+                              "answers"
+                            ]
                           }
                         },
                         "required": [
@@ -14963,6 +15044,33 @@
                                   "type": "string",
                                   "enum": [
                                     "required"
+                                  ]
+                                },
+                                "narrows": {
+                                  "type": "object",
+                                  "properties": {
+                                    "shape": {
+                                      "type": "string",
+                                      "enum": [
+                                        "item",
+                                        "list",
+                                        "array",
+                                        "file"
+                                      ]
+                                    },
+                                    "answers": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "shape",
+                                    "answers"
                                   ]
                                 }
                               },

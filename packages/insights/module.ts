@@ -28,6 +28,14 @@ const STEP_DESCRIPTION: JsonSchema = {
     binary: { type: "boolean" },
     atomicSafe: { type: "boolean" },
     anonymous: { type: "string", enum: ["required"] },
+    narrows: {
+      type: "object",
+      properties: {
+        shape: { type: "string", enum: ["item", "list", "array", "file"] },
+        answers: { type: "object", additionalProperties: STRINGS },
+      },
+      required: ["shape", "answers"],
+    },
   },
   required: ["summary", "reads", "writes"],
 };

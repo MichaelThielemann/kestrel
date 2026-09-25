@@ -129,6 +129,38 @@ describe("insights/default module steps via runPipeline", () => {
     await kestrel.stop();
   });
 
+  it("readManifest's schema describes a step declaring narrows", async () => {
+    const narrows = { shape: "item", answers: { visitor: ["id"] } } as const;
+    const withNarrows = defineModule({
+      name: "withnarrows/test",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return {};
+      },
+      steps: () => ({ produce: async (ctx: Context) => ok({ ...ctx, result: { id: "a", note: "b" } }), cut: async (ctx: Context) => ok(ctx) }),
+      describe: () => ({
+        produce: { summary: "produces", reads: [], writes: ["result"], output: { type: "object", properties: { id: { type: "string" }, note: { type: "string" } }, required: ["id", "note"] } },
+        cut: { summary: "keeps the granted members", reads: ["result"], writes: ["result?"], narrows },
+      }),
+    });
+    const kestrel = await boot({
+      config: { modules: [{ use: "./withnarrows.ts", config: {} }, { use: "@michaelthielemann/kestrel-insights", config: {} }], triggers: [], http: null },
+      modules: [withNarrows, module],
+      pipelines: [definePipeline({ name: "readIt", steps: ["withnarrows.produce", "withnarrows.cut"] }), manifestPipeline],
+      logger: silentLogger,
+      validateOutput: true,
+    });
+    const manifest = await kestrel.run("insightsManifest", { trigger: { kind: "http", name: "GET /x" } });
+    expect(manifest.status).toBe(200);
+    const result = boundaryCast<{ pipelines: Array<{ name: string; steps: Array<{ description: Record<string, unknown> }> }> }>(manifest.result, "json");
+    expect(result.pipelines.find((p) => p.name === "readIt")?.steps[1]?.description).toMatchObject({ narrows });
+    const tampered = { ...result, pipelines: result.pipelines.map((p) => ({ ...p, steps: p.steps.map((s) => (s.description.narrows === undefined ? s : { ...s, description: { ...s.description, narrows: { shape: "sideways", answers: { visitor: ["id"] } } } })) })) };
+    expect(validateSchema(MANIFEST_SCHEMA, tampered).map((p) => p.path)).toEqual(["$.pipelines[0].steps[1].description.narrows.shape"]);
+    await kestrel.stop();
+  });
+
   it("readManifest answers the boot warnings and matches its output schema", async () => {
     const probeOptional = defineModule({
       name: "probe2/test",

@@ -8,7 +8,7 @@ import { failure, isKestrelError, type KestrelError } from "./errors.ts";
 import { isErr, type Result } from "./result.ts";
 import { coerceQuery, resolveOutputSchema, validateSchema, type SchemaProblem } from "./schema.ts";
 import { isRecord } from "./guards.ts";
-import type { StepDescription } from "./defineModule.ts";
+import type { JsonSchema, StepDescription } from "./defineModule.ts";
 import { logWarn } from "./logger.ts";
 import { writeRoot } from "./writes.ts";
 
@@ -119,10 +119,26 @@ function optionalResultWrite(step: ResolvedStep): boolean {
   return step.description.writes.includes("result?");
 }
 
+function withoutRequired(schema: JsonSchema): JsonSchema {
+  const relaxed: JsonSchema = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "required" && Array.isArray(value)) continue;
+    relaxed[key] = relaxedValue(value);
+  }
+  return relaxed;
+}
+
+function relaxedValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(relaxedValue);
+  return isRecord(value) ? withoutRequired(value) : value;
+}
+
 function checkOutput(step: ResolvedStep, descriptionsSoFar: readonly StepDescription[], before: Context, after: Context): void {
   if (optionalResultWrite(step) && Object.is(before.result, after.result)) return;
-  const schema = resolveOutputSchema(descriptionsSoFar);
-  if (schema === undefined) return;
+  const folded = resolveOutputSchema(descriptionsSoFar);
+  if (folded === undefined) return;
+  const narrowed = descriptionsSoFar.some((d) => d.narrows !== undefined);
+  const schema = narrowed ? withoutRequired(folded) : folded;
   const problems = validateSchema(schema, after.result);
   if (problems.length > 0) {
     throw new Error(`step "${step.name}": result does not match describe().output (${problems.map((p) => `${p.path} ${p.message}`).join("; ")})`);

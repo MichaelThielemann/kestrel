@@ -590,7 +590,7 @@ describe("boot", () => {
     expectTypeOf<Omit<UnwrittenOptionalReadWarning, "code">>().toMatchTypeOf<Record<string, string>>();
   });
 
-  it("fails to boot for a step that writes result without declaring output, extendsOutput, extendsItems or binary: true", async () => {
+  it("fails to boot for a step that writes result without declaring output, extendsOutput, extendsItems, narrows or binary: true", async () => {
     const bare = defineModule({
       name: "bare/fake",
       provides: [],
@@ -605,7 +605,7 @@ describe("boot", () => {
     const bareCreate = definePipeline({ name: "bareCreate", steps: ["bare.create"] });
     const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./bare", config: {} }] };
     await expect(boot({ config, modules: [...modules, bare], pipelines: [...pipelines, bareCreate], logger: silentLogger })).rejects.toThrow(
-      /\[pipelines\/bareCreate\] step "bare\.create" writes result without declaring output, extendsOutput, extendsItems or binary: true/,
+      /\[pipelines\/bareCreate\] step "bare\.create" writes result without declaring output, extendsOutput, extendsItems, narrows or binary: true/,
     );
   });
 
@@ -854,7 +854,7 @@ describe("boot", () => {
     const probeOnly = definePipeline({ name: "probeOnly", steps: ["mandatory.probe"] });
     const config = { ...baseConfig, modules: [...baseConfig.modules, { use: "./mandatory", config: {} }] };
     await expect(boot({ config, modules: [...modules, mandatory], pipelines: [...pipelines, probeOnly], logger: silentLogger })).rejects.toThrow(
-      /\[pipelines\/probeOnly\] step "mandatory\.probe" writes result without declaring output, extendsOutput, extendsItems or binary: true \(terminalOutput alone only covers an optional "result\?" write\)/,
+      /\[pipelines\/probeOnly\] step "mandatory\.probe" writes result without declaring output, extendsOutput, extendsItems, narrows or binary: true \(terminalOutput alone only covers an optional "result\?" write\)/,
     );
   });
 
