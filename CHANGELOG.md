@@ -415,6 +415,10 @@ Net changes since 5.8.1.
   suites, each suite listed by name (`@michaelthielemann/kestrel-contracts/<name>.contract.test`), and
   nothing else. Its own unit tests are neither built nor published; any other `*.test` subpath answers
   `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+- `http.healthPath` answers from `kestrel.health()`: the body is `{ ok, restartRequired, modules,
+  uptimeSeconds }`, and the status is 503 while a module reports `restartRequired: true`, 200
+  otherwise (also while `ok` is false). A probe that expected `{ ok: true }` on every 200, or 200 on
+  every request, reads the new body and status.
 
 ### Added
 

@@ -96,3 +96,57 @@ describe("kestrel.health()", () => {
     await kestrel.stop();
   });
 });
+
+describe("http.healthPath", () => {
+  let state: ModuleHealth = { ok: true };
+  const watched = defineModule({
+    name: "watcher/switchable",
+    provides: [],
+    requires: [],
+    configSchema: z.object({}).strict(),
+    async setup() {
+      return {};
+    },
+    health: (): ModuleHealth => state,
+  });
+
+  async function served(): Promise<{ kestrel: Kestrel; base: string }> {
+    const kestrel = await boot({
+      config: { ...config, modules: [...config.modules, { use: "./watcher-switchable.ts", config: {} }], http: { port: 0 } },
+      modules: [store, watched],
+      pipelines: [],
+      logger: silentLogger,
+    });
+    const { http } = await kestrel.start();
+    return { kestrel, base: `http://127.0.0.1:${http?.port ?? 0}` };
+  }
+
+  it("answers 200 with kestrel.health() and the uptime while every module is ok", async () => {
+    state = { ok: true };
+    const { kestrel, base } = await served();
+    const res = await fetch(`${base}/health`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, restartRequired: false, modules: [{ module: "watcher/switchable", ok: true }], uptimeSeconds: expect.any(Number) as unknown });
+    await kestrel.stop();
+  });
+
+  it("answers 200 with ok false when a module is not ok but recovers on its own", async () => {
+    state = { ok: false, reason: "catching up", restartRequired: false };
+    const { kestrel, base } = await served();
+    const res = await fetch(`${base}/health`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: false, restartRequired: false, modules: [{ module: "watcher/switchable", ok: false, reason: "catching up", restartRequired: false }] });
+    await kestrel.stop();
+  });
+
+  it("answers 503 once a module requires a restart, read on every request", async () => {
+    state = { ok: true };
+    const { kestrel, base } = await served();
+    expect((await fetch(`${base}/health`)).status).toBe(200);
+    state = { ok: false, reason: "the store is unusable after a failed rollback", restartRequired: true };
+    const res = await fetch(`${base}/health`);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ ok: false, restartRequired: true, modules: [{ module: "watcher/switchable", reason: "the store is unusable after a failed rollback" }] });
+    await kestrel.stop();
+  });
+});

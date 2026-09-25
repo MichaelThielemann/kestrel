@@ -697,6 +697,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
           ...(http.trustedHeader === undefined ? {} : { trustedHeader: http.trustedHeader }),
           allow: http.allow,
           healthPath: http.healthPath,
+          health: introspection.health,
           inlineTypes: http.inlineTypes,
           timeouts: http.timeouts,
           ...(http.corsOrigin === undefined ? {} : { corsOrigin: http.corsOrigin }),

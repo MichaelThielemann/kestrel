@@ -93,7 +93,7 @@ event and cron triggers still run.
 | `proxyHops` | integer | `1` | Which `X-Forwarded-For` entry, counted from the right |
 | `trustedHeader` | string | – | A platform's client header; its first value wins over `trustProxy` |
 | `allow` | string[] | `[]` | IPv4/IPv6 addresses or CIDR ranges; empty means open |
-| `healthPath` | string \| `null` | `"/health"` | Answers `{ ok, uptimeSeconds }` without a pipeline |
+| `healthPath` | string \| `null` | `"/health"` | Answers `kestrel.health()` plus `uptimeSeconds` without a pipeline |
 | `inlineTypes` | string[] | `[]` | Content types served `inline` beyond the built-in safe set |
 | `timeouts.requestMs` | integer | `30000` | `server.requestTimeout` |
 | `timeouts.headersMs` | integer | `10000` | `server.headersTimeout` |
@@ -103,12 +103,13 @@ event and cron triggers still run.
 address nor a CIDR range aborts the boot. `image/svg+xml` in `inlineTypes` requires a module that
 registers the step `sanitize.svg`, otherwise the boot aborts.
 
-`healthPath` answers unconditionally: it is a liveness check for the HTTP server, not a readiness
-check for the modules behind it. A host that needs the latter reads `kestrel.health()` itself
-(see [`architecture.md`](architecture.md) § Module hooks and `kestrel.health()`) — for example
-from a custom pipeline step, or from code that holds the booted `Kestrel` instance directly — and
-answers its own probe route from that: `ok: false` for readiness, `restartRequired: true` for
-liveness.
+`healthPath` is a liveness probe. It answers `kestrel.health()` (`{ ok, restartRequired, modules }`,
+see [`architecture.md`](architecture.md) § Module hooks and `kestrel.health()`) plus
+`uptimeSeconds`, read afresh on every request: 503 once a module reports `restartRequired: true`,
+because the process cannot recover without a restart, and 200 otherwise — also while `ok` is false,
+since a module that is not ok but needs no restart recovers on its own. A readiness probe routes on
+`ok` instead; a host that needs one answers its own route from `kestrel.health()`, for example from
+code that holds the booted `Kestrel` instance.
 
 Request and response behaviour — headers, the `http` log line, client-address resolution, binary
 results — is described in [`pipelines.md`](pipelines.md) § HTTP Operation.

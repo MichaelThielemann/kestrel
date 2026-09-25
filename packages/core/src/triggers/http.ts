@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { boundaryCast } from "../cast.ts";
 import { isBinaryResult, requestIdOf, type ContextInput, type UploadedFile } from "../context.ts";
+import type { InstanceHealth } from "../defineModule.ts";
 import type { CoreCode } from "../errors.ts";
 import type { Logger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
@@ -251,6 +252,7 @@ export interface HttpOptions extends ClientIpOptions {
   corsOrigin?: string;
   maxBodyBytes?: number;
   healthPath?: string | null;
+  health?: () => InstanceHealth;
   inlineTypes?: readonly string[];
   timeouts?: HttpTimeouts;
 }
@@ -308,7 +310,8 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
     const requestId = requestIdOf(req.headers["x-request-id"]);
     if (healthPath && url.pathname === healthPath && req.method === "GET") {
       const meta: ResponseMeta = requestId === undefined ? { runId: randomUUID() } : { runId: randomUUID(), requestId };
-      return write(res, buildResponse(200, { ok: true, uptimeSeconds: Math.round((Date.now() - started) / 1000) }, meta));
+      const health = options.health?.() ?? { ok: true, restartRequired: false, modules: [] };
+      return write(res, buildResponse(health.restartRequired ? 503 : 200, { ...health, uptimeSeconds: Math.round((Date.now() - started) / 1000) }, meta));
     }
     const begin = performance.now();
     const match = matchRoute(routes, req.method ?? "GET", url.pathname);

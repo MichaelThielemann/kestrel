@@ -151,7 +151,9 @@ declaring module; a module without the hook is left out. `ok` is false if any li
 not ok; `restartRequired` is true if any listed module reports it. A readiness probe reads `ok` —
 false means route no traffic here — and this never depends on lock contention, since no module
 hook may report the outcome of a call. A liveness probe reads `restartRequired` — true means the
-process cannot recover on its own and needs a restart, not a retry.
+process cannot recover on its own and needs a restart, not a retry. The built-in HTTP server's
+`http.healthPath` is that liveness probe: it answers this body plus `uptimeSeconds`, with 503 while
+`restartRequired` is true and 200 otherwise.
 
 ## Errors loud and cheap – four levels
 

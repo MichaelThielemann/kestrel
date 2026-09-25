@@ -152,7 +152,8 @@ $ curl -s localhost:4000/pages
 ```
 
 Each request logs one line per step with its duration and outcome, plus one `http` line, and every
-response carries `X-Kestrel-Run-Id`. `GET /health` answers without running a pipeline.
+response carries `X-Kestrel-Run-Id`. `GET /health` answers without running a pipeline: 503 once a
+module reports that the process needs a restart, 200 otherwise.
 
 A misconfiguration stops the boot instead of failing at runtime: an unknown step name, a missing
 contract, a step reading context a previous step never wrote, or a cycle between modules ends with
