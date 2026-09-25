@@ -127,7 +127,7 @@ export interface FakePersistence extends Persistence {
   failScope(phase: "begin" | "commit" | "rollback"): void;
   /** How long a fake scope may hold the store; the fake's equivalent of `scopeTimeoutMs`. Default 5000. */
   scopeTimeoutMs: number;
-  /** How long a call may wait its turn behind an open scope; the fake's equivalent of `acquireTimeoutMs`. Default 5000. */
+  /** How long a call or a scope may wait its turn; the fake's equivalent of `acquireTimeoutMs`. Once it runs out, a call answers `Err(TRANSIENT)` and a scope a failed `begin`, and neither runs afterwards. Default 5000. */
   acquireTimeoutMs: number;
 }
 
@@ -146,10 +146,13 @@ export function createFakePersistence(): FakePersistence {
   const state = { scopeTimeoutMs: 5000, acquireTimeoutMs: 5000 };
 
   let tail: Promise<void> = Promise.resolve();
-  const enqueue = <T>(fn: () => Promise<T> | T, deadline?: number, onStart?: () => void): Promise<T> => {
+  const enqueue = <T>(fn: () => Promise<T> | T): Promise<T> => {
+    let turn: "waiting" | "started" | "abandoned" = "waiting";
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const handOff = (): Promise<T> | T => {
-      if (deadline !== undefined && Date.now() > deadline) return Promise.reject(new AcquireTimeout());
-      onStart?.();
+      if (turn === "abandoned") return Promise.reject(new AcquireTimeout());
+      turn = "started";
+      clearTimeout(timer);
       return fn();
     };
     const run = tail.then(handOff, handOff);
@@ -157,8 +160,16 @@ export function createFakePersistence(): FakePersistence {
       () => undefined,
       () => undefined,
     );
-    return run;
+    const abandoned = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        turn = "abandoned";
+        reject(new AcquireTimeout());
+      }, state.acquireTimeoutMs);
+      timer.unref?.();
+    });
+    return Promise.race([run, abandoned]);
   };
+  const timedOutWaiting = (): PersistenceError => failure("TRANSIENT", "fakePersistence: timed out waiting for the store");
 
   const checkScopeState = (collection: string): void => {
     const store = als.getStore();
@@ -167,12 +178,12 @@ export function createFakePersistence(): FakePersistence {
     }
     if (store?.state === "committed") console.warn("fakePersistence: call after the atomic scope committed");
   };
-  const routed = <T>(collection: string, fn: () => T): Promise<T> => {
+  const routed = <T>(collection: string, fn: () => Result<T, PersistenceError>): Promise<Result<T, PersistenceError>> => {
     try {
       checkScopeState(collection);
       if (inScope()) return Promise.resolve(fn());
       return enqueue(fn).catch((cause: unknown) => {
-        if (cause instanceof AcquireTimeout) throw new Error(`fakePersistence: timed out waiting for the store (collection "${collection}")`);
+        if (cause instanceof AcquireTimeout) return err(timedOutWaiting());
         throw cause;
       });
     } catch (cause) {
@@ -292,19 +303,10 @@ export function createFakePersistence(): FakePersistence {
     if (inScope()) {
       return { kind: "failed", phase: "begin", error: failure("INTERNAL", "fakePersistence: an atomic scope is already open in this call chain") };
     }
-    const deadline = Date.now() + state.acquireTimeoutMs;
-    let acquireTimer: ReturnType<typeof setTimeout> | undefined;
-    const queued: Promise<AtomicOutcome> = enqueue(() => runFakeScope(body), deadline, () => {
-      if (acquireTimer !== undefined) clearTimeout(acquireTimer);
-    }).catch((cause: unknown) => {
-      if (cause instanceof AcquireTimeout) return { kind: "failed", phase: "begin", error: failure("TRANSIENT", "fakePersistence: timed out waiting for the store") };
+    return enqueue(() => runFakeScope(body)).catch((cause: unknown): AtomicOutcome => {
+      if (cause instanceof AcquireTimeout) return { kind: "failed", phase: "begin", error: timedOutWaiting() };
       throw cause;
     });
-    const acquireTimeout = new Promise<AtomicOutcome>((resolve) => {
-      acquireTimer = setTimeout(() => resolve({ kind: "failed", phase: "begin", error: failure("TRANSIENT", "fakePersistence: timed out waiting for the store") }), state.acquireTimeoutMs);
-      acquireTimer.unref?.();
-    });
-    return Promise.race([queued, acquireTimeout]);
   };
 
   return {

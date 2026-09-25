@@ -44,8 +44,11 @@ Net changes since 5.8.1.
     `references.report`, `revisions.prune`). Every other shipped step keeps the default `false`.
   - `fakePersistence` (the contracts package's testing fake) gains the same `scope`/`failScope`/
     `scopeTimeoutMs`/`acquireTimeoutMs` surface, so a module test can exercise a grouped pipeline
-    without SQLite, including its own FIFO queue, an acquire budget and the two terminal states of
-    a closed scope. **`FakePersistence` gains four new required members**: anyone who built a
+    without SQLite, including its own FIFO queue, the same acquire budget for every call and scope
+    (`Err(TRANSIENT)` or a failed `begin` once it runs out, never running afterwards) and the two
+    terminal states of a closed scope. Both run the shared `atomicScopeTests` suite
+    (`@michaelthielemann/kestrel-contracts/atomic.contract.test`), whose fixture names the store's
+    `acquireTimeoutMs`. **`FakePersistence` gains four new required members**: anyone who built a
     hand-written implementation of that interface's type (rather than using `createFakePersistence`)
     must add them. The core's `testing/runPipeline.ts` test helper gains a typed `atomicScope`
     option with no default.

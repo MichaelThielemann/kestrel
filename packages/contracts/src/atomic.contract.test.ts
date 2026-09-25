@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AtomicScope } from "@michaelthielemann/kestrel/atomic";
 import type { Document, Persistence } from "./persistence.ts";
 import { expectOk } from "./testing/result.ts";
@@ -14,6 +14,28 @@ export interface AtomicScopeFixture {
   scope: AtomicScope;
   /** Closes the fixture. */
   close: () => Promise<void>;
+  /** The acquire budget the store was created with, so the suite can run a waiter's budget out to the millisecond. */
+  acquireTimeoutMs: number;
+}
+
+function gate(): { open: () => void; opened: Promise<void> } {
+  let open: () => void = () => {};
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { open, opened };
+}
+
+async function holdStore(scope: AtomicScope): Promise<{ release: () => void; holder: ReturnType<AtomicScope> }> {
+  const entered = gate();
+  const release = gate();
+  const holder = scope({ pipeline: "holder", group: 1 }, async () => {
+    entered.open();
+    await release.opened;
+    return "commit";
+  });
+  await entered.opened;
+  return { release: release.open, holder };
 }
 
 export function atomicScopeTests(make: () => Promise<AtomicScopeFixture>): void {
@@ -233,6 +255,108 @@ export function atomicScopeTests(make: () => Promise<AtomicScopeFixture>): void 
       expect(waiterRan).toBe(false);
       await holder;
       expect(expectOk(await db.findOne<Row>("rows", { id: "holder" }))?.name).toBe("holder");
+      await close();
+    });
+  });
+
+  describe("atomic scope: one budget and one clock for every wait (fake timers)", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("a call outside a group, queued behind an open group, answers TRANSIENT once acquireTimeoutMs has passed", async () => {
+      const { db, scope, close, acquireTimeoutMs } = await make();
+      expectOk(await db.ensureCollection("rows", { name: "string" }));
+      const { release, holder } = await holdStore(scope);
+
+      let answer: unknown;
+      const waiting = db.findMany<Row>("rows", {}).then((result) => {
+        answer = result;
+      });
+      await vi.advanceTimersByTimeAsync(acquireTimeoutMs - 1);
+      expect(answer).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(answer).toMatchObject({ ok: false, error: { code: "TRANSIENT", status: 503, retryable: true } });
+
+      release();
+      expect(await holder).toEqual({ kind: "settled", verdict: "commit" });
+      await waiting;
+      await close();
+    });
+
+    it("a write that timed out waiting is never executed once the store frees up", async () => {
+      const { db, scope, close, acquireTimeoutMs } = await make();
+      expectOk(await db.ensureCollection("rows", { name: "string" }));
+      const { release, holder } = await holdStore(scope);
+
+      const late = db.createOne<Row>("rows", { id: "late", name: "late" });
+      await vi.advanceTimersByTimeAsync(acquireTimeoutMs);
+      expect(await late).toMatchObject({ ok: false, error: { code: "TRANSIENT" } });
+
+      release();
+      await holder;
+      expect(expectOk(await db.findMany<Row>("rows", {})).items).toEqual([]);
+      await close();
+    });
+
+    it("a call that gets its turn before acquireTimeoutMs runs normally", async () => {
+      const { db, scope, close, acquireTimeoutMs } = await make();
+      expectOk(await db.ensureCollection("rows", { name: "string" }));
+      const { release, holder } = await holdStore(scope);
+
+      const write = db.createOne<Row>("rows", { id: "a", name: "alpha" });
+      await vi.advanceTimersByTimeAsync(acquireTimeoutMs - 1);
+      release();
+      await holder;
+      expect(expectOk(await write).id).toBe("a");
+      await vi.advanceTimersByTimeAsync(acquireTimeoutMs * 10);
+      expect(expectOk(await db.findMany<Row>("rows", {})).items.map((row) => row.id)).toEqual(["a"]);
+      await close();
+    });
+
+    it("a group answered with a timeout never runs, even when the store frees up in the millisecond its budget ends", async () => {
+      const { db, scope, close, acquireTimeoutMs } = await make();
+      expectOk(await db.ensureCollection("rows", { name: "string" }));
+      const { release, holder } = await holdStore(scope);
+
+      let waiterRan = false;
+      const waiter = scope({ pipeline: "waiter", group: 1 }, async () => {
+        waiterRan = true;
+        expectOk(await db.createOne<Row>("rows", { id: "late", name: "late" }));
+        return "commit";
+      });
+      await vi.advanceTimersByTimeAsync(acquireTimeoutMs);
+      release();
+
+      expect(await waiter).toMatchObject({ kind: "failed", phase: "begin", error: { code: "TRANSIENT", retryable: true } });
+      await holder;
+      expect(expectOk(await db.findMany<Row>("rows", {})).items).toEqual([]);
+      expect(waiterRan).toBe(false);
+      await close();
+    });
+
+    it("a group answered with a timeout never runs when the clock steps back while it waits", async () => {
+      const { db, scope, close, acquireTimeoutMs } = await make();
+      expectOk(await db.ensureCollection("rows", { name: "string" }));
+      const { release, holder } = await holdStore(scope);
+
+      let waiterRan = false;
+      const waiter = scope({ pipeline: "waiter", group: 1 }, async () => {
+        waiterRan = true;
+        return "commit";
+      });
+      await vi.advanceTimersByTimeAsync(acquireTimeoutMs);
+      vi.setSystemTime(Date.now() - 60000);
+      release();
+
+      expect(await waiter).toMatchObject({ kind: "failed", phase: "begin" });
+      await holder;
+      expectOk(await db.findMany<Row>("rows", {}));
+      expect(waiterRan).toBe(false);
       await close();
     });
   });

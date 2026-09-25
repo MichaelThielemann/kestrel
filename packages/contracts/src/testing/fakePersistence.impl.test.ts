@@ -10,7 +10,7 @@ atomicScopeTests(async () => {
   const db = createFakePersistence();
   db.scopeTimeoutMs = 500;
   db.acquireTimeoutMs = 50;
-  return { db, scope: (info, body) => db.scope(info, body), close: async () => {} };
+  return { db, scope: (info, body) => db.scope(info, body), close: async () => {}, acquireTimeoutMs: db.acquireTimeoutMs };
 });
 
 describe("fakePersistence.failNext", () => {

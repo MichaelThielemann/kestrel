@@ -38,7 +38,7 @@ async function withPatchedExec<T>(matches: readonly { sql: string; error: () => 
 
 atomicScopeTests(async () => {
   const db = createPersistenceSqlite({ file: ":memory:", scopeTimeoutMs: 500, acquireTimeoutMs: 50 });
-  return { db, scope: (info, body) => db.scope(info, body), close: async () => db.close() };
+  return { db, scope: (info, body) => db.scope(info, body), close: async () => db.close(), acquireTimeoutMs: 50 };
 });
 
 describe("persistence/sqlite atomic scope", () => {
@@ -417,7 +417,7 @@ function spyLogger(): { logger: Logger; warnings: Array<{ message: string; data?
   };
 }
 
-describe("Item 2: the late-call warning and the rollback-failure error go through the given logger", () => {
+describe("the late-call warning and the rollback-failure error go through the given logger", () => {
   it("warns through the logger, not console, when a call lands after the scope committed", async () => {
     const { logger, warnings } = spyLogger();
     const db = createPersistenceSqlite({ file: ":memory:" }, { logger });
