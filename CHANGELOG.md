@@ -412,6 +412,11 @@ Net changes since 5.8.1.
 
 ### Added
 
+- `references-default`: a target can be `{ media: true }`, the ready files of the `media@1` provider
+  (`optional: [media@1]`; setup fails naming the target when no module provides it). A file counts as
+  existing exactly while `media@1` reports it as ready. `examples/minimal` uses it for its `media`
+  target instead of `{ collection: "media_items" }`; `{ collection }` stays for a consumer's own
+  collections and must not name another module's.
 - `@michaelthielemann/kestrel-contracts/mediaType`: `parseMediaType`, `mediaTypeEssence` and
   `canonicalMediaType` (a declared content type that is exactly one media type, as its lower-cased
   `type/subtype` and a `text/*` type's charset, else `null`), `publicFormOf` (the `Content-Type` and

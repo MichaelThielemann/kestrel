@@ -43,7 +43,7 @@ export default defineConfig({
       },
     },
     { use: "@michaelthielemann/kestrel-site-default", config: {} },
-    { use: "@michaelthielemann/kestrel-references-default", config: { targets: { pages: { content: "pages" }, media: { collection: "media_items" } } } },
+    { use: "@michaelthielemann/kestrel-references-default", config: { targets: { pages: { content: "pages" }, media: { media: true } } } },
     { use: "@michaelthielemann/kestrel-links-default", config: { timeoutMs: 10000, concurrency: 4, recheckAfterSeconds: 21600 } },
     { use: "@michaelthielemann/kestrel-revisions-default", config: { keep: 50, liveStatuses: ["published"] } },
     { use: "@michaelthielemann/kestrel-validate-jsonschema", config: { schemas: { "pages.body": "./schemas/blocks.json", "redirects.rules": "./schemas/redirects.rules.json", "settings.navigation": "./schemas/settings.navigation.json" } } },

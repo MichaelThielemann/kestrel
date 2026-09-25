@@ -5,8 +5,14 @@ Referential integrity for internal references of `content@1`, backed by its own 
 for `kestrel:<type>:<id>` strings and `{ type: "internal", collection, id }` objects anywhere inside
 a `json` field (every locale; a type that is not a configured target is ignored). Rows written
 before `via` existed read as `"field"`.
-Targets are declared in config: `targets: { pages: { content: "pages" }, media: { collection:
-"media_items" } }`; every `ref` field must point to a configured target (checked at boot).
+Targets are declared in config: `targets: { pages: { content: "pages" }, media: { media: true } }`;
+every `ref` field must point to a configured target (checked at boot). A target is a type of
+`content@1` (`{ content: "<type>" }`), the files of the `media@1` provider (`{ media: true }`), or a
+collection of the consumer's own (`{ collection: "<name>" }`) — never another module's collection,
+whose storage is that module's alone. A media target counts a file as existing exactly while
+`media@1` reports it as ready, so an upload still in flight or a file being deleted is a dangling
+reference for `references.check` and `references.scan`; `media@1` is an optional dependency, and
+setup fails, naming the target, when a media target is configured and no module provides it.
 Every method returns a `Result`: a failure is an `Err(KestrelError)`, never an exception. Only
 wiring bugs throw (unknown type, unknown target).
 
@@ -36,7 +42,7 @@ Not included: cascading deletes, automatic clearing of dangling references, expa
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
-`@michaelthielemann/kestrel-references-default` – module `references/default`: provides no contract; requires `content@1`, `persistence@1`.
+`@michaelthielemann/kestrel-references-default` – module `references/default`: provides no contract; requires `content@1`, `persistence@1`; optional `media@1`.
 
 | Config | Type | Required | Default |
 |---|---|---|---|

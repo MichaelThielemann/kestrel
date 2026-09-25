@@ -1,6 +1,7 @@
 import type { Content, ContentDocument, FieldDefinition, FieldType } from "@michaelthielemann/kestrel-contracts/content";
 import { isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { collectInternalRefs } from "@michaelthielemann/kestrel-contracts/links";
+import type { MediaFiles } from "@michaelthielemann/kestrel-contracts/media";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 
 export const INDEX = "references_index";
@@ -8,7 +9,8 @@ export const INDEX = "references_index";
 /** Where a reference was found: a `ref` field of the content model, or an internal link inside a `json` field. */
 export type Via = "field" | "body";
 
-export type Target = { content: string } | { collection: string };
+/** A type of `content@1`, the ready files of the `media@1` provider, or a collection of the consumer's own; never another module's collection. */
+export type Target = { content: string } | { media: true } | { collection: string };
 
 export interface Config {
   targets: Record<string, Target>;
@@ -57,7 +59,7 @@ function definition(field: FieldType | FieldDefinition): FieldDefinition {
   return typeof field === "string" ? { type: field } : field;
 }
 
-export function createReferencesDefault(config: Config, content: Content, db: Persistence, now: () => number = Date.now): References {
+export function createReferencesDefault(config: Config, content: Content, db: Persistence, now: () => number = Date.now, media?: MediaFiles): References {
   const model = content.model();
   const locales = model.locales ?? [];
   const fieldsOfType = (type: string, kind: FieldType): Array<[string, FieldDefinition]> =>
@@ -71,6 +73,9 @@ export function createReferencesDefault(config: Config, content: Content, db: Pe
     for (const [field, def] of refFields(type)) {
       if (def.to === undefined || !(def.to in config.targets)) throw new Error(`references/default: "${type}.${field}" points to "${def.to ?? ""}" which is not a configured target`);
     }
+  }
+  for (const [name, target] of Object.entries(config.targets)) {
+    if ("media" in target && media === undefined) throw new Error(`references/default: target "${name}" reads media@1, but no module provides it`);
   }
   const knownType = (type: string): void => {
     if (!(type in model.types)) throw new Error(`references/default: unknown type "${type}"`);
@@ -86,6 +91,11 @@ export function createReferencesDefault(config: Config, content: Content, db: Pe
       const doc = await content.get(target.content, id);
       if (isErr(doc)) return doc;
       return ok(doc.value !== null);
+    }
+    if ("media" in target) {
+      const file = await media!.file(id);
+      if (isErr(file)) return file;
+      return ok(file.value !== null);
     }
     const row = await db.findOne(target.collection, { id });
     if (isErr(row)) return row;

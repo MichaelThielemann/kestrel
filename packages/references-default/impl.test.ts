@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import type { Content, ContentDocument, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
+import { createFakeMedia } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
 import { createFakePersistence, matchesFilter } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -60,10 +61,10 @@ function fakeContent(): Content & { docs: Map<string, Record<string, unknown>> }
 
 async function setup() {
   const db = createFakePersistence();
-  await db.ensureCollection("media_items", { filename: "string" });
-  await db.createOne("media_items", { id: "m1", filename: "a.png" });
+  await db.ensureCollection("asset_rows", { filename: "string" });
+  await db.createOne("asset_rows", { id: "m1", filename: "a.png" });
   const content = fakeContent();
-  const refs = createReferencesDefault({ targets: { media: { collection: "media_items" }, pages: { content: "pages" } } }, content, db, () => 42);
+  const refs = createReferencesDefault({ targets: { media: { collection: "asset_rows" }, pages: { content: "pages" } } }, content, db, () => 42);
   return { db, content, refs };
 }
 
@@ -124,7 +125,7 @@ describe("references/default", () => {
     const page = await createDoc(content, "pages", { title: "a", hero: "m1" });
     expectOk(await refs.index("pages", page.id));
     expect(expectOk(await refs.scan())).toEqual({ checked: 1, broken: 0 });
-    await db.deleteOne("media_items", "m1");
+    await db.deleteOne("asset_rows", "m1");
     expect(expectOk(await refs.scan())).toEqual({ checked: 1, broken: 1 });
     const report = expectOk(await refs.report());
     expect(report).toHaveLength(1);
@@ -201,7 +202,7 @@ describe("references/default", () => {
     expect(expectOk(await refs.rebuild())).toEqual({ documents: 2, entries: 2 });
     expect(expectOk(await refs.referrers("media", "m1"))).toEqual([{ type: "pages", field: "body", id: page.id, via: "body" }]);
 
-    await db.deleteOne("media_items", "m1");
+    await db.deleteOne("asset_rows", "m1");
     expect(expectOk(await refs.scan())).toEqual({ checked: 2, broken: 1 });
     expect(expectOk(await refs.report("media"))).toMatchObject([{ fromId: page.id, field: "body", toTarget: "media", toId: "m1", via: "body", broken: true }]);
   });
@@ -217,6 +218,40 @@ describe("references/default", () => {
       { type: "pages", field: "hero", id: "legacy", via: "field" },
     ]);
     expect(expectOk(await refs.report()).map((r) => r.via)).toEqual(["field"]);
+  });
+
+  describe("a media target", () => {
+    async function withMedia() {
+      const db = createFakePersistence();
+      const media = createFakeMedia();
+      media.add({ id: "m1", contentType: "image/png", data: new Uint8Array([1]) });
+      media.add({ id: "m2", contentType: "application/pdf", data: new Uint8Array([2]) });
+      const content = fakeContent();
+      const refs = createReferencesDefault({ targets: { media: { media: true }, pages: { content: "pages" } } }, content, db, () => 42, media);
+      return { refs, content, media };
+    }
+
+    it("counts a file media@1 reports as ready as existing, and one not ready or unknown as dangling", async () => {
+      const { refs, media } = await withMedia();
+      media.remove("m2");
+      expect(expectOk(await refs.missing("pages", { title: "x", hero: "m1" }))).toEqual([]);
+      expect(expectOk(await refs.missing("pages", { title: "x", hero: "m2" }))).toEqual([{ field: "hero", to: "media", id: "m2" }]);
+      expect(expectOk(await refs.missing("pages", { title: "x", hero: "nope" }))).toEqual([{ field: "hero", to: "media", id: "nope" }]);
+      expect(media.calls.map((call) => call.method)).toEqual(["file", "file", "file"]);
+    });
+
+    it("scan marks a reference broken once its file stops being ready", async () => {
+      const { refs, content, media } = await withMedia();
+      const page = await createDoc(content, "pages", { title: "a", hero: "m1" });
+      expectOk(await refs.index("pages", page.id));
+      expect(expectOk(await refs.scan())).toEqual({ checked: 1, broken: 0 });
+      media.remove("m1");
+      expect(expectOk(await refs.scan())).toEqual({ checked: 1, broken: 1 });
+    });
+
+    it("is a wiring error without a media@1 provider, naming the target", () => {
+      expect(() => createReferencesDefault({ targets: { media: { media: true }, pages: { content: "pages" } } }, fakeContent(), createFakePersistence())).toThrow('references/default: target "media" reads media@1, but no module provides it');
+    });
   });
 
   it("every contract-backed step answers a retryable 503", async () => {

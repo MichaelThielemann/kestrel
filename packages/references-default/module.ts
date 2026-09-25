@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
+import { MEDIA } from "@michaelthielemann/kestrel-contracts/media";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
@@ -9,7 +10,7 @@ import { createReferencesDefault, type References, type Referrer } from "./impl.
 
 export const configSchema = z
   .object({
-    targets: z.record(z.union([z.object({ content: z.string().min(1) }).strict(), z.object({ collection: z.string().min(1) }).strict()])),
+    targets: z.record(z.union([z.object({ content: z.string().min(1) }).strict(), z.object({ media: z.literal(true) }).strict(), z.object({ collection: z.string().min(1) }).strict()])),
   })
   .strict();
 
@@ -17,10 +18,11 @@ export default defineModule({
   name: "references/default",
   provides: [],
   requires: [CONTENT, PERSISTENCE],
+  optional: [MEDIA],
   configSchema,
 
   async setup(config, deps): Promise<References> {
-    return createReferencesDefault(config, deps.get(CONTENT), deps.get(PERSISTENCE));
+    return createReferencesDefault(config, deps.get(CONTENT), deps.get(PERSISTENCE), Date.now, deps.find(MEDIA));
   },
 
   steps: (refs) => ({

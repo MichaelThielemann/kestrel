@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Content, ContentDocument, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
+import { MEDIA } from "@michaelthielemann/kestrel-contracts/media";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
+import { createFakeMedia } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -45,13 +47,8 @@ function fakeContent(): Content {
   };
 }
 
-async function boot() {
-  const db = createFakePersistence();
-  await db.ensureCollection("media_items", { filename: "string" });
-  await db.createOne("media_items", { id: "m1", filename: "a.png" });
-  const content = fakeContent();
-  const providers = new Map<string, unknown>([[CONTENT.name, content], [PERSISTENCE.name, db]]);
-  const deps: Deps = {
+function depsWith(providers: Map<string, unknown>): Deps {
+  return {
     get<T>(contract: Contract<T>): T {
       if (!providers.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);
       return boundaryCast<T>(providers.get(contract.name), "host");
@@ -61,9 +58,18 @@ async function boot() {
     root: process.cwd(),
     eventTriggers: [],
   };
-  const config = configSchema.parse({ targets: { media: { collection: "media_items" }, pages: { content: "pages" } } });
+}
+
+async function boot() {
+  const db = createFakePersistence();
+  const media = createFakeMedia();
+  media.add({ id: "m1", contentType: "image/png", data: new Uint8Array([1]), filename: "a.png" });
+  const content = fakeContent();
+  const providers = new Map<string, unknown>([[CONTENT.name, content], [PERSISTENCE.name, db], [MEDIA.name, media]]);
+  const deps = depsWith(providers);
+  const config = configSchema.parse({ targets: { media: { media: true }, pages: { content: "pages" } } });
   const instance = await module.setup(config, deps);
-  return { instance, content, db };
+  return { instance, content, db, media };
 }
 
 const seed = (result: unknown): Record<string, Step | StepFactory> => ({ "test.seed": async (ctx: Context) => ok({ ...ctx, result }) });
@@ -124,10 +130,10 @@ describe("references/default module steps", () => {
   });
 
   it("scan and rebuild recompute the index, report lists broken references", async () => {
-    const { instance, content, db } = await boot();
+    const { instance, content, media } = await boot();
     const page = expectOk(await content.create("pages", { title: "A", hero: "m1" }));
     await run(["test.seed", "references.index:pages"], {}, instance, seed({ id: page.id }));
-    await db.deleteMany("media_items", { id: "m1" });
+    media.remove("m1");
 
     const scanned = await run(["references.scan"], {}, instance);
     expect(scanned.status).toBe(200);
@@ -146,6 +152,21 @@ describe("references/default module steps", () => {
     const res = await run(["references.referrersMany:media"], { query: { ids: 5 } }, instance);
     expect(res.status).toBe(400);
     expect(res.code).toBe("VALIDATION");
+  });
+});
+
+describe("references/default: a media target", () => {
+  it("accepts { media: true } next to content and collection targets, and nothing else", () => {
+    expect(configSchema.safeParse({ targets: { media: { media: true }, pages: { content: "pages" }, files: { collection: "file_rows" } } }).success).toBe(true);
+    expect(configSchema.safeParse({ targets: { media: { media: false } } }).success).toBe(false);
+    expect(configSchema.safeParse({ targets: { media: { media: true, collection: "file_rows" } } }).success).toBe(false);
+  });
+
+  it("declares media@1 as optional and fails setup, naming the target, when a media target has no provider", async () => {
+    expect(module.optional).toEqual([MEDIA]);
+    const deps = depsWith(new Map<string, unknown>([[CONTENT.name, fakeContent()], [PERSISTENCE.name, createFakePersistence()]]));
+    const config = configSchema.parse({ targets: { media: { media: true } } });
+    await expect(module.setup(config, deps)).rejects.toThrow('references/default: target "media" reads media@1, but no module provides it');
   });
 });
 

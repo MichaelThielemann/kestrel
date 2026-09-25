@@ -1421,7 +1421,9 @@
         "content@1",
         "persistence@1"
       ],
-      "optional": [],
+      "optional": [
+        "media@1"
+      ],
       "config": {
         "schema": {
           "type": "object",
@@ -1440,6 +1442,18 @@
                     },
                     "required": [
                       "content"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "media": {
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "media"
                     ],
                     "additionalProperties": false
                   },
@@ -1478,7 +1492,7 @@
                 "content": "pages"
               },
               "media": {
-                "collection": "media_items"
+                "media": true
               }
             },
             "redacted": false
