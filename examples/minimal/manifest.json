@@ -1048,6 +1048,33 @@
                 "type": "string"
               },
               "default": []
+            },
+            "anonymousFields": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_-]*(\\[\\])?(\\.[A-Za-z_][A-Za-z0-9_-]*(\\[\\])?)*$"
+                },
+                "minItems": 1
+              },
+              "default": {}
+            },
+            "fields": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_-]*(\\[\\])?(\\.[A-Za-z_][A-Za-z0-9_-]*(\\[\\])?)*$"
+                  },
+                  "minItems": 1
+                }
+              },
+              "default": {}
             }
           },
           "required": [
@@ -1102,6 +1129,28 @@
             ],
             "redacted": false,
             "default": []
+          },
+          {
+            "path": "anonymousFields",
+            "type": "record",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": {},
+            "redacted": false,
+            "default": {}
+          },
+          {
+            "path": "fields",
+            "type": "record",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": {},
+            "redacted": false,
+            "default": {}
           }
         ]
       },
@@ -1109,6 +1158,7 @@
         "authz.require",
         "authz.describePipelineAccess",
         "authz.listRoles",
+        "authz.fields",
         "authz.validateRoles"
       ],
       "eventHook": false,
@@ -6206,6 +6256,24 @@
           "required": [
             "roles"
           ]
+        }
+      }
+    },
+    {
+      "name": "authz.fields",
+      "module": "authz/roles",
+      "factory": true,
+      "description": {
+        "summary": "Keep only the <arg> fields the caller may see: anonymousFields.<arg> without an identity; with one, everything when one of its roles has no field grant for <arg>, otherwise the union of its roles' grants and the anonymous one",
+        "reads": [
+          "identity?",
+          "result?"
+        ],
+        "writes": [
+          "result?"
+        ],
+        "errors": {
+          "403": "no field grant for anonymous callers on <arg>"
         }
       }
     },

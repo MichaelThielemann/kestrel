@@ -4,7 +4,7 @@ import { authzContractTests } from "@michaelthielemann/kestrel-contracts/authz.c
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createContext } from "@michaelthielemann/kestrel/context";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
-import { anonymousCan, assertAnonymousAccess, createAuthzRoles, matches, requiredPermissions } from "./impl.ts";
+import { anonymousCan, anonymousPipelines, answersOf, assertAnonymousAccess, createAuthzRoles, fieldGrantProblems, fieldSet, matches, requiredPermissions, type Config } from "./impl.ts";
 import module from "./module.ts";
 
 const config = { roles: { admin: ["*"], editor: ["pages.*", "media.read"] }, roleClaim: "roles", anonymous: ["pages.read"] };
@@ -183,5 +183,186 @@ describe("authz/roles steps", () => {
 
   it("passes when the identity has the permission", async () => {
     expectOk(await require("pages.write")(withIdentity({ id: "e", claims: { roles: ["editor"] } })));
+  });
+});
+
+describe("fieldSet", () => {
+  const grants: Config = {
+    roles: { admin: ["*"], editor: ["pages.*"], reviewer: ["media.read"], translator: ["pages.read"] },
+    roleClaim: "roles",
+    anonymous: ["media.read"],
+    anonymousFields: { media: ["id", "path"] },
+    fields: { reviewer: { media: ["folder"] }, translator: { media: ["alt"], pages: ["title"] } },
+  };
+  const as = (...roles: string[]) => ({ id: "u", claims: { roles } });
+
+  it("gives an anonymous caller the anonymous grant, and nothing for a resource without one", () => {
+    expect(fieldSet(grants, undefined, "media")).toEqual(["id", "path"]);
+    expect(fieldSet(grants, undefined, "pages")).toBeUndefined();
+  });
+
+  it("gives everything to a caller one of whose roles has no field grant for the resource", () => {
+    expect(fieldSet(grants, as("editor"), "media")).toBe("all");
+    expect(fieldSet(grants, as("reviewer", "admin"), "media")).toBe("all");
+    expect(fieldSet(grants, as("reviewer"), "pages")).toBe("all");
+  });
+
+  it("gives the union of every role's grant and the anonymous one when every role has a grant", () => {
+    expect(fieldSet(grants, as("reviewer"), "media")).toEqual(["folder", "id", "path"]);
+    expect(fieldSet(grants, as("reviewer", "translator"), "media")).toEqual(["folder", "alt", "id", "path"]);
+    expect(fieldSet(grants, as("translator"), "pages")).toEqual(["title"]);
+  });
+
+  it("ignores role names the config does not define", () => {
+    expect(fieldSet(grants, as("reviewer", "ghost", "constructor", "__proto__"), "media")).toEqual(["folder", "id", "path"]);
+  });
+
+  it("gives an identity without a configured role the anonymous grant, or everything where there is none", () => {
+    expect(fieldSet(grants, as(), "media")).toEqual(["id", "path"]);
+    expect(fieldSet(grants, as("ghost"), "media")).toEqual(["id", "path"]);
+    expect(fieldSet(grants, as("ghost"), "pages")).toBe("all");
+  });
+
+  it("names every restricted answer per audience label for the step's declaration", () => {
+    expect(answersOf(grants, "media")).toEqual({ anonymous: ["id", "path"], "role:reviewer": ["folder", "id", "path"], "role:translator": ["alt", "id", "path"] });
+    expect(answersOf(grants, "pages")).toEqual({ "role:translator": ["title"] });
+    expect(answersOf(grants, "settings")).toEqual({});
+  });
+});
+
+function described(spec: string, description: Partial<PipelineManifest["steps"][number]["description"]> = {}): PipelineManifest["steps"][number] {
+  const colon = spec.indexOf(":");
+  const name = colon === -1 ? spec : spec.slice(0, colon);
+  return { spec, name, module: name.split(".")[0] ?? "", description: { summary: "", reads: [], writes: [], ...description } };
+}
+
+const MEDIA_ITEM = {
+  type: "object",
+  properties: { id: { type: "string" }, folder: { type: "string" }, variants: { type: "array", items: { type: "object", properties: { path: { type: "string" }, bytes: { type: "number" } }, required: ["path", "bytes"] } } },
+  required: ["id", "folder", "variants"],
+  additionalProperties: false,
+};
+const MEDIA_LIST = { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM }, total: { type: "number" } }, required: ["items", "total"] };
+const REDIRECT_HIT = { type: "object", properties: { redirect: { type: "object", properties: { to: { type: "string" } }, required: ["to"], additionalProperties: false } }, required: ["redirect"], additionalProperties: false };
+const identify = described("authn.identifyUser", { writes: ["token?", "identity?"], security: "optional" });
+const gate = (permission: string) => described(`authz.require:${permission}`, { security: "required" });
+const fields = (arg: string) => described(`authz.fields:${arg}`, { reads: ["identity?", "result?"], writes: ["result?"] });
+const getMedia = described("media.get", { writes: ["result"], output: MEDIA_ITEM });
+const listMedia = described("media.list", { writes: ["result"], output: MEDIA_LIST });
+const serve = described("media.serve", { writes: ["result"], binary: true });
+const lookup = described("redirects.lookup", { writes: ["result?"], terminalOutput: REDIRECT_HIT });
+
+function fieldManifest(pipelines: Array<[string, Array<PipelineManifest["steps"][number]>]>, http = pipelines.map(([name]) => name)): Manifest {
+  return {
+    core: { version: "0.0.0" },
+    contracts: [],
+    modules: [],
+    steps: [],
+    pipelines: pipelines.map(([name, steps]) => ({ name, steps })),
+    triggers: { http: http.map((pipeline) => ({ method: "GET", path: `/${pipeline}`, pipeline })), events: [], crons: [] },
+    warnings: [],
+  };
+}
+
+describe("anonymousPipelines", () => {
+  const config: Config = { roles: {}, roleClaim: "roles", anonymous: ["media.read"] };
+
+  it("lists the HTTP pipelines an anonymous caller reaches and whose answer goes to that caller", () => {
+    const manifest = fieldManifest(
+      [
+        ["getMedia", [identify, gate("media.read"), getMedia]],
+        ["open", [getMedia]],
+        ["signedIn", [described("authn.requireUser", { writes: ["identity"], security: "required" }), getMedia]],
+        ["ungranted", [identify, gate("media.write"), getMedia]],
+        ["login", [described("authn.login", { writes: ["token", "identity", "result"] }), described("events.relay", { writes: ["result._events"] })]],
+        ["noAnswer", [identify, gate("media.read")]],
+        ["cron", [getMedia]],
+      ],
+      ["getMedia", "open", "signedIn", "ungranted", "login", "noAnswer"],
+    );
+    expect(anonymousPipelines(config, manifest).map((p) => p.name)).toEqual(["getMedia", "open"]);
+  });
+});
+
+describe("fieldGrantProblems", () => {
+  const config: Config = { roles: { editor: ["*"] }, roleClaim: "roles", anonymous: ["media.read", "pages.read"], anonymousFields: { media: ["id", "variants[].path"], mediaFile: ["headers.cache-control"], pages: ["redirect", "id"] }, fields: {} };
+  const passing = (): Array<[string, Array<PipelineManifest["steps"][number]>]> => [
+    ["getMedia", [identify, gate("media.read"), getMedia, fields("media?shape=item")]],
+    ["listMedia", [identify, gate("media.read"), listMedia, fields("media?shape=list")]],
+    ["serveMediaFile", [identify, gate("media.read"), serve, fields("mediaFile?shape=file")]],
+    ["resolvePage", [identify, gate("pages.read"), lookup, described("site.resolve", { writes: ["result"], output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } }), fields("pages?shape=item")]],
+  ];
+
+  it("passes a set of pipelines that end with the step, grants that name declared fields and a covered early answer", () => {
+    expect(fieldGrantProblems(config, fieldManifest(passing()))).toEqual([]);
+  });
+
+  it("refuses an anonymously answered pipeline that does not end with the step, naming the shape to cut", () => {
+    const pipelines = passing();
+    pipelines[1] = ["listMedia", [identify, gate("media.read"), listMedia]];
+    expect(fieldGrantProblems(config, fieldManifest(pipelines))).toEqual([
+      'authz/roles: pipeline "listMedia" answers anonymous callers but does not end with authz.fields:<resource>?shape=list – end it with the step, so that its answer carries only the fields anonymous callers may see',
+    ]);
+  });
+
+  it("does not check a pipeline behind authn.requireUser or an ungranted permission, nor the login pipeline", () => {
+    const manifest = fieldManifest([
+      ...passing(),
+      ["adminMedia", [described("authn.requireUser", { writes: ["identity"], security: "required" }), getMedia]],
+      ["writeMedia", [identify, gate("media.write"), getMedia]],
+      ["login", [described("authn.login", { writes: ["token", "identity", "result"] })]],
+    ]);
+    expect(fieldGrantProblems(config, manifest)).toEqual([]);
+  });
+
+  it("refuses a step after authz.fields", () => {
+    const pipelines = passing();
+    pipelines[0] = ["getMedia", [identify, gate("media.read"), getMedia, fields("media?shape=item"), described("images.attach", { writes: ["result.variants?"] })]];
+    expect(fieldGrantProblems(config, fieldManifest(pipelines))).toContain('authz/roles: pipeline "getMedia" runs images.attach after authz.fields:media?shape=item – authz.fields must be the last step');
+  });
+
+  it("refuses a shape parameter the declared output contradicts", () => {
+    const pipelines = passing();
+    pipelines[1] = ["listMedia", [identify, gate("media.read"), listMedia, fields("media?shape=item")]];
+    expect(fieldGrantProblems(config, fieldManifest(pipelines))).toEqual(['authz/roles: pipeline "listMedia" ends with authz.fields:media?shape=item, but its declared output is a list ({ items, total }) – write authz.fields:media?shape=list']);
+  });
+
+  it("refuses an anonymously answered resource without an anonymous grant", () => {
+    const { mediaFile: _mediaFile, ...rest } = config.anonymousFields!;
+    void _mediaFile;
+    expect(fieldGrantProblems({ ...config, anonymousFields: rest }, fieldManifest(passing()))).toEqual(['authz/roles: pipeline "serveMediaFile" answers anonymous callers and ends with authz.fields:mediaFile, but anonymousFields grants nothing for "mediaFile"']);
+  });
+
+  it("refuses a grant naming a field no pipeline of its resource declares, with the way to write it where there is one", () => {
+    const problems = fieldGrantProblems({ ...config, anonymousFields: { ...config.anonymousFields, media: ["id", "folderr", "variants.path"] }, fields: { editor: { media: ["headers.x"] } } }, fieldManifest(passing()));
+    expect(problems).toEqual([
+      'authz/roles: anonymousFields.media names "folderr", which no pipeline ending with authz.fields:media declares',
+      'authz/roles: anonymousFields.media names "variants.path", which no pipeline ending with authz.fields:media declares – "variants" is a list, write "variants[].path"',
+      'authz/roles: fields.editor.media names "headers.x", which no pipeline ending with authz.fields:media declares',
+    ]);
+  });
+
+  it("accepts only headers.<name> for a file answer", () => {
+    const problems = fieldGrantProblems({ ...config, anonymousFields: { ...config.anonymousFields, mediaFile: ["headers", "id", "headers.cache-control"] } }, fieldManifest(passing()));
+    expect(problems).toEqual([
+      'authz/roles: anonymousFields.mediaFile names "headers", which no pipeline ending with authz.fields:mediaFile declares – name each header as "headers.<name>"',
+      'authz/roles: anonymousFields.mediaFile names "id", which no pipeline ending with authz.fields:mediaFile declares – name each header as "headers.<name>"',
+    ]);
+  });
+
+  it("refuses a grant for a resource no pipeline cuts", () => {
+    expect(fieldGrantProblems({ ...config, anonymousFields: { ...config.anonymousFields, settings: ["id"] }, fields: { editor: { users: ["id"] } } }, fieldManifest(passing()))).toEqual([
+      'authz/roles: anonymousFields grants fields of "settings", but no pipeline ends with authz.fields:settings',
+      'authz/roles: fields.editor grants fields of "users", but no pipeline ends with authz.fields:users',
+    ]);
+  });
+
+  it("refuses an early answer before the step that carries an ungranted member or is open", () => {
+    const ungranted = fieldGrantProblems({ ...config, anonymousFields: { ...config.anonymousFields, pages: ["id"] } }, fieldManifest(passing()));
+    expect(ungranted).toEqual(['authz/roles: pipeline "resolvePage" can end at redirects.lookup before authz.fields:pages, and that answer carries "redirect", which anonymousFields.pages does not grant']);
+    const pipelines = passing();
+    const openLookup = described("redirects.lookup", { writes: ["result?"], terminalOutput: { type: "object", properties: { redirect: { type: "string" } }, required: ["redirect"] } });
+    pipelines[3] = ["resolvePage", [identify, gate("pages.read"), openLookup, described("site.resolve", { writes: ["result"], output: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } }), fields("pages?shape=item")]];
+    expect(fieldGrantProblems(config, fieldManifest(pipelines))).toEqual(['authz/roles: pipeline "resolvePage" can end at redirects.lookup before authz.fields:pages, and that answer is an open object at the root, which no grant can bound']);
   });
 });

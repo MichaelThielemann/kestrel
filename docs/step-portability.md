@@ -58,6 +58,7 @@ prefix).
 | `authz.require` | none |
 | `authz.describePipelineAccess` | none |
 | `authz.listRoles` | none |
+| `authz.fields` | none |
 | `authz.validateRoles` | none |
 | `authn.login` | portable |
 | `authn.identifyUser` | portable |

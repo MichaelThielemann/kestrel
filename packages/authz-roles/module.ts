@@ -4,15 +4,34 @@ import { AUTHZ } from "@michaelthielemann/kestrel-contracts/authz";
 import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
+import { cutAnswer, FIELD_PATH, parseFieldsArgument, RESOURCE } from "./fields.ts";
 import { createAuthzRoles, type AuthzRoles } from "./impl.ts";
+
+const fieldGrants = z.record(
+  z.string().regex(RESOURCE, 'a resource is a name such as "media"'),
+  z.array(z.string().regex(FIELD_PATH, 'a field path is "name", "name.sub" or "name[].sub", e.g. "variants[].path"')).min(1),
+);
 
 export const configSchema = z
   .object({
     roles: z.record(z.array(z.string().regex(/^(\*|[a-z0-9_-]+(\.[a-z0-9_-]+)*(\.\*)?)$/))),
     roleClaim: z.string().min(1).default("roles"),
     anonymous: z.array(z.string()).default([]),
+    anonymousFields: fieldGrants.default({}),
+    fields: z.record(fieldGrants).default({}),
   })
-  .strict();
+  .strict()
+  .superRefine((config, issues) => {
+    for (const role of Object.keys(config.fields)) {
+      if (!Object.hasOwn(config.roles, role)) issues.addIssue({ code: "custom", path: ["fields", role], message: `fields names role "${role}", which roles does not define` });
+    }
+  });
+
+function fieldsTarget(arg: string) {
+  const target = parseFieldsArgument(arg);
+  if (target === undefined) throw new Error(`authz/roles: authz.fields:${arg} – write authz.fields:<resource>?shape=<item|list|array|file>, e.g. authz.fields:media?shape=list`);
+  return target;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -59,6 +78,17 @@ export default defineModule({
       return ok({ ...ctx, result: { ...base, roles: authz.listRoles() } });
     },
 
+    fields: stepFactory((arg: string) => {
+      const { resource, shape } = fieldsTarget(arg);
+      return async (ctx: Context) => {
+        const tree = authz.fieldsFor(ctx.identity, resource);
+        if (tree === "all") return ok(ctx);
+        if (tree === undefined) return ctx.fail("FORBIDDEN", `no field grant for anonymous callers on ${resource}`);
+        if (ctx.result === undefined) return ok(ctx);
+        return ok({ ...ctx, result: cutAnswer(ctx.result, shape, tree) });
+      };
+    }),
+
     validateRoles: stepFactory((path: string) => async (ctx: Context) => {
       const raw = payloadPath(ctx, path);
       if (raw === null || raw === undefined) return ok(ctx);
@@ -72,7 +102,7 @@ export default defineModule({
     }),
   }),
 
-  describe: () => ({
+  describe: (authz: AuthzRoles) => ({
     require: (permission: string) => ({ summary: `Requires permission ${permission}`, reads: [], writes: [], security: "required" as const, errors: { 401: "not authenticated", 403: `missing permission ${permission}` } }),
     describePipelineAccess: {
       summary: "Per booted pipeline, whether the caller passes its authz.require steps",
@@ -89,6 +119,15 @@ export default defineModule({
       reads: [],
       writes: ["result.roles"],
       extendsOutput: { type: "object", properties: { roles: { type: "array", items: { type: "string" } } }, required: ["roles"] },
+    },
+    fields: (arg: string) => {
+      const target = parseFieldsArgument(arg);
+      const resource = target?.resource ?? arg;
+      const summary = `Keep only the ${resource} fields the caller may see: anonymousFields.${resource} without an identity; with one, everything when one of its roles has no field grant for ${resource}, otherwise the union of its roles' grants and the anonymous one`;
+      const errors = { 403: `no field grant for anonymous callers on ${resource}` };
+      return target === undefined
+        ? { summary, reads: ["identity?", "result?"], writes: ["result?"], errors }
+        : { summary, reads: ["identity?", "result?"], writes: ["result?"], errors, narrows: { shape: target.shape, answers: authz.answersOf(target.resource) } };
     },
     validateRoles: (path: string) => ({
       summary: `Validate the role names at payload.${path} against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept`,

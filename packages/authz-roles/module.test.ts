@@ -6,7 +6,7 @@ import type { Identity } from "@michaelthielemann/kestrel-contracts/authn";
 import type { Context, Step } from "@michaelthielemann/kestrel/context";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
-import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
+import { definePipeline, type PipelineDefinition } from "@michaelthielemann/kestrel/definePipeline";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { ok } from "@michaelthielemann/kestrel/result";
 import { runPipeline } from "@michaelthielemann/kestrel/testing/runPipeline";
@@ -295,5 +295,125 @@ describe("authz/roles: dataflow and step registration", () => {
         logger: silentLogger,
       }),
     ).rejects.toThrow(/unknown step "authz.describeAccess"/);
+  });
+});
+
+describe("authz/roles config: field grants", () => {
+  it("defaults both grants to none", () => {
+    expect(configSchema.parse({ roles: {} })).toMatchObject({ anonymousFields: {}, fields: {} });
+  });
+
+  it("accepts resources and field paths, members, sub-members and list elements", () => {
+    const parsed = configSchema.parse({ roles: { editor: [] }, anonymousFields: { media: ["id", "provenance.origin", "variants[].path", "headers.x-content-provenance", "_translations"] }, fields: { editor: { media: ["folder"] } } });
+    expect(parsed.fields).toEqual({ editor: { media: ["folder"] } });
+  });
+
+  it("refuses a field grant for a role roles does not define", () => {
+    const parsed = configSchema.safeParse({ roles: { editor: [] }, fields: { reviewer: { media: ["folder"] } } });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues.map((i) => i.message)).toEqual(['fields names role "reviewer", which roles does not define']);
+  });
+
+  it("refuses a malformed resource, a malformed path and an empty grant", () => {
+    for (const anonymousFields of [{ "1media": ["id"] }, { media: ["variants.[].path"] }, { media: ["a..b"] }, { media: ["a b"] }, { media: [] }]) {
+      expect(configSchema.safeParse({ roles: {}, anonymousFields }).success, JSON.stringify(anonymousFields)).toBe(false);
+    }
+  });
+});
+
+const ITEM_SCHEMA = {
+  type: "object",
+  properties: { id: { type: "string" }, secret: { type: "string" }, note: { type: "string" }, nested: { type: "object", properties: { open: { type: "string" }, hidden: { type: "string" } }, required: ["open", "hidden"] } },
+  required: ["id", "secret", "note", "nested"],
+};
+const RECORD = { id: "r1", secret: "s3cret", note: "n", nested: { open: "o", hidden: "h" } };
+
+function recordsModule() {
+  return defineModule({
+    name: "records/test",
+    provides: [],
+    requires: [],
+    configSchema: z.object({}).strict(),
+    async setup() {
+      return {};
+    },
+    steps: () => ({
+      get: async (ctx: Context) => ok({ ...ctx, result: RECORD }),
+      list: async (ctx: Context) => ok({ ...ctx, result: { items: [RECORD, RECORD], total: 2, cursor: "next" } }),
+      signIn: async (ctx: Context) => {
+        const role = ctx.headers["x-role"];
+        return ok(role === undefined ? ctx : { ...ctx, identity: { id: "u", claims: { roles: role.split(",") } } });
+      },
+    }),
+    describe: () => ({
+      get: { summary: "one record", reads: [], writes: ["result"], output: ITEM_SCHEMA },
+      list: { summary: "records", reads: [], writes: ["result"], output: { type: "object", properties: { items: { type: "array", items: ITEM_SCHEMA }, total: { type: "number" }, cursor: { type: "string" } }, required: ["items", "total"] } },
+      signIn: { summary: "signs in the x-role header's roles", reads: [], writes: ["identity?"] },
+    }),
+  });
+}
+
+const RECORD_PIPELINES: PipelineDefinition[] = [
+  definePipeline({ name: "getRecord", steps: ["records.signIn", "authz.require:records.read", "records.get", "authz.fields:records?shape=item"] }),
+  definePipeline({ name: "listRecords", steps: ["records.signIn", "authz.require:records.read", "records.list", "authz.fields:records?shape=list"] }),
+];
+
+async function bootRecords(authzConfig: Record<string, unknown>, pipelines: PipelineDefinition[] = RECORD_PIPELINES) {
+  return bootKestrel({
+    config: {
+      modules: [{ use: "./records.ts", config: {} }, { use: "@michaelthielemann/kestrel-authz-roles", config: authzConfig }],
+      triggers: pipelines.map((p) => ({ http: `GET /${p.name}`, pipeline: p.name })),
+      http: null,
+    },
+    modules: [recordsModule(), module],
+    pipelines,
+    logger: silentLogger,
+    validateOutput: true,
+  });
+}
+
+describe("authz/roles: authz.fields cuts the answer to the caller's field grant", () => {
+  const grants = { roles: { editor: ["*"], reviewer: ["records.read"], archivist: ["records.read"] }, anonymous: ["records.read"], anonymousFields: { records: ["id", "nested.open"] }, fields: { reviewer: { records: ["note"] }, archivist: { records: ["secret"] } } };
+  const as = (role?: string) => ({ trigger, headers: role === undefined ? {} : { "x-role": role } });
+
+  it("answers an anonymous caller only the anonymous grant, item by item in a list", async () => {
+    const kestrel = await bootRecords(grants);
+    expect(await kestrel.run("getRecord", as())).toMatchObject({ status: 200, result: { id: "r1", nested: { open: "o" } } });
+    expect((await kestrel.run("getRecord", as())).result).toEqual({ id: "r1", nested: { open: "o" } });
+    expect((await kestrel.run("listRecords", as())).result).toEqual({ items: [{ id: "r1", nested: { open: "o" } }, { id: "r1", nested: { open: "o" } }], total: 2 });
+    await kestrel.stop();
+  });
+
+  it("answers a role without a field grant the whole answer", async () => {
+    const kestrel = await bootRecords(grants);
+    expect((await kestrel.run("getRecord", as("editor"))).result).toEqual(RECORD);
+    expect((await kestrel.run("getRecord", as("reviewer,editor"))).result).toEqual(RECORD);
+    await kestrel.stop();
+  });
+
+  it("answers a role with a field grant its grant and the anonymous one, never a member neither grants", async () => {
+    const kestrel = await bootRecords(grants);
+    expect((await kestrel.run("getRecord", as("reviewer"))).result).toEqual({ id: "r1", note: "n", nested: { open: "o" } });
+    expect((await kestrel.run("getRecord", as("reviewer,archivist"))).result).toEqual({ id: "r1", secret: "s3cret", note: "n", nested: { open: "o" } });
+    await kestrel.stop();
+  });
+
+  it("declares per audience what it keeps, from the config", async () => {
+    const kestrel = await bootRecords(grants);
+    const step = kestrel.describe().pipelines.find((p) => p.name === "listRecords")?.steps.at(-1);
+    expect(step?.description.narrows).toEqual({ shape: "list", answers: { anonymous: ["id", "nested.open"], "role:reviewer": ["note", "id", "nested.open"], "role:archivist": ["secret", "id", "nested.open"] } });
+    await kestrel.stop();
+  });
+
+  it("answers 403 FORBIDDEN to an anonymous caller of a resource without an anonymous grant", async () => {
+    const instance = await module.setup(configSchema.parse({ roles: {}, anonymous: ["records.read"] }), deps);
+    const pipeline = definePipeline({ name: "getRecord", steps: ["records.get", "authz.fields:records?shape=item"] });
+    const mod = recordsModule();
+    const res = await runPipeline(pipeline, {}, { modules: [{ module: mod, instance: await mod.setup({}, deps) }, { module, instance }] });
+    expect(res).toMatchObject({ status: 403, code: "FORBIDDEN" });
+  });
+
+  it("fails boot for a step argument without a resource and a shape", async () => {
+    await expect(bootRecords(grants, [definePipeline({ name: "getRecord", steps: ["records.get", "authz.fields:records"] })])).rejects.toThrow('authz.fields:records – write authz.fields:<resource>?shape=<item|list|array|file>, e.g. authz.fields:media?shape=list');
   });
 });

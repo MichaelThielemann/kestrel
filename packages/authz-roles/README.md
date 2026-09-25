@@ -44,12 +44,15 @@ Not included: ownership/resource checks (the `resource` argument is ignored), ro
 | `roles` | record | yes | – |
 | `roleClaim` | string | no | `"roles"` |
 | `anonymous` | array | no | `[]` |
+| `anonymousFields` | record | no | `{}` |
+| `fields` | record | no | `{}` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
 | `authz.require:<arg>` | Requires permission <arg> | – | – | – | – | 401 not authenticated; 403 missing permission <arg> | – | no |
 | `authz.describePipelineAccess` | Per booted pipeline, whether the caller passes its authz.require steps | `identity?` | `result.pipelineAccess` | – | { pipelineAccess: object, … } | – | – | no |
 | `authz.listRoles` | The configured role names, in config order | – | `result.roles` | – | { roles: string[], … } | – | – | no |
+| `authz.fields:<arg>` | Keep only the <arg> fields the caller may see: anonymousFields.<arg> without an identity; with one, everything when one of its roles has no field grant for <arg>, otherwise the union of its roles' grants and the anonymous one | `identity?`, `result?` | `result?` | – | – | 403 no field grant for anonymous callers on <arg> | – | no |
 | `authz.validateRoles:<arg>` | Validate the role names at payload.<arg> against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept | `payload.<arg>` | – | object | – | 400 the value is not an array of known role names | – | no |
 
 Used by 67 of 93 pipelines in `examples/minimal`.
