@@ -1,6 +1,6 @@
 # @michaelthielemann/kestrel-contracts
 The standard contracts: `persistence@1`, `authn@1`, `authz@1`, `blobstore@1`, `events@1`, `content@1`,
-`site@1`, `renderer@1`, `validate@1`, `revisions@1`, `migrations@1`, `insights@1`.
+`site@1`, `renderer@1`, `validate@1`, `revisions@1`, `migrations@1`, `insights@1`, `media@1`.
 Each contract is one file plus one `*.contract.test.ts` suite every implementation must pass.
 Every async method answers `Promise<Result<T, E>>` from `@michaelthielemann/kestrel/result`; the
 error union of each contract is declared next to it (`PersistenceError`, `ContentError`, …) and
@@ -13,7 +13,12 @@ below 1e-4), `LIKE` folds case for ASCII letters only, and without a declared sc
 is inferred from the stored value. `testing/result` holds `expectOk` / `expectErr`
 for the suites. `testing/fakeAuthn` is a minimal `authn@1` for the shared step-contract suite
 (`authn.steps.contract.test`), which every `authn@1` implementation runs its five shared steps
-(`login`, `identifyUser`, `requireUser`, `loadIdentity`, `logout`) against.
+(`login`, `identifyUser`, `requireUser`, `loadIdentity`, `logout`) against. `testing/fakeMedia` is an
+in-memory `media@1` for tests of a consumer: `add`, `remove` (ends a file's readiness), `loseBytes`,
+the recorded `calls`, and a `beforeCall` hook that can change the store between a consumer's calls.
+`persistence.owned` is not a contract: `ownedPersistence(db, owner, collections)` is a
+`persistence@1` view that reaches only the named collections and throws a wiring error naming
+`owner` for any other, before the store is asked — for a module whose storage must stay its own.
 `links` is not a contract but a pure helper pair shared by the modules that read internal
 references (`INTERNAL_REF`, `collectInternalRefs`).
 `mediaType` is not a contract either: `parseMediaType` accepts a declared content type only when it
@@ -25,7 +30,9 @@ essence, plus the charset of a `text/*` type when it is a token. `publicFormOf` 
 `bin` for anything else, including an SVG that did not pass `sanitize.svg`. The list only ever grows,
 since a published name keeps its extension. `mediaTypeMatches` and `mediaTypeAllowed` are the
 `allowedTypes`/`deniedTypes` pattern rule: `*` and `*/*` match every type, `type/*` a top-level type,
-any other pattern one type, with case and parameters ignored on both sides.
+`type/*+suffix` every subtype of a top-level type that ends in `+suffix` (with `*` as the type, of
+every top-level type), any other pattern one type, with case and parameters ignored on both sides.
+`media@1`'s `MediaFilter` uses the same rule.
 `content-locale` is not a contract either: `satisfiesFilter`, `publishedLocale` and
 `narrowListTranslations` implement one rule on top of `content@1` — a locale that fails a filter is
 never a fallback source and never counted in `_translations` — for every module that builds a

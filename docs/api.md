@@ -515,8 +515,11 @@ the first such item. A store from before this change must start empty.
 
 ## Image variants
 
-For every image (not SVG, not GIF), `images-default` keeps a WebP variant per *effective size*, at
-`/media/<id>/variants/<size>.<ext>`. Its path, dimensions and format are decided from the original
+For every ready image (not SVG or any other XML image type, not GIF), `images-default` keeps a WebP
+variant per *effective size*, at `/media/<id>/variants/<size>.<ext>`. It learns about media only
+through `media@1`, which `media-default` provides, so an upload still in flight or an item being
+deleted gets no variants and `POST /admin/images/retry-failed` with its id answers 404. Its path,
+dimensions and format are decided from the original
 right after upload — before any variant is actually rendered — so the path never needs a republish:
 until the render lands, it answers with the original's own bytes and type instead of the resized
 image. `available` on the media item (`false` while any size still lacks its path, `true` once every
@@ -543,7 +546,7 @@ database: variants for a size nobody declares any more are reported under `orpha
 | POST | `/admin/images/sync` | – | starts or resumes a sync job, keeps running in the background; `{ id, state, total, done, failed, cursor, startedAt, updatedAt, finishedAt, error }` (`images.manage`); 409 `images: sync job <id> is running` if a fresh job is already running |
 | GET | `/admin/images/status` | – | status of all sizes, the sync job, orphaned sizes and failed variants, see below (`images.read`) |
 | POST | `/admin/images/prune` | `{ sizes: [name] }` | deletes the variants (blob + row) for the named *orphaned* sizes; `{ sizes, variants }` (`images.manage`); 400 if a name is still declared or has no variants |
-| POST | `/admin/images/retry-failed` | `{ id? }` | puts every variant that gave up back to `pending` with `attempts: 0` — all of them, or with `id` only that media item's — and does the work: for one item right away (`job: null`), for all of them by starting a sync job from the first media item; `{ variants, media, job }`, `{ variants: 0, media: 0, job: null }` when nothing had given up (`images.manage`); 404 for an unknown `id` |
+| POST | `/admin/images/retry-failed` | `{ id? }` | puts every variant that gave up back to `pending` with `attempts: 0` — all of them, or with `id` only that media item's — and does the work: for one item right away (`job: null`), for all of them by starting a sync job from the first media item; `{ variants, media, job }`, `{ variants: 0, media: 0, job: null }` when nothing had given up (`images.manage`); 404 for an `id` that is unknown or not ready |
 | GET | `/media/:id/variants/:file` | – | variant image bytes; 404 only when `:file` is neither a size this item currently has nor a size it once had before a format change or a prune retired it, or the medium is unknown; otherwise, whenever no render is at that path yet — not planned, still pending, erroring, or permanently `failed` after `maxAttempts` tries — the original's own bytes and type are served instead, with header `x-kestrel-variant: original`; always `Cache-Control: no-store` (`media.read`, `identifyUser`) |
 
 **GET `/admin/images/status`** returns `{ sizes: [{ …size, source, used, variants: { done, pending,

@@ -24,7 +24,7 @@ running instance with a login, a content type and a step of your own.
 | Package | Purpose |
 |---|---|
 | `@michaelthielemann/kestrel` | Kestrel core: contract registry, boot check, pipeline runner and triggers. Ships no contracts and no modules. |
-| `@michaelthielemann/kestrel-contracts` | Kestrel standard contracts (persistence, authn, authz, blobstore, events) with contract test suites. |
+| `@michaelthielemann/kestrel-contracts` | Kestrel standard contracts (persistence, authn, authz, blobstore, events, media and more) with contract test suites. |
 | `@michaelthielemann/kestrel-h3` | Adapter: serves a Kestrel instance's HTTP triggers as an h3 event handler (Nuxt/Nitro). |
 | `@michaelthielemann/kestrel-openapi` | Generates an OpenAPI 3.1 description from a booted Kestrel instance (triggers, pipelines, step descriptions). |
 | `@michaelthielemann/kestrel-audit-persistence` | Step audit.record: writes audit_entries via persistence@1. |
@@ -39,10 +39,10 @@ running instance with a login, a content type and a step of your own.
 | `@michaelthielemann/kestrel-events-direct` | Inline event delivery: subscribes event-trigger pipelines to events@1 and runs them within the emitting request. |
 | `@michaelthielemann/kestrel-events-inmemory` | events@1 in process. The bus only; add events-direct or events-queue to deliver event-trigger pipelines. |
 | `@michaelthielemann/kestrel-events-queue` | Outbox event delivery: emit writes one row per subscribed pipeline and returns, an in-process worker runs them with retry, backoff and dead-letter. |
-| `@michaelthielemann/kestrel-images-default` | Steps images.register/generate/sync/resume/prune: image variant size registry, generation on upload, resumable sync. |
+| `@michaelthielemann/kestrel-images-default` | Steps images.register/generate/sync/resume/prune: image variant size registry, generation on upload, resumable sync; reads media through media@1. |
 | `@michaelthielemann/kestrel-insights` | insights@1: the instance manifest (modules, config schemas, steps, pipelines, triggers) and live per-process run statistics from the core's observer hook. |
 | `@michaelthielemann/kestrel-links-default` | Steps links.extract/check/report/rebuild: finds external URLs in content, checks them periodically and reports broken links. |
-| `@michaelthielemann/kestrel-media-default` | Media uploads: files in blobstore@1, metadata in persistence@1. |
+| `@michaelthielemann/kestrel-media-default` | Media uploads: files in blobstore@1, metadata in persistence@1; provides media@1, read access to the ready files. |
 | `@michaelthielemann/kestrel-migrations-default` | migrations@1: applies content migrations once, per document and stored locale, with a ledger. |
 | `@michaelthielemann/kestrel-persistence-sqlite` | persistence@1 on Node's built-in node:sqlite. |
 | `@michaelthielemann/kestrel-ratelimit-memory` | Step ratelimit.check:<bucket>: fixed-window rate limiting per client ip, in memory. |
