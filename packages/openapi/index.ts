@@ -1,6 +1,7 @@
 import type { JsonSchema, Kestrel, ResolvedPipeline, Route, StepDescription } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { resolveResultSchema } from "@michaelthielemann/kestrel/schema";
+import { resolveOutputSchema, resolveResultSchema } from "@michaelthielemann/kestrel/schema";
+import { grantedHeaders, narrowAnswer } from "./narrow.ts";
 
 export interface OpenApiInfo {
   title: string;
@@ -57,7 +58,55 @@ function mergeObjects(schemas: JsonSchema[]): JsonSchema | undefined {
   return merged;
 }
 
-function operation(route: Route, pipeline: ResolvedPipeline, params: string[]): Record<string, unknown> {
+const COMPONENT_NAME = /^[A-Za-z0-9_-]+(:[A-Za-z0-9_-]+)*$/;
+
+function componentRef(name: string): { $ref: string } {
+  return { $ref: `#/components/schemas/${name}` };
+}
+
+function answersResponse(pipeline: ResolvedPipeline, descriptions: readonly StepDescription[], output: JsonSchema | undefined, schemas: Record<string, JsonSchema>): Record<string, unknown> | undefined {
+  const narrows = pipeline.steps.at(-1)?.description.narrows;
+  if (narrows === undefined || narrows.shape === "file") return undefined;
+  const fold = resolveOutputSchema(descriptions);
+  const terminals: unknown[] = output !== undefined && output !== fold ? arrayOf(output.anyOf).slice(1) : [];
+  const op = pipeline.name;
+  schemas[op] = output ?? {};
+  const answers: Record<string, { $ref: string }> = {};
+  for (const [label, paths] of Object.entries(narrows.answers)) {
+    if (!COMPONENT_NAME.test(label)) continue;
+    const name = `${op}.${label.split(":").join(".")}`;
+    const narrowed = fold === undefined ? undefined : narrowAnswer(fold, narrows.shape, paths);
+    const shapes = narrowed === undefined ? terminals : [narrowed, ...terminals];
+    const [only] = shapes;
+    schemas[name] = shapes.length === 0 ? {} : shapes.length === 1 && isSchema(only) ? only : { anyOf: shapes };
+    answers[label] = componentRef(name);
+  }
+  return {
+    description: "ok; x-kestrel-answers names the answer each audience receives",
+    content: { "application/json": { schema: { anyOf: [componentRef(op), ...Object.values(answers)] } } },
+    "x-kestrel-answers": answers,
+  };
+}
+
+function arrayOf(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function isSchema(value: unknown): value is JsonSchema {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function fileResponse(pipeline: ResolvedPipeline): Record<string, unknown> {
+  const narrows = pipeline.steps.at(-1)?.description.narrows;
+  const response: Record<string, unknown> = { description: "the file", content: { "*/*": { schema: { type: "string", format: "binary" } } } };
+  if (narrows?.shape !== "file") return response;
+  const answers = Object.entries(narrows.answers)
+    .filter(([label]) => COMPONENT_NAME.test(label))
+    .map(([label, paths]): [string, { headers: string[] }] => [label, { headers: grantedHeaders(paths) }]);
+  return { ...response, "x-kestrel-answers": Object.fromEntries(answers) };
+}
+
+function operation(route: Route, pipeline: ResolvedPipeline, params: string[], schemas: Record<string, JsonSchema>): Record<string, unknown> {
   const descriptions = pipeline.steps.map((s) => s.description).filter((d): d is StepDescription => d !== undefined);
   const inputs = descriptions.map((d) => d.input).filter((i): i is JsonSchema => i !== undefined);
   const output = resolveResultSchema(descriptions);
@@ -83,9 +132,7 @@ function operation(route: Route, pipeline: ResolvedPipeline, params: string[]): 
     "x-kestrel-steps": pipeline.steps.map((s) => s.name),
     parameters,
     responses: {
-      "200": binary
-        ? { description: "the file", content: { "*/*": { schema: { type: "string", format: "binary" } } } }
-        : { description: "ok", content: { "application/json": { schema: output ?? {} } } },
+      "200": binary ? fileResponse(pipeline) : (answersResponse(pipeline, descriptions, output, schemas) ?? { description: "ok", content: { "application/json": { schema: output ?? {} } } }),
       ...Object.fromEntries(
         Object.entries(errors)
           .sort(([a], [b]) => Number(a) - Number(b))
@@ -115,19 +162,20 @@ function operation(route: Route, pipeline: ResolvedPipeline, params: string[]): 
 export function generateOpenApi(kestrel: Instance, info: OpenApiInfo): Record<string, unknown> {
   const mountPath = (info.mountPath ?? "").replace(/\/+$/, "");
   const paths: Record<string, Record<string, unknown>> = {};
+  const schemas: Record<string, JsonSchema> = { Error: ERROR_SCHEMA };
   const routes = [...kestrel.triggers.http].sort((a, b) => a.segments.join("/").localeCompare(b.segments.join("/")) || a.method.localeCompare(b.method));
   for (const route of routes) {
     const pipeline = kestrel.pipelines.get(route.pipeline);
     if (!pipeline) throw new Error(`openapi: trigger references unknown pipeline "${route.pipeline}"`);
     const { path, params } = pathOf(route, mountPath);
-    paths[path] = { ...paths[path], [route.method.toLowerCase()]: operation(route, pipeline, params) };
+    paths[path] = { ...paths[path], [route.method.toLowerCase()]: operation(route, pipeline, params, schemas) };
   }
   const doc: Record<string, unknown> = {
     openapi: "3.1.0",
     info: { title: info.title, version: info.version, ...(info.description === undefined ? {} : { description: info.description }) },
     paths,
     components: {
-      schemas: { Error: ERROR_SCHEMA },
+      schemas,
       securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", description: "token from the login pipeline" } },
     },
   };
