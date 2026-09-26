@@ -541,6 +541,11 @@ Net changes since 5.8.1.
   the module that registered the step in `BootProblem.module`, next to `pipeline` and `step`.
 - `checkBoot()`'s result carries `manifest`, the checked engine's `describe()` output, taken before
   teardown and present also when problems were found.
+- `media/default`'s `media.list` accepts a `type` query (`image`, `video` or `other`), matched against
+  each item's content type with the contracts package's `mediaTypeMatches` (`other` is neither
+  `image/*` nor `video/*`). `image`/`video` filter at the store; `other` cannot be expressed as a
+  store filter, so it filters every candidate in memory before paging and the total are computed, the
+  same way an unindexable text search already does, up to `MAX_UNINDEXED_SCAN` (5000) candidates.
 - A `kestrel.config` module entry accepts `defaults: { from, values }`: values a host supplies on the
   consumer's behalf. Boot merges `config` over them (plain objects key by key, everything else
   replaced whole) before parsing, and an invalid result names the defaults' source.

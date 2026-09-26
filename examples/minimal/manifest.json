@@ -4544,6 +4544,14 @@
           "sort": {
             "type": "string"
           },
+          "type": {
+            "type": "string",
+            "enum": [
+              "image",
+              "video",
+              "other"
+            ]
+          },
           "limit": {
             "type": "integer"
           },
@@ -17413,6 +17421,14 @@
               },
               "sort": {
                 "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "image",
+                  "video",
+                  "other"
+                ]
               },
               "limit": {
                 "type": "integer"

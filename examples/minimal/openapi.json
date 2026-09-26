@@ -8025,6 +8025,19 @@
             }
           },
           {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "image",
+                "video",
+                "other"
+              ]
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
