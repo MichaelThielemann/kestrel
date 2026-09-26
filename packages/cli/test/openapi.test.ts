@@ -8,8 +8,13 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) removeDir(dir);
 });
 
-function storageFiles(dir: string): string[] {
-  return readdirSync(dir, { recursive: true, encoding: "utf8" }).filter((file) => !file.startsWith("node_modules") && (/\.db(-wal|-shm)?$/.test(file) || file.startsWith("data")));
+function storageFiles(dir: string, prefix = ""): string[] {
+  return readdirSync(join(dir, prefix), { withFileTypes: true }).flatMap((entry) => {
+    const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.name === "node_modules") return [];
+    if (entry.isDirectory()) return entry.name === "data" ? [path] : storageFiles(dir, path);
+    return /\.db(-wal|-shm)?$/.test(entry.name) ? [path] : [];
+  });
 }
 
 describe("kestrel openapi", { timeout: 60_000 }, () => {
