@@ -84,8 +84,9 @@ The merge follows three rules:
 
 The difference shows in `kestrel.describe()` and the insights manifest. A path only `values`
 carries is reported as `status: "default"` with `source: "my-preset"`. A path `config` carries is
-`set`, whether or not `values` also has it, and so is everything below a `config` value that
-replaced a default object. Secrets are redacted the same way in both layers. See [api.md](api.md)
+`set`, whether or not `values` also has it. Below a `config` value that replaced a default object,
+such as `null`, no path reports a `source`: those paths fall back to the schema's own defaults.
+Secrets are redacted the same way in both layers. See [api.md](api.md)
 for the variable fields; `effectiveModuleConfig(entry)` from the package root returns the merged
 config of an entry.
 
