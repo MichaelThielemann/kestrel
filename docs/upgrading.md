@@ -611,8 +611,15 @@ the same edit.
 | `npx [-y] @michaelthielemann/kestrel-upgrade@<v> …` | `npx -y @michaelthielemann/kestrel-cli@<v> upgrade …` |
 | `pnpm dlx @michaelthielemann/kestrel-upgrade@<v> …` | `pnpm dlx @michaelthielemann/kestrel-cli@<v> upgrade …` |
 
-Only a command token is rewritten: at the start of the script, after `&&`, `;` or `|`, or after
-`node_modules/.bin/`; a longer word containing the name stays. `kestrel openapi` refuses flags it
+| `npm exec @michaelthielemann/kestrel-upgrade@<v> [--] …` | `npm exec @michaelthielemann/kestrel-cli@<v> -- upgrade …` |
+| `npx [-y] kestrel-upgrade …` | `kestrel upgrade …` (an error: an unscoped `npx` would fetch an unrelated registry package of that name) |
+
+Only a command token is rewritten: at the start of the script, after `&&`, `;` or `|`, after
+`node_modules/.bin/`, or behind a runner (`pnpm`, `pnpm exec`, `npm exec [--]`, `yarn`) or an
+environment prefix (`VAR=value …`, `cross-env …`), which stays in place; a longer word containing
+the name stays. A script that still runs one of the removed binaries in a form the rule cannot
+rewrite, or runs the path of a removed bin file (`…/kestrel-openapi/dist/cli.js`), gets a manual
+warning. `kestrel openapi` refuses flags it
 does not know, so a rewritten line that passes one gets a warning naming the flag. In other project
 files (`Dockerfile*`, `*.service`, `*.yml`/`*.yaml`, `*.sh`, `Makefile`, `Procfile`, `*.json` and
 `*.js`/`*.mjs`/`*.ts`, never Markdown or lockfiles) the rule reports each such line as a warning

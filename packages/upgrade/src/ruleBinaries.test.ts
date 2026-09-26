@@ -127,3 +127,48 @@ describe("scripts/kestrel-binaries", () => {
     expect(findings).toEqual([]);
   });
 });
+
+describe("scripts/kestrel-binaries behind runner prefixes", () => {
+  it("rewrites the removed binaries after pnpm, pnpm exec, npm exec, yarn, cross-env and variable prefixes, keeping the prefix", async () => {
+    const { rewriteCommand } = await import("./ruleBinaries.ts");
+    expect(rewriteCommand("pnpm kestrel-upgrade check")).toBe("pnpm kestrel upgrade check");
+    expect(rewriteCommand("pnpm exec kestrel-openapi --out a.json")).toBe("pnpm exec kestrel openapi --out a.json");
+    expect(rewriteCommand("npm exec -- kestrel-upgrade check")).toBe("npm exec -- kestrel upgrade check");
+    expect(rewriteCommand("yarn kestrel-openapi --out a.json")).toBe("yarn kestrel openapi --out a.json");
+    expect(rewriteCommand("cross-env A=1 B=2 kestrel-openapi --out a.json")).toBe("cross-env A=1 B=2 kestrel openapi --out a.json");
+    expect(rewriteCommand("NODE_ENV=production DEBUG=x kestrel-upgrade fix")).toBe("NODE_ENV=production DEBUG=x kestrel upgrade fix");
+    expect(rewriteCommand("tsc && pnpm exec kestrel-openapi; npm exec -- kestrel-upgrade data")).toBe("tsc && pnpm exec kestrel openapi; npm exec -- kestrel upgrade data");
+    expect(rewriteCommand("npm exec @michaelthielemann/kestrel-upgrade@6 -- check")).toBe("npm exec @michaelthielemann/kestrel-cli@6 -- upgrade check");
+    expect(rewriteCommand("pnpm run my-kestrel-openapi-tool")).toBe("pnpm run my-kestrel-openapi-tool");
+  });
+
+  it("replaces an unscoped npx of a removed binary with the local command, as an error naming the registry risk", async () => {
+    const { rewriteCommand } = await import("./ruleBinaries.ts");
+    expect(rewriteCommand("npx kestrel-upgrade check")).toBe("kestrel upgrade check");
+    expect(rewriteCommand("npx -y kestrel-openapi --out a.json")).toBe("kestrel openapi --out a.json");
+    await writePackage({ scripts: { up: "npx kestrel-upgrade check" }, dependencies: { "@michaelthielemann/kestrel": "^6.0.0", [CLI]: "^6.0.0" } });
+    const finding = (await check()).find((f) => f.rule === "scripts/kestrel-binaries");
+    expect(finding).toMatchObject({ severity: "error", fix: { kind: "auto" } });
+    expect(finding?.message).toContain("unscoped");
+    expect((await fixWrite()).scripts).toEqual({ up: "kestrel upgrade check" });
+  });
+
+  it("warns about a removed binary a script still runs through a form it cannot rewrite, and about a path to a removed bin file", async () => {
+    await writePackage({
+      scripts: { odd: "bunx kestrel-upgrade check", file: "node node_modules/@michaelthielemann/kestrel-openapi/dist/cli.js --out a.json" },
+      dependencies: { "@michaelthielemann/kestrel": "^6.0.0", [CLI]: "^6.0.0" },
+    });
+    const findings = (await check()).filter((f) => f.rule === "scripts/kestrel-binaries");
+    expect(findings.map((f) => [f.id.split(":").at(-1), f.severity, f.fix.kind]).sort()).toEqual([
+      ["file", "warning", "manual"],
+      ["odd", "warning", "manual"],
+    ]);
+  });
+
+  it("warns about a path to a removed bin file in another project file", async () => {
+    await writePackage({ dependencies: { "@michaelthielemann/kestrel": "^6.0.0", [CLI]: "^6.0.0" } });
+    await writeFile(join(dir, "app.service"), "[Service]\nExecStart=/usr/bin/node /srv/app/node_modules/@michaelthielemann/kestrel-upgrade/dist/cli.js check\n");
+    const findings = (await check()).filter((f) => f.rule === "scripts/kestrel-binaries");
+    expect(findings.map((f) => [f.where.line, f.severity])).toEqual([[2, "warning"]]);
+  });
+});
