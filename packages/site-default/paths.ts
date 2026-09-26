@@ -5,10 +5,11 @@ import { err, failure, ok, type KestrelError, type Result } from "@michaelthiele
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import type { Document, Filter, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
-import { defaultLocaleKey, localeKeys, PATHS_MOVED, routesHash, tailOf, type Move, type Route, type RoutesConfig } from "./routes.ts";
+import { defaultLocaleKey, localeKeys, PATHS_MOVED, routesHash, tailOf, type Mounts, type Move, type Route, type RoutesConfig } from "./routes.ts";
 import {
-  baseRow,
-  claimId,
+  baseOfRows,
+  derive,
+  prefixSource,
   claimOf,
   CLAIM_SCHEMA,
   DOCS,
@@ -25,7 +26,6 @@ import {
   RUN_SCHEMA,
   sameClaim,
   sameRow,
-  settle,
   violation,
   type Base,
   type ClaimRow,
@@ -55,6 +55,7 @@ export interface RebuildPlan {
   bases: Base[];
   docs: DocRow[];
   claims: ClaimRow[];
+  mounts: Mounts;
 }
 
 export interface RebuildReport {
@@ -68,7 +69,14 @@ export interface PathPreview {
   reason: string | null;
   conflict: Omit<PathConflict, "moving"> | null;
   shadows: Array<{ type: string; id: string; label: string; path: string }>;
-  exposesParentSlug: null;
+  exposesParentSlug: { type: string; id: string; label: string } | null;
+}
+
+export interface TreeNode {
+  id: string;
+  parent: string | null;
+  label: string;
+  paths: Record<string, string | null>;
 }
 
 export interface SitePaths {
@@ -85,7 +93,11 @@ export interface SitePaths {
   resume(): Promise<Result<{ announced: number; pruned: number }, PathsError>>;
   planRebuild(): Promise<Result<RebuildPlan, PathsError>>;
   applyRebuild(plan: RebuildPlan, runId: string | null): Promise<Result<RebuildReport, PathsError>>;
-  preview(type: string, input: { id?: string; locale?: string; slug: string }): Promise<Result<PathPreview, PathsError>>;
+  preview(type: string, input: { id?: string; locale?: string; slug: string; parent?: string | null }): Promise<Result<PathPreview, PathsError>>;
+  /** Re-reads the mount assignment, validates it and moves every document of each type whose mount changed, inside the caller's atomic group. */
+  indexMounts(runId: string): Promise<Result<{ moves: Move[] }, PathsError>>;
+  /** Every document of the mount target type with its parent, label and valid paths. */
+  tree(type: string): Promise<Result<TreeNode[], PathsError>>;
 }
 
 export interface SitePathsDeps {
@@ -133,6 +145,12 @@ function chunks<T>(values: readonly T[]): T[][] {
 }
 
 function slugValue(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
+function parentOf(doc: ContentDocument, route: Route): string | null {
+  if (route.parentField === null) return null;
+  const value = doc[route.parentField];
   return typeof value === "string" && value !== "" ? value : null;
 }
 
@@ -191,7 +209,7 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     const row = need(await db.findOne<MetaRow>(META, { id: "seq" }), "persistence@1");
     const value = (row?.value ?? 0) + 1;
     if (row) need(await db.updateOne<MetaRow>(META, "seq", { value }), "persistence@1");
-    else need(await db.createOne<MetaRow>(META, { id: "seq", hash: null, value }), "persistence@1");
+    else need(await db.createOne<MetaRow>(META, { id: "seq", hash: null, value, ref: null }), "persistence@1");
     return value;
   }
 
@@ -215,11 +233,11 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
   async function readBases(type: string, id: string): Promise<Base[] | null> {
     const route = routeOf(type);
     const own = new Map<string, string | null>();
-    let stamp: { createdAt: number; updatedAt: number } | null = null;
+    let stamp: { createdAt: number; updatedAt: number; parent: string | null } | null = null;
     for (const locale of locales) {
       const doc = need(await content.get(type, id, localeOption(locale)), "content@1");
       if (!doc) return null;
-      stamp = { createdAt: doc.createdAt, updatedAt: doc.updatedAt };
+      stamp = { createdAt: doc.createdAt, updatedAt: doc.updatedAt, parent: parentOf(doc, route) };
       own.set(locale, slugValue(doc[route.slugField]));
     }
     if (!stamp) return null;
@@ -237,7 +255,7 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     const bases: Base[] = [];
     for (const [type, route] of Object.entries(config.routes)) {
       const own = new Map<string, Map<string, string | null>>();
-      const stamps = new Map<string, { createdAt: number; updatedAt: number }>();
+      const stamps = new Map<string, { createdAt: number; updatedAt: number; parent: string | null }>();
       const live = new Map<string, Set<string>>();
       for (const locale of locales) {
         const slugs = new Map<string, string | null>();
@@ -245,7 +263,7 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
           const page = need(await content.list(type, {}, { ...localeOption(locale), sort: { id: "asc" }, limit: PAGE, offset }), "content@1");
           for (const doc of page.items) {
             slugs.set(doc.id, slugValue(doc[route.slugField]));
-            stamps.set(doc.id, { createdAt: doc.createdAt, updatedAt: doc.updatedAt });
+            stamps.set(doc.id, { createdAt: doc.createdAt, updatedAt: doc.updatedAt, parent: parentOf(doc, route) });
           }
           if (page.items.length < PAGE) break;
         }
@@ -283,111 +301,224 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     if (keys.length === 0) return;
     const ids = keys.flatMap((key) => locales.map((locale) => `${key}/${locale}`));
     table.replace(keys, await byIds<DocRow>(DOCS, ids));
+    table.mounts = await readMounts();
+  }
+
+  async function readMounts(): Promise<Mounts> {
+    const out: Mounts = {};
+    for (const [type, route] of Object.entries(config.routes)) {
+      if (!route.mount) continue;
+      out[type] = need(await db.findOne<MetaRow>(META, { id: `mount:${type}` }), "persistence@1")?.ref ?? null;
+    }
+    return out;
+  }
+
+  async function writeMounts(mounts: Mounts): Promise<void> {
+    for (const [type, ref] of Object.entries(mounts)) {
+      const id = `mount:${type}`;
+      const row = need(await db.findOne<MetaRow>(META, { id }), "persistence@1");
+      if (row) {
+        if (row.ref !== ref) need(await db.updateOne<MetaRow>(META, id, { ref }), "persistence@1");
+      } else need(await db.createOne<MetaRow>(META, { id, hash: null, value: null, ref }), "persistence@1");
+    }
+  }
+
+  async function storedMounts(): Promise<Record<string, unknown>> {
+    if (!config.mounts) return {};
+    const doc = need(await content.get(config.mounts.type), "content@1");
+    const value = doc?.[config.mounts.field];
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : {};
+  }
+
+  function contentMounts(raw: Record<string, unknown>): Mounts {
+    const out: Mounts = {};
+    for (const [type, route] of Object.entries(config.routes)) {
+      if (!route.mount) continue;
+      const value = raw[type];
+      out[type] = typeof value === "string" && value !== "" ? value : null;
+    }
+    return out;
+  }
+
+  interface Diff {
+    changed: Array<{ before: DocRow | null; after: DocRow | null }>;
+    removedClaims: string[];
+    createdClaims: ClaimRow[];
+  }
+
+  function diff(current: readonly DocRow[], currentClaims: readonly ClaimRow[], desired: readonly DocRow[]): Diff {
+    const before = new Map(current.map((r) => [r.id, r]));
+    const after = new Map(desired.map((r) => [r.id, r]));
+    const changed: Diff["changed"] = [];
+    for (const id of new Set([...before.keys(), ...after.keys()])) {
+      const b = before.get(id) ?? null;
+      const a = after.get(id) ?? null;
+      if (b && a && sameRow(b, a)) continue;
+      changed.push({ before: b, after: a });
+    }
+    const had = new Map(currentClaims.map((c) => [c.id, c]));
+    const wanted = new Map(desired.flatMap((r) => {
+      const c = claimOf(r);
+      return c ? [[c.id, c] as const] : [];
+    }));
+    return {
+      changed,
+      removedClaims: [...had.keys()].filter((id) => !wanted.has(id) || !sameClaim(had.get(id)!, wanted.get(id)!)),
+      createdClaims: [...wanted.values()].filter((c) => !had.has(c.id) || !sameClaim(had.get(c.id)!, c)),
+    };
+  }
+
+  async function apply(change: Diff, runId: string | null, recordMoves: boolean): Promise<Move[]> {
+    await replaceRows(PATHS, change.removedClaims, change.createdClaims);
+    await replaceRows(
+      DOCS,
+      change.changed.flatMap((c) => (c.before ? [c.before.id] : [])),
+      change.changed.flatMap((c) => (c.after ? [c.after] : [])),
+    );
+    const seq = await takeSeq();
+    const moves: Move[] = [];
+    const touched = new Set<string>();
+    for (const { before, after } of change.changed) {
+      const ref = (after ?? before)!;
+      touched.add(docKey(ref.type, ref.docId));
+      const from = reachablePath(format, before);
+      const to = reachablePath(format, after);
+      if (recordMoves && from !== to) moves.push({ type: ref.type, id: ref.docId, locale: ref.locale, from, to, seq });
+    }
+    await writeRun(runId, [...touched], moves, seq);
+    return moves;
+  }
+
+  function fieldError(field: string, message: string): Abort {
+    return new Abort(failure("VALIDATION", message, { details: { fields: [{ field, message }] } }));
+  }
+
+  function descendants(bases: readonly Base[], mounts: Mounts, roots: readonly string[]): Set<string> {
+    const children = new Map<string, Set<string>>();
+    for (const base of bases) {
+      const source = prefixSource(format, base, mounts);
+      if (source === undefined) continue;
+      const key = docKey(base.type, base.docId);
+      children.set(source, (children.get(source) ?? new Set<string>()).add(key));
+    }
+    const out = new Set<string>(roots);
+    const queue = [...roots];
+    while (queue.length > 0) {
+      for (const child of children.get(queue.pop()!) ?? []) {
+        if (out.has(child)) continue;
+        out.add(child);
+        queue.push(child);
+      }
+    }
+    return out;
+  }
+
+  async function settleMoving(current: DocRow[], bases: Base[], mounts: Mounts, moving: Set<string>, field: (key: string) => string, cascade: { field: string; publishing: boolean }, runId: string): Promise<Move[]> {
+    const { rows, conflicts } = derive(format, bases, current, mounts);
+    const pathConflicts: PathConflict[] = [];
+    const fieldErrors: Array<{ field: string; message: string }> = [];
+    for (const conflict of conflicts) {
+      for (const loser of conflict.losers) {
+        const key = docKey(loser.type, loser.id);
+        if (!moving.has(key)) continue;
+        const where = `${conflict.path} (${conflict.locale === "" ? "no locale" : conflict.locale})`;
+        if (conflict.winner === null) {
+          fieldErrors.push({ field: field(key), message: conflict.message ?? `${where} cannot be used` });
+          continue;
+        }
+        const label = await labelOf(conflict.winner.type, conflict.winner.id, conflict.locale);
+        pathConflicts.push({ path: conflict.path, locale: conflict.locale, type: conflict.winner.type, id: conflict.winner.id, label, moving: { type: loser.type, id: loser.id } });
+        fieldErrors.push({ field: field(key), message: `${where} is taken by ${conflict.winner.type} "${label}"` });
+      }
+    }
+    const unique = [...new Map(fieldErrors.map((e) => [`${e.field}\u0000${e.message}`, e])).values()];
+    fieldErrors.splice(0, fieldErrors.length, ...unique);
+    const text = [...new Set(fieldErrors.map((e) => e.message))].join("; ");
+    if (pathConflicts.length > 0) throw new Abort(failure("CONFLICT", text, { details: { fields: fieldErrors, conflicts: pathConflicts } }));
+    if (fieldErrors.length > 0) throw new Abort(failure("VALIDATION", text, { details: { fields: fieldErrors } }));
+    const change = diff(current, current.flatMap((r) => claimOf(r) ?? []), rows);
+    if (change.changed.length > config.maxCascade) {
+      const stall = `this change moves ${change.changed.length} paths (documents × locales), more than the limit of ${config.maxCascade} (config key maxCascade, preset option paths.maxCascade); a larger change blocks every request while it runs`;
+      throw fieldError(cascade.field, cascade.publishing ? `${stall}. Publishing or unpublishing moves other pages here: this page takes over or gives back a path another page reaches through its default-locale slug, together with that page's subpages` : stall);
+    }
+    return apply(change, runId, true);
   }
 
   async function index(type: string, id: string, runId: string): Promise<{ moves: Move[] }> {
     const route = routeOf(type);
-    const bases = await readBases(type, id);
-    const previous = new Map((need(await db.findMany<DocRow>(DOCS, { type, docId: id }, { limit: locales.length }), "persistence@1").items).map((r) => [r.locale, r]));
-    const next = new Map<string, DocRow>();
-    for (const base of bases ?? []) next.set(base.locale, baseRow(base, route));
+    const fresh = await readBases(type, id);
+    const current = await all<DocRow>(DOCS, {});
+    const mounts = await readMounts();
+    const key = docKey(type, id);
+    const rowOf = (t: string, docId: string, locale = defaultLocale): DocRow | undefined => current.find((r) => r.type === t && r.docId === docId && r.locale === locale);
+    const before = rowOf(type, id);
 
-    const fieldErrors = new Map<string, string>();
-    for (const row of next.values()) {
-      if (row.tail === null) continue;
-      const bad = violation(format, row.tail, row.locale);
-      if (bad) fieldErrors.set(bad.message, `${route.slugField}: ${bad.message}`);
-    }
-    if (fieldErrors.size > 0) {
-      const messages = [...fieldErrors.keys()];
-      throw new Abort(failure("VALIDATION", `${type}/${id}: ${messages.join("; ")}`, { details: { fields: messages.map((message) => ({ field: route.slugField, message })) } }));
-    }
-
-    const docRowOf = async (row: ClaimRow): Promise<DocRow | null> => need(await db.findOne<DocRow>(DOCS, { id: rowId(row.type, row.docId, row.locale) }), "persistence@1");
-    const conflicts: PathConflict[] = [];
-    const strongAt = new Map<string, ClaimRow | null>();
-    for (const row of next.values()) {
-      if (row.tail === null) continue;
-      const strong = need(await db.findOne<ClaimRow>(PATHS, { id: claimId(row.locale, row.tail, "s", "") }), "persistence@1");
-      strongAt.set(row.locale, strong);
-      const taken: ClaimRow[] = [];
-      if (row.strong && strong && strong.docId !== id) taken.push(strong);
-      if (!row.strong) {
-        const weak = need(await db.findMany<ClaimRow>(PATHS, { locale: row.locale, tail: row.tail, strength: "w" }), "persistence@1").items;
-        taken.push(...weak.filter((w) => w.docId !== id));
-      }
-      for (const other of taken) {
-        conflicts.push({ path: pathOfTail(format, row.tail, row.locale), locale: row.locale, type: other.type, id: other.docId, label: await labelOf(other.type, other.docId, row.locale), moving: { type, id } });
-      }
-    }
-    if (conflicts.length > 0) {
-      const text = conflicts.map((c) => `${c.path} (${c.locale === "" ? "no locale" : c.locale}) is taken by ${c.type} "${c.label}"`).join("; ");
-      throw new Abort(failure("CONFLICT", `${type}/${id}: ${text}`, { details: { fields: conflicts.map((c) => ({ field: route.slugField, message: `${c.path} (${c.locale}) is taken by ${c.type} "${c.label}"` })), conflicts } }));
-    }
-
-    for (const row of next.values()) {
-      if (row.tail === null || row.strong) continue;
-      const strong = strongAt.get(row.locale);
-      const holder = strong && strong.docId !== id ? await docRowOf(strong) : null;
-      row.valid = !(holder?.live ?? false);
-    }
-
-    const changed = new Map<string, { before: DocRow | null; after: DocRow | null }>();
-    for (const locale of locales) {
-      const before = previous.get(locale) ?? null;
-      const after = next.get(locale) ?? null;
-      if (before && after && sameRow(before, after)) continue;
-      if (before || after) changed.set(rowId(type, id, locale), { before, after });
-    }
-
-    const affectedTails: Array<{ locale: string; tail: string; strongLive: boolean }> = [];
-    for (const locale of locales) {
-      const before = previous.get(locale);
-      const after = next.get(locale);
-      const beforeStrong = before && before.tail !== null && before.strong ? before : undefined;
-      const afterStrong = after && after.tail !== null && after.strong ? after : undefined;
-      if (beforeStrong && (!afterStrong || afterStrong.tail !== beforeStrong.tail)) affectedTails.push({ locale, tail: beforeStrong.tail ?? "", strongLive: false });
-      if (afterStrong && (!beforeStrong || beforeStrong.tail !== afterStrong.tail || beforeStrong.live !== afterStrong.live)) affectedTails.push({ locale, tail: afterStrong.tail ?? "", strongLive: afterStrong.live });
-    }
-    for (const { locale, tail, strongLive } of affectedTails) {
-      const weak = need(await db.findMany<ClaimRow>(PATHS, { locale, tail, strength: "w" }), "persistence@1").items;
-      for (const claim of weak) {
-        if (claim.docId === id) continue;
-        const holder = await docRowOf(claim);
-        if (!holder || holder.valid === !strongLive) continue;
-        changed.set(holder.id, { before: holder, after: { ...holder, valid: !strongLive } });
+    if (!fresh) {
+      const children = [...new Set(current.filter((r) => r.type === type && r.parent === id).map((r) => r.docId))];
+      const mountedTypes = type === config.mountTarget ? Object.entries(mounts).filter(([, page]) => page === id).map(([t]) => t) : [];
+      if (children.length > 0 || mountedTypes.length > 0) {
+        const named = [...children.map((c) => `${type}/${c}`), ...mountedTypes.map((t) => `every ${t} (mounted here)`)];
+        throw new Abort(failure("CONFLICT", `${type}/${id} still has subpages or mounted collections: ${named.join(", ")}`, { details: { children: children.map((c) => ({ type, id: c })), mounted: mountedTypes } }));
       }
     }
 
-    const oldClaims = new Map<string, ClaimRow>();
-    const newClaims = new Map<string, ClaimRow>();
-    for (const row of previous.values()) {
-      const claim = claimOf(row);
-      if (claim && claim.docId === id) oldClaims.set(claim.id, claim);
+    const parent = fresh?.[0]?.parent ?? null;
+    if (fresh && route.parentField !== null && parent !== null) {
+      const field = route.parentField;
+      if (parent === id) throw fieldError(field, `${type}/${id} cannot be its own parent`);
+      const parentRow = rowOf(type, parent);
+      if (!parentRow) throw fieldError(field, `the parent ${type}/${parent} does not exist or has no path`);
+      if (parentRow.parent === null && parentRow.tail === "") throw fieldError(field, "the home page cannot have subpages");
+      const ownDefault = fresh.find((b) => b.locale === defaultLocale)?.own ?? null;
+      if (ownDefault !== null && ownDefault === route.home) throw fieldError(field, "the home page cannot have a parent");
+      let depth = 1;
+      for (let at: string | null = parent; at !== null; at = rowOf(type, at)?.parent ?? null) {
+        if (at === id) throw fieldError(field, `${type}/${parent} lies below ${type}/${id}; that parent would make a cycle`);
+        if (++depth > config.maxDepth) throw fieldError(field, `the parent chain would be deeper than ${config.maxDepth} (maxDepth)`);
+      }
     }
-    for (const row of next.values()) {
-      const claim = claimOf(row);
-      if (claim) newClaims.set(claim.id, claim);
-    }
-    const removedClaims = [...oldClaims.values()].filter((c) => !newClaims.has(c.id) || !sameClaim(c, newClaims.get(c.id)!)).map((c) => c.id);
-    const createdClaims = [...newClaims.values()].filter((c) => !oldClaims.has(c.id) || !sameClaim(c, oldClaims.get(c.id)!));
-    await replaceRows(PATHS, removedClaims, createdClaims);
-    await replaceRows(
-      DOCS,
-      [...changed.values()].flatMap((c) => (c.before ? [c.before.id] : [])),
-      [...changed.values()].flatMap((c) => (c.after ? [c.after] : [])),
-    );
 
-    const seq = await takeSeq();
-    const moves: Move[] = [];
-    for (const { before, after } of changed.values()) {
-      const from = reachablePath(format, before);
-      const to = reachablePath(format, after);
-      const ref = (after ?? before)!;
-      if (from !== to) moves.push({ type: ref.type, id: ref.docId, locale: ref.locale, from, to, seq });
+    const bases = [...baseOfRows(current.filter((r) => docKey(r.type, r.docId) !== key), defaultLocale), ...(fresh ?? [])];
+    const moving = fresh ? descendants(bases, mounts, [key]) : new Set<string>();
+    const slugChanged = fresh !== null && fresh.some((b) => (current.find((r) => r.id === rowId(type, id, b.locale))?.own ?? null) !== b.own);
+    const parentChanged = fresh !== null && before !== undefined && before.parent !== parent;
+    const liveField = Object.keys(route.liveWhen)[0];
+    const liveChanged = fresh !== null && fresh.some((b) => current.find((r) => r.id === rowId(type, id, b.locale))?.live !== b.live);
+    const structural = parentChanged && route.parentField !== null ? route.parentField : route.slugField;
+    const publishing = !slugChanged && !parentChanged && liveChanged && liveField !== undefined;
+    const cascade = { field: publishing ? liveField : structural, publishing };
+    return { moves: await settleMoving(current, bases, mounts, moving, () => structural, cascade, runId) };
+  }
+
+  async function indexMounts(runId: string): Promise<{ moves: Move[] }> {
+    const settings = config.mounts;
+    if (!settings) throw new Error("site/default: site.indexMounts needs \"mounts\" in the site/default config");
+    const raw = await storedMounts();
+    const current = await all<DocRow>(DOCS, {});
+    const problems: string[] = [];
+    for (const [type, value] of Object.entries(raw)) {
+      if (config.routes[type]?.mount !== true) problems.push(`"${type}" is not a mountable collection`);
+      else if (value !== null && typeof value !== "string") problems.push(`${type}: expected a page id or null`);
     }
-    const touched = [...new Set([docKey(type, id), ...[...changed.values()].map(({ before, after }) => docKey((after ?? before)!.type, (after ?? before)!.docId))])];
-    await writeRun(runId, touched, moves, seq);
+    const next = contentMounts(raw);
+    const seen = new Map<string, string>();
+    for (const [type, page] of Object.entries(next)) {
+      if (page === null) continue;
+      const row = current.find((r) => r.type === config.mountTarget && r.docId === page && r.locale === defaultLocale);
+      if (!row) problems.push(`${type}: ${config.mountTarget}/${page} does not exist`);
+      else if (row.parent === null && row.tail === "") problems.push(`${type}: the home page cannot hold a mounted collection`);
+      const other = seen.get(page);
+      if (other !== undefined) problems.push(`${config.mountTarget}/${page} is assigned to both ${other} and ${type}`);
+      seen.set(page, type);
+    }
+    if (problems.length > 0) throw new Abort(failure("VALIDATION", `mounts: ${problems.join("; ")}`, { details: { fields: problems.map((message) => ({ field: settings.field, message })) } }));
+    const previous = await readMounts();
+    const changedTypes = Object.keys(next).filter((t) => next[t] !== previous[t]);
+    if (changedTypes.length === 0) return { moves: [] };
+    const bases = baseOfRows(current, defaultLocale);
+    const moving = new Set(bases.filter((b) => changedTypes.includes(b.type)).map((b) => docKey(b.type, b.docId)));
+    const moves = await settleMoving(current, bases, next, moving, () => settings.field, { field: settings.field, publishing: false }, runId);
+    await writeMounts(next);
     return { moves };
   }
 
@@ -418,47 +549,15 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     return announced;
   }
 
-  function derive(plan: RebuildPlan): { desired: DocRow[]; conflicts: RebuildConflict[] } {
-    const { rows, conflicts } = settle(format, plan.bases, plan.docs);
-    return { desired: rows, conflicts };
-  }
-
   async function write(plan: RebuildPlan, runId: string | null): Promise<RebuildReport> {
-    const { desired, conflicts } = derive(plan);
-    const current = new Map(plan.docs.map((r) => [r.id, r]));
-    const wanted = new Map(desired.map((r) => [r.id, r]));
-    const removedDocs = [...current.keys()].filter((id) => !wanted.has(id) || !sameRow(current.get(id)!, wanted.get(id)!));
-    const createdDocs = desired.filter((r) => !current.has(r.id) || !sameRow(current.get(r.id)!, r));
-    const currentClaims = new Map(plan.claims.map((c) => [c.id, c]));
-    const wantedClaims = new Map(desired.flatMap((r) => {
-      const c = claimOf(r);
-      return c ? [[c.id, c] as const] : [];
-    }));
-    const removedClaims = [...currentClaims.keys()].filter((id) => !wantedClaims.has(id) || !sameClaim(currentClaims.get(id)!, wantedClaims.get(id)!));
-    const createdClaims = [...wantedClaims.values()].filter((c) => !currentClaims.has(c.id) || !sameClaim(currentClaims.get(c.id)!, c));
-    await replaceRows(PATHS, removedClaims, createdClaims);
-    await replaceRows(DOCS, removedDocs, createdDocs);
-    const touched = new Set<string>();
-    for (const id of [...removedDocs, ...createdDocs.map((r) => r.id)]) {
-      const row = wanted.get(id) ?? current.get(id)!;
-      touched.add(docKey(row.type, row.docId));
-    }
-    const seq = await takeSeq();
-    const moves: Move[] = [];
-    if (plan.previous) {
-      for (const id of new Set([...current.keys(), ...wanted.keys()])) {
-        const from = reachablePath(format, current.get(id));
-        const to = reachablePath(format, wanted.get(id));
-        const ref = (wanted.get(id) ?? current.get(id))!;
-        if (from !== to) moves.push({ type: ref.type, id: ref.docId, locale: ref.locale, from, to, seq });
-      }
-    }
-    await writeRun(runId, [...touched], moves, seq);
+    const { rows, conflicts } = derive(format, plan.bases, plan.docs, plan.mounts);
+    await apply(diff(plan.docs, plan.claims, rows), runId, plan.previous);
+    await writeMounts(plan.mounts);
     const hash = routesHash(config, model);
     const meta = need(await db.findOne<MetaRow>(META, { id: "routes" }), "persistence@1");
     if (meta) need(await db.updateOne<MetaRow>(META, "routes", { hash }), "persistence@1");
-    else need(await db.createOne<MetaRow>(META, { id: "routes", hash, value: null }), "persistence@1");
-    return { indexed: new Set(desired.map((r) => docKey(r.type, r.docId))).size, conflicts };
+    else need(await db.createOne<MetaRow>(META, { id: "routes", hash, value: null, ref: null }), "persistence@1");
+    return { indexed: new Set(rows.map((r) => docKey(r.type, r.docId))).size, conflicts };
   }
 
   async function plan(): Promise<RebuildPlan> {
@@ -467,7 +566,8 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     const claims = await all<ClaimRow>(PATHS, {});
     const previous = need(await db.findOne<MetaRow>(META, { id: "routes" }), "persistence@1") !== null;
     const bases = await readAllBases();
-    return { baseSeq, previous, bases, docs, claims };
+    const mounts = contentMounts(await storedMounts());
+    return { baseSeq, previous, bases, docs, claims, mounts };
   }
 
   async function replan(stale: RebuildPlan): Promise<RebuildPlan> {
@@ -487,7 +587,7 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     const fresh: ClaimRow[] = [];
     for (const part of chunks(docIds)) fresh.push(...need(await db.findMany<ClaimRow>(PATHS, { docId: { in: part } }), "persistence@1").items);
     const claims = [...stale.claims.filter((c) => !inKeys(c.type, c.docId)), ...fresh.filter((c) => inKeys(c.type, c.docId))];
-    return { baseSeq: await readSeq(), previous: stale.previous, bases, docs, claims };
+    return { baseSeq: await readSeq(), previous: stale.previous, bases, docs, claims, mounts: contentMounts(await storedMounts()) };
   }
 
   async function drifted(): Promise<boolean> {
@@ -504,7 +604,10 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
         if (page.items.length < PAGE) break;
       }
     }
-    return seen !== stored.size;
+    if (seen !== stored.size) return true;
+    const mounts = contentMounts(await storedMounts());
+    const kept = await readMounts();
+    return Object.keys(mounts).some((t) => mounts[t] !== kept[t]);
   }
 
   async function start(): Promise<void> {
@@ -523,6 +626,7 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
       else logger.info("site/default: paths rebuilt", { indexed: report.indexed });
     }
     table.load(await all<DocRow>(DOCS, {}));
+    table.mounts = await readMounts();
   }
 
   const booted = await guarded(start);
@@ -573,7 +677,13 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
       guarded(async () => {
         const route = routeOf(type);
         const locale = input.locale ?? defaultLocale;
-        const tail = tailOf(input.slug, route);
+        const known = input.id === undefined ? undefined : table.row(type, input.id, locale);
+        const parent = input.parent !== undefined ? input.parent : (known?.parent ?? null);
+        const sourceKey = prefixSource(format, { type, parent }, table.mounts);
+        const source = sourceKey === undefined ? undefined : table.row(sourceKey.slice(0, sourceKey.indexOf("/")), sourceKey.slice(sourceKey.indexOf("/") + 1), locale);
+        const prefix = sourceKey === undefined ? undefined : (source?.tail ?? null);
+        const tail = prefix === undefined ? tailOf(input.slug, route) : prefix === null ? null : prefix === "" ? input.slug : `${prefix}/${input.slug}`;
+        if (tail === null) return { path: "", reachable: false, reason: "the parent has no path in this locale", conflict: null, shadows: [], exposesParentSlug: null };
         const path = pathOfTail(format, tail, locale);
         const bad = violation(format, tail, locale);
         const claim = table.claim(locale, tail);
@@ -584,9 +694,36 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
           if (weak.docId === input.id || reachablePath(format, weak) === null) continue;
           shadows.push({ type: weak.type, id: weak.docId, label: await labelOf(weak.type, weak.docId, locale), path });
         }
-        const live = input.id === undefined ? false : (table.row(type, input.id, locale)?.live ?? false);
+        let exposesParentSlug: PathPreview["exposesParentSlug"] = null;
+        for (let at = source, guard = 0; at && guard <= config.maxDepth; guard++) {
+          if (!at.live) {
+            exposesParentSlug = { type: at.type, id: at.docId, label: await labelOf(at.type, at.docId, locale) };
+            break;
+          }
+          const next = prefixSource(format, at, table.mounts);
+          at = next === undefined ? undefined : table.row(next.slice(0, next.indexOf("/")), next.slice(next.indexOf("/") + 1), locale);
+        }
+        const live = known?.live ?? false;
         const reason = bad ? bad.message : conflict ? `taken by ${conflict.type} "${conflict.label}"` : live ? null : "not published in this locale";
-        return { path, reachable: reason === null, reason, conflict, shadows, exposesParentSlug: null };
+        return { path, reachable: reason === null, reason, conflict, shadows, exposesParentSlug };
+      }),
+
+    indexMounts: (runId) => guarded(() => indexMounts(runId)),
+
+    tree: (type) =>
+      guarded(async () => {
+        const route = routeOf(type);
+        const labels = new Map<string, string>();
+        for (let offset = 0; ; offset += PAGE) {
+          const page = need(await content.list(type, {}, { sort: { id: "asc" }, limit: PAGE, offset }), "content@1");
+          for (const doc of page.items) labels.set(doc.id, label(doc, route, doc.id));
+          if (page.items.length < PAGE) break;
+        }
+        return [...labels].map(([id, name]) => ({ id, parent: table.row(type, id, defaultLocale)?.parent ?? null, label: name, paths: table.row(type, id, defaultLocale) ? locales.reduce<Record<string, string | null>>((out, l) => {
+          const row = table.row(type, id, l);
+          out[l] = row && row.tail !== null && row.valid ? pathOfTail(format, row.tail, l) : null;
+          return out;
+        }, {}) : {} }));
       }),
   };
 }

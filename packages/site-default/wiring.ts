@@ -1,14 +1,15 @@
 import type { ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import type { Introspection } from "@michaelthielemann/kestrel/defineModule";
 import { logWarn, type Logger } from "@michaelthielemann/kestrel/logger";
-import type { Route } from "./routes.ts";
+import type { RoutesConfig } from "./routes.ts";
 
 const WRITE = /^content\.(create|update|remove|removeTranslation):([^?]+)/;
-const READ = /^site\.(resolve|resolveLinks|route|attachPaths|previewPath):([^?]+)(?:\?(.*))?$/;
+const READ = /^site\.(resolve|resolveLinks|route|attachPaths|previewPath|readTree):([^?]+)(?:\?(.*))?$/;
 
 /** Boot errors for a routed type whose model cannot carry a path. */
-export function checkRoutedModel(routes: Record<string, Route>, model: ContentModel, logger: Logger): void {
+export function checkRoutedModel(config: RoutesConfig, model: ContentModel, logger: Logger): void {
   const problems: string[] = [];
+  const routes = config.routes;
   for (const [type, route] of Object.entries(routes)) {
     const definition = model.types[type];
     if (!definition) {
@@ -20,16 +21,35 @@ export function checkRoutedModel(routes: Record<string, Route>, model: ContentMo
     const field = typeof raw === "string" ? { type: raw } : raw;
     if (field?.type !== "slug") problems.push(`routes.${type}.slugField: "${type}.${route.slugField}" must be a slug field`);
     for (const name of Object.keys(route.liveWhen)) if (!(name in definition.fields)) problems.push(`routes.${type}.liveWhen: "${type}" has no field "${name}"`);
-    if (field?.type === "slug" && field.unique === true) {
+    if (route.parentField !== null) {
+      const rawParent = definition.fields[route.parentField];
+      const parent = typeof rawParent === "string" ? { type: rawParent } : rawParent;
+      if (type !== config.mountTarget) problems.push(`routes.${type}.parentField: only the mount target type (${config.mountTarget}) may have parents`);
+      if (parent?.type !== "ref" || parent.to !== type || parent.localized === true) problems.push(`routes.${type}.parentField: "${type}.${route.parentField}" must be a non-localized ref to ${type}`);
+    }
+    if (route.mount && definition.kind !== "multi") problems.push(`routes.${type}.mount: only multi types can be mounted`);
+    if (route.mount && type === config.mountTarget) problems.push(`routes.${type}.mount: the mount target type cannot be mounted`);
+    const nested = route.parentField !== null || route.mount;
+    if (field?.type === "slug" && field.unique === true && nested) {
+      problems.push(`routes.${type}: "${type}.${route.slugField}" must not be unique; it would reject the same slug under two different parents without naming the occupant`);
+    } else if (field?.type === "slug" && field.unique === true) {
       logWarn(logger, `site/default: "${type}.${route.slugField}" is unique; the public path is what must be unique, and a unique slug rejects the same slug in two places without naming the occupant`, { type });
     }
+  }
+  const mountable = Object.entries(routes).filter(([, r]) => r.mount).map(([t]) => t);
+  if (mountable.length > 0) {
+    if (!routes[config.mountTarget]) problems.push(`mountTarget: "${config.mountTarget}" is not routed`);
+    if (!config.mounts) problems.push(`routes.${mountable[0] ?? ""}.mount needs "mounts": the single type and field that store the assignment`);
+    else if (model.types[config.mounts.type]?.kind !== "single" || !(config.mounts.field in (model.types[config.mounts.type]?.fields ?? {}))) problems.push(`mounts: "${config.mounts.type}.${config.mounts.field}" must be a field of a single type`);
   }
   if (problems.length > 0) throw new Error(`site/default: ${problems.join("; ")}`);
 }
 
 /** Boot errors for a pipeline that writes a routed type without keeping its paths, or reads one with rules that contradict its route. */
-export function checkPathWiring(manifest: ReturnType<Introspection["describe"]>, routes: Record<string, Route>): void {
+export function checkPathWiring(manifest: ReturnType<Introspection["describe"]>, config: RoutesConfig): void {
   const problems: string[] = [];
+  const routes = config.routes;
+  const mountsSet = config.mounts === null ? null : `content.set:${config.mounts.type}`;
   for (const pipeline of manifest.pipelines) {
     const steps = pipeline.steps;
     steps.forEach((step, i) => {
@@ -46,6 +66,12 @@ export function checkPathWiring(manifest: ReturnType<Introspection["describe"]>,
           if (last?.spec !== index) problems.push(`pipeline "${pipeline.name}": the atomic group with ${step.spec} must end with ${index} (it ends with ${last?.spec ?? "nothing"})`);
           else if (steps[end + 1]?.spec !== "site.announcePaths") problems.push(`pipeline "${pipeline.name}": site.announcePaths must follow the atomic group that ends with ${index}`);
         }
+      }
+      if (mountsSet !== null && (step.spec === mountsSet || step.spec.startsWith(`${mountsSet}?`))) {
+        let end = i;
+        while (step.atomic !== undefined && steps[end + 1]?.atomic === step.atomic) end++;
+        if (step.atomic === undefined || steps[end]?.spec !== "site.indexMounts") problems.push(`pipeline "${pipeline.name}": ${step.spec} must run in an atomic group that ends with site.indexMounts`);
+        else if (steps[end + 1]?.spec !== "site.announcePaths") problems.push(`pipeline "${pipeline.name}": site.announcePaths must follow the atomic group that ends with site.indexMounts`);
       }
       const read = READ.exec(step.spec);
       const readType = read?.[2];

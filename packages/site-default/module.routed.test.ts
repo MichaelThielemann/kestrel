@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, type Kestrel } from "@michaelthielemann/kestrel";
 import contentModule from "@michaelthielemann/kestrel-content-default";
-import type { ContentModel } from "@michaelthielemann/kestrel-contracts/content";
+import type { ContentModel, FieldDefinition } from "@michaelthielemann/kestrel-contracts/content";
 import eventsDirect from "@michaelthielemann/kestrel-events-direct";
 import eventsInmemory from "@michaelthielemann/kestrel-events-inmemory";
 import persistenceSqlite from "@michaelthielemann/kestrel-persistence-sqlite";
@@ -77,6 +77,7 @@ const WRITES = [
 ];
 
 interface BootOptions {
+  model?: ContentModel;
   pipelines?: PipelineDefinition[];
   events?: boolean;
   persistence?: boolean;
@@ -89,7 +90,7 @@ async function bootRouted(options: BootOptions = {}): Promise<{ kestrel: Kestrel
   const persistence = options.persistence ?? true;
   const modules = [
     ...(persistence ? [{ use: "persistence", config: { file: ":memory:" } }] : []),
-    { use: "content", config: MODEL },
+    { use: "content", config: options.model ?? MODEL },
     { use: "site", config: options.site ?? { routes: ROUTES } },
     ...(events ? [{ use: "events", config: {} }, { use: "direct", config: {} }] : []),
     { use: "test", config: {} },
@@ -139,6 +140,17 @@ describe("site/default routed: boot", () => {
 
   it("fails when a read names a home or slug field the route does not have", async () => {
     await expect(bootRouted({ pipelines: [definePipeline({ name: "resolvePage", steps: ["site.resolve:pages?home=start"] })] })).rejects.toThrow(/names home "start", but routes.pages.home is "home"/);
+  });
+
+  it("fails for a parent field that is not a non-localized ref to the same type, and for a unique slug under parents", async () => {
+    const withParent = (parent: FieldDefinition, unique = false): ContentModel => ({ ...MODEL, types: { pages: { ...MODEL.types.pages!, fields: { ...MODEL.types.pages!.fields, slug: { type: "slug" as const, required: true, localized: true, unique }, parent } } } });
+    const boot = (model: ContentModel) =>
+      bootRouted({ model, site: { routes: { pages: { home: "home", parentField: "parent" } } }, pipelines: [] });
+    await expect(boot(withParent({ type: "ref", to: "pages", localized: true }))).rejects.toThrow(/"pages.parent" must be a non-localized ref to pages/);
+    await expect(boot(withParent({ type: "text" }))).rejects.toThrow(/must be a non-localized ref/);
+    await expect(boot(withParent({ type: "ref", to: "pages" }, true))).rejects.toThrow(/"pages.slug" must not be unique/);
+    const { kestrel } = await boot(withParent({ type: "ref", to: "pages" }));
+    await kestrel.stop();
   });
 
   it("fails for a routed type the model does not have or whose slug field is no slug", async () => {

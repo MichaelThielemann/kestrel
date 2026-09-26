@@ -9,9 +9,9 @@ import { noteRead, unobserved } from "@michaelthielemann/kestrel/reads";
 import type { SitePaths } from "./paths.ts";
 
 export { createSitePaths, type SitePaths, type SitePathsDeps } from "./paths.ts";
-export type { Move, Route, RoutesConfig } from "./routes.ts";
+export { routesConfig, type Mounts, type Move, type Route, type RoutesConfig } from "./routes.ts";
 import { splitTail, tailOf, type Route } from "./routes.ts";
-import { pathOfTail } from "./table.ts";
+import { pathOfTail, prefixSource } from "./table.ts";
 
 interface Rules {
   home: string;
@@ -172,7 +172,7 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
     const effective = split.locale === "" ? undefined : split.locale;
     const claim = table.table.claim(split.locale, split.tail);
     const answered = await unobserved(async (): Promise<Result<{ candidate: string | null; doc: ContentDocument | null }, SiteError>> => {
-      let holder = claim.strong;
+      let holder = claim.strong?.valid === true ? claim.strong : undefined;
       if (holder) {
         const passes = await satisfiesFilter(content, holder.type, holder.docId, readLocale, rules.filter);
         if (isErr(passes)) return err(transientOnly(passes.error));
@@ -197,14 +197,26 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
   function pathOfRouted(table: SitePaths, type: string, document: ContentDocument, locale: string, rules: Rules, route: Route): string | null {
     const slug = document[rules.slugField];
     if (typeof slug !== "string" || slug === "") return null;
-    const tail = tailOf(slug, route);
-    const known = table.table.rowsOf(type, document.id).length > 0;
+    if (table.table.rowsOf(type, document.id).length > 0) {
+      const row = table.table.row(type, document.id, locale);
+      if (!row || row.tail === null || !row.valid) return null;
+      const last = row.tail === "" ? route.home : (row.tail.split("/").pop() ?? "");
+      if (last !== slug) return null;
+      if (Object.keys(rules.filter).length > 0 && !row.live) return null;
+      return pathOfTail(table.format, row.tail, locale, rules.prefixPrimary);
+    }
+    const parent = route.parentField === null ? null : document[route.parentField];
+    const source = prefixSource(table.format, { type, parent: typeof parent === "string" && parent !== "" ? parent : null }, table.table.mounts);
+    let tail: string;
+    if (source === undefined) tail = tailOf(slug, route);
+    else {
+      const at = source.indexOf("/");
+      const prefix = table.table.row(source.slice(0, at), source.slice(at + 1), locale)?.tail;
+      if (prefix === undefined || prefix === null) return null;
+      tail = prefix === "" ? slug : `${prefix}/${slug}`;
+    }
     const claim = table.table.claim(locale, tail);
-    const own = claim.strong?.docId === document.id ? claim.strong : claim.weak.find((w) => w.docId === document.id);
-    if (known) {
-      if (!own || !own.valid) return null;
-      if (Object.keys(rules.filter).length > 0 && !own.live) return null;
-    } else if (claim.strong || claim.weak.length > 0) return null;
+    if (claim.strong || claim.weak.length > 0) return null;
     return pathOfTail(table.format, tail, locale, rules.prefixPrimary);
   }
 

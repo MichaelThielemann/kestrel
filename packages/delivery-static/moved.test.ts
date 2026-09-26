@@ -8,7 +8,7 @@ import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import type { Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
-import { createSiteDefault, createSitePaths, type Move } from "@michaelthielemann/kestrel-site-default/impl";
+import { createSiteDefault, createSitePaths, routesConfig, type Move } from "@michaelthielemann/kestrel-site-default/impl";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { createDeliveryStatic, keyFor, STATUS, type Delivery, type StatusRow } from "./impl.ts";
@@ -25,6 +25,7 @@ const model: ContentModel = {
         title: { type: "text", required: true, localized: true },
         status: { type: "enum", options: ["draft", "published"], localized: true },
         body: { type: "richtext", localized: true },
+        parent: { type: "ref", to: "pages" },
       },
     },
   },
@@ -81,7 +82,7 @@ async function routedDelivery() {
     },
     on: () => () => {},
   };
-  const paths = await createSitePaths({ routes: { pages: { slugField: "slug", home: "home", liveWhen: { status: "published" }, labelField: "title" } }, prefixPrimary: false, reservedPaths: [] }, { content, db, events, logger: silentLogger });
+  const paths = await createSitePaths(routesConfig({ routes: { pages: { home: "home", liveWhen: { status: "published" }, parentField: "parent" } } }), { content, db, events, logger: silentLogger });
   const site = createSiteDefault(content, paths);
   const blobs = memoryBlobs();
   const config = configSchema.parse({ types: { pages: {} }, prefix: "site/", dependencies: { render: "background" } });
@@ -138,6 +139,20 @@ describe("delivery/static: re-rendering moved outputs", () => {
     expect(h.html("/a-neu")).toContain("<h1>A</h1>");
     expect(h.html("/linker")).toContain('href="/a-neu"');
     expect(h.html("/other")).toContain("<h1>Other</h1>");
+  });
+
+  it("renaming a parent re-renders its subpages at their new paths", async () => {
+    const h = await routedDelivery();
+    const parent = await h.create({ slug: "eltern", title: "Eltern", status: "published" });
+    const child = await h.create({ slug: "kind", title: "Kind", status: "published", parent });
+    for (const id of [parent, child]) expectOk(await h.delivery.publish("pages", id));
+    expect(h.html("/eltern/kind")).toContain("<h1>Kind</h1>");
+    h.moves.length = 0;
+    await h.update(parent, { slug: "familie" });
+    expectOk(await h.delivery.markMoved(h.moves));
+    await h.settle();
+    expect(h.html("/eltern/kind")).toBeNull();
+    expect(h.html("/familie/kind")).toContain("<h1>Kind</h1>");
   });
 
   it("swapped slugs leave each page's files at its new path", async () => {

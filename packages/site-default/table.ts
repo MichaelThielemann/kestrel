@@ -1,5 +1,5 @@
 import type { Document } from "@michaelthielemann/kestrel-contracts/persistence";
-import { formatPath, reservedMatch, tailOf, type Move, type Route, type RoutesConfig } from "./routes.ts";
+import { formatPath, reservedMatch, tailOf, type Mounts, type Move, type RoutesConfig } from "./routes.ts";
 
 export const DOCS = "site_docs";
 export const PATHS = "site_paths";
@@ -44,6 +44,7 @@ export interface RunRow extends Document {
 export interface MetaRow extends Document {
   hash: string | null;
   value: number | null;
+  ref: string | null;
 }
 
 /** What `content@1` says about one document in one locale, before claims are settled. */
@@ -54,6 +55,7 @@ export interface Base {
   own: string | null;
   slug: string | null;
   live: boolean;
+  parent: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -65,12 +67,13 @@ export interface RebuildConflict {
   winner: { type: string; id: string } | null;
   losers: Array<{ type: string; id: string }>;
   reason: "taken" | "reserved" | "locale";
+  message?: string;
 }
 
 export const DOC_SCHEMA = { type: "string", docId: "string", locale: "string", parent: "string", own: "string", tail: "string", strong: "boolean", live: "boolean", valid: "boolean", createdAt: "number", updatedAt: "number" } as const;
 export const CLAIM_SCHEMA = { locale: "string", tail: "string", strength: "string", type: "string", docId: "string" } as const;
 export const RUN_SCHEMA = { runId: "string", seq: "number", touched: "json", moves: "json", announced: "boolean", at: "number" } as const;
-export const META_SCHEMA = { hash: "string", value: "number" } as const;
+export const META_SCHEMA = { hash: "string", value: "number", ref: "string" } as const;
 
 export const docKey = (type: string, docId: string): string => `${type}/${docId}`;
 export const rowId = (type: string, docId: string, locale: string): string => `${type}/${docId}/${locale}`;
@@ -117,58 +120,86 @@ export function violation(f: Formatter, tail: string, locale: string): { reason:
   return null;
 }
 
-export function baseTail(base: Base, route: Route): string | null {
-  return base.slug === null ? null : tailOf(base.slug, route);
+/** The document whose tail prefixes `base`'s: its parent, else its type's mount page, else none (top level). */
+export function prefixSource(f: Formatter, base: Pick<Base, "type" | "parent">, mounts: Mounts): string | undefined {
+  if (base.parent !== null) return docKey(base.type, base.parent);
+  const page = f.config.routes[base.type]?.mount === true ? mounts[base.type] : undefined;
+  return page === undefined || page === null ? undefined : docKey(f.config.mountTarget, page);
 }
 
-export function baseRow(base: Base, route: Route): DocRow {
-  const tail = baseTail(base, route);
-  return {
-    id: rowId(base.type, base.docId, base.locale),
-    type: base.type,
-    docId: base.docId,
-    locale: base.locale,
-    parent: null,
-    own: base.own,
-    tail,
-    strong: tail !== null && base.own !== null,
-    live: base.live,
-    valid: tail !== null,
-    createdAt: base.createdAt,
-    updatedAt: base.updatedAt,
-  };
+/** The base a stored row stands for, so a save can recompute every other document without reading content. */
+export function baseOfRows(rows: readonly DocRow[], defaultLocale: string): Base[] {
+  const fallback = new Map<string, string | null>();
+  for (const row of rows) if (row.locale === defaultLocale) fallback.set(docKey(row.type, row.docId), row.own);
+  return rows.map((row) => ({ type: row.type, docId: row.docId, locale: row.locale, own: row.own, slug: row.own ?? fallback.get(docKey(row.type, row.docId)) ?? null, live: row.live, parent: row.parent, createdAt: row.createdAt, updatedAt: row.updatedAt }));
+}
+
+interface Claim {
+  strong?: DocRow;
+  weak?: DocRow;
+}
+
+/** The claim a tail's prefix belongs to: a live strong claim, a strong claim nobody else wants, else the weak one. */
+export function servingClaim(claim: Claim): DocRow | undefined {
+  const { strong, weak } = claim;
+  if (strong && (strong.live || !weak)) return strong;
+  return weak ?? strong;
 }
 
 /**
- * The rows a full rebuild settles on: a tail already held keeps its holder, an unheld tail goes to its oldest
- * claimant, and every other claimant of it loses its claim. A weak claim is valid unless a live strong claim holds
- * the same tail.
+ * Every row the bases give. A document's tail is its prefix source's tail plus its slug. A tail already held keeps
+ * its holder and an unheld one goes to its oldest claimant; every other claimant loses its claim. A row is valid when
+ * its own claim serves (a weak claim yields to a live strong one) and its prefix source is valid and serves the
+ * source's tail.
  */
-export function settle(f: Formatter, bases: readonly Base[], current: readonly DocRow[]): { rows: DocRow[]; conflicts: RebuildConflict[] } {
+export function derive(f: Formatter, bases: readonly Base[], current: readonly DocRow[], mounts: Mounts): { rows: DocRow[]; conflicts: RebuildConflict[] } {
+  const byRow = new Map<string, Base>();
+  for (const base of bases) if (f.config.routes[base.type]) byRow.set(rowId(base.type, base.docId, base.locale), base);
+  const tails = new Map<string, string | null>();
+  const visiting = new Set<string>();
+  const tailFor = (id: string): string | null => {
+    const known = tails.get(id);
+    if (known !== undefined) return known;
+    const base = byRow.get(id);
+    if (!base || base.slug === null) return null;
+    const route = f.config.routes[base.type]!;
+    const source = prefixSource(f, base, mounts);
+    let tail: string | null;
+    if (source === undefined) tail = tailOf(base.slug, route);
+    else if (visiting.has(id)) tail = null;
+    else {
+      visiting.add(id);
+      const prefix = tailFor(`${source}/${base.locale}`);
+      visiting.delete(id);
+      tail = prefix === null ? null : prefix === "" ? base.slug : `${prefix}/${base.slug}`;
+    }
+    tails.set(id, tail);
+    return tail;
+  };
+
   const holders = new Map<string, string>();
   for (const row of current) if (row.tail !== null) holders.set(`${claimKey(row.locale, row.tail)}\u0000${row.strong ? "s" : "w"}`, row.id);
   const rows = new Map<string, DocRow>();
   const groups = new Map<string, { strong: DocRow[]; weak: DocRow[] }>();
   const conflicts: RebuildConflict[] = [];
-  for (const base of bases) {
-    const route = f.config.routes[base.type];
-    if (!route) continue;
-    const row = baseRow(base, route);
-    rows.set(row.id, row);
-    if (row.tail === null) continue;
-    const bad = violation(f, row.tail, row.locale);
+  for (const [id, base] of byRow) {
+    const tail = tailFor(id);
+    const row: DocRow = { id, type: base.type, docId: base.docId, locale: base.locale, parent: base.parent, own: base.own, tail, strong: tail !== null && base.own !== null, live: base.live, valid: false, createdAt: base.createdAt, updatedAt: base.updatedAt };
+    rows.set(id, row);
+    if (tail === null) continue;
+    const bad = violation(f, tail, row.locale);
     if (bad) {
-      conflicts.push({ path: pathOfTail(f, row.tail, row.locale), locale: row.locale, winner: null, losers: [{ type: row.type, id: row.docId }], reason: bad.reason });
+      conflicts.push({ path: pathOfTail(f, tail, row.locale), locale: row.locale, winner: null, losers: [{ type: row.type, id: row.docId }], reason: bad.reason, message: bad.message });
       row.tail = null;
       row.strong = false;
-      row.valid = false;
       continue;
     }
-    const key = claimKey(row.locale, row.tail);
+    const key = claimKey(row.locale, tail);
     const group = groups.get(key) ?? { strong: [], weak: [] };
     (row.strong ? group.strong : group.weak).push(row);
     groups.set(key, group);
   }
+  const claims = new Map<string, Claim>();
   const pick = (claimants: DocRow[], strength: "s" | "w", key: string): DocRow | undefined => {
     if (claimants.length === 0) return undefined;
     const held = holders.get(`${key}\u0000${strength}`);
@@ -179,21 +210,45 @@ export function settle(f: Formatter, bases: readonly Base[], current: readonly D
       for (const loser of losers) {
         loser.tail = null;
         loser.strong = false;
-        loser.valid = false;
       }
     }
     return winner;
   };
   for (const [key, group] of groups) {
+    const claim: Claim = {};
     const strong = pick(group.strong, "s", key);
     const weak = pick(group.weak, "w", key);
-    if (weak) weak.valid = !(strong?.live ?? false);
+    if (strong) claim.strong = strong;
+    if (weak) claim.weak = weak;
+    claims.set(key, claim);
   }
+
+  const validity = new Map<string, boolean>();
+  const validFor = (row: DocRow): boolean => {
+    const known = validity.get(row.id);
+    if (known !== undefined) return known;
+    validity.set(row.id, false);
+    let valid = false;
+    if (row.tail !== null) {
+      const claim = claims.get(claimKey(row.locale, row.tail)) ?? {};
+      const serving = row.strong ? claim.strong === row : claim.weak === row && !(claim.strong?.live ?? false);
+      const source = prefixSource(f, row, mounts);
+      if (serving && source === undefined) valid = true;
+      else if (serving && source !== undefined) {
+        const parent = rows.get(`${source}/${row.locale}`);
+        valid = parent !== undefined && parent.tail !== null && validFor(parent) && servingClaim(claims.get(claimKey(parent.locale, parent.tail)) ?? {}) === parent;
+      }
+    }
+    validity.set(row.id, valid);
+    return valid;
+  };
+  for (const row of rows.values()) row.valid = validFor(row);
   return { rows: [...rows.values()], conflicts };
 }
 
 /** The in-memory mirror of the committed rows, patched only from committed state. */
 export class PathTable {
+  mounts: Mounts = {};
   private readonly rows = new Map<string, DocRow>();
   private readonly byDoc = new Map<string, Set<string>>();
   private readonly claims = new Map<string, { strong: string | null; weak: Set<string> }>();

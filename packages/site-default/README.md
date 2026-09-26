@@ -44,8 +44,32 @@ Not included: rendering, redirects (see delivery-static, redirects-default).
 
 A route has `slugField` (default `slug`), `home` (the top-level slug served at the locale's root;
 default none), `liveWhen` (the filter a document must pass with its own values in a locale to be
-reachable there; default `{}`) and `labelField` (default `title`, names documents in messages). Routed
-mode needs a `persistence@1` and an `events@1` provider; setup fails without them.
+reachable there; default `{}`), `labelField` (default `title`, names documents in messages) and
+`parentField` (see below). Routed mode needs a `persistence@1` and an `events@1` provider; setup fails
+without them. `maxDepth` (default 16) bounds a parent chain, `maxCascade` (default 1000) the rows one
+save may change.
+
+**Subpages.** With `parentField` (a non-localized `ref` to the same type, only on the type named by
+`mountTarget`, default `pages`) a document's path is its parent's path plus its own slug:
+`/ueber-uns/team`, `/en/about-us/team`. The slug is unique only where the whole path collides, so
+`/ueber-uns/team` and `/projekte/team` both save; a routed type with parents must not have a `unique`
+slug field, and setup fails if it does. In a locale where a page has no slug of its own, its segment is
+the default locale's slug. A parent that is the page itself or one of its subpages, a chain deeper
+than `maxDepth`, a missing parent and the home page as a parent or with a parent are field errors on
+the parent field; deleting a page that still has subpages is a `CONFLICT` naming them. Renaming or
+re-parenting a page moves every subpage in every locale; a subpage whose new path is taken rejects the
+whole save and names both documents (`details.conflicts[].moving`).
+
+**Independent reachability.** Every page is reachable on its own: live in the locale and its path
+valid. A page that is not published in a locale answers 404 there, but its subpages keep their paths,
+also under a page that was never published, and unpublishing or republishing it moves only that page.
+One deliberate consequence: the slug of an unpublished parent appears as a segment of its published
+subpages' paths. No other field of the parent is served: links to it are broken, it has no output, and
+a caller only learns its id through fields the caller is granted. `site.previewPath` reports such a
+parent as `exposesParentSlug`. A path prefix belongs to the claim that serves it: a live strong claim,
+else a weak one. So while a draft holds a page's fallback path with a slug of its own, the fallback
+page and its subpages keep serving and the draft's subpages are not reachable; when the draft is
+published both sections switch. That is the only case in which a page's publication moves other pages.
 
 **One path, one document.** The public path is unique per locale across every routed type; the slug
 alone need not be. A document's path in a locale is its own slug there (a strong claim), or else its
@@ -80,7 +104,8 @@ it could not finish, `site.resumePaths` (on a cron, every minute) finishes, so t
 one interval after a failure. Boot fails when a pipeline writes a routed type without this wiring, or
 reads it with a `home` or `slugField` the route does not have.
 
-`site.attachPaths:<t>?reachable` adds `_paths` to a list or read answer (reachable paths only; without
+`site.readTree:<t>` lists every document of the mount target type with its parent, label and valid
+paths. `site.attachPaths:<t>?reachable` adds `_paths` to a list or read answer (reachable paths only; without
 `?reachable` every valid path, drafts included). `site.previewPath:<t>` answers, for a payload
 `{ id?, locale?, slug }`, the path a save would give, whether it would be reachable, the occupant of a
 taken path and the fallback pages it would shadow.
@@ -102,9 +127,13 @@ unheld one goes to its oldest claimant; the answer `{ indexed, conflicts }` list
 lost a path, and such a document cannot be saved with that slug until the holder gives it up. Run it
 after migrations, for example on `migrations.applied`.
 
-**Cost.** A save's group holds the store's write lock, so public requests wait for it. Measured on
-SQLite in memory with 200 pages in 5 locales: a whole save run (content write, index, announce) takes
-about 1 ms, and a full rebuild about 20 ms.
+**Cost.** A save reads the stored path table and recomputes it in memory inside its group, and writes
+only the rows that changed, in bulk calls of up to 500 rows. The group holds the store's write lock, so
+public requests wait for it. A save that would change more than `maxCascade` rows is rejected with a
+field error before anything is written; raising the limit lets larger sections move in one save, at
+the price of every request waiting for that long. Measured on SQLite in memory with 200 pages in
+5 locales (1000 rows): a whole save run (content write, index, announce) takes about 4 ms, and a full
+rebuild about 15 ms.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
@@ -115,6 +144,12 @@ about 1 ms, and a full rebuild about 20 ms.
 | `routes` | record | no | `{}` |
 | `prefixPrimary` | boolean | no | `false` |
 | `reservedPaths` | array | no | `[]` |
+| `mounts` | object | no | – |
+| `mounts.type` | string | no | – |
+| `mounts.field` | string | no | – |
+| `mountTarget` | string | no | `"pages"` |
+| `maxDepth` | integer | no | `16` |
+| `maxCascade` | integer | no | `1000` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
@@ -125,22 +160,10 @@ about 1 ms, and a full rebuild about 20 ms.
 | `site.resumePaths` | Announce path changes a run left unannounced (patches the in-memory path table from the committed rows and raises site.pathsMoved) and prune announced ones older than 7 days | – | `result` | – | { announced: integer, pruned: integer, … } | 503 the store is unavailable | – | no |
 | `site.planRebuild` | Recompute every routed document's paths from content@1 outside any group (adds `rebuild` to the result) | – | `result.rebuild` | – | { rebuild: object, … } | 503 the store is unavailable | – | no |
 | `site.applyRebuild` | Write the planned paths inside one atomic group; saves committed since the plan are recomputed there | `result.rebuild` | `result` | – | { indexed: integer, conflicts: object[], … } | 503 the store is unavailable | – | yes |
-| `site.previewPath:<arg>` | The public path a <arg> would get for payload { id?, locale?, slug }, whether it would be reachable and why not; writes nothing | – | `result` | { id?: string, locale?: string, slug: string, … } | { path: string, reachable: boolean, reason: string \| null, conflict: object \| null, shadows: object[], exposesParentSlug: null, … } | 400 slug is missing; 503 the store is unavailable | – | no |
+| `site.readTree:<arg>` | Every <arg> with its parent, label and valid paths per locale | – | `result` | – | object[] | 503 the store is unavailable | – | no |
+| `site.previewPath:<arg>` | The public path a <arg> would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing | – | `result` | { id?: string, locale?: string, slug: string, parent?: string \| null, … } | { path: string, reachable: boolean, reason: string \| null, conflict: object \| null, shadows: object[], exposesParentSlug: object \| null, … } | 400 slug is missing; 503 the store is unavailable | – | no |
 | `site.attachPaths:<arg>` | Add _paths (locale → path) to the <arg> result, every valid path including drafts | `result` | `result` | – | { _paths: object, … } | – | – | no |
 
-Pipelines in `examples/minimal` using these steps:
-
-- **createPage** (POST /pages): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.create:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` → **`site.indexPath:pages`** ] → **`site.announcePaths`** → `events.emit:page.created` → `events.relay`
-- **deletePage** (DELETE /pages/:id): `authn.requireUser` → `authz.require:pages.delete` → [ `references.guard:pages` → `content.remove:pages` → `revisions.remove:pages` → `references.unindex:pages` → `links.unextract:pages` → **`site.indexPath:pages`** ] → **`site.announcePaths`** → `events.emit:page.deleted` → `events.relay`
-- **deletePageTranslation** (DELETE /pages/:id/translations/:locale): `authn.requireUser` → `authz.require:pages.write` → [ `content.removeTranslation:pages` → `revisions.removeTranslation:pages` → `references.index:pages` → `links.extract:pages` → **`site.indexPath:pages`** ] → **`site.announcePaths`** → `events.emit:page.translationRemoved` → `events.relay`
-- **listAllPages** (GET /admin/pages): `authn.requireUser` → `authz.require:pages.manage` → `content.list:pages` → **`site.attachPaths:pages`**
-- **previewPagePath** (POST /admin/pages/path-preview): `authn.requireUser` → `authz.require:pages.write` → **`site.previewPath:pages`**
-- **readAnyPage** (GET /admin/pages/:id): `authn.requireUser` → `authz.require:pages.manage` → `content.get:pages` → **`site.attachPaths:pages`**
-- **rebuildPaths** (POST /admin/paths/rebuild): `authn.requireUser` → `authz.require:pages.manage` → **`site.planRebuild`** → [ **`site.applyRebuild`** ] → **`site.announcePaths`**
-- **rebuildPathsAfterMigrations** (event migrations.applied): **`site.planRebuild`** → [ **`site.applyRebuild`** ] → **`site.announcePaths`**
-- **resolvePage** (GET /site/*path): `authn.identifyUser` → `authz.require:pages.read` → `redirects.lookup` → **`site.resolve:pages?home=home&status=published&fallback=true`** → **`site.resolveLinks:pages?home=home&status=published&fallback=true`** → `authz.fields:pages?shape=item`
-- **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.require:pages.write` → `revisions.restore:pages` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` → **`site.indexPath:pages`** ] → **`site.announcePaths`** → `revisions.reportRestore` → `events.emit:page.restored` → `events.relay`
-- **resumePaths** (cron * * * * *): **`site.resumePaths`**
-- **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` → **`site.indexPath:pages`** ] → **`site.announcePaths`** → `events.emit:page.updated` → `events.relay`
+Used by 13 of 102 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

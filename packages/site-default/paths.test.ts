@@ -7,7 +7,7 @@ import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { PAGES_ROUTE, recordingEvents, routedContent, routedSite } from "./__fixtures__/routed.ts";
 import { createSiteDefault } from "./impl.ts";
 import { createSitePaths } from "./paths.ts";
-import type { Move, RoutesConfig } from "./routes.ts";
+import { routeWith, routesConfig, type Move, type RoutesConfig } from "./routes.ts";
 import { RUNS, type RunRow } from "./table.ts";
 
 const MODEL: ContentModel = {
@@ -34,7 +34,7 @@ const MODEL: ContentModel = {
 };
 
 const published = { home: "home", fallback: true, filter: { status: "published" } };
-const POSTS_ROUTE = { slugField: "permalink", home: null, liveWhen: { status: "published" }, labelField: "title" };
+const POSTS_ROUTE = routeWith({ slugField: "permalink", liveWhen: { status: "published" } });
 
 async function runs(db: ReturnType<typeof createFakePersistence>): Promise<RunRow[]> {
   return expectOk(await db.findMany<RunRow>(RUNS, {}, { sort: { seq: "asc" } })).items;
@@ -225,7 +225,7 @@ describe("site/default routed paths: repair without a restart", () => {
 
     const emitted: Move[][] = [];
     const raw = await createContentDefault(MODEL, db);
-    const paths = await createSitePaths({ routes: { pages: PAGES_ROUTE }, prefixPrimary: false, reservedPaths: [] }, { content: raw, db, events: recordingEvents(emitted), logger: silentLogger });
+    const paths = await createSitePaths(routesConfig({ routes: { pages: PAGES_ROUTE } }), { content: raw, db, events: recordingEvents(emitted), logger: silentLogger });
     const site = createSiteDefault(raw, paths);
     expect(expectOk(await site.resolve("pages", "b", { rules: published }))).toMatchObject({ id: page.id });
     expect(expectOk(await paths.resume()).announced).toBe(1);
@@ -368,7 +368,7 @@ describe("site/default routed paths: memory", () => {
     const db = createFakePersistence();
     const raw = await createContentDefault(MODEL, db);
     const emitted: Move[][] = [];
-    const paths = await createSitePaths({ routes: { pages: PAGES_ROUTE }, prefixPrimary: false, reservedPaths: [] }, { content: raw, db, events: recordingEvents(emitted), logger: silentLogger });
+    const paths = await createSitePaths(routesConfig({ routes: { pages: PAGES_ROUTE } }), { content: raw, db, events: recordingEvents(emitted), logger: silentLogger });
     const content = routedContent(raw, paths, db);
     expectOk(await content.create("posts", { permalink: "p", title: "P", status: "published" }));
     expect(emitted).toEqual([]);

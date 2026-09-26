@@ -11,7 +11,7 @@ import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { createSiteDefault, type SiteDefault } from "./impl.ts";
 import { createSitePaths, type RebuildPlan, type SitePaths } from "./paths.ts";
-import { PATHS_MOVED, type RoutesConfig } from "./routes.ts";
+import { PATHS_MOVED, routesConfig, type RoutesConfig } from "./routes.ts";
 import { COLLECTIONS } from "./table.ts";
 import { checkPathWiring, checkRoutedModel } from "./wiring.ts";
 
@@ -21,6 +21,8 @@ const routeSchema = z
     home: z.string().min(1).optional(),
     liveWhen: z.record(z.unknown()).default({}),
     labelField: z.string().min(1).default("title"),
+    parentField: z.string().min(1).optional(),
+    mount: z.literal(true).optional(),
   })
   .strict();
 
@@ -29,6 +31,10 @@ export const configSchema = z
     routes: z.record(routeSchema).default({}),
     prefixPrimary: z.boolean().default(false),
     reservedPaths: z.array(z.string().regex(/^(\/[A-Za-z0-9._-]+)+$/)).default([]),
+    mounts: z.object({ type: z.string().min(1), field: z.string().min(1) }).strict().optional(),
+    mountTarget: z.string().min(1).default("pages"),
+    maxDepth: z.number().int().positive().default(16),
+    maxCascade: z.number().int().positive().default(1000),
   })
   .strict();
 
@@ -138,11 +144,18 @@ function describeSite(site: SiteDefault) {
       errors: { 503: "the store is unavailable" },
       atomicSafe: true,
     },
-    previewPath: (arg: string) => ({
-      summary: `The public path a ${arg} would get for payload { id?, locale?, slug }, whether it would be reachable and why not; writes nothing`,
+    readTree: (arg: string) => ({
+      summary: `Every ${arg} with its parent, label and valid paths per locale`,
       reads: [],
       writes: ["result"],
-      input: { type: "object", properties: { id: { type: "string" }, locale: { type: "string" }, slug: { type: "string", minLength: 1 } }, required: ["slug"], additionalProperties: true },
+      output: { type: "array", items: { type: "object", properties: { id: { type: "string" }, parent: { type: ["string", "null"] }, label: { type: "string" }, paths: PATHS_SCHEMA }, required: ["id", "parent", "label", "paths"] } },
+      errors: { 503: "the store is unavailable" },
+    }),
+    previewPath: (arg: string) => ({
+      summary: `The public path a ${arg} would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing`,
+      reads: [],
+      writes: ["result"],
+      input: { type: "object", properties: { id: { type: "string" }, locale: { type: "string" }, slug: { type: "string", minLength: 1 }, parent: { type: ["string", "null"] } }, required: ["slug"], additionalProperties: true },
       output: {
         type: "object",
         properties: {
@@ -151,7 +164,7 @@ function describeSite(site: SiteDefault) {
           reason: { type: ["string", "null"] },
           conflict: { anyOf: [CONFLICT_SCHEMA, { type: "null" }] },
           shadows: { type: "array", items: { type: "object", properties: { type: { type: "string" }, id: { type: "string" }, label: { type: "string" }, path: { type: "string" } }, required: ["type", "id", "label", "path"] } },
-          exposesParentSlug: { type: "null" },
+          exposesParentSlug: { anyOf: [{ type: "object", properties: { type: { type: "string" }, id: { type: "string" }, label: { type: "string" } }, required: ["type", "id", "label"] }, { type: "null" }] },
         },
         required: ["path", "reachable", "reason", "conflict", "shadows", "exposesParentSlug"],
       },
@@ -181,18 +194,22 @@ export default defineModule({
     const events = deps.find(EVENTS);
     if (!db) throw new Error("site/default: routes need a persistence@1 provider to store the path index");
     if (!events) throw new Error("site/default: routes need an events@1 provider to raise site.pathsMoved");
-    const routes: RoutesConfig = {
-      routes: Object.fromEntries(Object.entries(config.routes).map(([type, r]) => [type, { slugField: r.slugField, home: r.home ?? null, liveWhen: r.liveWhen, labelField: r.labelField }])),
+    const routes: RoutesConfig = routesConfig({
+      routes: Object.fromEntries(Object.entries(config.routes).map(([type, r]) => [type, { slugField: r.slugField, home: r.home ?? null, liveWhen: r.liveWhen, labelField: r.labelField, parentField: r.parentField ?? null, mount: r.mount === true }])),
       prefixPrimary: config.prefixPrimary,
       reservedPaths: config.reservedPaths,
-    };
-    checkRoutedModel(routes.routes, content.model(), deps.logger);
+      mounts: config.mounts ?? null,
+      mountTarget: config.mountTarget,
+      maxDepth: config.maxDepth,
+      maxCascade: config.maxCascade,
+    });
+    checkRoutedModel(routes, content.model(), deps.logger);
     const paths = await createSitePaths(routes, { content, db: ownedPersistence(db, "site/default", COLLECTIONS), events, logger: deps.logger, ...(deps.bootStartedAt === undefined ? {} : { bootedAt: deps.bootStartedAt }) });
     return createSiteDefault(content, paths);
   },
 
   attach: (site, kestrel) => {
-    if (site.paths) checkPathWiring(kestrel.describe(), site.paths.config.routes);
+    if (site.paths) checkPathWiring(kestrel.describe(), site.paths.config);
   },
 
   steps: (site) => ({
@@ -251,6 +268,15 @@ export default defineModule({
       if (isErr(applied)) return ctx.fail(applied.error);
       return ok({ ...ctx, result: applied.value });
     },
+    readTree: stepFactory((type: string) => {
+      const paths = routedPaths(site, "site.readTree", type);
+      if (paths.route(type)?.parentField === null) throw new Error(`site/default: site.readTree:${type} needs routes.${type}.parentField`);
+      return async (ctx: Context) => {
+        const tree = await paths.tree(type);
+        if (isErr(tree)) return ctx.fail(tree.error);
+        return ok({ ...ctx, result: tree.value });
+      };
+    }),
     previewPath: stepFactory((type: string) => {
       const paths = routedPaths(site, "site.previewPath", type);
       return async (ctx: Context) => {
@@ -258,7 +284,8 @@ export default defineModule({
         if (typeof slug !== "string" || slug === "") return ctx.fail("VALIDATION", "site.previewPath: slug is missing");
         const id = first(ctx.payload.id);
         const locale = first(ctx.payload.locale);
-        const preview = await paths.preview(type, { slug, ...(typeof id === "string" && id !== "" ? { id } : {}), ...(typeof locale === "string" && locale !== "" ? { locale } : {}) });
+        const parent: unknown = ctx.payload.parent;
+        const preview = await paths.preview(type, { slug, ...(typeof id === "string" && id !== "" ? { id } : {}), ...(typeof locale === "string" && locale !== "" ? { locale } : {}), ...(parent === null || (typeof parent === "string" && parent !== "") ? { parent } : {}) });
         if (isErr(preview)) return ctx.fail(preview.error);
         return ok({ ...ctx, result: preview.value });
       };

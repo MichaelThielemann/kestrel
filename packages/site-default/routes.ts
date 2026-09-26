@@ -12,6 +12,10 @@ export interface Route {
   liveWhen: Filter;
   /** The field that names a document in conflict messages. */
   labelField: string;
+  /** A non-localized `ref` to the same type whose path prefixes this document's; only on the mount target type. */
+  parentField: string | null;
+  /** Documents of this type live under the page `mounts` assigns to the type, or at the top level without one. */
+  mount: boolean;
 }
 
 /** The parsed route configuration of `site/default`. */
@@ -19,7 +23,35 @@ export interface RoutesConfig {
   routes: Record<string, Route>;
   prefixPrimary: boolean;
   reservedPaths: string[];
+  /** Where the page each mounted type lives under is stored: a field of a single type, an object of type → page id or `null`. */
+  mounts: { type: string; field: string } | null;
+  /** The type whose documents can be parents and mount pages. */
+  mountTarget: string;
+  maxDepth: number;
+  /** The most rows (documents × locales) one save may change. */
+  maxCascade: number;
 }
+
+/** A route with every unset option at its default. */
+export function routeWith(input: Partial<Route> = {}): Route {
+  return { slugField: input.slugField ?? "slug", home: input.home ?? null, liveWhen: input.liveWhen ?? {}, labelField: input.labelField ?? "title", parentField: input.parentField ?? null, mount: input.mount ?? false };
+}
+
+/** A route configuration with every unset option at its default. */
+export function routesConfig(input: { routes: Record<string, Partial<Route>> } & Partial<Omit<RoutesConfig, "routes">>): RoutesConfig {
+  return {
+    routes: Object.fromEntries(Object.entries(input.routes).map(([type, route]) => [type, routeWith(route)])),
+    prefixPrimary: input.prefixPrimary ?? false,
+    reservedPaths: input.reservedPaths ?? [],
+    mounts: input.mounts ?? null,
+    mountTarget: input.mountTarget ?? "pages",
+    maxDepth: input.maxDepth ?? 16,
+    maxCascade: input.maxCascade ?? 1000,
+  };
+}
+
+/** Type → id of the mount target page it lives under, or `null` for the top level. */
+export type Mounts = Record<string, string | null>;
 
 /** A change of one document's reachable path in one locale; `seq` is the global sequence number of the run that made it. */
 export interface Move {
@@ -72,8 +104,12 @@ export function routesHash(config: RoutesConfig, model: ContentModel): string {
   const types = Object.fromEntries(
     Object.keys(config.routes)
       .sort()
-      .map((type) => [type, model.types[type]?.fields[config.routes[type]?.slugField ?? "slug"] ?? null]),
+      .map((type) => {
+        const route = config.routes[type];
+        const fields = model.types[type]?.fields ?? {};
+        return [type, { slug: fields[route?.slugField ?? "slug"] ?? null, parent: route?.parentField ? (fields[route.parentField] ?? null) : null }];
+      }),
   );
-  const input = { routes: config.routes, locales: model.locales ?? [], defaultLocale: model.defaultLocale ?? null, prefixPrimary: config.prefixPrimary, reservedPaths: config.reservedPaths, types };
+  const input = { routes: config.routes, locales: model.locales ?? [], defaultLocale: model.defaultLocale ?? null, prefixPrimary: config.prefixPrimary, reservedPaths: config.reservedPaths, mountTarget: config.mountTarget, maxDepth: config.maxDepth, types };
   return createHash("sha256").update(JSON.stringify(input)).digest("hex");
 }

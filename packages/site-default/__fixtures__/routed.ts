@@ -10,10 +10,10 @@ import { silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 /* eslint-disable no-restricted-imports -- a fixture of this package builds on the package's own files */
 import { createSiteDefault, type SiteDefault } from "../impl.ts";
 import { createSitePaths, type SitePaths } from "../paths.ts";
-import type { Move, Route, RoutesConfig } from "../routes.ts";
+import { routeWith, routesConfig, type Move, type Route, type RoutesConfig } from "../routes.ts";
 /* eslint-enable no-restricted-imports */
 
-export const PAGES_ROUTE: Route = { slugField: "slug", home: "home", liveWhen: { status: "published" }, labelField: "title" };
+export const PAGES_ROUTE: Route = routeWith({ home: "home", liveWhen: { status: "published" } });
 
 export interface RoutedSite {
   site: SiteDefault;
@@ -33,6 +33,7 @@ export interface RoutedOptions {
   db?: FakePersistence;
   now?: () => number;
   logger?: Logger;
+  config?: Partial<Omit<RoutesConfig, "routes">>;
 }
 
 export function recordingEvents(emitted: Move[][]): Events & { failNext(): void } {
@@ -107,7 +108,7 @@ export async function routedSite(options: RoutedOptions = {}): Promise<RoutedSit
   const raw = await createContentDefault(options.model ?? SITE_TEST_MODEL, db);
   const emitted: Move[][] = [];
   const events = recordingEvents(emitted);
-  const config: RoutesConfig = { routes: options.routes ?? { pages: PAGES_ROUTE }, prefixPrimary: options.prefixPrimary ?? false, reservedPaths: options.reservedPaths ?? [] };
+  const config: RoutesConfig = routesConfig({ routes: options.routes ?? { pages: PAGES_ROUTE }, prefixPrimary: options.prefixPrimary ?? false, reservedPaths: options.reservedPaths ?? [], ...options.config });
   const paths = await createSitePaths(config, { content: raw, db, events, logger: options.logger ?? silentLogger, ...(options.now === undefined ? {} : { now: options.now }) });
   return { site: createSiteDefault(raw, paths), paths, content: routedContent(raw, paths, db), raw, db, emitted, events };
 }
