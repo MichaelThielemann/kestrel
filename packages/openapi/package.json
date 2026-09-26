@@ -7,9 +7,6 @@
   "engines": {
     "node": ">=22.18.0"
   },
-  "bin": {
-    "kestrel-openapi": "./cli.ts"
-  },
   "exports": {
     ".": "./index.ts"
   },
@@ -19,9 +16,6 @@
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
       }
-    },
-    "bin": {
-      "kestrel-openapi": "./dist/cli.js"
     }
   },
   "files": [
