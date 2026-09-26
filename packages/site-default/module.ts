@@ -11,8 +11,8 @@ import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { createSiteDefault, type SiteDefault } from "./impl.ts";
 import { createSitePaths, type RebuildPlan, type SitePaths } from "./paths.ts";
-import { PATHS_MOVED, routesConfig, type RoutesConfig } from "./routes.ts";
-import { COLLECTIONS } from "./table.ts";
+import { PATHS_MOVED, routesConfig, splitTail, type RoutesConfig } from "./routes.ts";
+import { COLLECTIONS, reachablePath } from "./table.ts";
 import { checkPathWiring, checkRoutedModel } from "./wiring.ts";
 
 const routeSchema = z
@@ -144,12 +144,25 @@ function describeSite(site: SiteDefault) {
       errors: { 503: "the store is unavailable" },
       atomicSafe: true,
     },
+    indexMounts: {
+      summary: "Validate the stored mount assignment and move every document of each collection whose mount page changed; last step of the settings write's atomic group",
+      reads: [],
+      writes: [],
+      errors: { 400: "an invalid assignment, or a change moving more than maxCascade paths", 409: "a moved document's path is taken", 503: "the store is unavailable" },
+      atomicSafe: true,
+    },
     readTree: (arg: string) => ({
       summary: `Every ${arg} with its parent, label and valid paths per locale`,
       reads: [],
       writes: ["result"],
       output: { type: "array", items: { type: "object", properties: { id: { type: "string" }, parent: { type: ["string", "null"] }, label: { type: "string" }, paths: PATHS_SCHEMA }, required: ["id", "parent", "label", "paths"] } },
       errors: { 503: "the store is unavailable" },
+    }),
+    route: (arg: string) => ({
+      summary: `End the run with { route: { type } } when params.path is reachable and belongs to a routed collection other than ${typeOf(arg)}; pass through otherwise`,
+      reads: ["params.path"],
+      writes: ["result?"],
+      terminalOutput: { type: "object", properties: { route: { type: "object", properties: { type: { type: "string" } }, required: ["type"], additionalProperties: false } }, required: ["route"], additionalProperties: false },
     }),
     previewPath: (arg: string) => ({
       summary: `The public path a ${arg} would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing`,
@@ -268,6 +281,11 @@ export default defineModule({
       if (isErr(applied)) return ctx.fail(applied.error);
       return ok({ ...ctx, result: applied.value });
     },
+    indexMounts: async (ctx: Context) => {
+      const indexed = await routedPaths(site, "site.indexMounts").indexMounts(ctx.runId);
+      if (isErr(indexed)) return ctx.fail(indexed.error);
+      return ok(ctx);
+    },
     readTree: stepFactory((type: string) => {
       const paths = routedPaths(site, "site.readTree", type);
       if (paths.route(type)?.parentField === null) throw new Error(`site/default: site.readTree:${type} needs routes.${type}.parentField`);
@@ -275,6 +293,20 @@ export default defineModule({
         const tree = await paths.tree(type);
         if (isErr(tree)) return ctx.fail(tree.error);
         return ok({ ...ctx, result: tree.value });
+      };
+    }),
+    route: stepFactory((arg: string) => {
+      const { type, fixed } = parseTarget(arg);
+      const paths = routedPaths(site, "site.route", type);
+      const prefixPrimary = fixed.prefixPrimary === true;
+      return async (ctx: Context) => {
+        const model = site.model();
+        const split = splitTail(ctx.params.path ?? "", model.locales ?? [], model.defaultLocale ?? "", prefixPrimary);
+        if (!split) return ok(ctx);
+        const claim = paths.table.claim(split.locale, split.tail);
+        const reachable = [claim.strong, ...claim.weak].find((row) => row !== undefined && reachablePath(paths.format, row) !== null);
+        if (reachable && reachable.type !== type && paths.route(reachable.type)) return ctx.done({ route: { type: reachable.type } });
+        return ok(ctx);
       };
     }),
     previewPath: stepFactory((type: string) => {

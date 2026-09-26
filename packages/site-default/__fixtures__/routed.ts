@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createContentDefault } from "@michaelthielemann/kestrel-content-default/impl";
-import type { Content, ContentDocument, ContentError, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
+import type { Content, ContentDocument, ContentError, ContentModel, LocaleOptions } from "@michaelthielemann/kestrel-contracts/content";
 import { err, isErr, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import { SITE_TEST_MODEL } from "@michaelthielemann/kestrel-contracts/site.contract.test";
@@ -73,12 +73,29 @@ export function routedContent(raw: Content, paths: SitePaths, db: FakePersistenc
     if (outcome.verdict === "commit") await paths.announce(runId);
     return answer!;
   };
+  const mountsSet = async (type: string, data: Record<string, unknown>, options?: LocaleOptions): Promise<Result<ContentDocument, ContentError>> => {
+    const runId = randomUUID();
+    let answer: Result<ContentDocument, ContentError> | undefined;
+    const outcome = await db.scope({ pipeline: "test", group: 1 }, async () => {
+      answer = await raw.set(type, data, options);
+      if (isErr(answer)) return "rollback";
+      const indexed = await paths.indexMounts(runId);
+      if (isErr(indexed)) {
+        answer = err(indexed.error);
+        return "rollback";
+      }
+      return "commit";
+    });
+    if (outcome.kind === "failed") throw new Error(outcome.error.message);
+    if (outcome.verdict === "commit") await paths.announce(runId);
+    return answer!;
+  };
   return {
     model: () => raw.model(),
     validate: (...args) => raw.validate(...args),
     get: (...args) => raw.get(...args),
     list: (...args) => raw.list(...args),
-    set: (...args) => raw.set(...args),
+    set: (type, data, options) => (paths.config.mounts?.type === type ? mountsSet(type, data, options) : raw.set(type, data, options)),
     create: (type, data, options) => grouped(type, () => raw.create(type, data, options), (d) => d.id),
     update: (type, id, patch, options) => grouped(type, () => raw.update(type, id, patch, options), () => id),
     removeTranslation: (type, id, locale) => grouped(type, () => raw.removeTranslation(type, id, locale), () => id),
