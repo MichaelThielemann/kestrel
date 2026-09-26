@@ -482,11 +482,16 @@ Net changes since 5.8.1.
   types stay at `events.steps`, frozen with the step set they belong to); `stepSet`'s
   `defineStepSet`/`stepSets` → `helpers/stepSet` (its `StepSet` type stays at `stepSet`, frozen);
   `links`'s `collectInternalRefs` → `helpers/links` (`INTERNAL_REF`/`InternalRef`/`LinkTarget` stay
-  at `links`, frozen). `errors` stays at its top-level path. `kestrel-upgrade`'s new
-  `imports/contract-helpers` rule rewrites a consumer's import specifiers automatically, splitting an
-  import statement that names both a frozen and a moved symbol. The contracts package's own README
-  states which of its exports are frozen contracts and which are helpers, additive-only within a
-  major.
+  at `links`, frozen); `persistence`'s `fieldDefinition` → `helpers/persistence`; `renderer`'s
+  `renderFailed` → `helpers/renderer`; `migrations`'s `migrationFailed` → `helpers/migrations` (each
+  contract's own interface and types stay at its unchanged path). `errors` stays at its top-level
+  path. `kestrel-upgrade`'s new `imports/contract-helpers` rule rewrites a consumer's import
+  specifiers automatically, splitting an import statement that names both a frozen and a moved
+  symbol; it reads a project's `.vue` files too (their `<script>`/`<script setup>` block only), and
+  reports — rather than silently skipping — a namespace, default, side-effect, `export *` or dynamic
+  import of one of the seven split paths, and a file it cannot parse at all. The contracts package's
+  own README states which of its exports are frozen contracts and which are helpers, additive-only
+  within a major.
 
 ### Added
 
