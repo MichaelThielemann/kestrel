@@ -23,6 +23,9 @@
       "path": "./packages/blobstore-s3"
     },
     {
+      "path": "./packages/cli"
+    },
+    {
       "path": "./packages/content-default"
     },
     {

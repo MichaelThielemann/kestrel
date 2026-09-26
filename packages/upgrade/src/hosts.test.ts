@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -185,4 +186,20 @@ describe("the engine reports an outdated host package and refuses to write", () 
       expect(existsSync(join(dir, "node_modules", "example-host", SIDE_EFFECT))).toBe(false);
     });
   }
+});
+
+describe("a 6.x backend project that depends on kestrel-cli", () => {
+  it("reports no outdated host and checks clean", async () => {
+    await mkdir(join(dir, "node_modules", "@michaelthielemann"), { recursive: true });
+    await symlink(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "core"), join(dir, "node_modules", "@michaelthielemann", "kestrel"), "dir");
+    await installHost(dir, "@michaelthielemann/kestrel-cli", { version: VERSION, dependencies: { "@michaelthielemann/kestrel-upgrade": "^6.0.0" } });
+    await writeProject(dir, { "@michaelthielemann/kestrel": "^6.0.0", "@michaelthielemann/kestrel-cli": "^6.0.0" });
+    await writeFile(join(dir, "kestrel.config.ts"), 'import { defineConfig } from "@michaelthielemann/kestrel/defineConfig";\nexport default defineConfig({ modules: [], triggers: [] });\n');
+    const lines: string[] = [];
+    const code = await runCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, forceInstalledMajor: 6 });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    expect(report.findings.filter((f) => f.rule.startsWith("deps/"))).toEqual([]);
+    expect(report.tiers.boot).toBe("done");
+    expect(code).toBe(0);
+  });
 });

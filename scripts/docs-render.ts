@@ -3,7 +3,7 @@ import { STEP_SETS } from "../packages/contracts/src/helpers/steps.ts";
 
 export const START = "<!-- kestrel-docs:start -->";
 export const END = "<!-- kestrel-docs:end -->";
-export const ROOT_ORDER = ["@michaelthielemann/kestrel", "@michaelthielemann/kestrel-contracts", "@michaelthielemann/kestrel-h3", "@michaelthielemann/kestrel-openapi"];
+export const ROOT_ORDER = ["@michaelthielemann/kestrel", "@michaelthielemann/kestrel-cli", "@michaelthielemann/kestrel-contracts", "@michaelthielemann/kestrel-h3", "@michaelthielemann/kestrel-openapi"];
 const MAX_LISTED_PIPELINES = 12;
 
 export interface Section {

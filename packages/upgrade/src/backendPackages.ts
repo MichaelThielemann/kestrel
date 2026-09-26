@@ -7,6 +7,7 @@ export const BACKEND_PACKAGE_NAMES: readonly string[] = [
   "@michaelthielemann/kestrel-backup-blobstore",
   "@michaelthielemann/kestrel-blobstore-filesystem",
   "@michaelthielemann/kestrel-blobstore-s3",
+  "@michaelthielemann/kestrel-cli",
   "@michaelthielemann/kestrel-content-default",
   "@michaelthielemann/kestrel-contracts",
   "@michaelthielemann/kestrel-delivery-static",

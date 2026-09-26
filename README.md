@@ -24,6 +24,7 @@ running instance with a login, a content type and a step of your own.
 | Package | Purpose |
 |---|---|
 | `@michaelthielemann/kestrel` | Kestrel core: contract registry, boot check, pipeline runner and triggers. Ships no contracts and no modules. |
+| `@michaelthielemann/kestrel-cli` | The kestrel command: starts a Kestrel project and checks, explains, describes, documents and upgrades it. |
 | `@michaelthielemann/kestrel-contracts` | Kestrel standard contracts (persistence, authn, authz, blobstore, events, media and more) with contract test suites. |
 | `@michaelthielemann/kestrel-h3` | Adapter: serves a Kestrel instance's HTTP triggers as an h3 event handler (Nuxt/Nitro). |
 | `@michaelthielemann/kestrel-openapi` | Generates an OpenAPI 3.1 description from a booted Kestrel instance (triggers, pipelines, step descriptions). |

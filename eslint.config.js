@@ -6,6 +6,19 @@ const contractImportPatterns = [
   { group: ["zod", "h3", "nuxt", "nuxt/*", "\\#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "A contract file is domain-neutral TypeScript: no validation library, no host framework." },
 ];
 
+const castSelectors = [
+  {
+    selector: "TSAsExpression > TSAsExpression.expression[typeAnnotation.type='TSUnknownKeyword']",
+    message: "`as unknown as T` is banned; use boundaryCast<T>(value, boundary) from @michaelthielemann/kestrel/cast at a JSON, AST, DOM or host boundary.",
+  },
+  {
+    selector: "TSAsExpression[typeAnnotation.type='TSAnyKeyword']",
+    message: "`as any` is banned.",
+  },
+];
+
+const cliStartPathFiles = ["packages/cli/src/cli.ts", "packages/cli/src/kestrel-cli.ts", "packages/cli/src/dispatch.ts", "packages/cli/src/commands/start.ts", "packages/cli/src/projectCore.ts"];
+
 export default tseslint.config(
   { ignores: ["**/node_modules/**", "**/dist/**", "**/.*/**", "examples/nginx-njs/**", "test-fixtures/**"] },
   js.configs.recommended,
@@ -21,17 +34,7 @@ export default tseslint.config(
       "@typescript-eslint/no-namespace": ["error", { allowDeclarations: true }],
       "@typescript-eslint/no-empty-object-type": ["error", { allowInterfaces: "always" }],
       "@typescript-eslint/consistent-type-assertions": ["error", { assertionStyle: "as", objectLiteralTypeAssertions: "never" }],
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector: "TSAsExpression > TSAsExpression.expression[typeAnnotation.type='TSUnknownKeyword']",
-          message: "`as unknown as T` is banned; use boundaryCast<T>(value, boundary) from @michaelthielemann/kestrel/cast at a JSON, AST, DOM or host boundary.",
-        },
-        {
-          selector: "TSAsExpression[typeAnnotation.type='TSAnyKeyword']",
-          message: "`as any` is banned.",
-        },
-      ],
+      "no-restricted-syntax": ["error", ...castSelectors],
     },
   },
   {
@@ -52,7 +55,7 @@ export default tseslint.config(
   },
   {
     files: ["packages/*/**/*.ts"],
-    ignores: ["packages/core/**", "packages/contracts/**", "packages/h3/**"],
+    ignores: ["packages/core/**", "packages/contracts/**", "packages/h3/**", "packages/cli/**"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -67,7 +70,7 @@ export default tseslint.config(
   },
   {
     files: ["packages/*/**/*.test.ts", "packages/*/__fixtures__/**/*.ts"],
-    ignores: ["packages/core/**", "packages/contracts/**"],
+    ignores: ["packages/core/**", "packages/contracts/**", "packages/cli/**"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [{ group: ["../*"], message: "A module may only import the core, the contracts, its own files, Node and its package dependencies." }] }],
     },
@@ -76,6 +79,32 @@ export default tseslint.config(
     files: ["packages/*/*.interleaving.test.ts", "packages/*/*.permanence.test.ts"],
     rules: {
       "no-restricted-imports": "off",
+    },
+  },
+  {
+    files: ["packages/cli/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [{ group: ["h3", "nuxt", "nuxt/*", "\\#imports", "nitropack", "nitropack/*", "express", "hono", "vue", "@nuxt/*"], message: "The CLI binds no host framework; a host package registers a plugin instead." }],
+        },
+      ],
+    },
+  },
+  {
+    files: cliStartPathFiles,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            { group: ["@michaelthielemann/kestrel-upgrade", "@michaelthielemann/kestrel-upgrade/*", "@michaelthielemann/kestrel-openapi", "@michaelthielemann/kestrel-openapi/*", "@babel/*", "jiti", "jiti/*"], message: "The start path loads nothing but the project's own core." },
+            { group: ["./inspectProject*", "../inspectProject*", "./inspect/*", "../inspect/*", "./commands/*", "../commands/*", "./check*", "./explain*", "./manifest*", "./openapi*", "./upgrade*"], message: "The start path imports no other command and no inspection code." },
+          ],
+        },
+      ],
+      "no-restricted-syntax": ["error", ...castSelectors, { selector: "ImportExpression", message: "The start path imports one command and the project's core, nothing else, at run time." }],
     },
   },
   {

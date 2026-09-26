@@ -1,0 +1,8 @@
+{
+  "name": "setup-marker-fixture",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@michaelthielemann/kestrel": "*"
+  }
+}

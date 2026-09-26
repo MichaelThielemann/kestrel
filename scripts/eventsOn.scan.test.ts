@@ -28,7 +28,7 @@ function countOnCallSitesByFile(): Record<string, number> {
   return counts;
 }
 
-const KNOWN_NON_EVENT_FILES = ["packages/core/src/cli.ts", "packages/validate-jsonschema/impl.ts", "packages/upgrade/src/ruleInfo.ts", "packages/upgrade/src/cleanup.ts"];
+const KNOWN_NON_EVENT_FILES = ["packages/core/src/cli.ts", "packages/cli/src/commands/start.ts", "packages/cli/test/harness.ts", "packages/validate-jsonschema/impl.ts", "packages/upgrade/src/ruleInfo.ts", "packages/upgrade/src/cleanup.ts"];
 
 describe("events.on call sites", () => {
   it("pins the file and count of every on( call site — the two delivery subscriptions, and nothing else new", () => {

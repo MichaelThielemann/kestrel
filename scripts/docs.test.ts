@@ -179,13 +179,14 @@ describe("splice", () => {
 });
 
 describe("root package table", () => {
-  it("orders the four infrastructure packages first, then the rest alphabetically", () => {
+  it("orders the infrastructure packages first, then the rest alphabetically", () => {
     const packages: PackageInfo[] = [
       { name: "@michaelthielemann/kestrel-zeta", description: "z" },
       { name: "@michaelthielemann/kestrel-openapi", description: "openapi" },
       { name: "@michaelthielemann/kestrel-alpha", description: "a" },
       { name: "@michaelthielemann/kestrel-h3", description: "h3" },
       { name: "@michaelthielemann/kestrel", description: "core" },
+      { name: "@michaelthielemann/kestrel-cli", description: "cli" },
       { name: "@michaelthielemann/kestrel-contracts", description: "contracts" },
     ];
     expect(orderPackages(packages).map((p) => p.name)).toEqual([...ROOT_ORDER, "@michaelthielemann/kestrel-alpha", "@michaelthielemann/kestrel-zeta"]);
@@ -207,11 +208,11 @@ describe("root package table", () => {
     expect(rows).toEqual(["| `@michaelthielemann/kestrel` | Core |", "| `@michaelthielemann/kestrel-widget-default` | Steps widget.get/list |"]);
   });
 
-  it("has 32 rows in the fixed-then-alphabetical order, against the real packages directory", () => {
+  it("has 33 rows in the fixed-then-alphabetical order, against the real packages directory", () => {
     const ordered = orderPackages(realPackages());
-    expect(ordered).toHaveLength(32);
-    expect(ordered.slice(0, 4).map((p) => p.name)).toEqual(ROOT_ORDER);
-    const rest = ordered.slice(4).map((p) => p.name);
+    expect(ordered).toHaveLength(33);
+    expect(ordered.slice(0, ROOT_ORDER.length).map((p) => p.name)).toEqual(ROOT_ORDER);
+    const rest = ordered.slice(ROOT_ORDER.length).map((p) => p.name);
     expect(rest).toEqual([...rest].sort((a, b) => a.localeCompare(b)));
   });
 });
