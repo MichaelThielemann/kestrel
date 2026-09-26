@@ -1,0 +1,11 @@
+{
+  "name": "explain-queue-fixture",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@michaelthielemann/kestrel": "*",
+    "@michaelthielemann/kestrel-events-inmemory": "*",
+    "@michaelthielemann/kestrel-events-queue": "*",
+    "@michaelthielemann/kestrel-persistence-sqlite": "*"
+  }
+}
