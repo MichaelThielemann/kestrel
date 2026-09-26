@@ -878,7 +878,8 @@ Net changes since 5.8.1.
 - `site.readTree` answers each document's per-locale `live` state next to its paths.
 - `kestrel-upgrade fix --write` applies findings that only appear after earlier edits in the same
   run, for at most five passes; a finding already handled is not applied again. An `--answers` id no
-  pass asked is ignored with a warning on stderr instead of exiting 2.
+  pass asked is ignored with a warning on stderr instead of exiting 2. With `--json`, `fix --write`
+  prints the report of every pass, including findings the last pass's edits brought up.
 - `kestrel-upgrade` rules `site/routed-slug-unique` (removes `unique` from a routed type's slug
   field), `site/path-wiring`, `site/path-events`, `redirects/requires-persistence` and
   `imports/redirects-impl`.

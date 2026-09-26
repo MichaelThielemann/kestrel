@@ -798,7 +798,10 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
       return 2;
     }
     const fresh = pass.report.findings.filter((f) => !seen.has(f.id));
-    if (round > 0 && !fresh.some((f) => f.fix.kind === "auto" || f.fix.kind === "ask")) break;
+    if (round > 0 && !fresh.some((f) => f.fix.kind === "auto" || f.fix.kind === "ask")) {
+      adjustedFindings = [...adjustedFindings, ...fresh];
+      break;
+    }
     for (const f of fresh) seen.add(f.id);
     fixed = verifyAndApply(fresh, root);
     for (const id of fixed.rejectedIds) rejectedAll.add(id);
@@ -909,6 +912,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
       }
     }
   }
+  if (write && boolFlag(args, "json")) printReport(adjustedReport, args, stdout);
   if (write && saveAnswersFile !== undefined) writeFileSync(resolve(saveAnswersFile), JSON.stringify(Object.fromEntries(answers), null, 2));
   return exitCodeFor(adjustedReport.findings, failOn);
 }

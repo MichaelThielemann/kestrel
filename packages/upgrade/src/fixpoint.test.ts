@@ -2,8 +2,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { runCli } from "./cli-run.ts";
 import type { LoadResult, SourceRule, UpgradePlugin } from "./plugin.ts";
+import type { UpgradeReport } from "./report.ts";
 
 let dir: string;
 beforeEach(async () => {
@@ -36,6 +38,17 @@ function askRule(): SourceRule {
       const answer = ctx.answers.get("chain-keep");
       if (answer === "yes") return [];
       return [{ id: "chain/ask", rule: "chain/ask", severity: "warning", tier: "source", where: {}, message: "keep the chain?", suggestion: "answer", fix: { kind: "ask", question: "chain-keep", prompt: "keep the chain?", choices: ["no", "yes"], closedChoices: true, defaultValue: "no" }, docs: "n/a" }];
+    },
+  };
+}
+
+function manualRule(): SourceRule {
+  return {
+    id: "chain/manual",
+    needs: "source",
+    check(ctx) {
+      const text = ctx.readFile(join(ctx.root, "steps.txt")) ?? "";
+      return text.includes("three") ? [{ id: "chain/manual", rule: "chain/manual", severity: "error", tier: "source", where: {}, message: "the chain needs a human now", suggestion: "by hand", fix: { kind: "manual" }, docs: "n/a" }] : [];
     },
   };
 }
@@ -81,5 +94,13 @@ describe("kestrel-upgrade fix --write", () => {
     });
     expect(prompts.filter((q) => q.includes("keep the chain?"))).toHaveLength(1);
     expect(await readFile(join(dir, "steps.txt"), "utf8")).toContain("three");
+  });
+
+  it("reports a manual finding that only the last pass's edits brought up", async () => {
+    const lines: string[] = [];
+    const code = await runCli(["fix", "--root", dir, "--write", "--yes", "--allow-dirty", "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, isInteractive: false, plugins: [plugin([manualRule()])] });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    expect(report.findings.find((f) => f.rule === "chain/manual")).toMatchObject({ fix: { kind: "manual" }, severity: "error" });
+    expect(code).toBe(1);
   });
 });

@@ -32,7 +32,9 @@ it), `n` (skip it) or `d` (show the diff again); without a terminal it needs `--
 `--allow-dirty` is also given, so `git diff` shows exactly the tool's edits and `git checkout`
 reverts them. When an applied edit brings up a new finding (a question that only makes sense once the
 first edit is in, say), `--write` checks again and applies it in the same run, for at most five passes;
-a finding already handled in an earlier pass is not applied again. The tool never runs `pnpm install`
+a finding already handled in an earlier pass is not applied again, and an answer given in one pass
+holds for the later ones. With `--json`, `--write` prints the report of every pass on stdout,
+including a finding that only the last pass's edits brought up. The tool never runs `pnpm install`
 itself.
 
 ## 3. Full check
