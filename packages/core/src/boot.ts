@@ -115,6 +115,8 @@ export interface BootCheck {
   warnings: BootWarning[];
   /** Every module, pipeline or `attach` phase `checkBoot()` could not check safely, and why. */
   notChecked: NotChecked[];
+  /** What the checked engine's `describe()` returned before teardown, the same shape a booted instance describes; absent only when the engine stopped before it resolved the modules. Modules that were not set up contribute no steps, and their pipelines are missing. */
+  manifest?: Manifest;
 }
 
 const CORE = "kestrel";
@@ -796,7 +798,8 @@ export async function checkBoot(input: BootInput, options: CheckBootOptions): Pr
     await teardownAll(state.ordered, state.instances, logger);
     throw err;
   }
+  const manifest = core?.introspection.describe();
   for (const stop of core?.stoppers ?? []) stop();
   await teardownAll(state.ordered, state.instances, logger);
-  return { errors, warnings: core?.warnings ?? [], notChecked: state.notChecked };
+  return { errors, warnings: core?.warnings ?? [], notChecked: state.notChecked, ...(manifest === undefined ? {} : { manifest }) };
 }

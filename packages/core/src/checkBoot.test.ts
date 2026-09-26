@@ -107,7 +107,26 @@ describe("checkBoot: collecting every problem", () => {
     const pipeline = definePipeline({ name: "ping", steps: ["good.ping"] });
     const input: BootInput = { config: { modules: [{ use: "./good-store", config: {} }], triggers: [], http: null }, modules: [good], pipelines: [pipeline], logger: silentLogger };
     const check = await checkBoot(input, { setup: "all" });
-    expect(check).toEqual({ errors: [], warnings: [], notChecked: [] });
+    expect({ errors: check.errors, warnings: check.warnings, notChecked: check.notChecked }).toEqual({ errors: [], warnings: [], notChecked: [] });
+  });
+
+  it("returns the manifest of the checked engine, equal to what a booted instance describes", async () => {
+    const input = (): BootInput => ({ config: { modules: [{ use: "./good-store", config: {} }], triggers: [{ http: "GET /ping", pipeline: "ping" }], http: null }, modules: [goodProvider()], pipelines: [definePipeline({ name: "ping", steps: ["good.ping"] })], logger: silentLogger });
+    const check = await checkBoot(input(), { setup: "all" });
+    const kestrel = await boot(input());
+    try {
+      expect(check.manifest).toEqual(kestrel.describe());
+    } finally {
+      await kestrel.stop();
+    }
+  });
+
+  it("returns a manifest listing the resolved pipelines when a pipeline has an error", async () => {
+    const check = await checkBoot(sevenProblemsInput(), { setup: "all" });
+    expect(check.errors.length).toBeGreaterThan(0);
+    const names = check.manifest?.pipelines.map((p) => p.name) ?? [];
+    expect(names).toEqual(expect.arrayContaining(["routeA", "routeB", "readPipeline"]));
+    expect(names).not.toContain("unknownPipeline");
   });
 
   it("a module requiring a contract from one with an invalid config is not checked either, without a second error", async () => {

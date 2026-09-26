@@ -178,6 +178,12 @@ runs no module code beyond `configSchema`, `"all"` runs every module's `setup()`
 covered by semver from 6.0.0 and a reader must handle one it does not recognize; `reason` and every
 message text are not covered and may change in any release.
 
+The result also carries `manifest`, what `describe()` returns for the checked engine (the same
+shape as `kestrel.describe()`), taken before the modules are torn down. It is present whenever the
+check got as far as resolving the modules, also when problems were found. A module whose `setup()`
+did not run contributes no steps, so a pipeline using it is missing from `manifest.pipelines` and
+listed in `notChecked`.
+
 ### Error codes
 
 Every `BootProblem.code` `boot()` and `checkBoot()` can produce, grouped by what finds it. A future

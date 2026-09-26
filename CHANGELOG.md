@@ -495,6 +495,8 @@ Net changes since 5.8.1.
 
 ### Added
 
+- `checkBoot()`'s result carries `manifest`, the checked engine's `describe()` output, taken before
+  teardown and present also when problems were found.
 - A `kestrel.config` module entry accepts `defaults: { from, values }`: values a host supplies on the
   consumer's behalf. Boot merges `config` over them (plain objects key by key, everything else
   replaced whole) before parsing, and an invalid result names the defaults' source.
