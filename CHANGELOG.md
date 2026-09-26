@@ -999,6 +999,11 @@ Net changes since 5.8.1.
 
 ### Fixed
 
+- A config variable's `default` and the `default` of the config JSON Schema are redacted like
+  `value`: inside an object default, a field the schema marks secret, a credential key name and a
+  URL with credentials read `"[redacted]"`. `value` also redacts a nested field the schema marks
+  secret. Both are JSON snapshots.
+
 - `replication-sqlite`: where the file system reports no birth time, the restore-on-start skip check
   judged an existing database by whether it held any table, so a database whose schema another
   module had just created during this boot, with no rows in it, passed as real data and the restore

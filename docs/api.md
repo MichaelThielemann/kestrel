@@ -827,8 +827,9 @@ A variable is redacted when any of the following is true:
 - its value is a URL containing `user:password@`, or
 - an ancestor field is redacted.
 
-The same check runs inside a value that's otherwise shown: a nested credential key still reads
-`"[redacted]"`. Numbers and booleans are never redacted by name alone, so `minPasswordLength` keeps
+The same check runs inside a value that's otherwise shown, in `value`, in `default` and in the
+`default` of the JSON Schema: a nested field the schema marks secret, a nested credential key and a
+URL with credentials read `"[redacted]"`. Numbers and booleans are never redacted by name alone, so `minPasswordLength` keeps
 its value.
 `Step`: `{ name: "content.list", module: "content/default", factory: boolean, description: StepDescription }` — a factory step's description is evaluated with the placeholder argument `<arg>`; a `describe()` that throws for it stops the boot, so the field is never `null`.
 `Pipeline`: `{ name, steps: [{ spec: "content.list:pages", name: "content.list", module, description: StepDescription }] }` with the real arguments. `StepDescription` is the module's `describe()` entry: `summary`, `reads`, `writes`, `input`/`output`/`query` (JSON Schema), `errors`, `security`, `multipart`, `binary`.

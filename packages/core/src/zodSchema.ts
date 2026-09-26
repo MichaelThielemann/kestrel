@@ -1,6 +1,6 @@
 import type { ZodTypeAny } from "zod";
 import { boundaryCast } from "./cast.ts";
-import { canHoldSecret, isSecretName, isSecretSchema, isSecretValue, snapshotValue, type JsonValue } from "./configValue.ts";
+import { canHoldSecret, isSecretName, isSecretSchema, isSecretValue, REDACTED, snapshotValue, type JsonValue } from "./configValue.ts";
 import type { JsonSchema } from "./defineModule.ts";
 import { isPlainObject } from "./guards.ts";
 
@@ -10,6 +10,7 @@ export interface ConfigVariable {
   path: string;
   type: string;
   required: boolean;
+  /** The default the path falls back to, as a JSON snapshot redacted like `value`; absent when there is none or the variable is redacted. */
   default?: unknown;
   secret: boolean;
   set: boolean;
@@ -213,10 +214,53 @@ export function toJsonSchema(schema: ZodTypeAny): JsonSchema {
   const { inner, nullable, defaultValue, description } = unwrap(schema);
   let out = bareSchema(inner);
   if (nullable) out = { anyOf: [out, { type: "null" }] };
-  if (defaultValue && description !== SECRET) out = { ...out, default: defaultValue() };
+  if (defaultValue && description !== SECRET) out = { ...out, default: redactedSnapshot(inner, defaultValue()) };
   if (description !== undefined && description !== SECRET) out = { ...out, description };
   if (description === SECRET) out = { ...out, writeOnly: true };
   return out;
+}
+
+const MAX_REDACT_DEPTH = 8;
+
+function isSecretField(key: string, child: ZodTypeAny): boolean {
+  return isSecretSchema(toJsonSchema(child)) || (isSecretName(key) && canHoldSecret(typeOf(unwrap(child).inner)));
+}
+
+function assign(out: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
+function redactSecrets(schema: ZodTypeAny, value: unknown, depth: number): unknown {
+  if (depth > MAX_REDACT_DEPTH) return value;
+  const { inner } = unwrap(schema);
+  const d = def(inner);
+  switch (kind(inner)) {
+    case "ZodObject": {
+      if (!isPlainObject(value)) return value;
+      const shape = d.shape?.() ?? {};
+      const catchall = d.catchall !== undefined && kind(d.catchall) !== "ZodNever" ? d.catchall : undefined;
+      const out: Record<string, unknown> = {};
+      for (const [key, item] of Object.entries(value)) {
+        const child = Object.hasOwn(shape, key) ? shape[key] : catchall;
+        assign(out, key, child === undefined ? item : isSecretField(key, child) ? REDACTED : redactSecrets(child, item, depth + 1));
+      }
+      return out;
+    }
+    case "ZodRecord": {
+      if (!isPlainObject(value)) return value;
+      const out: Record<string, unknown> = {};
+      for (const [key, item] of Object.entries(value)) assign(out, key, redactSecrets(d.valueType, item, depth + 1));
+      return out;
+    }
+    case "ZodArray":
+      return Array.isArray(value) ? value.map((item: unknown) => redactSecrets(d.type, item, depth + 1)) : value;
+    default:
+      return value;
+  }
+}
+
+function redactedSnapshot(schema: ZodTypeAny, value: unknown): JsonValue {
+  return snapshotValue(redactSecrets(schema, value, 0));
 }
 
 function typeOf(schema: ZodTypeAny): string {
@@ -317,9 +361,9 @@ function collectVariables(schema: ZodTypeAny, raw: unknown, parsed: unknown, def
     const configured = parsedValue !== undefined ? parsedValue : set ? rawValue : effective;
     const type = typeOf(unwrapped.inner);
     const redacted = secret || ancestors.redacted || (isSecretName(key) && canHoldSecret(type)) || isSecretValue(configured);
-    const variable: ConfigVariable = { path: childPath.join("."), type, required: !optional, secret, set, status, value: redacted ? null : snapshotValue(configured), redacted };
+    const variable: ConfigVariable = { path: childPath.join("."), type, required: !optional, secret, set, status, value: redacted ? null : redactedSnapshot(child, configured), redacted };
     if (!set && hostValue !== undefined && defaults !== undefined) variable.source = defaults.from;
-    if (effective !== undefined && !redacted) variable.default = effective;
+    if (effective !== undefined && !redacted) variable.default = redactedSnapshot(child, effective);
     out.push(variable);
     if (kind(unwrapped.inner) === "ZodObject") collectVariables(unwrapped.inner, raw, parsed, defaults, childPath, out, { optional, default: effective, redacted });
   }

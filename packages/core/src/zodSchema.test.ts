@@ -264,3 +264,39 @@ describe("effectiveModuleConfig", () => {
     expect(effectiveModuleConfig({ config: { b: { c: 2 } }, defaults: { from: "site-preset", values: { a: 1, b: { d: 3 } } } })).toEqual({ a: 1, b: { d: 3, c: 2 } });
   });
 });
+
+describe("secrets nested in a default", () => {
+  const nested = z
+    .object({
+      bootstrap: z
+        .object({ username: z.string(), passwordHash: z.string(), signing: z.string().describe("secret") })
+        .strict()
+        .default({ username: "admin", passwordHash: "scrypt$schema-default-hash", signing: "schema-default-signing" }),
+      store: z.object({ url: z.string() }).strict().optional(),
+      tenants: z.record(z.object({ apiSeed: z.string().describe("secret") }).strict()).default({ one: { apiSeed: "schema-default-seed" } }),
+    })
+    .strict();
+
+  it("never puts a secret from a schema default into the rows or the schema", () => {
+    const text = JSON.stringify(describeConfig(nested, {}, nested.parse({})));
+    expect(text).not.toContain("schema-default-hash");
+    expect(text).not.toContain("schema-default-signing");
+    expect(text).not.toContain("schema-default-seed");
+    expect(text).toContain("admin");
+  });
+
+  it("never puts a secret from host-supplied defaults into the rows", () => {
+    const defaults = { from: "site-preset", values: { bootstrap: { username: "host-admin", passwordHash: "scrypt$host-default-hash", signing: "host-default-signing" }, store: { url: "postgres://app:host-db-pass@db/app" }, tenants: { two: { apiSeed: "host-default-seed" } } } };
+    const merged = mergeConfigDefaults(defaults.values, {});
+    const out = describeConfig(nested, {}, nested.parse(merged), defaults);
+    const text = JSON.stringify(out);
+    for (const secret of ["host-default-hash", "host-default-signing", "host-db-pass", "host-default-seed"]) expect(text).not.toContain(secret);
+    const bootstrap = out.variables.find((v) => v.path === "bootstrap");
+    expect(bootstrap).toMatchObject({ status: "default", source: "site-preset", default: { username: "host-admin", passwordHash: "[redacted]", signing: "[redacted]" }, value: { username: "host-admin", passwordHash: "[redacted]", signing: "[redacted]" } });
+  });
+
+  it("redacts a schema-marked secret inside a configured parent's value", () => {
+    const text = JSON.stringify(describeConfig(nested, { bootstrap: { username: "a", passwordHash: "scrypt$x", signing: "configured-signing" } }));
+    expect(text).not.toContain("configured-signing");
+  });
+});

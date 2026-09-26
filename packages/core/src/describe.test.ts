@@ -267,3 +267,27 @@ describe("kestrel.describe() with host-supplied defaults", () => {
     await expect(boot({ config: { ...config, modules: [unnamed, config.modules[1]!] }, modules: [store, bus], pipelines, logger: silentLogger })).rejects.toMatchObject({ code: "invalid-config" });
   });
 });
+
+describe("kestrel.describe() with a secret inside an object default", () => {
+  const guarded = defineModule({
+    name: "guard/memory",
+    provides: [],
+    requires: [],
+    configSchema: z.object({ bootstrap: z.object({ username: z.string(), passwordHash: z.string() }).strict().default({ username: "admin", passwordHash: "scrypt$manifest-schema-hash" }) }).strict(),
+    async setup() {
+      return {};
+    },
+  });
+
+  it("keeps schema and host secrets out of the whole manifest", async () => {
+    const entry = { use: "./guard.ts", defaults: { from: "site-preset", values: { bootstrap: { username: "host", passwordHash: "scrypt$manifest-host-hash" } } } };
+    const plain = await boot({ config: { ...config, modules: [...config.modules, { use: "./guard.ts" }] }, modules: [store, bus, guarded], pipelines, logger: silentLogger });
+    expect(JSON.stringify(plain.describe())).not.toContain("manifest-schema-hash");
+    await plain.stop();
+    const hosted = await boot({ config: { ...config, modules: [...config.modules, entry] }, modules: [store, bus, guarded], pipelines, logger: silentLogger });
+    const text = JSON.stringify(hosted.describe());
+    expect(text).not.toContain("manifest-host-hash");
+    expect(text).not.toContain("manifest-schema-hash");
+    await hosted.stop();
+  });
+});
