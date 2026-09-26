@@ -34,9 +34,10 @@ import { defineConfig } from "$SCOPE/defineConfig";
 export default defineConfig({
   modules: [
     { use: "$SCOPE-events-inmemory", config: {} },
+    { use: "$SCOPE-events-direct", config: {} },
     { use: "$SCOPE-persistence-sqlite", config: { file: "./data/smoke.db" } },
     { use: "$SCOPE-authn-single", config: { username: "admin", passwordHash: "$HASH", roles: ["admin"] } },
-    { use: "$SCOPE-authz-roles", config: { roles: { admin: ["*"] }, anonymous: ["pages.read"] } },
+    { use: "$SCOPE-authz-roles", config: { roles: { admin: ["*"] }, anonymous: ["pages.read"], anonymousFields: { pages: ["id", "slug", "title"] } } },
     { use: "$SCOPE-content-default", config: { types: { pages: { kind: "multi", fields: { slug: { type: "slug", required: true, unique: true }, title: { type: "text", required: true } } } } } },
   ],
   triggers: [
@@ -57,12 +58,40 @@ export default definePipeline({ name: "createPage", steps: ["authn.requireUser",
 TS
 cat > pipelines/listPages.ts <<TS
 import { definePipeline } from "$SCOPE/definePipeline";
-export default definePipeline({ name: "listPages", steps: ["authn.identifyUser", "authz.require:pages.read", "content.list:pages"] });
+export default definePipeline({ name: "listPages", steps: ["authn.identifyUser", "authz.require:pages.read", "content.list:pages", "authz.fields:pages?shape=list"] });
 TS
 
 echo "== install (npm, no workspace)"
 npm install --no-audit --no-fund --loglevel=error
 test -x node_modules/.bin/kestrel
+test -x node_modules/.bin/kestrel-cli
+
+echo "== check"
+./node_modules/.bin/kestrel check
+
+cat > "$WORK/load-trace.mjs" <<'JS'
+import { appendFileSync } from "node:fs";
+import { registerHooks } from "node:module";
+registerHooks({
+  resolve(specifier, context, next) {
+    const result = next(specifier, context);
+    appendFileSync(process.env.KESTREL_LOAD_TRACE, result.url + "\n");
+    return result;
+  },
+});
+JS
+FORBIDDEN='kestrel-cli/dist/(inspectProject|inspect/|commands/(?!start))|kestrel-upgrade|kestrel-openapi|@babel/|jiti'
+
+echo "== start loads only the project's core"
+: > "$WORK/start-trace.txt"
+KESTREL_LOAD_TRACE="$WORK/start-trace.txt" node --disable-warning=ExperimentalWarning --import "$WORK/load-trace.mjs" node_modules/.bin/kestrel > traced.log 2>&1 &
+TRACED=$!
+for _ in $(seq 1 30); do grep -q "kestrel started" traced.log 2>/dev/null && break; sleep 0.2; done
+grep -q "kestrel started" traced.log || { cat traced.log; kill $TRACED 2>/dev/null; exit 1; }
+kill $TRACED
+wait $TRACED || true
+grep -q "kestrel/dist/boot.js" "$WORK/start-trace.txt"
+if grep -P "$FORBIDDEN" "$WORK/start-trace.txt"; then echo "start loaded the modules above"; exit 1; fi
 
 echo "== boot"
 ./node_modules/.bin/kestrel > server.log 2>&1 &
@@ -80,4 +109,37 @@ TOTAL="$(curl -sf "$B/pages" | node -e "process.stdin.on('data',d=>console.log(J
 test "$TOTAL" = "1"
 STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$B/pages" -H 'content-type: application/json' -d '{"slug":"x","title":"x"}')"
 test "$STATUS" = "401"
-echo "== ok: consumer installed from tarballs, booted, login/create/list/401 verified ($WORK)"
+
+echo "== check through a separately installed CLI, the layout npx and pnpm dlx produce"
+kill $SERVER 2>/dev/null || true
+mkdir -p "$WORK/dlx" "$WORK/dlx-project"
+cli_tarballs=""
+for tgz in "$WORK"/tarballs/*.tgz; do
+  name="$(tar -xzOf "$tgz" package/package.json | node -e "process.stdin.on('data',d=>console.log(JSON.parse(d).name))")"
+  case "$name" in
+    "$SCOPE"|"$SCOPE-contracts"|"$SCOPE-cli"|"$SCOPE-upgrade"|"$SCOPE-openapi") cli_tarballs="$cli_tarballs $tgz" ;;
+  esac
+done
+(cd "$WORK/dlx" && echo '{ "name": "dlx", "private": true }' > package.json && npm install --no-audit --no-fund --loglevel=error $cli_tarballs)
+cd "$WORK/dlx-project"
+ln -s "$WORK/consumer/node_modules" node_modules
+cp "$WORK/consumer/package.json" package.json
+cat > kestrel.config.ts <<TS
+import { defineConfig } from "$SCOPE/defineConfig";
+
+export default defineConfig({
+  modules: [
+    { use: "$SCOPE-blobstore-s3", config: { bucket: "smoke-bucket", region: "eu-west-1" } },
+    { use: "$SCOPE-persistence-sqlite", config: { file: "./data/smoke.db" } },
+    { use: "$SCOPE-media-default", config: {} },
+  ],
+  triggers: [],
+});
+TS
+: > "$WORK/dlx-trace.txt"
+KESTREL_LOAD_TRACE="$WORK/dlx-trace.txt" node --disable-warning=ExperimentalWarning --import "$WORK/load-trace.mjs" "$WORK/dlx/node_modules/$SCOPE-cli/dist/cli.js" check --root "$WORK/dlx-project"
+grep -q "dlx-project/node_modules/$SCOPE/dist/boot.js\|consumer/node_modules/$SCOPE/dist/boot.js" "$WORK/dlx-trace.txt"
+grep -q "consumer/node_modules/$SCOPE/dist/load.js" "$WORK/dlx-trace.txt"
+test ! -e "$WORK/dlx-project/data"
+
+echo "== ok: consumer installed from tarballs, checked, started without inspection code, booted, login/create/list/401 verified, checked through a separate CLI install ($WORK)"
