@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { BootCheck, BootProblem, ModuleDefinition } from "@michaelthielemann/kestrel";
 import { defineContract } from "@michaelthielemann/kestrel/defineContract";
 import { applyEdits } from "./apply.ts";
+import { findAll, isAstNode, objectProperty } from "./ast.ts";
 import type { LoadedProject, RuleContext } from "./plugin.ts";
 import { readFileOrUndefined } from "./rules.ts";
 import { pathEventsRule, pathWiringRule, redirectsImplRule, redirectsPersistenceRule, routedSlugUniqueRule } from "./ruleSitePaths.ts";
@@ -71,6 +72,7 @@ describe("site/routed-slug-unique", () => {
     const findings = await routedSlugUniqueRule.check(ctx);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.severity).toBe("error");
+    expect(findings[0]?.where.module).toBe("site/default");
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
     const { text } = applyEdits(CONFIG, edits);
     expect(text).toContain('slug: { type: "slug", required: true, localized: true }');
@@ -84,12 +86,34 @@ describe("site/routed-slug-unique", () => {
   });
 });
 
+describe("site/routed-slug-unique with a model outside kestrel.config.ts", () => {
+  it("edits the file and the fields the project's model hooks point at", async () => {
+    const modelFile = join(dir, "model.ts");
+    const modelSource = 'export const pages = { kind: "multi", fields: { slug: { type: "slug", unique: true, localized: true }, title: { type: "text" } } };\n';
+    await writeFile(modelFile, modelSource);
+    const base = await context({ modules: [CONTENT, { use: "@michaelthielemann/kestrel-site-default", config: { routes: { pages: { parentField: "parent" } } } }] });
+    const ctx: RuleContext = {
+      ...base,
+      project: { ...base.project, contentModel: { types: { pages: { fields: { slug: {}, title: {} } } }, use: "preset", file: modelFile } },
+      locateModelFields: (root, { typeName }) => {
+        const declaration = findAll(root, "VariableDeclarator").find((d) => isAstNode(d.id) && d.id.name === typeName);
+        const init = declaration && isAstNode(declaration.init) ? declaration.init : undefined;
+        return init === undefined ? undefined : objectProperty(init, "fields");
+      },
+    };
+    const findings = await routedSlugUniqueRule.check(ctx);
+    expect(findings[0]?.where.file).toBe(modelFile);
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    expect(applyEdits(modelSource, edits).text).toContain('slug: { type: "slug", localized: true }');
+  });
+});
+
 describe("site/path-events", () => {
   const site = { use: "@michaelthielemann/kestrel-site-default", config: { routes: { pages: { home: "home" } } } };
 
   it("reports routes without an events@1 provider", async () => {
     const findings = await pathEventsRule.check(await context({ modules: [site] }));
-    expect(findings.map((f) => [f.id, f.severity])).toEqual([["site/path-events:events", "error"]]);
+    expect(findings.map((f) => [f.id, f.severity, f.where.module])).toEqual([["site/path-events:events", "error", "site/default"]]);
   });
 
   it("warns when nothing runs on site.pathsMoved, and is silent when something does", async () => {
@@ -113,7 +137,7 @@ describe("redirects/requires-persistence", () => {
   const redirects = { use: "@michaelthielemann/kestrel-redirects-default", config: {} };
 
   it("reports redirects-default without a persistence@1 provider, and is silent with one", async () => {
-    expect((await redirectsPersistenceRule.check(await context({ modules: [redirects] }))).map((f) => f.rule)).toEqual(["redirects/requires-persistence"]);
+    expect((await redirectsPersistenceRule.check(await context({ modules: [redirects] }))).map((f) => [f.rule, f.where.module])).toEqual([["redirects/requires-persistence", "redirects/default"]]);
     expect(await redirectsPersistenceRule.check(await context({ modules: [redirects], definitions: [provider("persistence/sqlite", "persistence@1")] }))).toEqual([]);
   });
 });

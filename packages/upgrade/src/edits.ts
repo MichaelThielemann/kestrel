@@ -218,8 +218,12 @@ export function removeNestedModuleConfigProperty(file: string, source: string, o
     target = objectProperty(target, key);
   }
   if (target === undefined || target.type !== "ObjectExpression") return undefined;
+  return removePropertyFrom(file, source, target, options.key);
+}
+
+function removePropertyFrom(file: string, source: string, target: AstNode, key: string): Edit | undefined {
   const props = objectPropertyNodes(target);
-  const index = props.findIndex((p) => propertyKeyName(p) === options.key);
+  const index = props.findIndex((p) => propertyKeyName(p) === key);
   if (index === -1) return undefined;
   const { start: propStart, end: propEnd } = span(props[index]!);
   if (index < props.length - 1) {
@@ -666,6 +670,25 @@ export interface RenameContentFieldOptions {
   to: string;
   /** Locates the content type's `fields` object literal directly, for a project layout where it does not sit at `config.types.<typeName>.fields` on the module-list entry named `use`; additive, not a replacement — the built-in search runs when this is absent, or when it returns `undefined` for this type. */
   locateModelFields?: ModelFieldsLocator;
+}
+
+export interface RemoveContentFieldPropertyOptions {
+  use: string;
+  typeName: string;
+  field: string;
+  key: string;
+  /** Locates the content type's `fields` object literal directly, as for `renameContentField`. */
+  locateModelFields?: ModelFieldsLocator;
+}
+
+/** Removes `key` from the definition of `config.types.<typeName>.fields.<field>` (or wherever `locateModelFields` finds the type's fields), with its separating comma; `undefined` when the definition is not an object literal holding `key`. */
+export function removeContentFieldProperty(file: string, source: string, options: RemoveContentFieldPropertyOptions): Edit | undefined {
+  const root = parseTs(source);
+  const fields = options.locateModelFields?.(root, { use: options.use, typeName: options.typeName }) ?? builtInModelFields(root, options.use, options.typeName);
+  if (fields === undefined || fields.type !== "ObjectExpression") return undefined;
+  const definition = objectProperty(fields, options.field);
+  if (definition === undefined || definition.type !== "ObjectExpression") return undefined;
+  return removePropertyFrom(file, source, definition, options.key);
 }
 
 /** Renames a content type's field key, `config.types.<typeName>.fields.<from>`, on a module-list entry named `use` (or wherever `locateModelFields` says it lives). */

@@ -498,8 +498,10 @@ re-rendered on every change until they render once; run "Publish all" (`delivery
 A type listed in `site-default`'s `routes` has a public path that is unique per locale, so its slug
 field need not be `unique`; a `unique` slug would reject the same slug under two parents without
 naming the occupant, and with a `parentField` or a mount setup fails. The fix removes `unique: true`
-from the slug field in `content-default`'s inline config; the index drops at the next boot. A slug
-field defined outside `kestrel.config.ts` is left to you.
+from the slug field's definition: in `content-default`'s inline config, or in the file and type a
+plugin's `contentModel` and `locateModelFields` hooks point at; the index drops at the next boot. A
+definition the tool cannot locate as an object literal is left to you. The finding names the
+`site/default` module, so the same cause is not reported a second time as its setup failure.
 
 #### site-path-wiring
 With `routes`, every pipeline that writes a routed type ends that write's atomic group with

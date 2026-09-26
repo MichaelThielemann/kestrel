@@ -1,0 +1,13 @@
+{
+  "name": "upgrade-fixture-routed-nested",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@michaelthielemann/kestrel": "^6.0.0",
+    "@michaelthielemann/kestrel-content-default": "^6.0.0",
+    "@michaelthielemann/kestrel-events-direct": "^6.0.0",
+    "@michaelthielemann/kestrel-events-inmemory": "^6.0.0",
+    "@michaelthielemann/kestrel-persistence-sqlite": "^6.0.0",
+    "@michaelthielemann/kestrel-site-default": "^6.0.0"
+  }
+}

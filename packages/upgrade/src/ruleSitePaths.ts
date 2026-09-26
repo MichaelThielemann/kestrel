@@ -1,4 +1,4 @@
-import { removeNestedModuleConfigProperty } from "./edits.ts";
+import { removeContentFieldProperty } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import type { Rule, RuleContext } from "./plugin.ts";
 import type { Finding } from "./report.ts";
@@ -35,11 +35,13 @@ export const routedSlugUniqueRule: Rule = {
       const fields = isRecord(type) && isRecord(type.fields) ? type.fields : {};
       const field = fields[route.slugField];
       if (!isRecord(field) || field.unique !== true || content === undefined) continue;
-      const source = ctx.readFile(ctx.project.configFile);
-      const edit = source === undefined ? undefined : removeNestedModuleConfigProperty(ctx.project.configFile, source, { use: content.use, path: ["types", route.type, "fields", route.slugField], key: "unique" });
+      const model = ctx.project.contentModel;
+      const file = model?.file ?? ctx.project.configFile;
+      const source = ctx.readFile(file);
+      const edit = source === undefined ? undefined : removeContentFieldProperty(file, source, { use: model?.use ?? content.use, typeName: route.type, field: route.slugField, key: "unique", ...(ctx.locateModelFields === undefined ? {} : { locateModelFields: ctx.locateModelFields }) });
       const message = `${route.type}.${route.slugField} is unique, but ${route.type} is routed: its public path is unique instead, and a unique slug rejects the same slug in two places without naming the occupant${route.nested ? "; with a parent field or a mount, setup fails" : ""}`;
       const suggestion = `remove unique: true from ${route.type}.${route.slugField}; the index drops at the next boot`;
-      findings.push(finding(`site/routed-slug-unique:${route.type}`, "site/routed-slug-unique", message, edit === undefined ? `${suggestion} (by hand: the field is not an object literal in ${ctx.project.configFile})` : suggestion, { file: ctx.project.configFile, module: content.use, path: `types.${route.type}.fields.${route.slugField}` }, edit === undefined ? undefined : [edit], upgradingDocs("site-routed-slug-unique"), route.nested ? "error" : "warning"));
+      findings.push(finding(`site/routed-slug-unique:${route.type}`, "site/routed-slug-unique", message, edit === undefined ? `${suggestion} (by hand: the field's definition is not an object literal in ${file})` : suggestion, { file, module: "site/default", path: `types.${route.type}.fields.${route.slugField}` }, edit === undefined ? undefined : [edit], upgradingDocs("site-routed-slug-unique"), route.nested ? "error" : "warning"));
     }
     return findings;
   },
@@ -70,8 +72,7 @@ export const pathEventsRule: Rule = {
   id: "site/path-events",
   check(ctx) {
     if (routesOf(ctx).length === 0) return [];
-    const site = moduleEntry(ctx, "site-default");
-    const where = { file: ctx.project.configFile, module: site?.use ?? "site-default" };
+    const where = { file: ctx.project.configFile, module: "site/default" };
     if (!providesContract(ctx, "events@1")) {
       return [finding("site/path-events:events", "site/path-events", "site-default's routes need an events@1 provider to raise site.pathsMoved; setup fails without one", "add @michaelthielemann/kestrel-events-inmemory with events-direct or events-queue", where, undefined, upgradingDocs("site-path-events"))];
     }
@@ -87,7 +88,7 @@ export const redirectsPersistenceRule: Rule = {
   check(ctx) {
     const redirects = moduleEntry(ctx, "redirects-default");
     if (redirects === undefined || providesContract(ctx, "persistence@1")) return [];
-    return [finding("redirects/requires-persistence", "redirects/requires-persistence", "redirects-default requires a persistence@1 provider in 6.0.0 for its automatic redirects; boot fails without one", "configure a persistence module such as @michaelthielemann/kestrel-persistence-sqlite", { file: ctx.project.configFile, module: redirects.use }, undefined, upgradingDocs("redirects-requires-persistence"))];
+    return [finding("redirects/requires-persistence", "redirects/requires-persistence", "redirects-default requires a persistence@1 provider in 6.0.0 for its automatic redirects; boot fails without one", "configure a persistence module such as @michaelthielemann/kestrel-persistence-sqlite", { file: ctx.project.configFile, module: "redirects/default" }, undefined, upgradingDocs("redirects-requires-persistence"))];
   },
 };
 
