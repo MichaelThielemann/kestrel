@@ -98,12 +98,18 @@ Never edit them by hand; CI compares them.
 3. Submodules provide steps, not triggers — no submodule owns a route or emits an event itself.
 4. Business logic lives in pipelines; one pipeline file shows the complete flow.
 5. Errors fail loud at boot, not at runtime.
+6. A new package is for a realistic second implementation of the same contract (blobstore, authn,
+   events delivery), or to encapsulate a heavy dependency (an S3 SDK, an image library) — not for
+   domain logic that fits one implementation and one dependency footprint. That logic is an additional
+   step set in an existing module instead; see [`docs/submodule-template.md`](docs/submodule-template.md).
 
 The reasoning behind each, and the one documented exception to rule 3, is in
 [`docs/architecture.md`](docs/architecture.md). Submodules keep no module-level state; everything
-lives in the `deps`/config closed over by `setup(config, deps)`. Contracts in
-`packages/contracts/src/*.ts` are frozen once published. English in code, docs and `CHANGELOG.md`;
-comments only where a hidden constraint is not obvious from the code.
+lives in the `deps`/config closed over by `setup(config, deps)`. The `defineContract` interfaces and
+their contract test suites in `packages/contracts/src/*.ts` are frozen once published; the runtime
+helpers alongside them under `packages/contracts/src/helpers/*.ts` may gain exports additively within
+a major (see the contracts package's own README). English in code, docs and `CHANGELOG.md`; comments
+only where a hidden constraint is not obvious from the code.
 
 ## Documentation
 

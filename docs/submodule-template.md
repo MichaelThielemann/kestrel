@@ -5,6 +5,21 @@ A submodule is a package `@michaelthielemann/kestrel-<module>-<submodule>` (in t
 point, plus `package.json`. It doesn't have to fulfill a contract (`provides: []`) — a submodule
 may also provide only steps, e.g. `audit/persistence` with the step `audit.record`.
 
+## When a new package is warranted
+A new package earns its own version, README, trusted-publishing setup, release checklist entry and
+generated docs — real, recurring cost for a maintainer. Reach for one only when:
+
+- a second, realistic implementation of the same contract exists or is foreseeable (blobstore on S3
+  vs. the filesystem, authn single-user vs. multi-user, events delivered directly vs. through a
+  queue), so consumers actually swap the package; or
+- the module encapsulates a dependency heavy enough that a consumer who doesn't need it shouldn't pay
+  for it (an S3 SDK, an image-processing library).
+
+Domain logic without either property is an additional step set in an existing module, not a new package
+— e.g. a new step reading from an already-configured store belongs next to that store's other steps.
+Existing packages are not merged retroactively to fit this rule; splitting an already-published
+package back together is a break with no benefit to a consumer.
+
 This page describes the packaged form. A submodule that stays inside one consumer project needs no
 package at all: a `module.ts` somewhere in the project, referenced by a relative `use` path, is
 enough — `getting-started.md` § Your own module shows the smallest working one. Everything below
