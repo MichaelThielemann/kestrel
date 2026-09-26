@@ -1,4 +1,4 @@
-import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { declaresType, isSchemaNode, resolveSchema, typeTag, type SchemaNode } from "@michaelthielemann/kestrel-contracts/helpers/json-schema";
 
 /** The JSON Schema keyword that marks a string position as holding an id of a references target. */
 export const REF_KEYWORD = "x-kestrel-ref";
@@ -9,77 +9,72 @@ export interface SchemaRef {
   id: string;
 }
 
-type Node = Record<string, unknown>;
+const WALKED_KEYWORDS = new Set(["$ref", "$defs", "definitions", "oneOf", "anyOf", "allOf", "properties", "additionalProperties", "items", "type", "const", REF_KEYWORD]);
+const NAME_MAPS = new Set(["$defs", "definitions", "properties"]);
 
-function isNode(value: unknown): value is Node {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function list(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
-function resolveRef(root: Node, node: unknown): Node | undefined {
-  if (!isNode(node)) return undefined;
-  if (typeof node.$ref !== "string") return node;
-  if (!node.$ref.startsWith("#/")) return undefined;
-  const found = node.$ref.slice(2).split("/").reduce<unknown>((o, k) => (isNode(o) ? o[k] : undefined), root);
-  return isNode(found) ? found : undefined;
+function branches(root: SchemaNode, candidates: unknown[], value: unknown): unknown[] {
+  const resolved = candidates.map((candidate) => ({ candidate, schema: resolveSchema(root, candidate) }));
+  const tag = isSchemaNode(value) ? value.type : undefined;
+  return resolved
+    .filter(({ schema }) => {
+      if (schema === undefined) return false;
+      const own = typeTag(schema);
+      if (own !== undefined) return own === tag;
+      return schema.type === undefined || declaresType(schema, value);
+    })
+    .map(({ candidate }) => candidate);
 }
 
-function jsonType(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  return typeof value;
-}
-
-function pickBranch(root: Node, branches: unknown[], value: unknown): Node | undefined {
-  const schemas = branches.map((b) => resolveRef(root, b));
-  const tag = isNode(value) ? value.type : undefined;
-  let tagged = false;
-  for (const schema of schemas) {
-    const properties = schema && isNode(schema.properties) ? schema.properties : undefined;
-    const typeNode = properties && isNode(properties.type) ? properties.type : undefined;
-    const constant = typeNode?.const;
-    if (constant === undefined) continue;
-    tagged = true;
-    if (constant === tag) return schema;
-  }
-  if (tagged) return undefined;
-  const kind = jsonType(value);
-  return schemas.find((schema) => schema?.type === kind || (Array.isArray(schema?.type) && schema.type.includes(kind)));
-}
-
-function walk(root: Node, schema: unknown, value: unknown, out: Map<string, SchemaRef>): void {
-  const s = resolveRef(root, schema);
+function walk(root: SchemaNode, schema: unknown, value: unknown, out: Map<string, SchemaRef>, seen: Set<unknown>): void {
+  if (seen.has(schema)) return;
+  seen.add(schema);
+  const s = resolveSchema(root, schema);
   if (!s) return;
-  if (Array.isArray(s.oneOf) || Array.isArray(s.anyOf)) {
-    const branch = pickBranch(root, boundaryCast<unknown[]>(s.oneOf ?? s.anyOf, "json"), value);
-    if (branch) walk(root, branch, value, out);
-    return;
-  }
-  if (typeof value === "string") {
-    const target = s[REF_KEYWORD];
-    if (typeof target === "string" && target !== "" && value !== "") out.set(`${target}\u0000${value}`, { target, id: value });
-    return;
+  if (seen.has(s) && s !== schema) return;
+  seen.add(s);
+  const target = s[REF_KEYWORD];
+  if (typeof value === "string" && typeof target === "string" && target !== "" && value !== "") out.set(`${target}\u0000${value}`, { target, id: value });
+  for (const member of list(s.allOf)) walk(root, member, value, out, seen);
+  for (const union of [s.oneOf, s.anyOf]) {
+    for (const branch of branches(root, list(union), value)) walk(root, branch, value, out, seen);
   }
   if (Array.isArray(value)) {
-    if (s.items === undefined) return;
-    for (const item of value) walk(root, s.items, item, out);
+    if (s.items !== undefined) for (const item of value) walk(root, s.items, item, out, new Set());
     return;
   }
-  if (isNode(value)) {
-    const properties = isNode(s.properties) ? s.properties : {};
+  if (isSchemaNode(value)) {
+    const properties = isSchemaNode(s.properties) ? s.properties : {};
     for (const [key, child] of Object.entries(value)) {
-      const childSchema = properties[key] ?? (isNode(s.additionalProperties) ? s.additionalProperties : undefined);
-      if (childSchema !== undefined) walk(root, childSchema, child, out);
+      const childSchema = properties[key] ?? (isSchemaNode(s.additionalProperties) ? s.additionalProperties : undefined);
+      if (childSchema !== undefined) walk(root, childSchema, child, out, new Set());
     }
   }
 }
 
 /**
- * Every non-empty string in `value` whose position in `schema` carries `"x-kestrel-ref": "<target>"`,
- * deduped. The walk follows local `$ref`s, picks a `oneOf`/`anyOf` branch by its `type` const or else by
- * the value's JSON type, and descends `properties`, `additionalProperties` and `items`.
+ * Every non-empty string in `value` whose position in `schema` carries `"x-kestrel-ref": "<target>"`, deduped.
+ * The walk follows local `$ref`s (a marker next to a `$ref` counts), every `allOf` member, every `oneOf`/`anyOf`
+ * branch that fits the value (by its `type` const, else by its `type`), `properties`, `additionalProperties` and
+ * `items`. It errs towards finding an id: a branch without `type` is walked for any value.
  */
 export function collectSchemaRefs(schema: Record<string, unknown>, value: unknown): SchemaRef[] {
   const out = new Map<string, SchemaRef>();
-  walk(schema, schema, value, out);
+  walk(schema, schema, value, out, new Set());
   return [...out.values()];
+}
+
+/** The keywords of `schema` that decide what `collectSchemaRefs` finds, dropping annotations and validation-only keywords. */
+export function walkedProjection(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(walkedProjection);
+  if (!isSchemaNode(schema)) return schema;
+  const out: SchemaNode = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (!WALKED_KEYWORDS.has(key)) continue;
+    out[key] = NAME_MAPS.has(key) && isSchemaNode(value) ? Object.fromEntries(Object.entries(value).map(([name, child]) => [name, walkedProjection(child)])) : walkedProjection(value);
+  }
+  return out;
 }

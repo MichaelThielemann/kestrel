@@ -8,11 +8,19 @@ before `via` existed read as `"field"`.
 A bare id inside a `json` field is indexed (as `"body"`) when `schemas` gives that field a JSON
 Schema: `schemas: { "pages.body": "schemas/pages.body.json" }` (a path relative to the project root,
 or an inline schema). Every non-empty string at a position marked `"x-kestrel-ref": "<target>"` is an
-id of that target; the walk follows local `$ref`s, picks `oneOf`/`anyOf` branches by their `type`
-const or else by the value's JSON type, and descends `properties`, `additionalProperties` and
-`items`. A key that does not name a `json` field of the model, or a file that cannot be read, fails
-setup; a file is read again when its modification time changes. After adding a schema, run
-`references.rebuild` once so documents written before are indexed.
+id of that target. The walk follows local `$ref`s (a marker next to a `$ref` counts), every `allOf`
+member, every `oneOf`/`anyOf` branch that fits the value (by its `type` const, else by its `type`; a
+branch without `type` fits any value), `properties`, `additionalProperties` and `items`; it errs
+towards finding an id. A key that does not name a `json` field of the model, or a file that cannot be
+read, fails setup. A file is read once at setup; with `watch: true` it is read again when its
+modification time changes, and a failed re-read keeps the last good schema.
+The index rebuilds itself at boot whenever its extraction config changes: setup hashes the targets,
+the `ref` and `json` fields, the locales and the keywords the walk reads of each schema, compares the
+hash with the one stored in `references_meta`, and on a difference (or no stored hash) rebuilds the
+index before the module is ready. A failed rebuild fails the boot. A schema that changes while the
+process runs (with `watch`) applies to later writes; the next boot rebuilds. Documents written while
+the module was not loaded are not picked up while the hash stays the same; `references.rebuild`
+repairs that.
 Targets are declared in config: `targets: { pages: { content: "pages" }, media: { media: true } }`;
 every `ref` field must point to a configured target (checked at boot). A target is a type of
 `content@1` (`{ content: "<type>" }`), the files of the `media@1` provider (`{ media: true }`), or a
@@ -56,6 +64,7 @@ Not included: cascading deletes, automatic clearing of dangling references, expa
 |---|---|---|---|
 | `targets` | record | yes | – |
 | `schemas` | record | no | – |
+| `watch` | boolean | no | `false` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|

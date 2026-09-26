@@ -292,7 +292,7 @@ Not every file under `packages/contracts/src/` is a contract plus its test. The 
 - **`links.ts`** declares the frozen `content@1` underpinning (`INTERNAL_REF`, `InternalRef`,
   `LinkTarget`) at the package's top level; **`helpers/links.ts`**'s `collectInternalRefs` is its
   runtime counterpart and may change independently. **`helpers/persistence.owned`,
-  `helpers/mediaType`, `helpers/content-schema` and `helpers/content-locale`**, documented in
+  `helpers/mediaType`, `helpers/content-schema`, `helpers/content-locale` and `helpers/json-schema`**, documented in
   `packages/contracts/README.md`, are pure helpers shared by modules — not contracts either.
 
 ## Reads a render can see
@@ -371,10 +371,13 @@ root or an inline schema). Every non-empty string at a position whose schema car
   "gallery": { "type": "array", "items": { "type": "string", "x-kestrel-ref": "media" } } } }
 ```
 
-The walk follows local `$ref`s, picks a `oneOf`/`anyOf` branch by its `type` const (else by the
-value's JSON type) and descends `properties`, `additionalProperties` and `items`, so nested blocks
-and repeaters are covered. A schema file is read at setup and again whenever its modification time
-changes. Documents written before a schema was configured are indexed by `references.rebuild`.
+The walk follows local `$ref`s (a marker next to a `$ref` counts), every `allOf` member, every
+`oneOf`/`anyOf` branch that fits the value (by its `type` const, else by its `type`) and descends
+`properties`, `additionalProperties` and `items`, so nested blocks and repeaters are covered. A schema
+file is read at setup, and with `watch: true` again whenever its modification time changes. The
+index rebuilds itself at boot whenever the extraction config — targets, `ref` and `json` fields,
+locales, the walked part of each schema — differs from the one it was built with, so documents
+written before a schema was configured are indexed without a manual `references.rebuild`.
 
 **i18n** is part of the model, not a module: `localized` fields are stored per language,
 `required`/`unique` apply per language. Reading with `locale` is **strict** — a missing

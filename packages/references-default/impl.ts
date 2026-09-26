@@ -1,14 +1,19 @@
+import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import type { Content, ContentDocument, FieldDefinition, FieldType } from "@michaelthielemann/kestrel-contracts/content";
-import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
+import type { Content, ContentDocument, ContentModel, FieldDefinition, FieldType } from "@michaelthielemann/kestrel-contracts/content";
+import { isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { collectInternalRefs } from "@michaelthielemann/kestrel-contracts/helpers/links";
 import type { MediaFiles } from "@michaelthielemann/kestrel-contracts/media";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
-import { collectSchemaRefs } from "./schema-refs.ts";
+import { collectSchemaRefs, walkedProjection } from "./schema-refs.ts";
 
 export { REF_KEYWORD } from "./schema-refs.ts";
 
 export const INDEX = "references_index";
+export const META = "references_meta";
+
+/** Part of the extraction hash; changes whenever what the index extracts from a document changes. */
+export const EXTRACTOR_VERSION = 2;
 
 /** Where a reference was found: a `ref` field of the content model, or inside a `json` field (an internal link, or an id at a position its schema marks). */
 export type Via = "field" | "body";
@@ -18,8 +23,16 @@ export type Target = { content: string } | { media: true } | { collection: strin
 
 export interface Config {
   targets: Record<string, Target>;
-  /** JSON Schemas of `json` fields, keyed `"<type>.<field>"`: a file path or an inline schema. Strings at positions marked `"x-kestrel-ref": "<target>"` are indexed as ids of that target. */
-  schemas?: Record<string, string | Record<string, unknown>>;
+  /** JSON Schemas of `json` fields, keyed `"<type>.<field>"`. Strings at positions marked `"x-kestrel-ref": "<target>"` are indexed as ids of that target. */
+  schemas?: Record<string, SchemaSource>;
+  /** Re-read a schema file whose modification time changed, before each index of its field. */
+  watch?: boolean;
+}
+
+/** A schema of a `json` field, and the file it was read from when it came from one. */
+export interface SchemaSource {
+  schema: Record<string, unknown>;
+  file?: { path: string; mtimeMs: number };
 }
 
 export interface Missing {
@@ -57,6 +70,8 @@ export interface References {
   scan(): Promise<Result<{ checked: number; broken: number }, ReferencesError>>;
   report(target?: string): Promise<Result<IndexEntry[], ReferencesError>>;
   rebuild(): Promise<Result<{ documents: number; entries: number }, ReferencesError>>;
+  /** Rebuilds the index when the extraction config differs from the one it was built with, and records the new one. */
+  reconcile(): Promise<Result<{ rebuilt: false } | { rebuilt: true; documents: number; entries: number }, ReferencesError>>;
 }
 
 const PAGE = 100;
@@ -65,40 +80,60 @@ function definition(field: FieldType | FieldDefinition): FieldDefinition {
   return typeof field === "string" ? { type: field } : field;
 }
 
-type SchemaReader = () => Promise<Result<Record<string, unknown>, ReferencesError>>;
+type SchemaReader = () => Promise<Record<string, unknown>>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Reads a JSON Schema file, throwing with the field and path when it is missing or not a JSON object. */
-export async function readSchemaFile(key: string, path: string): Promise<Record<string, unknown>> {
+export async function readSchemaFile(key: string, path: string): Promise<SchemaSource> {
   let parsed: unknown;
+  let mtimeMs: number;
   try {
+    mtimeMs = (await stat(path)).mtimeMs;
     parsed = JSON.parse(await readFile(path, "utf8"));
   } catch (cause) {
     throw new Error(`references/default: cannot read schema for "${key}" at ${path}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
   }
   if (!isRecord(parsed)) throw new Error(`references/default: cannot read schema for "${key}" at ${path}: not a JSON object`);
-  return parsed;
+  return { schema: parsed, file: { path, mtimeMs } };
 }
 
-function schemaReader(key: string, source: string | Record<string, unknown>): SchemaReader {
-  if (typeof source !== "string") {
-    const inline = structuredClone(source);
-    return async () => ok(inline);
-  }
-  let cached: { mtimeMs: number; schema: Record<string, unknown> } | undefined;
+function schemaReader(key: string, source: SchemaSource, watch: boolean): SchemaReader {
+  let cached = { schema: structuredClone(source.schema), mtimeMs: source.file?.mtimeMs };
+  const file = source.file;
+  if (!watch || file === undefined) return async () => cached.schema;
   return async () => {
     try {
-      const { mtimeMs } = await stat(source);
-      if (cached?.mtimeMs !== mtimeMs) cached = { mtimeMs, schema: await readSchemaFile(key, source) };
-      return ok(cached.schema);
-    } catch (cause) {
-      if (cached !== undefined) return ok(cached.schema);
-      return err(failure("TRANSIENT", cause instanceof Error ? cause.message : String(cause), { cause }));
+      const { mtimeMs } = await stat(file.path);
+      if (cached.mtimeMs !== mtimeMs) cached = { schema: (await readSchemaFile(key, file.path)).schema, mtimeMs };
+    } catch {
+      return cached.schema;
     }
+    return cached.schema;
   };
+}
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
+}
+
+/** The sha256 of everything that decides which rows the index holds for a document: targets, `ref` and `json` fields, locales and what the walk reads of each schema. */
+export function extractionHash(config: Config, model: ContentModel): string {
+  const fields = Object.keys(model.types)
+    .sort()
+    .flatMap((type) =>
+      Object.entries(model.types[type]?.fields ?? {})
+        .map(([field, raw]) => ({ type, field, def: definition(raw) }))
+        .filter(({ def }) => def.type === "ref" || def.type === "json")
+        .map(({ type: owner, field, def }) => ({ type: owner, field, kind: def.type, to: def.to ?? null, localized: def.localized === true })),
+    );
+  const schemas = Object.fromEntries(Object.entries(config.schemas ?? {}).map(([key, source]) => [key, walkedProjection(source.schema)]));
+  const input = { version: EXTRACTOR_VERSION, targets: Object.keys(config.targets).sort(), fields, locales: model.locales ?? [], schemas };
+  return createHash("sha256").update(JSON.stringify(canonical(input))).digest("hex");
 }
 
 export function createReferencesDefault(config: Config, content: Content, db: Persistence, now: () => number = Date.now, media?: MediaFiles): References {
@@ -121,7 +156,7 @@ export function createReferencesDefault(config: Config, content: Content, db: Pe
     const at = key.indexOf(".");
     const raw = at < 0 ? undefined : model.types[key.slice(0, at)]?.fields[key.slice(at + 1)];
     if (raw === undefined || definition(raw).type !== "json") throw new Error(`references/default: schema "${key}" must name a json field of the content model`);
-    schemas.set(key, schemaReader(key, source));
+    schemas.set(key, schemaReader(key, source, config.watch === true));
   }
   for (const [name, target] of Object.entries(config.targets)) {
     if ("media" in target && media === undefined) throw new Error(`references/default: target "${name}" reads media@1, but no module provides it`);
@@ -178,13 +213,12 @@ export function createReferencesDefault(config: Config, content: Content, db: Pe
     for (const [field, def] of jsons) {
       const reader = schemas.get(`${type}.${field}`);
       const schema = reader === undefined ? undefined : await reader();
-      if (schema !== undefined && isErr(schema)) return schema;
       for (const locale of localesOf(def)) {
         const doc = await docFor(locale);
         if (isErr(doc)) return doc;
         const value = doc.value?.[field];
         const found = collectInternalRefs(value).map((ref) => ({ target: ref.type, id: ref.id }));
-        if (schema !== undefined) found.push(...collectSchemaRefs(schema.value, value));
+        if (schema !== undefined) found.push(...collectSchemaRefs(schema, value));
         const seen = new Set<string>();
         for (const ref of found) {
           const key = `${ref.target}\u0000${ref.id}`;
@@ -218,7 +252,8 @@ export function createReferencesDefault(config: Config, content: Content, db: Pe
     return ok(entries.value.length);
   };
 
-  return {
+  const hash = extractionHash(config, model);
+  const api: References = {
     async missing(type, data) {
       knownType(type);
       const out: Missing[] = [];
@@ -308,7 +343,21 @@ export function createReferencesDefault(config: Config, content: Content, db: Pe
       }
       return ok({ documents, entries });
     },
+    async reconcile() {
+      await ready;
+      const prepared = await db.ensureCollection(META, { hash: "string" });
+      if (isErr(prepared)) return prepared;
+      const row = await db.findOne<Document & { hash: string }>(META, { id: "extraction" });
+      if (isErr(row)) return row;
+      if (row.value?.hash === hash) return ok({ rebuilt: false });
+      const rebuilt = await api.rebuild();
+      if (isErr(rebuilt)) return rebuilt;
+      const written = row.value === null ? await db.createOne(META, { id: "extraction", hash }) : await db.updateOne(META, "extraction", { hash });
+      if (isErr(written)) return written;
+      return ok({ rebuilt: true, ...rebuilt.value });
+    },
   };
+  return api;
 }
 
 export async function referrersLive(content: Content, target: string, id: string): Promise<Result<Referrer[], ReferencesError>> {

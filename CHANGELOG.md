@@ -1050,7 +1050,14 @@ Net changes since 5.8.1.
   be deleted while a block still used it. The new optional `schemas` config maps `"<type>.<field>"`
   to a JSON Schema (a path relative to the project root, or inline); strings at positions marked
   `"x-kestrel-ref": "<target>"` are indexed with `via: "body"`, including nested blocks and
-  repeaters. Run `references.rebuild` once after adding a schema so existing documents are indexed.
+  repeaters. `watch: true` re-reads a changed schema file. The index rebuilds itself at boot whenever
+  targets, `ref`/`json` fields, locales or the walked part of a schema change (a hash kept in the new
+  collection `references_meta`); the first boot after upgrading rebuilds once, and a failed rebuild
+  fails the boot. `references.rebuild` stays for repairs.
+- `validate-jsonschema`: `validate.sanitize` picks a `oneOf`/`anyOf` branch whose `type` is a list of
+  names, follows `$ref` chains and keeps keywords written next to a `$ref`, so `format: "html"` there
+  is sanitized. `@michaelthielemann/kestrel-contracts/helpers/json-schema` holds the schema resolution
+  both walkers share.
 - Config secrets are redacted everywhere a config value is emitted: a variable's `value` and
   `default` and the `default` of the config JSON Schema, which are JSON snapshots. Redaction reaches
   object fields, record values, array and tuple elements, and every member of a union or

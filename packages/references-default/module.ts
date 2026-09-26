@@ -7,12 +7,13 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { createReferencesDefault, readSchemaFile, type References, type Referrer } from "./impl.ts";
+import { createReferencesDefault, readSchemaFile, type References, type Referrer, type SchemaSource } from "./impl.ts";
 
 export const configSchema = z
   .object({
     targets: z.record(z.union([z.object({ content: z.string().min(1) }).strict(), z.object({ media: z.literal(true) }).strict(), z.object({ collection: z.string().min(1) }).strict()])),
     schemas: z.record(z.union([z.string().min(1), z.record(z.unknown())])).optional(),
+    watch: z.boolean().default(false),
   })
   .strict();
 
@@ -24,17 +25,15 @@ export default defineModule({
   configSchema,
 
   async setup(config, deps): Promise<References> {
-    const schemas: Record<string, string | Record<string, unknown>> = {};
+    const schemas: Record<string, SchemaSource> = {};
     for (const [key, source] of Object.entries(config.schemas ?? {})) {
-      if (typeof source !== "string") {
-        schemas[key] = source;
-        continue;
-      }
-      const path = resolve(deps.root, source);
-      await readSchemaFile(key, path);
-      schemas[key] = path;
+      schemas[key] = typeof source === "string" ? await readSchemaFile(key, resolve(deps.root, source)) : { schema: source };
     }
-    return createReferencesDefault({ targets: config.targets, schemas }, deps.get(CONTENT), deps.get(PERSISTENCE), Date.now, deps.find(MEDIA));
+    const refs = createReferencesDefault({ targets: config.targets, schemas, watch: config.watch }, deps.get(CONTENT), deps.get(PERSISTENCE), Date.now, deps.find(MEDIA));
+    const reconciled = await refs.reconcile();
+    if (isErr(reconciled)) throw new Error(`references/default: the reference index could not be rebuilt: ${reconciled.error.message}`);
+    if (reconciled.value.rebuilt) deps.logger.info("references/default: index rebuilt", { documents: reconciled.value.documents, entries: reconciled.value.entries });
+    return refs;
   },
 
   steps: (refs) => ({

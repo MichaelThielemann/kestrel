@@ -1798,6 +1798,10 @@
                   }
                 ]
               }
+            },
+            "watch": {
+              "type": "boolean",
+              "default": false
             }
           },
           "required": [
@@ -1832,6 +1836,17 @@
             "status": "missing",
             "value": null,
             "redacted": false
+          },
+          {
+            "path": "watch",
+            "type": "boolean",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": false,
+            "redacted": false,
+            "default": false
           }
         ]
       },
