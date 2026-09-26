@@ -1,3 +1,4 @@
+import { declaresType, isSchemaNode, resolveSchema, typeTag, type SchemaNode } from "@michaelthielemann/kestrel-contracts/helpers/json-schema";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import sanitizeHtml from "sanitize-html";
 
@@ -27,44 +28,17 @@ export function sanitize(html: string): string {
   return sanitizeHtml(html, HTML_ALLOWLIST);
 }
 
-type Node = Record<string, unknown>;
-
-function isNode(value: unknown): value is Node {
-  return typeof value === "object" && value !== null;
-}
-
-function resolveRef(root: Node, node: unknown): Node | undefined {
-  if (!isNode(node)) return undefined;
-  if (typeof node.$ref !== "string") return node;
-  if (!node.$ref.startsWith("#/")) return undefined;
-  return boundaryCast<Node | undefined>(node.$ref.slice(2).split("/").reduce<unknown>((o, k) => (isNode(o) ? o[k] : undefined), root), "json");
-}
-
-function jsonType(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  return typeof value;
-}
+type Node = SchemaNode;
 
 function pickBranch(root: Node, branches: unknown[], value: unknown): Node | undefined {
-  const schemas = branches.map((b) => resolveRef(root, b));
-  const tag = isNode(value) ? value.type : undefined;
-  let tagged = false;
-  for (const schema of schemas) {
-    const properties = schema && isNode(schema.properties) ? schema.properties : undefined;
-    const typeNode = properties && isNode(properties.type) ? properties.type : undefined;
-    const constant = typeNode?.const;
-    if (constant === undefined) continue;
-    tagged = true;
-    if (constant === tag) return schema;
-  }
-  if (tagged) return undefined;
-  const kind = jsonType(value);
-  return schemas.find((schema) => schema?.type === kind);
+  const schemas = branches.map((b) => resolveSchema(root, b));
+  const tag = isSchemaNode(value) ? value.type : undefined;
+  if (schemas.some((schema) => typeTag(schema) !== undefined)) return schemas.find((schema) => typeTag(schema) !== undefined && typeTag(schema) === tag);
+  return schemas.find((schema) => schema !== undefined && declaresType(schema, value));
 }
 
 export function sanitizeBySchema(root: Node, schema: unknown, value: unknown): unknown {
-  const s = resolveRef(root, schema);
+  const s = resolveSchema(root, schema);
   if (!s) return value;
   if (Array.isArray(s.oneOf) || Array.isArray(s.anyOf)) {
     const branch = pickBranch(root, boundaryCast<unknown[]>(s.oneOf ?? s.anyOf, "json"), value);
@@ -75,7 +49,7 @@ export function sanitizeBySchema(root: Node, schema: unknown, value: unknown): u
     if (s.items === undefined) return value;
     return value.map((v) => sanitizeBySchema(root, s.items, v));
   }
-  if (isNode(value)) {
+  if (isSchemaNode(value)) {
     const properties = boundaryCast<Record<string, unknown> | undefined>(s.properties, "json") ?? {};
     const out: Node = {};
     for (const [k, v] of Object.entries(value)) {

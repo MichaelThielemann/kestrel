@@ -86,6 +86,15 @@ describe("sanitizeBySchema branch selection", () => {
     expect(sanitizeBySchema(root, root, { rows: [{ body: EVIL }] })).toEqual({ rows: [{ body: CLEAN }] });
   });
 
+  it("picks a branch whose type is a list of names and keeps a format next to a $ref", () => {
+    const root = {
+      type: "object",
+      properties: { listed: { anyOf: [{ type: "number" }, { type: ["string", "null"], format: "html" }] }, referenced: { $ref: "#/$defs/text", format: "html" } },
+      $defs: { text: { type: "string" } },
+    };
+    expect(sanitizeBySchema(root, root, { listed: EVIL, referenced: EVIL })).toEqual({ listed: CLEAN, referenced: CLEAN });
+  });
+
   it("leaves a null value alone", () => {
     const root = { type: "object", properties: { optional: nullable(html) } };
     expect(sanitizeBySchema(root, root, { optional: null })).toEqual({ optional: null });

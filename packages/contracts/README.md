@@ -74,7 +74,9 @@ sets a reader consults for the portability marking), `helpers/events.envelope` (
 `parseEmitSpec`, `withEventIdentity`, `relaySummary`, `mergeRelayReport` — runtime logic built on the
 frozen shapes in `events.steps`), `helpers/persistence.owned` (`ownedPersistence`),
 `helpers/content-locale` (`satisfiesFilter`, `publishedLocale`, `narrowListTranslations`),
-`helpers/content-schema` (`documentSchema`, `fieldSchema`), `helpers/links` (`collectInternalRefs`),
+`helpers/content-schema` (`documentSchema`, `fieldSchema`), `helpers/json-schema` (`resolveSchema`,
+`isSchemaNode`, `jsonTypeOf`, `declaresType`, `typeTag` — JSON Schema resolution shared by the walkers of
+`validate-jsonschema` and `references-default`), `helpers/links` (`collectInternalRefs`),
 `helpers/mediaType` (`parseMediaType`, `mediaTypeEssence`, `canonicalMediaType`, `publicFormOf`,
 `mediaTypeMatches`, `mediaTypeAllowed`, `EXTENSION_BY_TYPE`, `NEUTRAL_TYPE`, `NEUTRAL_EXTENSION`),
 `helpers/persistence` (`fieldDefinition`), `helpers/renderer` (`renderFailed`) and
