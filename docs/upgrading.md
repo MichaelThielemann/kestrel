@@ -424,23 +424,36 @@ code importing any of the former, or calling the latter, needs a by-hand rewrite
 through the API's own `path` field and set `publicCopy` on the media modules for a static copy.
 
 #### imports-contract-helpers
-`content-locale`, `content-schema`, `events.envelope`, `mediaType`, `persistence.owned`, `stepSet` and
-`steps` are runtime helpers of `@michaelthielemann/kestrel-contracts`, not frozen contracts, and
-import as `@michaelthielemann/kestrel-contracts/helpers/<name>`; the contracts package's own README
-lists exactly what is frozen and what is a helper. `events.envelope`, `stepSet`, `links` and
-`events.steps` split between the two: a frozen type (`EventEnvelope`/`EventIdentity`, `StepSet`,
-`INTERNAL_REF`/`InternalRef`/`LinkTarget`) stays importable at its unchanged top-level path, while a
-runtime function from the same old path (`eventEnvelope`/`parseEmitSpec`/`withEventIdentity`,
-`relaySummary`/`mergeRelayReport`, `defineStepSet`/`stepSets`, `collectInternalRefs`) moves to
-`helpers/`.
+`content-locale`, `content-schema`, `mediaType`, `persistence.owned` and `steps` are runtime helpers
+of `@michaelthielemann/kestrel-contracts`, not frozen contracts, and import as
+`@michaelthielemann/kestrel-contracts/helpers/<name>`; the contracts package's own README lists
+exactly what is frozen and what is a helper. `events.envelope`, `stepSet`, `links`, `events.steps`,
+`persistence`, `renderer` and `migrations` split between the two: `stepSet`'s `StepSet` type,
+`links`'s `INTERNAL_REF`/`InternalRef`/`LinkTarget`, and `events.steps`'s own step-set declaration and
+shapes stay importable at their unchanged path, while a runtime function from the same old path
+(`defineStepSet`/`stepSets`, `collectInternalRefs`, `relaySummary`/`mergeRelayReport`) moves to
+`helpers/`. `events.envelope`'s own runtime functions
+(`eventEnvelope`/`parseEmitSpec`/`withEventIdentity`) move to `helpers/events.envelope` too, but its
+`EventEnvelope`/`EventIdentity` payload types move to a *different* top-level file, `events.steps`,
+next to the other frozen shapes of the step set they belong to — not left importable from
+`events.envelope` at all, since that path stops existing. `persistence`'s `fieldDefinition`,
+`renderer`'s `renderFailed` and `migrations`'s `migrationFailed` move to
+`helpers/persistence`/`helpers/renderer`/`helpers/migrations`; the contract's own interface and types
+stay.
 
 The rule scans every `.ts`/`.mts`/`.js`/`.mjs`/`.vue` file of the project (not an installed package's
-own). `content-locale`, `content-schema`, `mediaType`, `persistence.owned` and `steps` move as a
-whole, so every import form is rewritten: a static `import`, a dynamic `import()`, `require()`,
-`vi.mock()`, a namespace import, a re-export. `events.envelope`, `stepSet`, `links` and `events.steps`
-split between a name that stays and one that moves, so only a static `import`/`export { … } from`
-naming one of them is rewritten — split into two declarations when it mixes both — and a dynamic
-`import()`, `require()`, namespace import or `export * from` naming one of these four is left alone.
+own); in a `.vue` file, only its `<script>`/`<script setup>` block(s) are read, never the template.
+`content-locale`, `content-schema`, `mediaType`, `persistence.owned` and `steps` move as a whole, so
+every import form is rewritten: a static `import`, a dynamic `import()`, `require()`, `vi.mock()`, a
+namespace import, a re-export. The other seven split between a name that stays and one that moves, so
+only a static `import`/`export { … } from` naming one of them is rewritten — split into two
+declarations when it mixes both. A namespace import, a default import, a side-effect import
+(`import "…"` alone), `export * from`/`export * as … from`, or a dynamic `import()`/`require()` naming
+one of these seven cannot be split by name, so the rule reports it as a manual finding naming the file
+instead of silently leaving it broken. A file (or, in a `.vue` file, one of its script blocks) the rule
+cannot parse at all is skipped with the same manual finding when its text still mentions
+`@michaelthielemann/kestrel-contracts/`, and silently otherwise — never aborting the rule for the rest
+of the project.
 
 #### types-breaking-signatures
 `Deps`, `Introspection`, `PipelineDefinition["steps"]`, `ModuleManifest`, `FakePersistence`,

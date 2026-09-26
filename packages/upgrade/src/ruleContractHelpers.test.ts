@@ -182,4 +182,113 @@ describe("imports/contract-helpers: M2 mixed old paths, splitting an import when
     expect(text).toContain('import { defineStepSet } from "@michaelthielemann/kestrel-contracts/helpers/stepSet";');
     expect(text).toContain('import { type StepSet } from "@michaelthielemann/kestrel-contracts/stepSet";');
   });
+
+  it("moves persistence's fieldDefinition to helpers/persistence but leaves its types alone", async () => {
+    const file = await write("custom.ts", 'import { fieldDefinition, type Persistence } from "@michaelthielemann/kestrel-contracts/persistence";\nexport default defineModule({ name: "custom/module" });\n');
+    const p = project({ moduleFiles: { "custom/module": file } });
+    const findings = await contractHelperImportsRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const { text } = applyEdits(readFileOrUndefined(file)!, edits);
+    expect(text).toContain('import { fieldDefinition } from "@michaelthielemann/kestrel-contracts/helpers/persistence";');
+    expect(text).toContain('import { type Persistence } from "@michaelthielemann/kestrel-contracts/persistence";');
+  });
+
+  it("moves renderer's renderFailed and migrations' migrationFailed to their own helpers subpaths", async () => {
+    const file = await write(
+      "custom.ts",
+      ['import { renderFailed, type Renderer } from "@michaelthielemann/kestrel-contracts/renderer";', 'import { migrationFailed, type Migrations } from "@michaelthielemann/kestrel-contracts/migrations";', 'export default defineModule({ name: "custom/module" });', ""].join("\n"),
+    );
+    const p = project({ moduleFiles: { "custom/module": file } });
+    const findings = await contractHelperImportsRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const { text } = applyEdits(readFileOrUndefined(file)!, edits);
+    expect(text).toContain('import { renderFailed } from "@michaelthielemann/kestrel-contracts/helpers/renderer";');
+    expect(text).toContain('import { type Renderer } from "@michaelthielemann/kestrel-contracts/renderer";');
+    expect(text).toContain('import { migrationFailed } from "@michaelthielemann/kestrel-contracts/helpers/migrations";');
+    expect(text).toContain('import { type Migrations } from "@michaelthielemann/kestrel-contracts/migrations";');
+  });
+});
+
+describe("imports/contract-helpers: N1, .vue files and files the rule cannot parse", () => {
+  it("rewrites a moved helper import inside a .vue file's <script setup>, never touching the template", async () => {
+    const file = await write(
+      "components/Widget.vue",
+      ['<template>', '  <div>{{ "@michaelthielemann/kestrel-contracts/mediaType" }}</div>', "</template>", "", "<script setup lang=\"ts\">", 'import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/mediaType";', "</script>", ""].join("\n"),
+    );
+    const p = project({ moduleFiles: { "custom/module": file } });
+    const findings = await contractHelperImportsRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const { text } = applyEdits(readFileOrUndefined(file)!, edits);
+    expect(text).toContain('import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";');
+    expect(text).toContain('{{ "@michaelthielemann/kestrel-contracts/mediaType" }}');
+  });
+
+  it("still rewrites every other file when one .vue file's script cannot be parsed", async () => {
+    const brokenVue = await write("components/Broken.vue", ['<script setup lang="ts">', 'import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/mediaType";', "const x = ;", "</script>", ""].join("\n"));
+    const libFile = await write("lib.ts", 'import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/mediaType";\nexport { mediaTypeAllowed };\n');
+    const p = project({ moduleFiles: { "custom/module": libFile, "custom/vue": brokenVue } });
+    const findings = await contractHelperImportsRule.check(contextFor(p));
+    const libFinding = findings.find((f) => f.where.file === libFile);
+    expect(libFinding?.fix.kind).toBe("auto");
+    const brokenFinding = findings.find((f) => f.where.file === brokenVue);
+    expect(brokenFinding).toBeDefined();
+    expect(brokenFinding?.fix.kind).toBe("manual");
+    expect(brokenFinding?.rule).toBe("imports/contract-helpers-unresolved");
+  });
+
+  it("never throws, and reports nothing, for a .js file it cannot parse that never mentions the package", async () => {
+    const file = await write("vendor/bundle.js", "const <<< invalid syntax >>>\n");
+    const p = project({ moduleFiles: { "custom/module": file } });
+    expect(await contractHelperImportsRule.check(contextFor(p))).toEqual([]);
+  });
+
+  it("reports a manual finding for an unparseable .js file that does mention the package", async () => {
+    const file = await write("vendor/weird.js", 'import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/mediaType"\nconst <<< invalid syntax >>>\n');
+    const p = project({ moduleFiles: { "custom/module": file } });
+    const findings = await contractHelperImportsRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+    expect(findings[0]?.rule).toBe("imports/contract-helpers-unresolved");
+  });
+});
+
+describe("imports/contract-helpers: N2, namespace and dynamic imports of a split old path", () => {
+  it("reports a manual finding for a namespace import of a split path, naming the file", async () => {
+    const file = await write("custom.ts", 'import * as linksNs from "@michaelthielemann/kestrel-contracts/links";\nexport { linksNs };\n');
+    const p = project({ moduleFiles: { "custom/module": file } });
+    const findings = await contractHelperImportsRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.rule).toBe("imports/contract-helpers-unresolved");
+    expect(findings[0]?.fix.kind).toBe("manual");
+    expect(findings[0]?.where.file).toBe(file);
+    expect(findings[0]?.message).toContain("links");
+  });
+
+  it("reports a manual finding for a dynamic import() of a split path", async () => {
+    const file = await write("custom.ts", 'export async function load() {\n  return import("@michaelthielemann/kestrel-contracts/events.envelope");\n}\n');
+    const p = project({ moduleFiles: { "custom/module": file } });
+    const findings = await contractHelperImportsRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+    expect(findings[0]?.message).toContain("events.envelope");
+  });
+
+  it("reports a manual finding for export * from a split path", async () => {
+    const file = await write("custom.ts", 'export * from "@michaelthielemann/kestrel-contracts/stepSet";\n');
+    const p = project({ moduleFiles: { "custom/module": file } });
+    const findings = await contractHelperImportsRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).toBe("manual");
+  });
+
+  it("does not report a namespace import of a wholesale-moved helper, since the whole-file rename already covers it", async () => {
+    const file = await write("custom.ts", 'import * as mt from "@michaelthielemann/kestrel-contracts/mediaType";\nexport { mt };\n');
+    const p = project({ moduleFiles: { "custom/module": file } });
+    const findings = await contractHelperImportsRule.check(contextFor(p));
+    expect(findings.every((f) => f.rule === "imports/contract-helpers-unresolved")).toBe(false);
+  });
 });

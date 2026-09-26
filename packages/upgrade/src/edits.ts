@@ -294,7 +294,12 @@ export function replaceModuleConfigProperty(file: string, source: string, option
 
 /** Every string-literal occurrence of `from` in the file becomes `to`, keeping the original quote character. */
 export function renameStringLiterals(file: string, source: string, from: string, to: string): Edit[] {
-  const root = parseTs(source);
+  let root: AstNode;
+  try {
+    root = parseTs(source);
+  } catch {
+    return [];
+  }
   const literals = findAll(root, "StringLiteral").filter((n) => n.value === from);
   return literals.map((node) => {
     const { start, end } = span(node);
@@ -867,6 +872,45 @@ export function rewriteMovedNamedImports(file: string, source: string, move: Mov
     edits.push({ file, start, end, text });
   }
   return edits;
+}
+
+/**
+ * Finds a form of importing `@michaelthielemann/kestrel-contracts/<move.from>` that
+ * `rewriteMovedNamedImports` cannot split by name, because it never names the symbols it reaches: a
+ * namespace import (`import * as x from …`), a default import, a side-effect import (`import "…"`
+ * alone), `export * from`/`export * as x from`, and a dynamic `import(…)`/`require(…)`. Each span is
+ * the whole statement or call, for a rule to report as a manual finding.
+ */
+export function unsplittableMovedImportSpans(source: string, move: MovedSpecifier): Array<{ start: number; end: number }> {
+  let root: AstNode;
+  try {
+    root = parseTs(source);
+  } catch {
+    return [];
+  }
+  const from = contractsSpecifier(move.from);
+  const spans: Array<{ start: number; end: number }> = [];
+  for (const node of findAll(root, "ImportDeclaration")) {
+    const sourceNode = node.source;
+    if (!isAstNode(sourceNode) || stringValue(sourceNode) !== from) continue;
+    const specifiers = Array.isArray(node.specifiers) ? node.specifiers : [];
+    const hasUnsplittableSpecifier = specifiers.some((s) => isAstNode(s) && (s.type === "ImportNamespaceSpecifier" || s.type === "ImportDefaultSpecifier"));
+    if (hasUnsplittableSpecifier || specifiers.length === 0) spans.push(span(node));
+  }
+  for (const node of findAll(root, "ExportAllDeclaration")) {
+    const sourceNode = node.source;
+    if (isAstNode(sourceNode) && stringValue(sourceNode) === from) spans.push(span(node));
+  }
+  for (const node of findAll(root, "CallExpression")) {
+    const callee = node.callee;
+    const isDynamicImport = isAstNode(callee) && callee.type === "Import";
+    const isRequire = isAstNode(callee) && callee.type === "Identifier" && callee.name === "require";
+    if (!isDynamicImport && !isRequire) continue;
+    const args: unknown[] = Array.isArray(node.arguments) ? node.arguments : [];
+    const arg = args[0];
+    if (isAstNode(arg) && stringValue(arg) === from) spans.push(span(node));
+  }
+  return spans;
 }
 
 /**
