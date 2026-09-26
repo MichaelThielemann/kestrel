@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { boot, checkBoot, type BootInput } from "./boot.ts";
-import type { Context } from "./context.ts";
+import { stepFactory, type Context } from "./context.ts";
 import { defineContract } from "./defineContract.ts";
 import { defineModule, type ModuleDefinition } from "./defineModule.ts";
 import { definePipeline } from "./definePipeline.ts";
@@ -119,6 +119,29 @@ describe("checkBoot: collecting every problem", () => {
     } finally {
       await kestrel.stop();
     }
+  });
+
+  it("names the module whose step factory refused a pipeline's argument", async () => {
+    const picky = defineModule({
+      name: "good/picky",
+      provides: [GOOD],
+      requires: [],
+      configSchema: z.object({}).strict(),
+      async setup() {
+        return { ping: () => "pong" };
+      },
+      steps: () => ({
+        read: stepFactory((arg: string) => {
+          if (arg !== "known") throw new Error(`unknown kind "${arg}"`);
+          return async (ctx: Context) => ok(ctx);
+        }),
+      }),
+      describe: () => ({ read: () => ({ summary: "reads", reads: [], writes: [] }) }),
+    });
+    const input: BootInput = { config: { modules: [{ use: "./good-picky", config: {} }], triggers: [], http: null }, modules: [picky], pipelines: [definePipeline({ name: "broken", steps: ["good.read:other"] })], logger: silentLogger };
+    const check = await checkBoot(input, { setup: "all" });
+    expect(check.errors).toEqual([expect.objectContaining({ code: "step-argument", pipeline: "broken", step: "good.read:other", module: "good/picky" })]);
+    expect(check.errors[0]?.reason).toContain('unknown kind "other"');
   });
 
   it("returns a manifest listing the resolved pipelines when a pipeline has an error", async () => {

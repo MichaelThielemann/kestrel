@@ -553,7 +553,8 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
       } else if (step.code === "unknown-step" && stepName !== undefined && steps.failedToRegister(stepName)) {
         cascadeStep = stepName;
       } else {
-        sink.fail(step.code, step.module, step.reason, { step: s });
+        const builtBy = step.code === "step-argument" || step.code === "describe-threw" || step.code === "step-not-function" ? owner?.name : undefined;
+        sink.fail(step.code, step.module, step.reason, { step: s, ...(builtBy === undefined ? {} : { module: builtBy }) });
       }
       failed = true;
       return DUMMY_STEP;

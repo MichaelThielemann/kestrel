@@ -21,7 +21,7 @@ export interface BootProblem {
  */
 export interface Sink {
   readonly collecting: boolean;
-  fail(code: BootErrorCode, owner: string, reason: string, extra?: Partial<Pick<BootProblem, "step" | "path">>): void;
+  fail(code: BootErrorCode, owner: string, reason: string, extra?: Partial<Pick<BootProblem, "step" | "path" | "module">>): void;
 }
 
 function ownerFields(owner: string): Pick<BootProblem, "module" | "pipeline"> {

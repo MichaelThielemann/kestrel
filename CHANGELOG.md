@@ -495,6 +495,8 @@ Net changes since 5.8.1.
 
 ### Added
 
+- A `step-argument`, `describe-threw` or `step-not-function` problem of a pipeline step also names
+  the module that registered the step in `BootProblem.module`, next to `pipeline` and `step`.
 - `checkBoot()`'s result carries `manifest`, the checked engine's `describe()` output, taken before
   teardown and present also when problems were found.
 - A `kestrel.config` module entry accepts `defaults: { from, values }`: values a host supplies on the
