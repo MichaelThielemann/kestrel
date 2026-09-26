@@ -172,6 +172,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`responses/thrown-error-text`](#responses-thrown-error-text) | load | none (info) | a file next to a local module matching on an answer's `error` text |
 | [`runtime/anonymous-media-list`](#runtime-anonymous-media-list) | source | none (info) | anonymous `media.read` granted while `anonymousList` stays `"ids"` |
 | [`imports/removed-export`](#imports-removed-export) | source | manual | an import or call of a `delivery-static` export removed in 6.0.0 |
+| [`imports/contract-helpers`](#imports-contract-helpers) | source | auto | an import of a contracts helper at its pre-6.0.0 path, moved under `helpers/*` |
 | [`types/breaking-signatures`](#types-breaking-signatures) | source | none (info), always | type-level members a hand-built implementation must add |
 | [`responses/breaking-step-shapes`](#responses-breaking-step-shapes) | source | none (info) | a pipeline running a step whose response or manifest shape changed |
 | [`responses/binary-cache-control`](#responses-binary-cache-control) | source | none (info) | a local module mentioning `cache-control` near a binary step result |
@@ -421,6 +422,25 @@ listing or folders (401). Set `anonymousList: "all"` to restore that too, if int
 `kestrel-delivery-static/impl`, and the startup key migration `migrateKeys` no longer exists. Custom
 code importing any of the former, or calling the latter, needs a by-hand rewrite: reach a media file
 through the API's own `path` field and set `publicCopy` on the media modules for a static copy.
+
+#### imports-contract-helpers
+`content-locale`, `content-schema`, `events.envelope`, `mediaType`, `persistence.owned`, `stepSet` and
+`steps` are runtime helpers of `@michaelthielemann/kestrel-contracts`, not frozen contracts, and
+import as `@michaelthielemann/kestrel-contracts/helpers/<name>`; the contracts package's own README
+lists exactly what is frozen and what is a helper. `events.envelope`, `stepSet`, `links` and
+`events.steps` split between the two: a frozen type (`EventEnvelope`/`EventIdentity`, `StepSet`,
+`INTERNAL_REF`/`InternalRef`/`LinkTarget`) stays importable at its unchanged top-level path, while a
+runtime function from the same old path (`eventEnvelope`/`parseEmitSpec`/`withEventIdentity`,
+`relaySummary`/`mergeRelayReport`, `defineStepSet`/`stepSets`, `collectInternalRefs`) moves to
+`helpers/`.
+
+The rule scans every `.ts`/`.mts`/`.js`/`.mjs`/`.vue` file of the project (not an installed package's
+own). `content-locale`, `content-schema`, `mediaType`, `persistence.owned` and `steps` move as a
+whole, so every import form is rewritten: a static `import`, a dynamic `import()`, `require()`,
+`vi.mock()`, a namespace import, a re-export. `events.envelope`, `stepSet`, `links` and `events.steps`
+split between a name that stays and one that moves, so only a static `import`/`export { … } from`
+naming one of them is rewritten — split into two declarations when it mixes both — and a dynamic
+`import()`, `require()`, namespace import or `export * from` naming one of these four is left alone.
 
 #### types-breaking-signatures
 `Deps`, `Introspection`, `PipelineDefinition["steps"]`, `ModuleManifest`, `FakePersistence`,

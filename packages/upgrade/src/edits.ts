@@ -761,6 +761,114 @@ export function insertModulesTsEntry(file: string, source: string, packageName: 
   return [importEdit, arrayEdit];
 }
 
+export interface MovedSpecifier {
+  /** A package subpath, without its `@michaelthielemann/kestrel-contracts/` prefix. */
+  from: string;
+  /** Where a name not listed in `except` moves to; absent means it stays at `from`. */
+  to?: string;
+  /** A name's own target subpath, overriding `to`; `undefined` keeps that one name at `from`. */
+  except?: Record<string, string | undefined>;
+}
+
+const CONTRACTS_PACKAGE = "@michaelthielemann/kestrel-contracts";
+
+function contractsSpecifier(subpath: string): string {
+  return `${CONTRACTS_PACKAGE}/${subpath}`;
+}
+
+function movedTargetSubpath(move: MovedSpecifier, name: string): string {
+  if (move.except && name in move.except) return move.except[name] ?? move.from;
+  return move.to ?? move.from;
+}
+
+interface NamedSpecifier {
+  /** The name as the source module declares it — the lookup key against a `MovedSpecifier`. */
+  sourceName: string;
+  /** The name this file binds it to (an import) or re-exports it as (an `export … from`). */
+  localName: string;
+  typeOnly: boolean;
+}
+
+function namedSpecifiers(node: AstNode, kind: "import" | "export"): NamedSpecifier[] | undefined {
+  const raw = Array.isArray(node.specifiers) ? node.specifiers : [];
+  const out: NamedSpecifier[] = [];
+  for (const spec of raw) {
+    if (!isAstNode(spec)) return undefined;
+    if (kind === "import") {
+      if (spec.type !== "ImportSpecifier") return undefined;
+      const imported = spec.imported;
+      const local = spec.local;
+      if (!isAstNode(local) || local.type !== "Identifier" || typeof local.name !== "string") return undefined;
+      const sourceName = isAstNode(imported) ? (imported.type === "Identifier" ? (typeof imported.name === "string" ? imported.name : undefined) : stringValue(imported)) : undefined;
+      if (sourceName === undefined) return undefined;
+      out.push({ sourceName, localName: local.name, typeOnly: spec.importKind === "type" });
+    } else {
+      if (spec.type !== "ExportSpecifier") return undefined;
+      const local = spec.local;
+      const exported = spec.exported;
+      if (!isAstNode(local) || local.type !== "Identifier" || typeof local.name !== "string" || !isAstNode(exported)) return undefined;
+      const exportedName = exported.type === "Identifier" ? (typeof exported.name === "string" ? exported.name : undefined) : stringValue(exported);
+      if (exportedName === undefined) return undefined;
+      out.push({ sourceName: local.name, localName: exportedName, typeOnly: spec.exportKind === "type" });
+    }
+  }
+  return out;
+}
+
+function namedDeclarationText(kind: "import" | "export", declTypeOnly: boolean, quote: '"' | "'", subpath: string, specs: readonly NamedSpecifier[]): string {
+  const keyword = kind === "import" ? "import" : "export";
+  const names = specs.map((s) => {
+    const base = s.sourceName === s.localName ? s.sourceName : `${s.sourceName} as ${s.localName}`;
+    return declTypeOnly || !s.typeOnly ? base : `type ${base}`;
+  });
+  return `${keyword} ${declTypeOnly ? "type " : ""}{ ${names.join(", ")} } from ${quote}${contractsSpecifier(subpath)}${quote};`;
+}
+
+/**
+ * Rewrites every static `import`/`export { … } from` declaration whose source is
+ * `@michaelthielemann/kestrel-contracts/<move.from>`, sending each named specifier to the subpath
+ * `move` maps it to. A declaration whose names all move to the same subpath has only its source
+ * string replaced; one mixing subpaths (or moving some names and leaving others at `from`) is
+ * replaced with one declaration per subpath, each keeping its own specifier's aliasing and `type`
+ * marker. A default import, a namespace import, and a whole-module `export * from` are left alone —
+ * there is no single name to look up a target for.
+ */
+export function rewriteMovedNamedImports(file: string, source: string, move: MovedSpecifier): Edit[] {
+  let root: AstNode;
+  try {
+    root = parseTs(source);
+  } catch {
+    return [];
+  }
+  const from = contractsSpecifier(move.from);
+  const edits: Edit[] = [];
+  for (const node of [...findAll(root, "ImportDeclaration"), ...findAll(root, "ExportNamedDeclaration")]) {
+    const kind: "import" | "export" = node.type === "ImportDeclaration" ? "import" : "export";
+    const sourceNode = node.source;
+    if (!isAstNode(sourceNode) || stringValue(sourceNode) !== from) continue;
+    const specs = namedSpecifiers(node, kind);
+    if (specs === undefined || specs.length === 0) continue;
+    const declTypeOnly = node.importKind === "type" || node.exportKind === "type";
+    const groups = new Map<string, NamedSpecifier[]>();
+    for (const spec of specs) {
+      const subpath = movedTargetSubpath(move, spec.sourceName);
+      (groups.get(subpath) ?? groups.set(subpath, []).get(subpath)!).push(spec);
+    }
+    const subpaths = [...groups.keys()];
+    if (subpaths.length === 1 && subpaths[0] === move.from) continue;
+    const { start: srcStart, end: srcEnd } = span(sourceNode);
+    const quote = source[srcStart] === "'" ? "'" : '"';
+    if (subpaths.length === 1) {
+      edits.push({ file, start: srcStart, end: srcEnd, text: `${quote}${contractsSpecifier(subpaths[0]!)}${quote}` });
+      continue;
+    }
+    const { start, end } = span(node);
+    const text = subpaths.map((subpath) => namedDeclarationText(kind, declTypeOnly, quote, subpath, groups.get(subpath)!)).join(eolOf(source));
+    edits.push({ file, start, end, text });
+  }
+  return edits;
+}
+
 /**
  * Swaps one default-imported module for another in a `modules.ts`-style file, in place: the import's
  * package specifier and local name, and the matching array element, all become the new package's.

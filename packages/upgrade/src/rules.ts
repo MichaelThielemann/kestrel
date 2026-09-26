@@ -9,6 +9,7 @@ import type { Rule, RuleContext, SourceRule } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
 import { combineEditParts, finding, KESTREL_RANGE, moduleEntry, packageJsonPath, upgradingDocs } from "./ruleHelpers.ts";
 import { bootWrapRules } from "./ruleBootWraps.ts";
+import { contractHelperImportsRule } from "./ruleContractHelpers.ts";
 import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { fieldGrantRules } from "./ruleFieldGrants.ts";
 import { INFO_RULES } from "./ruleInfo.ts";
@@ -147,6 +148,7 @@ export const DEFAULT_RULES: readonly Rule[] = [
   removedStepsRule,
   kestrelRangeRule,
   verifiedUserRule,
+  contractHelperImportsRule,
   ...bootWrapRules,
   ...underscoreFieldRules,
   emitsRule,
