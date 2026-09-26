@@ -59,3 +59,98 @@ export function applySegment(image: Uint8Array, segment: Uint8Array): Uint8Array
   }
   return out;
 }
+
+/** Running WAL checksum pair, as stored in the WAL header and in every frame header. */
+export type WalChecksum = readonly [number, number];
+
+/** Continues a WAL checksum over `data` (a multiple of 8 bytes), in the byte order the WAL magic selects. */
+export function walChecksum(magic: number, data: Uint8Array, start: WalChecksum): WalChecksum {
+  const v = view(data);
+  const littleEndian = (magic & 1) === 0;
+  let s1 = start[0];
+  let s2 = start[1];
+  for (let i = 0; i + 8 <= data.byteLength; i += 8) {
+    s1 = (s1 + v.getUint32(i, littleEndian) + s2) >>> 0;
+    s2 = (s2 + v.getUint32(i + 4, littleEndian) + s1) >>> 0;
+  }
+  return [s1, s2];
+}
+
+/** The checksum stored in the WAL header when it matches the header's content, else `null` (a torn or foreign header). */
+export function walHeaderChecksum(d: Uint8Array): WalChecksum | null {
+  const header = parseWalHeader(d);
+  if (!header) return null;
+  const v = view(d);
+  const stored: WalChecksum = [v.getUint32(24), v.getUint32(28)];
+  const computed = walChecksum(header.magic, d.subarray(0, 24), [0, 0]);
+  return computed[0] === stored[0] && computed[1] === stored[1] ? stored : null;
+}
+
+/**
+ * Accepts whole WAL frames in file order and keeps those that belong to a committed transaction.
+ * A frame whose salts or checksum do not continue the chain ends the scan, like SQLite's own WAL recovery.
+ */
+export class FrameScanner {
+  private readonly header: WalHeader;
+  private readonly size: number;
+  private running: WalChecksum;
+  private pending: Uint8Array[] = [];
+  private committed: Uint8Array[] = [];
+  /** Number of committed frames held for the next segment. */
+  committedFrames: number;
+  /** Byte length of the committed frames held for the next segment. */
+  committedBytes: number;
+  /** Checksum after the last committed frame seen. */
+  checksum: WalChecksum;
+  /** True once a frame fails the salt or checksum check; later frames are ignored. */
+  stopped: boolean;
+
+  constructor(header: WalHeader, start: WalChecksum) {
+    this.header = header;
+    this.size = frameSize(header.pageSize);
+    this.running = start;
+    this.checksum = start;
+    this.committedFrames = 0;
+    this.committedBytes = 0;
+    this.stopped = false;
+  }
+
+  /** Scans `frames`, a run of whole frames; the bytes are copied. */
+  push(frames: Uint8Array): void {
+    for (let offset = 0; !this.stopped && offset + this.size <= frames.byteLength; offset += this.size) {
+      const frame = frames.subarray(offset, offset + this.size);
+      const info = parseFrameHeader(frame, 0);
+      const v = view(frame);
+      const sum = walChecksum(this.header.magic, frame.subarray(FRAME_HEADER_SIZE), walChecksum(this.header.magic, frame.subarray(0, 8), this.running));
+      if (info.salt1 !== this.header.salt1 || info.salt2 !== this.header.salt2 || sum[0] !== v.getUint32(16) || sum[1] !== v.getUint32(20)) {
+        this.stopped = true;
+        break;
+      }
+      this.running = sum;
+      this.pending.push(frame.slice());
+      if (info.commitSize > 0) {
+        for (const p of this.pending) this.committed.push(p);
+        this.committedFrames += this.pending.length;
+        this.committedBytes += this.pending.length * this.size;
+        this.pending = [];
+        this.checksum = sum;
+      }
+    }
+  }
+
+  /** Returns the committed frames collected so far as one segment behind `headerBytes`, and forgets them. */
+  takeSegment(headerBytes: Uint8Array): { segment: Uint8Array; frames: number } {
+    const segment = new Uint8Array(WAL_HEADER_SIZE + this.committedBytes);
+    segment.set(headerBytes.subarray(0, WAL_HEADER_SIZE));
+    let at = WAL_HEADER_SIZE;
+    for (const frame of this.committed) {
+      segment.set(frame, at);
+      at += frame.byteLength;
+    }
+    const frames = this.committedFrames;
+    this.committed = [];
+    this.committedFrames = 0;
+    this.committedBytes = 0;
+    return { segment, frames };
+  }
+}
