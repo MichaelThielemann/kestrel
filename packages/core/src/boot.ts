@@ -19,7 +19,7 @@ import { ok } from "./result.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
 import { collectSink, throwSink, type BootProblem, type Sink } from "./sink.ts";
 import { CONTEXT_KEYS, satisfied, stripOptional, writeRoot } from "./writes.ts";
-import { mergeConfigDefaults, type ConfigDefaults } from "./zodSchema.ts";
+import { effectiveModuleConfig, type ConfigDefaults } from "./zodSchema.ts";
 import { sortModules } from "./sort.ts";
 import { createCronEntry, startCron, type CronEntry } from "./triggers/cron.ts";
 import { createAllowlist } from "./triggers/allowlist.ts";
@@ -451,10 +451,10 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
   for (const mod of ordered) {
     if (notSetUp.has(mod)) continue;
     const defaults = defaultsByModule.get(mod);
-    const raw = configByModule.get(mod);
-    const cfg = mod.configSchema.safeParse(defaults === undefined ? raw : mergeConfigDefaults(defaults.values, raw));
+    const cfg = mod.configSchema.safeParse(effectiveModuleConfig({ config: configByModule.get(mod), defaults }));
     if (!cfg.success) {
-      sink.fail("invalid-module-config", mod.name, `invalid config: ${cfg.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
+      const origin = defaults === undefined ? "" : ` (with defaults from "${defaults.from}")`;
+      sink.fail("invalid-module-config", mod.name, `invalid config${origin}: ${cfg.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
       markNotSetUp(notSetUp, mod, "invalid config");
       continue;
     }

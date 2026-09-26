@@ -257,6 +257,11 @@ describe("kestrel.describe() with host-supplied defaults", () => {
     await kestrel.stop();
   });
 
+  it("names the defaults' source when the merged config is invalid", async () => {
+    const stray = { ...hosted, defaults: { from: "site-preset", values: { file: "/host/data.db", unknownOption: true } } };
+    await expect(boot({ config: { ...config, modules: [stray, config.modules[1]!] }, modules: [store, bus], pipelines, logger: silentLogger })).rejects.toThrow(/invalid config \(with defaults from "site-preset"\): \(root\): Unrecognized key/);
+  });
+
   it("rejects defaults without a source name", async () => {
     const unnamed = { ...hosted, defaults: { from: "", values: {} } };
     await expect(boot({ config: { ...config, modules: [unnamed, config.modules[1]!] }, modules: [store, bus], pipelines, logger: silentLogger })).rejects.toMatchObject({ code: "invalid-config" });

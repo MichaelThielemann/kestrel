@@ -270,8 +270,26 @@ export function mergeConfigDefaults(values: unknown, config: unknown): unknown {
   if (config === undefined) return values;
   if (!isPlainObject(values) || !isPlainObject(config)) return config;
   const out: Record<string, unknown> = { ...values };
-  for (const [key, value] of Object.entries(config)) out[key] = mergeConfigDefaults(values[key], value);
+  for (const [key, value] of Object.entries(config)) Object.defineProperty(out, key, { value: mergeConfigDefaults(values[key], value), enumerable: true, writable: true, configurable: true });
   return out;
+}
+
+/** The config a module entry's module is set up with: `config` laid over `defaults.values`, or `config` alone when the entry has no defaults. */
+export function effectiveModuleConfig(entry: { config?: unknown; defaults?: ConfigDefaults | undefined }): unknown {
+  return entry.defaults === undefined ? entry.config : mergeConfigDefaults(entry.defaults.values, entry.config);
+}
+
+function hostValueAt(defaults: ConfigDefaults | undefined, raw: unknown, path: string[]): unknown {
+  if (defaults === undefined) return undefined;
+  let host: unknown = defaults.values;
+  let own: unknown = raw;
+  for (const key of path) {
+    if (own !== undefined && !isPlainObject(own)) return undefined;
+    if (!isPlainObject(host)) return undefined;
+    host = host[key];
+    own = own === undefined ? undefined : own[key];
+  }
+  return host;
 }
 
 interface Ancestors {
@@ -290,7 +308,7 @@ function collectVariables(schema: ZodTypeAny, raw: unknown, parsed: unknown, def
     const secret = isSecretSchema(toJsonSchema(child));
     const rawValue = valueAt(raw, childPath);
     const set = rawValue !== undefined;
-    const hostValue = defaults === undefined ? undefined : valueAt(defaults.values, childPath);
+    const hostValue = hostValueAt(defaults, raw, childPath);
     const fromAncestor = valueAt(inherited, [key]);
     const effective = hostValue !== undefined ? hostValue : fromAncestor === undefined ? unwrapped.defaultValue?.() : fromAncestor;
     const optional = ancestors.optional || unwrapped.optional;

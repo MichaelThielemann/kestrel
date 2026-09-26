@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boundaryCast } from "./cast.ts";
-import { describeConfig, mergeConfigDefaults, toJsonSchema } from "./zodSchema.ts";
+import { describeConfig, effectiveModuleConfig, mergeConfigDefaults, toJsonSchema } from "./zodSchema.ts";
 
 const schema = z
   .object({
@@ -194,6 +194,16 @@ describe("describeConfig with host-supplied defaults", () => {
     expect(row).not.toHaveProperty("source");
   });
 
+  it("stops reporting host values below a parent the config replaces with a non-object", () => {
+    const nullable = z.object({ dep: z.object({ render: z.string().default("background") }).strict().nullable().default({}) }).strict();
+    const hostDefaults = { from: "site-preset", values: { dep: { render: "events" } } };
+    const raw = { dep: null };
+    const byPath = Object.fromEntries(describeConfig(nullable, raw, nullable.parse(mergeConfigDefaults(hostDefaults.values, raw)), hostDefaults).variables.map((v) => [v.path, v]));
+    expect(byPath.dep).toMatchObject({ set: true, status: "set", value: null });
+    expect(byPath["dep.render"]).not.toHaveProperty("source");
+    expect(byPath["dep.render"]?.default).not.toBe("events");
+  });
+
   it("redacts a host-supplied secret and keeps its source", () => {
     const out = describeConfig(hosted, undefined, hosted.parse(defaults.values), defaults);
     expect(JSON.stringify(out)).not.toContain("host-token-value");
@@ -220,11 +230,37 @@ describe("mergeConfigDefaults", () => {
     expect(mergeConfigDefaults({ a: 1 }, "raw")).toBe("raw");
   });
 
+  it("lets a config object replace a default that is not a plain object", () => {
+    const when = new Date(0);
+    expect(mergeConfigDefaults({ at: when, link: new URL("https://example.org/") }, { at: { day: 1 }, link: { host: "a" } })).toEqual({ at: { day: 1 }, link: { host: "a" } });
+    expect(mergeConfigDefaults({ at: { day: 1 } }, { at: when })).toEqual({ at: when });
+  });
+
+  it("copies a __proto__ key as a plain property and leaves the prototype alone", () => {
+    const config: unknown = JSON.parse('{ "__proto__": { "polluted": true }, "a": 1 }');
+    const merged = mergeConfigDefaults({ b: 2 }, config);
+    expect(Object.getPrototypeOf(merged)).toBe(Object.prototype);
+    expect(Object.keys(boundaryCast<object>(merged, "host"))).toEqual(["b", "__proto__", "a"]);
+    expect(Reflect.get(Object.prototype, "polluted")).toBeUndefined();
+  });
+
   it("leaves both inputs untouched", () => {
     const values = { b: { c: 1 } };
     const config = { b: { d: 2 } };
     mergeConfigDefaults(values, config);
     expect(values).toEqual({ b: { c: 1 } });
     expect(config).toEqual({ b: { d: 2 } });
+  });
+});
+
+describe("effectiveModuleConfig", () => {
+  it("is the config alone for an entry without defaults", () => {
+    const config = { a: 1 };
+    expect(effectiveModuleConfig({ config })).toBe(config);
+    expect(effectiveModuleConfig({})).toBeUndefined();
+  });
+
+  it("lays the config over the defaults' values", () => {
+    expect(effectiveModuleConfig({ config: { b: { c: 2 } }, defaults: { from: "site-preset", values: { a: 1, b: { d: 3 } } } })).toEqual({ a: 1, b: { d: 3, c: 2 } });
   });
 });
