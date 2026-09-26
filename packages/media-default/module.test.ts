@@ -470,6 +470,16 @@ describe("media/default steps via runPipeline", () => {
     expect(boundaryCast<{ total: number }>(res.result, "host").total).toBe(1);
   });
 
+  it("list: query.type keeps only the matching canonical kind, and rejects an unknown value", async () => {
+    const { media } = await makeInstance();
+    await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1]) });
+    await media.upload({ filename: "a.mp4", contentType: "video/mp4", data: new Uint8Array([1]) });
+    const images = await runPipeline(pipeline("identity.set", "media.list"), { query: { type: "image" } }, { modules: [{ module, instance: media }], steps: setsIdentity, writes: identityWrite });
+    expect(boundaryCast<{ total: number }>(images.result, "host").total).toBe(1);
+    const unfiltered = await runPipeline(pipeline("identity.set", "media.list"), { query: { type: "not-a-kind" } }, { modules: [{ module, instance: media }], steps: setsIdentity, writes: identityWrite });
+    expect(unfiltered.status).toBe(400);
+  });
+
   it("download: serves the binary result", async () => {
     const { media } = await makeInstance();
     const item = expectOk(await media.upload({ filename: "a.png", contentType: "image/png", data: new Uint8Array([1, 2]) })).item;

@@ -6,7 +6,7 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { binaryResult, first, stepFactory, type Context, type StepResult } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { createMediaDefault, publishedFileOf, SORTABLE, type ListOptions, type Media, type MediaItem, type SortField } from "./impl.ts";
+import { createMediaDefault, MEDIA_KINDS, publishedFileOf, SORTABLE, type ListOptions, type Media, type MediaItem, type MediaKind, type SortField } from "./impl.ts";
 
 export const configSchema = z
   .object({
@@ -34,6 +34,10 @@ function localeOf(ctx: Context): string | undefined {
 
 function isSortField(value: string): value is SortField {
   return (SORTABLE as readonly string[]).includes(value);
+}
+
+function isMediaKind(value: string): value is MediaKind {
+  return (MEDIA_KINDS as readonly string[]).includes(value);
 }
 
 function idsFrom(value: unknown): string[] {
@@ -64,6 +68,8 @@ function listOptions(payload: Record<string, unknown>): ListOptions & { locale?:
   const offset = Number(first(payload.offset));
   if (Number.isInteger(limit) && limit > 0) options.limit = limit;
   if (Number.isInteger(offset) && offset >= 0) options.offset = offset;
+  const type = first(payload.type);
+  if (type !== undefined && isMediaKind(type)) options.mediaKind = type;
   return options;
 }
 
@@ -292,7 +298,7 @@ export default defineModule({
       errors: { 400: "no file or invalid folder/provenance (per-file for a multi-file request)", 409: "the folder already has a file with that name, `details.field: \"location\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict", 413: "file exceeds maxBytes (per-file for a multi-file request)", 415: "type not allowed (per-file for a multi-file request)" },
     },
     get: { summary: "Media metadata", reads: ["params.id"], writes: ["result"], query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "unknown locale", 404: "not found" } },
-    list: { summary: "List media, newest first; anonymous callers may only fetch by ids", reads: ["identity?"], writes: ["result"], query: { folder: { type: "string" }, recursive: { type: "boolean" }, q: { type: "string" }, sort: { type: "string" }, limit: { type: "integer" }, offset: { type: "integer" }, ids: { type: "string" }, locale: { type: "string" } }, output: { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, total: { type: "number" } }, required: ["items", "total"] }, errors: { 400: "invalid folder or unknown locale", 401: "no identity and no ids (unless anonymousList is \"all\")" } },
+    list: { summary: "List media, newest first; anonymous callers may only fetch by ids", reads: ["identity?"], writes: ["result"], query: { folder: { type: "string" }, recursive: { type: "boolean" }, q: { type: "string" }, sort: { type: "string" }, type: { type: "string", enum: [...MEDIA_KINDS] }, limit: { type: "integer" }, offset: { type: "integer" }, ids: { type: "string" }, locale: { type: "string" } }, output: { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, total: { type: "number" } }, required: ["items", "total"] }, errors: { 400: "invalid folder or unknown locale", 401: "no identity and no ids (unless anonymousList is \"all\")" } },
     download: { summary: "The file itself", reads: ["params.id"], writes: ["result"], binary: true, errors: { 404: "not found" } },
     serve: media.publicCopyEnabled()
       ? {
