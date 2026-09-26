@@ -80,7 +80,7 @@ registerHooks({
   },
 });
 JS
-FORBIDDEN='kestrel-cli/dist/(inspectProject|inspect/|commands/(?!start))|kestrel-upgrade|kestrel-openapi|@babel/|jiti'
+FORBIDDEN='kestrel-cli/dist/(inspectProject|inspect/|commands/)|kestrel-upgrade|kestrel-openapi|@babel/|jiti'
 
 echo "== start loads only the project's core"
 : > "$WORK/start-trace.txt"
@@ -91,7 +91,7 @@ grep -q "kestrel started" traced.log || { cat traced.log; kill $TRACED 2>/dev/nu
 kill $TRACED
 wait $TRACED || true
 grep -q "kestrel/dist/boot.js" "$WORK/start-trace.txt"
-if grep -P "$FORBIDDEN" "$WORK/start-trace.txt"; then echo "start loaded the modules above"; exit 1; fi
+if grep -E "$FORBIDDEN" "$WORK/start-trace.txt" | grep -v 'kestrel-cli/dist/commands/start\.js$'; then echo "start loaded the modules above"; exit 1; fi
 
 echo "== boot"
 ./node_modules/.bin/kestrel > server.log 2>&1 &
