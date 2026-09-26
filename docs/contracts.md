@@ -357,9 +357,24 @@ Two origins are indexed, distinguished by the `via` field of each index row: `"f
 `ref` fields, `"body"` for internal references **inside the block tree** — every
 `kestrel:<type>:<id>` and every `{ type: "internal", collection, id }` inside a `json` field
 (all languages), i.e. exactly what `site.resolveLinks` later rewrites into paths. A `<type>`
-that is not a configured target is ignored. The deletion guard therefore also sees media and
-pages that are only used inside a block. `references.referrers`/`referrersMany`/`report`
+that is not a configured target is ignored. `references.referrers`/`referrersMany`/`report`
 include `via` in their output; a row without `via` reads as `"field"`.
+
+A bare id inside a `json` field — a block's image field holding `"a1b2"` or `["a1b2", "c3d4"]` —
+names no target, so the index sees it only when the field has a JSON Schema in the module's
+`schemas` config (`{ "pages.body": "schemas/pages.body.json" }`, a path relative to the project
+root or an inline schema). Every non-empty string at a position whose schema carries
+`"x-kestrel-ref": "<target>"` is indexed with `via: "body"`:
+
+```json
+{ "type": "object", "properties": { "image": { "type": "string", "x-kestrel-ref": "media" },
+  "gallery": { "type": "array", "items": { "type": "string", "x-kestrel-ref": "media" } } } }
+```
+
+The walk follows local `$ref`s, picks a `oneOf`/`anyOf` branch by its `type` const (else by the
+value's JSON type) and descends `properties`, `additionalProperties` and `items`, so nested blocks
+and repeaters are covered. A schema file is read at setup and again whenever its modification time
+changes. Documents written before a schema was configured are indexed by `references.rebuild`.
 
 **i18n** is part of the model, not a module: `localized` fields are stored per language,
 `required`/`unique` apply per language. Reading with `locale` is **strict** — a missing

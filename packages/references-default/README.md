@@ -5,6 +5,14 @@ Referential integrity for internal references of `content@1`, backed by its own 
 for `kestrel:<type>:<id>` strings and `{ type: "internal", collection, id }` objects anywhere inside
 a `json` field (every locale; a type that is not a configured target is ignored). Rows written
 before `via` existed read as `"field"`.
+A bare id inside a `json` field is indexed (as `"body"`) when `schemas` gives that field a JSON
+Schema: `schemas: { "pages.body": "schemas/pages.body.json" }` (a path relative to the project root,
+or an inline schema). Every non-empty string at a position marked `"x-kestrel-ref": "<target>"` is an
+id of that target; the walk follows local `$ref`s, picks `oneOf`/`anyOf` branches by their `type`
+const or else by the value's JSON type, and descends `properties`, `additionalProperties` and
+`items`. A key that does not name a `json` field of the model, or a file that cannot be read, fails
+setup; a file is read again when its modification time changes. After adding a schema, run
+`references.rebuild` once so documents written before are indexed.
 Targets are declared in config: `targets: { pages: { content: "pages" }, media: { media: true } }`;
 every `ref` field must point to a configured target (checked at boot). A target is a type of
 `content@1` (`{ content: "<type>" }`), the files of the `media@1` provider (`{ media: true }`), or a
@@ -47,6 +55,7 @@ Not included: cascading deletes, automatic clearing of dangling references, expa
 | Config | Type | Required | Default |
 |---|---|---|---|
 | `targets` | record | yes | – |
+| `schemas` | record | no | – |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|

@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { z } from "zod";
 import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
 import { MEDIA } from "@michaelthielemann/kestrel-contracts/media";
@@ -6,11 +7,12 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { createReferencesDefault, type References, type Referrer } from "./impl.ts";
+import { createReferencesDefault, readSchemaFile, type References, type Referrer } from "./impl.ts";
 
 export const configSchema = z
   .object({
     targets: z.record(z.union([z.object({ content: z.string().min(1) }).strict(), z.object({ media: z.literal(true) }).strict(), z.object({ collection: z.string().min(1) }).strict()])),
+    schemas: z.record(z.union([z.string().min(1), z.record(z.unknown())])).optional(),
   })
   .strict();
 
@@ -22,7 +24,17 @@ export default defineModule({
   configSchema,
 
   async setup(config, deps): Promise<References> {
-    return createReferencesDefault(config, deps.get(CONTENT), deps.get(PERSISTENCE), Date.now, deps.find(MEDIA));
+    const schemas: Record<string, string | Record<string, unknown>> = {};
+    for (const [key, source] of Object.entries(config.schemas ?? {})) {
+      if (typeof source !== "string") {
+        schemas[key] = source;
+        continue;
+      }
+      const path = resolve(deps.root, source);
+      await readSchemaFile(key, path);
+      schemas[key] = path;
+    }
+    return createReferencesDefault({ targets: config.targets, schemas }, deps.get(CONTENT), deps.get(PERSISTENCE), Date.now, deps.find(MEDIA));
   },
 
   steps: (refs) => ({

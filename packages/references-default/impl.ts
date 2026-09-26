@@ -1,12 +1,16 @@
+import { readFile, stat } from "node:fs/promises";
 import type { Content, ContentDocument, FieldDefinition, FieldType } from "@michaelthielemann/kestrel-contracts/content";
-import { isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
+import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { collectInternalRefs } from "@michaelthielemann/kestrel-contracts/helpers/links";
 import type { MediaFiles } from "@michaelthielemann/kestrel-contracts/media";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import { collectSchemaRefs } from "./schema-refs.ts";
+
+export { REF_KEYWORD } from "./schema-refs.ts";
 
 export const INDEX = "references_index";
 
-/** Where a reference was found: a `ref` field of the content model, or an internal link inside a `json` field. */
+/** Where a reference was found: a `ref` field of the content model, or inside a `json` field (an internal link, or an id at a position its schema marks). */
 export type Via = "field" | "body";
 
 /** A type of `content@1`, the ready files of the `media@1` provider, or a collection of the consumer's own; never another module's collection. */
@@ -14,6 +18,8 @@ export type Target = { content: string } | { media: true } | { collection: strin
 
 export interface Config {
   targets: Record<string, Target>;
+  /** JSON Schemas of `json` fields, keyed `"<type>.<field>"`: a file path or an inline schema. Strings at positions marked `"x-kestrel-ref": "<target>"` are indexed as ids of that target. */
+  schemas?: Record<string, string | Record<string, unknown>>;
 }
 
 export interface Missing {
@@ -59,6 +65,42 @@ function definition(field: FieldType | FieldDefinition): FieldDefinition {
   return typeof field === "string" ? { type: field } : field;
 }
 
+type SchemaReader = () => Promise<Result<Record<string, unknown>, ReferencesError>>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Reads a JSON Schema file, throwing with the field and path when it is missing or not a JSON object. */
+export async function readSchemaFile(key: string, path: string): Promise<Record<string, unknown>> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(path, "utf8"));
+  } catch (cause) {
+    throw new Error(`references/default: cannot read schema for "${key}" at ${path}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+  }
+  if (!isRecord(parsed)) throw new Error(`references/default: cannot read schema for "${key}" at ${path}: not a JSON object`);
+  return parsed;
+}
+
+function schemaReader(key: string, source: string | Record<string, unknown>): SchemaReader {
+  if (typeof source !== "string") {
+    const inline = structuredClone(source);
+    return async () => ok(inline);
+  }
+  let cached: { mtimeMs: number; schema: Record<string, unknown> } | undefined;
+  return async () => {
+    try {
+      const { mtimeMs } = await stat(source);
+      if (cached?.mtimeMs !== mtimeMs) cached = { mtimeMs, schema: await readSchemaFile(key, source) };
+      return ok(cached.schema);
+    } catch (cause) {
+      if (cached !== undefined) return ok(cached.schema);
+      return err(failure("TRANSIENT", cause instanceof Error ? cause.message : String(cause), { cause }));
+    }
+  };
+}
+
 export function createReferencesDefault(config: Config, content: Content, db: Persistence, now: () => number = Date.now, media?: MediaFiles): References {
   const model = content.model();
   const locales = model.locales ?? [];
@@ -73,6 +115,13 @@ export function createReferencesDefault(config: Config, content: Content, db: Pe
     for (const [field, def] of refFields(type)) {
       if (def.to === undefined || !(def.to in config.targets)) throw new Error(`references/default: "${type}.${field}" points to "${def.to ?? ""}" which is not a configured target`);
     }
+  }
+  const schemas = new Map<string, SchemaReader>();
+  for (const [key, source] of Object.entries(config.schemas ?? {})) {
+    const at = key.indexOf(".");
+    const raw = at < 0 ? undefined : model.types[key.slice(0, at)]?.fields[key.slice(at + 1)];
+    if (raw === undefined || definition(raw).type !== "json") throw new Error(`references/default: schema "${key}" must name a json field of the content model`);
+    schemas.set(key, schemaReader(key, source));
   }
   for (const [name, target] of Object.entries(config.targets)) {
     if ("media" in target && media === undefined) throw new Error(`references/default: target "${name}" reads media@1, but no module provides it`);
@@ -127,13 +176,21 @@ export function createReferencesDefault(config: Config, content: Content, db: Pe
       }
     }
     for (const [field, def] of jsons) {
+      const reader = schemas.get(`${type}.${field}`);
+      const schema = reader === undefined ? undefined : await reader();
+      if (schema !== undefined && isErr(schema)) return schema;
       for (const locale of localesOf(def)) {
         const doc = await docFor(locale);
         if (isErr(doc)) return doc;
         const value = doc.value?.[field];
-        for (const ref of collectInternalRefs(value)) {
-          if (!(ref.type in config.targets)) continue;
-          out.push({ fromType: type, fromId: id, field, locale: locale ?? "", toTarget: ref.type, toId: ref.id, via: "body", broken: false, checkedAt: null });
+        const found = collectInternalRefs(value).map((ref) => ({ target: ref.type, id: ref.id }));
+        if (schema !== undefined) found.push(...collectSchemaRefs(schema.value, value));
+        const seen = new Set<string>();
+        for (const ref of found) {
+          const key = `${ref.target}\u0000${ref.id}`;
+          if (!(ref.target in config.targets) || seen.has(key)) continue;
+          seen.add(key);
+          out.push({ fromType: type, fromId: id, field, locale: locale ?? "", toTarget: ref.target, toId: ref.id, via: "body", broken: false, checkedAt: null });
         }
       }
     }

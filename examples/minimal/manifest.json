@@ -1783,6 +1783,21 @@
                   }
                 ]
               }
+            },
+            "schemas": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                ]
+              }
             }
           },
           "required": [
@@ -1806,6 +1821,16 @@
                 "media": true
               }
             },
+            "redacted": false
+          },
+          {
+            "path": "schemas",
+            "type": "record",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "missing",
+            "value": null,
             "redacted": false
           }
         ]

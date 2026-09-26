@@ -1045,6 +1045,12 @@ Net changes since 5.8.1.
 
 ### Fixed
 
+- `references-default`: a bare id inside a `json` field — a block's image or relation field such as
+  `"a1b2"` or `["a1b2", "c3d4"]` — was never indexed, so `references.guard` let a media file or page
+  be deleted while a block still used it. The new optional `schemas` config maps `"<type>.<field>"`
+  to a JSON Schema (a path relative to the project root, or inline); strings at positions marked
+  `"x-kestrel-ref": "<target>"` are indexed with `via: "body"`, including nested blocks and
+  repeaters. Run `references.rebuild` once after adding a schema so existing documents are indexed.
 - Config secrets are redacted everywhere a config value is emitted: a variable's `value` and
   `default` and the `default` of the config JSON Schema, which are JSON snapshots. Redaction reaches
   object fields, record values, array and tuple elements, and every member of a union or
