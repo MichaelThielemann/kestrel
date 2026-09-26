@@ -215,7 +215,8 @@ settings (single):  title (text, required, localized), description (text, locali
 pages (multi):      slug (slug, required, localized; the public path is unique), title (text, required, localized),
                     body (json, localized – pagebuilder blocks),
                     status (enum draft|finished|published, required, **localized** – publication per language),
-                    hero (ref → media), seo (json, localized – { title?, description?, noindex? })
+                    hero (ref → media), seo (json, localized – { title?, description?, noindex? }),
+                    parent (ref → pages – the page this one is a subpage of)
 redirects (single): rules (json, list of {from, to, status}, order = priority)
 ```
 
@@ -262,6 +263,11 @@ itself `published`; otherwise the field stays empty. `_translations` reports onl
 that are themselves `published`.
 Static delivery (`delivery.publish`) derives its published document the same way, so the export and
 the live API never disagree.
+A page with a `parent` lives below it: `/ueber-uns/team`, `/en/about-us/team`; in a language without
+its own slug a segment falls back to the default language's slug. A subpage stays reachable while its
+parent is not published (the parent itself answers 404), so the parent's slug is visible as a segment;
+`parent` is not in the anonymous field grant. Renaming or moving a page moves all its subpages, and
+each old path redirects.
 The document carries `_paths: { de: "/kontakt", en: "/en/contact" }`: its public path in every
 language, `null` where it is not published or another page holds the path; the language switcher
 needs no further request. Paths come from `site-default`'s routed mode: a path belongs to exactly
@@ -309,12 +315,13 @@ identical paths.
 | GET | `/admin/pages` | same as above | every status (permission `pages.manage`) |
 | GET | `/admin/pages/:id` | `?locale=` | document, every status, with `_paths` for every language that has a valid path, drafts included (permission `pages.manage`; `/admin/pages` carries the same per item) |
 | POST | `/admin/pages/path-preview` | `{ id?, locale?, slug }` | `{ path, reachable, reason, conflict, shadows, exposesParentSlug }` – the path a save would give, before saving (`pages.write`) |
+| GET | `/admin/pages/tree` | – | `[{ id, parent, label, paths }]` – every page with its parent and valid paths per language (`pages.manage`) |
 | POST | `/admin/paths/rebuild` | – | `{ indexed, conflicts }` – recomputes every page path from the stored pages; also runs after migrations (`pages.manage`) |
 | GET | `/pages/:id` | `?locale=` | document (strict, no fallback) – published only, otherwise 404 |
-| POST | `/pages` | fields (+ `locale`) | `{ …document, _events }` – the saved document plus `_events` reporting the triggered `publishPage` run (static delivery per language, then `llms.txt`), which happens after this response, not inside it; 400 with a field name on a validation error, e.g. `pages: hero references media/<id> which does not exist` or a slug whose path is reserved (`/media`) or starts with a language code; 409 when another page holds the path, naming path, language and occupant (`details.conflicts: [{ path, locale, type, id, label }]`, `details.fields` on `slug`) |
+| POST | `/pages` | fields (+ `locale`) | `{ …document, _events }` – the saved document plus `_events` reporting the triggered `publishPage` run (static delivery per language, then `llms.txt`), which happens after this response, not inside it; 400 with a field name on a validation error, e.g. `pages: hero references media/<id> which does not exist` or a slug whose path is reserved (`/media`) or starts with a language code; 409 when another page holds the path, naming path, language and occupant (`details.conflicts: [{ path, locale, type, id, label, moving }]`, `details.fields` on `slug` or `parent`); 400 on `parent` for a cycle, a missing parent or the home page; 400 when the save would move more than `maxCascade` (1000) paths |
 | PATCH | `/pages/:id` | partial fields (+ `locale`) | `{ …document, _events }` as with POST |
 | DELETE | `/pages/:id/translations/:locale` | – | `{ …document in the default language, _events }` – deletes only this translation, see below (`pages.write`) |
-| DELETE | `/pages/:id` | – | `{ ok: true, _events }`; 409 if other documents reference it, e.g. `pages/<id> is referenced by pages/<id2> (hero)` (no 409 on `PATCH`, only on `DELETE`) |
+| DELETE | `/pages/:id` | – | `{ ok: true, _events }`; 409 if it still has subpages, or if other documents reference it, e.g. `pages/<id> is referenced by pages/<id2> (hero)` (no 409 on `PATCH`, only on `DELETE`) |
 
 `sort` is a field name, a leading `-` means descending; an unknown field → 400 (`unknown sort field
 …`). `limit` and `offset` must be integers (`limit` ≥ 1, `offset` ≥ 0); an invalid value or a

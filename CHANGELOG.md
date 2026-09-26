@@ -859,6 +859,16 @@ Net changes since 5.8.1.
   on `migrations.applied`. New routes `POST /admin/paths/rebuild`, `POST /admin/pages/path-preview`,
   `GET /admin/redirects/auto` and `DELETE /admin/redirects/auto/*path`; page answers carry `_paths`,
   and `pages.slug` is no longer `unique`.
+- `site-default` subpages: `routes.<t>.parentField` (a non-localized `ref` to the same type, on the
+  `mountTarget` type, default `pages`) prefixes a document's path with its parent's, per locale. A
+  cycle, a chain deeper than `maxDepth` (default 16), a missing parent and the home page as parent
+  are field errors; deleting a page with subpages is a `CONFLICT`. Renaming or re-parenting moves every
+  subpage. A save that would change more than `maxCascade` rows (documents × locales, default 1000) is
+  rejected with a field error naming the key. A published subpage stays reachable under a parent that
+  is not published, with the parent's slug as a segment. New step `site.readTree:<t>`;
+  `site.previewPath` takes `parent` and reports `exposesParentSlug`. A routed type with a parent
+  field and a `unique` slug fails setup. `examples/minimal` gains `pages.parent` and
+  `GET /admin/pages/tree`.
 
 ### Changed
 

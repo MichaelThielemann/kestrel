@@ -30,7 +30,10 @@ may define its own contracts with the same `defineContract`; the core treats the
   meaning only in a major release of the contracts package, and only to close a leak of
   unpublished data; it never weakens one. `site@1`'s suite did so in 6.0.0: a provider falls back
   only from a published default locale, narrows `_translations` to the locales that pass the
-  filter, and answers 404 for a path reachable only through a draft slug. Boot cannot tell a
+  filter, and answers 404 for a path reachable only through a draft slug. One deliberate exception,
+  outside the contract: in `site-default`'s routed mode a published document keeps its path under an
+  ancestor that is not published, so the ancestor's slug — and only its slug — appears as a segment
+  of that path; no other field of the ancestor is served. Boot cannot tell a
   provider written against the looser suite, so a provider runs the new major's suite before it
   widens its dependency range to that major.
 - The query vocabulary types (`Filter`, `Condition`, `FindOptions`, `Page`) live in

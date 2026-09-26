@@ -1399,6 +1399,10 @@
                   "seo": {
                     "type": "json",
                     "localized": true
+                  },
+                  "parent": {
+                    "type": "ref",
+                    "to": "pages"
                   }
                 },
                 "completeWhen": {
@@ -1527,6 +1531,13 @@
                     "type": "string",
                     "minLength": 1,
                     "default": "title"
+                  },
+                  "parentField": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "mount": {
+                    "const": true
                   }
                 },
                 "additionalProperties": false
@@ -1544,6 +1555,39 @@
                 "pattern": "^(\\/[A-Za-z0-9._-]+)+$"
               },
               "default": []
+            },
+            "mounts": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "type",
+                "field"
+              ],
+              "additionalProperties": false
+            },
+            "mountTarget": {
+              "type": "string",
+              "minLength": 1,
+              "default": "pages"
+            },
+            "maxDepth": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 16
+            },
+            "maxCascade": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 1000
             }
           },
           "additionalProperties": false
@@ -1563,7 +1607,8 @@
                 "liveWhen": {
                   "status": "published"
                 },
-                "labelField": "title"
+                "labelField": "title",
+                "parentField": "parent"
               }
             },
             "redacted": false,
@@ -1592,6 +1637,69 @@
             ],
             "redacted": false,
             "default": []
+          },
+          {
+            "path": "mounts",
+            "type": "object",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "missing",
+            "value": null,
+            "redacted": false
+          },
+          {
+            "path": "mounts.type",
+            "type": "string",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "missing",
+            "value": null,
+            "redacted": false
+          },
+          {
+            "path": "mounts.field",
+            "type": "string",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "missing",
+            "value": null,
+            "redacted": false
+          },
+          {
+            "path": "mountTarget",
+            "type": "string",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": "pages",
+            "redacted": false,
+            "default": "pages"
+          },
+          {
+            "path": "maxDepth",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 16,
+            "redacted": false,
+            "default": 16
+          },
+          {
+            "path": "maxCascade",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 1000,
+            "redacted": false,
+            "default": 1000
           }
         ]
       },
@@ -1603,6 +1711,7 @@
         "site.resumePaths",
         "site.planRebuild",
         "site.applyRebuild",
+        "site.readTree",
         "site.previewPath",
         "site.attachPaths"
       ],
@@ -7937,11 +8046,62 @@
       }
     },
     {
+      "name": "site.readTree",
+      "module": "site/default",
+      "factory": true,
+      "description": {
+        "summary": "Every <arg> with its parent, label and valid paths per locale",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "paths": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
+              }
+            },
+            "required": [
+              "id",
+              "parent",
+              "label",
+              "paths"
+            ]
+          }
+        },
+        "errors": {
+          "503": "the store is unavailable"
+        }
+      }
+    },
+    {
       "name": "site.previewPath",
       "module": "site/default",
       "factory": true,
       "description": {
-        "summary": "The public path a <arg> would get for payload { id?, locale?, slug }, whether it would be reachable and why not; writes nothing",
+        "summary": "The public path a <arg> would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing",
         "reads": [],
         "writes": [
           "result"
@@ -7958,6 +8118,12 @@
             "slug": {
               "type": "string",
               "minLength": 1
+            },
+            "parent": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -8041,7 +8207,30 @@
               }
             },
             "exposesParentSlug": {
-              "type": "null"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id",
+                    "label"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -12264,6 +12453,17 @@
                     }
                   ]
                 },
+                "parent": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a pages"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "locale": {
                   "type": "string",
                   "enum": [
@@ -12349,6 +12549,17 @@
                 "seo": {
                   "anyOf": [
                     {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "parent": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a pages"
+                    },
                     {
                       "type": "null"
                     }
@@ -13757,6 +13968,17 @@
                 "seo": {
                   "anyOf": [
                     {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "parent": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a pages"
+                    },
                     {
                       "type": "null"
                     }
@@ -16757,6 +16979,17 @@
                           }
                         ]
                       },
+                      "parent": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "description": "id of a pages"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "_locales": {
                         "type": "object",
                         "additionalProperties": {
@@ -17664,6 +17897,17 @@
                       "seo": {
                         "anyOf": [
                           {},
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "parent": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "description": "id of a pages"
+                          },
                           {
                             "type": "null"
                           }
@@ -19205,6 +19449,94 @@
       ]
     },
     {
+      "name": "pageTree",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:pages.manage",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission pages.manage",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission pages.manage"
+            }
+          }
+        },
+        {
+          "spec": "site.readTree:pages",
+          "name": "site.readTree",
+          "module": "site/default",
+          "description": {
+            "summary": "Every pages with its parent, label and valid paths per locale",
+            "reads": [],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "parent": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "paths": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
+                  }
+                },
+                "required": [
+                  "id",
+                  "parent",
+                  "label",
+                  "paths"
+                ]
+              }
+            },
+            "errors": {
+              "503": "the store is unavailable"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "pathsMovedDelivery",
       "steps": [
         {
@@ -19456,7 +19788,7 @@
           "name": "site.previewPath",
           "module": "site/default",
           "description": {
-            "summary": "The public path a pages would get for payload { id?, locale?, slug }, whether it would be reachable and why not; writes nothing",
+            "summary": "The public path a pages would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing",
             "reads": [],
             "writes": [
               "result"
@@ -19473,6 +19805,12 @@
                 "slug": {
                   "type": "string",
                   "minLength": 1
+                },
+                "parent": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "required": [
@@ -19556,7 +19894,30 @@
                   }
                 },
                 "exposesParentSlug": {
-                  "type": "null"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "id",
+                        "label"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -20124,6 +20485,17 @@
                     }
                   ]
                 },
+                "parent": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a pages"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "_locales": {
                   "type": "object",
                   "additionalProperties": {
@@ -20309,6 +20681,17 @@
                 "seo": {
                   "anyOf": [
                     {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "parent": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a pages"
+                    },
                     {
                       "type": "null"
                     }
@@ -22091,6 +22474,17 @@
                     }
                   ]
                 },
+                "parent": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a pages"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "_locales": {
                   "type": "object",
                   "additionalProperties": {
@@ -22440,6 +22834,17 @@
                     }
                   ]
                 },
+                "parent": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a pages"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "locale": {
                   "type": "string",
                   "enum": [
@@ -22520,6 +22925,17 @@
                 "seo": {
                   "anyOf": [
                     {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "parent": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a pages"
+                    },
                     {
                       "type": "null"
                     }
@@ -24857,6 +25273,17 @@
                     }
                   ]
                 },
+                "parent": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a pages"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "locale": {
                   "type": "string",
                   "enum": [
@@ -24937,6 +25364,17 @@
                 "seo": {
                   "anyOf": [
                     {},
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "parent": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "id of a pages"
+                    },
                     {
                       "type": "null"
                     }
@@ -26233,6 +26671,11 @@
         "method": "POST",
         "path": "/admin/pages/path-preview",
         "pipeline": "previewPagePath"
+      },
+      {
+        "method": "GET",
+        "path": "/admin/pages/tree",
+        "pipeline": "pageTree"
       },
       {
         "method": "GET",

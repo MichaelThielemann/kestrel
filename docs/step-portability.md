@@ -92,6 +92,7 @@ prefix).
 | `site.resumePaths` | none |
 | `site.planRebuild` | none |
 | `site.applyRebuild` | none |
+| `site.readTree` | none |
 | `site.previewPath` | none |
 | `site.attachPaths` | none |
 | `references.check` | none |
