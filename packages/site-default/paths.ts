@@ -224,10 +224,10 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     for (const move of [...existing.moves, ...moves]) {
       const key = rowId(move.type, move.id, move.locale);
       const before = merged.get(key);
-      merged.set(key, { ...move, from: before ? before.from : move.from, seq: existing.seq });
+      merged.set(key, { ...move, from: before ? before.from : move.from, seq });
     }
     const combined = [...merged.values()].filter((m) => m.from !== m.to);
-    need(await db.updateOne<RunRow>(RUNS, id, { touched: [...new Set([...existing.touched, ...touched])], moves: combined, announced: false }), "persistence@1");
+    need(await db.updateOne<RunRow>(RUNS, id, { seq, touched: [...new Set([...existing.touched, ...touched])], moves: combined, announced: false }), "persistence@1");
   }
 
   async function readBases(type: string, id: string): Promise<Base[] | null> {
@@ -539,15 +539,24 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
   }
 
   async function announceDue(runId: string | null): Promise<number> {
-    const pending = need(await db.findMany<RunRow>(RUNS, { announced: false }, { sort: { seq: "asc" }, limit: 100 }), "persistence@1").items;
-    const cutoff = now() - ANNOUNCE_GRACE_MS;
     let announced = 0;
-    for (const row of pending) {
-      const due = (runId !== null && row.runId === runId) || row.runId === null || row.at < bootedAt || row.at <= cutoff;
-      if (due && (await handle(row))) announced++;
+    if (runId !== null) {
+      const own = need(await db.findOne<RunRow>(RUNS, { id: runId }), "persistence@1");
+      if (own && !own.announced && (await handle(own))) announced++;
     }
-    return announced;
+    const cutoff = now() - ANNOUNCE_GRACE_MS;
+    let after = -1;
+    for (;;) {
+      const pending = need(await db.findMany<RunRow>(RUNS, { announced: false, seq: { gt: after } }, { sort: { seq: "asc" }, limit: 100 }), "persistence@1").items;
+      for (const row of pending) {
+        after = row.seq;
+        const due = row.runId === null || row.at < bootedAt || row.at <= cutoff;
+        if ((runId === null || row.runId !== runId) && due && (await handle(row))) announced++;
+      }
+      if (pending.length < 100 || runId !== null) return announced;
+    }
   }
+
 
   async function write(plan: RebuildPlan, runId: string | null): Promise<RebuildReport> {
     const { rows, conflicts } = derive(format, plan.bases, plan.docs, plan.mounts);

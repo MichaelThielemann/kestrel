@@ -195,6 +195,55 @@ describe("site/default routed paths: moves and runs", () => {
   });
 });
 
+describe("site/default routed paths: runs", () => {
+  it("a save is patched into memory even behind more than a hundred unannounced runs", async () => {
+    const { content, site, events } = await routedSite({ model: MODEL });
+    for (let i = 0; i < 101; i++) {
+      events.failNext();
+      expectOk(await content.create("pages", { slug: `p-${i}`, title: "P", status: "published" }));
+    }
+    const fresh = expectOk(await content.create("pages", { slug: "fresh", title: "Fresh", status: "published" }));
+    expect(expectOk(await site.resolve("pages", "fresh", { rules: published }))).toMatchObject({ id: fresh.id });
+  });
+
+  it("a second index in the same run takes over the run's sequence number for all its moves", async () => {
+    const { raw, paths, db } = await routedSite({ model: MODEL });
+    const a = expectOk(await raw.create("pages", { slug: "a", title: "A", status: "published" }));
+    const b = expectOk(await raw.create("pages", { slug: "b", title: "B", status: "published" }));
+    expectOk(await paths.index("pages", a.id, "run"));
+    expectOk(await paths.index("pages", b.id, "other"));
+    expectOk(await raw.update("pages", a.id, { slug: "a2" }));
+    expectOk(await paths.index("pages", a.id, "run"));
+    const row = (await runs(db)).find((r) => r.runId === "run")!;
+    const other = (await runs(db)).find((r) => r.runId === "other")!;
+    expect(row.seq).toBeGreaterThan(other.seq);
+    expect(row.moves.every((m) => m.seq === row.seq)).toBe(true);
+  });
+});
+
+describe("site/default routed paths: weak claims under a live strong claim", () => {
+  it("a new document whose fallback path is held by a live page gets no path there, no move and a broken link", async () => {
+    const { content, paths, site, emitted } = await routedSite({ model: MODEL });
+    const strong = expectOk(await content.create("pages", { slug: "s", title: "S", status: "published" }));
+    expectOk(await content.update("pages", strong.id, { slug: "x", title: "S en", status: "published" }, { locale: "en" }));
+    emitted.length = 0;
+    const weak = expectOk(await content.create("pages", { slug: "x", title: "W", status: "published" }));
+    expectOk(await content.update("pages", weak.id, { title: "W en", status: "published" }, { locale: "en" }));
+    expect(paths.pathsOf("pages", weak.id, "reachable")).toEqual({ de: "/x", en: null });
+    expect(emitted.flat().filter((m) => m.to === "/en/x")).toEqual([]);
+    const linked = expectOk(await site.resolveLinks("pages", { id: "l", createdAt: 0, updatedAt: 0, ref: `kestrel:pages:${weak.id}` }, { locale: "en", rules: published }));
+    expect(linked._links).toEqual({ [weak.id]: { broken: true } });
+  });
+
+  it("pathOf of a draft under a non-empty filter is null", async () => {
+    const { content, site } = await routedSite({ model: MODEL });
+    const draft = expectOk(await content.create("pages", { slug: "entwurf", title: "E", status: "draft" }));
+    const doc = expectOk(await content.get("pages", draft.id))!;
+    expect(site.pathOf("pages", doc, { rules: published })).toBeNull();
+    expect(site.pathOf("pages", doc, { rules: { home: "home" } })).toBe("/entwurf");
+  });
+});
+
 describe("site/default routed paths: repair without a restart", () => {
   it("a failed event leaves memory patched, and the next resume raises the moves again", async () => {
     let clock = 1_000_000;
@@ -296,6 +345,21 @@ describe("site/default routed paths: rebuild", () => {
     const rebuildRun = (await runs(db)).find((r) => r.runId === "rebuild-run")!;
     expect(rebuildRun.seq).toBeGreaterThan(saveSeq);
     expect(rebuildRun.moves.map(({ id, from, to, seq }) => ({ id, from, to, seq }))).toEqual([{ id: drifted.id, from: "/d", to: "/d-neu", seq: rebuildRun.seq }]);
+  });
+
+  it("a save that takes a path the plan gave to a drifted document keeps it; the drifted document loses", async () => {
+    const { content, raw, paths, site } = await routedSite({ model: MODEL });
+    const a = expectOk(await content.create("pages", { slug: "a", title: "A", status: "published" }));
+    const drifted = expectOk(await content.create("pages", { slug: "d", title: "D", status: "published" }));
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    expectOk(await raw.update("pages", drifted.id, { slug: "d-neu" }));
+    const plan = expectOk(await paths.planRebuild());
+    expectOk(await content.update("pages", a.id, { slug: "d-neu" }));
+    const report = expectOk(await paths.applyRebuild(plan, "rebuild-run"));
+    expect(report.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ path: "/d-neu", winner: { type: "pages", id: a.id }, losers: [{ type: "pages", id: drifted.id }] })]));
+    await paths.announce("rebuild-run");
+    expect(expectOk(await site.resolve("pages", "d-neu", { rules: published }))).toMatchObject({ id: a.id });
+    expect(expectOk(await site.resolve("pages", "d", { rules: published }))).toBeNull();
   });
 
   it("adding a locale and rebooting makes the new locale resolve", async () => {
