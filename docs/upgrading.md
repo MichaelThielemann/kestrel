@@ -130,6 +130,12 @@ stop writes, drain, stop the 5.8 process, deploy 6.0.
 
 Every finding's `docs` field links to one of the anchors below.
 
+Rules read each module entry's effective config: its `config` laid over its `defaults`, if it has
+any (see [configuration](configuration.md#host-supplied-defaults)). A fix writes only into `config`.
+Where writing an array would replace one the defaults supply, the rule goes manual, so the default
+entries are never dropped. A fix that swaps one module for another writes the new entry without the
+old entry's `defaults`, because they belong to the module being removed.
+
 | Rule id | Tier | Fix | What it checks |
 |---|---|---|---|
 | [`modules/event-delivery`](#modules-event-delivery) | load | auto | `events-inmemory` with no delivery module next to it |

@@ -39,29 +39,6 @@ not listed here does not exist for the instance.
 the module. Relative paths inside a module's config resolve against `deps.root`, the directory of
 the loaded config file.
 
-### Host-supplied defaults
-
-A tool that writes module entries on the consumer's behalf can hand its values over as defaults
-instead of as `config`:
-
-```ts
-{
-  use: "@michaelthielemann/kestrel-delivery-static",
-  defaults: { from: "my-preset", values: { reservedPaths: ["/admin"], dependencies: { render: "events" } } },
-  config: { dependencies: { maxPerRender: 200 } },
-}
-```
-
-`from` names the source (non-empty); `values` is an object. Boot lays `config` over `values` and
-parses the result: plain objects merge key by key, `config` wins at every path, and any other value
-— an array, a string, `null` — replaces the default whole. An entry without `config` gets `values`
-as its config.
-
-The difference shows in `kestrel.describe()` and the insights manifest: a path only `values`
-carries is reported as `status: "default"` with `source: "my-preset"`; a path `config` carries is
-`set`, whether or not `values` also has it. Secrets are redacted the same way in both layers. See
-[api.md](api.md) for the variable fields.
-
 Setup order follows these rules, applied in order:
 
 1. a module is set up after the provider of every contract in its `requires`;
@@ -75,6 +52,42 @@ A module that declares `before: [C]` is set up before the provider of `C`, regar
 either module sits in `modules`. Naming a contract whose provider depends on the declarer, directly
 or transitively — including a module that both `requires` and declares `before` on the same
 contract — is a contradiction and fails the boot as a dependency cycle, naming the path.
+
+### Host-supplied defaults
+
+A tool that writes module entries on the consumer's behalf can hand its values over as defaults
+instead of as `config`:
+
+```ts
+{
+  use: "@michaelthielemann/kestrel-delivery-static",
+  defaults: { from: "my-preset", values: { dependencies: { render: "events" } } },
+  config: { dependencies: { maxPerRender: 200 } },
+}
+```
+
+`from` names the source (non-empty); `values` is an object. Boot lays `config` over `values` and
+parses the result. An entry without `config` gets `values` as its config. When the merged config
+is invalid, the boot error says `invalid config (with defaults from "my-preset")`, since the
+offending key may come from either layer.
+
+The merge follows three rules:
+
+- Plain objects merge key by key, and `config` wins at every path. That includes map-shaped options
+  such as a record of content types: an entry `config` gives for a key the defaults also have is
+  merged into the default entry, not swapped for it.
+- An array replaces the default array whole. To keep what the defaults list and add to it,
+  `config` repeats the default entries; a host whose list must always survive keeps it out of
+  `defaults`.
+- `null`, a string, a number or any other non-object value in `config` replaces the default too.
+  `null` does not bring back the schema's own default; to get that value, write it out.
+
+The difference shows in `kestrel.describe()` and the insights manifest. A path only `values`
+carries is reported as `status: "default"` with `source: "my-preset"`. A path `config` carries is
+`set`, whether or not `values` also has it, and so is everything below a `config` value that
+replaced a default object. Secrets are redacted the same way in both layers. See [api.md](api.md)
+for the variable fields; `effectiveModuleConfig(entry)` from the package root returns the merged
+config of an entry.
 
 ## `triggers`
 
