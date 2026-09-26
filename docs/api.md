@@ -827,10 +827,18 @@ A variable is redacted when any of the following is true:
 - its value is a URL containing `user:password@`, or
 - an ancestor field is redacted.
 
-The same check runs inside a value that's otherwise shown, in `value`, in `default` and in the
-`default` of the JSON Schema: a nested field the schema marks secret, a nested credential key and a
-URL with credentials read `"[redacted]"`. Numbers and booleans are never redacted by name alone, so `minPasswordLength` keeps
+The same check runs everywhere a config value is emitted: in `value`, in `default` and in the
+`default` of the JSON Schema. Anything the schema marks secret reads `"[redacted]"`, and so does
+anything under a credential-like key or a URL with credentials. That covers object fields,
+record values, array and tuple elements, and every member of a union or an intersection: a field
+counts as secret when any member marks it. The JSON Schema leaves out the `default` of a
+credential-like key. Its `enum` and `const` stay, because they are written by the module author,
+not taken from config. Numbers and booleans are never redacted by name alone, so `minPasswordLength` keeps
 its value.
+
+A config that fails validation aborts the boot with `invalid config: <path>: <problem>`. The
+problem never repeats the value it received: for a secret path it is only the validation code
+(`invalid_enum_value`, `custom`, …), and for an enum or a literal only the expected values.
 `Step`: `{ name: "content.list", module: "content/default", factory: boolean, description: StepDescription }` — a factory step's description is evaluated with the placeholder argument `<arg>`; a `describe()` that throws for it stops the boot, so the field is never `null`.
 `Pipeline`: `{ name, steps: [{ spec: "content.list:pages", name: "content.list", module, description: StepDescription }] }` with the real arguments. `StepDescription` is the module's `describe()` entry: `summary`, `reads`, `writes`, `input`/`output`/`query` (JSON Schema), `errors`, `security`, `multipart`, `binary`.
 Stats: `failed` counts every run or step whose outcome is not ok — 4xx included, so a 401 on `/me` is a failed run; `errors` is the 5xx share of that (thrown steps, `INTERNAL`, `TRANSIENT`). `p50Ms`/`p95Ms` are nearest-rank percentiles over the last 1000 samples per key, `count`/`failed` are unbounded. `step` in `steps` is the spec as written in the pipeline (`authz.require:pages.read`). `events` counts event-triggered runs per event name — an event nobody listens to is invisible. `ratelimit` is always `[]` in this release (no ratelimit contract exists yet); the field stays so a client can render it later.

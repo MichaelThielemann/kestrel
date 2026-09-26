@@ -300,3 +300,70 @@ describe("secrets nested in a default", () => {
     expect(text).not.toContain("configured-signing");
   });
 });
+
+describe("secrets reachable anywhere in a config", () => {
+  function emitted(schema: z.ZodTypeAny, raw: unknown): string {
+    return JSON.stringify(describeConfig(schema, raw, schema.parse(raw)));
+  }
+
+  it("keeps the default of a secret-named leaf out of the JSON Schema, at the top and nested", () => {
+    const schema = z.object({ apiKey: z.string().default("leaf-default-key"), db: z.object({ password: z.string().default("leaf-default-pass") }).strict().default({}) }).strict();
+    const text = emitted(schema, {});
+    expect(text).not.toContain("leaf-default-key");
+    expect(text).not.toContain("leaf-default-pass");
+  });
+
+  it("redacts secret elements of records, arrays and tuples, configured or defaulted", () => {
+    const secretString = z.string().describe("secret");
+    const schema = z
+      .object({
+        byName: z.record(secretString).default({ a: "record-default-secret" }),
+        list: z.array(secretString).default(["array-default-secret"]),
+        pair: z.tuple([z.string(), secretString]).default(["visible-first", "tuple-default-secret"]),
+      })
+      .strict();
+    const defaulted = emitted(schema, {});
+    for (const secret of ["record-default-secret", "array-default-secret", "tuple-default-secret"]) expect(defaulted).not.toContain(secret);
+    expect(defaulted).toContain("visible-first");
+    const configured = emitted(schema, { byName: { b: "record-set-secret" }, list: ["array-set-secret"], pair: ["x", "tuple-set-secret"] });
+    for (const secret of ["record-set-secret", "array-set-secret", "tuple-set-secret"]) expect(configured).not.toContain(secret);
+  });
+
+  it("redacts a secret field inside arrays of objects and under a catchall", () => {
+    const schema = z
+      .object({
+        users: z.array(z.object({ name: z.string(), pin: z.string().describe("secret") }).strict()).default([{ name: "visible-user", pin: "array-object-secret" }]),
+        extra: z.object({}).catchall(z.string().describe("secret")).default({ anything: "catchall-default-secret" }),
+      })
+      .strict();
+    const defaulted = emitted(schema, {});
+    expect(defaulted).not.toContain("array-object-secret");
+    expect(defaulted).not.toContain("catchall-default-secret");
+    expect(defaulted).toContain("visible-user");
+    const configured = emitted(schema, { users: [{ name: "u", pin: "array-object-set" }], extra: { other: "catchall-set-secret" } });
+    expect(configured).not.toContain("array-object-set");
+    expect(configured).not.toContain("catchall-set-secret");
+  });
+
+  it("redacts a secret field of any union, discriminated union or intersection member, configured or defaulted", () => {
+    const withPass = z.object({ kind: z.literal("basic"), pass: z.string().describe("secret") }).strict();
+    const withNothing = z.object({ kind: z.literal("none") }).strict();
+    const schema = z
+      .object({
+        either: z.union([withNothing, withPass]).default({ kind: "basic", pass: "union-default-secret" }),
+        tagged: z.discriminatedUnion("kind", [withNothing, withPass]).default({ kind: "basic", pass: "tagged-default-secret" }),
+        both: z.intersection(z.object({ user: z.string() }), z.object({ pin: z.string().describe("secret") })).default({ user: "visible-both", pin: "intersection-default-secret" }),
+      })
+      .strict();
+    const defaulted = emitted(schema, {});
+    for (const secret of ["union-default-secret", "tagged-default-secret", "intersection-default-secret"]) expect(defaulted).not.toContain(secret);
+    expect(defaulted).toContain("visible-both");
+    const configured = emitted(schema, { either: { kind: "basic", pass: "union-set-secret" }, tagged: { kind: "basic", pass: "tagged-set-secret" }, both: { user: "u", pin: "intersection-set-secret" } });
+    for (const secret of ["union-set-secret", "tagged-set-secret", "intersection-set-secret"]) expect(configured).not.toContain(secret);
+  });
+
+  it("does not redact plain settings next to secrets", () => {
+    const schema = z.object({ bootstrap: z.object({ username: z.string(), minPasswordLength: z.number(), keyName: z.string() }).strict() }).strict();
+    expect(emitted(schema, { bootstrap: { username: "admin", minPasswordLength: 12, keyName: "main" } })).toContain('"value":{"username":"admin","minPasswordLength":12,"keyName":"main"}');
+  });
+});

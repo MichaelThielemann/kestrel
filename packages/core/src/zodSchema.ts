@@ -1,4 +1,4 @@
-import type { ZodTypeAny } from "zod";
+import type { ZodIssue, ZodTypeAny } from "zod";
 import { boundaryCast } from "./cast.ts";
 import { canHoldSecret, isSecretName, isSecretSchema, isSecretValue, REDACTED, snapshotValue, type JsonValue } from "./configValue.ts";
 import type { JsonSchema } from "./defineModule.ts";
@@ -149,7 +149,9 @@ function objectSchema(d: Def): JsonSchema {
   const properties: Record<string, JsonSchema> = {};
   const required: string[] = [];
   for (const [key, child] of Object.entries(d.shape?.() ?? {})) {
-    properties[key] = toJsonSchema(child);
+    const property = toJsonSchema(child);
+    if (isSecretName(key) && canHoldSecret(typeOf(unwrap(child).inner))) delete property.default;
+    properties[key] = property;
     if (!unwrap(child).optional) required.push(key);
   }
   const out: JsonSchema = { type: "object", properties };
@@ -230,8 +232,24 @@ function assign(out: Record<string, unknown>, key: string, value: unknown): void
   Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
 }
 
+function isSecretNode(schema: ZodTypeAny): boolean {
+  return unwrap(schema).description === SECRET;
+}
+
+function redactEntries(value: Record<string, unknown>, childOf: (key: string) => ZodTypeAny | undefined, depth: number): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const child = childOf(key);
+    const secret = child === undefined ? isSecretName(key) && canHoldSecret(typeof item) : isSecretField(key, child);
+    assign(out, key, secret ? REDACTED : child === undefined ? item : redactSecrets(child, item, depth + 1));
+  }
+  return out;
+}
+
 function redactSecrets(schema: ZodTypeAny, value: unknown, depth: number): unknown {
-  if (depth > MAX_REDACT_DEPTH) return value;
+  if (value === undefined || value === null) return value;
+  if (isSecretNode(schema)) return REDACTED;
+  if (depth > MAX_REDACT_DEPTH) return REDACTED;
   const { inner } = unwrap(schema);
   const d = def(inner);
   switch (kind(inner)) {
@@ -239,24 +257,74 @@ function redactSecrets(schema: ZodTypeAny, value: unknown, depth: number): unkno
       if (!isPlainObject(value)) return value;
       const shape = d.shape?.() ?? {};
       const catchall = d.catchall !== undefined && kind(d.catchall) !== "ZodNever" ? d.catchall : undefined;
-      const out: Record<string, unknown> = {};
-      for (const [key, item] of Object.entries(value)) {
-        const child = Object.hasOwn(shape, key) ? shape[key] : catchall;
-        assign(out, key, child === undefined ? item : isSecretField(key, child) ? REDACTED : redactSecrets(child, item, depth + 1));
-      }
-      return out;
+      return redactEntries(value, (key) => (Object.hasOwn(shape, key) ? shape[key] : catchall), depth);
     }
-    case "ZodRecord": {
-      if (!isPlainObject(value)) return value;
-      const out: Record<string, unknown> = {};
-      for (const [key, item] of Object.entries(value)) assign(out, key, redactSecrets(d.valueType, item, depth + 1));
-      return out;
-    }
+    case "ZodRecord":
+      return isPlainObject(value) ? redactEntries(value, () => d.valueType, depth) : value;
     case "ZodArray":
       return Array.isArray(value) ? value.map((item: unknown) => redactSecrets(d.type, item, depth + 1)) : value;
+    case "ZodTuple": {
+      if (!Array.isArray(value)) return value;
+      const items = d.items ?? [];
+      return value.map((item: unknown, i) => {
+        const element = items[i] ?? d.rest ?? undefined;
+        return element === undefined ? item : redactSecrets(element, item, depth + 1);
+      });
+    }
+    case "ZodUnion":
+    case "ZodDiscriminatedUnion":
+      return optionsOf(d).reduce<unknown>((current, option) => redactSecrets(option, current, depth + 1), value);
+    case "ZodIntersection":
+      return redactSecrets(d.right, redactSecrets(d.left, value, depth + 1), depth + 1);
     default:
       return value;
   }
+}
+
+function childAt(schema: ZodTypeAny, key: string | number): ZodTypeAny | undefined {
+  const { inner } = unwrap(schema);
+  const d = def(inner);
+  switch (kind(inner)) {
+    case "ZodObject": {
+      const shape = d.shape?.() ?? {};
+      if (typeof key === "string" && Object.hasOwn(shape, key)) return shape[key];
+      return d.catchall !== undefined && kind(d.catchall) !== "ZodNever" ? d.catchall : undefined;
+    }
+    case "ZodRecord":
+      return d.valueType;
+    case "ZodArray":
+      return d.type;
+    case "ZodTuple":
+      return (typeof key === "number" ? d.items?.[key] : undefined) ?? d.rest ?? undefined;
+    default:
+      return undefined;
+  }
+}
+
+function isSecretPath(schema: ZodTypeAny, path: ReadonlyArray<string | number>): boolean {
+  let node: ZodTypeAny | undefined = schema;
+  for (const key of path) {
+    if (node === undefined) return false;
+    if (isSecretNode(node)) return true;
+    const kindName = kind(unwrap(node).inner);
+    if (kindName === "ZodUnion" || kindName === "ZodDiscriminatedUnion" || kindName === "ZodIntersection") return true;
+    if (typeof key === "string" && isSecretName(key)) return true;
+    node = childAt(node, key);
+  }
+  return node !== undefined && isSecretNode(node);
+}
+
+/**
+ * One line per config validation problem that never repeats the value it received: a secret path
+ * (a secret schema node, a credential-like key or a path through a union) reports only the issue
+ * code, an enum or literal mismatch only what it expected.
+ */
+export function describeConfigIssue(schema: ZodTypeAny, issue: ZodIssue): string {
+  const where = issue.path.join(".") || "(root)";
+  if (isSecretPath(schema, issue.path)) return `${where}: ${issue.code}`;
+  if (issue.code === "invalid_enum_value") return `${where}: Invalid enum value. Expected ${issue.options.map((o) => `'${String(o)}'`).join(" | ")}`;
+  if (issue.code === "invalid_literal") return `${where}: Invalid literal value, expected ${JSON.stringify(issue.expected)}`;
+  return `${where}: ${issue.message}`;
 }
 
 function redactedSnapshot(schema: ZodTypeAny, value: unknown): JsonValue {

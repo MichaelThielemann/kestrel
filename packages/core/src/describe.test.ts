@@ -291,3 +291,43 @@ describe("kestrel.describe() with a secret inside an object default", () => {
     await hosted.stop();
   });
 });
+
+describe("module config errors", () => {
+  function moduleWith(configSchema: z.ZodTypeAny) {
+    return defineModule({
+      name: "check/memory",
+      provides: [],
+      requires: [],
+      configSchema,
+      async setup() {
+        return {};
+      },
+    });
+  }
+
+  async function bootError(configSchema: z.ZodTypeAny, moduleConfig: unknown): Promise<string> {
+    const mod = moduleWith(configSchema);
+    try {
+      await boot({ config: { ...config, modules: [...config.modules, { use: "./check.ts", config: moduleConfig }] }, modules: [store, bus, mod], pipelines, logger: silentLogger });
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+    throw new Error("boot did not fail");
+  }
+
+  it("never echoes a received value for a secret path", async () => {
+    const enumMessage = await bootError(z.object({ apiKey: z.enum(["a", "b"]) }).strict(), { apiKey: "error-enum-secret" });
+    expect(enumMessage).toContain("apiKey");
+    expect(enumMessage).not.toContain("error-enum-secret");
+    const refineMessage = await bootError(z.object({ signing: z.string().describe("secret").refine((v) => v.length > 40, (v) => ({ message: `too short: ${v}` })) }).strict(), { signing: "error-refine-secret" });
+    expect(refineMessage).toContain("signing");
+    expect(refineMessage).not.toContain("error-refine-secret");
+  });
+
+  it("never echoes a received value for any enum or literal", async () => {
+    const message = await bootError(z.object({ mode: z.enum(["apply", "off"]), tag: z.literal("fixed") }).strict(), { mode: "error-enum-plain", tag: "error-literal-plain" });
+    expect(message).not.toContain("error-enum-plain");
+    expect(message).not.toContain("error-literal-plain");
+    expect(message).toContain("'apply' | 'off'");
+  });
+});
