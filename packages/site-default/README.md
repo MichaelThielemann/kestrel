@@ -47,7 +47,9 @@ default none), `liveWhen` (the filter a document must pass with its own values i
 reachable there; default `{}`), `labelField` (default `title`, names documents in messages) and
 `parentField` (see below). Routed mode needs a `persistence@1` and an `events@1` provider; setup fails
 without them. `maxDepth` (default 16) bounds a parent chain, `maxCascade` (default 1000) the rows one
-save may change.
+save may change. The in-memory table is updated only in the process that saved, so one process
+serves one database: a second process on the same store would keep answering with the paths it loaded
+at its own start.
 
 **Subpages.** With `parentField` (a non-localized `ref` to the same type, only on the type named by
 `mountTarget`, default `pages`) a document's path is its parent's path plus its own slug:
