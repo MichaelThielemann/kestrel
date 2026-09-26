@@ -25,6 +25,14 @@ const MODEL: ContentModel = {
         status: { type: "enum", options: ["draft", "published"], localized: true },
       },
     },
+    events: {
+      kind: "multi",
+      fields: {
+        slug: { type: "slug", required: true, localized: true },
+        title: { type: "text", required: true, localized: true },
+        status: { type: "enum", options: ["draft", "published"], localized: true },
+      },
+    },
     settings: { kind: "single", fields: { title: { type: "text" }, mounts: { type: "json" } } },
   },
 };
@@ -32,6 +40,7 @@ const MODEL: ContentModel = {
 const ROUTES = {
   pages: routeWith({ home: "home", liveWhen: { status: "published" }, parentField: "parent" }),
   posts: routeWith({ liveWhen: { status: "published" }, mount: true }),
+  events: routeWith({ liveWhen: { status: "published" }, mount: true }),
 };
 const published = { fallback: true, filter: { status: "published" } };
 
@@ -105,6 +114,13 @@ describe("site/default mounted collections", () => {
     const error = expectErr(await s.mount(home), "VALIDATION");
     expect(error.details).toEqual({ fields: [{ field: "mounts", message: "posts: the home page cannot hold a mounted collection" }] });
     expectErr(await s.content.set("settings", { title: "Site", mounts: { pages: home } }), "VALIDATION");
+  });
+
+  it("rejects one page assigned to two collections, naming both", async () => {
+    const s = await site();
+    const blog = await s.create("pages", { slug: "blog" });
+    const error = expectErr(await s.content.set("settings", { title: "Site", mounts: { posts: blog, events: blog } }), "VALIDATION");
+    expect(error.details?.fields).toContainEqual({ field: "mounts", message: `pages/${blog} is assigned to both posts and events` });
   });
 
   it("an unpublished mount page answers 404 while its mounted documents stay reachable", async () => {
