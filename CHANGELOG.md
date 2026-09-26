@@ -6,6 +6,35 @@ Net changes since 5.8.1.
 
 ### Breaking
 
+- One command, `kestrel`, from the new package `@michaelthielemann/kestrel-cli`, replaces the three
+  binaries. `@michaelthielemann/kestrel` no longer ships the `kestrel` binary: add
+  `@michaelthielemann/kestrel-cli` at the same version, in `dependencies` for a backend project,
+  since its `kestrel` starts the production server. `kestrel` alone still starts the project in the
+  current directory, with the same log lines and exit codes; any argument after `start` is an error.
+  `kestrel upgrade`'s `deps/kestrel-range` adds the dependency (to `devDependencies` when a host
+  package's plugin loads the project) and moves it out of the wrong block.
+- `kestrel-openapi` is gone; run `kestrel openapi` with the same options, plus `--root`,
+  `--run-setup` and `--no-plugins`. It refuses an unknown option (exit 2), and it boots the project
+  in a sandboxed scratch copy: storage modules write into the copy, and a module the sandbox does not
+  know stops it (exit 2, naming the module) unless `--run-setup <use>` names it, so it no longer
+  opens the project's own database or files. `@michaelthielemann/kestrel-openapi` is a library only.
+  `kestrel upgrade`'s new `scripts/kestrel-binaries` rewrites the command in `package.json` scripts
+  and warns about it in other project files, including a flag the command now refuses.
+- `kestrel-upgrade` is gone; run `kestrel upgrade check|fix|data` with unchanged options, and from a
+  5.x project `npx -y @michaelthielemann/kestrel-cli@6 upgrade …` (or `pnpm dlx`). The package
+  ships the program under a second name, `kestrel-cli`, which is what both run.
+  `@michaelthielemann/kestrel-upgrade` is a library only; `scripts/kestrel-binaries` rewrites the old
+  command, including the `pnpm dlx`/`npx` form.
+- A host package registers its upgrade plugin through a `kestrel` field in its own `package.json`
+  (`plugin`, `pluginApi`, `engine`) instead of shipping its own binary; the load-failure hint that
+  pointed at such a binary is removed. A direct dependency that depends on
+  `@michaelthielemann/kestrel-upgrade` without that field, or whose `engine`/`pluginApi` do not match
+  the running CLI, is reported as `deps/host-outdated` (an error): its plugin is never run, and
+  `fix --write` and `data` refuse to run (exit 2) until its matching release is installed. A
+  malformed field is `deps/host-refused` and stops the kestrel commands with exit 2.
+  `PLUGIN_API_VERSION` is `4`; the new `PLUGIN_API_MIN` (`4`) is the lowest `pluginApi` the engine
+  runs.
+
 - The pipeline grammar gains an atomic group: `steps` accepts `{ atomic: [...] }` next to a plain
   step name, and the runner wraps such a group in one all-or-nothing scope it obtains from a
   module hook. `PipelineDefinition["steps"]` is now `readonly PipelineEntry[]`, not
@@ -495,6 +524,18 @@ Net changes since 5.8.1.
 
 ### Added
 
+- `kestrel check`, `kestrel explain` and `kestrel manifest` inspect a project without starting it,
+  in a sandboxed scratch copy, through the project's own core. `check` lists every load issue, boot
+  problem, warning and not-checked item with module and cause (`--json`, `--fail-on`) and is meant
+  as a CI gate. `explain <pipeline>` / `explain --event <name>` shows steps, atomic groups, emitted
+  events, the relay, listeners and their delivery (direct, or queue with lane and relay), as text,
+  `--json` or `--mermaid`. `manifest` prints `describe()` of the checked project.
+- `@michaelthielemann/kestrel-upgrade` gains the subpaths `./hosts` (`scanHosts`,
+  `loadHostPlugins`, `selectHostPlugin`), `./project` (`loadBackendProject`, which takes the
+  project core's loaders as an optional third argument) and `./scratch` (`createScratchCopy`,
+  `removeScratchCopy`); `./sandbox` also exports `mergeSandboxEntries`. `./plugin` adds
+  `UpgradePlugin.hostChecks`, `KestrelPluginHost`, `HostProblem`, `KestrelPluginFactory`,
+  `RunUpgradeCliOptions.hosts`, `PLUGIN_API_MIN`, and the engine's `parseArgs`/`stringFlag`.
 - A `step-argument`, `describe-threw` or `step-not-function` problem of a pipeline step also names
   the module that registered the step in `BootProblem.module`, next to `pipeline` and `step`.
 - `checkBoot()`'s result carries `manifest`, the checked engine's `describe()` output, taken before

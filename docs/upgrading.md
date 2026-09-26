@@ -1,17 +1,26 @@
 # Upgrading: 5.x -> 6.0.0
 
-`@michaelthielemann/kestrel-upgrade` finds the 6.0.0 breaks a 5.8 project meets, previews a fix for
-the ones it can edit mechanically, asks about the ones only a person can decide, and reads a
-database copy for the checks only stored data can answer. It never installs, commits, pushes or
-reaches the network on its own.
+`kestrel upgrade` finds the 6.0.0 breaks a 5.8 project meets, previews a fix for the ones it can
+edit mechanically, asks about the ones only a person can decide, and reads a database copy for the
+checks only stored data can answer. It never installs, commits, pushes or reaches the network on its
+own. The command belongs to `@michaelthielemann/kestrel-cli`; the engine behind it is the library
+`@michaelthielemann/kestrel-upgrade`.
+
+A 5.8 project does not have the 6.0 CLI yet, so the first runs fetch it without installing it. Use
+`npx -y @michaelthielemann/kestrel-cli@6 …` or `pnpm dlx @michaelthielemann/kestrel-cli@6 …`; both
+run the package's `kestrel-cli` binary, never the project's own 5.x `kestrel`, which would start the
+server instead. Once `fix --write` has added `@michaelthielemann/kestrel-cli` and the install is
+done, `kestrel upgrade …` runs the local copy.
 
 ## 1. See what breaks
 
 With the 5.x packages still installed:
 
 ```
-pnpm dlx @michaelthielemann/kestrel-upgrade@6 check
+npx -y @michaelthielemann/kestrel-cli@6 upgrade check
 ```
+
+(`pnpm dlx @michaelthielemann/kestrel-cli@6 upgrade check` is the same.)
 
 At this point the tool sees the **source tier** only — it reads `kestrel.config.ts`, every pipeline
 file, every local module file and `package.json` as text, without importing the 6.0 packages.
@@ -21,9 +30,14 @@ Every finding the tool did not name explicitly but the checker underneath still 
 ## 2. Bump and install
 
 ```
-pnpm dlx @michaelthielemann/kestrel-upgrade@6 fix --write
+npx -y @michaelthielemann/kestrel-cli@6 upgrade fix --write
 pnpm install
 ```
+
+`fix --write` bumps every `@michaelthielemann/kestrel*` range to `^6.0.0` and adds
+`@michaelthielemann/kestrel-cli` (see [`deps/kestrel-range`](#deps-kestrel-range)); it rewrites
+scripts that call the removed `kestrel-openapi` and `kestrel-upgrade` binaries
+([`scripts/kestrel-binaries`](#scripts-kestrel-binaries)).
 
 `fix` without `--write` only previews: it shows a unified diff of every file it would change and
 never touches the project. `--write` on a terminal shows the same diff per file and asks `y` (write
@@ -87,7 +101,7 @@ pipelines with a `delivery.publish`/`delivery.unpublish` step), which becomes `r
 ## 6. Data
 
 ```
-kestrel-upgrade data --db <a copy of the database> --root <project>
+kestrel upgrade data --db <a copy of the database> --root <project>
 ```
 
 The tool copies the given file (and any `-wal`/`-shm` siblings) into its own temp directory and
@@ -107,7 +121,7 @@ stop writes, drain, stop the 5.8 process, deploy 6.0.
 
 1. Take a consistent snapshot of the database close to the moment of cutover (a replication
    snapshot, or `sqlite3 <db> ".backup <copy>"` while the process keeps running).
-2. Run `kestrel-upgrade data --db <copy> --root <project>` against it. `data/queue-unfanned` names
+2. Run `kestrel upgrade data --db <copy> --root <project>` against it. `data/queue-unfanned` names
    every event name with rows not yet delivered to any pipeline; `data/queue-dead-unassigned` names
    dead-letter rows with no pipeline assigned yet. Neither blocks a deploy — they describe what the
    first tick after boot will do. Both count only rows with no pipeline assigned yet, so they stop
@@ -254,14 +268,14 @@ that file back with `check --data-report <report>.json` / `fix --data-report <re
   behaves like no data report at all.
 - A stored value, or a `null`, in at least one locale — the rule still asks, with no default,
   reporting what it saw so you can judge which locales need a migration.
-- No data report at all — the rule asks, with no default, and points at `kestrel-upgrade data`.
+- No data report at all — the rule asks, with no default, and points at `kestrel upgrade data`.
 - An explicit rename answer given without a data report proving the field empty is still applied,
   naming the old column and how to check it. Nothing remembers this across runs by itself: on a
   later `check`/`fix` run given `--data-report <report>.json`, the rule probes the *new* field name's
   own old, underscore-prefixed column directly against that report's raw counts, so it warns again as
   long as the old column still holds data — even though the field itself no longer starts with `_` —
   but a run given no `--data-report` at all stays silent about it, the same as any other data-report
-  question. Run `kestrel-upgrade data` again and pass its report to confirm the old column is empty.
+  question. Run `kestrel upgrade data` again and pass its report to confirm the old column is empty.
 
 Where a stored value can exist, rename it in two phases instead of trusting a mechanical edit:
 
@@ -699,26 +713,72 @@ reports major `6` — a package built from this branch but not yet published sti
 released version, so testing against it sees the source tier only. Set
 `KESTREL_UPGRADE_FORCE_MAJOR=6` in the environment to make that check treat the installed major as
 `6` regardless of what `package.json` says, opening every tier the same way a real 6.0.0 install
-would. This is a CLI/environment escape hatch for testing a not-yet-published build, never part of
-the plugin API: `RunUpgradeCliOptions`, `UpgradePlugin` and `Rule` are unaffected, and a host
-embedding `runUpgradeCli` should rely on its own project's real installed version instead of setting
-this.
+would. This is an environment escape hatch for `kestrel upgrade` when testing a not-yet-published
+build, never part of the plugin API: `RunUpgradeCliOptions`, `UpgradePlugin` and `Rule` are
+unaffected, and a caller of `runUpgradeCli` should rely on its project's real installed version
+instead of setting this.
 
 ## Programmatic use
 
 The sandbox helper composes with `checkBoot()` directly — see `docs/configuration.md` § Checking a
 boot without starting it, which also lists every boot error code. `@michaelthielemann/kestrel-upgrade/plugin`
 exports the plugin API (`UpgradePlugin`, `Rule`, `RuleContext`, `runUpgradeCli`,
-`createRuleContext`, `PLUGIN_API_VERSION`) a host CLI registers
-its own project loader and rules through, instead of shipping a second copy of the check-and-fix
-engine; `runUpgradeCli` also takes a `prompt` and `isInteractive` override for a host with its own UI.
+`createRuleContext`, `KestrelPluginFactory`, `PLUGIN_API_VERSION`, `PLUGIN_API_MIN`) a host package
+registers its own project loader and rules through, instead of shipping a second copy of the
+check-and-fix engine; `runUpgradeCli` also takes a `prompt` and `isInteractive` override for a
+caller with its own UI.
+
+### Registering a plugin
+
+A host package registers its plugin with a `kestrel` field in its own `package.json`:
+
+```json
+"kestrel": { "plugin": "./cli/plugin.mjs", "pluginApi": 4, "engine": "^6.0.0" }
+```
+
+- `plugin` — a `.mjs` or `.js` file inside the package. Node does not strip types under
+  `node_modules`, so a TypeScript host ships a small JavaScript entry that loads the rest. Its default
+  export is a `KestrelPluginFactory`: `(host) => UpgradePlugin | Promise<UpgradePlugin>`, where
+  `host` is `{ pluginApiVersion, cliVersion }` of the running CLI.
+- `pluginApi` — the lowest `PLUGIN_API_VERSION` the plugin needs.
+- `engine` — the kestrel-cli versions the plugin is built for, of the form
+  `^<major>.<minor>.<patch>` and nothing else. kestrel-cli shares `@michaelthielemann/kestrel`'s
+  version, so a host derives this from its own `@michaelthielemann/kestrel` range.
+
+The kestrel CLI reads the field from the project's direct `dependencies` and `devDependencies`
+only (never a transitive dependency, a global install or a path flag), resolved from the project
+root, and checks it as data before importing anything:
+
+- The package is refused, and every command except `start` stops with exit 2 naming it, when
+  `plugin` is absolute, leaves the package directory (also through a symlink), is not a `.mjs`/`.js`
+  file or does not exist, when `pluginApi` is not an integer or is higher than the engine's
+  `PLUGIN_API_VERSION`, or when `engine` is malformed.
+- The package is outdated, reported as [`deps/host-outdated`](#deps-host-outdated) and never
+  imported, when the running version is outside `engine`, when `pluginApi` is below
+  `PLUGIN_API_MIN`, or when it depends on `@michaelthielemann/kestrel-upgrade` without declaring the
+  field.
+- Otherwise the entry is imported and its factory called. A factory or a `detect` that throws, or a
+  result that is not a plugin, is a refusal naming the package. More than one plugin whose `detect`
+  accepts the project is an error naming every one of them; there is no first match.
+
+`--no-plugins` skips the lookup and uses the built-in loader. A plugin runs with the user's
+privileges like any other code of the packages the project installed; the rules above limit it to
+direct dependencies and make a second plugin taking over a project an error instead of a silent
+choice.
+
+A plugin compares `host.pluginApiVersion`, the running engine's number, never the
+`PLUGIN_API_VERSION` it imports from its own copy of this package: a project can hold two copies,
+the CLI's engine and the one the host package depends on for `./codemods`.
 
 ### The plugin API
 
-A host registers one or more `UpgradePlugin`s through `runUpgradeCli(argv, { plugins })`. For a given
-`root`, the first plugin whose `detect(root)` returns `true` becomes the active one for that run;
-none matching falls back to the built-in backend loader (`kestrel.config.ts`, module list, pipelines
-directory) with only the built-in rules.
+A caller of `runUpgradeCli(argv, { plugins })` passes the plugins itself; the kestrel CLI passes the
+one it discovered. For a given `root`, the first plugin whose `detect(root)` returns `true` becomes
+the active one for that run; none matching falls back to the built-in backend loader
+(`kestrel.config.ts`, module list, pipelines directory) with only the built-in rules. The engine also
+classifies the project's direct dependencies on its own (`RunUpgradeCliOptions.hosts` passes a
+result the caller already has), so a direct caller gets the `deps/host-outdated` findings too; that
+classification never imports a plugin.
 
 - `kind: string` — the plugin's own project kind, shown as `report.project.kind`.
 - `detect(root): boolean | Promise<boolean>` — whether this plugin owns the project at `root`.
@@ -818,6 +878,11 @@ directory) with only the built-in rules.
   values directly and produces one auto-fixing finding per module entry that does not already match,
   instead of the single manual finding it falls back to when it cannot tell where a project mounts its
   own routes. Absent, or when it returns `undefined`, the built-in heuristic runs unchanged.
+- `hostChecks?(project, bootCheck): readonly HostProblem[] | Promise<…>` — the checks the host's own
+  server start runs beyond `boot()`, given the loaded project and its boot check. `kestrel check`
+  lists what it returns (`code`, `severity` `error` or `warning`, `owner`, `reason`, optionally
+  `pipeline`, `module`, `file`) next to the boot problems; an `error` fails the check. The upgrade
+  commands do not call it.
 
 A `Rule` answers one of its own `ask` questions the same way every other finding changes: through
 `ctx.answers` on the next `check()` call — there is no separate answer-to-edit path a plugin's rule
@@ -850,16 +915,18 @@ without running the CLI: `root` and `scratch` default to the directory of `proje
 `overrides` replaces any of them. A member `RuleContext` gains later gets its default there, so a
 test built on it keeps compiling.
 
-`PLUGIN_API_VERSION` is the version of this plugin API, `1` as 6.0.0 ships it. It covers every type
+`PLUGIN_API_VERSION` is the version of this plugin API, `4` as 6.0.0 ships it. It covers every type
 `./plugin` exports, the ones a plugin returns to the engine as much as the ones it receives:
 `UpgradePlugin`, `LoadResult`, `LoadedProject`, `LoadIssue`, `PipelineFile`, `DataContentModel` and
 its parts, `SwitchEditsResult`, `Rule` with its `needs` values, `RuleContext`/`SourceRuleContext`, the
-locator types, `Finding`/`Edit` and `RunUpgradeCliOptions`. A member added to any of them later is an
-optional one, and a new `needs` value is a new variant of `Rule`; each such addition raises the
-number by one. An engine older than an addition ignores a hook or member it does not know, so a
-plugin that relies on one compares `PLUGIN_API_VERSION` first and reports the engine as too old
-instead. The number only grows: a new major of this package continues from the previous major's
-value and never resets it.
+locator types, `Finding`/`Edit`, `KestrelPluginHost`, `HostProblem`, `KestrelPluginFactory` and
+`RunUpgradeCliOptions`. A member added to any of them later is an optional one, and a new `needs`
+value is a new variant of `Rule`; each such addition raises the number by one. An engine older than
+an addition ignores a hook or member it does not know, so a plugin that relies on one compares
+`host.pluginApiVersion` first and reports the engine as too old instead. The number only grows: a
+new major of this package continues from the previous major's value and never resets it.
+`PLUGIN_API_MIN`, `4` in 6.0.0, is the lowest `pluginApi` the engine still runs; a major that removes
+an API member raises it.
 
 `@michaelthielemann/kestrel-upgrade/codemods` exports the primitives a plugin's own `Rule` or locator
 writes edits with, so it never needs a second copy of this engine's own edit machinery:

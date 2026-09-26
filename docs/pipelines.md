@@ -626,7 +626,7 @@ type "<t>", not "object" (set by step "<earlier>")"`).
 
 `@michaelthielemann/kestrel/schema` folds a pipeline's step descriptions, in order, into the
 schema its result ends up matching (`resolveOutputSchema`, from the `schema` subpath) — this is
-what `kestrel-openapi` uses for a route's response schema. Passing `validateOutput: true` to
+what `kestrel openapi` uses for a route's response schema. Passing `validateOutput: true` to
 `boot()` (off by default) applies the same fold at runtime: after every step that writes `result`
 — except a step whose write is declared optional (`result?`) and left `ctx.result` unchanged —
 it validates the result against the schema folded up to that point and fails the run naming the
@@ -638,7 +638,7 @@ A step that may end the run with `ctx.done()` declares the complete shape of tha
 `terminalOutput`, never folded with any other step's `output`, `extendsOutput` or `extendsItems`
 and never applied to a run that continues past the step. `resolveResultSchema` (also from the
 `schema` subpath) reports every shape a successful run can end in: the fold above, then each
-step's distinct `terminalOutput`, as one `anyOf` — this is what `kestrel-openapi` publishes as a
+step's distinct `terminalOutput`, as one `anyOf` — this is what `kestrel openapi` publishes as a
 route's 200 when a pipeline can end more than one way, for example `redirects.lookup`'s
 `{ redirect: { to, status } }` next to the page a resolver otherwise returns. A `ctx.done()` at a
 step without `terminalOutput` fails the run with `INTERNAL` in every mode, so no early answer is
@@ -646,7 +646,7 @@ ever undeclared. Under `validateOutput`, a `ctx.done()` whose result does not ma
 `terminalOutput` fails the run naming the step, and a step that declares only `terminalOutput` (no
 `output`) but changes `result` without calling `ctx.done()` fails as well. **Boot cannot see a
 `ctx.done()` call; a missing `terminalOutput` is found at run time and by
-`@michaelthielemann/kestrel-upgrade`'s source scan, a wrong one only under `validateOutput`.** Boot does reject `terminalOutput` on a step
+`kestrel upgrade`'s source scan, a wrong one only under `validateOutput`.** Boot does reject `terminalOutput` on a step
 with no write to `result`, and `terminalOutput` together with a `binary` step in the same pipeline.
 
 These checks, like the dataflow check above, run after every module's `setup()` has already

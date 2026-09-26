@@ -154,17 +154,97 @@ results — is described in [`pipelines.md`](pipelines.md) § HTTP Operation.
 
 ## Command line
 
-`kestrel` takes no arguments. It loads `kestrel.config.ts`, the modules named in `use` and every
-`*.ts` file in `pipelinesDir` (excluding `*.test.ts`), all relative to the current directory, then
-boots and starts the triggers. `SIGINT`/`SIGTERM` run the shutdown; it exits 1 when the deadline is
-hit, and logs `unhandledRejection`/`uncaughtException` before stopping.
-
-`kestrel-openapi` (package `@michaelthielemann/kestrel-openapi`) boots the same project without
-HTTP and writes an OpenAPI 3.1 document:
+The `kestrel` command lives in `@michaelthielemann/kestrel-cli`, a regular dependency of a backend
+project. The package installs the same program under a second name, `kestrel-cli`, which is the one
+`npx`/`pnpm dlx` run.
 
 ```
-kestrel-openapi --out openapi.json [--title t] [--version v] [--server url] [--mount /api]
+kestrel [start]
+kestrel check    [--root <dir>] [--json] [--fail-on error|warning] [--run-setup <use>]... [--no-plugins]
+kestrel explain  <pipeline> [--json | --mermaid] [--depth <n>] [--root <dir>] [--run-setup <use>]... [--no-plugins]
+kestrel explain  --event <name> [--json | --mermaid] [--depth <n>] [--root <dir>] [--run-setup <use>]... [--no-plugins]
+kestrel manifest [--json] [--root <dir>] [--run-setup <use>]... [--no-plugins]
+kestrel openapi  [--out <file>] [--title <t>] [--version <v>] [--server <url>] [--mount <path>]
+                 [--root <dir>] [--run-setup <use>]... [--no-plugins]
+kestrel upgrade  check|fix|data [options]
+kestrel help [<command>] | kestrel --help | -h | kestrel --version | -v
 ```
+
+Results go to stdout (text, JSON, Mermaid, OpenAPI); diagnostics go to stderr. Every command except
+`upgrade` refuses an unknown option or a missing value with exit 2 and its usage. `--version` is
+global only as the first argument; after `openapi` it is the document's version.
+
+**`start`** (also no command at all) takes no options. It loads `kestrel.config.ts`, the modules
+named in `use` and every `*.ts` file in `pipelinesDir` (excluding `*.test.ts`), all relative to the
+current directory, then boots and starts the triggers and logs `kestrel started`. Module configs
+resolve their relative paths (a SQLite `file`, a blob store `root`) against the current directory
+too, so run it from the project root; a systemd unit sets `WorkingDirectory=`. `SIGINT`/`SIGTERM`
+run the shutdown; it exits 0 once drained and 1 when the deadline is hit or the shutdown fails, and
+logs `unhandledRejection`/`uncaughtException` before stopping with exit 1. A boot failure logs one
+`boot failed` line and exits 1. It runs the project's own installed `@michaelthielemann/kestrel`
+and loads nothing else of the CLI: no inspection, OpenAPI or upgrade code. When that core is missing
+or its major differs from the CLI's, it exits 2 before loading anything.
+
+**`check`, `explain`, `manifest`, `openapi`** load the project named by `--root` (default: the
+current directory) into a scratch copy, which is also the process's working directory while they
+run, and remove the copy afterwards. Nothing is written into the project. Storage modules are
+rewritten into the copy by the sandbox described below; a module the sandbox does not know runs its
+`setup()` only when `--run-setup <use>` names it, and otherwise its pipelines are reported as not
+checked.
+
+- `check` runs `checkBoot()` of the project's core and lists every load issue, boot problem, warning
+  and not-checked item with its module and cause, plus the problems a host package's plugin finds
+  (see below). `--json` prints `{ schema: 1, tool, project, plugins, issues, errors, warnings,
+  notChecked, host, sandbox }`. Exit `0` when nothing is at or above `--fail-on` (default `error`;
+  `warning` also fails on warnings and not-checked items), `1` otherwise, `2` when it could not run.
+  It is a ready-made CI gate for the boot check.
+- `explain <pipeline>` prints the pipeline's triggers and steps (owning module, atomic group,
+  `reads`/`writes`, the event an `events.emit` step emits, the `events.relay` step), the events its
+  modules declare in `emits`, and for each event every listening pipeline with its delivery:
+  `direct`, or `queue` with the lane and whether the request relays it, read from the effective
+  config of `events-queue`. Listeners are followed up to `--depth` levels (default 4); an edge back
+  into the current path is marked `cycle`. `explain --event <name>` starts from an event: its
+  senders, then its listeners. `--json` prints the graph with `schema: 1`, `--mermaid` a Mermaid
+  flowchart. An unknown pipeline or event exits 2 and names close matches.
+- `manifest` prints what `describe()` returns for the checked project (modules, contracts,
+  pipelines, routes, event triggers, crons, warnings) as tables, or `--json` exactly as `Manifest`,
+  with every config variable of a module the sandbox rewrote marked `sandboxed: true`.
+- `openapi` boots the sandboxed project without HTTP and writes an OpenAPI 3.1 document to stdout,
+  or to `--out` (resolved against the current directory, followed by `wrote <file> (<n> paths)` on
+  stderr). Title and version default to the project's `package.json`. A module outside the sandbox
+  stops it with exit 2, naming the module, unless `--run-setup` names it, so it never opens the
+  project's own database or files. A boot failure exits 1.
+
+**`upgrade`** hands the rest of its arguments unchanged to `@michaelthielemann/kestrel-upgrade`; see
+[`upgrading.md`](upgrading.md).
+
+**Host packages.** A project a host package loads in its own shape is inspected through that
+package's plugin. The package declares it in its own `package.json`:
+
+```json
+"kestrel": { "plugin": "./cli/plugin.mjs", "pluginApi": 4, "engine": "^6.0.0" }
+```
+
+The CLI reads this field only from the project's direct `dependencies` and `devDependencies`, as
+data, before importing anything. A malformed field, or one whose plugin path leaves its package,
+stops every command except `start` with exit 2 naming the package. A plugin built for another
+version (`engine` not matching the CLI, `pluginApi` below the engine's minimum) is never run:
+`check` reports it as `deps/host-outdated` and exits 1, the other commands exit 2. Two plugins that
+both detect the project stop the command, naming both. `--no-plugins` skips the lookup and uses the
+built-in loader. `start` never loads a plugin; on a boot failure it names the dependency that
+declares one. [`upgrading.md`](upgrading.md) § Registering a plugin has the details.
+
+| Command | 0 | 1 | 2 |
+|---|---|---|---|
+| `start` | clean shutdown | boot failure, shutdown deadline, fatal error | any argument; project core missing or another major |
+| `check` | nothing at or above `--fail-on` | a problem at or above `--fail-on`, `deps/host-outdated` | could not run |
+| `explain` | graph printed | — | bad arguments, unknown pipeline or event, could not run |
+| `manifest` | printed | — | could not run |
+| `openapi` | written | boot failure | bad arguments, a module outside the sandbox, could not run |
+| `upgrade` | nothing at or above `--fail-on` | a finding at or above `--fail-on` | could not run, a refused plugin, `fix --write` or `data` with an outdated host package |
+
+"Could not run" means bad arguments, no `kestrel.config.ts` and no plugin that detects the project,
+the project's core missing or of another major, a refused plugin, or more than one detecting plugin.
 
 ## Checking a boot without starting it
 
@@ -211,9 +291,10 @@ throws for a pipeline's argument is `step-argument`, and a factory step's `descr
 for it `describe-threw`; both name the pipeline, the step and the module that registered it. When
 either throws a `KestrelBootError` of its own, the problem keeps that error's code.
 
-`@michaelthielemann/kestrel-upgrade` (`docs/upgrading.md`) builds on this: its exported
-`sandboxBootInput()` rewrites a loaded project's storage modules to write into a scratch directory,
-so a CI gate can call `checkBoot()` on a real project without touching it:
+`kestrel check` (see Command line above) is the ready-made CI gate built on this. For a gate of
+your own, `@michaelthielemann/kestrel-upgrade` (`docs/upgrading.md`) exports `sandboxBootInput()`,
+which rewrites a loaded project's storage modules to write into a scratch directory, so
+`checkBoot()` can run on a real project without touching it:
 
 ```ts
 import { checkBoot } from "@michaelthielemann/kestrel";

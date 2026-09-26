@@ -19,7 +19,7 @@ Start with a `package.json` that marks the project as an ES module:
 ```
 
 ```
-pnpm add @michaelthielemann/kestrel @michaelthielemann/kestrel-contracts \
+pnpm add @michaelthielemann/kestrel @michaelthielemann/kestrel-cli @michaelthielemann/kestrel-contracts \
   @michaelthielemann/kestrel-persistence-sqlite @michaelthielemann/kestrel-authn-single \
   @michaelthielemann/kestrel-authz-roles @michaelthielemann/kestrel-content-default
 ```
@@ -132,11 +132,14 @@ permission. There is no second pipeline for the public case — see
 
 ## 5. Run it
 
-`kestrel` reads `kestrel.config.ts` and `pipelines/*.ts` from the current directory.
+`kestrel` (from `@michaelthielemann/kestrel-cli`) reads `kestrel.config.ts` and `pipelines/*.ts`
+from the current directory.
 
 ```
-./node_modules/.bin/kestrel
+pnpm kestrel
 ```
+
+(`./node_modules/.bin/kestrel` is the same.)
 
 ```
 $ curl -s -X POST localhost:4000/login -H 'content-type: application/json' \
@@ -158,6 +161,39 @@ module reports that the process needs a restart, 200 otherwise.
 A misconfiguration stops the boot instead of failing at runtime: an unknown step name, a missing
 contract, a step reading context a previous step never wrote, or a cycle between modules ends with
 `boot failed` naming the module and the reason.
+
+`kestrel check` finds the same problems without starting anything, every one at once, and
+`kestrel explain createPage` shows the pipeline's steps, what each reads and writes, and the events
+it emits:
+
+```
+pnpm kestrel check
+pnpm kestrel explain createPage
+```
+
+### Running in production
+
+Keep `@michaelthielemann/kestrel-cli` in `dependencies`, not `devDependencies`: a production install
+omits dev dependencies, and `kestrel` is what starts the server. Start it from the project root,
+because module configs resolve relative paths (the SQLite `file`, a blob store `root`) against the
+current directory. A systemd unit:
+
+```ini
+[Unit]
+Description=Kestrel
+After=network.target
+
+[Service]
+WorkingDirectory=/srv/app
+ExecStart=/srv/app/node_modules/.bin/kestrel
+Restart=on-failure
+User=kestrel
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`SIGTERM` from `systemctl stop` drains running requests before the process exits.
 
 ## 6. Your own module
 
@@ -228,7 +264,7 @@ Add the module to `modules.ts` as well, and `greet.say` becomes part of the type
 | Goal | Read |
 |---|---|
 | Understand the model behind all of this | [`architecture.md`](architecture.md) |
-| Every config key and both CLIs | [`configuration.md`](configuration.md) |
+| Every config key and the `kestrel` command | [`configuration.md`](configuration.md) |
 | Write real steps: context, errors, arguments, tests | [`pipelines.md`](pipelines.md) |
 | Define your own contract | [`contracts.md`](contracts.md) |
 | Ship a module as a package | [`submodule-template.md`](submodule-template.md) |

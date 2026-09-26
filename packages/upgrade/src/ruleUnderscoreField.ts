@@ -79,7 +79,7 @@ export const underscoreFieldRule: Rule = {
             tier: "source",
             where: { module: model.use, path: `types.${typeName}.fields.${field}` },
             message: `the old column "${orphanField}" on content type "${typeName}" still has stored data (${describeCounts(orphanCounts)}); the current field is named "${field}"`,
-            suggestion: `add a migration on the running 5.8.x instance (defineMigration) copying "${orphanField}" to "${field}", then run \`kestrel-upgrade data\` again to confirm "${orphanField}" is empty`,
+            suggestion: `add a migration on the running 5.8.x instance (defineMigration) copying "${orphanField}" to "${field}", then run \`kestrel upgrade data\` again to confirm "${orphanField}" is empty`,
             fix: { kind: "none" },
             docs: upgradingDocs("model-underscore-field"),
           });
@@ -117,7 +117,7 @@ export const underscoreFieldRule: Rule = {
               id,
               RULE_ID,
               `"${field}" on content type "${typeName}" starts with "_"`,
-              `renamed to "${answer}" — ${proof}, not a proving zero count; the old column "${field}" on "${typeName}" may still hold data. Add a migration on the running 5.8.x instance before it upgrades, then run \`kestrel-upgrade data --db <file> --out <report>.json\` and check again with --data-report <report>.json to clear this warning`,
+              `renamed to "${answer}" — ${proof}, not a proving zero count; the old column "${field}" on "${typeName}" may still hold data. Add a migration on the running 5.8.x instance before it upgrades, then run \`kestrel upgrade data --db <file> --out <report>.json\` and check again with --data-report <report>.json to clear this warning`,
               where,
               edits,
               upgradingDocs("model-underscore-field"),
@@ -130,7 +130,7 @@ export const underscoreFieldRule: Rule = {
         const fix: AskFix = {
           kind: "ask",
           question: questionId(typeName, field),
-          prompt: counts === undefined ? `rename "${field}" on "${typeName}" to (no data report supplied; run \`kestrel-upgrade data\` first, or see docs/upgrading.md#model-underscore-field)` : `rename "${field}" on "${typeName}" to`,
+          prompt: counts === undefined ? `rename "${field}" on "${typeName}" to (no data report supplied; run \`kestrel upgrade data\` first, or see docs/upgrading.md#model-underscore-field)` : `rename "${field}" on "${typeName}" to`,
           choices: [defaultName, "remove"],
         };
         findings.push({
@@ -144,7 +144,7 @@ export const underscoreFieldRule: Rule = {
             : `"${field}" on content type "${typeName}" starts with "_", which fails boot on 6.0.0`,
           suggestion:
             counts === undefined
-              ? "run `kestrel-upgrade data --db <file> --out <report>.json` against a copy of the store, then check again with --data-report <report>.json — see docs/upgrading.md#model-underscore-field"
+              ? "run `kestrel upgrade data --db <file> --out <report>.json` against a copy of the store, then check again with --data-report <report>.json — see docs/upgrading.md#model-underscore-field"
               : "a stored value exists in at least one locale; add a migration on the running 5.8.x instance (defineMigration) copying it to the new key before upgrading",
           fix,
           docs: upgradingDocs("model-underscore-field"),

@@ -49,7 +49,7 @@ one item: `title` keeps the member whole, `provenance.origin` keeps `provenance`
 `origin`, `variants[].path` keeps the array `variants` whose elements hold only `path`; a whole grant
 wins over a sub-path of the same member, and a map or a free-form value is granted whole. A value
 that is not an object (`null`, a string) is kept as it is. The step declares `narrows` with one
-answer per audience (`anonymous`, `role:<name>`), so `kestrel-openapi` documents each.
+answer per audience (`anonymous`, `role:<name>`), so `kestrel openapi` documents each.
 
 At `attach()` boot fails, one line per problem, when a step runs after `authz.fields`; when the
 declared output does not fit the shape parameter (`item` fits any object, `list` an object whose

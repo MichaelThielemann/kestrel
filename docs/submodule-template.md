@@ -202,7 +202,7 @@ Validation). A static test in the core's suite fails for undeclared reads, and t
 `module.test.ts` runs every step once through `testing/runPipeline` with
 `modules: [{ module, instance }]`.
 
-Further optional fields — output schema, errors, security, etc. — feed `kestrel-openapi`. A step
+Further optional fields — output schema, errors, security, etc. — feed `kestrel openapi`. A step
 that extends `ctx.result` with fields instead of replacing it (e.g. `redirects.export`) sets
 `extendsOutput` instead of `output`, so the generator merges it into the predecessor's output
 schema. `extendsItems` behaves the same but merges the schema into `properties.items.items` of the

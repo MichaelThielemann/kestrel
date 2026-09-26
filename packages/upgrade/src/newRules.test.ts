@@ -402,12 +402,12 @@ describe("model/underscore-field", () => {
     expect(findings[0]?.where.path).toBe("types.page.fields._hint");
   });
 
-  it("points at kestrel-upgrade data when no data report was given", async () => {
+  it("points at kestrel upgrade data when no data report was given", async () => {
     const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } }] });
     const findings = await underscoreFieldRule.check(contextFor(p));
     expect(findings).toHaveLength(1);
-    expect(findings[0]?.suggestion).toMatch(/kestrel-upgrade data/);
-    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.prompt : "n/a").toMatch(/kestrel-upgrade data/);
+    expect(findings[0]?.suggestion).toMatch(/kestrel upgrade data/);
+    expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.prompt : "n/a").toMatch(/kestrel upgrade data/);
   });
 
   it("asks with no default and reports the counts when the data report counted a stored value", async () => {

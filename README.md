@@ -118,12 +118,12 @@ only where a hidden constraint is not obvious from the code.
 |---|---|
 | [`docs/getting-started.md`](docs/getting-started.md) | First contact: install, configure, run, and write your own module. Start here. |
 | [`docs/architecture.md`](docs/architecture.md) | The model behind it: contract, module, submodule, step, pipeline, trigger; package layout, boot sequence, the five rules, config vs. context. |
-| [`docs/configuration.md`](docs/configuration.md) | Reference for `kestrel.config.ts`: every top-level and `http` key with its default, trigger forms, the `kestrel` and `kestrel-openapi` commands. |
+| [`docs/configuration.md`](docs/configuration.md) | Reference for `kestrel.config.ts`: every top-level and `http` key with its default, trigger forms, the `kestrel` command (start, check, explain, manifest, openapi, upgrade). |
 | [`docs/pipelines.md`](docs/pipelines.md) | Writing steps and pipelines: the `Context` type, step arguments and `stepFactory()`, errors as values, `reads`/`writes`, payload validation, runner behaviour, naming, event payloads. |
 | [`docs/contracts.md`](docs/contracts.md) | Defining a contract, the rules it must follow, worked examples, and the content model as configuration. |
 | [`docs/submodule-template.md`](docs/submodule-template.md) | Shipping a submodule as a package: file layout, `module.ts`/`impl.ts` shape, checklist before "done". |
 | [`docs/api.md`](docs/api.md) | The HTTP API of the example instance — read before touching a route or a response shape. |
-| [`docs/upgrading.md`](docs/upgrading.md) | Moving a 5.8 project to 6.0.0 with `@michaelthielemann/kestrel-upgrade`: what it finds, what it fixes, the data check, CI use. |
+| [`docs/upgrading.md`](docs/upgrading.md) | Moving a 5.8 project to 6.0.0 with `kestrel upgrade`: what it finds, what it fixes, the data check, CI use, and how a host package registers its plugin. |
 | [`examples/minimal`](examples/minimal) | Every shipped module wired up in one instance; the reference `docs/api.md` describes. |
 | [`RELEASING.md`](RELEASING.md) | Version bump, smoke test and publish steps. |
 | [`CHANGELOG.md`](CHANGELOG.md) | Every behaviour change visible to a consumer, newest first under `## Unreleased`. |

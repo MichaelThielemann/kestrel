@@ -34,6 +34,6 @@ describe("kestrel-upgrade fix --write against an explicit, unproven underscore-f
     expect(lines).toContain("wrote kestrel.config.ts");
     const notice = lines.find((l) => l.includes("_hint"));
     expect(notice).toBeDefined();
-    expect(notice).toMatch(/kestrel-upgrade data/);
+    expect(notice).toMatch(/kestrel upgrade data/);
   });
 });

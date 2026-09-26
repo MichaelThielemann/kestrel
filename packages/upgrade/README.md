@@ -1,7 +1,7 @@
 # @michaelthielemann/kestrel-upgrade
 
-**What.** A CLI (`kestrel-upgrade`) and a small library that find the breaks a 5.8 project meets on
-6.0.0, preview and apply a fix for the ones that can be edited mechanically, ask about the ones a
+**What.** The library behind `kestrel upgrade` (the command lives in `@michaelthielemann/kestrel-cli`):
+it finds the breaks a 5.8 project meets on 6.0.0, preview and apply a fix for the ones that can be edited mechanically, ask about the ones a
 person must decide, offer switching event delivery to the queue where the project can support it,
 and read a copy of a project's database for the checks only stored data can answer.
 
@@ -11,14 +11,16 @@ list into findings against the consumer's own files, with a stable id, a tier (w
 it) and a fix class (auto, ask, manual). It shares its check engine with `@michaelthielemann/kestrel`'s
 `checkBoot()`, so it never drifts from what `boot()` actually enforces.
 
-**Commands.**
+**Commands.** This package ships no binary. Run the commands through the kestrel CLI, locally or,
+from a project still on the previous major, with `npx -y @michaelthielemann/kestrel-cli@6 upgrade …`
+(or `pnpm dlx`):
 
 ```
-kestrel-upgrade check [--root <dir>] [--entry <file>] [--json] [--fail-on error|warning|info]
+kestrel upgrade check [--root <dir>] [--entry <file>] [--json] [--fail-on error|warning|info]
                       [--run-setup <use>]... [--data-report <file>]
-kestrel-upgrade fix   [--write] [--yes] [--answers <file>] [--save-answers <file>] [--allow-dirty]
+kestrel upgrade fix   [--write] [--yes] [--answers <file>] [--save-answers <file>] [--allow-dirty]
                       [--data-report <file>] (+ the check flags)
-kestrel-upgrade data  --db <sqlite file> --root <dir> [--json] [--out <file>]
+kestrel upgrade data  --db <sqlite file> --root <dir> [--json] [--out <file>]
 ```
 
 `check` never writes anything. `fix` without `--write` previews every finding, showing a unified
@@ -41,18 +43,22 @@ appear after earlier ones in the same run, for at most five passes.
 functions below.
 
 **Library.** The root export carries the report types (`Finding`, `UpgradeReport`) and
-`runUpgradeCli(argv, options?)`, the same function the bin calls, so a host package's own CLI
-can register its own project loader and rules as a plugin and delegate to this engine instead
-of shipping a second copy of it; `options.prompt`/`options.isInteractive` let a host supply its own
-UI instead of a terminal. `./plugin` carries the plugin API (`UpgradePlugin`, `Rule`, `RuleContext`,
-`PLUGIN_API_VERSION`, and `createRuleContext` for a plugin's own rule tests) — see `docs/upgrading.md`'s "The plugin API" for the full surface, and `./codemods` for the edit,
+`runUpgradeCli(argv, options?)`, the function `kestrel upgrade` calls with the plugin it discovered;
+`options.prompt`/`options.isInteractive` let a caller supply its own UI instead of a terminal. A host
+package registers its project loader and rules as a plugin through the `kestrel` field of its own
+`package.json` (see `docs/upgrading.md` § Registering a plugin); `./hosts` reads that field from a
+project's direct dependencies as data (`scanHosts`, `loadHostPlugins`, `selectHostPlugin`). `./plugin` carries the plugin API (`UpgradePlugin`, `Rule`, `RuleContext`,
+`KestrelPluginFactory`, `KestrelPluginHost`, `HostProblem`, `PLUGIN_API_VERSION`, `PLUGIN_API_MIN`,
+and `createRuleContext` for a plugin's own rule tests) — see `docs/upgrading.md`'s "The plugin API" for the full surface, and `./codemods` for the edit,
 verify and AST-reading primitives a plugin's own rule or locator is written with, so it never needs
 a second copy of this engine's own edit machinery. A registered plugin's own `load()` (its config
 import, any prepare step it runs) executes unconditionally, before any consent question — `--run-setup`
 and its consent list only ever gate a module's own `setup()`, at the later boot tier. `./sandbox`
 carries `sandboxBootInput()`, which rewrites a loaded project's storage modules to write into a
 scratch directory instead of the project's own files, for a CI gate that wants `checkBoot()` without
-a full `kestrel-upgrade` run.
+a full `kestrel upgrade` run. `./project` (`loadBackendProject`) and `./scratch`
+(`createScratchCopy`, `removeScratchCopy`) are the loader and scratch copy the kestrel CLI's
+inspection commands share with the engine; none of these subpaths loads the source parser.
 
 **Not included.** Installing, committing, pushing or reaching the network — the tool prints the next
 command and lets the consumer run it. Draining a queue, renaming a stored column or any other write
