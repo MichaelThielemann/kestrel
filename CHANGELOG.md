@@ -875,6 +875,7 @@ Net changes since 5.8.1.
   `site.announcePaths`; boot fails otherwise) and `site.route:<t>` (ends the run with
   `{ route: { type } }` for a reachable document of another routed type). The mount page cannot be
   removed while it holds a collection.
+- `site.readTree` answers each document's per-locale `live` state next to its paths.
 - `kestrel-upgrade` rules `site/routed-slug-unique` (removes `unique` from a routed type's slug
   field), `site/path-wiring`, `site/path-events`, `redirects/requires-persistence` and
   `imports/redirects-impl`.

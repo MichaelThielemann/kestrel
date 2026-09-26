@@ -8066,7 +8066,7 @@
       "module": "site/default",
       "factory": true,
       "description": {
-        "summary": "Every <arg> with its parent, label and valid paths per locale",
+        "summary": "Every <arg> with its parent, label, valid paths and live state per locale",
         "reads": [],
         "writes": [
           "result"
@@ -8097,13 +8097,21 @@
                   ]
                 },
                 "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
+              },
+              "live": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "description": "per locale: whether the document passes its route's liveWhen there"
               }
             },
             "required": [
               "id",
               "parent",
               "label",
-              "paths"
+              "paths",
+              "live"
             ]
           }
         },
@@ -19539,7 +19547,7 @@
           "name": "site.readTree",
           "module": "site/default",
           "description": {
-            "summary": "Every pages with its parent, label and valid paths per locale",
+            "summary": "Every pages with its parent, label, valid paths and live state per locale",
             "reads": [],
             "writes": [
               "result"
@@ -19570,13 +19578,21 @@
                       ]
                     },
                     "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
+                  },
+                  "live": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "boolean"
+                    },
+                    "description": "per locale: whether the document passes its route's liveWhen there"
                   }
                 },
                 "required": [
                   "id",
                   "parent",
                   "label",
-                  "paths"
+                  "paths",
+                  "live"
                 ]
               }
             },

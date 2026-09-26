@@ -5049,7 +5049,7 @@
     "/admin/pages/tree": {
       "get": {
         "operationId": "pageTree",
-        "summary": "Require a valid session → Requires permission pages.manage → Every pages with its parent, label and valid paths per locale",
+        "summary": "Require a valid session → Requires permission pages.manage → Every pages with its parent, label, valid paths and live state per locale",
         "tags": [
           "admin"
         ],
@@ -5091,13 +5091,21 @@
                           ]
                         },
                         "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
+                      },
+                      "live": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "boolean"
+                        },
+                        "description": "per locale: whether the document passes its route's liveWhen there"
                       }
                     },
                     "required": [
                       "id",
                       "parent",
                       "label",
-                      "paths"
+                      "paths",
+                      "live"
                     ]
                   }
                 }

@@ -77,6 +77,8 @@ export interface TreeNode {
   parent: string | null;
   label: string;
   paths: Record<string, string | null>;
+  /** Per locale: whether the document passes its route's `liveWhen` there. */
+  live: Record<string, boolean>;
 }
 
 export interface SitePaths {
@@ -728,11 +730,16 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
           for (const doc of page.items) labels.set(doc.id, label(doc, route, doc.id));
           if (page.items.length < PAGE) break;
         }
-        return [...labels].map(([id, name]) => ({ id, parent: table.row(type, id, defaultLocale)?.parent ?? null, label: name, paths: table.row(type, id, defaultLocale) ? locales.reduce<Record<string, string | null>>((out, l) => {
-          const row = table.row(type, id, l);
-          out[l] = row && row.tail !== null && row.valid ? pathOfTail(format, row.tail, l) : null;
-          return out;
-        }, {}) : {} }));
+        return [...labels].map(([id, name]) => {
+          const paths: Record<string, string | null> = {};
+          const live: Record<string, boolean> = {};
+          for (const l of locales) {
+            const row = table.row(type, id, l);
+            paths[l] = row && row.tail !== null && row.valid ? pathOfTail(format, row.tail, l) : null;
+            live[l] = row?.live ?? false;
+          }
+          return { id, parent: table.row(type, id, defaultLocale)?.parent ?? null, label: name, paths, live };
+        });
       }),
   };
 }

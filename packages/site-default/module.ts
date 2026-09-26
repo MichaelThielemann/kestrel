@@ -152,10 +152,10 @@ function describeSite(site: SiteDefault) {
       atomicSafe: true,
     },
     readTree: (arg: string) => ({
-      summary: `Every ${arg} with its parent, label and valid paths per locale`,
+      summary: `Every ${arg} with its parent, label, valid paths and live state per locale`,
       reads: [],
       writes: ["result"],
-      output: { type: "array", items: { type: "object", properties: { id: { type: "string" }, parent: { type: ["string", "null"] }, label: { type: "string" }, paths: PATHS_SCHEMA }, required: ["id", "parent", "label", "paths"] } },
+      output: { type: "array", items: { type: "object", properties: { id: { type: "string" }, parent: { type: ["string", "null"] }, label: { type: "string" }, paths: PATHS_SCHEMA, live: { type: "object", additionalProperties: { type: "boolean" }, description: "per locale: whether the document passes its route's liveWhen there" } }, required: ["id", "parent", "label", "paths", "live"] } },
       errors: { 503: "the store is unavailable" },
     }),
     route: (arg: string) => ({

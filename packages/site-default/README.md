@@ -129,8 +129,8 @@ it could not finish, `site.resumePaths` (on a cron, every minute) finishes, so t
 one interval after a failure. Boot fails when a pipeline writes a routed type without this wiring, or
 reads it with a `home` or `slugField` the route does not have.
 
-`site.readTree:<t>` lists every document of the mount target type with its parent, label and valid
-paths. `site.attachPaths:<t>?reachable` adds `_paths` to a list or read answer (reachable paths only; without
+`site.readTree:<t>` lists every document of the mount target type with its parent, label, valid
+paths and per-locale `live` state. `site.attachPaths:<t>?reachable` adds `_paths` to a list or read answer (reachable paths only; without
 `?reachable` every valid path, drafts included). `site.previewPath:<t>` answers, for a payload
 `{ id?, locale?, slug }`, the path a save would give, whether it would be reachable, the occupant of a
 taken path and the fallback pages it would shadow.
@@ -191,7 +191,7 @@ persistence settings:
 | `site.planRebuild` | Recompute every routed document's paths from content@1 outside any group (adds `rebuild` to the result) | – | `result.rebuild` | – | { rebuild: object, … } | 503 the store is unavailable | – | no |
 | `site.applyRebuild` | Write the planned paths inside one atomic group; saves committed since the plan are recomputed there | `result.rebuild` | `result` | – | { indexed: integer, conflicts: object[], … } | 503 the store is unavailable | – | yes |
 | `site.indexMounts` | Validate the stored mount assignment and move every document of each collection whose mount page changed; last step of the settings write's atomic group | – | – | – | – | 400 an invalid assignment, or a change moving more than maxCascade paths; 409 a moved document's path is taken; 503 the store is unavailable | – | yes |
-| `site.readTree:<arg>` | Every <arg> with its parent, label and valid paths per locale | – | `result` | – | object[] | 503 the store is unavailable | – | no |
+| `site.readTree:<arg>` | Every <arg> with its parent, label, valid paths and live state per locale | – | `result` | – | object[] | 503 the store is unavailable | – | no |
 | `site.route:<arg>` | End the run with { route: { type } } when params.path is reachable and belongs to a routed collection other than <arg>; pass through otherwise | `params.path` | `result?` | – | – (ends: { route: object }) | – | – | no |
 | `site.previewPath:<arg>` | The public path a <arg> would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing | – | `result` | { id?: string, locale?: string, slug: string, parent?: string \| null, … } | { path: string, reachable: boolean, reason: string \| null, conflict: object \| null, shadows: object[], exposesParentSlug: object \| null, … } | 400 slug is missing; 503 the store is unavailable | – | no |
 | `site.attachPaths:<arg>` | Add _paths (locale → path) to the <arg> result, every valid path including drafts | `result` | `result` | – | { _paths: object, … } | – | – | no |

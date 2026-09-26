@@ -262,7 +262,7 @@ describe("site/default nested pages: tree", () => {
     const parent = await s.page({ slug: "eltern" });
     const child = await s.page({ slug: "kind", parent });
     const tree = expectOk(await s.paths.tree("pages"));
-    expect(tree).toEqual(expect.arrayContaining([{ id: parent, parent: null, label: "eltern", paths: { de: "/eltern", en: "/en/eltern" } }, { id: child, parent, label: "kind", paths: { de: "/eltern/kind", en: "/en/eltern/kind" } }]));
+    expect(tree).toEqual(expect.arrayContaining([{ id: parent, parent: null, label: "eltern", paths: { de: "/eltern", en: "/en/eltern" }, live: { de: true, en: false } }, { id: child, parent, label: "kind", paths: { de: "/eltern/kind", en: "/en/eltern/kind" }, live: { de: true, en: false } }]));
     const rows = expectOk(await s.db.findMany<DocRow>(DOCS, { docId: child }));
     expect(rows.items.every((r) => r.parent === parent)).toBe(true);
   });
