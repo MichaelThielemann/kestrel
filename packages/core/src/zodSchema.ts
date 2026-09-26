@@ -452,8 +452,9 @@ interface Ancestors {
   redacted: boolean;
 }
 
-function collectVariables(schema: ZodTypeAny, raw: unknown, parsed: unknown, defaults: ConfigDefaults | undefined, path: string[], out: ConfigVariable[], ancestors: Ancestors): void {
-  const { inner } = unwrap(schema);
+function collectVariables(schema: ZodTypeAny, raw: unknown, parsedInput: unknown, defaults: ConfigDefaults | undefined, path: string[], out: ConfigVariable[], ancestors: Ancestors): void {
+  const { inner, reshapes } = unwrap(schema);
+  const parsed = reshapes ? undefined : parsedInput;
   if (kind(inner) !== "ZodObject") return;
   const inherited = valueAt(raw, path) === undefined ? ancestors.default : undefined;
   for (const [key, child] of Object.entries(def(inner).shape?.() ?? {})) {
@@ -475,7 +476,7 @@ function collectVariables(schema: ZodTypeAny, raw: unknown, parsed: unknown, def
     if (!set && hostValue !== undefined && defaults !== undefined) variable.source = defaults.from;
     if (effective !== undefined && !redacted) variable.default = redactedSnapshot(child, effective);
     out.push(variable);
-    if (kind(unwrapped.inner) === "ZodObject") collectVariables(unwrapped.inner, raw, parsed, defaults, childPath, out, { optional, default: effective, redacted });
+    if (kind(unwrapped.inner) === "ZodObject") collectVariables(child, raw, parsed, defaults, childPath, out, { optional, default: effective, redacted });
   }
 }
 
@@ -483,6 +484,8 @@ function collectVariables(schema: ZodTypeAny, raw: unknown, parsed: unknown, def
  * JSON Schema plus one row per config path. `raw` is the consumer's entry before parsing and decides
  * `set`/`status`; `parsed` is the same entry after the schema applied its defaults and is the source
  * of the effective `value` — without it the value falls back to `raw` and the declared defaults.
+ * Below a `transform`, `preprocess` or `pipe` the parsed output no longer lines up with the schema,
+ * so the rows there read `raw` and the declared defaults.
  * `defaults` is the host layer merged under `raw`: a path it carries and `raw` does not is a
  * `"default"` with `source` set to `defaults.from`, ahead of any default the schema declares.
  */

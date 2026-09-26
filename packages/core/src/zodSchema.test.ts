@@ -404,3 +404,31 @@ describe("secrets behind a wrapper that changes the value", () => {
     expect(text).toContain("checked-user");
   });
 });
+
+describe("rows below a wrapper that changes the value", () => {
+  it("reads rows from the raw config when the root schema transforms", () => {
+    const schema = z
+      .object({ password: z.string(), label: z.string() })
+      .strict()
+      .transform((o) => ({ ...o, label: `${o.label}:${o.password}` }));
+    const raw = { password: "root-folded-secret", label: "shown" };
+    const out = describeConfig(schema, raw, schema.parse(raw));
+    expect(JSON.stringify(out)).not.toContain("root-folded-secret");
+    expect(out.variables.find((v) => v.path === "label")).toMatchObject({ status: "set", value: "shown" });
+  });
+
+  it("reads rows from the raw config below a nested transform", () => {
+    const schema = z
+      .object({
+        outer: z
+          .object({ inner: z.object({ note: z.string(), extra: z.string().default("plain") }).strict() })
+          .strict()
+          .transform((o) => ({ inner: { note: `${o.inner.note}!`, extra: "changed" } })),
+      })
+      .strict();
+    const raw = { outer: { inner: { note: "as-written" } } };
+    const byPath = Object.fromEntries(describeConfig(schema, raw, schema.parse(raw)).variables.map((v) => [v.path, v]));
+    expect(byPath["outer.inner.note"]).toMatchObject({ value: "as-written" });
+    expect(byPath["outer.inner.extra"]).toMatchObject({ status: "default", value: "plain" });
+  });
+});

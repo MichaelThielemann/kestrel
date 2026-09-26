@@ -834,7 +834,9 @@ record values, array and tuple elements, and every member of a union or an inter
 counts as secret when any member marks it. A `transform`, `preprocess` or `pipe` changes the value
 so it can no longer be matched against the schema: when anything inside such a wrapper is secret,
 the whole value reads `"[redacted]"` and the JSON Schema marks it `writeOnly`. `refine` and
-`superRefine` keep the value and are looked through. The JSON Schema leaves out the `default` of a
+`superRefine` keep the value and are looked through. The rows below such a wrapper, including every row of a
+`configSchema` that is itself transformed, report the value as configured plus the declared
+defaults instead of the transformed output. The JSON Schema leaves out the `default` of a
 credential-like key. Its `enum` and `const` stay, because they are written by the module author,
 not taken from config. Numbers and booleans are never redacted by name alone, so `minPasswordLength` keeps
 its value.
