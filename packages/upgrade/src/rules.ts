@@ -14,6 +14,7 @@ import { fieldGrantRules } from "./ruleFieldGrants.ts";
 import { INFO_RULES } from "./ruleInfo.ts";
 import { mediaRules } from "./ruleMedia.ts";
 import { queueOfferRule } from "./ruleQueueOffer.ts";
+import { SITE_PATH_RULES } from "./ruleSitePaths.ts";
 import { underscoreFieldRules } from "./ruleUnderscoreField.ts";
 import { verifiedUserRule } from "./ruleVerifiedUser.ts";
 import { useToken } from "./useToken.ts";
@@ -153,6 +154,7 @@ export const DEFAULT_RULES: readonly Rule[] = [
   queueOfferRule,
   ...mediaRules,
   ...fieldGrantRules,
+  ...SITE_PATH_RULES,
   ...INFO_RULES,
 ];
 

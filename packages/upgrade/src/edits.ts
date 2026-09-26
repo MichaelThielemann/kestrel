@@ -192,13 +192,33 @@ export interface RemoveModuleConfigOptions {
  * caller's finding falls back to manual instead of guessing at the surrounding punctuation.
  */
 export function removeModuleConfigProperty(file: string, source: string, options: RemoveModuleConfigOptions): Edit | undefined {
+  return removeNestedModuleConfigProperty(file, source, { use: options.use, path: [], key: options.key });
+}
+
+export interface RemoveNestedModuleConfigOptions {
+  use: string;
+  /** Property names leading from the entry's `config` object down to the object holding `key`. */
+  path: readonly string[];
+  key: string;
+}
+
+/**
+ * Removes a named property from an object literal nested in a module-list entry's `config`, reached through
+ * `path`, along with the comma that separated it from a neighbor. `undefined` when the entry, any object on the
+ * path, or the key cannot be found as an object literal.
+ */
+export function removeNestedModuleConfigProperty(file: string, source: string, options: RemoveNestedModuleConfigOptions): Edit | undefined {
   const array = moduleListArray(source);
   if (array === undefined) return undefined;
   const entry = elements(array).find((e) => entryUse(e) === options.use);
   if (entry === undefined) return undefined;
-  const config = objectProperty(entry, "config");
-  if (config === undefined || config.type !== "ObjectExpression") return undefined;
-  const props = objectPropertyNodes(config);
+  let target = objectProperty(entry, "config");
+  for (const key of options.path) {
+    if (target === undefined || target.type !== "ObjectExpression") return undefined;
+    target = objectProperty(target, key);
+  }
+  if (target === undefined || target.type !== "ObjectExpression") return undefined;
+  const props = objectPropertyNodes(target);
   const index = props.findIndex((p) => propertyKeyName(p) === options.key);
   if (index === -1) return undefined;
   const { start: propStart, end: propEnd } = span(props[index]!);

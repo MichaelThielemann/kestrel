@@ -173,6 +173,11 @@ Every finding's `docs` field links to one of the anchors below.
 | [`boot/dependency-cycle`](#boot-dependency-cycle) | boot | manual | a module dependency cycle |
 | [`runtime/restore-freshness`](#runtime-restore-freshness) | load | none (info) | `restoreOnStart` left on for `replication-sqlite`/`backup-blobstore` |
 | [`delivery/dependents`](#delivery-dependents) | source | none (info) | `delivery-static` publishing on events without marking dependent outputs |
+| [`site/routed-slug-unique`](#site-routed-slug-unique) | load | auto (error / warning) | a `unique` slug field on a type in `site-default`'s `routes` |
+| [`site/path-wiring`](#site-path-wiring) | boot | manual | a routed write without `site.indexPath`/`site.announcePaths`, or a read with another `home`/`slugField` |
+| [`site/path-events`](#site-path-events) | load | manual (error / warning) | `routes` without an `events@1` provider, or without a pipeline on `site.pathsMoved` |
+| [`redirects/requires-persistence`](#redirects-requires-persistence) | load | manual | `redirects-default` without a `persistence@1` provider |
+| [`imports/redirects-impl`](#imports-redirects-impl) | load | none (info) | a local module importing `kestrel-redirects-default/impl` |
 | [`deps/kestrel-range`](#deps-kestrel-range), `deps/mixed-majors`, `deps/pre-install` | source | auto / manual / none | a `@michaelthielemann/kestrel*` dependency range |
 | [`offer/event-queue`](#offer-event-queue) | source | none / ask / auto | the switch from `events-direct` to `events-queue` |
 | [`boot/<code>`](#boot-code) | boot | manual | any boot error no rule above claims |
@@ -488,6 +493,35 @@ a page it links to leaves its output stale. The `delivery-static` README ("Depen
 wiring for both render modes. Outputs rendered before the upgrade have no recorded dependencies and are
 re-rendered on every change until they render once; run "Publish all" (`delivery.publishAll`) or
 `delivery.checkBuild` once after upgrading to record them all.
+
+#### site-routed-slug-unique
+A type listed in `site-default`'s `routes` has a public path that is unique per locale, so its slug
+field need not be `unique`; a `unique` slug would reject the same slug under two parents without
+naming the occupant, and with a `parentField` or a mount setup fails. The fix removes `unique: true`
+from the slug field in `content-default`'s inline config; the index drops at the next boot. A slug
+field defined outside `kestrel.config.ts` is left to you.
+
+#### site-path-wiring
+With `routes`, every pipeline that writes a routed type ends that write's atomic group with
+`site.indexPath:<type>` and runs `site.announcePaths` right after the group; a pipeline writing the
+single type named in `mounts` does the same with `site.indexMounts`. `site.resolve`,
+`site.resolveLinks`, `site.attachPaths` and `site.route` on a routed type name its route's `home`
+and `slugField` or leave them out. Boot names the pipeline and the missing step; add it by hand.
+
+#### site-path-events
+Routed mode needs an `events@1` provider to raise `site.pathsMoved`, and a pipeline on that event
+for anything to follow a path change: `["redirects.recordMoves", "redirects.export"]` for automatic
+redirects and `["delivery.markMoved"]` for re-rendering static outputs.
+
+#### redirects-requires-persistence
+`redirects-default` stores automatic redirects in its own collections and requires `persistence@1`;
+configure a persistence module next to it.
+
+#### imports-redirects-impl
+`createRedirects` from `kestrel-redirects-default/impl` is async and takes `db` next to `content`,
+`blobs` and `logger`, and `Redirects.validate` returns a `Promise<Result>` instead of throwing
+synchronously for anything but a malformed rule. Code calling them directly needs `await` and the
+new dependency.
 
 #### deps-kestrel-range
 A `@michaelthielemann/kestrel*` dependency is not on a 6.x range; `deps/mixed-majors` fires when
