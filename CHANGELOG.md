@@ -31,7 +31,8 @@ Net changes since 5.8.1.
   `@michaelthielemann/kestrel-upgrade` without that field, or whose `engine`/`pluginApi` do not match
   the running CLI, is reported as `deps/host-outdated` (an error): its plugin is never run, and
   `fix --write` and `data` refuse to run (exit 2) until its matching release is installed. A
-  malformed field is `deps/host-refused` and stops the kestrel commands with exit 2.
+  malformed field is `deps/host-refused`: it stops the kestrel commands with exit 2, and the engine
+  refuses `fix --write` and `data` for it too. `--no-plugins` loads no plugin but keeps both guards.
   `PLUGIN_API_VERSION` is `4`; the new `PLUGIN_API_MIN` (`4`) is the lowest `pluginApi` the engine
   runs.
 

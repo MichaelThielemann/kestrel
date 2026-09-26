@@ -73,5 +73,6 @@ anything. `plugin` is a `.mjs` or `.js` file inside the package; its default exp
 versions the plugin is built for, of the form `^<major>.<minor>.<patch>`. A field that is malformed
 or points outside its package stops every command except `start`; a plugin built for another
 version is reported as `deps/host-outdated` and never runs. Two plugins that both detect the
-project stop the command and name both. `--no-plugins` skips the lookup. The configuration docs
+project stop the command and name both. `--no-plugins` loads no plugin, but an
+outdated or refused one is still reported. The configuration docs
 describe the field in full.

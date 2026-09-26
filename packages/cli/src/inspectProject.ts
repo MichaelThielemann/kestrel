@@ -3,7 +3,7 @@ import { findPackageJSON } from "node:module";
 import { resolve } from "node:path";
 import type { BootCheck } from "@michaelthielemann/kestrel";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
-import { loadHostPlugins, PLUGIN_API_VERSION, refusalMessage, scanHosts, selectHostPlugin, type LoadedHost, type OutdatedHost } from "@michaelthielemann/kestrel-upgrade/hosts";
+import { loadHostPlugins, PLUGIN_API_VERSION, refusalMessage, scanHosts, selectHostPlugin, type LoadableHost, type LoadedHost, type OutdatedHost } from "@michaelthielemann/kestrel-upgrade/hosts";
 import type { HostProblem, LoadedProject, LoadIssue } from "@michaelthielemann/kestrel-upgrade/plugin";
 import { loadBackendProject } from "@michaelthielemann/kestrel-upgrade/project";
 import { mergeSandboxEntries, sandboxBootInput, type SandboxResult } from "@michaelthielemann/kestrel-upgrade/sandbox";
@@ -85,13 +85,15 @@ export function remapPaths<T>(value: T, scratchDir: string, root: string): T {
   return boundaryCast<T>(walk(value), "json");
 }
 
-async function choosePlugin(root: string, noPlugins: boolean): Promise<{ ok: true; plugin?: LoadedHost } | PrepareFailure> {
-  if (noPlugins) return { ok: true };
-  const cli = cliVersion();
-  const scan = scanHosts(root, { cliVersion: cli });
+function scanProjectHosts(root: string): { ok: true; loadable: LoadableHost[] } | PrepareFailure {
+  const scan = scanHosts(root, { cliVersion: cliVersion() });
   if (scan.refused.length > 0) return { ok: false, kind: "refused", message: scan.refused.map(refusalMessage).join("\n") };
   if (scan.outdated.length > 0) return { ok: false, kind: "outdated", outdated: scan.outdated, root, installed: installedKestrelVersions(root) };
-  const { loaded, refused } = await loadHostPlugins(scan.loadable, { pluginApiVersion: PLUGIN_API_VERSION, cliVersion: cli });
+  return { ok: true, loadable: scan.loadable };
+}
+
+async function choosePlugin(root: string, loadable: readonly LoadableHost[]): Promise<{ ok: true; plugin?: LoadedHost } | PrepareFailure> {
+  const { loaded, refused } = await loadHostPlugins(loadable, { pluginApiVersion: PLUGIN_API_VERSION, cliVersion: cliVersion() });
   if (refused.length > 0) return { ok: false, kind: "refused", message: refused.map(refusalMessage).join("\n") };
   const selection = await selectHostPlugin(loaded, root);
   if (!selection.ok) return { ok: false, kind: "refused", message: selection.message };
@@ -99,25 +101,28 @@ async function choosePlugin(root: string, noPlugins: boolean): Promise<{ ok: tru
 }
 
 /**
- * Loads the project at `options.root` into a scratch copy that is also the process cwd while `body`
- * runs, through the detecting host plugin or the built-in backend loader with the project's own
- * core, and sandboxes its boot input. The cwd is restored and the copy removed afterwards.
+ * Loads the project at `options.root` into a scratch copy that is the process cwd from before any
+ * host plugin code runs until `body` returns, through the detecting host plugin or the built-in
+ * backend loader with the project's own core, and sandboxes its boot input. An outdated or refused
+ * host package fails it also with `noPlugins`. The cwd is restored and the copy removed afterwards.
  */
 export async function withProject<T>(options: ProjectOptions, body: (prepared: PreparedProject) => Promise<T>): Promise<{ ok: true; value: T } | PrepareFailure> {
   const root = resolve(options.root);
   const resolved = await importProjectCore(root);
   if (!resolved.ok) return { ok: false, kind: "refused", message: resolved.message };
-  const chosen = await choosePlugin(root, options.noPlugins);
-  if (!chosen.ok) return chosen;
-  const plugin = chosen.plugin;
-  if (plugin === undefined && !existsSync(resolve(root, "kestrel.config.ts"))) {
-    return { ok: false, kind: "refused", message: `${root} has no kestrel.config.ts, and no host package's plugin detects it` };
-  }
-  const loadModule: unknown = plugin === undefined ? await import(projectCoreUrl(root, "/load")) : undefined;
+  const scanned = scanProjectHosts(root);
+  if (!scanned.ok) return scanned;
   const scratch = await createScratchCopy(root);
   const previousCwd = process.cwd();
   process.chdir(scratch.dir);
   try {
+    const chosen = options.noPlugins ? { ok: true as const } : await choosePlugin(root, scanned.loadable);
+    if (!chosen.ok) return chosen;
+    const plugin = "plugin" in chosen ? chosen.plugin : undefined;
+    if (plugin === undefined && !existsSync(resolve(root, "kestrel.config.ts"))) {
+      return { ok: false, kind: "refused", message: `${root} has no kestrel.config.ts, and no host package's plugin detects it` };
+    }
+    const loadModule: unknown = plugin === undefined ? await import(projectCoreUrl(root, "/load")) : undefined;
     const issues: LoadIssue[] = [];
     let project: LoadedProject | undefined;
     try {

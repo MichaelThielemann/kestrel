@@ -168,6 +168,40 @@ describe("host plugin discovery", { timeout: 60_000 }, () => {
     expect(check.stderr).toContain("no kestrel.config.ts");
   });
 
+  it("keeps the outdated-host guard with --no-plugins: check fails, fix --write refuses and writes nothing", async () => {
+    const dir = hostProject("discovery-outdated-no-plugins");
+    const host = installHost(dir, "example-host", { ...FIELD, engine: `^${Number(VERSION.split(".")[0]) - 1}.0.0` });
+    writeProject(dir, { "example-host": "3.0.0" });
+    const before = readFileSync(join(dir, "package.json"), "utf8");
+    const fix = await runCli(["upgrade", "fix", "--write", "--yes", "--no-plugins", "--root", dir]);
+    expect(fix.code).toBe(2);
+    expect(fix.stderr).toContain("is not built for this kestrel-cli");
+    expect(readFileSync(join(dir, "package.json"), "utf8")).toBe(before);
+    const check = await runCli(["check", "--json", "--no-plugins", "--root", dir]);
+    expect(check.code).toBe(1);
+    expect(boundaryCast<CheckReport>(JSON.parse(check.stdout), "json").host.map((h) => h.code)).toEqual(["deps/host-outdated"]);
+    expect(existsSync(join(host, "cli", SIDE_EFFECT))).toBe(false);
+  });
+
+  it("keeps the refused-host guard with --no-plugins", async () => {
+    const dir = hostProject("discovery-refused-no-plugins");
+    installHost(dir, "example-host", { ...FIELD, engine: "6" });
+    writeProject(dir, { "example-host": "3.0.0" });
+    const before = readFileSync(join(dir, "package.json"), "utf8");
+    expect((await runCli(["upgrade", "fix", "--write", "--yes", "--no-plugins", "--root", dir])).code).toBe(2);
+    expect(readFileSync(join(dir, "package.json"), "utf8")).toBe(before);
+    expect((await runCli(["check", "--no-plugins", "--root", dir])).code).toBe(2);
+  });
+
+  it("runs a plugin's factory and detect in the scratch copy, never in the project", async () => {
+    const dir = hostProject("discovery-cwd");
+    installHost(dir, "example-host", FIELD, pluginSource({ detect: '(() => { writeFileSync("detect-ran", "yes"); return true; })()' }));
+    writeProject(dir, { "example-host": "3.0.0" });
+    const result = await runCli(["check", "--root", dir], { cwd: dir });
+    expect(result.code).toBe(0);
+    expect(existsSync(join(dir, "detect-ran"))).toBe(false);
+  });
+
   it("reports an outdated host package from check with exit 1 and refuses fix --write", async () => {
     const dir = hostProject("discovery-outdated");
     installHost(dir, "example-host", { ...FIELD, engine: `^${Number(VERSION.split(".")[0]) - 1}.0.0` });

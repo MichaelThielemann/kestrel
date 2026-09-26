@@ -230,8 +230,8 @@ data, before importing anything. A malformed field, or one whose plugin path lea
 stops every command except `start` with exit 2 naming the package. A plugin built for another
 version (`engine` not matching the CLI, `pluginApi` below the engine's minimum) is never run:
 `check` reports it as `deps/host-outdated` and exits 1, the other commands exit 2. Two plugins that
-both detect the project stop the command, naming both. `--no-plugins` skips the lookup and uses the
-built-in loader. `start` never loads a plugin; on a boot failure it names the dependency that
+both detect the project stop the command, naming both. `--no-plugins` loads no plugin and uses the
+built-in loader; an outdated or refused host package still stops the command. `start` never loads a plugin; on a boot failure it names the dependency that
 declares one. [`upgrading.md`](upgrading.md) § Registering a plugin has the details.
 
 | Command | 0 | 1 | 2 |

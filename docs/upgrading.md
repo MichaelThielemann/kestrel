@@ -637,7 +637,8 @@ does. Install the dependency's release for the target major first, then run the 
 `deps/host-refused` names a dependency whose `kestrel` field cannot be used at all: the plugin
 path is absolute, leaves the package directory (also through a symlink), is not a `.mjs`/`.js`
 file or does not exist, `pluginApi` is not an integer or needs a newer engine, or `engine` is not
-of the form `^<major>.<minor>.<patch>`. Nothing of that package runs.
+of the form `^<major>.<minor>.<patch>`. Nothing of that package runs, and `fix --write` and `data`
+refuse to run (exit 2) the same way as for an outdated one.
 
 #### offer-event-queue
 See [Switching event delivery to the queue](#5-switching-event-delivery-to-the-queue) above.
@@ -768,10 +769,12 @@ root, and checks it as data before importing anything:
   result that is not a plugin, is a refusal naming the package. More than one plugin whose `detect`
   accepts the project is an error naming every one of them; there is no first match.
 
-`--no-plugins` skips the lookup and uses the built-in loader. A plugin runs with the user's
-privileges like any other code of the packages the project installed; the rules above limit it to
-direct dependencies and make a second plugin taking over a project an error instead of a silent
-choice.
+`--no-plugins` loads no plugin and uses the built-in loader; an outdated or refused host package is
+still reported and still blocks `fix --write` and `data`. A plugin runs with the user's privileges
+like any other code of the packages the project installed; the rules above limit it to direct
+dependencies and make a second plugin taking over a project an error instead of a silent choice.
+Its factory and `detect` run with a scratch copy of the project (`check`, `explain`, `manifest`,
+`openapi`) or the project root (`upgrade`) as the working directory.
 
 A plugin compares `host.pluginApiVersion`, the running engine's number, never the
 `PLUGIN_API_VERSION` it imports from its own copy of this package: a project can hold two copies,
