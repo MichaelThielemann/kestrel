@@ -28,12 +28,24 @@ function appendRule(id: string, needs: string | undefined, adds: string): Source
   };
 }
 
-function plugin(): UpgradePlugin {
+function askRule(): SourceRule {
+  return {
+    id: "chain/ask",
+    needs: "source",
+    check(ctx) {
+      const answer = ctx.answers.get("chain-keep");
+      if (answer === "yes") return [];
+      return [{ id: "chain/ask", rule: "chain/ask", severity: "warning", tier: "source", where: {}, message: "keep the chain?", suggestion: "answer", fix: { kind: "ask", question: "chain-keep", prompt: "keep the chain?", choices: ["no", "yes"], closedChoices: true, defaultValue: "no" }, docs: "n/a" }];
+    },
+  };
+}
+
+function plugin(extra: SourceRule[] = []): UpgradePlugin {
   const project = (): LoadResult => ({
     project: { input: { config: { modules: [], triggers: [] }, modules: [], pipelines: [] }, kind: "chain-host", configFile: join(dir, "host.config.ts"), moduleFiles: new Map(), pipelineFiles: [] },
     issues: [],
   });
-  return { kind: "chain-host", detect: () => true, load: () => Promise.resolve(project()), rules: [appendRule("chain/one", undefined, "one"), appendRule("chain/two", "one", "two"), appendRule("chain/three", "two", "three")] };
+  return { kind: "chain-host", detect: () => true, load: () => Promise.resolve(project()), rules: [appendRule("chain/one", undefined, "one"), appendRule("chain/two", "one", "two"), appendRule("chain/three", "two", "three"), ...extra] };
 }
 
 describe("kestrel-upgrade fix --write", () => {
@@ -52,6 +64,22 @@ describe("kestrel-upgrade fix --write", () => {
     const code = await runCli(["fix", "--root", dir, "--write", "--yes", "--allow-dirty", "--answers", answersFile], { stdout: (l) => lines.push(l), stderr: (l) => lines.push(l), isInteractive: false, plugins: [plugin()] });
     expect(code).toBe(1);
     expect(lines.some((l) => l.includes("some-plugin:question-of-a-later-pass") && l.includes("never asked"))).toBe(true);
+    expect(await readFile(join(dir, "steps.txt"), "utf8")).toContain("three");
+  });
+
+  it("asks a question answered at the terminal only once across passes", async () => {
+    const prompts: string[] = [];
+    await runCli(["fix", "--root", dir, "--write", "--allow-dirty"], {
+      stdout: () => undefined,
+      stderr: () => undefined,
+      isInteractive: true,
+      prompt: (question, _choices, fallback) => {
+        prompts.push(question);
+        return Promise.resolve(question.startsWith("write") ? "y" : (fallback ?? ""));
+      },
+      plugins: [plugin([askRule()])],
+    });
+    expect(prompts.filter((q) => q.includes("keep the chain?"))).toHaveLength(1);
     expect(await readFile(join(dir, "steps.txt"), "utf8")).toContain("three");
   });
 });

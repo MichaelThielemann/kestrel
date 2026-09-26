@@ -710,8 +710,8 @@ interface AskLoopResult {
   previewBoot?: (edits: readonly Edit[]) => Promise<BootPreview | undefined>;
 }
 
-async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined, plugins: readonly UpgradePlugin[] | undefined): Promise<AskLoopResult & { unknownIds: string[]; staleIds: string[]; invalidAnswers: Array<{ id: string; value: string }> }> {
-  const answers = new Map<string, string>();
+async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined, plugins: readonly UpgradePlugin[] | undefined, known: ReadonlyMap<string, string> = new Map()): Promise<AskLoopResult & { unknownIds: string[]; staleIds: string[]; invalidAnswers: Array<{ id: string; value: string }> }> {
+  const answers = new Map<string, string>(known);
   const everAsked = new Set<string>();
   const askedFixes = new Map<string, AskFix>();
   const pluginCache = new Map<string, unknown>();
@@ -789,7 +789,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
   let staleIds: string[] | undefined;
   let changed: Array<[string, { source: string; current: string }]> = [];
   for (let round = 0; round < (write ? MAX_FIX_PASSES : 1); round++) {
-    pass = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins);
+    pass = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins, answers);
     for (const [id, value] of pass.answers) answers.set(id, value);
     unknownIds = unknownIds === undefined ? pass.unknownIds : unknownIds.filter((id) => pass!.unknownIds.includes(id));
     staleIds = staleIds === undefined ? pass.staleIds : staleIds.filter((id) => pass!.staleIds.includes(id));
