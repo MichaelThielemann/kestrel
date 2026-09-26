@@ -9,7 +9,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type Introspection } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { createDeliveryStatic, LLMS_STALE, OUTPUT_STALE, type Delivery } from "./impl.ts";
+import { createDeliveryStatic, LLMS_STALE, OUTPUT_STALE, type Delivery, type MovedPath } from "./impl.ts";
 
 const dependenciesSchema = z
   .object({
@@ -70,6 +70,10 @@ function changedIds(payload: Record<string, unknown>): string[] {
   const ids = Array.isArray(payload.ids) ? payload.ids.filter((v): v is string => typeof v === "string") : [];
   if (typeof payload.id === "string") ids.push(payload.id);
   return [...new Set(ids)];
+}
+
+function isMovedPath(value: unknown): value is MovedPath {
+  return isRecord(value) && typeof value.type === "string" && typeof value.id === "string" && typeof value.locale === "string" && (value.from === null || typeof value.from === "string") && (value.to === null || typeof value.to === "string");
 }
 
 function previousResult(ctx: Context): Record<string, unknown> {
@@ -178,6 +182,13 @@ export default defineModule({
       if (isErr(marked)) return ctx.fail(marked.error);
       return ok({ ...ctx, result: { ...previousResult(ctx), _dependents: marked.value } });
     }),
+    markMoved: async (ctx: Context) => {
+      const moves: unknown = ctx.payload.moves;
+      if (!Array.isArray(moves) || !moves.every(isMovedPath)) return ctx.fail("VALIDATION", "delivery.markMoved: payload.moves must be a list of { type, id, locale, from, to }");
+      const marked = await delivery.markMoved(moves);
+      if (isErr(marked)) return ctx.fail(marked.error);
+      return ok({ ...ctx, result: { ...previousResult(ctx), _moved: marked.value } });
+    },
     markAll: stepFactory((type: string) => async (ctx: Context) => {
       const marked = await delivery.markAll(type);
       if (isErr(marked)) return ctx.fail(marked.error);
@@ -256,6 +267,14 @@ export default defineModule({
       extendsOutput: { type: "object", properties: { _dependents: MARKED }, required: ["_dependents"] },
       errors: { 503: "the marks or their jobs could not be written" },
     }),
+    markMoved: {
+      summary: "Mark the own outputs of every document in payload.moves (site.pathsMoved) and every output linking to one of them for a re-render at its new path, and start it outside the request (adds `_moved: { marked }` to the result)",
+      reads: ["payload"],
+      writes: ["result._moved"],
+      input: { type: "object", properties: { moves: { type: "array", items: { type: "object", properties: { type: { type: "string" }, id: { type: "string" }, locale: { type: "string" }, from: { type: ["string", "null"] }, to: { type: ["string", "null"] } }, required: ["type", "id", "locale", "from", "to"] } } }, required: ["moves"], additionalProperties: true },
+      extendsOutput: { type: "object", properties: { _moved: MARKED }, required: ["_moved"] },
+      errors: { 400: "payload.moves is missing or malformed", 503: "the marks or their jobs could not be written" },
+    },
     markAll: (type: string) => ({
       summary: `Mark every ${type} output for a re-render in the background, including documents that were never delivered (adds \`marked\` to the result)`,
       reads: [],

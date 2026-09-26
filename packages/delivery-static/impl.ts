@@ -105,6 +105,8 @@ export interface Delivery {
   exportLlms(): Promise<Result<{ entries: number; full: boolean }, DeliveryError>>;
   /** Marks every `live` or `error` output whose last render read one of `ids` of `type`, a list `type`'s store now puts one of them in, a link whose path changed, or nothing known. */
   markDependents(type: string, ids: readonly string[]): Promise<Result<{ marked: number }, DeliveryError>>;
+  /** Marks the own outputs of every moved document, then every output whose last render linked to one of them at a path that changed. */
+  markMoved(moves: readonly MovedPath[]): Promise<Result<{ marked: number }, DeliveryError>>;
   /** Marks every output of a delivered type, creating a marked `draft` row for each document and locale without one. */
   markAll(type: string): Promise<Result<{ marked: number }, DeliveryError>>;
   /** Marks every output of every delivered type when `build` differs from the stored one, then stores it. */
@@ -117,6 +119,15 @@ export interface Delivery {
   readStaleStatus(): Promise<Result<StaleStatus, DeliveryError>>;
   /** Stops the background loop and waits for the render in progress. */
   close(): Promise<void>;
+}
+
+/** A document's reachable path in one locale before and after a run, as `site.pathsMoved` reports it. */
+export interface MovedPath {
+  type: string;
+  id: string;
+  locale: string;
+  from: string | null;
+  to: string | null;
 }
 
 export interface DeliveryDeps {
@@ -856,7 +867,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     const keptPath = before !== null && (before.state === "live" || before.state === "error") ? before.path : null;
     const failed = (message: string, work: Omit<Work, "failure" | "set">, reads: ObservedRead[]): Promise<Result<RenderOutcome, DeliveryError>> =>
       commit(flight, output, before, renderId, { state: "error", path: keptPath, error: message }, { ...work, set: { kind: "failure", reads }, failure: message });
-    if (path === null) return commit(flight, output, before, renderId, { state: "error", path: null, error: `no ${tc.slugField}` }, { renderPath: null, written: {}, set: { kind: "empty" }, failure: null });
+    if (path === null) return commit(flight, output, before, renderId, { state: "error", path: null, error: "no public path" }, { renderPath: null, written: {}, set: { kind: "empty" }, failure: null });
     const reservedPage = reservedMatch(path, config.reservedPaths);
     if (reservedPage !== undefined) return failed(`path ${path} is reserved (${reservedPage})`, { renderPath: null, written: {} }, linkScope.reads);
 
@@ -1134,6 +1145,21 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     }
   };
 
+  const markMoved: Delivery["markMoved"] = async (moves) => {
+    const own = moves.filter((m) => deliveredTypes.includes(m.type)).map((m) => statusIdOf(m.type, m.id, m.locale));
+    const marked = await markRows(own, MARKABLE);
+    if (isErr(marked)) return marked;
+    let total = marked.value;
+    const byType = new Map<string, Set<string>>();
+    for (const move of moves) byType.set(move.type, (byType.get(move.type) ?? new Set<string>()).add(move.id));
+    for (const [type, ids] of byType) {
+      const dependents = await markDependents(type, [...ids]);
+      if (isErr(dependents)) return dependents;
+      total += dependents.value.marked;
+    }
+    return ok({ marked: total });
+  };
+
   const markAll: Delivery["markAll"] = async (type) => {
     typeConfig(type);
     const token = randomUUID();
@@ -1262,6 +1288,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     },
     exportLlms: exportLlmsNow,
     markDependents,
+    markMoved,
     markAll,
     async checkBuild(build) {
       const stored = await db.findOne<StateRow>(STATE, { id: "build" });

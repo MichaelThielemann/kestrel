@@ -9,9 +9,11 @@ narrowed to locales that satisfy it themselves, internal links resolved to publi
 path `site.pathOf` returns (default locale unprefixed unless `prefixPrimary`, `home` slug → `/`);
 other locales are removed. Outcome per
 locale in `delivery_publish_status` (`live` | `error` | `draft`, `path`, `error`, `publishedAt`); a failed
-render keeps the previous live output, but a locale that is published yet has no slug of its own or
-inherited (`state: "error"`, e.g. the default locale it inherited a slug from turned draft) removes
-its previous output instead — that content is no longer publishable, so it does not stay public.
+render keeps the previous live output, but a locale that is published yet has no public path
+(`state: "error"`, error `no public path`: it has no slug of its own or inherited, e.g. the default
+locale it inherited a slug from turned draft, or `site.pathOf` answers `null` because another
+document holds the path) removes its previous output instead — that content is no longer
+publishable, so it does not stay public.
 `delivery.unpublish:<type>` after remove, `delivery.readStatus:<type>`
 for the editor's second lamp, `delivery.publishAll:<type>` to re-render everything.
 `delivery.publish` takes the document id from `result.id` when present, else from the event
@@ -60,6 +62,7 @@ published. Only wiring bugs throw (unknown type, unconfigured type, an asset pat
 | `delivery.publishAll:<type>` | – | `result` | TRANSIENT |
 | `delivery.exportLlms` | – | `result._llms` | TRANSIENT |
 | `delivery.markDependents:<type>` | `payload.id`, `payload.ids` | `result._dependents` | TRANSIENT |
+| `delivery.markMoved` | `payload.moves` | `result._moved` | VALIDATION, TRANSIENT |
 | `delivery.markAll:<type>` | – | `result.marked` | TRANSIENT |
 | `delivery.checkBuild` | `payload.build` | `result` | VALIDATION, TRANSIENT |
 | `delivery.republishOutput` | `payload.type`, `payload.docId`, `payload.locale` | `result` | VALIDATION, TRANSIENT |
@@ -100,6 +103,17 @@ of `<type>` as a whole, a list the store now puts one of them in (`content.list(
 so list filters are never evaluated here), or a link whose path or published state changed. Outputs with unknown
 dependencies are marked by every change. Drafts are never marked, and a re-render raises no content event, so a
 change marks each dependent output once and a cycle of pages that show each other ends after one round.
+
+**Moved paths.** `delivery.markMoved` runs on `site.pathsMoved` and takes `{ type, id, locale, from, to }` entries
+from the payload's `moves`. It marks the moved documents' own `live` or `error` outputs in those locales, which a
+change of their own document would not mark, and then every output that linked to one of them at a path that is
+no longer current. The re-render stores each output at its new path and removes the old path's files unless
+another output owns them, so two pages that swapped slugs each end up at their new path.
+
+```ts
+triggers: [{ event: "site.pathsMoved", pipeline: "pathsMovedDelivery" }],
+definePipeline({ name: "pathsMovedDelivery", steps: ["delivery.markMoved"] });
+```
 
 **Rendering, never inside the request.** `dependencies.render` chooses who renders a marked output:
 
@@ -250,6 +264,7 @@ Not included: sitemap, CDN invalidation.
 | `delivery.publishAll:<arg>` | Re-render every <arg> | – | `result` | – | { documents: number, live: number, errors: number, … } | – | – | no |
 | `delivery.exportLlms` | Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result) | – | `result._llms` | – | { _llms: object, … } | – | – | no |
 | `delivery.markDependents:<arg>` | Mark every published output whose last render read the changed <arg> (payload id and ids) for a re-render, and start it outside the request (adds `_dependents: { marked }` to the result) | `payload` | `result._dependents` | object | { _dependents: object, … } | 503 the marks or their jobs could not be written | – | no |
+| `delivery.markMoved` | Mark the own outputs of every document in payload.moves (site.pathsMoved) and every output linking to one of them for a re-render at its new path, and start it outside the request (adds `_moved: { marked }` to the result) | `payload` | `result._moved` | { moves: object[], … } | { _moved: object, … } | 400 payload.moves is missing or malformed; 503 the marks or their jobs could not be written | – | no |
 | `delivery.markAll:<arg>` | Mark every <arg> output for a re-render in the background, including documents that were never delivered (adds `marked` to the result) | – | `result` | – | { marked: integer, … } | 503 the marks or their jobs could not be written | – | no |
 | `delivery.checkBuild` | Mark every delivered output for a re-render when payload.build differs from the stored build, then store it | `payload` | `result` | { build: string, … } | { changed: boolean, marked: integer, … } | 400 payload.build is missing; 503 the marks could not be written; the build is not stored | – | no |
 | `delivery.republishOutput` | Render one marked output (payload type, docId, locale) under a claim; a failed render is recorded on the output and answered as an error so the event delivery retries it | `payload` | `result` | { type: string, docId: string, locale: string, … } | { rendered: boolean, state: "live" \| "error" \| "draft" \| null, … } | 400 payload needs type, docId and locale; 503 the render failed or another render holds the output | – | no |
@@ -263,6 +278,7 @@ Pipelines in `examples/minimal` using these steps:
 - **mediaDependents** (event media.updated, event media.deleted, event images.variantsChanged): **`delivery.markDependents:media`**
 - **pageDependents** (event page.created, event page.updated, event page.restored, event page.translationRemoved, event page.deleted): **`delivery.markDependents:pages`**
 - **pagePublishStatus** (GET /admin/publish-status/pages/:id): `authn.requireUser` → `authz.require:pages.manage` → **`delivery.readStatus:pages`**
+- **pathsMovedDelivery** (event site.pathsMoved): **`delivery.markMoved`**
 - **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.require:pages.manage` → **`delivery.publishAll:pages`** → `redirects.export` → **`delivery.exportLlms`**
 - **publishPage** (event page.created, event page.updated, event page.restored, event page.translationRemoved): **`delivery.publish:pages`** → **`delivery.requestLlms`**
 - **resumeStalePages** (cron */5 * * * *): **`delivery.resumeStale`**
