@@ -322,6 +322,10 @@ function hostFindings(hosts: HostScan): Finding[] {
   return [...outdated, ...refused];
 }
 
+function hostBlockers(hosts: HostScan): string[] {
+  return [...hosts.outdated.map((host) => host.message), ...hosts.refused.map(refusalMessage)];
+}
+
 function hostsOf(root: string, hosts: HostScan | undefined): HostScan {
   return hosts ?? scanHosts(root, { cliVersion: TOOL_VERSION });
 }
@@ -805,9 +809,9 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     return 2;
   }
   const hosts = hostsOf(root, options.hosts);
-  if (write && hosts.outdated.length > 0) {
-    for (const host of hosts.outdated) stderr(host.message);
-    stderr("fix --write refuses to run while a dependency is not built for this version; nothing was written");
+  if (write && (hosts.outdated.length > 0 || hosts.refused.length > 0)) {
+    for (const message of hostBlockers(hosts)) stderr(message);
+    stderr("fix --write refuses to run while a dependency is not built for this version or its kestrel field is refused; nothing was written");
     return 2;
   }
 
@@ -961,9 +965,9 @@ async function runData(args: ParsedArgs, stdout: (line: string) => void, stderr:
   }
   const root = resolve(stringFlag(args, "root") ?? ".");
   const hosts = hostsOf(root, options.hosts);
-  if (hosts.outdated.length > 0) {
-    for (const host of hosts.outdated) stderr(host.message);
-    stderr("data refuses to run while a dependency is not built for this version");
+  if (hosts.outdated.length > 0 || hosts.refused.length > 0) {
+    for (const message of hostBlockers(hosts)) stderr(message);
+    stderr("data refuses to run while a dependency is not built for this version or its kestrel field is refused");
     return 2;
   }
   const result = await runDataStep(resolve(db), root, options.plugins ?? []);

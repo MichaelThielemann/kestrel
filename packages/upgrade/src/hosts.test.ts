@@ -203,3 +203,16 @@ describe("a 6.x backend project that depends on kestrel-cli", () => {
     expect(code).toBe(0);
   });
 });
+
+describe("the engine refuses to write while a host package's kestrel field is refused", () => {
+  it("fix --write and data exit 2 with nothing written", async () => {
+    await installHost(dir, "example-host", { kestrel: { plugin: "../../evil.mjs", pluginApi: PLUGIN_API_MIN, engine: MATCHING } });
+    await writeProject(dir, { "example-host": "1.0.0", "@michaelthielemann/kestrel": "^5.8.0" });
+    const before = readFileSync(join(dir, "package.json"), "utf8");
+    const errors: string[] = [];
+    expect(await runCli(["fix", "--root", dir, "--write", "--yes"], { stdout: () => undefined, stderr: (l) => errors.push(l) })).toBe(2);
+    expect(errors.join("\n")).toContain('"example-host"');
+    expect(readFileSync(join(dir, "package.json"), "utf8")).toBe(before);
+    expect(await runCli(["data", "--root", dir, "--db", join(dir, "missing.db")], { stdout: () => undefined, stderr: () => undefined })).toBe(2);
+  });
+});
