@@ -137,7 +137,7 @@ export const contractHelperImportsRule: Rule = {
     const findings: Finding[] = [];
     for (const file of projectSourceFiles(ctx.scratch)) {
       const source = ctx.readFile(file);
-      if (source === undefined) continue;
+      if (source === undefined || !CONTRACTS_REFERENCE.test(source)) continue;
       let scan: Scan;
       try {
         scan = scanFile(file, source);
