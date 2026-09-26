@@ -103,6 +103,12 @@ export async function createRedirects(config: Config, deps: { content: Content; 
   }
 
   let cache: { updatedAt: number; rules: RedirectRule[] } | undefined;
+  let queue: Promise<unknown> = Promise.resolve();
+  const serial = <T>(work: () => Promise<T>): Promise<T> => {
+    const run = queue.then(work, work);
+    queue = run.catch(() => undefined);
+    return run;
+  };
 
   async function publishable(): Promise<Result<{ updatedAt: number; rules: RedirectRule[]; skipped: string[] }, RedirectsError>> {
     const found = await content.get(config.type);
@@ -244,15 +250,16 @@ export async function createRedirects(config: Config, deps: { content: Content; 
       });
       return ok(undefined);
     },
-    async recordMoves(moves) {
-      let recorded = 0;
-      for (const move of moves) {
-        const applied = await applyMove(move);
-        if (isErr(applied)) return applied;
-        recorded += 1;
-      }
-      return ok({ recorded });
-    },
+    recordMoves: (moves) =>
+      serial(async () => {
+        let recorded = 0;
+        for (const move of moves) {
+          const applied = await applyMove(move);
+          if (isErr(applied)) return applied;
+          recorded += 1;
+        }
+        return ok({ recorded });
+      }),
     async lookup(path) {
       return unobserved(async () => {
         const rules = await current();
@@ -261,7 +268,8 @@ export async function createRedirects(config: Config, deps: { content: Content; 
         if (hit) return ok({ to: hit.target, status: hit.status });
         const auto = await autoAt(canonicalPath(path));
         if (isErr(auto)) return auto;
-        return ok(auto.value ? { to: auto.value.to, status: 301 } : null);
+        if (!auto.value || matchRedirect(rules.value, auto.value.to)) return ok(null);
+        return ok({ to: auto.value.to, status: 301 });
       });
     },
     async export() {
@@ -289,13 +297,14 @@ export async function createRedirects(config: Config, deps: { content: Content; 
       if (isErr(effective)) return effective;
       return ok([...effective.value].sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0)));
     },
-    async removeAuto(rawPath) {
-      const path = canonicalPath(requestPath(rawPath));
-      const at = await autoAt(path);
-      if (isErr(at)) return at;
-      if (!at.value) return err(failure("NOT_FOUND", `redirects: no automatic redirect at ${path}`));
-      const updated = await db.updateOne<PathRow>(PATHS, path, { kind: "removed" });
-      return isErr(updated) ? err(transientOnly(updated.error, "persistence@1")) : ok(undefined);
-    },
+    removeAuto: (rawPath) =>
+      serial(async (): Promise<Result<void, RedirectsError | KestrelError<"NOT_FOUND">>> => {
+        const path = canonicalPath(requestPath(rawPath));
+        const at = await autoAt(path);
+        if (isErr(at)) return at;
+        if (!at.value) return err(failure("NOT_FOUND", `redirects: no automatic redirect at ${path}`));
+        const updated = await db.updateOne<PathRow>(PATHS, path, { kind: "removed" });
+        return isErr(updated) ? err(transientOnly(updated.error, "persistence@1")) : ok(undefined);
+      }),
   };
 }

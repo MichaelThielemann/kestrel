@@ -162,7 +162,36 @@ describe("automatic redirects: admin removal", () => {
   });
 });
 
+describe("automatic redirects: concurrent deliveries", () => {
+  for (const order of ["older first", "newer first"] as const) {
+    it(`two deliveries recorded at the same time end with the newer state (${order})`, async () => {
+      const r = await domain();
+      await r.recordMoves([move({ type: "page", id: "b", locale: "de", from: null, to: "/b", seq: 1 })]);
+      const older = [move({ type: "page", id: "b", locale: "de", from: "/b", to: "/c", seq: 5 })];
+      const newer = [move({ type: "page", id: "a", locale: "de", from: null, to: "/b", seq: 6 })];
+      const results = await Promise.all(order === "older first" ? [r.recordMoves(older), r.recordMoves(newer)] : [r.recordMoves(newer), r.recordMoves(older)]);
+      for (const result of results) expectOk(result);
+      expect(expectOk(await r.lookup("/b"))).toBeNull();
+      expect(expectOk(await r.lookup("/c"))).toBeNull();
+      expect(expectOk(await r.listAuto())).toEqual([]);
+    });
+  }
+});
+
 describe("automatic redirects: editor precedence", () => {
+  it("an automatic redirect into a path an editor rule redirects back answers nothing instead of looping", async () => {
+    const r = await createRedirects(config, { content: fakeContent([{ from: "/b", to: "/a" }]), blobs: fakeBlobs(), db: createFakePersistence(), logger: quiet });
+    await r.recordMoves([move({ type: "page", id: "d1", locale: "de", from: "/a", to: "/b", seq: 1 })]);
+    expect(expectOk(await r.lookup("/b"))).toEqual({ to: "/a", status: 301 });
+    expect(expectOk(await r.lookup("/a"))).toBeNull();
+  });
+
+  it("an old path with a trailing slash redirects too", async () => {
+    const r = await domain();
+    await r.recordMoves([move({ type: "page", id: "d1", locale: "de", from: "/alt", to: "/neu", seq: 1 })]);
+    expect(expectOk(await r.lookup("/alt/"))).toEqual({ to: "/neu", status: 301 });
+  });
+
   it("an editor rule wins over an automatic one, and redirects.json lists editor rules first", async () => {
     const r = await createRedirects(config, { content: fakeContent([{ from: "/a", to: "/edited" }]), blobs: fakeBlobs(), db: createFakePersistence(), logger: quiet });
     await r.recordMoves([move({ type: "page", id: "d1", locale: "de", from: "/a", to: "/b", seq: 1 })]);

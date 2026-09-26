@@ -44,11 +44,14 @@ ends up live for whichever document claims it last, and never lands on a documen
 `to` is `null` ends every redirect to that document, since a redirect is only reported while the document
 still has a known destination path.
 
+Moves are recorded one delivery at a time within the process, so two runs delivering moves at once end
+in the same state as in either order.
+
 An editor rule takes precedence over an automatic redirect at the same path, in `lookup` and in the
 `redirects.json` order (editor rules first). Saving an editor rule that redirects into a path an automatic
 redirect currently owns is rejected by `redirects.validate` – that combination would otherwise send a
-visitor through two hops. Symmetrically, `export`/`render` skip (and log) an automatic redirect whose own
-target an editor rule already matches, rather than publish a redirect into a redirect.
+visitor through two hops. Symmetrically, `lookup`, `export` and `render` skip an automatic redirect whose own
+target an editor rule already matches (`export` and `render` log it), rather than answer a redirect into a redirect.
 
 An admin can retire one automatic redirect with `redirects.removeAuto` without touching the underlying
 content: the path is marked as removed, keeping the `seq` it had. Replaying the move that produced it does

@@ -407,7 +407,7 @@ non-empty strings, no other fields — otherwise 400 with path and reason
 | PUT | `/redirects` | `{ rules: [{ from, to, status? }] }` | document, writes `redirects.json` to the blob store (`redirects.write`); 400 `redirects: Row N: …` on an invalid rule |
 | GET | `/redirects.json` | – | `[{ pattern, target, status }]` – public, same content as the file in the blob store; editor rules first, then the automatic redirects of moved pages |
 | GET | `/admin/redirects/auto` | – | `[{ from, to, type, docId, locale, seq }]` – automatic redirects in effect, sorted by `from` (`redirects.read`) |
-| DELETE | `/admin/redirects/auto/*path` | – | removes the automatic redirect at that path for good and rewrites `redirects.json` (`redirects.write`); 404 when there is none |
+| DELETE | `/admin/redirects/auto/*path` | – | removes the automatic redirect at that path (a later move of a page away from that path creates a new one) and rewrites `redirects.json` (`redirects.write`); 404 when there is none |
 
 `from` uses `*` (one segment) / `**` (one or more segments), `to` is a path or an https URL with
 `$1…`; `status` is 301 (default) | 302 | 307 | 308. List order = priority when several rules match.
