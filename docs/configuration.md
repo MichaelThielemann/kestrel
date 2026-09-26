@@ -39,6 +39,29 @@ not listed here does not exist for the instance.
 the module. Relative paths inside a module's config resolve against `deps.root`, the directory of
 the loaded config file.
 
+### Host-supplied defaults
+
+A tool that writes module entries on the consumer's behalf can hand its values over as defaults
+instead of as `config`:
+
+```ts
+{
+  use: "@michaelthielemann/kestrel-delivery-static",
+  defaults: { from: "my-preset", values: { reservedPaths: ["/admin"], dependencies: { render: "events" } } },
+  config: { dependencies: { maxPerRender: 200 } },
+}
+```
+
+`from` names the source (non-empty); `values` is an object. Boot lays `config` over `values` and
+parses the result: plain objects merge key by key, `config` wins at every path, and any other value
+— an array, a string, `null` — replaces the default whole. An entry without `config` gets `values`
+as its config.
+
+The difference shows in `kestrel.describe()` and the insights manifest: a path only `values`
+carries is reported as `status: "default"` with `source: "my-preset"`; a path `config` carries is
+`set`, whether or not `values` also has it. Secrets are redacted the same way in both layers. See
+[api.md](api.md) for the variable fields.
+
 Setup order follows these rules, applied in order:
 
 1. a module is set up after the provider of every contract in its `requires`;

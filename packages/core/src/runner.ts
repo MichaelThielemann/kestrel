@@ -7,7 +7,7 @@ import type { ResolvedStep } from "./registry.ts";
 import { failure, isKestrelError, type KestrelError } from "./errors.ts";
 import { isErr, type Result } from "./result.ts";
 import { coerceQuery, resolveOutputSchema, validateSchema, type SchemaProblem } from "./schema.ts";
-import { isRecord } from "./guards.ts";
+import { isPlainObject, isRecord } from "./guards.ts";
 import type { StepDescription } from "./defineModule.ts";
 import { logWarn } from "./logger.ts";
 import { writeRoot } from "./writes.ts";
@@ -127,12 +127,6 @@ function checkOutput(step: ResolvedStep, descriptionsSoFar: readonly StepDescrip
   if (problems.length > 0) {
     throw new Error(`step "${step.name}": result does not match describe().output (${problems.map((p) => `${p.path} ${p.message}`).join("; ")})`);
   }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (!isRecord(value)) return false;
-  const prototype: unknown = Object.getPrototypeOf(value);
-  return prototype === null || prototype === Object.prototype;
 }
 
 function memberPath(path: string, key: string): string {

@@ -3,7 +3,7 @@ export { matchRoute, routePattern, parseRequestBody, parseQuery, buildResponse, 
 export { defineConfig, type KestrelConfig, type KestrelConfigInput } from "./defineConfig.ts";
 export { defineContract, type Contract } from "./defineContract.ts";
 export { defineModule, type ModuleDefinition, type ModuleInput, type ModuleTriggers, type ContractLookup, type Deps, type EventEntry, type ContextPath, type JsonSchema, type StepDescription, type StepDescriptions, type NarrowsDeclaration, type Introspection, type Detach } from "./defineModule.ts";
-export type { Manifest, ModuleManifest, StepManifest, PipelineManifest, PipelineStepManifest, TriggersManifest, ConfigStatus, ConfigVariable } from "./describe.ts";
+export type { Manifest, ModuleManifest, StepManifest, PipelineManifest, PipelineStepManifest, TriggersManifest, ConfigDefaults, ConfigStatus, ConfigVariable } from "./describe.ts";
 export { SECRET } from "./describe.ts";
 export { REDACTED, type JsonValue } from "./configValue.ts";
 export type { RunObserver, RunStartEvent, RunEndEvent, StepStartEvent, StepEndEvent, Unobserve } from "./observer.ts";

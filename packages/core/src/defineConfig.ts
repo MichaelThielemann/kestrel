@@ -8,7 +8,15 @@ const triggerSchema = z.union([
 
 export const configSchema = z
   .object({
-    modules: z.array(z.object({ use: z.string().min(1), config: z.unknown().optional() }).strict()),
+    modules: z.array(
+      z
+        .object({
+          use: z.string().min(1),
+          config: z.unknown().optional(),
+          defaults: z.object({ from: z.string().min(1), values: z.record(z.string(), z.unknown()) }).strict().optional(),
+        })
+        .strict(),
+    ),
     triggers: z.array(triggerSchema),
     http: z
       .union([

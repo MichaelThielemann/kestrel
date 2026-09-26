@@ -475,6 +475,13 @@ Net changes since 5.8.1.
 
 ### Added
 
+- A `kestrel.config` module entry accepts `defaults: { from, values }`: values a host supplies on the
+  consumer's behalf. Boot merges `config` over them (plain objects key by key, everything else
+  replaced whole) before parsing. `ConfigVariable` gains an optional `source`: a path only the
+  defaults carry reports `status: "default"` with `source` set to `from`, and a path `config`
+  sets stays `set`. `describeConfig()` takes the defaults as a fourth argument, `ManifestInput`
+  gains `configDefaults`, `ConfigDefaults` is exported, and the insights manifest schema lists
+  `source`.
 - `StepDescription.narrows` (`NarrowsDeclaration`: the answer's `shape` and, per audience label, the
   member paths it keeps) declares a step that only removes members of `result`; boot accepts it as
   the declaration of the `result` write; under `validateOutput` the answer after it must be a

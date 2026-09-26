@@ -792,7 +792,7 @@ influences readiness or `health()`.
 | GET | `/admin/insights/manifest` | `{ generatedAt, core: { version }, contracts: ["persistence@1", …], modules: [Module], steps: [Step], pipelines: [Pipeline], triggers: { http: [{ method, path, pipeline }], events: [{ event, pipeline }], crons: [{ expression, pipeline }] }, warnings: [BootWarning] }` — computed once at boot, `generatedAt` is the response time |
 | GET | `/admin/insights/stats` | `{ generatedAt, process: { pid, startedAt, uptimeMs }, runs: { active, total, failed, errors }, pipelines: [{ name, count, failed, errors, p50Ms, p95Ms, lastAt }], steps: [{ pipeline, step, count, failed, errors, p50Ms, p95Ms }], events: [{ name, count, lastAt }], ratelimit: [], recentFailures: [{ at, runId, pipeline, trigger: { kind, name }, status, ms, code?, step?, message? }] }` |
 
-`Module`: `{ name: "authn/multi", use: "@michaelthielemann/kestrel-authn-multi", version: string | null (null when the package cannot be resolved from the boot root, and for path entries), provides, requires, optional: ["<contract>@<major>"], config: { schema: JsonSchema, variables: [{ path: "bootstrap.passwordHash", type, required, default?, secret, set, status, value, redacted }] }, steps: ["authn.login", …], eventHook: boolean, emits: ["migrations.applied"] (events the module emits from a contract method, `[]` for most modules) }`.
+`Module`: `{ name: "authn/multi", use: "@michaelthielemann/kestrel-authn-multi", version: string | null (null when the package cannot be resolved from the boot root, and for path entries), provides, requires, optional: ["<contract>@<major>"], config: { schema: JsonSchema, variables: [{ path: "bootstrap.passwordHash", type, required, default?, secret, set, status, source?, value, redacted }] }, steps: ["authn.login", …], eventHook: boolean, emits: ["migrations.applied"] (events the module emits from a contract method, `[]` for most modules) }`.
 `type` is one of `string number integer boolean array object record enum union literal function unknown`. `required` is true only when neither the variable nor any of its ancestors is optional or
 defaulted — `bootstrap.username` inside an optional `bootstrap` is *not* required, because leaving
 `bootstrap` out is legal. `set` says whether the raw config carries the path itself; `status` is the
@@ -801,6 +801,12 @@ comes from the variable's own `.default()` or from an ancestor's — `default` t
 value, e.g. `archive.folder` → `"old_posts"` when `archive` is left out entirely) or `missing` (no
 value at all). A parent that *is* spelled out in the config hands its children no default: only their
 own `.default()` still applies.
+
+When the module entry carries `defaults` (see [configuration](configuration.md#host-supplied-defaults)),
+a path those values carry and `config` does not is `status: "default"` with `source` set to
+`defaults.from`, and `default` holds the host's value; it takes precedence over the schema's own
+default. `source` is absent on every other variable, including a path `config` sets over a host
+default — that one is `set`, and its `default` still shows the host's value.
 
 `value` is the effective value — what the config sets, otherwise the default, `null` when the status
 is `missing`. It is a JSON snapshot, not the live object: a function, a class instance or a Buffer

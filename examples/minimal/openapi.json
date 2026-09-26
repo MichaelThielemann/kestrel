@@ -1530,7 +1530,11 @@
                                         "default",
                                         "missing"
                                       ],
-                                      "description": "set: the raw config carries the path; default: it does not and the value comes from this node's or an ancestor's default; missing: no value at all"
+                                      "description": "set: the raw config carries the path; default: it does not and the value comes from the entry's host-supplied defaults or from this node's or an ancestor's default; missing: no value at all"
+                                    },
+                                    "source": {
+                                      "type": "string",
+                                      "description": "The name of the host layer that supplied the default; present only when the value comes from the module entry's defaults"
                                     },
                                     "value": {
                                       "description": "The effective value as a JSON snapshot: what the config sets, else the default; null when the variable is missing or redacted"

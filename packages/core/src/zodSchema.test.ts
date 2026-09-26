@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boundaryCast } from "./cast.ts";
-import { describeConfig, toJsonSchema } from "./zodSchema.ts";
+import { describeConfig, mergeConfigDefaults, toJsonSchema } from "./zodSchema.ts";
 
 const schema = z
   .object({
@@ -129,5 +129,102 @@ describe("describeConfig", () => {
 
   it("yields no rows for a non-object schema", () => {
     expect(describeConfig(z.string(), "x").variables).toEqual([]);
+  });
+});
+
+describe("describeConfig with host-supplied defaults", () => {
+  const hosted = z
+    .object({
+      publicPath: z.string().default("/media"),
+      dependencies: z
+        .object({
+          render: z.enum(["background", "events"]).default("background"),
+          maxPerRender: z.number().int().default(1000),
+          timeoutSeconds: z.number().int().default(60),
+        })
+        .strict()
+        .default({}),
+      backoffSeconds: z.array(z.number()).default([60, 300]),
+      reservedPaths: z.array(z.string()).default([]),
+      apiToken: z.string().optional(),
+    })
+    .strict();
+  const defaults = { from: "site-preset", values: { publicPath: "/files", dependencies: { render: "events" }, backoffSeconds: [1, 2, 3], apiToken: "host-token-value" } };
+
+  function rows(raw: unknown): Record<string, ReturnType<typeof describeConfig>["variables"][number]> {
+    const merged = mergeConfigDefaults(defaults.values, raw);
+    return Object.fromEntries(describeConfig(hosted, raw, hosted.parse(merged), defaults).variables.map((v) => [v.path, v]));
+  }
+
+  it("reports a host value the config leaves out as a default with its source", () => {
+    expect(rows(undefined).publicPath).toEqual({ path: "publicPath", type: "string", required: false, default: "/files", secret: false, set: false, status: "default", source: "site-preset", value: "/files", redacted: false });
+  });
+
+  it("marks only the host-supplied child of a nested object with the source", () => {
+    const byPath = rows({ dependencies: { timeoutSeconds: 5 } });
+    expect(byPath.dependencies).toMatchObject({ set: true, status: "set", value: { render: "events", maxPerRender: 1000, timeoutSeconds: 5 } });
+    expect(byPath.dependencies).not.toHaveProperty("source");
+    expect(byPath["dependencies.render"]).toMatchObject({ set: false, status: "default", source: "site-preset", default: "events", value: "events" });
+    expect(byPath["dependencies.maxPerRender"]).toMatchObject({ set: false, status: "default", default: 1000, value: 1000 });
+    expect(byPath["dependencies.maxPerRender"]).not.toHaveProperty("source");
+    expect(byPath["dependencies.timeoutSeconds"]).toMatchObject({ set: true, status: "set", value: 5 });
+  });
+
+  it("reports a host-supplied parent object as a default with its source", () => {
+    const byPath = rows(undefined);
+    expect(byPath.dependencies).toMatchObject({ set: false, status: "default", source: "site-preset", value: { render: "events", maxPerRender: 1000, timeoutSeconds: 60 } });
+  });
+
+  it("reports a host-supplied array as a default and a configured array as set, replacing it whole", () => {
+    expect(rows(undefined).backoffSeconds).toMatchObject({ status: "default", source: "site-preset", default: [1, 2, 3], value: [1, 2, 3] });
+    const overridden = rows({ backoffSeconds: [9] }).backoffSeconds;
+    expect(overridden).toMatchObject({ set: true, status: "set", value: [9] });
+    expect(overridden).not.toHaveProperty("source");
+  });
+
+  it("reports a config value that overrides a host default as set, without a source", () => {
+    const row = rows({ publicPath: "/assets" }).publicPath;
+    expect(row).toMatchObject({ set: true, status: "set", value: "/assets" });
+    expect(row).not.toHaveProperty("source");
+  });
+
+  it("leaves a path neither the host nor the config mentions to the schema default", () => {
+    const row = rows(undefined).reservedPaths;
+    expect(row).toMatchObject({ status: "default", default: [], value: [] });
+    expect(row).not.toHaveProperty("source");
+  });
+
+  it("redacts a host-supplied secret and keeps its source", () => {
+    const out = describeConfig(hosted, undefined, hosted.parse(defaults.values), defaults);
+    expect(JSON.stringify(out)).not.toContain("host-token-value");
+    const row = out.variables.find((v) => v.path === "apiToken");
+    expect(row).toEqual({ path: "apiToken", type: "string", required: false, secret: false, set: false, status: "default", source: "site-preset", value: null, redacted: true });
+  });
+});
+
+describe("mergeConfigDefaults", () => {
+  it("merges plain objects deeply, the config winning at every path", () => {
+    expect(mergeConfigDefaults({ a: 1, b: { c: 2, d: 3 } }, { b: { d: 4 }, e: 5 })).toEqual({ a: 1, b: { c: 2, d: 4 }, e: 5 });
+  });
+
+  it("replaces arrays and scalars whole", () => {
+    expect(mergeConfigDefaults({ list: [1, 2], b: { c: 1 } }, { list: [3], b: "flat" })).toEqual({ list: [3], b: "flat" });
+  });
+
+  it("keeps an explicit null from the config", () => {
+    expect(mergeConfigDefaults({ max: 10 }, { max: null })).toEqual({ max: null });
+  });
+
+  it("returns the defaults for an absent config and the config itself when it is not an object", () => {
+    expect(mergeConfigDefaults({ a: 1 }, undefined)).toEqual({ a: 1 });
+    expect(mergeConfigDefaults({ a: 1 }, "raw")).toBe("raw");
+  });
+
+  it("leaves both inputs untouched", () => {
+    const values = { b: { c: 1 } };
+    const config = { b: { d: 2 } };
+    mergeConfigDefaults(values, config);
+    expect(values).toEqual({ b: { c: 1 } });
+    expect(config).toEqual({ b: { d: 2 } });
   });
 });

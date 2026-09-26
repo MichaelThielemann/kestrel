@@ -234,3 +234,31 @@ describe("kestrel.observe()", () => {
     await kestrel.stop();
   });
 });
+
+describe("kestrel.describe() with host-supplied defaults", () => {
+  const hosted = { use: "./modules/store.ts", config: { token: "hunter2" }, defaults: { from: "site-preset", values: { file: "/host/data.db", retries: 7 } } };
+
+  it("parses the defaults under the config and reports their source", async () => {
+    const kestrel = await boot({ config: { ...config, modules: [hosted, config.modules[1]!] }, modules: [store, bus], pipelines, logger: silentLogger });
+    const [storeManifest] = kestrel.describe().modules;
+    expect(storeManifest!.config.variables).toEqual([
+      { path: "file", type: "string", required: true, default: "/host/data.db", secret: false, set: false, status: "default", source: "site-preset", value: "/host/data.db", redacted: false },
+      { path: "token", type: "string", required: false, secret: true, set: true, status: "set", value: null, redacted: true },
+      { path: "retries", type: "integer", required: false, default: 7, secret: false, set: false, status: "default", source: "site-preset", value: 7, redacted: false },
+    ]);
+    await kestrel.stop();
+  });
+
+  it("lets the config override a host default and still reports the default it replaced", async () => {
+    const overridden = { ...hosted, config: { file: "/own.db" } };
+    const kestrel = await boot({ config: { ...config, modules: [overridden, config.modules[1]!] }, modules: [store, bus], pipelines, logger: silentLogger });
+    const file = kestrel.describe().modules[0]!.config.variables.find((v) => v.path === "file");
+    expect(file).toEqual({ path: "file", type: "string", required: true, default: "/host/data.db", secret: false, set: true, status: "set", value: "/own.db", redacted: false });
+    await kestrel.stop();
+  });
+
+  it("rejects defaults without a source name", async () => {
+    const unnamed = { ...hosted, defaults: { from: "", values: {} } };
+    await expect(boot({ config: { ...config, modules: [unnamed, config.modules[1]!] }, modules: [store, bus], pipelines, logger: silentLogger })).rejects.toMatchObject({ code: "invalid-config" });
+  });
+});

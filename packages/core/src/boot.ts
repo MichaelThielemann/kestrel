@@ -19,6 +19,7 @@ import { ok } from "./result.ts";
 import { createRunTracker, runPipeline, type ResolvedPipeline, type RunResult } from "./runner.ts";
 import { collectSink, throwSink, type BootProblem, type Sink } from "./sink.ts";
 import { CONTEXT_KEYS, satisfied, stripOptional, writeRoot } from "./writes.ts";
+import { mergeConfigDefaults, type ConfigDefaults } from "./zodSchema.ts";
 import { sortModules } from "./sort.ts";
 import { createCronEntry, startCron, type CronEntry } from "./triggers/cron.ts";
 import { createAllowlist } from "./triggers/allowlist.ts";
@@ -380,6 +381,7 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
   }
 
   const configByModule = new Map<ModuleDefinition, unknown>();
+  const defaultsByModule = new Map<ModuleDefinition, ConfigDefaults>();
   const useByModule = new Map<ModuleDefinition, string>();
   const seen = new Set<string>();
   let entryProblem = false;
@@ -403,6 +405,7 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
       }
     }
     configByModule.set(mod, entry.config ?? {});
+    if (entry.defaults !== undefined) defaultsByModule.set(mod, entry.defaults);
     useByModule.set(mod, entry.use);
   }
   if (entryProblem) {
@@ -447,7 +450,9 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
 
   for (const mod of ordered) {
     if (notSetUp.has(mod)) continue;
-    const cfg = mod.configSchema.safeParse(configByModule.get(mod));
+    const defaults = defaultsByModule.get(mod);
+    const raw = configByModule.get(mod);
+    const cfg = mod.configSchema.safeParse(defaults === undefined ? raw : mergeConfigDefaults(defaults.values, raw));
     if (!cfg.success) {
       sink.fail("invalid-module-config", mod.name, `invalid config: ${cfg.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
       markNotSetUp(notSetUp, mod, "invalid config");
@@ -634,7 +639,7 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
   const hub = createObserverHub(logger);
   let manifest: Manifest | undefined;
   const describe = (): Manifest => {
-    manifest ??= buildManifest({ root, modules: input.modules, uses: config.modules.map((m) => m.use), rawConfigs: configByModule, parsedConfigs: parsedByModule, contracts: contracts.names(), steps, pipelines, triggers: { http: routes, events, crons }, warnings });
+    manifest ??= buildManifest({ root, modules: input.modules, uses: config.modules.map((m) => m.use), rawConfigs: configByModule, parsedConfigs: parsedByModule, configDefaults: defaultsByModule, contracts: contracts.names(), steps, pipelines, triggers: { http: routes, events, crons }, warnings });
     return manifest;
   };
   const healthThrew = new Set<ModuleDefinition>();

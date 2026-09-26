@@ -2,6 +2,7 @@ import type { ZodTypeAny } from "zod";
 import { boundaryCast } from "./cast.ts";
 import { canHoldSecret, isSecretName, isSecretSchema, isSecretValue, snapshotValue, type JsonValue } from "./configValue.ts";
 import type { JsonSchema } from "./defineModule.ts";
+import { isPlainObject } from "./guards.ts";
 
 export type ConfigStatus = "set" | "default" | "missing";
 
@@ -13,10 +14,18 @@ export interface ConfigVariable {
   secret: boolean;
   set: boolean;
   status: ConfigStatus;
+  /** The name of the host layer that supplied this default; present only when `status` is `"default"` and the value comes from a module entry's `defaults`. */
+  source?: string;
   /** The effective value as a JSON-serialisable snapshot: what the config sets, else the default, `null` when missing or redacted. */
   value: JsonValue;
   /** True when the value is withheld because the schema marks it secret, the key name looks like a credential or an ancestor is redacted. */
   redacted: boolean;
+}
+
+/** Config values a host supplies for a module entry as defaults, named after their source. The entry's own `config` wins at every path. */
+export interface ConfigDefaults {
+  from: string;
+  values: Record<string, unknown>;
 }
 
 export interface ConfigDescription {
@@ -252,13 +261,26 @@ function valueAt(raw: unknown, path: string[]): unknown {
   return current;
 }
 
+/**
+ * `config` laid over `values`: plain objects merge key by key, every other value — arrays included —
+ * replaces the default whole. An absent `config` yields the defaults; a `config` that is not a plain
+ * object replaces them. Neither input is modified.
+ */
+export function mergeConfigDefaults(values: unknown, config: unknown): unknown {
+  if (config === undefined) return values;
+  if (!isPlainObject(values) || !isPlainObject(config)) return config;
+  const out: Record<string, unknown> = { ...values };
+  for (const [key, value] of Object.entries(config)) out[key] = mergeConfigDefaults(values[key], value);
+  return out;
+}
+
 interface Ancestors {
   optional: boolean;
   default: unknown;
   redacted: boolean;
 }
 
-function collectVariables(schema: ZodTypeAny, raw: unknown, parsed: unknown, path: string[], out: ConfigVariable[], ancestors: Ancestors): void {
+function collectVariables(schema: ZodTypeAny, raw: unknown, parsed: unknown, defaults: ConfigDefaults | undefined, path: string[], out: ConfigVariable[], ancestors: Ancestors): void {
   const { inner } = unwrap(schema);
   if (kind(inner) !== "ZodObject") return;
   const inherited = valueAt(raw, path) === undefined ? ancestors.default : undefined;
@@ -268,8 +290,9 @@ function collectVariables(schema: ZodTypeAny, raw: unknown, parsed: unknown, pat
     const secret = isSecretSchema(toJsonSchema(child));
     const rawValue = valueAt(raw, childPath);
     const set = rawValue !== undefined;
+    const hostValue = defaults === undefined ? undefined : valueAt(defaults.values, childPath);
     const fromAncestor = valueAt(inherited, [key]);
-    const effective = fromAncestor === undefined ? unwrapped.defaultValue?.() : fromAncestor;
+    const effective = hostValue !== undefined ? hostValue : fromAncestor === undefined ? unwrapped.defaultValue?.() : fromAncestor;
     const optional = ancestors.optional || unwrapped.optional;
     const status: ConfigStatus = set ? "set" : effective === undefined ? "missing" : "default";
     const parsedValue = valueAt(parsed, childPath);
@@ -277,9 +300,10 @@ function collectVariables(schema: ZodTypeAny, raw: unknown, parsed: unknown, pat
     const type = typeOf(unwrapped.inner);
     const redacted = secret || ancestors.redacted || (isSecretName(key) && canHoldSecret(type)) || isSecretValue(configured);
     const variable: ConfigVariable = { path: childPath.join("."), type, required: !optional, secret, set, status, value: redacted ? null : snapshotValue(configured), redacted };
+    if (!set && hostValue !== undefined && defaults !== undefined) variable.source = defaults.from;
     if (effective !== undefined && !redacted) variable.default = effective;
     out.push(variable);
-    if (kind(unwrapped.inner) === "ZodObject") collectVariables(unwrapped.inner, raw, parsed, childPath, out, { optional, default: effective, redacted });
+    if (kind(unwrapped.inner) === "ZodObject") collectVariables(unwrapped.inner, raw, parsed, defaults, childPath, out, { optional, default: effective, redacted });
   }
 }
 
@@ -287,9 +311,11 @@ function collectVariables(schema: ZodTypeAny, raw: unknown, parsed: unknown, pat
  * JSON Schema plus one row per config path. `raw` is the consumer's entry before parsing and decides
  * `set`/`status`; `parsed` is the same entry after the schema applied its defaults and is the source
  * of the effective `value` — without it the value falls back to `raw` and the declared defaults.
+ * `defaults` is the host layer merged under `raw`: a path it carries and `raw` does not is a
+ * `"default"` with `source` set to `defaults.from`, ahead of any default the schema declares.
  */
-export function describeConfig(schema: ZodTypeAny, raw: unknown, parsed?: unknown): ConfigDescription {
+export function describeConfig(schema: ZodTypeAny, raw: unknown, parsed?: unknown, defaults?: ConfigDefaults): ConfigDescription {
   const variables: ConfigVariable[] = [];
-  collectVariables(schema, raw, parsed, [], variables, { optional: false, default: undefined, redacted: false });
+  collectVariables(schema, raw, parsed, defaults, [], variables, { optional: false, default: undefined, redacted: false });
   return { schema: toJsonSchema(schema), variables };
 }
