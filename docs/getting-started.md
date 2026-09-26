@@ -176,7 +176,9 @@ pnpm kestrel explain createPage
 Keep `@michaelthielemann/kestrel-cli` in `dependencies`, not `devDependencies`: a production install
 omits dev dependencies, and `kestrel` is what starts the server. Start it from the project root,
 because module configs resolve relative paths (the SQLite `file`, a blob store `root`) against the
-current directory. A systemd unit:
+current directory. `node_modules/.bin/kestrel` runs `node` from `PATH`, and systemd starts services
+with a minimal `PATH`, so a unit names the Node binary itself (here `/usr/bin/node`; use the path
+`command -v node` prints for the account that runs the service):
 
 ```ini
 [Unit]
@@ -185,7 +187,8 @@ After=network.target
 
 [Service]
 WorkingDirectory=/srv/app
-ExecStart=/srv/app/node_modules/.bin/kestrel
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning /srv/app/node_modules/@michaelthielemann/kestrel-cli/dist/cli.js
 Restart=on-failure
 User=kestrel
 
