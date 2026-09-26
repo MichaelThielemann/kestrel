@@ -36,7 +36,7 @@ describe("the manifest of a grouped instance validates against insights.readMani
       definePipeline({ name: "readManifest", steps: ["insights.readManifest"] }),
     ];
     const kestrel = await boot({
-      config: { modules: [{ use: "store" }, { use: "insights" }], triggers: [] },
+      config: { modules: [{ use: "store" }, { use: "insights" }], triggers: [], http: null },
       modules: [store, insightsModule],
       pipelines,
       logger: silentLogger,

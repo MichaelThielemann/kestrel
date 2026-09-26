@@ -145,7 +145,7 @@ describe("images/default at boot", () => {
   it("boots with a media@1 provider and requires it", async () => {
     expect(module.requires).toContain(MEDIA);
     expect(module.emits).toEqual(["images.variantsChanged"]);
-    const kestrel = await boot({ config: { modules: [{ use: "./blobstore-memory" }, { use: "./persistence-memory" }, { use: "./media-memory" }, images()], triggers: [] }, modules: [blobstoreModule, persistenceModule, mediaModule, module], pipelines: [], logger: silentLogger });
+    const kestrel = await boot({ config: { modules: [{ use: "./blobstore-memory" }, { use: "./persistence-memory" }, { use: "./media-memory" }, images()], triggers: [], http: null }, modules: [blobstoreModule, persistenceModule, mediaModule, module], pipelines: [], logger: silentLogger });
     expect(kestrel.describe().modules.find((m) => m.name === "images/default")?.requires).toEqual(["blobstore@1", "persistence@1", "media@1"]);
     await kestrel.stop();
   });

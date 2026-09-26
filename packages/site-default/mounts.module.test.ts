@@ -45,6 +45,7 @@ async function bootMounted(options: { locales?: string[]; pipelines?: PipelineDe
         { use: "direct", config: {} },
       ],
       triggers: [],
+      http: { port: 0 },
     },
     modules: [persistenceSqlite, contentModule, siteModule, eventsInmemory, eventsDirect],
     pipelines: options.pipelines ?? PIPELINES,

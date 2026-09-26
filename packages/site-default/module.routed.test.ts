@@ -96,7 +96,7 @@ async function bootRouted(options: BootOptions = {}): Promise<{ kestrel: Kestrel
     { use: "test", config: {} },
   ];
   const kestrel = await boot({
-    config: { modules, triggers: events ? [{ event: "site.pathsMoved", pipeline: "pathsMoved" }] : [] },
+    config: { modules, triggers: events ? [{ event: "site.pathsMoved", pipeline: "pathsMoved" }] : [], http: { port: 0 } },
     modules: [...(persistence ? [persistenceSqlite] : []), contentModule, siteModule, ...(events ? [eventsInmemory, eventsDirect] : []), recorder(moves)],
     pipelines: [...(options.pipelines ?? WRITES.filter((p) => p.name !== "pathsMoved")), ...(events ? [WRITES.find((p) => p.name === "pathsMoved")!] : [])],
     logger: silentLogger,

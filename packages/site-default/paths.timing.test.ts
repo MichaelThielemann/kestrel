@@ -36,6 +36,7 @@ describe("site/default routed paths on SQLite at 200 pages in 5 locales", () => 
           { use: "noop", config: {} },
         ],
         triggers: [],
+        http: { port: 0 },
       },
       modules: [persistenceSqlite, contentModule, siteModule, eventsInmemory, eventsDirect, noop],
       pipelines: [

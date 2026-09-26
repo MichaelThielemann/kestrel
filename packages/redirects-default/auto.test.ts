@@ -298,7 +298,7 @@ describe("redirects/default at boot", () => {
 
   it("boots with a persistence@1 provider and requires it", async () => {
     expect(module.requires.map((c) => c.name)).toContain("persistence@1");
-    const kestrel = await boot({ config: { modules: [{ use: "./content-default" }, { use: "./blobstore-memory" }, { use: "./persistence-memory" }, redirects()], triggers: [] }, modules: [contentModule, blobstoreModule, persistenceModule, module], pipelines: [], logger: silentLogger });
+    const kestrel = await boot({ config: { modules: [{ use: "./content-default" }, { use: "./blobstore-memory" }, { use: "./persistence-memory" }, redirects()], triggers: [], http: null }, modules: [contentModule, blobstoreModule, persistenceModule, module], pipelines: [], logger: silentLogger });
     expect(kestrel.describe().modules.find((m) => m.name === "redirects/default")?.requires).toEqual(["content@1", "blobstore@1", "persistence@1"]);
     await kestrel.stop();
   });
