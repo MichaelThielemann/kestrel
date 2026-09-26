@@ -119,7 +119,7 @@ without Nuxt: [`../examples/h3`](../examples/h3).
   an unreadable or too-large body — there `retryable: false` and `code` follows from the status
   alone: 400 → `VALIDATION`, 404 → `NOT_FOUND`, 413 → `PAYLOAD_TOO_LARGE`, 500 → `INTERNAL`).
   `details` is an optional object the step attaches; typical shapes: validation errors from
-  `content@1` deliver `{ "fields": [{ "field": "slug", "message": "must be unique, \"home\" exists" }] }`,
+  `content@1` deliver `{ "fields": [{ "field": "title", "message": "required" }] }`,
   so the frontend can attach errors to fields without parsing text; a dangling reference
   (`DANGLING_REF`) additionally delivers `{ "refs": [{ "field", "to", "id" }] }`; a body rejected by
   `validate.check` delivers `{ "problems": [{ "path", "message" }] }` and also duplicates one
@@ -212,7 +212,7 @@ event payload carries too.
 ```
 settings (single):  title (text, required, localized), description (text, localized – blockquote in llms.txt),
                     navigation (json, localized – list of {label, path, children?})
-pages (multi):      slug (slug, required, unique, localized), title (text, required, localized),
+pages (multi):      slug (slug, required, localized; the public path is unique), title (text, required, localized),
                     body (json, localized – pagebuilder blocks),
                     status (enum draft|finished|published, required, **localized** – publication per language),
                     hero (ref → media), seo (json, localized – { title?, description?, noindex? })
@@ -262,6 +262,14 @@ itself `published`; otherwise the field stays empty. `_translations` reports onl
 that are themselves `published`.
 Static delivery (`delivery.publish`) derives its published document the same way, so the export and
 the live API never disagree.
+The document carries `_paths: { de: "/kontakt", en: "/en/contact" }`: its public path in every
+language, `null` where it is not published or another page holds the path; the language switcher
+needs no further request. Paths come from `site-default`'s routed mode: a path belongs to exactly
+one page per language. A language without its own slug reaches the page through the default
+language's slug (`/en/kontakt`) until another published page takes `/en/kontakt` with a slug of its
+own. When a page's path changes (slug renamed, translation removed, taken over), the old path
+answers `{ redirect: { to: "<new path>", status: 301 } }` from then on, and `redirects.json` lists
+it after the editor's rules.
 When a redirect rule matches, the route responds with `{ redirect: { to, status } }` instead of a
 document — even if a page exists at that path. `redirects.lookup` runs only after
 `authz.require:pages.read`; if `anonymous` lacks the `pages.read` permission on a deployment, logged
@@ -299,9 +307,11 @@ identical paths.
 |---|---|---|---|
 | GET | `/pages` | `?locale=&limit=&offset=&sort=-updatedAt` | `{ items: [...], total }` – published only; `sort=-updatedAt` also orders an anonymous caller's list, whose items carry no `updatedAt` |
 | GET | `/admin/pages` | same as above | every status (permission `pages.manage`) |
-| GET | `/admin/pages/:id` | `?locale=` | document, every status (permission `pages.manage`) |
+| GET | `/admin/pages/:id` | `?locale=` | document, every status, with `_paths` for every language that has a valid path, drafts included (permission `pages.manage`; `/admin/pages` carries the same per item) |
+| POST | `/admin/pages/path-preview` | `{ id?, locale?, slug }` | `{ path, reachable, reason, conflict, shadows, exposesParentSlug }` – the path a save would give, before saving (`pages.write`) |
+| POST | `/admin/paths/rebuild` | – | `{ indexed, conflicts }` – recomputes every page path from the stored pages; also runs after migrations (`pages.manage`) |
 | GET | `/pages/:id` | `?locale=` | document (strict, no fallback) – published only, otherwise 404 |
-| POST | `/pages` | fields (+ `locale`) | `{ …document, _events }` – the saved document plus `_events` reporting the triggered `publishPage` run (static delivery per language, then `llms.txt`), which happens after this response, not inside it; 400 with a field name on a validation error, e.g. `pages: slug must be unique, "home" exists` or `pages: hero references media/<id> which does not exist` |
+| POST | `/pages` | fields (+ `locale`) | `{ …document, _events }` – the saved document plus `_events` reporting the triggered `publishPage` run (static delivery per language, then `llms.txt`), which happens after this response, not inside it; 400 with a field name on a validation error, e.g. `pages: hero references media/<id> which does not exist` or a slug whose path is reserved (`/media`) or starts with a language code; 409 when another page holds the path, naming path, language and occupant (`details.conflicts: [{ path, locale, type, id, label }]`, `details.fields` on `slug`) |
 | PATCH | `/pages/:id` | partial fields (+ `locale`) | `{ …document, _events }` as with POST |
 | DELETE | `/pages/:id/translations/:locale` | – | `{ …document in the default language, _events }` – deletes only this translation, see below (`pages.write`) |
 | DELETE | `/pages/:id` | – | `{ ok: true, _events }`; 409 if other documents reference it, e.g. `pages/<id> is referenced by pages/<id2> (hero)` (no 409 on `PATCH`, only on `DELETE`) |
@@ -388,10 +398,15 @@ non-empty strings, no other fields — otherwise 400 with path and reason
 |---|---|---|---|
 | GET | `/redirects` | – | document; as long as it was never set: 200 with an empty document (`redirects.read`) |
 | PUT | `/redirects` | `{ rules: [{ from, to, status? }] }` | document, writes `redirects.json` to the blob store (`redirects.write`); 400 `redirects: Row N: …` on an invalid rule |
-| GET | `/redirects.json` | – | `[{ pattern, target, status }]` – public, same content as the file in the blob store |
+| GET | `/redirects.json` | – | `[{ pattern, target, status }]` – public, same content as the file in the blob store; editor rules first, then the automatic redirects of moved pages |
+| GET | `/admin/redirects/auto` | – | `[{ from, to, type, docId, locale, seq }]` – automatic redirects in effect, sorted by `from` (`redirects.read`) |
+| DELETE | `/admin/redirects/auto/*path` | – | removes the automatic redirect at that path for good and rewrites `redirects.json` (`redirects.write`); 404 when there is none |
 
 `from` uses `*` (one segment) / `**` (one or more segments), `to` is a path or an https URL with
 `$1…`; `status` is 301 (default) | 302 | 307 | 308. List order = priority when several rules match.
+
+An editor rule whose `to` is the source of an automatic redirect is rejected (`Row N: …`), and an
+automatic redirect whose target an editor rule matches is left out of `redirects.json`.
 
 `GET /redirects.json` is deliberately public: the rules are observable through browser behavior
 anyway, `redirects.read` only protects the editor view.
@@ -890,8 +905,9 @@ both with `users.manage`. A repeat that finds nothing left to change answers `re
 ## What the frontend does not need to do
 
 - Language fallback logic for `/site/*` (the backend handles it, transparently via `_locales`).
-- Check slug uniqueness, required fields, reference existence — the backend answers with 400 and a
-  field name; client-side validation is UX only.
+- Check path uniqueness, required fields, reference existence — the backend answers with 400 or 409
+  and a field name; client-side validation is UX only.
+- Build page URLs from slugs — `_paths` and `_links` carry them.
 - Refresh the token — there is no refresh; log in again after a 401.
 
 ## What a site provides for delivery

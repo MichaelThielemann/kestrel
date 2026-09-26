@@ -850,9 +850,20 @@ Net changes since 5.8.1.
   rule matches is skipped and logged, and `redirects.validate` rejects an editor rule whose target is
   an automatic redirect's source. `redirects.listAuto` and `redirects.removeAuto` (a removed automatic
   redirect stays removed when the move that created it is replayed).
+- `delivery-static`: `delivery.markMoved` runs on `site.pathsMoved` and marks the moved documents'
+  own outputs and every output linking to one of them at an old path; the re-render stores each at
+  its new path and removes the old files. `site-default`'s `./impl` exports `createSitePaths`.
+- `examples/minimal` routes its pages through `site-default`: page writes end their atomic group with
+  `site.indexPath:pages` followed by `site.announcePaths`, `site.pathsMoved` feeds automatic
+  redirects and re-renders, `resumePaths` runs every minute, and `rebuildPathsAfterMigrations` runs
+  on `migrations.applied`. New routes `POST /admin/paths/rebuild`, `POST /admin/pages/path-preview`,
+  `GET /admin/redirects/auto` and `DELETE /admin/redirects/auto/*path`; page answers carry `_paths`,
+  and `pages.slug` is no longer `unique`.
 
 ### Changed
 
+- `delivery-static`: an output that is published but has no public path records the error
+  `no public path` instead of `no <slugField>`.
 - `core`: module code that throws while `boot()` registers or resolves steps is a `KestrelBootError`
   and, in `checkBoot()`, an entry in `errors`. A module's `steps()` that throws is `steps-threw` (a
   new `BootErrorCode`) and its `describe()` `describe-threw`, both naming the module; `checkBoot()`

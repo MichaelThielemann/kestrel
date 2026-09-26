@@ -33,6 +33,13 @@ instance for anything but trying it out**:
 node -e "import('@michaelthielemann/kestrel-authn-multi/impl').then(m => console.log(m.hashPassword(process.argv[1])))" -- <password>
 ```
 
+Pages are routed by `site-default`: every page's public path is unique per language, a rename or
+any other path change answers the old path with a 301 (`redirects-default`) and re-renders the
+exported page and every page linking to it (`delivery-static`). Every page write ends its atomic
+group with `site.indexPath:pages` and continues with `site.announcePaths`; `site.pathsMoved` feeds
+`pathsMovedRedirects` and `pathsMovedDelivery`, `resumePaths` runs every minute, and
+`rebuildPathsAfterMigrations` recomputes every path after `migrations.applied`.
+
 Anonymous callers may read (`pages.read`, `settings.read`, `media.read`); everything else needs a
 token from `POST /login`. The renderer is `renderer-plain` and the blob store is the local
 filesystem, so static delivery works without any external service.

@@ -300,6 +300,6 @@ Not included: image resizing, tags, linking media to content documents.
 | `media.syncPublic` | Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result) | – | `result._publicMedia` | – | { _publicMedia: object, … } | – | – | no |
 | `media.export:<arg>` | Copy every ready media item to <arg>/<folder>/<filename> | – | `result` | – | { written: number, skipped: number, missing: number, conflicts: number, … } | – | – | no |
 
-Used by 14 of 93 pipelines in `examples/minimal`.
+Used by 14 of 101 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

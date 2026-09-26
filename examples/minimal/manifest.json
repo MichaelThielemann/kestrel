@@ -1150,6 +1150,7 @@
                 "_locales",
                 "_translations",
                 "_links",
+                "_paths",
                 "redirect"
               ],
               "settings": [
@@ -1370,7 +1371,6 @@
                   "slug": {
                     "type": "slug",
                     "required": true,
-                    "unique": true,
                     "localized": true
                   },
                   "title": {
@@ -1554,9 +1554,18 @@
             "type": "record",
             "required": false,
             "secret": false,
-            "set": false,
-            "status": "default",
-            "value": {},
+            "set": true,
+            "status": "set",
+            "value": {
+              "pages": {
+                "slugField": "slug",
+                "home": "home",
+                "liveWhen": {
+                  "status": "published"
+                },
+                "labelField": "title"
+              }
+            },
             "redacted": false,
             "default": {}
           },
@@ -1576,9 +1585,11 @@
             "type": "array",
             "required": false,
             "secret": false,
-            "set": false,
-            "status": "default",
-            "value": [],
+            "set": true,
+            "status": "set",
+            "value": [
+              "/media"
+            ],
             "redacted": false,
             "default": []
           }
@@ -2768,6 +2779,7 @@
         "delivery.publishAll",
         "delivery.exportLlms",
         "delivery.markDependents",
+        "delivery.markMoved",
         "delivery.markAll",
         "delivery.checkBuild",
         "delivery.republishOutput",
@@ -9725,6 +9737,88 @@
       }
     },
     {
+      "name": "delivery.markMoved",
+      "module": "delivery/static",
+      "factory": false,
+      "description": {
+        "summary": "Mark the own outputs of every document in payload.moves (site.pathsMoved) and every output linking to one of them for a re-render at its new path, and start it outside the request (adds `_moved: { marked }` to the result)",
+        "reads": [
+          "payload"
+        ],
+        "writes": [
+          "result._moved"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "moves": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "locale": {
+                    "type": "string"
+                  },
+                  "from": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "to": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "type",
+                  "id",
+                  "locale",
+                  "from",
+                  "to"
+                ]
+              }
+            }
+          },
+          "required": [
+            "moves"
+          ],
+          "additionalProperties": true
+        },
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "_moved": {
+              "type": "object",
+              "properties": {
+                "marked": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "marked"
+              ]
+            }
+          },
+          "required": [
+            "_moved"
+          ]
+        },
+        "errors": {
+          "400": "payload.moves is missing or malformed",
+          "503": "the marks or their jobs could not be written"
+        }
+      }
+    },
+    {
       "name": "delivery.markAll",
       "module": "delivery/static",
       "factory": true,
@@ -10021,8 +10115,12 @@
       "factory": false,
       "description": {
         "summary": "Apply site.pathsMoved moves to the automatic-redirect state: per document the highest seq wins, a tie inside one run favours the destination path",
-        "reads": [],
-        "writes": [],
+        "reads": [
+          "payload"
+        ],
+        "writes": [
+          "result.autoRedirects"
+        ],
         "input": {
           "type": "object",
           "properties": {
@@ -12337,6 +12435,36 @@
           "atomic": 1
         },
         {
+          "spec": "site.indexPath:pages",
+          "name": "site.indexPath",
+          "module": "site/default",
+          "description": {
+            "summary": "Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group",
+            "reads": [
+              "result.id?",
+              "params.id?"
+            ],
+            "writes": [],
+            "errors": {
+              "400": "the path is reserved or starts with a locale code",
+              "409": "another document holds the path",
+              "503": "the store is unavailable"
+            },
+            "atomicSafe": true
+          },
+          "atomic": 1
+        },
+        {
+          "spec": "site.announcePaths",
+          "name": "site.announcePaths",
+          "module": "site/default",
+          "description": {
+            "summary": "After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run",
+            "reads": [],
+            "writes": []
+          }
+        },
+        {
           "spec": "events.emit:page.created",
           "name": "events.emit",
           "module": "events/direct",
@@ -13378,6 +13506,36 @@
           "atomic": 1
         },
         {
+          "spec": "site.indexPath:pages",
+          "name": "site.indexPath",
+          "module": "site/default",
+          "description": {
+            "summary": "Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group",
+            "reads": [
+              "result.id?",
+              "params.id?"
+            ],
+            "writes": [],
+            "errors": {
+              "400": "the path is reserved or starts with a locale code",
+              "409": "another document holds the path",
+              "503": "the store is unavailable"
+            },
+            "atomicSafe": true
+          },
+          "atomic": 1
+        },
+        {
+          "spec": "site.announcePaths",
+          "name": "site.announcePaths",
+          "module": "site/default",
+          "description": {
+            "summary": "After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run",
+            "reads": [],
+            "writes": []
+          }
+        },
+        {
           "spec": "events.emit:page.deleted",
           "name": "events.emit",
           "module": "events/direct",
@@ -13683,6 +13841,36 @@
             "atomicSafe": true
           },
           "atomic": 1
+        },
+        {
+          "spec": "site.indexPath:pages",
+          "name": "site.indexPath",
+          "module": "site/default",
+          "description": {
+            "summary": "Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group",
+            "reads": [
+              "result.id?",
+              "params.id?"
+            ],
+            "writes": [],
+            "errors": {
+              "400": "the path is reserved or starts with a locale code",
+              "409": "another document holds the path",
+              "503": "the store is unavailable"
+            },
+            "atomicSafe": true
+          },
+          "atomic": 1
+        },
+        {
+          "spec": "site.announcePaths",
+          "name": "site.announcePaths",
+          "module": "site/default",
+          "description": {
+            "summary": "After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run",
+            "reads": [],
+            "writes": []
+          }
         },
         {
           "spec": "events.emit:page.translationRemoved",
@@ -16605,6 +16793,121 @@
             },
             "atomicSafe": true
           }
+        },
+        {
+          "spec": "site.attachPaths:pages",
+          "name": "site.attachPaths",
+          "module": "site/default",
+          "description": {
+            "summary": "Add _paths (locale → path) to the pages result, every valid path including drafts",
+            "reads": [
+              "result"
+            ],
+            "writes": [
+              "result"
+            ],
+            "extendsItems": {
+              "type": "object",
+              "properties": {
+                "_paths": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
+                }
+              },
+              "required": [
+                "_paths"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "listAutoRedirects",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:redirects.read",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission redirects.read",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission redirects.read"
+            }
+          }
+        },
+        {
+          "spec": "redirects.listAuto",
+          "name": "redirects.listAuto",
+          "module": "redirects/default",
+          "description": {
+            "summary": "Effective automatic redirects (a moved document's old path, sorted by from)",
+            "reads": [],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "docId": {
+                    "type": "string"
+                  },
+                  "locale": {
+                    "type": "string"
+                  },
+                  "seq": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "from",
+                  "to",
+                  "type",
+                  "docId",
+                  "locale",
+                  "seq"
+                ]
+              }
+            }
+          }
         }
       ]
     },
@@ -17434,6 +17737,7 @@
                   "_locales",
                   "_translations",
                   "_links",
+                  "_paths",
                   "redirect"
                 ]
               }
@@ -18901,6 +19205,378 @@
       ]
     },
     {
+      "name": "pathsMovedDelivery",
+      "steps": [
+        {
+          "spec": "delivery.markMoved",
+          "name": "delivery.markMoved",
+          "module": "delivery/static",
+          "description": {
+            "summary": "Mark the own outputs of every document in payload.moves (site.pathsMoved) and every output linking to one of them for a re-render at its new path, and start it outside the request (adds `_moved: { marked }` to the result)",
+            "reads": [
+              "payload"
+            ],
+            "writes": [
+              "result._moved"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "moves": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "locale": {
+                        "type": "string"
+                      },
+                      "from": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "to": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "locale",
+                      "from",
+                      "to"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "moves"
+              ],
+              "additionalProperties": true
+            },
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "_moved": {
+                  "type": "object",
+                  "properties": {
+                    "marked": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "marked"
+                  ]
+                }
+              },
+              "required": [
+                "_moved"
+              ]
+            },
+            "errors": {
+              "400": "payload.moves is missing or malformed",
+              "503": "the marks or their jobs could not be written"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "pathsMovedRedirects",
+      "steps": [
+        {
+          "spec": "redirects.recordMoves",
+          "name": "redirects.recordMoves",
+          "module": "redirects/default",
+          "description": {
+            "summary": "Apply site.pathsMoved moves to the automatic-redirect state: per document the highest seq wins, a tie inside one run favours the destination path",
+            "reads": [
+              "payload"
+            ],
+            "writes": [
+              "result.autoRedirects"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "moves": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "locale": {
+                        "type": "string"
+                      },
+                      "from": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "to": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "seq": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "locale",
+                      "from",
+                      "to",
+                      "seq"
+                    ]
+                  }
+                }
+              },
+              "additionalProperties": true
+            },
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "autoRedirects": {
+                  "type": "object",
+                  "properties": {
+                    "recorded": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "recorded"
+                  ]
+                }
+              },
+              "required": [
+                "autoRedirects"
+              ]
+            },
+            "errors": {
+              "400": "payload.moves is missing or malformed"
+            }
+          }
+        },
+        {
+          "spec": "redirects.export",
+          "name": "redirects.export",
+          "module": "redirects/default",
+          "description": {
+            "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+            "reads": [],
+            "writes": [
+              "result.redirects"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "redirects": {
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "rules",
+                    "skipped"
+                  ]
+                }
+              },
+              "required": [
+                "redirects"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "previewPagePath",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:pages.write",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission pages.write",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission pages.write"
+            }
+          }
+        },
+        {
+          "spec": "site.previewPath:pages",
+          "name": "site.previewPath",
+          "module": "site/default",
+          "description": {
+            "summary": "The public path a pages would get for payload { id?, locale?, slug }, whether it would be reachable and why not; writes nothing",
+            "reads": [],
+            "writes": [
+              "result"
+            ],
+            "input": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "locale": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "slug"
+              ],
+              "additionalProperties": true
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "reachable": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "conflict": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "locale": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "locale",
+                        "type",
+                        "id",
+                        "label"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "shadows": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "label",
+                      "path"
+                    ]
+                  }
+                },
+                "exposesParentSlug": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "path",
+                "reachable",
+                "reason",
+                "conflict",
+                "shadows",
+                "exposesParentSlug"
+              ]
+            },
+            "errors": {
+              "400": "slug is missing",
+              "503": "the store is unavailable"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "pruneAudit",
       "steps": [
         {
@@ -19475,6 +20151,38 @@
             },
             "atomicSafe": true
           }
+        },
+        {
+          "spec": "site.attachPaths:pages",
+          "name": "site.attachPaths",
+          "module": "site/default",
+          "description": {
+            "summary": "Add _paths (locale → path) to the pages result, every valid path including drafts",
+            "reads": [
+              "result"
+            ],
+            "writes": [
+              "result"
+            ],
+            "extendsItems": {
+              "type": "object",
+              "properties": {
+                "_paths": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
+                }
+              },
+              "required": [
+                "_paths"
+              ]
+            }
+          }
         }
       ]
     },
@@ -19665,6 +20373,7 @@
                   "_locales",
                   "_translations",
                   "_links",
+                  "_paths",
                   "redirect"
                 ]
               }
@@ -19845,6 +20554,264 @@
                 "entries"
               ]
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "rebuildPaths",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:pages.manage",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission pages.manage",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission pages.manage"
+            }
+          }
+        },
+        {
+          "spec": "site.planRebuild",
+          "name": "site.planRebuild",
+          "module": "site/default",
+          "description": {
+            "summary": "Recompute every routed document's paths from content@1 outside any group (adds `rebuild` to the result)",
+            "reads": [],
+            "writes": [
+              "result.rebuild"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "rebuild": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "rebuild"
+              ]
+            },
+            "errors": {
+              "503": "the store is unavailable"
+            }
+          }
+        },
+        {
+          "spec": "site.applyRebuild",
+          "name": "site.applyRebuild",
+          "module": "site/default",
+          "description": {
+            "summary": "Write the planned paths inside one atomic group; saves committed since the plan are recomputed there",
+            "reads": [
+              "result.rebuild"
+            ],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "object",
+              "properties": {
+                "indexed": {
+                  "type": "integer"
+                },
+                "conflicts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "locale": {
+                        "type": "string"
+                      },
+                      "winner": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "losers": {
+                        "type": "array",
+                        "items": {
+                          "type": "object"
+                        }
+                      },
+                      "reason": {
+                        "type": "string",
+                        "enum": [
+                          "taken",
+                          "reserved",
+                          "locale"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "locale",
+                      "winner",
+                      "losers",
+                      "reason"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "indexed",
+                "conflicts"
+              ]
+            },
+            "errors": {
+              "503": "the store is unavailable"
+            },
+            "atomicSafe": true
+          },
+          "atomic": 1
+        },
+        {
+          "spec": "site.announcePaths",
+          "name": "site.announcePaths",
+          "module": "site/default",
+          "description": {
+            "summary": "After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run",
+            "reads": [],
+            "writes": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "rebuildPathsAfterMigrations",
+      "steps": [
+        {
+          "spec": "site.planRebuild",
+          "name": "site.planRebuild",
+          "module": "site/default",
+          "description": {
+            "summary": "Recompute every routed document's paths from content@1 outside any group (adds `rebuild` to the result)",
+            "reads": [],
+            "writes": [
+              "result.rebuild"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "rebuild": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "rebuild"
+              ]
+            },
+            "errors": {
+              "503": "the store is unavailable"
+            }
+          }
+        },
+        {
+          "spec": "site.applyRebuild",
+          "name": "site.applyRebuild",
+          "module": "site/default",
+          "description": {
+            "summary": "Write the planned paths inside one atomic group; saves committed since the plan are recomputed there",
+            "reads": [
+              "result.rebuild"
+            ],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "object",
+              "properties": {
+                "indexed": {
+                  "type": "integer"
+                },
+                "conflicts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "locale": {
+                        "type": "string"
+                      },
+                      "winner": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "losers": {
+                        "type": "array",
+                        "items": {
+                          "type": "object"
+                        }
+                      },
+                      "reason": {
+                        "type": "string",
+                        "enum": [
+                          "taken",
+                          "reserved",
+                          "locale"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "locale",
+                      "winner",
+                      "losers",
+                      "reason"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "indexed",
+                "conflicts"
+              ]
+            },
+            "errors": {
+              "503": "the store is unavailable"
+            },
+            "atomicSafe": true
+          },
+          "atomic": 1
+        },
+        {
+          "spec": "site.announcePaths",
+          "name": "site.announcePaths",
+          "module": "site/default",
+          "description": {
+            "summary": "After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run",
+            "reads": [],
+            "writes": []
           }
         }
       ]
@@ -20204,6 +21171,97 @@
             "errors": {
               "400": "empty list or invalid size definition",
               "409": "a size collides with a config size"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "removeAutoRedirect",
+      "steps": [
+        {
+          "spec": "authn.requireUser",
+          "name": "authn.requireUser",
+          "module": "authn/multi",
+          "description": {
+            "summary": "Require a valid session",
+            "reads": [],
+            "writes": [
+              "token",
+              "identity"
+            ],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated"
+            }
+          }
+        },
+        {
+          "spec": "authz.require:redirects.write",
+          "name": "authz.require",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires permission redirects.write",
+            "reads": [],
+            "writes": [],
+            "security": "required",
+            "errors": {
+              "401": "not authenticated",
+              "403": "missing permission redirects.write"
+            }
+          }
+        },
+        {
+          "spec": "redirects.removeAuto",
+          "name": "redirects.removeAuto",
+          "module": "redirects/default",
+          "description": {
+            "summary": "Turn the automatic redirect at params.path into a removed tombstone; a replay of the move that created it cannot restore it",
+            "reads": [
+              "params.path"
+            ],
+            "writes": [],
+            "errors": {
+              "400": "missing path",
+              "404": "no automatic redirect at that path"
+            }
+          }
+        },
+        {
+          "spec": "redirects.export",
+          "name": "redirects.export",
+          "module": "redirects/default",
+          "description": {
+            "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+            "reads": [],
+            "writes": [
+              "result.redirects"
+            ],
+            "extendsOutput": {
+              "type": "object",
+              "properties": {
+                "redirects": {
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "rules",
+                    "skipped"
+                  ]
+                }
+              },
+              "required": [
+                "redirects"
+              ]
             }
           }
         }
@@ -21069,6 +22127,16 @@
                     "required": []
                   },
                   "description": "internal references by target id after site.resolveLinks"
+                },
+                "_paths": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
                 }
               },
               "required": [
@@ -21157,6 +22225,7 @@
                   "_locales",
                   "_translations",
                   "_links",
+                  "_paths",
                   "redirect"
                 ]
               }
@@ -21537,6 +22606,36 @@
           "atomic": 1
         },
         {
+          "spec": "site.indexPath:pages",
+          "name": "site.indexPath",
+          "module": "site/default",
+          "description": {
+            "summary": "Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group",
+            "reads": [
+              "result.id?",
+              "params.id?"
+            ],
+            "writes": [],
+            "errors": {
+              "400": "the path is reserved or starts with a locale code",
+              "409": "another document holds the path",
+              "503": "the store is unavailable"
+            },
+            "atomicSafe": true
+          },
+          "atomic": 1
+        },
+        {
+          "spec": "site.announcePaths",
+          "name": "site.announcePaths",
+          "module": "site/default",
+          "description": {
+            "summary": "After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run",
+            "reads": [],
+            "writes": []
+          }
+        },
+        {
           "spec": "revisions.reportRestore",
           "name": "revisions.reportRestore",
           "module": "revisions/default",
@@ -21756,6 +22855,41 @@
                   "type": "null"
                 }
               ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "resumePaths",
+      "steps": [
+        {
+          "spec": "site.resumePaths",
+          "name": "site.resumePaths",
+          "module": "site/default",
+          "description": {
+            "summary": "Announce path changes a run left unannounced (patches the in-memory path table from the committed rows and raises site.pathsMoved) and prune announced ones older than 7 days",
+            "reads": [],
+            "writes": [
+              "result"
+            ],
+            "output": {
+              "type": "object",
+              "properties": {
+                "announced": {
+                  "type": "integer"
+                },
+                "pruned": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "announced",
+                "pruned"
+              ]
+            },
+            "errors": {
+              "503": "the store is unavailable"
             }
           }
         }
@@ -23889,6 +25023,36 @@
           "atomic": 1
         },
         {
+          "spec": "site.indexPath:pages",
+          "name": "site.indexPath",
+          "module": "site/default",
+          "description": {
+            "summary": "Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group",
+            "reads": [
+              "result.id?",
+              "params.id?"
+            ],
+            "writes": [],
+            "errors": {
+              "400": "the path is reserved or starts with a locale code",
+              "409": "another document holds the path",
+              "503": "the store is unavailable"
+            },
+            "atomicSafe": true
+          },
+          "atomic": 1
+        },
+        {
+          "spec": "site.announcePaths",
+          "name": "site.announcePaths",
+          "module": "site/default",
+          "description": {
+            "summary": "After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run",
+            "reads": [],
+            "writes": []
+          }
+        },
+        {
           "spec": "events.emit:page.updated",
           "name": "events.emit",
           "module": "events/direct",
@@ -25052,6 +26216,26 @@
       },
       {
         "method": "GET",
+        "path": "/admin/redirects/auto",
+        "pipeline": "listAutoRedirects"
+      },
+      {
+        "method": "DELETE",
+        "path": "/admin/redirects/auto/*path",
+        "pipeline": "removeAutoRedirect"
+      },
+      {
+        "method": "POST",
+        "path": "/admin/paths/rebuild",
+        "pipeline": "rebuildPaths"
+      },
+      {
+        "method": "POST",
+        "path": "/admin/pages/path-preview",
+        "pipeline": "previewPagePath"
+      },
+      {
+        "method": "GET",
         "path": "/site/*path",
         "pipeline": "resolvePage"
       },
@@ -25268,6 +26452,18 @@
     ],
     "events": [
       {
+        "event": "migrations.applied",
+        "pipeline": "rebuildPathsAfterMigrations"
+      },
+      {
+        "event": "site.pathsMoved",
+        "pipeline": "pathsMovedRedirects"
+      },
+      {
+        "event": "site.pathsMoved",
+        "pipeline": "pathsMovedDelivery"
+      },
+      {
         "event": "page.created",
         "pipeline": "publishPage"
       },
@@ -25360,6 +26556,10 @@
       {
         "expression": "*/5 * * * *",
         "pipeline": "sweepRateLimits"
+      },
+      {
+        "expression": "* * * * *",
+        "pipeline": "resumePaths"
       },
       {
         "expression": "*/5 * * * *",

@@ -256,6 +256,6 @@ cursor.
 | `images.syncPublic` | Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result) | – | `result._publicVariants` | – | { _publicVariants: object, … } | – | – | no |
 | `images.export:<arg>` | Copy every done variant of a ready media item to <arg>/<folder>/<filename>.<size>.<ext> | – | `result.variants` | – | { variants: object, … } | – | – | no |
 
-Used by 17 of 93 pipelines in `examples/minimal`.
+Used by 17 of 101 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

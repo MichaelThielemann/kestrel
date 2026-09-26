@@ -83,7 +83,7 @@ on every request.
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
 | `redirects.validate` | Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect | – | – | { rules?: object[] } | – | 400 Row N: <reason> | – | no |
-| `redirects.recordMoves` | Apply site.pathsMoved moves to the automatic-redirect state: per document the highest seq wins, a tie inside one run favours the destination path | – | – | { moves?: object[], … } | { autoRedirects: object, … } | 400 payload.moves is missing or malformed | – | no |
+| `redirects.recordMoves` | Apply site.pathsMoved moves to the automatic-redirect state: per document the highest seq wins, a tie inside one run favours the destination path | `payload` | `result.autoRedirects` | { moves?: object[], … } | { autoRedirects: object, … } | 400 payload.moves is missing or malformed | – | no |
 | `redirects.lookup` | End the pipeline with { redirect: { to, status } } on an editor rule or an automatic redirect (a moved document's old path); pass through otherwise | `params.path` | `result?` | – | – (ends: { redirect: object }) | – | – | no |
 | `redirects.export` | Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result) | – | `result.redirects` | – | { redirects: object, … } | – | – | no |
 | `redirects.render` | The compiled redirect list (same content as redirects.json) | – | `result` | – | object[] | – | – | no |
@@ -92,7 +92,10 @@ on every request.
 
 Pipelines in `examples/minimal` using these steps:
 
+- **listAutoRedirects** (GET /admin/redirects/auto): `authn.requireUser` → `authz.require:redirects.read` → **`redirects.listAuto`**
+- **pathsMovedRedirects** (event site.pathsMoved): **`redirects.recordMoves`** → **`redirects.export`**
 - **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.require:pages.manage` → `delivery.publishAll:pages` → **`redirects.export`** → `delivery.exportLlms`
+- **removeAutoRedirect** (DELETE /admin/redirects/auto/*path): `authn.requireUser` → `authz.require:redirects.write` → **`redirects.removeAuto`** → **`redirects.export`**
 - **renderRedirects** (GET /redirects.json): **`redirects.render`** → `authz.fields:redirectRules?shape=array`
 - **resolvePage** (GET /site/*path): `authn.identifyUser` → `authz.require:pages.read` → **`redirects.lookup`** → `site.resolve:pages?home=home&status=published&fallback=true` → `site.resolveLinks:pages?home=home&status=published&fallback=true` → `authz.fields:pages?shape=item`
 - **setRedirects** (PUT /redirects): `authn.requireUser` → `authz.require:redirects.write` → `validate.check:redirects.rules` → **`redirects.validate`** → `content.set:redirects` → **`redirects.export`**

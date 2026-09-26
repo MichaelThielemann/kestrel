@@ -5,7 +5,8 @@ export default definePipeline({
   steps: [
     "authn.requireUser",
     "authz.require:pages.delete",
-    { atomic: ["references.guard:pages", "content.remove:pages", "revisions.remove:pages", "references.unindex:pages", "links.unextract:pages"] },
+    { atomic: ["references.guard:pages", "content.remove:pages", "revisions.remove:pages", "references.unindex:pages", "links.unextract:pages", "site.indexPath:pages"] },
+    "site.announcePaths",
     "events.emit:page.deleted",
     "events.relay",
   ],

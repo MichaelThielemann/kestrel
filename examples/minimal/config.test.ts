@@ -80,7 +80,7 @@ describe("examples/minimal single translation removal", () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
     expect(config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline])).toContainEqual(["DELETE /pages/:id/translations/:locale", "deletePageTranslation"]);
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("deletePageTranslation")).toEqual(["authn.requireUser", "authz.require:pages.write", "content.removeTranslation:pages", "revisions.removeTranslation:pages", "references.index:pages", "links.extract:pages", "events.emit:page.translationRemoved", "events.relay"]);
+    expect(pipelines.get("deletePageTranslation")).toEqual(["authn.requireUser", "authz.require:pages.write", "content.removeTranslation:pages", "revisions.removeTranslation:pages", "references.index:pages", "links.extract:pages", "site.indexPath:pages", "site.announcePaths", "events.emit:page.translationRemoved", "events.relay"]);
   });
 });
 

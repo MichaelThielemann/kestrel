@@ -3184,7 +3184,7 @@
     "/admin/pages": {
       "get": {
         "operationId": "listAllPages",
-        "summary": "Require a valid session → Requires permission pages.manage → List pages",
+        "summary": "Require a valid session → Requires permission pages.manage → List pages → Add _paths (locale → path) to the pages result, every valid path including drafts",
         "tags": [
           "admin"
         ],
@@ -3192,7 +3192,8 @@
         "x-kestrel-steps": [
           "authn.requireUser",
           "authz.require:pages.manage",
-          "content.list:pages"
+          "content.list:pages",
+          "site.attachPaths:pages"
         ],
         "parameters": [
           {
@@ -3334,11 +3335,22 @@
                               "type": "boolean"
                             },
                             "description": "per locale: required localized fields present"
+                          },
+                          "_paths": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
                           }
                         },
                         "required": [
-                          "id",
+                          "_paths",
                           "createdAt",
+                          "id",
                           "updatedAt"
                         ]
                       }
@@ -3424,7 +3436,7 @@
     "/admin/pages/{id}": {
       "get": {
         "operationId": "readAnyPage",
-        "summary": "Require a valid session → Requires permission pages.manage → One pages document",
+        "summary": "Require a valid session → Requires permission pages.manage → One pages document → Add _paths (locale → path) to the pages result, every valid path including drafts",
         "tags": [
           "admin"
         ],
@@ -3432,7 +3444,8 @@
         "x-kestrel-steps": [
           "authn.requireUser",
           "authz.require:pages.manage",
-          "content.get:pages"
+          "content.get:pages",
+          "site.attachPaths:pages"
         ],
         "parameters": [
           {
@@ -3549,11 +3562,22 @@
                         "type": "boolean"
                       },
                       "description": "per locale: required localized fields present"
+                    },
+                    "_paths": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
                     }
                   },
                   "required": [
-                    "id",
+                    "_paths",
                     "createdAt",
+                    "id",
                     "updatedAt"
                   ]
                 }
@@ -4338,7 +4362,7 @@
     "/admin/pages/{id}/revisions/{revisionId}/restore": {
       "post": {
         "operationId": "restorePageRevision",
-        "summary": "Require a valid session → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is → Emit event \"page.restored\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is → Emit event \"page.restored\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "admin"
         ],
@@ -4355,6 +4379,8 @@
           "revisions.record:pages",
           "references.index:pages",
           "links.extract:pages",
+          "site.indexPath:pages",
+          "site.announcePaths",
           "revisions.reportRestore",
           "events.emit:page.restored",
           "events.relay"
@@ -4577,7 +4603,7 @@
             }
           },
           "400": {
-            "description": "validation failed",
+            "description": "the path is reserved or starts with a locale code",
             "content": {
               "application/json": {
                 "schema": {
@@ -4617,7 +4643,7 @@
             }
           },
           "409": {
-            "description": "the revision carries no snapshot",
+            "description": "another document holds the path",
             "content": {
               "application/json": {
                 "schema": {
@@ -4637,7 +4663,7 @@
             }
           },
           "503": {
-            "description": "the revision could not be written",
+            "description": "the store is unavailable",
             "headers": {
               "Retry-After": {
                 "description": "seconds until the client may retry",
@@ -4734,6 +4760,351 @@
                   }
                 },
                 "additionalProperties": false
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/pages/path-preview": {
+      "post": {
+        "operationId": "previewPagePath",
+        "summary": "Require a valid session → Requires permission pages.write → The public path a pages would get for payload { id?, locale?, slug }, whether it would be reachable and why not; writes nothing",
+        "tags": [
+          "admin"
+        ],
+        "x-kestrel-pipeline": "previewPagePath",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:pages.write",
+          "site.previewPath:pages"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "reachable": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "conflict": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "locale": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "locale",
+                            "type",
+                            "id",
+                            "label"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "shadows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "id",
+                          "label",
+                          "path"
+                        ]
+                      }
+                    },
+                    "exposesParentSlug": {
+                      "type": "null"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "reachable",
+                    "reason",
+                    "conflict",
+                    "shadows",
+                    "exposesParentSlug"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "slug is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission pages.write",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "the store is unavailable",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "locale": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "slug"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/paths/rebuild": {
+      "post": {
+        "operationId": "rebuildPaths",
+        "summary": "Require a valid session → Requires permission pages.manage → Recompute every routed document's paths from content@1 outside any group (adds `rebuild` to the result) → Write the planned paths inside one atomic group; saves committed since the plan are recomputed there → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run",
+        "tags": [
+          "admin"
+        ],
+        "x-kestrel-pipeline": "rebuildPaths",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:pages.manage",
+          "site.planRebuild",
+          "site.applyRebuild",
+          "site.announcePaths"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "indexed": {
+                      "type": "integer"
+                    },
+                    "conflicts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "locale": {
+                            "type": "string"
+                          },
+                          "winner": {
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          },
+                          "losers": {
+                            "type": "array",
+                            "items": {
+                              "type": "object"
+                            }
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "taken",
+                              "reserved",
+                              "locale"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "locale",
+                          "winner",
+                          "losers",
+                          "reason"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "indexed",
+                    "conflicts"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission pages.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "the store is unavailable",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           }
@@ -5024,6 +5395,253 @@
           },
           "403": {
             "description": "missing permission pages.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "temporarily unavailable; retry after the Retry-After header",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/redirects/auto": {
+      "get": {
+        "operationId": "listAutoRedirects",
+        "summary": "Require a valid session → Requires permission redirects.read → Effective automatic redirects (a moved document's old path, sorted by from)",
+        "tags": [
+          "admin"
+        ],
+        "x-kestrel-pipeline": "listAutoRedirects",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:redirects.read",
+          "redirects.listAuto"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "type": "string"
+                      },
+                      "to": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "docId": {
+                        "type": "string"
+                      },
+                      "locale": {
+                        "type": "string"
+                      },
+                      "seq": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "from",
+                      "to",
+                      "type",
+                      "docId",
+                      "locale",
+                      "seq"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission redirects.read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "temporarily unavailable; retry after the Retry-After header",
+            "headers": {
+              "Retry-After": {
+                "description": "seconds until the client may retry",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/redirects/auto/{path}": {
+      "delete": {
+        "operationId": "removeAutoRedirect",
+        "summary": "Require a valid session → Requires permission redirects.write → Turn the automatic redirect at params.path into a removed tombstone; a replay of the move that created it cannot restore it → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+        "tags": [
+          "admin"
+        ],
+        "x-kestrel-pipeline": "removeAutoRedirect",
+        "x-kestrel-steps": [
+          "authn.requireUser",
+          "authz.require:redirects.write",
+          "redirects.removeAuto",
+          "redirects.export"
+        ],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "rest of the path, may contain slashes"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "redirects": {
+                      "type": "object",
+                      "properties": {
+                        "rules": {
+                          "type": "integer"
+                        },
+                        "skipped": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "rules",
+                        "skipped"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "redirects"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "missing path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "missing permission redirects.write",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no automatic redirect at that path",
             "content": {
               "application/json": {
                 "schema": {
@@ -9876,7 +10494,7 @@
       },
       "post": {
         "operationId": "createPage",
-        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Create a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Emit event \"page.created\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Create a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Emit event \"page.created\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "pages"
         ],
@@ -9892,6 +10510,8 @@
           "revisions.record:pages",
           "references.index:pages",
           "links.extract:pages",
+          "site.indexPath:pages",
+          "site.announcePaths",
           "events.emit:page.created",
           "events.relay"
         ],
@@ -10072,7 +10692,7 @@
             }
           },
           "400": {
-            "description": "validation failed",
+            "description": "the path is reserved or starts with a locale code",
             "content": {
               "application/json": {
                 "schema": {
@@ -10102,7 +10722,7 @@
             }
           },
           "409": {
-            "description": "a document with that id already exists",
+            "description": "another document holds the path",
             "content": {
               "application/json": {
                 "schema": {
@@ -10122,7 +10742,7 @@
             }
           },
           "503": {
-            "description": "the revision could not be written",
+            "description": "the store is unavailable",
             "headers": {
               "Retry-After": {
                 "description": "seconds until the client may retry",
@@ -10217,7 +10837,7 @@
     "/pages/{id}": {
       "delete": {
         "operationId": "deletePage",
-        "summary": "Require a valid session → Requires permission pages.delete → Refuse deletion while pages is referenced → Delete a pages → Drop every revision of a pages document, in every locale → Drop indexed references of a pages document → Drop indexed links of pages → Emit event \"page.deleted\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session → Requires permission pages.delete → Refuse deletion while pages is referenced → Delete a pages → Drop every revision of a pages document, in every locale → Drop indexed references of a pages document → Drop indexed links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Emit event \"page.deleted\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "pages"
         ],
@@ -10230,6 +10850,8 @@
           "revisions.remove:pages",
           "references.unindex:pages",
           "links.unextract:pages",
+          "site.indexPath:pages",
+          "site.announcePaths",
           "events.emit:page.deleted",
           "events.relay"
         ],
@@ -10325,7 +10947,7 @@
             }
           },
           "400": {
-            "description": "missing id",
+            "description": "the path is reserved or starts with a locale code",
             "content": {
               "application/json": {
                 "schema": {
@@ -10355,7 +10977,7 @@
             }
           },
           "409": {
-            "description": "still referenced",
+            "description": "another document holds the path",
             "content": {
               "application/json": {
                 "schema": {
@@ -10375,7 +10997,7 @@
             }
           },
           "503": {
-            "description": "temporarily unavailable; retry after the Retry-After header",
+            "description": "the store is unavailable",
             "headers": {
               "Retry-After": {
                 "description": "seconds until the client may retry",
@@ -10534,7 +11156,7 @@
       },
       "patch": {
         "operationId": "updatePage",
-        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Emit event \"page.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Emit event \"page.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "pages"
         ],
@@ -10550,6 +11172,8 @@
           "revisions.record:pages",
           "references.index:pages",
           "links.extract:pages",
+          "site.indexPath:pages",
+          "site.announcePaths",
           "events.emit:page.updated",
           "events.relay"
         ],
@@ -10738,7 +11362,7 @@
             }
           },
           "400": {
-            "description": "validation failed",
+            "description": "the path is reserved or starts with a locale code",
             "content": {
               "application/json": {
                 "schema": {
@@ -10777,6 +11401,16 @@
               }
             }
           },
+          "409": {
+            "description": "another document holds the path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "500": {
             "description": "a subscribed handler failed",
             "content": {
@@ -10788,7 +11422,7 @@
             }
           },
           "503": {
-            "description": "the revision could not be written",
+            "description": "the store is unavailable",
             "headers": {
               "Retry-After": {
                 "description": "seconds until the client may retry",
@@ -10899,7 +11533,7 @@
     "/pages/{id}/translations/{locale}": {
       "delete": {
         "operationId": "deletePageTranslation",
-        "summary": "Require a valid session → Requires permission pages.write → Remove one translation of a pages (locale from the route or ?locale=); the document stays in its other locales → Drop the revisions of one locale of a pages document → Index the references of a pages document → Index external links of pages → Emit event \"page.translationRemoved\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session → Requires permission pages.write → Remove one translation of a pages (locale from the route or ?locale=); the document stays in its other locales → Drop the revisions of one locale of a pages document → Index the references of a pages document → Index external links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Emit event \"page.translationRemoved\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "pages"
         ],
@@ -10911,6 +11545,8 @@
           "revisions.removeTranslation:pages",
           "references.index:pages",
           "links.extract:pages",
+          "site.indexPath:pages",
+          "site.announcePaths",
           "events.emit:page.translationRemoved",
           "events.relay"
         ],
@@ -11107,7 +11743,7 @@
             }
           },
           "400": {
-            "description": "missing id",
+            "description": "the path is reserved or starts with a locale code",
             "content": {
               "application/json": {
                 "schema": {
@@ -11147,7 +11783,7 @@
             }
           },
           "409": {
-            "description": "last translation – remove the document",
+            "description": "another document holds the path",
             "content": {
               "application/json": {
                 "schema": {
@@ -11167,7 +11803,7 @@
             }
           },
           "503": {
-            "description": "temporarily unavailable; retry after the Retry-After header",
+            "description": "the store is unavailable",
             "headers": {
               "Retry-After": {
                 "description": "seconds until the client may retry",
@@ -14895,6 +15531,16 @@
                   "required": []
                 },
                 "description": "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve"
+              },
+              "_paths": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
               }
             },
             "required": [
@@ -15043,6 +15689,16 @@
                   "required": []
                 },
                 "description": "internal references by target id after site.resolveLinks; absent when the document has no internal references to resolve"
+              },
+              "_paths": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
               }
             },
             "required": [

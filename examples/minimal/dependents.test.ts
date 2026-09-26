@@ -85,7 +85,8 @@ function readingRendererModule(state: ReadingRenderer) {
       if (state.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, state.delayMs));
       const title = isRecord(page) && typeof page.title === "string" ? page.title : String(input.document.title);
       const siteTitle = isRecord(settings) && typeof settings.title === "string" ? settings.title : "";
-      return ok({ data: `<html><body><main><h1>${title}</h1><p class="site">${siteTitle}</p><ul>${names.map((n) => `<li>${n}</li>`).join("")}</ul></main></body></html>`, contentType: "text/html; charset=utf-8", extension: "html" });
+      const links = isRecord(page) && isRecord(page._links) ? Object.values(page._links).flatMap((l) => (isRecord(l) && typeof l.path === "string" ? [l.path] : [])) : [];
+      return ok({ data: `<html><body><main><h1>${title}</h1><p class="site">${siteTitle}</p><ul>${names.map((n) => `<li>${n}</li>`).join("")}</ul><nav>${links.map((l) => `<a href="${l}"></a>`).join("")}</nav></main></body></html>`, contentType: "text/html; charset=utf-8", extension: "html" });
     },
   };
   return defineModule({
@@ -296,6 +297,27 @@ for (const mode of ["direct", "queue"] as const) {
         await settled(example);
         expect(page(example, "/entwurf")).toBeNull();
         expect(example.reading.calls).not.toContain("/entwurf");
+      } finally {
+        await example.dispose();
+      }
+    }, 30_000);
+
+    it("renaming a page moves its exported file, re-renders the pages linking to it and redirects the old path", async () => {
+      const example = await bootExample({ mode });
+      try {
+        const ids = await seed(example);
+        await settled(example);
+        expect(page(example, "/info")).toContain('<a href="/programm">');
+        await call(example, "updatePage", { token: ids.token, params: { id: ids.programm }, body: { slug: "festival" } });
+        await pollUntil(() => page(example, "/programm") === null && (page(example, "/festival") ?? "").includes("<h1>Programm</h1>") && (page(example, "/info") ?? "").includes('<a href="/festival">'));
+        expect(page(example, "/en/program")).toContain("<h1>Program</h1>");
+        await pollUntil(async () => {
+          const res = await example.kestrel.run("resolvePage", { trigger, params: { path: "programm" } });
+          return JSON.stringify(res.result) === JSON.stringify({ redirect: { to: "/festival", status: 301 } });
+        });
+        const exported = boundaryCast<Array<{ target: string }>>(JSON.parse(readFileSync(join(example.site, "redirects.json"), "utf8")), "json");
+        expect(exported.map((r) => r.target)).toContain("/festival");
+        await settled(example);
       } finally {
         await example.dispose();
       }

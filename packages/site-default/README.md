@@ -130,6 +130,17 @@ about 1 ms, and a full rebuild about 20 ms.
 
 Pipelines in `examples/minimal` using these steps:
 
+- **createPage** (POST /pages): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.create:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` → **`site.indexPath:pages`** ] → **`site.announcePaths`** → `events.emit:page.created` → `events.relay`
+- **deletePage** (DELETE /pages/:id): `authn.requireUser` → `authz.require:pages.delete` → [ `references.guard:pages` → `content.remove:pages` → `revisions.remove:pages` → `references.unindex:pages` → `links.unextract:pages` → **`site.indexPath:pages`** ] → **`site.announcePaths`** → `events.emit:page.deleted` → `events.relay`
+- **deletePageTranslation** (DELETE /pages/:id/translations/:locale): `authn.requireUser` → `authz.require:pages.write` → [ `content.removeTranslation:pages` → `revisions.removeTranslation:pages` → `references.index:pages` → `links.extract:pages` → **`site.indexPath:pages`** ] → **`site.announcePaths`** → `events.emit:page.translationRemoved` → `events.relay`
+- **listAllPages** (GET /admin/pages): `authn.requireUser` → `authz.require:pages.manage` → `content.list:pages` → **`site.attachPaths:pages`**
+- **previewPagePath** (POST /admin/pages/path-preview): `authn.requireUser` → `authz.require:pages.write` → **`site.previewPath:pages`**
+- **readAnyPage** (GET /admin/pages/:id): `authn.requireUser` → `authz.require:pages.manage` → `content.get:pages` → **`site.attachPaths:pages`**
+- **rebuildPaths** (POST /admin/paths/rebuild): `authn.requireUser` → `authz.require:pages.manage` → **`site.planRebuild`** → [ **`site.applyRebuild`** ] → **`site.announcePaths`**
+- **rebuildPathsAfterMigrations** (event migrations.applied): **`site.planRebuild`** → [ **`site.applyRebuild`** ] → **`site.announcePaths`**
 - **resolvePage** (GET /site/*path): `authn.identifyUser` → `authz.require:pages.read` → `redirects.lookup` → **`site.resolve:pages?home=home&status=published&fallback=true`** → **`site.resolveLinks:pages?home=home&status=published&fallback=true`** → `authz.fields:pages?shape=item`
+- **restorePageRevision** (POST /admin/pages/:id/revisions/:revisionId/restore): `authn.requireUser` → `authz.require:pages.write` → `revisions.restore:pages` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` → **`site.indexPath:pages`** ] → **`site.announcePaths`** → `revisions.reportRestore` → `events.emit:page.restored` → `events.relay`
+- **resumePaths** (cron * * * * *): **`site.resumePaths`**
+- **updatePage** (PATCH /pages/:id): `authn.requireUser` → `authz.require:pages.write` → `validate.check:pages.body` → `validate.sanitize:pages.body` → `validate.check:pages.body` → [ `references.check:pages` → `content.update:pages` → `revisions.record:pages` → `references.index:pages` → `links.extract:pages` → **`site.indexPath:pages`** ] → **`site.announcePaths`** → `events.emit:page.updated` → `events.relay`
 
 <!-- kestrel-docs:end -->

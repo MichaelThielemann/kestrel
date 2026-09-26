@@ -130,6 +130,7 @@ prefix).
 | `delivery.publishAll` | none |
 | `delivery.exportLlms` | none |
 | `delivery.markDependents` | none |
+| `delivery.markMoved` | none |
 | `delivery.markAll` | none |
 | `delivery.checkBuild` | none |
 | `delivery.republishOutput` | none |
