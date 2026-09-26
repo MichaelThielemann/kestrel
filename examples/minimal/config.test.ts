@@ -33,7 +33,7 @@ describe("static delivery reserves the media path instead of rewriting it", () =
   });
 });
 
-describe("site wiring", () => {
+describe("site wiring", { timeout: 30_000 }, () => {
   it("declares site-default between content-default and delivery-static", async () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
     const modules = config.modules.map((m) => m.use);

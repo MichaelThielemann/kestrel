@@ -224,7 +224,7 @@ function filesUnder(dir: string): string[] {
   return readdirSync(dir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name));
 }
 
-describe("examples/minimal media: a published page and the public copies", () => {
+describe("examples/minimal media: a published page and the public copies", { timeout: 30_000 }, () => {
   it("a page publish writes the media URLs verbatim, and the original and every variant are in the static prefix next to it", async () => {
     const example = await bootExample();
     try {

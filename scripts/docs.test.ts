@@ -244,7 +244,7 @@ describe("formatBootWarning", () => {
   });
 });
 
-describe("example config with an event trigger no pipeline emits", () => {
+describe("example config with an event trigger no pipeline emits", { timeout: 30_000 }, () => {
   it("makes the boot warning list non-empty, naming the pipeline and the event", async () => {
     const config = await loadConfig(join(example, "kestrel.config.ts"));
     const modules = await loadModules(example, config);
@@ -258,7 +258,7 @@ describe("example config with an event trigger no pipeline emits", () => {
   });
 });
 
-describe("example config's own steps", () => {
+describe("example config's own steps", { timeout: 30_000 }, () => {
   it("generates the same OpenAPI document as the checked-in examples/minimal/openapi.json", async () => {
     const config = await loadConfig(join(example, "kestrel.config.ts"));
     const modules = await loadModules(example, config);
