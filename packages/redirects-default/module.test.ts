@@ -4,6 +4,8 @@ import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentDocument } from "@michaelthielemann/kestrel-contracts/content";
 import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
 import { err, failure, ok } from "@michaelthielemann/kestrel-contracts/errors";
+import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
+import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Contract } from "@michaelthielemann/kestrel/defineContract";
 import type { Deps } from "@michaelthielemann/kestrel/defineModule";
@@ -51,7 +53,7 @@ function fakeBlobs(): Blobstore & { blobs: Map<string, Uint8Array> } {
 }
 
 async function boot(initial?: unknown) {
-  const providers = new Map<string, unknown>([[CONTENT.name, fakeContent(initial)], [BLOBSTORE.name, fakeBlobs()]]);
+  const providers = new Map<string, unknown>([[CONTENT.name, fakeContent(initial)], [BLOBSTORE.name, fakeBlobs()], [PERSISTENCE.name, createFakePersistence()]]);
   const deps: Deps = {
     get<T>(contract: Contract<T>): T {
       if (!providers.has(contract.name)) throw new Error(`no provider for "${contract.name}"`);

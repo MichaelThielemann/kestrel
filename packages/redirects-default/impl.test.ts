@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentDocument } from "@michaelthielemann/kestrel-contracts/content";
 import { err, failure, ok } from "@michaelthielemann/kestrel-contracts/errors";
+import { PERSISTENCE, type Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createContext, DONE } from "@michaelthielemann/kestrel/context";
@@ -72,29 +74,29 @@ describe("requestPath", () => {
 });
 
 describe("validate", () => {
-  it("accepts good rules and absent rules, rejects bad rows with the row number", () => {
-    const r = createRedirects(config, { content: fakeContent().content, blobs: fakeBlobs(), logger: stubLogger().logger });
-    expect(() => r.validate(rules)).not.toThrow();
-    expect(() => r.validate(null)).not.toThrow();
-    expect(() => r.validate([{ from: "/a", to: "/b/$1" }])).toThrow(RedirectRuleError);
-    expect(() => r.validate([{ from: "/a", to: "/b/$1" }])).toThrow(/^Row 1:/);
+  it("accepts good rules and absent rules, rejects bad rows with the row number", async () => {
+    const r = await createRedirects(config, { content: fakeContent().content, blobs: fakeBlobs(), db: createFakePersistence(), logger: stubLogger().logger });
+    expect(expectOk(await r.validate(rules))).toBeUndefined();
+    expect(expectOk(await r.validate(null))).toBeUndefined();
+    await expect(r.validate([{ from: "/a", to: "/b/$1" }])).rejects.toThrow(RedirectRuleError);
+    await expect(r.validate([{ from: "/a", to: "/b/$1" }])).rejects.toThrow(/^Row 1:/);
   });
 });
 
 describe("lookup", () => {
   it("matches first-wins, substitutes $n, returns null without a hit or without a singleton", async () => {
     const c = fakeContent(rules);
-    const r = createRedirects(config, { content: c.content, blobs: fakeBlobs(), logger: stubLogger().logger });
+    const r = await createRedirects(config, { content: c.content, blobs: fakeBlobs(), db: createFakePersistence(), logger: stubLogger().logger });
     expect(expectOk(await r.lookup("/blog/hallo"))).toEqual({ to: "/artikel/hallo", status: 301 });
     expect(expectOk(await r.lookup("/event/"))).toEqual({ to: "/aktion", status: 302 });
     expect(expectOk(await r.lookup("/nope"))).toBeNull();
-    const empty = createRedirects(config, { content: fakeContent().content, blobs: fakeBlobs(), logger: stubLogger().logger });
+    const empty = await createRedirects(config, { content: fakeContent().content, blobs: fakeBlobs(), db: createFakePersistence(), logger: stubLogger().logger });
     expect(expectOk(await empty.lookup("/blog/x"))).toBeNull();
   });
   it("recompiles only when updatedAt changes and skips broken rows once per version", async () => {
     const c = fakeContent(rules);
     const { logger, errors } = stubLogger();
-    const r = createRedirects(config, { content: c.content, blobs: fakeBlobs(), logger });
+    const r = await createRedirects(config, { content: c.content, blobs: fakeBlobs(), db: createFakePersistence(), logger });
     await r.lookup("/a");
     await r.lookup("/b");
     expect(c.reads()).toBe(2);
@@ -106,7 +108,7 @@ describe("lookup", () => {
   });
   it("passes a persistence failure through as TRANSIENT", async () => {
     const content: Pick<Content, "get"> = { async get() { return err(failure("TRANSIENT", "db busy")); } };
-    const r = createRedirects(config, { content: boundaryCast<Content>(content, "host"), blobs: fakeBlobs(), logger: stubLogger().logger });
+    const r = await createRedirects(config, { content: boundaryCast<Content>(content, "host"), blobs: fakeBlobs(), db: createFakePersistence(), logger: stubLogger().logger });
     const error = expectErr(await r.lookup("/x"), "TRANSIENT");
     expect(error.status).toBe(503);
     expect(error.retryable).toBe(true);
@@ -117,14 +119,14 @@ describe("lookup with a malformed rule list", () => {
   it("fails open (null, one logger error, no repeat on the second lookup)", async () => {
     const c = fakeContent({ a: 1 });
     const { logger, errors } = stubLogger();
-    const r = createRedirects(config, { content: c.content, blobs: fakeBlobs(), logger });
+    const r = await createRedirects(config, { content: c.content, blobs: fakeBlobs(), db: createFakePersistence(), logger });
     expect(expectOk(await r.lookup("/x"))).toBeNull();
     expect(expectOk(await r.lookup("/x"))).toBeNull();
     expect(errors).toHaveLength(1);
   });
   it("export still throws – a broken container must not silently publish []", async () => {
     const c = fakeContent({ a: 1 });
-    const r = createRedirects(config, { content: c.content, blobs: fakeBlobs(), logger: stubLogger().logger });
+    const r = await createRedirects(config, { content: c.content, blobs: fakeBlobs(), db: createFakePersistence(), logger: stubLogger().logger });
     await expect(r.export()).rejects.toThrow(/must be a list/);
   });
 });
@@ -134,7 +136,7 @@ describe("export", () => {
     const c = fakeContent([...rules, { from: "/bad?x", to: "/c" }]);
     const blobs = fakeBlobs();
     const { logger, errors } = stubLogger();
-    const r = createRedirects(config, { content: c.content, blobs, logger });
+    const r = await createRedirects(config, { content: c.content, blobs, db: createFakePersistence(), logger });
     const out = expectOk(await r.export());
     expect(out).toEqual({ rules: 2, skipped: [expect.stringMatching(/^Row 3:/)] });
     expect(errors).toHaveLength(1);
@@ -145,10 +147,10 @@ describe("export", () => {
   });
   it("writes [] when the singleton is absent and passes a blobstore failure through as TRANSIENT", async () => {
     const blobs = fakeBlobs();
-    const r = createRedirects(config, { content: fakeContent().content, blobs, logger: stubLogger().logger });
+    const r = await createRedirects(config, { content: fakeContent().content, blobs, db: createFakePersistence(), logger: stubLogger().logger });
     expect(expectOk(await r.export())).toEqual({ rules: 0, skipped: [] });
     expect(new TextDecoder().decode(blobs.blobs.get("site/redirects.json")?.data)).toBe("[]");
-    const failing = createRedirects(config, { content: fakeContent(rules).content, blobs: fakeBlobs(true), logger: stubLogger().logger });
+    const failing = await createRedirects(config, { content: fakeContent(rules).content, blobs: fakeBlobs(true), db: createFakePersistence(), logger: stubLogger().logger });
     const error = expectErr(await failing.export(), "TRANSIENT");
     expect(error.status).toBe(503);
     expect(error.retryable).toBe(true);
@@ -157,20 +159,22 @@ describe("export", () => {
 
 describe("render", () => {
   it("returns the publishable rules", async () => {
-    const r = createRedirects(config, { content: fakeContent(rules).content, blobs: fakeBlobs(), logger: stubLogger().logger });
+    const r = await createRedirects(config, { content: fakeContent(rules).content, blobs: fakeBlobs(), db: createFakePersistence(), logger: stubLogger().logger });
     expect(expectOk(await r.render()).map((x) => x.target)).toEqual(["/artikel/$1", "/aktion"]);
-    const empty = createRedirects(config, { content: fakeContent().content, blobs: fakeBlobs(), logger: stubLogger().logger });
+    const empty = await createRedirects(config, { content: fakeContent().content, blobs: fakeBlobs(), db: createFakePersistence(), logger: stubLogger().logger });
     expect(expectOk(await empty.render())).toEqual([]);
   });
 });
 
 describe("module steps", () => {
-  async function steps(initial?: unknown, blobs = fakeBlobs()) {
+  async function steps(initial?: unknown, blobs = fakeBlobs(), db: Persistence = createFakePersistence()) {
     const c = fakeContent(initial);
     const { logger } = stubLogger();
     const deps: Deps = {
       get<T>(contract: Contract<T>): T {
-        return boundaryCast<T>(contract.name === "content@1" ? c.content : blobs, "host");
+        if (contract.name === "content@1") return boundaryCast<T>(c.content, "host");
+        if (contract.name === PERSISTENCE.name) return boundaryCast<T>(db, "host");
+        return boundaryCast<T>(blobs, "host");
       },
       find: () => undefined,
       logger,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content } from "@michaelthielemann/kestrel-contracts/content";
+import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
@@ -18,7 +19,7 @@ describe("redirects/default in a read scope", () => {
         return ok({ id: "r", createdAt: 1, updatedAt: 1, rules: [{ from: "/alt", to: "/neu", status: 301 }] });
       },
     };
-    const redirects = createRedirects({ type: "redirects", field: "rules", prefix: "site/", key: "redirects.json" }, { content: boundaryCast<Content>(noting, "host"), blobs: boundaryCast<Blobstore>({}, "host"), logger: quiet });
+    const redirects = await createRedirects({ type: "redirects", field: "rules", prefix: "site/", key: "redirects.json" }, { content: boundaryCast<Content>(noting, "host"), blobs: boundaryCast<Blobstore>({}, "host"), db: createFakePersistence(), logger: quiet });
     const { reads } = await observeReads(async () => {
       expect(expectOk(await redirects.lookup("/alt"))).toEqual({ to: "/neu", status: 301 });
     });

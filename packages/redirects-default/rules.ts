@@ -60,6 +60,11 @@ function wildcardCount(from: string): number {
   return (from.trim().match(/\*\*|\*/g) ?? []).length;
 }
 
+/** Anchors a literal, already-canonical path (no wildcards) the same way `patternToRegexSource` tolerates a trailing slash. */
+export function exactPathPatternSource(path: string): string {
+  return path === "/" ? "^/$" : `^${escapeLiteral(path)}/?$`;
+}
+
 /**
  * Normalize an authored `to` into a `Location` value. A path gets its leading slash; an absolute
  * http(s) URL is kept verbatim (a moved domain is a legitimate target). Everything else is rejected —
