@@ -14,10 +14,6 @@ export interface FieldDefinition {
 
 export type Schema = Record<string, FieldType | FieldDefinition>;
 
-export function fieldDefinition(value: FieldType | FieldDefinition): FieldDefinition {
-  return typeof value === "string" ? { type: value } : value;
-}
-
 export interface Document {
   id: string;
   [field: string]: unknown;

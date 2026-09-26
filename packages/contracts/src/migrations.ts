@@ -1,6 +1,6 @@
 import { defineContract } from "@michaelthielemann/kestrel/defineContract";
 import type { ContentDocument } from "./content.ts";
-import { customFailure, type KestrelError, type Result } from "./errors.ts";
+import type { KestrelError, Result } from "./errors.ts";
 
 export interface MigrationContext {
   document: ContentDocument;
@@ -29,9 +29,6 @@ export type ApplyResult = { dry: true; changes: { id: string; documents: number 
 
 export type MigrationsCode = "CONFLICT" | "TRANSIENT" | "MIGRATION_FAILED";
 export type MigrationsError = KestrelError<MigrationsCode>;
-
-/** A migration's `up` produced data the model or schema rejects; the caller shows the message verbatim. */
-export const migrationFailed = (message: string, details: { migration: string; document: string; locale?: string; problems?: unknown }): KestrelError<"MIGRATION_FAILED"> => customFailure("MIGRATION_FAILED", 500, message, { details });
 
 /** Construction never applies anything; running migrations at boot is the providing module's job. */
 export interface Migrations {

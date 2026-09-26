@@ -1,5 +1,5 @@
 import { defineContract } from "@michaelthielemann/kestrel/defineContract";
-import { customFailure, type KestrelError, type Result } from "./errors.ts";
+import type { KestrelError, Result } from "./errors.ts";
 
 export interface RenderInput {
   type: string;
@@ -25,9 +25,6 @@ export interface RenderOutput {
 
 export type RendererCode = "TRANSIENT" | "RENDER_FAILED";
 export type RendererError = KestrelError<RendererCode>;
-
-/** The template or the host app rejected the document; `delivery-static` records it per locale instead of failing the request. */
-export const renderFailed = (message: string, cause?: unknown): KestrelError<"RENDER_FAILED"> => customFailure("RENDER_FAILED", 500, message, cause === undefined ? {} : { cause });
 
 export interface Renderer {
   formats(): string[];

@@ -5,7 +5,8 @@ import { createContentDefault } from "@michaelthielemann/kestrel-content-default
 import { err, failure, ok } from "@michaelthielemann/kestrel-contracts/errors";
 import type { EventData, Events } from "@michaelthielemann/kestrel-contracts/events";
 import type { Document, Filter, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
-import { renderFailed, type Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
+import { renderFailed } from "@michaelthielemann/kestrel-contracts/helpers/renderer";
+import type { Renderer } from "@michaelthielemann/kestrel-contracts/renderer";
 import { createFakePersistence, type FakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { createSiteDefault } from "@michaelthielemann/kestrel-site-default/impl";

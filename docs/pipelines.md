@@ -410,7 +410,8 @@ ctx.fail(error: KestrelError): Err<KestrelError>   // passes a contract's error 
 
 There is no status parameter — the status follows from `code` alone. A step that
 needs a different status (e.g. `MIGRATION_FAILED` with 500) passes a ready-made
-`KestrelError` from its contract file: `ctx.fail(migrationFailed(message, details))`.
+`KestrelError` from a contract's `helpers/*` error constructor:
+`ctx.fail(migrationFailed(message, details))`.
 Success is `ok(ctx)` or `ok({ ...ctx, result })`; `ctx.done(result)` remains the only way to
 end a pipeline *successfully* ahead of time.
 

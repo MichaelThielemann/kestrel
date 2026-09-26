@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import type { AtomicOutcome, AtomicScopeInfo, AtomicVerdict } from "@michaelthielemann/kestrel/atomic";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { err, failure, ok, type Result } from "../errors.ts";
-import { fieldDefinition, type Document, type FieldDefinition, type FieldType, type Filter, type FindOptions, type NewDocument, type Page, type Persistence, type PersistenceError, type Schema } from "../persistence.ts";
+import { fieldDefinition } from "../helpers/persistence.ts";
+import type { Document, FieldDefinition, FieldType, Filter, FindOptions, NewDocument, Page, Persistence, PersistenceError, Schema } from "../persistence.ts";
 
 type Row = Record<string, unknown>;
 type SqlValue = string | number | null;

@@ -8,7 +8,8 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { ModuleHealth } from "@michaelthielemann/kestrel/defineModule";
 import { logWarn, silentLogger, type Logger } from "@michaelthielemann/kestrel/logger";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
-import { fieldDefinition, type Document, type FieldDefinition, type FieldType, type Filter, type FindOptions, type NewDocument, type Page, type Persistence, type PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
+import { fieldDefinition } from "@michaelthielemann/kestrel-contracts/helpers/persistence";
+import type { Document, FieldDefinition, FieldType, Filter, FindOptions, NewDocument, Page, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 
 export interface Config {
   file: string;

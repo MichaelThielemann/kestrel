@@ -22,6 +22,9 @@ that can change the store between a consumer's calls.
 `helpers/persistence.owned` is not a contract: `ownedPersistence(db, owner, collections)` is a
 `persistence@1` view that reaches only the named collections and throws a wiring error naming
 `owner` for any other, before the store is asked — for a module whose storage must stay its own.
+`helpers/persistence`'s `fieldDefinition`, `helpers/renderer`'s `renderFailed` and
+`helpers/migrations`'s `migrationFailed` normalize a schema field and build a contract's own
+`KestrelError` respectively — runtime functions next to a frozen contract, not part of it.
 `links` declares the frozen `content@1` underpinning shared by the modules that read internal
 references: `INTERNAL_REF`, `InternalRef` and `LinkTarget`. `helpers/links`'s `collectInternalRefs`
 walks a value for every `INTERNAL_REF` match, the runtime counterpart of that same declaration.
@@ -71,9 +74,13 @@ sets a reader consults for the portability marking), `helpers/events.envelope` (
 `parseEmitSpec`, `withEventIdentity`, `relaySummary`, `mergeRelayReport` — runtime logic built on the
 frozen shapes in `events.steps`), `helpers/persistence.owned` (`ownedPersistence`),
 `helpers/content-locale` (`satisfiesFilter`, `publishedLocale`, `narrowListTranslations`),
-`helpers/content-schema` (`documentSchema`, `fieldSchema`), `helpers/links` (`collectInternalRefs`)
-and `helpers/mediaType` (`parseMediaType`, `mediaTypeEssence`, `canonicalMediaType`, `publicFormOf`,
-`mediaTypeMatches`, `mediaTypeAllowed`, `EXTENSION_BY_TYPE`, `NEUTRAL_TYPE`, `NEUTRAL_EXTENSION`).
+`helpers/content-schema` (`documentSchema`, `fieldSchema`), `helpers/links` (`collectInternalRefs`),
+`helpers/mediaType` (`parseMediaType`, `mediaTypeEssence`, `canonicalMediaType`, `publicFormOf`,
+`mediaTypeMatches`, `mediaTypeAllowed`, `EXTENSION_BY_TYPE`, `NEUTRAL_TYPE`, `NEUTRAL_EXTENSION`),
+`helpers/persistence` (`fieldDefinition`), `helpers/renderer` (`renderFailed`) and
+`helpers/migrations` (`migrationFailed`).
 
 `errors` re-exports `@michaelthielemann/kestrel/errors` and `@michaelthielemann/kestrel/result` and
-stays at its top-level path.
+stays at its top-level path. `testing/*` (`fakePersistence`, `fakeAuthn`, `fakeMedia`, `result`) are
+test doubles and assertion helpers for the contract suites — neither frozen nor a `helpers/*` runtime
+helper.

@@ -1,7 +1,8 @@
 import type { Content, ContentDocument, ContentError } from "@michaelthielemann/kestrel-contracts/content";
 import { err, failure, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
-import { migrationFailed, type ApplyResult, type LedgerEntry, type Migration, type MigrationContext, type Migrations, type MigrationsError, type PendingMigration } from "@michaelthielemann/kestrel-contracts/migrations";
+import { migrationFailed } from "@michaelthielemann/kestrel-contracts/helpers/migrations";
+import type { ApplyResult, LedgerEntry, Migration, MigrationContext, Migrations, MigrationsError, PendingMigration } from "@michaelthielemann/kestrel-contracts/migrations";
 import type { Document, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Validate } from "@michaelthielemann/kestrel-contracts/validate";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
