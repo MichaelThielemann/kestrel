@@ -472,6 +472,21 @@ Net changes since 5.8.1.
 - `redirects-default` requires `persistence@1`; a config loading it without a persistence provider
   fails to boot, naming the contract. It stores `redirects_auto_paths` and `redirects_auto_targets`.
   `Redirects.validate` returns a `Promise<Result>`, and `createRedirects` is async and takes `db`.
+- `@michaelthielemann/kestrel-contracts`'s runtime helpers moved under
+  `@michaelthielemann/kestrel-contracts/helpers/*`, no re-export left at the old path:
+  `content-locale` → `helpers/content-locale`, `content-schema` → `helpers/content-schema`,
+  `mediaType` → `helpers/mediaType`, `persistence.owned` → `helpers/persistence.owned`, `steps` →
+  `helpers/steps`. Four old paths split between frozen surface (unchanged) and a helper (moved):
+  `events.envelope`'s `eventEnvelope`/`parseEmitSpec`/`withEventIdentity` and `events.steps`'s
+  `relaySummary`/`mergeRelayReport` → `helpers/events.envelope` (its `EventEnvelope`/`EventIdentity`
+  types stay at `events.steps`, frozen with the step set they belong to); `stepSet`'s
+  `defineStepSet`/`stepSets` → `helpers/stepSet` (its `StepSet` type stays at `stepSet`, frozen);
+  `links`'s `collectInternalRefs` → `helpers/links` (`INTERNAL_REF`/`InternalRef`/`LinkTarget` stay
+  at `links`, frozen). `errors` stays at its top-level path. `kestrel-upgrade`'s new
+  `imports/contract-helpers` rule rewrites a consumer's import specifiers automatically, splitting an
+  import statement that names both a frozen and a moved symbol. The contracts package's own README
+  states which of its exports are frozen contracts and which are helpers, additive-only within a
+  major.
 
 ### Added
 
