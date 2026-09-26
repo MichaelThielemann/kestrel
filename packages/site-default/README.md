@@ -43,7 +43,8 @@ Not included: rendering, redirects (see delivery-static, redirects-default).
 ```
 
 A route has `slugField` (default `slug`), `home` (the top-level slug served at the locale's root;
-default none), `liveWhen` (the filter a document must pass with its own values in a locale to be
+default none, so a route without it, such as a mounted collection, has no home and a document slugged
+`home` keeps its own path; a call naming a `home` the route does not have throws), `liveWhen` (the filter a document must pass with its own values in a locale to be
 reachable there; default `{}`), `labelField` (default `title`, names documents in messages) and
 `parentField` (see below). Routed mode needs a `persistence@1` and an `events@1` provider; setup fails
 without them. `maxDepth` (default 16) bounds a parent chain, `maxCascade` (default 1000) the rows one

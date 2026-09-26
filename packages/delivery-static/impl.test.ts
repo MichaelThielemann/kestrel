@@ -49,7 +49,7 @@ const site: Site = {
     const locale = o.locale ?? doc._locale;
     const rules = o.rules ?? {};
     const prefixed = locale !== undefined && (rules.prefixPrimary === true || locale !== model.defaultLocale);
-    return `/${[...(prefixed ? [locale] : []), ...(slug === rules.home ? [] : [slug])].join("/")}`;
+    return `/${[...(prefixed ? [locale] : []), ...(slug === (rules.home ?? "home") ? [] : [slug])].join("/")}`;
   },
   resolveLinks: async (_t, doc) => ok({ ...doc, _links: { resolved: { path: "/x", locale: "de" } } }),
 };

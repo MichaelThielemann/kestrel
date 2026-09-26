@@ -881,6 +881,12 @@ Net changes since 5.8.1.
 
 ### Changed
 
+- `delivery-static`: a type's `home` is optional and has no default; without it the render passes no
+  `home` to `site@1`, whose own rule applies (`site-default`: `"home"` for an unrouted type, the route's
+  `home`, possibly none, for a routed one). A config that relied on the `"home"` default with a
+  `site@1` provider using another default must set `home` explicitly.
+- `site-default`: a routed type's rules take the route's `home` even when the route has none; the
+  `"home"` default applies only to unrouted types.
 - `delivery-static`: an output that is published but has no public path records the error
   `no public path` instead of `no <slugField>`.
 - `core`: module code that throws while `boot()` registers or resolves steps is a `KestrelBootError`

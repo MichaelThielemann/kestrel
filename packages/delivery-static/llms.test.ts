@@ -88,7 +88,7 @@ const site: Site = {
     const slug = doc.slug;
     if (typeof slug !== "string" || slug === "") return null;
     const prefixed = o.locale !== undefined && o.locale !== model.defaultLocale;
-    return `/${[...(prefixed ? [o.locale] : []), ...(slug === o.rules?.home ? [] : [slug])].join("/")}`;
+    return `/${[...(prefixed ? [o.locale] : []), ...(slug === (o.rules?.home ?? "home") ? [] : [slug])].join("/")}`;
   },
   resolveLinks: async (_t, doc) => ok(doc),
 };

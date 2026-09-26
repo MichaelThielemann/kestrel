@@ -27,7 +27,7 @@ const dependenciesSchema = z
 export const configSchema = z
   .object({
     types: z.record(
-      z.object({ slugField: z.string().default("slug"), statusField: z.string().default("status"), publishedValue: z.string().default("published"), home: z.string().default("home") }).strict(),
+      z.object({ slugField: z.string().default("slug"), statusField: z.string().default("status"), publishedValue: z.string().default("published"), home: z.string().optional() }).strict(),
     ),
     formats: z.array(z.string().min(1)).min(1).default(["html"]),
     prefix: z.string().default(""),

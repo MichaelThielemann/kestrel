@@ -14,7 +14,7 @@ import { splitTail, tailOf, type Route } from "./routes.ts";
 import { pathOfTail, prefixSource } from "./table.ts";
 
 interface Rules {
-  home: string;
+  home: string | null;
   slugField: string;
   prefixPrimary: boolean;
   fallback: boolean;
@@ -27,7 +27,7 @@ function rulesOf(rules: SiteRules | undefined, type?: string, route?: Route): Ru
     if (rules?.home !== undefined && rules.home !== route.home) throw new Error(`site/default: "${type ?? ""}" is routed with home ${route.home === null ? "none" : `"${route.home}"`}, but the call names "${rules.home}"`);
   }
   return {
-    home: rules?.home ?? route?.home ?? "home",
+    home: route ? route.home : (rules?.home ?? "home"),
     slugField: rules?.slugField ?? route?.slugField ?? "slug",
     prefixPrimary: rules?.prefixPrimary ?? false,
     fallback: rules?.fallback ?? false,
@@ -35,7 +35,7 @@ function rulesOf(rules: SiteRules | undefined, type?: string, route?: Route): Ru
   };
 }
 
-export function publicPath(slug: string, locale: string | undefined, defaultLocale: string | undefined, home: string, prefixPrimary: boolean): string {
+export function publicPath(slug: string, locale: string | undefined, defaultLocale: string | undefined, home: string | null, prefixPrimary: boolean): string {
   const prefixed = locale !== undefined && (prefixPrimary || locale !== defaultLocale);
   const segments = [...(prefixed ? [locale] : []), ...(slug === home ? [] : [slug])];
   return `/${segments.join("/")}`;
@@ -130,7 +130,7 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
     if (!parsed) return ok(null);
     const read: LocaleOptions = {};
     if (parsed.locale !== undefined) read.locale = parsed.locale;
-    const slug = parsed.slug === "" ? rules.home : parsed.slug;
+    const slug = parsed.slug === "" ? (rules.home ?? "") : parsed.slug;
     const lookup = { ...rules.filter, [rules.slugField]: slug };
     const defaultLookup = { ...localeIndependent(model, type, rules.filter), [rules.slugField]: slug };
     const effective = parsed.locale ?? model.defaultLocale;
@@ -187,7 +187,7 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
     if (isErr(answered)) return answered;
     const { candidate, doc } = answered.value;
     const segments = split.tail.split("/");
-    const slug = split.tail === "" ? rules.home : (segments[segments.length - 1] ?? "");
+    const slug = split.tail === "" ? (rules.home ?? "") : (segments[segments.length - 1] ?? "");
     if (candidate === null) noteRead({ kind: "query", type, filter: { ...rules.filter, [rules.slugField]: slug }, ...(effective === undefined ? {} : { locale: effective }) });
     else noteRead({ kind: "document", type, id: candidate, ...(effective === undefined ? {} : { locale: effective }) });
     if (!doc) return ok(null);

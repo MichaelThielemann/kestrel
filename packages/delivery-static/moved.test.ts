@@ -28,6 +28,15 @@ const model: ContentModel = {
         parent: { type: "ref", to: "pages" },
       },
     },
+    posts: {
+      kind: "multi",
+      fields: {
+        slug: { type: "slug", required: true, localized: true },
+        title: { type: "text", required: true, localized: true },
+        status: { type: "enum", options: ["draft", "published"], localized: true },
+      },
+    },
+    settings: { kind: "single", fields: { title: { type: "text" }, description: { type: "text" }, mounts: { type: "json" } } },
   },
 };
 
@@ -181,5 +190,23 @@ describe("delivery/static: re-rendering moved outputs", () => {
     const statuses = expectOk(await h.delivery.publish("pages", shadowed));
     expect(statuses.find((s) => s.locale === "en")).toMatchObject({ state: "error", path: null, error: "no public path" });
     expect(statuses.find((s) => s.locale === "de")).toMatchObject({ state: "live", path: "/p" });
+  });
+
+  it("delivers a routed type without a home: no home is named, and a document's slug is never taken for one", async () => {
+    const db = createFakePersistence();
+    const content = await createContentDefault(model, db);
+    const paths = await createSitePaths(routesConfig({ routes: { pages: { home: "home", liveWhen: { status: "published" } }, posts: { liveWhen: { status: "published" }, mount: true } }, mounts: { type: "settings", field: "mounts" } }), { content, db, events: { emit: async () => {}, on: () => () => {} }, logger: silentLogger });
+    const site = createSiteDefault(content, paths);
+    const blobs = memoryBlobs();
+    const config = configSchema.parse({ types: { posts: {} }, prefix: "site/", dependencies: { render: "background" } });
+    expect(config.types.posts?.home).toBeUndefined();
+    const delivery = await createDeliveryStatic(config, { content, site, renderer, blobs, db, logger: silentLogger, events: { emit: async () => {}, on: () => () => {} } });
+    instances.push(delivery);
+    const post = expectOk(await content.create("posts", { slug: "home", title: "Home post", status: "published" }));
+    expectOk(await paths.index("posts", post.id, "run"));
+    await paths.announce("run");
+    const statuses = expectOk(await delivery.publish("posts", post.id));
+    expect(statuses.find((s) => s.locale === "de")).toMatchObject({ state: "live", path: "/home" });
+    expect(blobs.files.get(keyFor("site/", "/home", "html"))).toContain("Home post");
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { observeReads } from "@michaelthielemann/kestrel/reads";
 import { routedSite } from "./__fixtures__/routed.ts";
 import { routeWith } from "./routes.ts";
 
@@ -133,6 +134,18 @@ describe("site/default mounted collections", () => {
     expect(await s.resolve("pages", "blog")).toBeNull();
     expect(await s.resolve("posts", "blog/a")).toBe(post);
     expect(s.moves()).toEqual([{ id: blog, locale: "de", from: "/blog", to: null }]);
+  });
+
+  it("a mounted collection has no home: its empty path finds nothing and a post slugged like a home page keeps its own path", async () => {
+    const s = await site();
+    const post = await s.create("posts", { slug: "home" });
+    expect(expectOk(await s.site.resolve("posts", "", { rules: { filter: { status: "published" } } }))).toBeNull();
+    expect(await s.resolve("posts", "home")).toBe(post);
+    const { reads } = await observeReads(() => s.site.resolve("posts", "", { rules: {} }));
+    expect(reads).toEqual([{ kind: "query", type: "posts", filter: { slug: "" }, locale: "de" }]);
+    const doc = expectOk(await s.content.get("posts", post))!;
+    expect(s.site.pathOf("posts", doc, { rules: {} })).toBe("/home");
+    expect(() => s.site.pathOf("posts", doc, { rules: { home: "home" } })).toThrow(/routed with home none/);
   });
 
   it("refuses to remove the mount page", async () => {

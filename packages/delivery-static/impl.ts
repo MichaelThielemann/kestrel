@@ -856,7 +856,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
       if (before?.state === "deleted") return ok({ status: null, failure: null });
       return commit(flight, output, before, renderId, { state: "draft", path: null, error: null }, { renderPath: null, written: {}, set: { kind: "none" }, failure: null });
     }
-    const rules = { home: tc.home, slugField: tc.slugField, prefixPrimary: config.prefixPrimary, fallback: config.fallback, filter: statusFilter };
+    const rules = { ...(tc.home === undefined ? {} : { home: tc.home }), slugField: tc.slugField, prefixPrimary: config.prefixPrimary, fallback: config.fallback, filter: statusFilter };
     const options = { ...(locale === undefined ? {} : { locale }), rules };
     const linkScope = await observeReads(() => site.resolveLinks(type, view, options));
     if (linkScope.result.status === "rejected") throw linkScope.result.reason;

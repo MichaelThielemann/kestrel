@@ -6,7 +6,9 @@ own `statusField` equals `publishedValue` the document (an empty field filled fr
 locale only when the default locale's own values equal `publishedValue` too, `_translations`
 narrowed to locales that satisfy it themselves, internal links resolved to public paths via
 `site.resolveLinks`, `_links` attached) is rendered in each configured format and stored under the
-path `site.pathOf` returns (default locale unprefixed unless `prefixPrimary`, `home` slug → `/`);
+path `site.pathOf` returns (default locale unprefixed unless `prefixPrimary`; a type's `home`, when
+set, is passed to `site@1` and its slug maps to `/`; without it the `site@1` provider's own rule applies,
+which for a routed type in `site-default` is the route's `home`, possibly none);
 other locales are removed. Outcome per
 locale in `delivery_publish_status` (`live` | `error` | `draft`, `path`, `error`, `publishedAt`); a failed
 render keeps the previous live output, but a locale that is published yet has no public path

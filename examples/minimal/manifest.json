@@ -2394,8 +2394,7 @@
                     "default": "published"
                   },
                   "home": {
-                    "type": "string",
-                    "default": "home"
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -2564,8 +2563,7 @@
               "pages": {
                 "slugField": "slug",
                 "statusField": "status",
-                "publishedValue": "published",
-                "home": "home"
+                "publishedValue": "published"
               }
             },
             "redacted": false
