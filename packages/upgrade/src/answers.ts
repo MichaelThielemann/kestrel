@@ -72,7 +72,7 @@ function isKnownQuestionFamily(id: string): boolean {
 
 /**
  * Every id in the answers file that neither matched an asked question nor belongs to a built-in
- * rule's own question family: `--answers` refuses these (exit 2). A plugin's own custom rule and its
+ * rule's own question family: `fix` ignores these with a warning. A plugin's own custom rule and its
  * own question ids are not in this family list, so a stale answer of its own still counts as unknown.
  */
 export function unknownAnswerIds(fromFile: ReadonlyMap<string, string>, everAsked: ReadonlySet<string>): string[] {

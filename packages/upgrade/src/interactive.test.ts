@@ -79,15 +79,15 @@ describe("--answers resolves a question without a TTY", () => {
     expect(lines.some((l) => l.includes("pnpm install"))).toBe(false);
   });
 
-  it("exits 2 when the answers file names an id this run never asked", async () => {
+  it("warns, and still runs, when the answers file names an id this run never asked", async () => {
     const scratch = await createScratchCopy(FIXTURE);
     cleanupDirs.push(scratch.dir);
     const answersFile = join(scratch.dir, "answers.json");
     await writeFile(answersFile, JSON.stringify({ "nope:not-a-real-question": "yes" }));
-    let errored = "";
-    const code = await runUpgradeCli(["fix", "--root", scratch.dir, "--write", "--yes", "--answers", answersFile], { stdout: () => undefined, stderr: (l) => { errored = l; }, isInteractive: false });
-    expect(code).toBe(2);
-    expect(errored).toContain("nope:not-a-real-question");
+    const errored: string[] = [];
+    const code = await runUpgradeCli(["fix", "--root", scratch.dir, "--write", "--yes", "--answers", answersFile], { stdout: () => undefined, stderr: (l) => errored.push(l), isInteractive: false });
+    expect(code).not.toBe(2);
+    expect(errored.some((l) => l.startsWith("warning:") && l.includes("nope:not-a-real-question"))).toBe(true);
   });
 
   it("notes, but does not refuse, a stale answer belonging to a known rule's question family", async () => {

@@ -753,6 +753,8 @@ async function confirmFile(file: string, root: string, before: string, after: st
   }
 }
 
+const MAX_FIX_PASSES = 5;
+
 async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: (line: string) => void, options: InternalRunOptions): Promise<number> {
   const root = resolve(stringFlag(args, "root") ?? ".");
   const entry = stringFlag(args, "entry");
@@ -773,50 +775,74 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     return 2;
   }
 
-  const { report, unknownIds, staleIds, invalidAnswers, answers, previewBoot } = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins);
-  if (invalidAnswers.length > 0) {
-    for (const { id, value } of invalidAnswers) stderr(`--answers: "${id}" is "${value}", which is not one of its choices`);
-    return 2;
-  }
-  if (unknownIds.length > 0) {
-    stderr(`--answers names an id this run never asked: ${unknownIds.join(", ")}`);
-    return 2;
-  }
-  for (const id of staleIds) humanLine(`--answers: "${id}" is not asked this run; ignored as a stale answer from an earlier pass`);
-
-  const { states, rejectedIds, conflictsWith, pathExists, unsafeTargets } = verifyAndApply(report.findings, root);
-  const adjustedFindings = downgradeRejected(report.findings, rejectedIds, conflictsWith, pathExists, unsafeTargets);
-  const adjustedReport: UpgradeReport = { ...report, findings: adjustedFindings, summary: summarize(adjustedFindings) };
-  const changed = [...states].filter(([, state]) => state.current !== state.source);
-
-  if (write && !allowDirty) {
-    for (const [file] of changed) {
-      const dirty = await isDirty(file, root);
-      if (dirty === undefined) {
-        stderr(`could not check "${relative(root, file)}" for uncommitted changes; pass --allow-dirty once you have confirmed it by hand`);
-        return 2;
-      }
-      if (dirty) {
-        stderr(`"${relative(root, file)}" has uncommitted changes; pass --allow-dirty or commit first`);
-        return 2;
-      }
-    }
-  }
-
   const saveAnswersFile = stringFlag(args, "save-answers");
-  const applied: string[] = [];
   const skipConfirmation = yes || !interactive;
-  for (const [file, state] of changed) {
-    if (!write) {
-      const diff = unifiedDiff(relative(root, file), state.source, state.current);
-      if (diff !== "") humanLine(diff);
-      continue;
+  const applied: string[] = [];
+  const answers = new Map<string, string>();
+  const writtenByUs = new Set<string>();
+  let unknownIds: string[] | undefined;
+  let pass: Awaited<ReturnType<typeof resolveQuestions>> | undefined;
+  let fixed: ReturnType<typeof verifyAndApply> | undefined;
+  let adjustedFindings: Finding[] = [];
+  const seen = new Set<string>();
+  const rejectedAll = new Set<string>();
+  let staleIds: string[] | undefined;
+  let changed: Array<[string, { source: string; current: string }]> = [];
+  for (let round = 0; round < (write ? MAX_FIX_PASSES : 1); round++) {
+    pass = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins);
+    for (const [id, value] of pass.answers) answers.set(id, value);
+    unknownIds = unknownIds === undefined ? pass.unknownIds : unknownIds.filter((id) => pass!.unknownIds.includes(id));
+    staleIds = staleIds === undefined ? pass.staleIds : staleIds.filter((id) => pass!.staleIds.includes(id));
+    if (pass.invalidAnswers.length > 0) {
+      for (const { id, value } of pass.invalidAnswers) stderr(`--answers: "${id}" is "${value}", which is not one of its choices`);
+      return 2;
     }
-    const proceed = skipConfirmation || (await confirmFile(file, root, state.source, state.current, prompt));
-    if (!proceed) continue;
-    writeFileSync(file, state.current);
-    applied.push(relative(root, file));
+    const fresh = pass.report.findings.filter((f) => !seen.has(f.id));
+    if (round > 0 && !fresh.some((f) => f.fix.kind === "auto" || f.fix.kind === "ask")) break;
+    for (const f of fresh) seen.add(f.id);
+    fixed = verifyAndApply(fresh, root);
+    for (const id of fixed.rejectedIds) rejectedAll.add(id);
+    adjustedFindings = [...adjustedFindings, ...downgradeRejected(fresh, fixed.rejectedIds, fixed.conflictsWith, fixed.pathExists, fixed.unsafeTargets)];
+    changed = [...fixed.states].filter(([, state]) => state.current !== state.source);
+
+    if (write && !allowDirty) {
+      for (const [file] of changed) {
+        if (writtenByUs.has(file)) continue;
+        const dirty = await isDirty(file, root);
+        if (dirty === undefined) {
+          stderr(`could not check "${relative(root, file)}" for uncommitted changes; pass --allow-dirty once you have confirmed it by hand`);
+          return 2;
+        }
+        if (dirty) {
+          stderr(`"${relative(root, file)}" has uncommitted changes; pass --allow-dirty or commit first`);
+          return 2;
+        }
+      }
+    }
+
+    let wroteThisPass = false;
+    for (const [file, state] of changed) {
+      if (!write) {
+        const diff = unifiedDiff(relative(root, file), state.source, state.current);
+        if (diff !== "") humanLine(diff);
+        continue;
+      }
+      const proceed = skipConfirmation || (await confirmFile(file, root, state.source, state.current, prompt));
+      if (!proceed) continue;
+      writeFileSync(file, state.current);
+      writtenByUs.add(file);
+      wroteThisPass = true;
+      const name = relative(root, file);
+      if (!applied.includes(name)) applied.push(name);
+    }
+    if (!wroteThisPass) break;
   }
+  const report = pass!.report;
+  const rejectedIds = rejectedAll;
+  const previewBoot = pass!.previewBoot;
+  if ((unknownIds ?? []).length > 0) stderr(`warning: --answers names an id this run never asked: ${(unknownIds ?? []).join(", ")}; ignored`);
+  for (const id of staleIds ?? []) humanLine(`--answers: "${id}" is not asked this run; ignored as a stale answer from an earlier pass`);
+  const adjustedReport: UpgradeReport = { ...report, findings: adjustedFindings, summary: summarize(adjustedFindings) };
 
   if (write) {
     for (const file of applied) humanLine(`wrote ${file}`);
@@ -834,7 +860,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     } else {
       humanLine("wrote nothing: no finding had an edit to apply");
     }
-    const writtenFiles = new Set(changed.filter(([file]) => applied.includes(relative(root, file))).map(([file]) => file));
+    const writtenFiles = writtenByUs;
     for (const f of adjustedFindings) {
       if (f.severity !== "warning" || f.fix.kind !== "auto") continue;
       if (!f.fix.edits.some((e) => writtenFiles.has(e.file))) continue;

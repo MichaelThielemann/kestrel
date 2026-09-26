@@ -33,7 +33,9 @@ file (and any `-wal`/`-shm` siblings), verifies the copy with `PRAGMA quick_chec
 the tool issues itself — then reads it through the project's own installed `persistence-sqlite`, so
 the storage layout stays that module's knowledge. Exit codes: `0` nothing at or above `--fail-on`
 (default `error`), `1` at least one finding, `2` the tool could not run (bad arguments, a dirty
-write target, a copy that fails `quick_check`, an unknown `--answers` id).
+write target, a copy that fails `quick_check`, an `--answers` value outside its question's choices).
+An `--answers` id no pass asked is ignored with a warning. `fix --write` applies edits that only
+appear after earlier ones in the same run, for at most five passes.
 
 **Config.** No `kestrel.config.ts` of its own; every option is a CLI flag or a call to the library
 functions below.

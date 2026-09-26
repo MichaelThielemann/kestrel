@@ -30,7 +30,10 @@ never touches the project. `--write` on a terminal shows the same diff per file 
 it), `n` (skip it) or `d` (show the diff again); without a terminal it needs `--yes` or is refused
 (exit 2) rather than write silently. It refuses a file with uncommitted changes unless
 `--allow-dirty` is also given, so `git diff` shows exactly the tool's edits and `git checkout`
-reverts them. The tool never runs `pnpm install` itself.
+reverts them. When an applied edit brings up a new finding (a question that only makes sense once the
+first edit is in, say), `--write` checks again and applies it in the same run, for at most five passes;
+a finding already handled in an earlier pass is not applied again. The tool never runs `pnpm install`
+itself.
 
 ## 3. Full check
 
@@ -54,10 +57,10 @@ prompts: pass `--answers <file>` (a JSON object of `{ "<question id>": "<answer>
 them, or `--yes` to take every default — a question with no safe default (whether an output
 property is always present, for one) stays open under `--yes` either way. `--answers` giving a
 closed-choice question (`yes`/`no`, say) a value outside its choices is refused (exit 2), naming the
-id and the offending value. Naming an id this run never asked is refused (exit 2) too, unless the id
-belongs to a built-in rule's own question family (an earlier pass's answer that pass's own edit has
-since resolved, say) — such an id is only noted, not refused, so one answers file kept across several
-passes keeps working as later passes resolve what earlier ones asked.
+id and the offending value. An id no pass of this run asked is not refused: it is ignored with a
+warning on stderr when it belongs to no built-in rule's question family (a plugin's question a later
+run asks, or a typo), and only noted when it does (an earlier run's answer that run's own edit has
+since resolved, say), so one answers file kept across several runs keeps working.
 `--save-answers <file>` writes down what was answered interactively, to replay with `--answers` next
 time.
 
