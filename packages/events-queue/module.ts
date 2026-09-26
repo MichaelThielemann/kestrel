@@ -1,9 +1,9 @@
 import { z } from "zod";
 import "@michaelthielemann/kestrel-contracts/authn";
 import { EVENTS } from "@michaelthielemann/kestrel-contracts/events";
-import { eventEnvelope } from "@michaelthielemann/kestrel-contracts/events.envelope";
-import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/events.envelope";
-import { DELIVERY_STATUS_SCHEMA, mergeRelayReport, RELAY_SCHEMA } from "@michaelthielemann/kestrel-contracts/events.steps";
+import { eventEnvelope, mergeRelayReport } from "@michaelthielemann/kestrel-contracts/helpers/events.envelope";
+import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/helpers/events.envelope";
+import { DELIVERY_STATUS_SCHEMA, RELAY_SCHEMA } from "@michaelthielemann/kestrel-contracts/events.steps";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";

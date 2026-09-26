@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import type { Persistence } from "./persistence.ts";
+import type { Persistence } from "../persistence.ts";
 import { ownedPersistence } from "./persistence.owned.ts";
-import { createFakePersistence } from "./testing/fakePersistence.ts";
-import { expectOk } from "./testing/result.ts";
+import { createFakePersistence } from "../testing/fakePersistence.ts";
+import { expectOk } from "../testing/result.ts";
 
 const OWN = ["things", "thing_parts"] as const;
 

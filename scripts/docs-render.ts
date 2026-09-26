@@ -1,5 +1,5 @@
 import type { BootWarning, JsonSchema, Logger, Manifest, ModuleManifest, StepDescription, StepManifest, UnemittedEventWarning, UnwrittenOptionalReadWarning } from "../packages/core/src/index.ts";
-import { STEP_SETS } from "../packages/contracts/src/steps.ts";
+import { STEP_SETS } from "../packages/contracts/src/helpers/steps.ts";
 
 export const START = "<!-- kestrel-docs:start -->";
 export const END = "<!-- kestrel-docs:end -->";

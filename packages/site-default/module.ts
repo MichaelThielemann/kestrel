@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { CONTENT, type ContentDocument } from "@michaelthielemann/kestrel-contracts/content";
-import { documentSchema } from "@michaelthielemann/kestrel-contracts/content-schema";
+import { documentSchema } from "@michaelthielemann/kestrel-contracts/helpers/content-schema";
 import { EVENTS } from "@michaelthielemann/kestrel-contracts/events";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
-import { ownedPersistence } from "@michaelthielemann/kestrel-contracts/persistence.owned";
+import { ownedPersistence } from "@michaelthielemann/kestrel-contracts/helpers/persistence.owned";
 import { SITE, type SiteRules } from "@michaelthielemann/kestrel-contracts/site";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";

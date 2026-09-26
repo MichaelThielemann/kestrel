@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ok } from "../errors.ts";
 import type { LoadedMediaFile, MediaFile, MediaFiles, MediaFilter, MediaScanOptions } from "../media.ts";
-import { canonicalMediaType, mediaTypeAllowed, publicFormOf } from "../mediaType.ts";
+import { canonicalMediaType, mediaTypeAllowed, publicFormOf } from "../helpers/mediaType.ts";
 
 /** A file as a test adds it to {@link createFakeMedia}; everything but the type and the bytes has a default. */
 export interface FakeMediaInput {

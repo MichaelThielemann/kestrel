@@ -3,9 +3,9 @@ import { dirname, extname, relative, resolve as resolvePath, sep } from "node:pa
 import type { Introspection } from "@michaelthielemann/kestrel";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
-import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/events.envelope";
+import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/helpers/events.envelope";
 import type { MediaFile, MediaFiles, MediaFilter, MediaScan } from "@michaelthielemann/kestrel-contracts/media";
-import { publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
+import { publicFormOf } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
 import type { Document, Filter, Persistence, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";

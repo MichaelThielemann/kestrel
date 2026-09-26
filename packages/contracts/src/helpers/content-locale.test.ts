@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { Content, ContentDocument, ContentModel } from "./content.ts";
-import { ok } from "./errors.ts";
+import type { Content, ContentDocument, ContentModel } from "../content.ts";
+import { ok } from "../errors.ts";
 import { narrowListTranslations, publishedLocale, satisfiesFilter } from "./content-locale.ts";
 
 const model: ContentModel = {

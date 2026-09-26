@@ -39,7 +39,7 @@ stored document can miss; `list:<t>` or
 `offset` ≥ 0), `limit` at most `maxLimit` (config, default 200), `sort` a known field; anything
 else is `VALIDATION` (400). An unknown `?locale=` is `VALIDATION` too, on every step.
 A fixed filter also narrows `_translations`: a locale counts only once its own values satisfy the
-same filter too (`get` through `@michaelthielemann/kestrel-contracts/content-locale`'s
+same filter too (`get` through `@michaelthielemann/kestrel-contracts/helpers/content-locale`'s
 `publishedLocale`, `list` through its `narrowListTranslations`, one query per other locale for the
 whole page, not per item). A fixed filter together with `?fallback=true` fails to boot, naming the
 step: `fallback` fills a field from the default locale whatever its own status, so a filtered read

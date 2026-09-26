@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Content, ContentDocument } from "@michaelthielemann/kestrel-contracts/content";
-import { satisfiesFilter } from "@michaelthielemann/kestrel-contracts/content-locale";
+import { satisfiesFilter } from "@michaelthielemann/kestrel-contracts/helpers/content-locale";
 import { err, failure, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import type { Document, Filter, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";

@@ -1,5 +1,5 @@
 import type { JsonSchema } from "@michaelthielemann/kestrel/defineModule";
-import type { ContentModel, FieldDefinition, FieldType } from "./content.ts";
+import type { ContentModel, FieldDefinition, FieldType } from "../content.ts";
 
 export const FIELD_SCHEMA: Record<FieldType, JsonSchema> = {
   text: { type: "string" },

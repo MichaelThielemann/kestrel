@@ -1,6 +1,6 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/mediaType";
+import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
 import { createFakeMedia } from "@michaelthielemann/kestrel-contracts/testing/fakeMedia";
 import { expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
 import { ELIGIBLE, eligible, render } from "./generate.ts";

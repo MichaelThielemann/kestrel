@@ -30,7 +30,7 @@ as `UNSUPPORTED` (415). What is stored and written to the blob store is the lowe
 `type/subtype`, plus the `charset` of a `text/*` type when its value is a token, lower-cased; no other
 parameter survives: `IMAGE/PNG; x=1` is stored as `image/png`, `Text/Plain; Charset=UTF-8;
 format=flowed` as `text/plain; charset=utf-8`. `allowedTypes`/`deniedTypes` entries are patterns,
-matched by `mediaTypeMatches` from `@michaelthielemann/kestrel-contracts/mediaType` against the
+matched by `mediaTypeMatches` from `@michaelthielemann/kestrel-contracts/helpers/mediaType` against the
 `type/subtype` alone, ignoring parameters and case on both sides: `*` and `*/*` match every type,
 `image/*` every image type, `image/*+xml` every image type whose subtype ends in `+xml` (`*/*+xml` the
 same for every top-level type), `image/png` that one type, and any other entry — a list, a bare
@@ -46,7 +46,7 @@ extension are always the same one:
 
 - a listed type (images, PDF, audio, video, `text/plain`, `text/csv`, JSON, office documents such as
   DOCX, XLSX, PPTX, ODT, ODS and ODP, and archives such as ZIP; see `EXTENSION_BY_TYPE` in
-  `@michaelthielemann/kestrel-contracts/mediaType`) gets its own extension, replacing the uploaded
+  `@michaelthielemann/kestrel-contracts/helpers/mediaType`) gets its own extension, replacing the uploaded
   one: `Photo 1.JPG` sent as `image/jpeg` becomes `Photo-1.jpg`, `x.html.png` sent as `image/png`
   becomes `x-html.png`. None of them is a type a browser runs as a document;
 - every other type gets `.bin` and keeps the uploaded extension in the stem: `x.html` sent as

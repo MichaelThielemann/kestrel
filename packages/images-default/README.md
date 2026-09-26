@@ -110,7 +110,7 @@ removes on the way never make it skip others; and after writing a copy it reads 
 removes the copy when the item was deleted meanwhile. Serve the copy tree with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, as
 the Node origin does; a placeholder holds the original's bytes under the variant's extension until the
 render replaces it. A render's copy takes its `Content-Type` from `publicFormOf` in
-`@michaelthielemann/kestrel-contracts/mediaType`; a placeholder, a retired path and `images.serve`'s
+`@michaelthielemann/kestrel-contracts/helpers/mediaType`; a placeholder, a retired path and `images.serve`'s
 fallback carry the original's `publishedType` from `media@1`, the type its provider serves the
 original with itself (`media-default` sends `application/octet-stream` for a name stored as `.bin`),
 so the same bytes never reach two paths with two types. The variant URL shares the item's public

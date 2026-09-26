@@ -1,6 +1,6 @@
 import type { Content, ContentDocument, FieldDefinition, FieldType } from "@michaelthielemann/kestrel-contracts/content";
 import { isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
-import { collectInternalRefs } from "@michaelthielemann/kestrel-contracts/links";
+import { collectInternalRefs } from "@michaelthielemann/kestrel-contracts/helpers/links";
 import type { MediaFiles } from "@michaelthielemann/kestrel-contracts/media";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 

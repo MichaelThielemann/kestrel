@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { z } from "zod";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content } from "@michaelthielemann/kestrel-contracts/content";
-import { publishedLocale } from "@michaelthielemann/kestrel-contracts/content-locale";
+import { publishedLocale } from "@michaelthielemann/kestrel-contracts/helpers/content-locale";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";

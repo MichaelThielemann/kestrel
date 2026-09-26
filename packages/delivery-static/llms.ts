@@ -1,7 +1,7 @@
 import TurndownService from "turndown";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Content, ContentDocument, ContentModel } from "@michaelthielemann/kestrel-contracts/content";
-import { publishedLocale } from "@michaelthielemann/kestrel-contracts/content-locale";
+import { publishedLocale } from "@michaelthielemann/kestrel-contracts/helpers/content-locale";
 import { isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";

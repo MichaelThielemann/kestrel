@@ -1,4 +1,4 @@
-import type { Document, Filter, FindOptions, NewDocument, Persistence, Schema } from "./persistence.ts";
+import type { Document, Filter, FindOptions, NewDocument, Persistence, Schema } from "../persistence.ts";
 
 /**
  * A view of `db` that reaches only `collections`. Any call naming another collection throws a wiring error

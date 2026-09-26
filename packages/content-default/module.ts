@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { CONTENT, type Content, type ContentModel } from "@michaelthielemann/kestrel-contracts/content";
-import { narrowListTranslations, publishedLocale } from "@michaelthielemann/kestrel-contracts/content-locale";
-import { documentSchema, fieldSchema } from "@michaelthielemann/kestrel-contracts/content-schema";
+import { narrowListTranslations, publishedLocale } from "@michaelthielemann/kestrel-contracts/helpers/content-locale";
+import { documentSchema, fieldSchema } from "@michaelthielemann/kestrel-contracts/helpers/content-schema";
 import type { JsonSchema } from "@michaelthielemann/kestrel/defineModule";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";

@@ -1,6 +1,7 @@
 import { hostname } from "node:os";
 import type { EventData } from "@michaelthielemann/kestrel-contracts/events";
-import { relaySummary, type DeliveryStatus, type RelayEntry, type RelayReport } from "@michaelthielemann/kestrel-contracts/events.steps";
+import { relaySummary } from "@michaelthielemann/kestrel-contracts/helpers/events.envelope";
+import type { DeliveryStatus, RelayEntry, RelayReport } from "@michaelthielemann/kestrel-contracts/events.steps";
 import type { Document, Filter, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { EventEntry } from "@michaelthielemann/kestrel/defineModule";
 import type { Logger } from "@michaelthielemann/kestrel/logger";

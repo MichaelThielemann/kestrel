@@ -4,7 +4,7 @@ import { dirname, extname, relative, resolve as resolvePath, sep } from "node:pa
 import type { Introspection, PipelineManifest, PipelineStepManifest } from "@michaelthielemann/kestrel";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { LoadedMediaFile, MediaFile, MediaFiles, MediaFilesError, MediaFilter } from "@michaelthielemann/kestrel-contracts/media";
-import { canonicalMediaType, mediaTypeAllowed, mediaTypeEssence, NEUTRAL_EXTENSION, NEUTRAL_TYPE, publicFormOf } from "@michaelthielemann/kestrel-contracts/mediaType";
+import { canonicalMediaType, mediaTypeAllowed, mediaTypeEssence, NEUTRAL_EXTENSION, NEUTRAL_TYPE, publicFormOf } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
 import type { Document, Filter, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";

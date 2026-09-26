@@ -1,4 +1,4 @@
-import { defineStepSet } from "./stepSet.ts";
+import { defineStepSet } from "./helpers/stepSet.ts";
 
 /** The five steps authn-single and authn-multi both register: login, identifyUser, requireUser, loadIdentity, logout. */
 export const AUTHN_STEPS = defineStepSet({

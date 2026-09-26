@@ -8,7 +8,7 @@ import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Document, NewDocument, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
-import { EXTENSION_BY_TYPE } from "@michaelthielemann/kestrel-contracts/mediaType";
+import { EXTENSION_BY_TYPE } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { failure } from "@michaelthielemann/kestrel/errors";
 import { err, ok } from "@michaelthielemann/kestrel/result";

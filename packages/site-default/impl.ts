@@ -1,8 +1,9 @@
 import type { Content, ContentDocument, ContentError, ContentModel, LocaleOptions } from "@michaelthielemann/kestrel-contracts/content";
-import { publishedLocale, satisfiesFilter } from "@michaelthielemann/kestrel-contracts/content-locale";
+import { publishedLocale, satisfiesFilter } from "@michaelthielemann/kestrel-contracts/helpers/content-locale";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { LinkTarget } from "@michaelthielemann/kestrel-contracts/links";
-import { INTERNAL_REF, collectInternalRefs } from "@michaelthielemann/kestrel-contracts/links";
+import { INTERNAL_REF } from "@michaelthielemann/kestrel-contracts/links";
+import { collectInternalRefs } from "@michaelthielemann/kestrel-contracts/helpers/links";
 import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
 import type { Site, SiteError, SiteRules } from "@michaelthielemann/kestrel-contracts/site";
 import { noteRead, unobserved } from "@michaelthielemann/kestrel/reads";

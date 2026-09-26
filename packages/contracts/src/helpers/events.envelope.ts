@@ -1,25 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { Context } from "@michaelthielemann/kestrel/context";
-import type { Identity } from "./authn.ts";
-import type { EventData } from "./events.ts";
-
-/** What every event a delivery module hands to a pipeline carries, whatever raised it. */
-export interface EventIdentity {
-  eventId: string;
-  event: string;
-  at: number;
-}
-
-/** What an `events.emit` step puts on the bus or into the queue, and what an event pipeline reads as `payload`. */
-export interface EventEnvelope extends EventIdentity {
-  runId: string;
-  identity: Identity | null;
-  params: Record<string, string>;
-  id: string | null;
-  ids?: string[];
-  result?: unknown;
-}
+import type { EventEnvelope, EventIdentity, RelayEntry, RelayReport } from "../events.steps.ts";
+import type { EventData } from "../events.ts";
 
 /** Splits an `events.emit` step argument into the event name and whether `?with=result` (or any alias of it) enables carrying the result. */
 export function parseEmitSpec(spec: string): { name: string; withResult: boolean } {
@@ -63,4 +46,26 @@ export function withEventIdentity(event: string, data: EventData): EventData & E
   const out: Record<string, unknown> = { ...identity };
   for (const [key, value] of Object.entries(data)) if (!Object.hasOwn(identity, key)) out[key] = value;
   return boundaryCast<EventData & EventIdentity>(out, "json");
+}
+
+/** Folds per-pipeline statuses into the summary: `error` beats `pending`/`queued` beats `done`. */
+export function relaySummary(pipelines: readonly RelayEntry[]): RelayReport["status"] {
+  if (pipelines.some((p) => p.status === "error")) return "error";
+  if (pipelines.some((p) => p.status === "pending" || p.status === "queued")) return "pending";
+  return "done";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Merges `_events` into a result: creates an object when `result` is `undefined`, merges into an
+ * existing record. A defined non-object result is a wiring error, the same way `authz.listRoles`
+ * treats it.
+ */
+export function mergeRelayReport(result: unknown, report: RelayReport, moduleName: string): unknown {
+  if (result === undefined) return { _events: report };
+  if (isRecord(result)) return { ...result, _events: report };
+  throw new Error(`${moduleName}: cannot add _events to a non-object result`);
 }

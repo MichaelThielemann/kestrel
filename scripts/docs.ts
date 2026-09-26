@@ -102,7 +102,7 @@ async function main(): Promise<void> {
     "# Step portability",
     "",
     "Generated from the manifest of `examples/minimal`. Three states, derived from a step's name and",
-    "the declared step sets (`@michaelthielemann/kestrel-contracts/steps`): **portable** (a member of a",
+    "the declared step sets (`@michaelthielemann/kestrel-contracts/helpers/steps`): **portable** (a member of a",
     "declared step set — every provider of that role registers it), **beside** (its prefix is governed",
     "by a step set but it is not a member — provider-specific), **none** (no step set governs its",
     "prefix).",

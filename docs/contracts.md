@@ -266,24 +266,33 @@ contains `not found` (pinned by the contract test) — an adapter must not let a
 
 Not every file under `packages/contracts/src/` is a contract plus its test. The package also holds:
 
-- **Step sets** (`stepSet.ts`): `defineStepSet`/`stepSets` validate and collect a `StepSet`, the
-  declaration that every module in a role (e.g. `authn`) registers the same steps with the same
-  context reads and writes. `authn.steps.ts` declares `AUTHN_STEPS` (`authn.login`,
-  `authn.identifyUser`, `authn.requireUser`, `authn.loadIdentity`, `authn.logout`); `events.steps.ts`
-  declares `EVENT_DELIVERY_STEPS` (`events.emit`, `events.relay`, `events.readDeliveryStatus`),
-  registered by every event delivery module (`events-direct`, `events-queue`), never by the bus
-  module (`events-inmemory`). `steps.ts` collects both into `STEP_SETS`.
-- **Shared event runtime logic** (`events.envelope.ts`, part of `events.steps.ts`): `eventEnvelope`
-  builds the payload an `events.emit` step hands to the bus; `withEventIdentity` guarantees
-  `eventId`/`event`/`at` on data raised through `events@1`, run once per emit by each delivery
-  module before any subscribed pipeline sees it; `mergeRelayReport` and `relaySummary` fold
-  per-pipeline delivery outcomes into the `_events` a result carries.
+- **Step sets** (`stepSet.ts`, the `StepSet` type; `helpers/stepSet.ts`, `defineStepSet`/`stepSets`):
+  `StepSet` is the declaration that every module in a role (e.g. `authn`) registers the same steps
+  with the same context reads and writes, frozen together with the step sets it types.
+  `defineStepSet`/`stepSets` are the builder functions behind it and may change independently.
+  `authn.steps.ts` declares `AUTHN_STEPS` (`authn.login`, `authn.identifyUser`, `authn.requireUser`,
+  `authn.loadIdentity`, `authn.logout`); `events.steps.ts` declares `EVENT_DELIVERY_STEPS`
+  (`events.emit`, `events.relay`, `events.readDeliveryStatus`), registered by every event delivery
+  module (`events-direct`, `events-queue`), never by the bus module (`events-inmemory`), plus the
+  frozen payload and status shapes those steps carry: `EventIdentity`, `EventEnvelope`,
+  `DeliveryStatus`, `RelayEntry`, `RelayReport` and their JSON schemas. Both step-set files stay at
+  the package's top level: they declare frozen surface, not a helper. `helpers/steps.ts` collects
+  both step sets into `STEP_SETS`.
+- **Shared event runtime logic** (`helpers/events.envelope.ts`): `eventEnvelope` builds the payload
+  an `events.emit` step hands to the bus; `withEventIdentity` guarantees `eventId`/`event`/`at` on
+  data raised through `events@1`, run once per emit by each delivery module before any subscribed
+  pipeline sees it; `relaySummary` folds per-pipeline delivery outcomes into one status, and
+  `mergeRelayReport` adds that summary as `_events` on a result. All four build on the frozen shapes
+  declared in `events.steps.ts` and may change independently of them.
 - **A shared suite for a capability that is not itself a contract** (`atomic.contract.test.ts`):
   `atomicScopeTests(make)` is the suite every `persistence@1` provider that also exposes an
   `AtomicScope` (the atomic-group hook from `@michaelthielemann/kestrel/atomic`) must pass. It is
   exported the same way a contract's suite is (`@michaelthielemann/kestrel-contracts/atomic.contract.test`)
   even though `atomic` names a core capability, not a `contracts` file.
-- **`persistence.owned`, `links`, `mediaType` and `content-locale`**, documented in
+- **`links.ts`** declares the frozen `content@1` underpinning (`INTERNAL_REF`, `InternalRef`,
+  `LinkTarget`) at the package's top level; **`helpers/links.ts`**'s `collectInternalRefs` is its
+  runtime counterpart and may change independently. **`helpers/persistence.owned`,
+  `helpers/mediaType`, `helpers/content-schema` and `helpers/content-locale`**, documented in
   `packages/contracts/README.md`, are pure helpers shared by modules — not contracts either.
 
 ## Reads a render can see
@@ -361,7 +370,7 @@ Website routing is not `content@1`'s job but `site@1`'s (`site-default`, activat
 wildcard route (`GET /site/*path`): `/`, `/<slug>`, `/<lang>`, `/<lang>/<slug>` — the primary
 language without a prefix. `content@1`'s own `fallback: true` fills a field from `defaultLocale`
 unconditionally, since `content@1` carries no notion of "published"; every module that builds a
-public view on top of it adds that on top, through `@michaelthielemann/kestrel-contracts/content-locale`'s
+public view on top of it adds that on top, through `@michaelthielemann/kestrel-contracts/helpers/content-locale`'s
 `publishedLocale`: it only uses `content@1`'s fallback once the default locale's own values pass the
 given filter too, and narrows `_translations` to the locales that pass it themselves. `site@1`,
 `delivery-static` and `content-default`'s own `get`/`list` steps (whenever their step argument

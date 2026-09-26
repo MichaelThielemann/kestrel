@@ -2,7 +2,7 @@ import { z } from "zod";
 import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { CONTENT } from "@michaelthielemann/kestrel-contracts/content";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
-import { ownedPersistence } from "@michaelthielemann/kestrel-contracts/persistence.owned";
+import { ownedPersistence } from "@michaelthielemann/kestrel-contracts/helpers/persistence.owned";
 import type { Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";

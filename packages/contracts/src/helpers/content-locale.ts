@@ -1,6 +1,6 @@
-import type { Content, ContentDocument, ContentError } from "./content.ts";
-import { isErr, ok, type Result } from "./errors.ts";
-import type { Filter } from "./query.ts";
+import type { Content, ContentDocument, ContentError } from "../content.ts";
+import { isErr, ok, type Result } from "../errors.ts";
+import type { Filter } from "../query.ts";
 
 const RESERVED_FIELDS = new Set(["id", "createdAt", "updatedAt"]);
 

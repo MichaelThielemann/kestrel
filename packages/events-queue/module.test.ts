@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, definePipeline, KestrelBootError, silentLogger } from "@michaelthielemann/kestrel";
 import { EVENTS, type EventData } from "@michaelthielemann/kestrel-contracts/events";
-import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/events.envelope";
+import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/helpers/events.envelope";
 import { eventDeliveryStepTests, type EventDeliveryFixture } from "@michaelthielemann/kestrel-contracts/events.steps.contract.test";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";

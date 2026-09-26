@@ -19,12 +19,13 @@ for the suites. `testing/fakeAuthn` is a minimal `authn@1` for the shared step-c
 in-memory `media@1` for tests of a consumer: `add`, `addPending` and `markReady` (a file not ready
 yet), `remove` (ends a file's readiness), `loseBytes`, the recorded `calls`, and a `beforeCall` hook
 that can change the store between a consumer's calls.
-`persistence.owned` is not a contract: `ownedPersistence(db, owner, collections)` is a
+`helpers/persistence.owned` is not a contract: `ownedPersistence(db, owner, collections)` is a
 `persistence@1` view that reaches only the named collections and throws a wiring error naming
 `owner` for any other, before the store is asked — for a module whose storage must stay its own.
-`links` is not a contract but a pure helper pair shared by the modules that read internal
-references (`INTERNAL_REF`, `collectInternalRefs`).
-`mediaType` is not a contract either: `parseMediaType` accepts a declared content type only when it
+`links` declares the frozen `content@1` underpinning shared by the modules that read internal
+references: `INTERNAL_REF`, `InternalRef` and `LinkTarget`. `helpers/links`'s `collectInternalRefs`
+walks a value for every `INTERNAL_REF` match, the runtime counterpart of that same declaration.
+`helpers/mediaType` is not a contract either: `parseMediaType` accepts a declared content type only when it
 is exactly one media type (RFC 9110 tokens, optional `;` parameters, no comma); `mediaTypeEssence`
 answers its lower-cased `type/subtype`, and `canonicalMediaType` the form it is stored in — that
 essence, plus the charset of a `text/*` type when it is a token. `publicFormOf` answers the
@@ -36,7 +37,7 @@ since a published name keeps its extension. `mediaTypeMatches` and `mediaTypeAll
 `type/*+suffix` every subtype of a top-level type that ends in `+suffix` (with `*` as the type, of
 every top-level type), any other pattern one type, with case and parameters ignored on both sides.
 `media@1`'s `MediaFilter` uses the same rule.
-`content-locale` is not a contract either: `satisfiesFilter`, `publishedLocale` and
+`helpers/content-locale` is not a contract either: `satisfiesFilter`, `publishedLocale` and
 `narrowListTranslations` implement one rule on top of `content@1` — a locale that fails a filter is
 never a fallback source and never counted in `_translations` — for every module that builds a
 public view of content (`site-default`'s `resolve`/`resolveLinks`, `delivery-static`'s
@@ -50,3 +51,29 @@ caches or reuses one call's result for another (`site-default`'s README states t
 to for `resolve`).
 Consumers may define their own contracts with `defineContract` from the core; the core treats
 them exactly like these.
+
+## Frozen contracts vs. helpers
+Frozen means a `defineContract` interface and its own types — they do not change once released, and a
+change request goes to a human, never straight into the file. Concretely, this package's frozen
+surface is: every contract listed above; `query`'s shared vocabulary (`Condition`, `Filter`,
+`FindOptions`, `Page`); `links`'s `content@1` underpinning (`INTERNAL_REF`, `InternalRef`,
+`LinkTarget`); `verifiedUser`'s `Context` augmentation; `authn.steps`'s step-set declaration
+(`AUTHN_STEPS`); `events.steps`'s step-set declaration and payload/status shapes
+(`EVENT_DELIVERY_STEPS`, `EventIdentity`, `EventEnvelope`, `DeliveryStatus`, `DELIVERY_STATUS_SCHEMA`,
+`RELAY_SCHEMA`, `RelayEntry`, `RelayReport`); and `stepSet`'s `StepSet` type, the shape of every
+step-set declaration above, frozen with them though it declares no data of its own.
+
+Everything under `@michaelthielemann/kestrel-contracts/helpers/<name>` is a runtime helper, not a
+contract: it may gain new exports within a major (additive only), but never breaks one. The helpers
+are `helpers/stepSet` (`defineStepSet`, `stepSets` — the builder functions behind a step set, as
+opposed to the frozen `StepSet` type they return), `helpers/steps` (`STEP_SETS`, the declared step
+sets a reader consults for the portability marking), `helpers/events.envelope` (`eventEnvelope`,
+`parseEmitSpec`, `withEventIdentity`, `relaySummary`, `mergeRelayReport` — runtime logic built on the
+frozen shapes in `events.steps`), `helpers/persistence.owned` (`ownedPersistence`),
+`helpers/content-locale` (`satisfiesFilter`, `publishedLocale`, `narrowListTranslations`),
+`helpers/content-schema` (`documentSchema`, `fieldSchema`), `helpers/links` (`collectInternalRefs`)
+and `helpers/mediaType` (`parseMediaType`, `mediaTypeEssence`, `canonicalMediaType`, `publicFormOf`,
+`mediaTypeMatches`, `mediaTypeAllowed`, `EXTENSION_BY_TYPE`, `NEUTRAL_TYPE`, `NEUTRAL_EXTENSION`).
+
+`errors` re-exports `@michaelthielemann/kestrel/errors` and `@michaelthielemann/kestrel/result` and
+stays at its top-level path.

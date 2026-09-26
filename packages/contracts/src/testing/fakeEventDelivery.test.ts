@@ -2,8 +2,8 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { ok } from "@michaelthielemann/kestrel/result";
 import { eventDeliveryStepTests, type EventDeliveryFixture } from "../events.steps.contract.test.ts";
-import { eventEnvelope, withEventIdentity } from "../events.envelope.ts";
-import { DELIVERY_STATUS_SCHEMA, mergeRelayReport, RELAY_SCHEMA } from "../events.steps.ts";
+import { eventEnvelope, mergeRelayReport, withEventIdentity } from "../helpers/events.envelope.ts";
+import { DELIVERY_STATUS_SCHEMA, RELAY_SCHEMA } from "../events.steps.ts";
 import type { EventData } from "../events.ts";
 
 function fakeDeliveryFixture(): EventDeliveryFixture {

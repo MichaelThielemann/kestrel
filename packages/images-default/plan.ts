@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { mediaTypeEssence } from "@michaelthielemann/kestrel-contracts/mediaType";
+import { mediaTypeEssence } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
 import { extOf } from "./sizes.ts";
 import type { Size } from "./sizes.ts";
 

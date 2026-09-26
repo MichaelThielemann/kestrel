@@ -1,6 +1,6 @@
 import sharp, { type FormatEnum } from "sharp";
 import type { MediaFilter } from "@michaelthielemann/kestrel-contracts/media";
-import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/mediaType";
+import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { extOf } from "./sizes.ts";
 import type { Size } from "./sizes.ts";

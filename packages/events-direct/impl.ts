@@ -1,4 +1,4 @@
-import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/events.envelope";
+import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/helpers/events.envelope";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import type { DeliveryStatus, RelayEntry } from "@michaelthielemann/kestrel-contracts/events.steps";
 import type { ContextInput } from "@michaelthielemann/kestrel/context";

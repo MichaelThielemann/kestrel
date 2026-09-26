@@ -4,7 +4,7 @@ import { BLOBSTORE } from "@michaelthielemann/kestrel-contracts/blobstore";
 import { EVENTS } from "@michaelthielemann/kestrel-contracts/events";
 import { MEDIA } from "@michaelthielemann/kestrel-contracts/media";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
-import { ownedPersistence } from "@michaelthielemann/kestrel-contracts/persistence.owned";
+import { ownedPersistence } from "@michaelthielemann/kestrel-contracts/helpers/persistence.owned";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { binaryResult, first, stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";

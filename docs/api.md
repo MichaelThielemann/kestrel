@@ -463,7 +463,7 @@ picks its own charset. `<name>` is `filename` reduced to `[A-Za-z0-9_-]`, with
 one extension, taken from that stored type and never from the uploaded name (`Photo 1.JPG` sent as
 `image/jpeg` becomes `Photo-1.jpg`), so that a static host deriving `Content-Type` from the extension
 serves the type the upload was checked as; a type outside the list in
-`@michaelthielemann/kestrel-contracts/mediaType` becomes `.bin` (`x.html` sent as `image/x-foo` becomes
+`@michaelthielemann/kestrel-contracts/helpers/mediaType` becomes `.bin` (`x.html` sent as `image/x-foo` becomes
 `x-html.bin`) and is published as `application/octet-stream`. `<name>` is fixed at upload and never
 changes again — renaming the item only changes the display `filename`, never the key or `path`, and a
 name stored as `.bin` stays `.bin` even once the list holds its type. The one exception is a name
@@ -478,7 +478,7 @@ Rules: allows `image/*` (including SVG) and `application/pdf`, forbids `text/htm
 matched against the stored `type/subtype`, ignoring parameters and case: `*` and `*/*` match every
 type, `type/*` every type of that top-level type, anything else the one type it names, and an entry
 that is none of these matches nothing; a type is accepted when it matches an allowed entry and no
-denied one (`mediaTypeMatches`/`mediaTypeAllowed` in `@michaelthielemann/kestrel-contracts/mediaType`,
+denied one (`mediaTypeMatches`/`mediaTypeAllowed` in `@michaelthielemann/kestrel-contracts/helpers/mediaType`,
 for any client that checks a type before uploading). **SVG** is sanitized on upload
 (`sanitize.svg` before `media.upload`): `script`, `style`, event handlers, `foreignObject`, `image`
 and external `href`/`xlink:href` are removed, only internal references (`#id`) survive; the XML

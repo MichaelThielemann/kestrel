@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { boot, defineModule, loadConfig, loadModules, loadPipelines, silentLogger, type BootWarning, type StepDescription, type StepManifest } from "../packages/core/src/index.ts";
 import { generateOpenApi } from "../packages/openapi/index.ts";
-import { STEP_SETS } from "../packages/contracts/src/steps.ts";
+import { STEP_SETS } from "../packages/contracts/src/helpers/steps.ts";
 import { brief, collectingLogger, errors, formatBootWarning, groupedArrowChain, inputCell, orderPackages, portabilityOf, rootTable, splice, stepTable, unexpectedBootWarnings, unexpectedLogEntries, ROOT_ORDER, type LogEntry, type PackageInfo } from "./docs-render.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
