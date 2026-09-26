@@ -1065,6 +1065,24 @@ Net changes since 5.8.1.
   is redacted whole. The JSON Schema leaves out the default of a credential-like key.
 - An `invalid config` boot error reports a secret path by its validation code only and an enum
   mismatch by the expected values only; other messages have credential URLs redacted.
+- `replication-sqlite`: `replication.sync` read the whole WAL file into memory on every run, so time
+  and memory grew with the WAL instead of with the frames written since the last run, and it blocked
+  the event loop for the read. It now reads from where the last run stopped, asynchronously and in
+  1 MiB chunks, and ships segments of about 4 MiB.
+- `replication-sqlite`: the WAL grew with everything written between two syncs, because the module's
+  read transaction keeps SQLite from resetting it and only a sync checkpointed. The module now checks
+  the WAL size every second and, once it reaches `checkpointBytes`, ships the new frames and
+  checkpoints without waiting for the next sync.
+- `replication-sqlite`: frames committed while a sync was uploading a segment were checkpointed into
+  the database and truncated from the WAL without ever being shipped, so a restore missed those
+  transactions. The frames up to the checkpoint are now read in the same synchronous step as the
+  checkpoint itself and shipped right after it.
+- `replication-sqlite`: a frame is only shipped when its salts and checksum continue the WAL's
+  checksum chain, so a frame still being written or left over from an earlier WAL never reaches a
+  segment.
+- `replication-sqlite`: a `replication.sync` called while another is still running returns the
+  running one's result instead of starting a second, overlapping run; `replication.snapshot`,
+  `replication.prepareRestore` and the size-triggered checkpoint wait for each other.
 - `replication-sqlite`: where the file system reports no birth time, the restore-on-start skip check
   judged an existing database by whether it held any table, so a database whose schema another
   module had just created during this boot, with no rows in it, passed as real data and the restore

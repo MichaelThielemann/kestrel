@@ -8,9 +8,29 @@ layout. Frames the snapshot already contains are not shipped again; without a ge
 nowhere to ship frames to, so they wait. Point-in-time
 restore = snapshot + segments up to the requested time, applied page by page; the rebuilt file is
 opened and passes `PRAGMA quick_check` before it is handed over, otherwise the restore fails with
-`TRANSIENT` naming the generation. Because the writing connection lives in the same Node process,
-checkpoints (`wal_checkpoint(TRUNCATE)`) run between two synchronous steps and can never lose
-frames. Config: `file`, `prefix`, `checkpointBytes`/`checkpointSeconds`,
+`TRANSIENT` naming the generation.
+
+Shipping reads the WAL from the frame the previous run stopped at, asynchronously in 1 MiB chunks,
+and uploads segments of about 4 MiB (a single transaction larger than that stays in one segment), so
+a run costs time and memory in proportion to the new frames, not to the WAL. A frame is shipped only
+when it belongs to a committed transaction and its salts and checksum continue the WAL's checksum
+chain; a partly written frame at the end of the file waits for the next run. The module holds a read
+transaction on the database, which keeps SQLite from resetting the WAL before its frames are
+shipped. A checkpoint (`wal_checkpoint(TRUNCATE)`, without a busy timeout) reads the remaining
+committed frames, releases that transaction, checkpoints and takes it again in one synchronous step,
+then uploads those frames; since every writing connection lives in the same Node process, nothing
+can commit in between, so a checkpoint never loses frames. A checkpoint runs from `replication.sync`
+when the WAL file holds `checkpointBytes` or `checkpointSeconds` have passed since the last one,
+and, between syncs, as soon as a once-per-second check finds the WAL at `checkpointBytes` or more;
+the WAL therefore stays near `checkpointBytes` however rarely `replication.sync` runs. When another
+connection keeps the checkpoint from completing (an open write transaction or an older read
+snapshot), the WAL keeps growing and the next check tries again. If an upload fails after a
+checkpoint, the frames stay in memory and go out first on the next run; a new snapshot supersedes
+them, as does the snapshot a restarted process takes on its first sync. A `replication.sync` called while another is running returns that run's result instead of
+starting a second one; `replication.snapshot`, `replication.prepareRestore` and the
+size-triggered checkpoint wait for each other.
+
+Config: `file`, `prefix`, `checkpointBytes`/`checkpointSeconds`,
 `snapshotSeconds` (24 h), `retentionSeconds` (48 h; the newest generation is always kept),
 `restoreOnStart` (rebuild the file from the replica when missing). This module declares
 `before: [persistence@1]`, so it is set up before `persistence-sqlite` by declaration, regardless
