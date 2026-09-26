@@ -4,7 +4,7 @@ import { dirname, extname, relative, resolve as resolvePath, sep } from "node:pa
 import type { Introspection, PipelineManifest, PipelineStepManifest } from "@michaelthielemann/kestrel";
 import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { LoadedMediaFile, MediaFile, MediaFiles, MediaFilesError, MediaFilter } from "@michaelthielemann/kestrel-contracts/media";
-import { canonicalMediaType, mediaTypeAllowed, mediaTypeEssence, NEUTRAL_EXTENSION, NEUTRAL_TYPE, publicFormOf } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
+import { canonicalMediaType, mediaTypeAllowed, mediaTypeEssence, mediaTypeMatches, NEUTRAL_EXTENSION, NEUTRAL_TYPE, publicFormOf } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
 import type { Document, Filter, FindOptions, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
@@ -100,12 +100,23 @@ export interface Config {
 export const SORTABLE = ["createdAt", "filename", "size"] as const;
 export type SortField = (typeof SORTABLE)[number];
 
+export const MEDIA_KINDS = ["image", "video", "other"] as const;
+export type MediaKind = (typeof MEDIA_KINDS)[number];
+
 export interface ListOptions extends FindOptions {
   folder?: string;
   recursive?: boolean;
   q?: string;
   sortBy?: SortField;
   direction?: "asc" | "desc";
+  /** Keeps only items of this canonical kind: `image` and `video` match their content type's top-level type, `other` matches neither. */
+  mediaKind?: MediaKind;
+}
+
+/** Whether an item's content type belongs to `kind`, `image`/`video` matching that top-level type, `other` matching neither. */
+export function matchesMediaKind(contentType: string, kind: MediaKind): boolean {
+  if (kind === "other") return !mediaTypeMatches("image/*", contentType) && !mediaTypeMatches("video/*", contentType);
+  return mediaTypeMatches(`${kind}/*`, contentType);
 }
 
 export interface Reconciliation {
@@ -754,17 +765,18 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     },
     async list(options = {}) {
       noteRead({ kind: "type", type: MEDIA_READ_TYPE });
-      const { folder, recursive, q, sortBy, direction, locale, ...find } = options;
+      const { folder, recursive, q, sortBy, direction, locale, mediaKind, ...find } = options;
       const key = localeKey(locale);
       if (isErr(key)) return key;
       const query = q?.trim() || undefined;
+      const matchesKind = (contentType: unknown): boolean => mediaKind === undefined || (typeof contentType === "string" && matchesMediaKind(contentType, mediaKind));
       if (folder !== undefined && recursive === true) {
         const prefix = safeFolder(folder);
         if (isErr(prefix)) return prefix;
         if (prefix.value !== "") {
           const found = await recursiveFolderItems(prefix.value);
           if (isErr(found)) return found;
-          const matched = query === undefined ? found.value : found.value.filter((i) => i.filename.includes(query));
+          const matched = found.value.filter((i) => (query === undefined || i.filename.includes(query)) && matchesKind(i.contentType));
           const sorted = sortItems(matched, sortBy, direction);
           const offset = find.offset ?? 0;
           const sliced = find.limit === undefined ? sorted.slice(offset) : sorted.slice(offset, offset + find.limit);
@@ -777,12 +789,13 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
         if (isErr(clean)) return clean;
         filter.folder = clean.value;
       }
+      if (mediaKind === "image" || mediaKind === "video") filter.contentType = { like: `${mediaKind}/%` };
       const sort: Record<string, "asc" | "desc"> = { [sortBy ?? "createdAt"]: direction ?? (sortBy === undefined ? "desc" : "asc") };
-      if (query !== undefined) {
-        filter.filename = { like: `%${query.replace(/[%_]/g, "")}%` };
+      if (query !== undefined || mediaKind === "other") {
+        if (query !== undefined) filter.filename = { like: `%${query.replace(/[%_]/g, "")}%` };
         const page = await db.findMany<Document>(COLLECTION, filter, { sort });
         if (isErr(page)) return page;
-        const candidates = page.value.items.filter((i) => String(i.filename).includes(query));
+        const candidates = page.value.items.filter((i) => (query === undefined || String(i.filename).includes(query)) && matchesKind(i.contentType));
         const offset = find.offset ?? 0;
         const sliced = find.limit === undefined ? candidates.slice(offset) : candidates.slice(offset, offset + find.limit);
         return ok({ items: sliced.map((i) => resolveWith(i, key.value)), total: candidates.length });

@@ -558,6 +558,28 @@ describe("media/default", () => {
     expect(expectOk(await media.byIds([]))).toEqual([]);
   });
 
+  it("filters by canonical media kind, in the plain list, combined with a text query, and in a recursive folder listing", async () => {
+    const blobs = fakeBlobstore();
+    let t = 0;
+    const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, blobs, createFakePersistence(), noLogger, () => ++t);
+    const photo = expectOk(await media.upload({ filename: "photo.png", contentType: "image/png", data: new Uint8Array([1]) }, "2026")).item;
+    const clip = expectOk(await media.upload({ filename: "clip.mp4", contentType: "video/mp4", data: new Uint8Array([1]) }, "2026")).item;
+    const sheet = expectOk(await media.upload({ filename: "sheet.pdf", contentType: "application/pdf", data: new Uint8Array([1]) })).item;
+
+    expect(expectOk(await media.list({ mediaKind: "image" })).items.map((i) => i.id)).toEqual([photo.id]);
+    expect(expectOk(await media.list({ mediaKind: "video" })).items.map((i) => i.id)).toEqual([clip.id]);
+    expect(expectOk(await media.list({ mediaKind: "other" })).items.map((i) => i.id)).toEqual([sheet.id]);
+
+    expect(expectOk(await media.list({ mediaKind: "image", q: "clip" })).items).toEqual([]);
+    expect(expectOk(await media.list({ mediaKind: "video", q: "clip" })).items.map((i) => i.id)).toEqual([clip.id]);
+
+    expect(expectOk(await media.list({ folder: "2026", recursive: true, mediaKind: "video" })).items.map((i) => i.id)).toEqual([clip.id]);
+
+    const otherPage = expectOk(await media.list({ mediaKind: "other", limit: 1, offset: 0 }));
+    expect(otherPage.total).toBe(1);
+    expect(otherPage.items.map((i) => i.id)).toEqual([sheet.id]);
+  });
+
   it("recursive list matches the exact subtree, not a LIKE prefix or byte range", async () => {
     const blobs = fakeBlobstore();
     let t = 0;
