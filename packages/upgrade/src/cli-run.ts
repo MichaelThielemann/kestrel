@@ -9,6 +9,7 @@ import { boolFlag, parseArgs, stringFlag, type ParsedArgs } from "./args.ts";
 import { unifiedDiff } from "./diff.ts";
 import { runDataStep } from "./data.ts";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
+import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import { isRecord } from "./guards.ts";
 import { loadBackendProject, loadIssuesAsFindings, type LoadIssue, type LoadResult } from "./project.ts";
@@ -368,7 +369,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
         const box = sandboxBootInput(project.input, { dir: scratch.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
         outside = box.outside;
         sandboxInfo = { rewritten: box.rewritten, consented: box.consented, outside: box.outside };
-        bootCheck = await checkBoot(box.input, { setup: box.setup });
+        bootCheck = await checkBoot({ ...box.input, logger: silentLogger }, { setup: box.setup });
         tiers = { ...tiers, boot: "done" };
         for (const key of box.unmatched) {
           findings.push({
@@ -428,7 +429,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
                 return { bootCheck: { errors: [], warnings: [], notChecked: [] }, issues: [{ message: `the edited copy could not be reloaded: ${detail}` }] };
               }
               const previewSandbox = sandboxBootInput(reloadedProject.input, { dir: preview.dir, consent: options.runSetupUses, ...(sandboxEntries === undefined ? {} : { entries: sandboxEntries }) });
-              const bootCheck = await checkBoot(previewSandbox.input, { setup: previewSandbox.setup });
+              const bootCheck = await checkBoot({ ...previewSandbox.input, logger: silentLogger }, { setup: previewSandbox.setup });
               return { bootCheck, issues: reloadIssues, moduleUses: reloadedProject.input.config.modules.map((m) => m.use) };
             } catch (err) {
               const raw = err instanceof Error ? err.message : String(err);
