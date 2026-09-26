@@ -869,6 +869,12 @@ Net changes since 5.8.1.
   `site.previewPath` takes `parent` and reports `exposesParentSlug`. A routed type with a parent
   field and a `unique` slug fails setup. `examples/minimal` gains `pages.parent` and
   `GET /admin/pages/tree`.
+- `site-default` mounted collections: `routes.<t>.mount: true` with `mounts: { type, field }` places a
+  collection under the page the stored assignment names, or at the top level without one. New steps
+  `site.indexMounts` (last in the atomic group of a write to the mounts type, followed by
+  `site.announcePaths`; boot fails otherwise) and `site.route:<t>` (ends the run with
+  `{ route: { type } }` for a reachable document of another routed type). The mount page cannot be
+  removed while it holds a collection.
 
 ### Changed
 

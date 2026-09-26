@@ -62,6 +62,26 @@ the parent field; deleting a page that still has subpages is a `CONFLICT` naming
 re-parenting a page moves every subpage in every locale; a subpage whose new path is taken rejects the
 whole save and names both documents (`details.conflicts[].moving`).
 
+**Mounted collections.** A routed type with `mount: true` lives under a page of the `mountTarget` type:
+`mounts: { type: "settings", field: "mounts" }` names the single type and field holding the assignment
+(`{ posts: "<page id>" }`; `null` or absent means the top level, where the collection shares the path
+space with the pages). A post then reaches `/blog/hallo` and `/en/news/hallo`. Every pipeline that
+writes that single type ends its atomic group with `site.indexMounts`, followed by
+`site.announcePaths`, or boot fails:
+
+```ts
+{ atomic: ["content.set:settings", "site.indexMounts"] }, "site.announcePaths"
+```
+
+`site.indexMounts` rejects an unknown collection, a missing page, the home page and one page for two
+collections (`VALIDATION` on the mounts field), and a change whose documents would collide
+(`CONFLICT` naming both); otherwise it moves every document of each collection whose page changed.
+Renaming the mount page moves every mounted document; removing it is refused while it holds a
+collection. The mount page follows the same independent reachability as a parent. On a routed
+collection's own resolve pipeline, `site.route:<t>` before `site.resolve:<t>` ends the run with
+`{ route: { type } }` when the path belongs to a reachable document of another routed type, so the
+caller can fetch it from that collection's pipeline.
+
 **Independent reachability.** Every page is reachable on its own: live in the locale and its path
 valid. A page that is not published in a locale answers 404 there, but its subpages keep their paths,
 also under a page that was never published, and unpublishing or republishing it moves only that page.
@@ -133,9 +153,12 @@ after migrations, for example on `migrations.applied`.
 only the rows that changed, in bulk calls of up to 500 rows. The group holds the store's write lock, so
 public requests wait for it. A save that would change more than `maxCascade` rows is rejected with a
 field error before anything is written; raising the limit lets larger sections move in one save, at
-the price of every request waiting for that long. Measured on SQLite in memory with 200 pages in
-5 locales (1000 rows): a whole save run (content write, index, announce) takes about 4 ms, and a full
-rebuild about 15 ms.
+the price of every request waiting for that long. Measured on SQLite in memory with the default persistence settings:
+- 200 pages in 5 locales (1000 rows): a whole save run (content write, index, announce) takes about
+  4 ms, and a full rebuild about 15 ms;
+- a cascade of exactly `maxCascade` rows (renaming the mount page of 199 posts, 200 documents in
+  5 locales): the atomic group takes about 42 ms and the announce afterwards about 8 ms, well inside
+  the 5000 ms `scopeTimeoutMs`. Public requests wait for the duration of such a group.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
@@ -162,7 +185,9 @@ rebuild about 15 ms.
 | `site.resumePaths` | Announce path changes a run left unannounced (patches the in-memory path table from the committed rows and raises site.pathsMoved) and prune announced ones older than 7 days | – | `result` | – | { announced: integer, pruned: integer, … } | 503 the store is unavailable | – | no |
 | `site.planRebuild` | Recompute every routed document's paths from content@1 outside any group (adds `rebuild` to the result) | – | `result.rebuild` | – | { rebuild: object, … } | 503 the store is unavailable | – | no |
 | `site.applyRebuild` | Write the planned paths inside one atomic group; saves committed since the plan are recomputed there | `result.rebuild` | `result` | – | { indexed: integer, conflicts: object[], … } | 503 the store is unavailable | – | yes |
+| `site.indexMounts` | Validate the stored mount assignment and move every document of each collection whose mount page changed; last step of the settings write's atomic group | – | – | – | – | 400 an invalid assignment, or a change moving more than maxCascade paths; 409 a moved document's path is taken; 503 the store is unavailable | – | yes |
 | `site.readTree:<arg>` | Every <arg> with its parent, label and valid paths per locale | – | `result` | – | object[] | 503 the store is unavailable | – | no |
+| `site.route:<arg>` | End the run with { route: { type } } when params.path is reachable and belongs to a routed collection other than <arg>; pass through otherwise | `params.path` | `result?` | – | – (ends: { route: object }) | – | – | no |
 | `site.previewPath:<arg>` | The public path a <arg> would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing | – | `result` | { id?: string, locale?: string, slug: string, parent?: string \| null, … } | { path: string, reachable: boolean, reason: string \| null, conflict: object \| null, shadows: object[], exposesParentSlug: object \| null, … } | 400 slug is missing; 503 the store is unavailable | – | no |
 | `site.attachPaths:<arg>` | Add _paths (locale → path) to the <arg> result, every valid path including drafts | `result` | `result` | – | { _paths: object, … } | – | – | no |
 

@@ -1711,7 +1711,9 @@
         "site.resumePaths",
         "site.planRebuild",
         "site.applyRebuild",
+        "site.indexMounts",
         "site.readTree",
+        "site.route",
         "site.previewPath",
         "site.attachPaths"
       ],
@@ -8046,6 +8048,22 @@
       }
     },
     {
+      "name": "site.indexMounts",
+      "module": "site/default",
+      "factory": false,
+      "description": {
+        "summary": "Validate the stored mount assignment and move every document of each collection whose mount page changed; last step of the settings write's atomic group",
+        "reads": [],
+        "writes": [],
+        "errors": {
+          "400": "an invalid assignment, or a change moving more than maxCascade paths",
+          "409": "a moved document's path is taken",
+          "503": "the store is unavailable"
+        },
+        "atomicSafe": true
+      }
+    },
+    {
       "name": "site.readTree",
       "module": "site/default",
       "factory": true,
@@ -8093,6 +8111,41 @@
         },
         "errors": {
           "503": "the store is unavailable"
+        }
+      }
+    },
+    {
+      "name": "site.route",
+      "module": "site/default",
+      "factory": true,
+      "description": {
+        "summary": "End the run with { route: { type } } when params.path is reachable and belongs to a routed collection other than <arg>; pass through otherwise",
+        "reads": [
+          "params.path"
+        ],
+        "writes": [
+          "result?"
+        ],
+        "terminalOutput": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "route"
+          ],
+          "additionalProperties": false
         }
       }
     },
