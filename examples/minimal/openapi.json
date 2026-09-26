@@ -4748,7 +4748,7 @@
     "/admin/publish-all/pages": {
       "post": {
         "operationId": "publishAllPages",
-        "summary": "Require a valid session → Requires permission pages.manage → Re-render every pages → Write redirects.json to the blobstore (adds `redirects: { rules, skipped }` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
+        "summary": "Require a valid session → Requires permission pages.manage → Re-render every pages → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
         "tags": [
           "admin"
         ],
@@ -11335,7 +11335,7 @@
       },
       "put": {
         "operationId": "setRedirects",
-        "summary": "Require a valid session → Requires permission redirects.write → Validate payload field redirects.rules against its JSON Schema → Compile the redirect rules of the payload; VALIDATION names the offending row → Replace the redirects document → Write redirects.json to the blobstore (adds `redirects: { rules, skipped }` to the result)",
+        "summary": "Require a valid session → Requires permission redirects.write → Validate payload field redirects.rules against its JSON Schema → Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect → Replace the redirects document → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
         "tags": [
           "redirects"
         ],
@@ -12056,7 +12056,7 @@
     "/site/{path}": {
       "get": {
         "operationId": "resolvePage",
-        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → End the pipeline with { redirect: { to, status } } when the request path matches a rule; pass through otherwise → Resolve a site path to a pages document (default locale unprefixed) → Replace internal kestrel:<type>:<id> references in the pages document with public paths (_links map added) → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → End the pipeline with { redirect: { to, status } } on an editor rule or an automatic redirect (a moved document's old path); pass through otherwise → Resolve a site path to a pages document (default locale unprefixed) → Replace internal kestrel:<type>:<id> references in the pages document with public paths (_links map added) → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
         "tags": [
           "site"
         ],

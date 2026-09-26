@@ -2790,7 +2790,8 @@
       "provides": [],
       "requires": [
         "content@1",
-        "blobstore@1"
+        "blobstore@1",
+        "persistence@1"
       ],
       "optional": [],
       "config": {
@@ -2868,9 +2869,12 @@
       },
       "steps": [
         "redirects.validate",
+        "redirects.recordMoves",
         "redirects.lookup",
         "redirects.export",
-        "redirects.render"
+        "redirects.render",
+        "redirects.listAuto",
+        "redirects.removeAuto"
       ],
       "eventHook": false,
       "atomicScope": false,
@@ -9977,7 +9981,7 @@
       "module": "redirects/default",
       "factory": false,
       "description": {
-        "summary": "Compile the redirect rules of the payload; VALIDATION names the offending row",
+        "summary": "Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect",
         "reads": [],
         "writes": [],
         "input": {
@@ -10012,11 +10016,89 @@
       }
     },
     {
+      "name": "redirects.recordMoves",
+      "module": "redirects/default",
+      "factory": false,
+      "description": {
+        "summary": "Apply site.pathsMoved moves to the automatic-redirect state: per document the highest seq wins, a tie inside one run favours the destination path",
+        "reads": [],
+        "writes": [],
+        "input": {
+          "type": "object",
+          "properties": {
+            "moves": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "locale": {
+                    "type": "string"
+                  },
+                  "from": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "to": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "seq": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "type",
+                  "id",
+                  "locale",
+                  "from",
+                  "to",
+                  "seq"
+                ]
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "autoRedirects": {
+              "type": "object",
+              "properties": {
+                "recorded": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "recorded"
+              ]
+            }
+          },
+          "required": [
+            "autoRedirects"
+          ]
+        },
+        "errors": {
+          "400": "payload.moves is missing or malformed"
+        }
+      }
+    },
+    {
       "name": "redirects.lookup",
       "module": "redirects/default",
       "factory": false,
       "description": {
-        "summary": "End the pipeline with { redirect: { to, status } } when the request path matches a rule; pass through otherwise",
+        "summary": "End the pipeline with { redirect: { to, status } } on an editor rule or an automatic redirect (a moved document's old path); pass through otherwise",
         "reads": [
           "params.path"
         ],
@@ -10061,7 +10143,7 @@
       "module": "redirects/default",
       "factory": false,
       "description": {
-        "summary": "Write redirects.json to the blobstore (adds `redirects: { rules, skipped }` to the result)",
+        "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
         "reads": [],
         "writes": [
           "result.redirects"
@@ -10131,6 +10213,68 @@
               "status"
             ]
           }
+        }
+      }
+    },
+    {
+      "name": "redirects.listAuto",
+      "module": "redirects/default",
+      "factory": false,
+      "description": {
+        "summary": "Effective automatic redirects (a moved document's old path, sorted by from)",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "docId": {
+                "type": "string"
+              },
+              "locale": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "type",
+              "docId",
+              "locale",
+              "seq"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "redirects.removeAuto",
+      "module": "redirects/default",
+      "factory": false,
+      "description": {
+        "summary": "Turn the automatic redirect at params.path into a removed tombstone; a replay of the move that created it cannot restore it",
+        "reads": [
+          "params.path"
+        ],
+        "writes": [],
+        "errors": {
+          "400": "missing path",
+          "404": "no automatic redirect at that path"
         }
       }
     },
@@ -18973,7 +19117,7 @@
           "name": "redirects.export",
           "module": "redirects/default",
           "description": {
-            "summary": "Write redirects.json to the blobstore (adds `redirects: { rules, skipped }` to the result)",
+            "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
             "reads": [],
             "writes": [
               "result.redirects"
@@ -20762,7 +20906,7 @@
           "name": "redirects.lookup",
           "module": "redirects/default",
           "description": {
-            "summary": "End the pipeline with { redirect: { to, status } } when the request path matches a rule; pass through otherwise",
+            "summary": "End the pipeline with { redirect: { to, status } } on an editor rule or an automatic redirect (a moved document's old path); pass through otherwise",
             "reads": [
               "params.path"
             ],
@@ -22341,7 +22485,7 @@
           "name": "redirects.validate",
           "module": "redirects/default",
           "description": {
-            "summary": "Compile the redirect rules of the payload; VALIDATION names the offending row",
+            "summary": "Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect",
             "reads": [],
             "writes": [],
             "input": {
@@ -22458,7 +22602,7 @@
           "name": "redirects.export",
           "module": "redirects/default",
           "description": {
-            "summary": "Write redirects.json to the blobstore (adds `redirects: { rules, skipped }` to the result)",
+            "summary": "Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
             "reads": [],
             "writes": [
               "result.redirects"

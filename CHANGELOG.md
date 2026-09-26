@@ -469,6 +469,9 @@ Net changes since 5.8.1.
   components.
 - The boot error for a step writing `result` without a declaration names `narrows` among the
   keywords that declare it.
+- `redirects-default` requires `persistence@1`; a config loading it without a persistence provider
+  fails to boot, naming the contract. It stores `redirects_auto_paths` and `redirects_auto_targets`.
+  `Redirects.validate` returns a `Promise<Result>`, and `createRedirects` is async and takes `db`.
 
 ### Added
 
@@ -839,6 +842,14 @@ Net changes since 5.8.1.
   module) and stores `site_docs`, `site_paths`, `site_runs` and `site_meta`; boot fails when a
   pipeline writes a routed type without the index steps, or reads it with another `home` or
   `slugField`.
+- `redirects-default` automatic redirects: `redirects.recordMoves` applies `site.pathsMoved` moves.
+  An old path answers 301 to its document's current path in `redirects.lookup`, `redirects.export` and
+  `redirects.render`, with no chains; the outcome does not depend on the order, repetition or replay
+  of the moves, and two documents swapping paths in one run leave both paths unredirected. Editor rules
+  take precedence and come first in `redirects.json`; an automatic redirect whose target an editor
+  rule matches is skipped and logged, and `redirects.validate` rejects an editor rule whose target is
+  an automatic redirect's source. `redirects.listAuto` and `redirects.removeAuto` (a removed automatic
+  redirect stays removed when the move that created it is replayed).
 
 ### Changed
 
