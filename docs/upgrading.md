@@ -191,6 +191,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`redirects/requires-persistence`](#redirects-requires-persistence) | load | manual | `redirects-default` without a `persistence@1` provider |
 | [`imports/redirects-impl`](#imports-redirects-impl) | load | none (info) | a local module importing `kestrel-redirects-default/impl` |
 | [`deps/kestrel-range`](#deps-kestrel-range), `deps/mixed-majors`, `deps/pre-install` | source | auto / manual / none | a `@michaelthielemann/kestrel*` dependency range |
+| [`scripts/kestrel-binaries`](#scripts-kestrel-binaries) | source | auto / manual (warning) | a `kestrel-openapi` or `kestrel-upgrade` command in `package.json` scripts or another project file |
 | [`deps/host-outdated`](#deps-host-outdated), `deps/host-refused` | source | manual | a direct dependency whose plugin is not built for this version, or whose `kestrel` field is refused |
 | [`offer/event-queue`](#offer-event-queue) | source | none / ask / auto | the switch from `events-direct` to `events-queue` |
 | [`boot/<code>`](#boot-code) | boot | manual | any boot error no rule above claims |
@@ -578,6 +579,30 @@ installed (source tier only). `deps/kestrel-range` reads and edits `package.json
 still runs — and `fix --write` still bumps the range — even when the project itself could not load
 at all (a `load/failed` finding alongside it names why); install the bumped range and run `check`
 again to see the rest.
+
+The same rule adds `@michaelthielemann/kestrel-cli`, the package the `kestrel` command lives in
+from 6.0.0, at the same range. A backend project gets it in `dependencies`, since its `kestrel`
+command starts the production server and a production install omits `devDependencies`; a project
+a host package's plugin loads gets it in `devDependencies`. An entry in the other block is moved in
+the same edit.
+
+#### scripts-kestrel-binaries
+6.0.0 removes the `kestrel-openapi` and `kestrel-upgrade` binaries; both are subcommands of
+`kestrel` now. In `package.json` scripts the rule rewrites them automatically:
+
+| Before | After |
+|---|---|
+| `kestrel-openapi …` | `kestrel openapi …` |
+| `kestrel-upgrade …` | `kestrel upgrade …` |
+| `npx [-y] @michaelthielemann/kestrel-upgrade@<v> …` | `npx -y @michaelthielemann/kestrel-cli@<v> upgrade …` |
+| `pnpm dlx @michaelthielemann/kestrel-upgrade@<v> …` | `pnpm dlx @michaelthielemann/kestrel-cli@<v> upgrade …` |
+
+Only a command token is rewritten: at the start of the script, after `&&`, `;` or `|`, or after
+`node_modules/.bin/`; a longer word containing the name stays. `kestrel openapi` refuses flags it
+does not know, so a rewritten line that passes one gets a warning naming the flag. In other project
+files (`Dockerfile*`, `*.service`, `*.yml`/`*.yaml`, `*.sh`, `Makefile`, `Procfile`, `*.json` and
+`*.js`/`*.mjs`/`*.ts`, never Markdown or lockfiles) the rule reports each such line as a warning
+with its file and line and the new form, and edits nothing.
 
 #### deps-host-outdated
 A direct dependency of the project (not one of kestrel's own packages) carries a plugin that is not

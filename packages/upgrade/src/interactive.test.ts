@@ -68,6 +68,7 @@ describe("--answers resolves a question without a TTY", () => {
     const pkgFile = join(scratch.dir, "package.json");
     const pkg = boundaryCast<{ dependencies: Record<string, string> }>(JSON.parse(readFileSync(pkgFile, "utf8")), "json");
     for (const dep of Object.keys(pkg.dependencies)) pkg.dependencies[dep] = "^6.0.0";
+    pkg.dependencies["@michaelthielemann/kestrel-cli"] = "^6.0.0";
     await writeFile(pkgFile, JSON.stringify(pkg, null, 2));
     const answersFile = join(scratch.dir, "answers.json");
     await writeFile(answersFile, JSON.stringify({ "verified-user-path:retryReassignRevisionAuthor": "reassignTo" }));

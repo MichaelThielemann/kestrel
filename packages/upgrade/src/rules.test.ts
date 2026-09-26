@@ -162,7 +162,7 @@ describe("deps/kestrel-range", () => {
   it("fires for a non-6.x kestrel dependency and sets it to ^6.0.0", async () => {
     const project = await projectWithConfig("export default defineConfig({ modules: [], triggers: [] });\n", ["@michaelthielemann/kestrel-events-inmemory"]);
     const findings = await kestrelRangeRule.check(contextFor(project));
-    expect(findings).toHaveLength(1);
+    expect(findings.map((f) => f.where.module)).toEqual(["@michaelthielemann/kestrel-events-inmemory", "@michaelthielemann/kestrel-cli"]);
     const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
     const pkgSource = readFileOrUndefined(join(dir, "package.json"))!;
     const { text } = applyEdits(pkgSource, edits);
@@ -171,7 +171,7 @@ describe("deps/kestrel-range", () => {
 
   it("does not fire once the range is already 6.x", async () => {
     const project = await projectWithConfig("export default defineConfig({ modules: [], triggers: [] });\n", []);
-    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-events-inmemory": "^6.0.0" } }));
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: { "@michaelthielemann/kestrel-cli": "^6.0.0", "@michaelthielemann/kestrel-events-inmemory": "^6.0.0" } }));
     expect(await kestrelRangeRule.check(contextFor(project))).toEqual([]);
   });
 });

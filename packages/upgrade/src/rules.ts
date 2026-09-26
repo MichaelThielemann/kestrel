@@ -4,7 +4,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { BACKEND_PACKAGE_NAMES } from "./backendPackages.ts";
 import { insertModuleListEntry, insertModulesTsEntry, renameStringLiterals } from "./edits.ts";
 import { isRecord } from "./guards.ts";
-import { setDependencyRange } from "./packageJson.ts";
+import { removeDependency, setDependencyRange } from "./packageJson.ts";
 import type { Rule, RuleContext, SourceRule } from "./plugin.ts";
 import type { Edit, Finding } from "./report.ts";
 import { combineEditParts, finding, KESTREL_RANGE, moduleEntry, packageJsonPath, upgradingDocs } from "./ruleHelpers.ts";
@@ -14,6 +14,7 @@ import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { fieldGrantRules } from "./ruleFieldGrants.ts";
 import { INFO_RULES } from "./ruleInfo.ts";
 import { mediaRules } from "./ruleMedia.ts";
+import { kestrelBinariesRule } from "./ruleBinaries.ts";
 import { queueOfferRule } from "./ruleQueueOffer.ts";
 import { SITE_PATH_RULES } from "./ruleSitePaths.ts";
 import { underscoreFieldRules } from "./ruleUnderscoreField.ts";
@@ -124,6 +125,41 @@ function majorOf(range: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+const CLI_PACKAGE = "@michaelthielemann/kestrel-cli";
+
+type DependencyBlock = "dependencies" | "devDependencies";
+
+function blockEntry(pkg: unknown, block: DependencyBlock, name: string): string | undefined {
+  if (!isRecord(pkg)) return undefined;
+  const value = pkg[block];
+  if (!isRecord(value)) return undefined;
+  const range = value[name];
+  return typeof range === "string" ? range : undefined;
+}
+
+function pluginKindOf(ctx: object): string | undefined {
+  return "pluginKind" in ctx && typeof ctx.pluginKind === "string" ? ctx.pluginKind : undefined;
+}
+
+function cliPackageFinding(pkgFile: string, source: string, hasKestrel: boolean, pluginKind: string | undefined): Finding | undefined {
+  const pkg = boundaryCast<unknown>(JSON.parse(source), "json");
+  const target: DependencyBlock = pluginKind === undefined ? "dependencies" : "devDependencies";
+  const other: DependencyBlock = target === "dependencies" ? "devDependencies" : "dependencies";
+  const inTarget = blockEntry(pkg, target, CLI_PACKAGE);
+  const inOther = blockEntry(pkg, other, CLI_PACKAGE);
+  if (inTarget === undefined && inOther === undefined && !hasKestrel && pluginKind === undefined) return undefined;
+  const edits: Edit[] = [];
+  if (inTarget === undefined || majorOf(inTarget) !== 6) edits.push(setDependencyRange(pkgFile, source, target, CLI_PACKAGE, KESTREL_RANGE));
+  if (inOther !== undefined) {
+    const removed = removeDependency(pkgFile, source, other, CLI_PACKAGE);
+    if (removed !== undefined) edits.push(removed);
+  }
+  if (edits.length === 0) return undefined;
+  const why = pluginKind === undefined ? "its `kestrel` command starts the server, so production installs need it" : `the host plugin "${pluginKind}" starts the server, so the command is a development tool here`;
+  const message = inTarget === undefined && inOther === undefined ? `${CLI_PACKAGE} is missing; the kestrel command lives in that package from 6.0.0` : inTarget === undefined ? `${CLI_PACKAGE} is in ${other}, not ${target}` : `${CLI_PACKAGE} is at ${inTarget}, not a 6.x range`;
+  return finding(`deps/kestrel-range:${CLI_PACKAGE}`, "deps/kestrel-range", message, `set ${CLI_PACKAGE} to "${KESTREL_RANGE}" in ${target} (${why})`, { file: pkgFile, module: CLI_PACKAGE }, edits, upgradingDocs("deps-kestrel-range"));
+}
+
 export const kestrelRangeRule: SourceRule = {
   id: "deps/kestrel-range",
   needs: "source",
@@ -132,12 +168,17 @@ export const kestrelRangeRule: SourceRule = {
     const source = ctx.readFile(pkgFile);
     if (source === undefined) return [];
     const findings: Finding[] = [];
-    for (const dep of kestrelDependencyRanges(source)) {
+    const ranges = kestrelDependencyRanges(source);
+    for (const dep of ranges) {
+      if (dep.name === CLI_PACKAGE && dep.map !== "peerDependencies") continue;
       const major = majorOf(dep.range);
       if (major === 6) continue;
       const edit = setDependencyRange(pkgFile, source, dep.map, dep.name, KESTREL_RANGE);
       findings.push(finding(`deps/kestrel-range:${dep.name}`, "deps/kestrel-range", `${dep.name} is at ${dep.range}, not a 6.x range`, `set ${dep.name} to "${KESTREL_RANGE}"`, { file: pkgFile, module: dep.name }, [edit], upgradingDocs("deps-kestrel-range")));
     }
+    const hasKestrel = ranges.some((dep) => dep.map !== "peerDependencies");
+    const cli = cliPackageFinding(pkgFile, source, hasKestrel, pluginKindOf(ctx));
+    if (cli !== undefined) findings.push(cli);
     return findings;
   },
 };
@@ -147,6 +188,7 @@ export const DEFAULT_RULES: readonly Rule[] = [
   eventBusRule,
   removedStepsRule,
   kestrelRangeRule,
+  kestrelBinariesRule,
   verifiedUserRule,
   contractHelperImportsRule,
   ...bootWrapRules,

@@ -10,7 +10,7 @@ import type { UpgradeReport } from "./report.ts";
 let dir: string;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "kestrel-upgrade-fixpoint-"));
-  await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: {} }));
+  await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: {}, devDependencies: { "@michaelthielemann/kestrel-cli": "^6.0.0" } }));
   await writeFile(join(dir, "steps.txt"), "start\n");
 });
 afterEach(async () => {

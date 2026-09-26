@@ -576,6 +576,7 @@ describe("fix's own final preview, before any write", () => {
 describe("fix never writes through a scratch path that maps into the real project's node_modules", () => {
   it("refuses the finding instead of writing, and the dry-run shows the refusal instead of a diff", async () => {
     await writeFile(join(dir, "host.config.ts"), "export default { modules: [], triggers: [] };\n");
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: {}, devDependencies: { "@michaelthielemann/kestrel-cli": "^6.0.0" } }));
     const realPkgDir = join(dir, "node_modules", "widget");
     await mkdir(realPkgDir, { recursive: true });
     const pkgFile = join(realPkgDir, "package.json");

@@ -280,6 +280,7 @@ describe("fix --write runs the dirty guard for every touched file before writing
   });
 
   it("refuses (exit 2), never overwrites, when git itself cannot run inside a real repository", async () => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: {}, devDependencies: { "@michaelthielemann/kestrel-cli": "^6.0.0" } }));
     await run("git", ["init"], { cwd: dir });
     await run("git", ["config", "user.email", "t@example.com"], { cwd: dir });
     await run("git", ["config", "user.name", "t"], { cwd: dir });
@@ -411,6 +412,7 @@ describe("fix never writes through a project-level file symlink to outside the p
 
 describe("fix --write always says what happened, even when it wrote nothing", () => {
   it("names the finding and the reason, instead of printing nothing, when its only edit fails to verify", async () => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: {}, devDependencies: { "@michaelthielemann/kestrel-cli": "^6.0.0" } }));
     const configFile = join(dir, "host.config.ts");
     await writeFile(configFile, "export default { a: 1 };\n");
     const badRule: Rule = {
@@ -430,6 +432,7 @@ describe("fix --write always says what happened, even when it wrote nothing", ()
   });
 
   it("says so, instead of printing nothing, when no open finding has an edit to apply at all", async () => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: {}, devDependencies: { "@michaelthielemann/kestrel-cli": "^6.0.0" } }));
     const configFile = join(dir, "host.config.ts");
     await writeFile(configFile, "export default { a: 1 };\n");
     const manualRule: Rule = {

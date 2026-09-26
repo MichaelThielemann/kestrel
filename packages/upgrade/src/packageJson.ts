@@ -103,10 +103,15 @@ export function removeDependency(file: string, source: string, mapKey: "dependen
   const block = findObjectBlock(source, mapKey);
   if (block === undefined) return undefined;
   const inner = source.slice(block.openBrace + 1, block.closeBrace);
-  const pattern = new RegExp(`\\n?[ \\t]*"${name}"\\s*:\\s*"[^"]*",?`);
+  const pattern = new RegExp(`\\n?[ \\t]*"${escapeRegExp(name)}"\\s*:\\s*"[^"]*",?`);
   const match = pattern.exec(inner);
   if (!match) return undefined;
-  return { file, start: block.openBrace + 1 + match.index, end: block.openBrace + 1 + match.index + match[0].length, text: "" };
+  let start = match.index;
+  if (!match[0].endsWith(",")) {
+    const before = inner.slice(0, start).replace(/\s*$/, "");
+    if (before.endsWith(",")) start = before.length - 1;
+  }
+  return { file, start: block.openBrace + 1 + start, end: block.openBrace + 1 + match.index + match[0].length, text: "" };
 }
 
 function escapeRegExp(value: string): string {
