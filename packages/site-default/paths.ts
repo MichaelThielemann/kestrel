@@ -439,7 +439,7 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     const change = diff(current, current.flatMap((r) => claimOf(r) ?? []), rows);
     if (change.changed.length > config.maxCascade) {
       const stall = `this change moves ${change.changed.length} paths (documents × locales), more than the limit of ${config.maxCascade} (config key maxCascade, preset option paths.maxCascade); a larger change blocks every request while it runs`;
-      throw fieldError(cascade.field, cascade.publishing ? `${stall}. Publishing or unpublishing moves other pages here: this page takes over or gives back a path another page reaches through its default-locale slug, together with that page's subpages` : stall);
+      throw fieldError(cascade.field, cascade.publishing ? `${stall}. Publishing or unpublishing moves another page here: this page takes over or gives back a path that page reaches through its default-locale slug` : stall);
     }
     return apply(change, runId, true);
   }

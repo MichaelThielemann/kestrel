@@ -139,18 +139,11 @@ interface Claim {
   weak?: DocRow;
 }
 
-/** The claim a tail's prefix belongs to: a live strong claim, a strong claim nobody else wants, else the weak one. */
-export function servingClaim(claim: Claim): DocRow | undefined {
-  const { strong, weak } = claim;
-  if (strong && (strong.live || !weak)) return strong;
-  return weak ?? strong;
-}
-
 /**
  * Every row the bases give. A document's tail is its prefix source's tail plus its slug. A tail already held keeps
  * its holder and an unheld one goes to its oldest claimant; every other claimant loses its claim. A row is valid when
- * its own claim serves (a weak claim yields to a live strong one) and its prefix source is valid and serves the
- * source's tail.
+ * its own claim serves (a weak claim yields to a live strong one) and it is placed: it holds its tail, and so does
+ * every document its prefix comes from, whatever their publication or their claims' strength.
  */
 export function derive(f: Formatter, bases: readonly Base[], current: readonly DocRow[], mounts: Mounts): { rows: DocRow[]; conflicts: RebuildConflict[] } {
   const byRow = new Map<string, Base>();
@@ -223,24 +216,22 @@ export function derive(f: Formatter, bases: readonly Base[], current: readonly D
     claims.set(key, claim);
   }
 
-  const validity = new Map<string, boolean>();
-  const validFor = (row: DocRow): boolean => {
-    const known = validity.get(row.id);
+  const placement = new Map<string, boolean>();
+  const placed = (row: DocRow | undefined): boolean => {
+    if (row === undefined || row.tail === null) return false;
+    const known = placement.get(row.id);
     if (known !== undefined) return known;
-    validity.set(row.id, false);
-    let valid = false;
-    if (row.tail !== null) {
-      const claim = claims.get(claimKey(row.locale, row.tail)) ?? {};
-      const serving = row.strong ? claim.strong === row : claim.weak === row && !(claim.strong?.live ?? false);
-      const source = prefixSource(f, row, mounts);
-      if (serving && source === undefined) valid = true;
-      else if (serving && source !== undefined) {
-        const parent = rows.get(`${source}/${row.locale}`);
-        valid = parent !== undefined && parent.tail !== null && validFor(parent) && servingClaim(claims.get(claimKey(parent.locale, parent.tail)) ?? {}) === parent;
-      }
-    }
-    validity.set(row.id, valid);
-    return valid;
+    placement.set(row.id, false);
+    const source = prefixSource(f, row, mounts);
+    const result = source === undefined || placed(rows.get(`${source}/${row.locale}`));
+    placement.set(row.id, result);
+    return result;
+  };
+  const validFor = (row: DocRow): boolean => {
+    if (row.tail === null) return false;
+    const claim = claims.get(claimKey(row.locale, row.tail)) ?? {};
+    const serving = row.strong ? claim.strong === row : claim.weak === row && !(claim.strong?.live ?? false);
+    return serving && placed(row);
   };
   for (const row of rows.values()) row.valid = validFor(row);
   return { rows: [...rows.values()], conflicts };

@@ -24,7 +24,7 @@ const MODEL: ContentModel = {
 const ROUTES = { pages: routeWith({ home: "home", liveWhen: { status: "published" }, parentField: "parent" }) };
 const published = { home: "home", fallback: true, filter: { status: "published" } };
 
-async function site(config: { maxCascade?: number } = {}) {
+async function site(config: { maxCascade?: number; maxDepth?: number } = {}) {
   const routed = await routedSite({ model: MODEL, routes: ROUTES, config });
   const page = async (fields: Record<string, unknown>, en?: Record<string, unknown>): Promise<string> => {
     const id = expectOk(await routed.content.create("pages", { status: "published", title: String(fields.slug), ...fields })).id;
@@ -80,6 +80,17 @@ describe("site/default nested pages: parent rules", () => {
     expectErr(await s.content.update("pages", a, { parent: c }), "VALIDATION");
     expect(expectOk(await s.content.get("pages", a))?.parent).toBeNull();
     expect(await s.resolve("a/b/c")).toBe(c);
+  });
+
+  it("rejects a parent chain deeper than maxDepth and writes nothing", async () => {
+    const s = await site({ maxDepth: 3 });
+    const a = await s.page({ slug: "a" });
+    const b = await s.page({ slug: "b", parent: a });
+    const c = await s.page({ slug: "c", parent: b });
+    const error = expectErr(await s.content.create("pages", { slug: "d", title: "D", status: "published", parent: c }), "VALIDATION");
+    expect(error.details).toEqual({ fields: [{ field: "parent", message: "the parent chain would be deeper than 3 (maxDepth)" }] });
+    expect(await s.resolve("a/b/c/d")).toBeNull();
+    expect(expectOk(await s.content.list("pages", {})).total).toBe(3);
   });
 
   it("rejects a missing parent and the home page as a parent", async () => {
@@ -193,7 +204,7 @@ describe("site/default nested pages: fallback and shadowing", () => {
     expect(await s.resolve("en/parent/kind")).toBe(rival);
   });
 
-  it("a draft with its own slug on a fallback page's path takes no section offline; publishing it swaps both sections", async () => {
+  it("a draft translation of a parent moves its own subpages with it and leaves the other section alone", async () => {
     const s = await site();
     const p = await s.page({ slug: "p" }, {});
     const pChild = await s.page({ slug: "c", parent: p }, { slug: "c-en" });
@@ -201,24 +212,37 @@ describe("site/default nested pages: fallback and shadowing", () => {
     const qChild = await s.page({ slug: "d", parent: q }, { slug: "d-en" });
     s.emitted.length = 0;
     expectOk(await s.content.update("pages", q, { slug: "p", title: "Q en", status: "draft" }, { locale: "en" }));
-    expect(s.moves()).toEqual([{ id: qChild, locale: "en", from: "/en/q/d-en", to: null }]);
+    expect(s.moves()).toEqual([{ id: qChild, locale: "en", from: "/en/q/d-en", to: "/en/p/d-en" }]);
     expect(await s.resolve("en/p")).toBe(p);
     expect(await s.resolve("en/p/c-en")).toBe(pChild);
-    expect(await s.resolve("en/p/d-en")).toBeNull();
+    expect(await s.resolve("en/p/d-en")).toBe(qChild);
+  });
 
+  it("publishing a page that takes a fallback page's path moves only that fallback page, not its subpages", async () => {
+    const s = await site();
+    const p = await s.page({ slug: "p" }, {});
+    const pChild = await s.page({ slug: "c", parent: p }, { slug: "c-en" });
+    const q = expectOk(await s.content.create("pages", { slug: "q", title: "Q", status: "published" })).id;
+    const qChild = await s.page({ slug: "d", parent: q }, { slug: "d-en" });
+    expectOk(await s.content.update("pages", q, { slug: "p", title: "Q en", status: "draft" }, { locale: "en" }));
     s.emitted.length = 0;
     expectOk(await s.content.update("pages", q, { status: "published" }, { locale: "en" }));
+    expect(s.moves()).toEqual(expect.arrayContaining([{ id: p, locale: "en", from: "/en/p", to: null }, { id: q, locale: "en", from: null, to: "/en/p" }]));
+    expect(s.moves()).toHaveLength(2);
     expect(await s.resolve("en/p")).toBe(q);
+    expect(await s.resolve("en/p/c-en")).toBe(pChild);
     expect(await s.resolve("en/p/d-en")).toBe(qChild);
-    expect(await s.resolve("en/p/c-en")).toBeNull();
-    expect(s.moves()).toEqual(
-      expect.arrayContaining([
-        { id: p, locale: "en", from: "/en/p", to: null },
-        { id: pChild, locale: "en", from: "/en/p/c-en", to: null },
-        { id: q, locale: "en", from: null, to: "/en/p" },
-        { id: qChild, locale: "en", from: null, to: "/en/p/d-en" },
-      ]),
-    );
+  });
+
+  it("a published grandchild under a shadowed fallback parent stays reachable", async () => {
+    const s = await site();
+    const p = await s.page({ slug: "p" }, {});
+    const child = await s.page({ slug: "c", parent: p }, { slug: "c-en" });
+    const grandchild = await s.page({ slug: "g", parent: child }, { slug: "g-en" });
+    await s.page({ slug: "rival" }, { slug: "p" });
+    expect(await s.resolve("en/p")).not.toBe(p);
+    expect(await s.resolve("en/p/c-en/g-en")).toBe(grandchild);
+    expect(s.paths.pathsOf("pages", grandchild, "reachable")).toEqual({ de: "/p/c/g", en: "/en/p/c-en/g-en" });
   });
 
   it("two children that fall onto one path under two holders of the parent's path conflict", async () => {

@@ -88,10 +88,12 @@ also under a page that was never published, and unpublishing or republishing it 
 One deliberate consequence: the slug of an unpublished parent appears as a segment of its published
 subpages' paths. No other field of the parent is served: links to it are broken, it has no output, and
 a caller only learns its id through fields the caller is granted. `site.previewPath` reports such a
-parent as `exposesParentSlug`. A path prefix belongs to the claim that serves it: a live strong claim,
-else a weak one. So while a draft holds a page's fallback path with a slug of its own, the fallback
-page and its subpages keep serving and the draft's subpages are not reachable; when the draft is
-published both sections switch. That is the only case in which a page's publication moves other pages.
+parent as `exposesParentSlug`. A subpage is placed structurally: its path is valid when its own claim
+serves and every page above it holds its path, whatever those pages' publication or claim strength.
+So when a page reaches `/en/p` only through its default-locale slug and another page takes `/en/p`
+with a slug of its own, both pages' subpages keep their full paths below `/en/p/`; full paths stay
+unique, so two documents never answer one path. Publishing or unpublishing a page moves at most that
+page and a page whose fallback path it takes over or gives back, never their subpages.
 
 **One path, one document.** The public path is unique per locale across every routed type; the slug
 alone need not be. A document's path in a locale is its own slug there (a strong claim), or else its
@@ -153,7 +155,9 @@ after migrations, for example on `migrations.applied`.
 only the rows that changed, in bulk calls of up to 500 rows. The group holds the store's write lock, so
 public requests wait for it. A save that would change more than `maxCascade` rows is rejected with a
 field error before anything is written; raising the limit lets larger sections move in one save, at
-the price of every request waiting for that long. Measured on SQLite in memory with the default persistence settings:
+the price of every request waiting for that long. The cost of a save therefore grows with the total number of stored rows (documents × locales), not with
+the size of the change: roughly 4 ms per 1000 rows. Measured on SQLite in memory with the default
+persistence settings:
 - 200 pages in 5 locales (1000 rows): a whole save run (content write, index, announce) takes about
   4 ms, and a full rebuild about 15 ms;
 - a cascade of exactly `maxCascade` rows (renaming the mount page of 199 posts, 200 documents in
