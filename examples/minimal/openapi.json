@@ -8094,7 +8094,7 @@
             }
           },
           "400": {
-            "description": "invalid folder or unknown locale",
+            "description": "invalid folder, unknown locale or invalid type",
             "content": {
               "application/json": {
                 "schema": {

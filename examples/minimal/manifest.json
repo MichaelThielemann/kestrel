@@ -4685,7 +4685,7 @@
           ]
         },
         "errors": {
-          "400": "invalid folder or unknown locale",
+          "400": "invalid folder, unknown locale or invalid type",
           "401": "no identity and no ids (unless anonymousList is \"all\")"
         }
       }
@@ -17563,7 +17563,7 @@
               ]
             },
             "errors": {
-              "400": "invalid folder or unknown locale",
+              "400": "invalid folder, unknown locale or invalid type",
               "401": "no identity and no ids (unless anonymousList is \"all\")"
             }
           }
