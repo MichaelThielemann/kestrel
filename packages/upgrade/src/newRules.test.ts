@@ -46,7 +46,7 @@ function contextFor(project: LoadedProject, options: { check?: BootCheck; answer
   };
 }
 
-async function project(options: { configModules?: Array<{ use: string; config?: Record<string, unknown> }>; triggers?: unknown[]; pipelines?: PipelineDefinition[]; pipelineFiles?: Record<string, string>; modules?: ModuleDefinition[]; moduleFiles?: Record<string, string> }): Promise<LoadedProject> {
+async function project(options: { configModules?: Array<{ use: string; config?: Record<string, unknown>; defaults?: { from: string; values: Record<string, unknown> } }>; triggers?: unknown[]; pipelines?: PipelineDefinition[]; pipelineFiles?: Record<string, string>; modules?: ModuleDefinition[]; moduleFiles?: Record<string, string> }): Promise<LoadedProject> {
   const configFile = join(dir, "kestrel.config.ts");
   await writeFile(configFile, "export default defineConfig({});\n");
   return {
@@ -393,6 +393,13 @@ describe("model/underscore-field", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).toBe("ask");
     expect(findings[0]?.fix.kind === "ask" ? findings[0].fix.defaultValue : "n/a").toBeUndefined();
+  });
+
+  it("finds an underscore field declared only in host-supplied defaults", async () => {
+    const p = await project({ configModules: [{ use: "@michaelthielemann/kestrel-content-default", config: {}, defaults: { from: "site-preset", values: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } } }] });
+    const findings = await underscoreFieldRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.where.path).toBe("types.page.fields._hint");
   });
 
   it("points at kestrel-upgrade data when no data report was given", async () => {

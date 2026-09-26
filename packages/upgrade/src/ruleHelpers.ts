@@ -1,5 +1,5 @@
 import { isAbsolute, join, relative, sep } from "node:path";
-import type { BootCheck, BootProblem } from "@michaelthielemann/kestrel";
+import { effectiveModuleConfig, type BootCheck, type BootProblem } from "@michaelthielemann/kestrel";
 import type { RuleContext } from "./plugin.ts";
 import type { Edit, Finding, FindingLocation, Severity } from "./report.ts";
 import { useToken } from "./useToken.ts";
@@ -72,8 +72,10 @@ export function ruleCheckFailedFinding(ruleId: string, err: unknown): Finding {
   };
 }
 
+/** The module-list entry for `token`, its `config` replaced by the effective one: the entry's own `config` laid over its host-supplied `defaults`. */
 export function moduleEntry(ctx: RuleContext, token: string) {
-  return ctx.project.input.config.modules.find((m) => useToken(m.use) === token);
+  const entry = ctx.project.input.config.modules.find((m) => useToken(m.use) === token);
+  return entry === undefined ? undefined : { ...entry, config: effectiveModuleConfig(entry) };
 }
 
 export function hasModule(ctx: RuleContext, token: string): boolean {

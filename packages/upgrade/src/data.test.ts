@@ -158,6 +158,21 @@ describe("runDataStep: underscore-field counts", () => {
     expect(result.report?.findings).toEqual([]);
   });
 
+  it("counts a field the content model declares only in host-supplied defaults", async () => {
+    const root = await mkdtemp(join(PROJECT_ROOT, "__fixtures__", ".tmp-data-test-"));
+    projectRoots.push(root);
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "tmp", type: "module" }));
+    const defaults = { from: "site-preset", values: { types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } } };
+    await writeFile(join(root, "kestrel.config.ts"), `export default { modules: [{ use: "@michaelthielemann/kestrel-content-default", config: {}, defaults: ${JSON.stringify(defaults)} }], triggers: [] };\n`);
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { _hint: "string" });
+    await db.createOne("page", { id: "1", _hint: "legacy value" });
+    db.close();
+    const result = await runDataStep(file, root);
+    expect(result.report?.underscoreFields).toEqual({ "page._hint": { unlocalized: 1 } });
+  });
+
   it("counts a stored value for an unlocalized field and reports it as a finding", async () => {
     const root = await contentProjectRoot({ types: { page: { kind: "multi", fields: { _hint: { type: "string" } } } } });
     const file = join(dir, "kestrel.db");

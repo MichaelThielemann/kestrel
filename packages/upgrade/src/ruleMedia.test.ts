@@ -28,6 +28,7 @@ import {
 interface ModuleSpec {
   use: string;
   config?: Record<string, unknown>;
+  defaults?: { from: string; values: Record<string, unknown> };
 }
 
 let dir: string;
@@ -47,7 +48,7 @@ async function project(
   extra: { pipelines?: PipelineDefinition[]; triggers?: unknown[]; moduleFiles?: Record<string, string>; withPipelinesDir?: boolean } = {},
 ): Promise<LoadedProject> {
   const configFile = join(dir, "kestrel.config.ts");
-  const modulesText = modules.map((m) => `{ use: "${m.use}", config: ${JSON.stringify(m.config ?? {})} }`).join(", ");
+  const modulesText = modules.map((m) => `{ use: "${m.use}", config: ${JSON.stringify(m.config ?? {})}${m.defaults === undefined ? "" : `, defaults: ${JSON.stringify(m.defaults)}`} }`).join(", ");
   await writeFile(configFile, `export default defineConfig({ modules: [${modulesText}], triggers: ${JSON.stringify(extra.triggers ?? [])} });\n`);
   const pipelineFiles = extra.withPipelinesDir === true ? [{ file: join(dir, "pipelines", "existing.ts"), pipelines: ["existing"] }] : [];
   return {
@@ -162,6 +163,52 @@ describe("modules/delivery-media", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.fix.kind).not.toBe("auto");
     expect(findings[0]?.suggestion).toContain("reservedPaths");
+  });
+
+  it("reads media from the entry's host-supplied defaults", async () => {
+    const p = await project([
+      { use: DELIVERY, config: {}, defaults: { from: "site-preset", values: { media: { publicPath: "/media" } } } },
+      { use: MEDIA_DEFAULT, config: {} },
+    ]);
+    const findings = await deliveryMediaRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.rule).toBe("modules/delivery-media");
+  });
+
+  it("keeps host-supplied reservedPaths: goes manual instead of writing an array that would replace them", async () => {
+    const p = await project([
+      { use: DELIVERY, config: { media: { publicPath: "/media" } }, defaults: { from: "site-preset", values: { reservedPaths: ["/admin"] } } },
+      { use: MEDIA_DEFAULT, config: {} },
+    ]);
+    const findings = await deliveryMediaRule.check(contextFor(p));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.fix.kind).not.toBe("auto");
+    expect(findings[0]?.suggestion).toContain("reservedPaths");
+  });
+
+  it("only removes media when host-supplied reservedPaths already hold the public path", async () => {
+    const p = await project([
+      { use: DELIVERY, config: { media: { publicPath: "/media" } }, defaults: { from: "site-preset", values: { reservedPaths: ["/admin", "/media"] } } },
+      { use: MEDIA_DEFAULT, config: {} },
+    ]);
+    const findings = await deliveryMediaRule.check(contextFor(p));
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const text = applied(p, edits);
+    expect(text).not.toContain('"media":');
+    expect(text).not.toContain("reservedPaths: [");
+    expect(text).toContain('"reservedPaths":["/admin","/media"]');
+  });
+
+  it("with host wiring, goes manual on delivery-static when host-supplied reservedPaths lack the wiring's paths", async () => {
+    const wiring: MediaWiring = { publicPath: "/media", copyPrefix: "site/", reservedPaths: ["/api/media"] };
+    const p = await project([
+      { use: DELIVERY, config: { media: { publicPath: "/media" } }, defaults: { from: "site-preset", values: { reservedPaths: ["/admin"] } } },
+      { use: MEDIA_DEFAULT, config: {} },
+    ]);
+    const findings = await deliveryMediaRule.check(contextWithWiring(p, wiring));
+    const delivery = findings.find((f) => f.where.module === DELIVERY);
+    expect(delivery?.fix.kind).not.toBe("auto");
   });
 
   it("stays manual when media-default is not configured at all", async () => {

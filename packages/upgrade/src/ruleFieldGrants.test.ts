@@ -31,6 +31,7 @@ const CONFIG_SOURCE = `export default defineConfig({
 interface ModuleEntry {
   use: string;
   config: Record<string, unknown>;
+  defaults?: { from: string; values: Record<string, unknown> };
 }
 
 const MODULES: ModuleEntry[] = [
@@ -119,6 +120,17 @@ describe("pipelines/field-step", () => {
     expect(text).not.toContain("variants[]");
   });
 
+  it("reads the content model and the existing grants from host-supplied defaults", async () => {
+    const modules = MODULES.map((m) => (m.use.endsWith("content-default") ? { use: m.use, config: {}, defaults: { from: "site-preset", values: m.config } } : m.use === AUTHZ ? { ...m, defaults: { from: "site-preset", values: { anonymousFields: { settings: ["id"] } } } } : m));
+    const p = await project({ modules });
+    const [asked] = await fieldStepRule.check(contextFor(p, [problem]));
+    expect(asked?.suggestion).toContain("pages: id, slug, title, _locales, _translations, _locale, _links, redirect");
+    const [finding] = await fieldStepRule.check(contextFor(p, [problem], { "field-step": "yes" }));
+    const edits = finding!.fix.kind === "auto" ? finding!.fix.edits : [];
+    const config = applyEdits(readFileOrUndefined(p.configFile) ?? "", edits.filter((e) => e.file === p.configFile)).text;
+    expect(config).toContain('anonymousFields: { settings: ["id"], media: ["id"');
+  });
+
   it("stays manual on a manual answer, and for a pipeline whose resource it cannot tell", async () => {
     const [manual] = await fieldStepRule.check(contextFor(await project(), [problem], { "field-step": "manual" }));
     expect(manual?.fix.kind).toBe("manual");
@@ -163,6 +175,12 @@ describe("responses/anonymous-fields", () => {
     expect(findings[0]?.message).toContain("folder, createdAt, updatedAt, available, variantCounts, variants[].bytes, variants[].state");
     expect(findings[1]?.message).toContain("createdAt, updatedAt");
     expect(findings[2]?.message).toContain("every response header the grant does not name");
+  });
+
+  it("reads anonymous grants from host-supplied defaults", async () => {
+    const modules = MODULES.map((m) => (m.use === AUTHZ ? { use: m.use, config: {}, defaults: { from: "site-preset", values: m.config } } : m));
+    const findings = await anonymousFieldsRule.check(contextFor(await project({ modules, triggers: [{ http: "GET /media/:id", pipeline: "getMedia" }] })));
+    expect(findings.map((f) => f.where.pipeline)).toEqual(["getMedia"]);
   });
 
   it("stays silent without anonymous grants and for a pipeline that already ends with the step", async () => {

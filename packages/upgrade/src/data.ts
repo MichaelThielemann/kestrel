@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { effectiveModuleConfig } from "@michaelthielemann/kestrel";
 import { loadConfig } from "@michaelthielemann/kestrel/load";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { isErr } from "@michaelthielemann/kestrel/result";
@@ -175,7 +176,8 @@ async function builtInDataModel(root: string, pluginKind: string | undefined): P
   if (!existsSync(configFile)) return {};
   try {
     const config = await loadConfig(configFile);
-    return { model: contentDefaultModel(config.modules.find((m) => useToken(m.use) === "content-default")?.config) };
+    const entry = config.modules.find((m) => useToken(m.use) === "content-default");
+    return { model: contentDefaultModel(entry === undefined ? undefined : effectiveModuleConfig(entry)) };
   } catch (err) {
     return { issue: configLoadFailedFinding(err, pluginKind) };
   }
@@ -297,7 +299,8 @@ function underscoreFieldFindings(counts: Record<string, Record<string, number | 
 async function moduleConfigOf(root: string, token: string): Promise<unknown> {
   try {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
-    return config.modules.find((m) => useToken(m.use) === token)?.config;
+    const entry = config.modules.find((m) => useToken(m.use) === token);
+    return entry === undefined ? undefined : effectiveModuleConfig(entry);
   } catch {
     return undefined;
   }
