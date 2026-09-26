@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Blobstore, BlobstoreError } from "@michaelthielemann/kestrel-contracts/blobstore";
@@ -6,7 +7,7 @@ import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import type { ModuleHealth } from "@michaelthielemann/kestrel/defineModule";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import { err, isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
-import { applySegment, FRAME_HEADER_SIZE, frameSize, parseFrameHeader, parseWalHeader, WAL_HEADER_SIZE, type WalHeader } from "./wal.ts";
+import { applySegment, FRAME_HEADER_SIZE, FrameScanner, frameSize, parseWalHeader, WAL_HEADER_SIZE, walHeaderChecksum, type WalChecksum, type WalHeader } from "./wal.ts";
 
 export interface Config {
   file: string;
@@ -16,6 +17,12 @@ export interface Config {
   snapshotSeconds: number;
   retentionSeconds: number;
   restoreOnStart: boolean;
+}
+
+/** Tuning knobs of {@link createReplicationSqlite} that are not part of the module config. */
+export interface ReplicationOptions {
+  /** How often the WAL size is compared with `checkpointBytes` between syncs, in milliseconds. Default 1000. */
+  checkIntervalMs?: number;
 }
 
 export interface Point {
@@ -119,19 +126,28 @@ async function listPoints(blobs: Blobstore, prefix: string): Promise<Result<Poin
   return ok(out.sort((a, b) => a.generation.localeCompare(b.generation) || (a.kind === "snapshot" ? -1 : b.kind === "snapshot" ? 1 : a.key.localeCompare(b.key))));
 }
 
-function lastCommittedFrame(wal: Uint8Array, header: WalHeader, from: number): number {
-  const size = frameSize(header.pageSize);
-  const total = Math.floor((wal.byteLength - WAL_HEADER_SIZE) / size);
-  let lastCommit = -1;
-  for (let i = from; i < total; i++) {
-    const frame = parseFrameHeader(wal, WAL_HEADER_SIZE + i * size);
-    if (frame.salt1 !== header.salt1 || frame.salt2 !== header.salt2) break;
-    if (frame.commitSize > 0) lastCommit = i;
-  }
-  return lastCommit;
+const READ_CHUNK_BYTES = 1024 * 1024;
+const SEGMENT_TARGET_BYTES = 4 * 1024 * 1024;
+
+interface WalCursor {
+  headerBytes: Uint8Array;
+  header: WalHeader;
+  frame: number;
+  checksum: WalChecksum;
 }
 
-export function createReplicationSqlite(config: Config, blobs: Blobstore, now: () => number = Date.now): Replication {
+type WalHead = Omit<WalCursor, "frame">;
+
+function readHead(bytes: Uint8Array, length: number): WalHead | null {
+  if (length < WAL_HEADER_SIZE) return null;
+  const header = parseWalHeader(bytes);
+  const checksum = walHeaderChecksum(bytes);
+  return header && checksum ? { headerBytes: bytes.slice(0, WAL_HEADER_SIZE), header, checksum } : null;
+}
+
+const chunkBytes = (header: WalHeader): number => Math.max(1, Math.floor(READ_CHUNK_BYTES / frameSize(header.pageSize))) * frameSize(header.pageSize);
+
+export function createReplicationSqlite(config: Config, blobs: Blobstore, now: () => number = Date.now, options: ReplicationOptions = {}): Replication {
   const file = resolve(config.file);
   const walFile = `${file}-wal`;
   mkdirSync(dirname(file), { recursive: true });
@@ -148,76 +164,177 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
 
   let generation: string | null = null;
   let lineage = 0;
-  let header: WalHeader | null = null;
-  let shippedFrames = 0;
+  let cursor: WalCursor | null = null;
   let seq = 0;
   let lastSyncAt: number | null = null;
   let lastSnapshotAt: number | null = null;
   let lastCheckpointAt: number | null = null;
   let restorePrepared = false;
+  let closed = false;
+  let pending: Array<{ key: string; data: Uint8Array }> = [];
 
   const walBytes = (): number => (existsSync(walFile) ? statSync(walFile).size : 0);
   const segmentKey = (currentGeneration: string, at: number): string => `${config.prefix}gen/${currentGeneration}/wal/${pad(lineage, 6)}-${pad(seq, 6)}-${stamp(at)}.wal`;
 
+  const continueFrom = (head: WalHead): WalCursor => {
+    if (!cursor || cursor.header.salt1 !== head.header.salt1 || cursor.header.salt2 !== head.header.salt2) {
+      lineage += 1;
+      cursor = { ...head, frame: 0 };
+    }
+    return cursor;
+  };
+  const fromStart = (head: WalHead): WalCursor => ({ ...head, frame: 0 });
+
+  const readCommittedSync = (locate: (head: WalHead) => WalCursor): { at: WalCursor; segment: Uint8Array; frames: number; checksum: WalChecksum } | null => {
+    if (!existsSync(walFile)) return null;
+    const fd = openSync(walFile, "r");
+    try {
+      const headBytes = new Uint8Array(WAL_HEADER_SIZE);
+      const head = readHead(headBytes, readSync(fd, headBytes, 0, WAL_HEADER_SIZE, 0));
+      if (!head) return null;
+      const at = locate(head);
+      const size = frameSize(at.header.pageSize);
+      const chunk = chunkBytes(at.header);
+      const buffer = new Uint8Array(chunk);
+      const scanner = new FrameScanner(at.header, at.checksum);
+      for (let offset = WAL_HEADER_SIZE + at.frame * size; !scanner.stopped; ) {
+        const read = readSync(fd, buffer, 0, chunk, offset);
+        const whole = Math.floor(read / size) * size;
+        scanner.push(buffer.subarray(0, whole));
+        offset += whole;
+        if (read < chunk) break;
+      }
+      return { at, ...scanner.takeSegment(at.headerBytes), checksum: scanner.checksum };
+    } finally {
+      closeSync(fd);
+    }
+  };
+
+  const flushPending = async (): Promise<Result<void, BlobstoreError>> => {
+    for (let next = pending[0]; next !== undefined; next = pending[0]) {
+      const put = await blobs.put(next.key, next.data, { contentType: "application/octet-stream" });
+      if (isErr(put)) return put;
+      pending.shift();
+    }
+    return ok();
+  };
+
   const takeSnapshot = async (): Promise<Result<{ generation: string; bytes: number }, BlobstoreError>> => {
     const at = now();
     let data: Uint8Array = new Uint8Array(readFileSync(file));
-    const wal = existsSync(walFile) ? new Uint8Array(readFileSync(walFile)) : null;
-    const current = wal ? parseWalHeader(wal) : null;
-    const included = wal && current ? lastCommittedFrame(wal, current, 0) + 1 : 0;
-    if (wal && current && included > 0) data = applySegment(data, wal.subarray(0, WAL_HEADER_SIZE + included * frameSize(current.pageSize)));
+    const wal = readCommittedSync(fromStart);
+    if (wal && wal.frames > 0) data = applySegment(data, wal.segment);
     const gen = stamp(at);
     const put = await blobs.put(`${config.prefix}gen/${gen}/snapshot.db`, data, { contentType: "application/vnd.sqlite3" });
     if (isErr(put)) return put;
     generation = gen;
     seq = 0;
-    header = current;
-    shippedFrames = included;
+    cursor = wal ? { ...wal.at, frame: wal.frames, checksum: wal.checksum } : null;
+    pending = [];
     lastSnapshotAt = at;
     return ok({ generation: gen, bytes: data.byteLength });
   };
 
   const shipNewFrames = async (): Promise<Result<{ bytes: number; frames: number }, BlobstoreError>> => {
     const currentGeneration = generation;
-    if (currentGeneration === null || !existsSync(walFile)) return ok({ bytes: 0, frames: 0 });
-    const wal = new Uint8Array(readFileSync(walFile));
-    const current = parseWalHeader(wal);
-    if (!current) return ok({ bytes: 0, frames: 0 });
-    if (!header || header.salt1 !== current.salt1 || header.salt2 !== current.salt2) {
-      header = current;
-      lineage += 1;
-      shippedFrames = 0;
+    if (currentGeneration === null) return ok({ bytes: 0, frames: 0 });
+    const flushed = await flushPending();
+    if (isErr(flushed)) return flushed;
+    if (!existsSync(walFile)) return ok({ bytes: 0, frames: 0 });
+    const handle = await open(walFile, "r");
+    try {
+      const headBytes = new Uint8Array(WAL_HEADER_SIZE);
+      const head = readHead(headBytes, (await handle.read(headBytes, 0, WAL_HEADER_SIZE, 0)).bytesRead);
+      if (!head) return ok({ bytes: 0, frames: 0 });
+      let at = continueFrom(head);
+      const size = frameSize(at.header.pageSize);
+      const chunk = chunkBytes(at.header);
+      const buffer = new Uint8Array(chunk);
+      const scanner = new FrameScanner(at.header, at.checksum);
+      let bytes = 0;
+      let frames = 0;
+      const emit = async (): Promise<Result<void, BlobstoreError>> => {
+        if (scanner.committedFrames === 0) return ok();
+        const checksum = scanner.checksum;
+        const taken = scanner.takeSegment(at.headerBytes);
+        const put = await blobs.put(segmentKey(currentGeneration, now()), taken.segment, { contentType: "application/octet-stream" });
+        if (isErr(put)) return put;
+        seq += 1;
+        at = { ...at, frame: at.frame + taken.frames, checksum };
+        cursor = at;
+        bytes += taken.segment.byteLength;
+        frames += taken.frames;
+        return ok();
+      };
+      for (let offset = WAL_HEADER_SIZE + at.frame * size; !scanner.stopped; ) {
+        const { bytesRead } = await handle.read(buffer, 0, chunk, offset);
+        const whole = Math.floor(bytesRead / size) * size;
+        scanner.push(buffer.subarray(0, whole));
+        offset += whole;
+        if (scanner.committedBytes >= SEGMENT_TARGET_BYTES) {
+          const emitted = await emit();
+          if (isErr(emitted)) return emitted;
+        }
+        if (bytesRead < chunk) break;
+      }
+      const emitted = await emit();
+      if (isErr(emitted)) return emitted;
+      return ok({ bytes, frames });
+    } finally {
+      await handle.close();
     }
-    const size = frameSize(current.pageSize);
-    const lastCommit = lastCommittedFrame(wal, current, shippedFrames);
-    if (lastCommit < shippedFrames) return ok({ bytes: 0, frames: 0 });
-    const frames = wal.subarray(WAL_HEADER_SIZE + shippedFrames * size, WAL_HEADER_SIZE + (lastCommit + 1) * size);
-    const segment = new Uint8Array(WAL_HEADER_SIZE + frames.byteLength);
-    segment.set(wal.subarray(0, WAL_HEADER_SIZE));
-    segment.set(frames, WAL_HEADER_SIZE);
-    const put = await blobs.put(segmentKey(currentGeneration, now()), segment, { contentType: "application/octet-stream" });
-    if (isErr(put)) return put;
-    seq += 1;
-    const count = lastCommit + 1 - shippedFrames;
-    shippedFrames = lastCommit + 1;
-    return ok({ bytes: segment.byteLength, frames: count });
   };
 
-  const checkpoint = (): boolean => {
+  const checkpoint = async (): Promise<Result<{ done: boolean; bytes: number; frames: number }, BlobstoreError>> => {
+    const currentGeneration = generation;
+    if (currentGeneration === null) return ok({ done: false, bytes: 0, frames: 0 });
+    const tail = readCommittedSync(continueFrom);
+    let done: boolean;
     release();
     try {
       const row = boundaryCast<{ busy: number } | undefined>(conn.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get(), "host");
-      const done = row !== undefined && row.busy === 0;
-      if (done) {
-        lastCheckpointAt = now();
-        header = null;
-        shippedFrames = 0;
-      }
-      return done;
+      done = row !== undefined && row.busy === 0;
     } finally {
       holdRead();
     }
+    if (tail) {
+      if (tail.frames > 0) {
+        pending.push({ key: segmentKey(currentGeneration, now()), data: tail.segment });
+        seq += 1;
+      }
+      cursor = { ...tail.at, frame: tail.at.frame + tail.frames, checksum: tail.checksum };
+    }
+    if (done) {
+      lastCheckpointAt = now();
+      cursor = null;
+    }
+    const flushed = await flushPending();
+    if (isErr(flushed)) return flushed;
+    return ok({ done, bytes: tail && tail.frames > 0 ? tail.segment.byteLength : 0, frames: tail?.frames ?? 0 });
   };
+
+  let queue: Promise<unknown> = Promise.resolve();
+  let queued = 0;
+  const exclusive = <T>(task: () => Promise<T>): Promise<T> => {
+    queued += 1;
+    const run = queue.then(task).finally(() => {
+      queued -= 1;
+    });
+    queue = run.catch(() => undefined);
+    return run;
+  };
+
+  const maintain = async (): Promise<void> => {
+    if (closed) return;
+    const shipped = await shipNewFrames();
+    if (isErr(shipped) || closed) return;
+    await checkpoint();
+  };
+  const timer = setInterval(() => {
+    if (closed || queued > 0 || generation === null || walBytes() < config.checkpointBytes) return;
+    exclusive(maintain).catch(() => undefined);
+  }, options.checkIntervalMs ?? 1000);
+  timer.unref();
 
   const prune = async (): Promise<Result<number, BlobstoreError>> => {
     const list = await listPoints(blobs, config.prefix);
@@ -239,56 +356,76 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     return ok(removed);
   };
 
-  return {
-    async sync() {
-      if (generation === null) {
-        const existingList = await listPoints(blobs, config.prefix);
-        if (isErr(existingList)) return existingList;
-        const existing = existingList.value.filter((p) => p.kind === "snapshot");
-        if (existing.length === 0 || lastSnapshotAt === null) {
-          const snap = await takeSnapshot();
-          if (isErr(snap)) return snap;
-        }
-      }
-      const t = now();
-      const shipped = await shipNewFrames();
-      if (isErr(shipped)) return shipped;
-      let checkpointed = false;
-      const due = lastCheckpointAt === null ? t : t - lastCheckpointAt;
-      if (walBytes() >= config.checkpointBytes || due >= config.checkpointSeconds * 1000) checkpointed = checkpoint();
-      if (lastSnapshotAt !== null && t - lastSnapshotAt >= config.snapshotSeconds * 1000) {
+  const runSync = async (): Promise<Result<{ generation: string; shippedBytes: number; frames: number; checkpointed: boolean; pruned: number }, BlobstoreError>> => {
+    if (generation === null) {
+      const existingList = await listPoints(blobs, config.prefix);
+      if (isErr(existingList)) return existingList;
+      const existing = existingList.value.filter((p) => p.kind === "snapshot");
+      if (existing.length === 0 || lastSnapshotAt === null) {
         const snap = await takeSnapshot();
         if (isErr(snap)) return snap;
       }
-      const pruned = await prune();
-      if (isErr(pruned)) return pruned;
-      lastSyncAt = t;
-      if (generation === null) throw new Error("replication/sqlite: sync ended without a generation");
-      return ok({ generation, shippedBytes: shipped.value.bytes, frames: shipped.value.frames, checkpointed, pruned: pruned.value });
-    },
-    async snapshot() {
-      const shipped = await shipNewFrames();
-      if (isErr(shipped)) return shipped;
-      return takeSnapshot();
-    },
-    points: () => listPoints(blobs, config.prefix),
-    async prepareRestore(target) {
-      const shipped = await shipNewFrames();
-      if (isErr(shipped)) return shipped;
-      const out = restoreMarker(file);
-      const result = await restoreFromBlobs(blobs, config.prefix, target, out);
+    }
+    const t = now();
+    const shipped = await shipNewFrames();
+    if (isErr(shipped)) return shipped;
+    let shippedBytes = shipped.value.bytes;
+    let frames = shipped.value.frames;
+    let checkpointed = false;
+    const due = lastCheckpointAt === null ? t : t - lastCheckpointAt;
+    if (walBytes() >= config.checkpointBytes || due >= config.checkpointSeconds * 1000) {
+      const result = await checkpoint();
       if (isErr(result)) return result;
-      restorePrepared = true;
-      return ok({ ...result.value, file: out, restartRequired: true as const });
+      checkpointed = result.value.done;
+      shippedBytes += result.value.bytes;
+      frames += result.value.frames;
+    }
+    if (lastSnapshotAt !== null && t - lastSnapshotAt >= config.snapshotSeconds * 1000) {
+      const snap = await takeSnapshot();
+      if (isErr(snap)) return snap;
+    }
+    const pruned = await prune();
+    if (isErr(pruned)) return pruned;
+    lastSyncAt = t;
+    if (generation === null) throw new Error("replication/sqlite: sync ended without a generation");
+    return ok({ generation, shippedBytes, frames, checkpointed, pruned: pruned.value });
+  };
+  let inflightSync: ReturnType<typeof runSync> | null = null;
+
+  return {
+    sync() {
+      inflightSync ??= exclusive(runSync).finally(() => {
+        inflightSync = null;
+      });
+      return inflightSync;
     },
+    snapshot: () =>
+      exclusive(async () => {
+        const shipped = await shipNewFrames();
+        if (isErr(shipped)) return shipped;
+        return takeSnapshot();
+      }),
+    points: () => listPoints(blobs, config.prefix),
+    prepareRestore: (target) =>
+      exclusive(async () => {
+        const shipped = await shipNewFrames();
+        if (isErr(shipped)) return shipped;
+        const out = restoreMarker(file);
+        const result = await restoreFromBlobs(blobs, config.prefix, target, out);
+        if (isErr(result)) return result;
+        restorePrepared = true;
+        return ok({ ...result.value, file: out, restartRequired: true as const });
+      }),
     async status() {
-      return { generation, lineage, shippedFrames, lastSyncAt, lastSnapshotAt, lastCheckpointAt, walBytes: walBytes(), pendingRestore: existsSync(restoreMarker(file)) ? restoreMarker(file) : null };
+      return { generation, lineage, shippedFrames: cursor?.frame ?? 0, lastSyncAt, lastSnapshotAt, lastCheckpointAt, walBytes: walBytes(), pendingRestore: existsSync(restoreMarker(file)) ? restoreMarker(file) : null };
     },
     health(): ModuleHealth {
       if (!restorePrepared) return { ok: true };
       return { ok: true, note: "replication/sqlite: a restore is prepared; restart the process to apply it" };
     },
     close() {
+      closed = true;
+      clearInterval(timer);
       try {
         release();
         // eslint-disable-next-line no-empty -- release() on an already released lock throws; nothing is left to do
