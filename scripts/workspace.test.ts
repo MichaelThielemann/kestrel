@@ -57,3 +57,37 @@ describe("config secrets", () => {
     expect(unmarked).toEqual([]);
   });
 });
+
+interface BinManifest {
+  name: string;
+  version: string;
+  bin?: Record<string, string> | string;
+  publishConfig?: { bin?: Record<string, string> | string };
+}
+
+function manifests(): { dir: string; pkg: BinManifest }[] {
+  return readdirSync(join(root, "packages"))
+    .filter((name) => existsSync(join(root, "packages", name, "package.json")))
+    .map((name) => ({ dir: name, pkg: JSON.parse(readFileSync(join(root, "packages", name, "package.json"), "utf-8")) as BinManifest }));
+}
+
+describe("bins", () => {
+  it("only the CLI package ships bins: kestrel-cli first, then kestrel, as two distinct files in bin and publishConfig.bin", () => {
+    const withBins = manifests().filter(({ pkg }) => pkg.bin !== undefined || pkg.publishConfig?.bin !== undefined);
+    expect(withBins.map(({ pkg }) => pkg.name)).toEqual(["@michaelthielemann/kestrel-cli"]);
+    const cli = withBins[0]!.pkg;
+    for (const bin of [cli.bin, cli.publishConfig?.bin]) {
+      expect(typeof bin).toBe("object");
+      const entries = Object.entries(bin as Record<string, string>);
+      expect(entries.map(([name]) => name)).toEqual(["kestrel-cli", "kestrel"]);
+      expect(new Set(entries.map(([, file]) => file)).size).toBe(2);
+    }
+    const source = readFileSync(join(root, "packages", "cli", (cli.bin as Record<string, string>)["kestrel-cli"]!), "utf-8");
+    expect(source.trim().split("\n")).toEqual(["#!/usr/bin/env -S node --disable-warning=ExperimentalWarning", 'import "./cli.ts";']);
+  });
+
+  it("the CLI package has core's version, so kestrel --version names the kestrel release", () => {
+    const byName = new Map(manifests().map(({ pkg }) => [pkg.name, pkg.version]));
+    expect(byName.get("@michaelthielemann/kestrel-cli")).toBe(byName.get("@michaelthielemann/kestrel"));
+  });
+});

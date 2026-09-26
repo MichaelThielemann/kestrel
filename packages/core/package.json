@@ -7,9 +7,6 @@
   "engines": {
     "node": ">=22.18.0"
   },
-  "bin": {
-    "kestrel": "./src/cli.ts"
-  },
   "exports": {
     ".": "./src/index.ts",
     "./atomic": "./src/atomic.ts",
@@ -99,9 +96,6 @@
         "types": "./dist/testing/runPipeline.d.ts",
         "default": "./dist/testing/runPipeline.js"
       }
-    },
-    "bin": {
-      "kestrel": "./dist/cli.js"
     }
   },
   "files": [
