@@ -7,6 +7,9 @@ import type { Filter } from "@michaelthielemann/kestrel-contracts/query";
 import type { Site, SiteError, SiteRules } from "@michaelthielemann/kestrel-contracts/site";
 import { noteRead, unobserved } from "@michaelthielemann/kestrel/reads";
 import type { SitePaths } from "./paths.ts";
+
+export { createSitePaths, type SitePaths, type SitePathsDeps } from "./paths.ts";
+export type { Move, Route, RoutesConfig } from "./routes.ts";
 import { splitTail, tailOf, type Route } from "./routes.ts";
 import { pathOfTail } from "./table.ts";
 
