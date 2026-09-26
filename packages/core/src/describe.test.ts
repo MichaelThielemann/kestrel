@@ -324,6 +324,21 @@ describe("module config errors", () => {
     expect(refineMessage).not.toContain("error-refine-secret");
   });
 
+  it("never echoes a received value under a credential-like key or inside a union member", async () => {
+    const echo = (v: string) => ({ message: `got ${v}` });
+    const keyed = await bootError(z.object({ apiKey: z.string().refine((v) => v.length > 40, echo) }).strict(), { apiKey: "error-keyed-secret" });
+    expect(keyed).toContain("apiKey: custom");
+    expect(keyed).not.toContain("error-keyed-secret");
+    const member = await bootError(z.object({ choice: z.union([z.object({ kind: z.literal("x"), code: z.string().refine((v) => v.length > 40, echo) }).strict(), z.object({ kind: z.literal("y") }).strict()]) }).strict(), { choice: { kind: "x", code: "error-union-secret" } });
+    expect(member).not.toContain("error-union-secret");
+  });
+
+  it("redacts a credential URL an author's message repeats for a plain path", async () => {
+    const message = await bootError(z.object({ note: z.string().refine(() => false, (v) => ({ message: `got ${v}` })) }).strict(), { note: "postgres://app:error-url-pass@db/app" });
+    expect(message).toContain("note: got");
+    expect(message).not.toContain("error-url-pass");
+  });
+
   it("never echoes a received value for any enum or literal", async () => {
     const message = await bootError(z.object({ mode: z.enum(["apply", "off"]), tag: z.literal("fixed") }).strict(), { mode: "error-enum-plain", tag: "error-literal-plain" });
     expect(message).not.toContain("error-enum-plain");

@@ -367,3 +367,40 @@ describe("secrets reachable anywhere in a config", () => {
     expect(emitted(schema, { bootstrap: { username: "admin", minPasswordLength: 12, keyName: "main" } })).toContain('"value":{"username":"admin","minPasswordLength":12,"keyName":"main"}');
   });
 });
+
+describe("secrets behind a wrapper that changes the value", () => {
+  function emitted(schema: z.ZodTypeAny, raw: unknown): string {
+    return JSON.stringify(describeConfig(schema, raw, schema.parse(raw)));
+  }
+
+  it("redacts the whole output of a transform over a secret field", () => {
+    const schema = z.object({ outer: z.object({ creds: z.string().describe("secret") }).strict().transform((o) => ({ c: o.creds })) }).strict();
+    expect(emitted(schema, { outer: { creds: "transform-secret" } })).not.toContain("transform-secret");
+  });
+
+  it("redacts a pipe into a secret schema and marks it secret in the JSON Schema", () => {
+    const schema = z.object({ piped: z.string().pipe(z.string().describe("secret")) }).strict();
+    const out = describeConfig(schema, { piped: "pipe-secret" }, schema.parse({ piped: "pipe-secret" }));
+    expect(JSON.stringify(out)).not.toContain("pipe-secret");
+    expect(out.variables.find((v) => v.path === "piped")).toMatchObject({ secret: true, redacted: true, value: null });
+  });
+
+  it("redacts a preprocess over a credential-like key", () => {
+    const schema = z.object({ conn: z.preprocess((v) => v, z.object({ password: z.string() }).strict()).transform((o) => ({ p: o.password })) }).strict();
+    expect(emitted(schema, { conn: { password: "preprocess-secret" } })).not.toContain("preprocess-secret");
+  });
+
+  it("sees through refine and superRefine, which keep the value as it is", () => {
+    const schema = z
+      .object({
+        refined: z.object({ user: z.string(), pin: z.string().describe("secret") }).strict().refine(() => true),
+        checked: z.object({ user: z.string(), pin: z.string().describe("secret") }).strict().superRefine(() => {}),
+      })
+      .strict();
+    const text = emitted(schema, { refined: { user: "refined-user", pin: "refine-secret" }, checked: { user: "checked-user", pin: "superrefine-secret" } });
+    expect(text).not.toContain("refine-secret");
+    expect(text).not.toContain("superrefine-secret");
+    expect(text).toContain("refined-user");
+    expect(text).toContain("checked-user");
+  });
+});

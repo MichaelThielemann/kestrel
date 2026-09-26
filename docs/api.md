@@ -831,14 +831,20 @@ The same check runs everywhere a config value is emitted: in `value`, in `defaul
 `default` of the JSON Schema. Anything the schema marks secret reads `"[redacted]"`, and so does
 anything under a credential-like key or a URL with credentials. That covers object fields,
 record values, array and tuple elements, and every member of a union or an intersection: a field
-counts as secret when any member marks it. The JSON Schema leaves out the `default` of a
+counts as secret when any member marks it. A `transform`, `preprocess` or `pipe` changes the value
+so it can no longer be matched against the schema: when anything inside such a wrapper is secret,
+the whole value reads `"[redacted]"` and the JSON Schema marks it `writeOnly`. `refine` and
+`superRefine` keep the value and are looked through. The JSON Schema leaves out the `default` of a
 credential-like key. Its `enum` and `const` stay, because they are written by the module author,
 not taken from config. Numbers and booleans are never redacted by name alone, so `minPasswordLength` keeps
 its value.
 
-A config that fails validation aborts the boot with `invalid config: <path>: <problem>`. The
-problem never repeats the value it received: for a secret path it is only the validation code
-(`invalid_enum_value`, `custom`, …), and for an enum or a literal only the expected values.
+A config that fails validation aborts the boot with `invalid config: <path>: <problem>`. For a
+secret path, a path under a credential-like key or a path through a union or intersection, the
+problem is only the validation code (`invalid_enum_value`, `custom`, …). An enum mismatch names
+only the expected values. Any other message is shown as the check wrote it, with URLs that carry
+credentials replaced by `"[redacted]"`; a message a module author writes should not repeat the
+value it rejects.
 `Step`: `{ name: "content.list", module: "content/default", factory: boolean, description: StepDescription }` — a factory step's description is evaluated with the placeholder argument `<arg>`; a `describe()` that throws for it stops the boot, so the field is never `null`.
 `Pipeline`: `{ name, steps: [{ spec: "content.list:pages", name: "content.list", module, description: StepDescription }] }` with the real arguments. `StepDescription` is the module's `describe()` entry: `summary`, `reads`, `writes`, `input`/`output`/`query` (JSON Schema), `errors`, `security`, `multipart`, `binary`.
 Stats: `failed` counts every run or step whose outcome is not ok — 4xx included, so a 401 on `/me` is a failed run; `errors` is the 5xx share of that (thrown steps, `INTERNAL`, `TRANSIENT`). `p50Ms`/`p95Ms` are nearest-rank percentiles over the last 1000 samples per key, `count`/`failed` are unbounded. `step` in `steps` is the spec as written in the pipeline (`authz.require:pages.read`). `events` counts event-triggered runs per event name — an event nobody listens to is invisible. `ratelimit` is always `[]` in this release (no ratelimit contract exists yet); the field stays so a client can render it later.

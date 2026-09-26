@@ -44,6 +44,11 @@ export function isSecretValue(value: unknown): boolean {
   return typeof value === "string" && CREDENTIALS_IN_URL.test(value);
 }
 
+/** `text` with every URL that carries `user:password@` replaced by `REDACTED`. */
+export function redactCredentialUrls(text: string): string {
+  return text.replace(/[a-z][a-z0-9+.-]*:\/\/[^/\s@]+:[^/\s@]+@\S*/gi, REDACTED);
+}
+
 export function isSecretSchema(schema: JsonSchema): boolean {
   return schema.writeOnly === true || schema.format === "password" || schema["x-secret"] === true;
 }

@@ -1,6 +1,6 @@
 import type { ZodIssue, ZodTypeAny } from "zod";
 import { boundaryCast } from "./cast.ts";
-import { canHoldSecret, isSecretName, isSecretSchema, isSecretValue, REDACTED, snapshotValue, type JsonValue } from "./configValue.ts";
+import { canHoldSecret, isSecretName, isSecretSchema, isSecretValue, REDACTED, redactCredentialUrls, snapshotValue, type JsonValue } from "./configValue.ts";
 import type { JsonSchema } from "./defineModule.ts";
 import { isPlainObject } from "./guards.ts";
 
@@ -62,12 +62,14 @@ interface Def {
   maxLength?: { value: number } | null;
   exactLength?: { value: number } | null;
   defaultValue?: () => unknown;
+  effect?: { type: string };
 }
 
 interface Unwrapped {
   inner: ZodTypeAny;
   optional: boolean;
   nullable: boolean;
+  reshapes: boolean;
   defaultValue?: () => unknown;
   description?: string;
 }
@@ -76,7 +78,7 @@ const def = (schema: ZodTypeAny): Def => boundaryCast<Def>(schema._def, "host");
 const kind = (schema: ZodTypeAny): string => def(schema).typeName ?? "";
 
 function unwrap(schema: ZodTypeAny): Unwrapped {
-  const out: Unwrapped = { inner: schema, optional: false, nullable: false };
+  const out: Unwrapped = { inner: schema, optional: false, nullable: false, reshapes: false };
   let current = schema;
   for (;;) {
     const d = def(current);
@@ -95,10 +97,12 @@ function unwrap(schema: ZodTypeAny): Unwrapped {
     } else if (name === "ZodCatch") {
       current = d.innerType;
     } else if (name === "ZodEffects") {
+      if (d.effect?.type !== "refinement") out.reshapes = true;
       current = d.schema;
     } else if (name === "ZodBranded") {
       current = d.type;
     } else if (name === "ZodPipeline") {
+      out.reshapes = true;
       current = d.in;
     } else if (name === "ZodLazy") {
       current = d.getter();
@@ -214,11 +218,12 @@ function bareSchema(schema: ZodTypeAny): JsonSchema {
 
 export function toJsonSchema(schema: ZodTypeAny): JsonSchema {
   const { inner, nullable, defaultValue, description } = unwrap(schema);
+  const secret = isSecretNode(schema);
   let out = bareSchema(inner);
   if (nullable) out = { anyOf: [out, { type: "null" }] };
-  if (defaultValue && description !== SECRET) out = { ...out, default: redactedSnapshot(inner, defaultValue()) };
+  if (defaultValue && !secret) out = { ...out, default: redactedSnapshot(inner, defaultValue()) };
   if (description !== undefined && description !== SECRET) out = { ...out, description };
-  if (description === SECRET) out = { ...out, writeOnly: true };
+  if (secret) out = { ...out, writeOnly: true };
   return out;
 }
 
@@ -232,8 +237,46 @@ function assign(out: Record<string, unknown>, key: string, value: unknown): void
   Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
 }
 
+function containsSecret(schema: ZodTypeAny, depth: number): boolean {
+  if (depth > MAX_REDACT_DEPTH) return true;
+  const d = def(schema);
+  if (d.description === SECRET) return true;
+  const next = (child: ZodTypeAny | null | undefined): boolean => child !== undefined && child !== null && containsSecret(child, depth + 1);
+  switch (d.typeName) {
+    case "ZodOptional":
+    case "ZodDefault":
+    case "ZodNullable":
+    case "ZodCatch":
+      return next(d.innerType);
+    case "ZodEffects":
+      return next(d.schema);
+    case "ZodBranded":
+      return next(d.type);
+    case "ZodPipeline":
+      return next(d.in) || next(d.out);
+    case "ZodLazy":
+      return next(d.getter());
+    case "ZodObject":
+      return Object.entries(d.shape?.() ?? {}).some(([key, child]) => (isSecretName(key) && canHoldSecret(typeOf(unwrap(child).inner))) || next(child)) || next(d.catchall);
+    case "ZodRecord":
+      return next(d.valueType);
+    case "ZodArray":
+      return next(d.type);
+    case "ZodTuple":
+      return (d.items ?? []).some((item) => next(item)) || next(d.rest);
+    case "ZodUnion":
+    case "ZodDiscriminatedUnion":
+      return optionsOf(d).some((option) => next(option));
+    case "ZodIntersection":
+      return next(d.left) || next(d.right);
+    default:
+      return false;
+  }
+}
+
 function isSecretNode(schema: ZodTypeAny): boolean {
-  return unwrap(schema).description === SECRET;
+  const { description, reshapes } = unwrap(schema);
+  return description === SECRET || (reshapes && containsSecret(schema, 0));
 }
 
 function redactEntries(value: Record<string, unknown>, childOf: (key: string) => ZodTypeAny | undefined, depth: number): Record<string, unknown> {
@@ -317,14 +360,13 @@ function isSecretPath(schema: ZodTypeAny, path: ReadonlyArray<string | number>):
 /**
  * One line per config validation problem that never repeats the value it received: a secret path
  * (a secret schema node, a credential-like key or a path through a union) reports only the issue
- * code, an enum or literal mismatch only what it expected.
+ * code, an enum mismatch only what it expected, and any other message has its credential URLs redacted.
  */
 export function describeConfigIssue(schema: ZodTypeAny, issue: ZodIssue): string {
   const where = issue.path.join(".") || "(root)";
   if (isSecretPath(schema, issue.path)) return `${where}: ${issue.code}`;
   if (issue.code === "invalid_enum_value") return `${where}: Invalid enum value. Expected ${issue.options.map((o) => `'${String(o)}'`).join(" | ")}`;
-  if (issue.code === "invalid_literal") return `${where}: Invalid literal value, expected ${JSON.stringify(issue.expected)}`;
-  return `${where}: ${issue.message}`;
+  return `${where}: ${redactCredentialUrls(issue.message)}`;
 }
 
 function redactedSnapshot(schema: ZodTypeAny, value: unknown): JsonValue {

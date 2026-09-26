@@ -1002,9 +1002,10 @@ Net changes since 5.8.1.
 - Config secrets are redacted everywhere a config value is emitted: a variable's `value` and
   `default` and the `default` of the config JSON Schema, which are JSON snapshots. Redaction reaches
   object fields, record values, array and tuple elements, and every member of a union or
-  intersection. The JSON Schema leaves out the default of a credential-like key.
-- An `invalid config` boot error no longer repeats the value it received: a secret path reports
-  only the validation code, an enum or literal mismatch only the expected values.
+  intersection. A value behind a `transform`, `preprocess` or `pipe` that contains anything secret
+  is redacted whole. The JSON Schema leaves out the default of a credential-like key.
+- An `invalid config` boot error reports a secret path by its validation code only and an enum
+  mismatch by the expected values only; other messages have credential URLs redacted.
 - `replication-sqlite`: where the file system reports no birth time, the restore-on-start skip check
   judged an existing database by whether it held any table, so a database whose schema another
   module had just created during this boot, with no rows in it, passed as real data and the restore
