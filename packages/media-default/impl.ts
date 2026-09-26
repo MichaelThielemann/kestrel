@@ -100,6 +100,9 @@ export interface Config {
 export const SORTABLE = ["createdAt", "filename", "size"] as const;
 export type SortField = (typeof SORTABLE)[number];
 
+/** How many of the newest ready items in scope a text query or a `mediaKind: "other"` filter scans, since neither can be expressed as a store filter; an older match beyond this is not found. */
+export const MAX_UNINDEXED_SCAN = 5000;
+
 export const MEDIA_KINDS = ["image", "video", "other"] as const;
 export type MediaKind = (typeof MEDIA_KINDS)[number];
 
@@ -188,6 +191,7 @@ export interface Media extends MediaFiles {
   /** Stores a file under the `canonicalMediaType` form of its declared type, refusing a type that is not exactly one media type. `svgSanitized` says an SVG's bytes passed `sanitize.svg`; `media.upload` sets it from {@link Media.sanitizesSvg}, never from the request. */
   upload(file: { filename: string; contentType: string; data: Uint8Array }, folder?: string, provenance?: unknown, svgSanitized?: boolean): Promise<Result<Upload, MediaError>>;
   get(id: string, locale?: string): Promise<Result<MediaItem | null, MediaError>>;
+  /** A text query (`q`) or a `mediaKind: "other"` filter matches only among the newest {@link MAX_UNINDEXED_SCAN} ready items in scope; an older match beyond that is not found. `image`/`video` and an unfiltered list have no such bound, since the store filters and counts them directly. */
   list(options?: ListOptions & { locale?: string }): Promise<Result<{ items: MediaItem[]; total: number }, MediaError>>;
   byIds(ids: string[], locale?: string): Promise<Result<MediaItem[], MediaError>>;
   folders(): Promise<Result<Array<{ folder: string; count: number }>, MediaError>>;
@@ -793,7 +797,7 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
       const sort: Record<string, "asc" | "desc"> = { [sortBy ?? "createdAt"]: direction ?? (sortBy === undefined ? "desc" : "asc") };
       if (query !== undefined || mediaKind === "other") {
         if (query !== undefined) filter.filename = { like: `%${query.replace(/[%_]/g, "")}%` };
-        const page = await db.findMany<Document>(COLLECTION, filter, { sort });
+        const page = await db.findMany<Document>(COLLECTION, filter, { sort, limit: MAX_UNINDEXED_SCAN });
         if (isErr(page)) return page;
         const candidates = page.value.items.filter((i) => (query === undefined || String(i.filename).includes(query)) && matchesKind(i.contentType));
         const offset = find.offset ?? 0;

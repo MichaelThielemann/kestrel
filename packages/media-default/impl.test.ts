@@ -564,20 +564,25 @@ describe("media/default", () => {
     const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, blobs, createFakePersistence(), noLogger, () => ++t);
     const photo = expectOk(await media.upload({ filename: "photo.png", contentType: "image/png", data: new Uint8Array([1]) }, "2026")).item;
     const clip = expectOk(await media.upload({ filename: "clip.mp4", contentType: "video/mp4", data: new Uint8Array([1]) }, "2026")).item;
+    const clip2 = expectOk(await media.upload({ filename: "clip2.mp4", contentType: "video/mp4", data: new Uint8Array([1]) }, "2026")).item;
     const sheet = expectOk(await media.upload({ filename: "sheet.pdf", contentType: "application/pdf", data: new Uint8Array([1]) })).item;
+    const readme = expectOk(await media.upload({ filename: "readme.txt", contentType: "text/plain", data: new Uint8Array([1]) })).item;
 
     expect(expectOk(await media.list({ mediaKind: "image" })).items.map((i) => i.id)).toEqual([photo.id]);
-    expect(expectOk(await media.list({ mediaKind: "video" })).items.map((i) => i.id)).toEqual([clip.id]);
-    expect(expectOk(await media.list({ mediaKind: "other" })).items.map((i) => i.id)).toEqual([sheet.id]);
+    expect(expectOk(await media.list({ mediaKind: "video" })).items.map((i) => i.id).sort()).toEqual([clip.id, clip2.id].sort());
+    expect(expectOk(await media.list({ mediaKind: "other" })).items.map((i) => i.id).sort()).toEqual([sheet.id, readme.id].sort());
 
     expect(expectOk(await media.list({ mediaKind: "image", q: "clip" })).items).toEqual([]);
-    expect(expectOk(await media.list({ mediaKind: "video", q: "clip" })).items.map((i) => i.id)).toEqual([clip.id]);
+    expect(expectOk(await media.list({ mediaKind: "video", q: "clip2" })).items.map((i) => i.id)).toEqual([clip2.id]);
 
-    expect(expectOk(await media.list({ folder: "2026", recursive: true, mediaKind: "video" })).items.map((i) => i.id)).toEqual([clip.id]);
+    expect(expectOk(await media.list({ folder: "2026", recursive: true, mediaKind: "video" })).items.map((i) => i.id).sort()).toEqual([clip.id, clip2.id].sort());
+    const recursivePage = expectOk(await media.list({ folder: "2026", recursive: true, mediaKind: "video", limit: 1, offset: 0 }));
+    expect(recursivePage.total).toBe(2);
+    expect(recursivePage.items).toHaveLength(1);
 
     const otherPage = expectOk(await media.list({ mediaKind: "other", limit: 1, offset: 0 }));
-    expect(otherPage.total).toBe(1);
-    expect(otherPage.items.map((i) => i.id)).toEqual([sheet.id]);
+    expect(otherPage.total).toBe(2);
+    expect(otherPage.items).toHaveLength(1);
   });
 
   it("recursive list matches the exact subtree, not a LIKE prefix or byte range", async () => {
