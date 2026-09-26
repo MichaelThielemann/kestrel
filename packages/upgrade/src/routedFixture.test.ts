@@ -8,6 +8,7 @@ import type { UpgradeReport } from "./report.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(HERE, "..", "__fixtures__", "routed-6.0");
 const NESTED = join(HERE, "..", "__fixtures__", "routed-nested-6.0");
+const BROKEN = join(HERE, "..", "__fixtures__", "routed-broken-6.0");
 
 describe("kestrel-upgrade check against a routed 6.0 project", () => {
   it("prints nothing but the JSON report, and the report names the routed slug's unique flag once", async () => {
@@ -37,6 +38,16 @@ describe("kestrel-upgrade check against a routed 6.0 project", () => {
     const siteFindings = report.findings.filter((f) => f.where.module === "site/default" && f.rule !== "boot/not-checked");
     expect(siteFindings.map((f) => [f.rule, f.severity])).toEqual([["site/routed-slug-unique", "error"]]);
     expect(siteFindings[0]?.fix.kind).toBe("auto");
+    expect(code).toBe(1);
+  });
+
+  it("a warning about a flat route's unique slug never hides an unrelated site/default setup failure", async () => {
+    const lines: string[] = [];
+    const code = await runCli(["check", "--root", BROKEN, "--json"], { stdout: (line) => lines.push(line), stderr: () => undefined, forceInstalledMajor: 6 });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    expect(report.findings.find((f) => f.rule === "site/routed-slug-unique")?.severity).toBe("warning");
+    const setup = report.findings.find((f) => f.rule === "boot/setup-failed" && f.where.module === "site/default");
+    expect(setup?.message).toContain('no type "ghosts"');
     expect(code).toBe(1);
   });
 });

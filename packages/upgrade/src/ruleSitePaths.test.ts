@@ -80,7 +80,7 @@ describe("site/routed-slug-unique", () => {
 
   it("is a warning for flat routes and silent for unrouted types or a slug without unique", async () => {
     const flat = await context({ modules: [CONTENT, { use: "@michaelthielemann/kestrel-site-default", config: { routes: { pages: {} } } }] });
-    expect((await routedSlugUniqueRule.check(flat))[0]?.severity).toBe("warning");
+    expect((await routedSlugUniqueRule.check(flat))[0]).toMatchObject({ severity: "warning", where: { module: CONTENT.use } });
     const unrouted = await context({ modules: [CONTENT, { use: "@michaelthielemann/kestrel-site-default", config: {} }] });
     expect(await routedSlugUniqueRule.check(unrouted)).toEqual([]);
   });
@@ -118,7 +118,7 @@ describe("site/path-events", () => {
 
   it("warns when nothing runs on site.pathsMoved, and is silent when something does", async () => {
     const definitions = [provider("events/inmemory", "events@1")];
-    expect((await pathEventsRule.check(await context({ modules: [site], definitions })))[0]?.severity).toBe("warning");
+    expect((await pathEventsRule.check(await context({ modules: [site], definitions })))[0]).toMatchObject({ severity: "warning", where: { module: site.use } });
     expect(await pathEventsRule.check(await context({ modules: [site], definitions, triggers: [{ event: "site.pathsMoved", pipeline: "pathsMovedRedirects" }] }))).toEqual([]);
   });
 });

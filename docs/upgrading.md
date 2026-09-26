@@ -501,7 +501,8 @@ naming the occupant, and with a `parentField` or a mount setup fails. The fix re
 from the slug field's definition: in `content-default`'s inline config, or in the file and type a
 plugin's `contentModel` and `locateModelFields` hooks point at; the index drops at the next boot. A
 definition the tool cannot locate as an object literal is left to you. The finding names the
-`site/default` module, so the same cause is not reported a second time as its setup failure.
+`site/default` module when setup fails for this cause (the error case), so it is not reported a second
+time; the warning for a flat route names `content-default` and never hides another setup failure.
 
 #### site-path-wiring
 With `routes`, every pipeline that writes a routed type ends that write's atomic group with

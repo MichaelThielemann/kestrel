@@ -41,7 +41,7 @@ export const routedSlugUniqueRule: Rule = {
       const edit = source === undefined ? undefined : removeContentFieldProperty(file, source, { use: model?.use ?? content.use, typeName: route.type, field: route.slugField, key: "unique", ...(ctx.locateModelFields === undefined ? {} : { locateModelFields: ctx.locateModelFields }) });
       const message = `${route.type}.${route.slugField} is unique, but ${route.type} is routed: its public path is unique instead, and a unique slug rejects the same slug in two places without naming the occupant${route.nested ? "; with a parent field or a mount, setup fails" : ""}`;
       const suggestion = `remove unique: true from ${route.type}.${route.slugField}; the index drops at the next boot`;
-      findings.push(finding(`site/routed-slug-unique:${route.type}`, "site/routed-slug-unique", message, edit === undefined ? `${suggestion} (by hand: the field's definition is not an object literal in ${file})` : suggestion, { file, module: "site/default", path: `types.${route.type}.fields.${route.slugField}` }, edit === undefined ? undefined : [edit], upgradingDocs("site-routed-slug-unique"), route.nested ? "error" : "warning"));
+      findings.push(finding(`site/routed-slug-unique:${route.type}`, "site/routed-slug-unique", message, edit === undefined ? `${suggestion} (by hand: the field's definition is not an object literal in ${file})` : suggestion, { file, module: route.nested ? "site/default" : content.use, path: `types.${route.type}.fields.${route.slugField}` }, edit === undefined ? undefined : [edit], upgradingDocs("site-routed-slug-unique"), route.nested ? "error" : "warning"));
     }
     return findings;
   },
@@ -72,10 +72,10 @@ export const pathEventsRule: Rule = {
   id: "site/path-events",
   check(ctx) {
     if (routesOf(ctx).length === 0) return [];
-    const where = { file: ctx.project.configFile, module: "site/default" };
     if (!providesContract(ctx, "events@1")) {
-      return [finding("site/path-events:events", "site/path-events", "site-default's routes need an events@1 provider to raise site.pathsMoved; setup fails without one", "add @michaelthielemann/kestrel-events-inmemory with events-direct or events-queue", where, undefined, upgradingDocs("site-path-events"))];
+      return [finding("site/path-events:events", "site/path-events", "site-default's routes need an events@1 provider to raise site.pathsMoved; setup fails without one", "add @michaelthielemann/kestrel-events-inmemory with events-direct or events-queue", { file: ctx.project.configFile, module: "site/default" }, undefined, upgradingDocs("site-path-events"))];
     }
+    const where = { file: ctx.project.configFile, module: moduleEntry(ctx, "site-default")?.use ?? "site-default" };
     const subscribed = ctx.project.input.config.triggers.some((t) => "event" in t && t.event === "site.pathsMoved");
     if (subscribed) return [];
     return [finding("site/path-events:consumer", "site/path-events", "site-default's routes raise site.pathsMoved, but no pipeline runs on it: renamed pages leave no redirect behind and moved static outputs are not re-rendered", 'add triggers on "site.pathsMoved" for pipelines running redirects.recordMoves then redirects.export, and delivery.markMoved', where, undefined, upgradingDocs("site-path-events"), "warning")];
