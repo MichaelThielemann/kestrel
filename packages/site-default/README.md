@@ -26,19 +26,107 @@ filter check if the requested locale has a slug of its own) to decide whether th
 there. Measured at 4 locales: 8 calls for `resolve`. Every locale's filter membership is decided fresh at read time, on the store itself,
 never cached or reused across these calls; that correctness is preferred over the read count.
 Steps: `site.resolve:<t>?home=home&status=published&fallback=true` (`NOT_FOUND` otherwise) and
-`site.resolveLinks:<t>?…` with the same arguments. Config `{}`.
-Not included: rendering, storage, redirects (see delivery-static, redirects-default).
+`site.resolveLinks:<t>?…` with the same arguments. With config `{}` every type resolves as described
+above and the module stores nothing.
+Not included: rendering, redirects (see delivery-static, redirects-default).
+
+## Routed mode
+
+`routes` makes `site/default` the owner of every public path of the listed types:
+
+```ts
+{
+  routes: { pages: { home: "home", liveWhen: { status: "published" } } },
+  prefixPrimary: false,              // the form of stored paths, _paths and moves
+  reservedPaths: ["/api", "/admin"], // no routed document may take these paths or anything below them
+}
+```
+
+A route has `slugField` (default `slug`), `home` (the top-level slug served at the locale's root;
+default none), `liveWhen` (the filter a document must pass with its own values in a locale to be
+reachable there; default `{}`) and `labelField` (default `title`, names documents in messages). Routed
+mode needs a `persistence@1` and an `events@1` provider; setup fails without them.
+
+**One path, one document.** The public path is unique per locale across every routed type; the slug
+alone need not be. A document's path in a locale is its own slug there (a strong claim), or else its
+default-locale slug (a weak claim). Two strong claims on one path conflict whatever either document's
+status, so drafts block each other. A strong claim meets a weak one without a conflict: while the
+strong holder is live it takes the path and the weak holder is unreachable in that locale; while it is
+a draft the weak holder keeps serving. A path equal to or below a `reservedPaths` entry, or starting
+with a locale code, is a slug field error. A `unique` slug field is not needed and logs a warning at
+setup, because it rejects the same slug without naming the occupant.
+
+**Resolving.** `resolve` looks the path up in an in-memory table: the strong holder when it passes the
+call's filter (an empty filter always does), otherwise, with `fallback`, the weak holder unless a live
+strong holder shadows it. The answer is then read as described above and gains `_paths`: every locale's
+reachable path, `null` where the document is not reachable. `pathOf` answers `null` for a document whose
+claim is not serving, and `resolveLinks` marks such a target as broken. A call naming a `slugField` or
+`home` other than the route's throws.
+
+**Writing.** Every write to a routed type goes through the index, inside the write's atomic group:
+
+```ts
+{ atomic: ["content.update:pages", "site.indexPath:pages"] }, "site.announcePaths", "events.emit:page.updated"
+```
+
+`site.indexPath:<t>` is the last step of the group. It recomputes the saved document and every document
+whose path depends on it, rejects a taken or reserved path (`CONFLICT` with `details.conflicts` naming
+path, locale and occupant, or `VALIDATION` with `details.fields`), writes the changed rows and records
+the run's moves. A rejection rolls the whole group back. `site.announcePaths` runs right after the
+group: it updates the in-memory table from the committed rows and raises `site.pathsMoved` with
+`{ moves: [{ type, id, locale, from, to, seq }] }`, one entry per document and locale whose reachable
+path changed (`null` for none). `seq` increases with every run. The announce never fails the run; what
+it could not finish, `site.resumePaths` (on a cron, every minute) finishes, so the table lags by at most
+one interval after a failure. Boot fails when a pipeline writes a routed type without this wiring, or
+reads it with a `home` or `slugField` the route does not have.
+
+`site.attachPaths:<t>?reachable` adds `_paths` to a list or read answer (reachable paths only; without
+`?reachable` every valid path, drafts included). `site.previewPath:<t>` answers, for a payload
+`{ id?, locale?, slug }`, the path a save would give, whether it would be reachable, the occupant of a
+taken path and the fallback pages it would shadow.
+
+**Rebuilding.** The table is stored in `site_docs`, `site_paths`, `site_runs` and `site_meta`. Setup
+rebuilds it when the routes, the locales, `prefixPrimary`, `reservedPaths` or a routed slug field
+changed, and when any routed document's `updatedAt` differs from the stored one (a write that bypassed
+the index, such as a migration). A write that bypasses the index within the same millisecond as that
+document's last indexed save goes unnoticed until the next rebuild. At run time a rebuild is a
+pipeline:
+
+```ts
+["site.planRebuild", { atomic: ["site.applyRebuild"] }, "site.announcePaths"]
+```
+
+The plan reads everything outside the group; the group writes only the difference, and recomputes
+there the documents saved while the plan was being made. A tail already held keeps its holder, an
+unheld one goes to its oldest claimant; the answer `{ indexed, conflicts }` lists every document that
+lost a path, and such a document cannot be saved with that slug until the holder gives it up. Run it
+after migrations, for example on `migrations.applied`.
+
+**Cost.** A save's group holds the store's write lock, so public requests wait for it. Measured on
+SQLite in memory with 200 pages in 5 locales: a whole save run (content write, index, announce) takes
+about 1 ms, and a full rebuild about 20 ms.
 
 <!-- kestrel-docs:start -->
 ## Generated from the manifest
-`@michaelthielemann/kestrel-site-default` – module `site/default`: provides `site@1`; requires `content@1`.
+`@michaelthielemann/kestrel-site-default` – module `site/default`: provides `site@1`; requires `content@1`; optional `persistence@1`, `events@1`.
 
-Config: `{}` – nothing to set.
+| Config | Type | Required | Default |
+|---|---|---|---|
+| `routes` | record | no | `{}` |
+| `prefixPrimary` | boolean | no | `false` |
+| `reservedPaths` | array | no | `[]` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
 | `site.resolve:<arg>` | Resolve a site path to a <arg> document (default locale unprefixed) | `params.path` | `result` | – | { id: string, createdAt: number, updatedAt: number, _locales?: object, _translations?: object, _locale?: string, _links?: object, … } | 404 no page at this path | – | no |
 | `site.resolveLinks:<arg>` | Replace internal kestrel:<type>:<id> references in the <arg> document with public paths (_links map added) | `result` | `result` | ?locale: string | { _links?: object, … } | – | – | no |
+| `site.indexPath:<arg>` | Recompute the public paths of the saved <arg> (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group | `result.id?`, `params.id?` | – | – | – | 400 the path is reserved or starts with a locale code; 409 another document holds the path; 503 the store is unavailable | – | yes |
+| `site.announcePaths` | After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run | – | – | – | – | – | – | no |
+| `site.resumePaths` | Announce path changes a run left unannounced (patches the in-memory path table from the committed rows and raises site.pathsMoved) and prune announced ones older than 7 days | – | `result` | – | { announced: integer, pruned: integer, … } | 503 the store is unavailable | – | no |
+| `site.planRebuild` | Recompute every routed document's paths from content@1 outside any group (adds `rebuild` to the result) | – | `result.rebuild` | – | { rebuild: object, … } | 503 the store is unavailable | – | no |
+| `site.applyRebuild` | Write the planned paths inside one atomic group; saves committed since the plan are recomputed there | `result.rebuild` | `result` | – | { indexed: integer, conflicts: object[], … } | 503 the store is unavailable | – | yes |
+| `site.previewPath:<arg>` | The public path a <arg> would get for payload { id?, locale?, slug }, whether it would be reachable and why not; writes nothing | – | `result` | { id?: string, locale?: string, slug: string, … } | { path: string, reachable: boolean, reason: string \| null, conflict: object \| null, shadows: object[], exposesParentSlug: null, … } | 400 slug is missing; 503 the store is unavailable | – | no |
+| `site.attachPaths:<arg>` | Add _paths (locale → path) to the <arg> result, every valid path including drafts | `result` | `result` | – | { _paths: object, … } | – | – | no |
 
 Pipelines in `examples/minimal` using these steps:
 

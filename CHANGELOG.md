@@ -827,6 +827,18 @@ Net changes since 5.8.1.
   boot tiers against a build whose own `package.json` does not report major `6` yet — testing a build
   from this branch before it is published, say — the same way a real 6.0.0 install would. A CLI/
   environment escape hatch only: `RunUpgradeCliOptions`, `UpgradePlugin` and `Rule` gain nothing.
+- `site-default` routed mode: config `routes` (per type `slugField`, `home`, `liveWhen`,
+  `labelField`), `prefixPrimary` and `reservedPaths`; `{}` behaves as before. A routed type's public
+  path is unique per locale across all routed types; a save that takes a held path answers `CONFLICT`
+  naming path, locale and occupant, a reserved path or a leading locale code `VALIDATION` on the slug
+  field. New steps `site.indexPath:<t>` (last in a routed write's atomic group), `site.announcePaths`
+  (right after it), `site.resumePaths`, `site.planRebuild`/`site.applyRebuild`, `site.previewPath:<t>`
+  and `site.attachPaths:<t>`; `site.resolve` answers carry `_paths`. The module raises
+  `site.pathsMoved` with `{ moves: [{ type, id, locale, from, to, seq }] }` after every run that
+  changed a reachable path. Routed mode needs `persistence@1` and `events@1` (now `optional` for the
+  module) and stores `site_docs`, `site_paths`, `site_runs` and `site_meta`; boot fails when a
+  pipeline writes a routed type without the index steps, or reads it with another `home` or
+  `slugField`.
 
 ### Changed
 

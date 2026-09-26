@@ -1496,22 +1496,110 @@
       "requires": [
         "content@1"
       ],
-      "optional": [],
+      "optional": [
+        "persistence@1",
+        "events@1"
+      ],
       "config": {
         "schema": {
           "type": "object",
-          "properties": {},
+          "properties": {
+            "routes": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "slugField": {
+                    "type": "string",
+                    "minLength": 1,
+                    "default": "slug"
+                  },
+                  "home": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "liveWhen": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "default": {}
+                  },
+                  "labelField": {
+                    "type": "string",
+                    "minLength": 1,
+                    "default": "title"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "default": {}
+            },
+            "prefixPrimary": {
+              "type": "boolean",
+              "default": false
+            },
+            "reservedPaths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^(\\/[A-Za-z0-9._-]+)+$"
+              },
+              "default": []
+            }
+          },
           "additionalProperties": false
         },
-        "variables": []
+        "variables": [
+          {
+            "path": "routes",
+            "type": "record",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": {},
+            "redacted": false,
+            "default": {}
+          },
+          {
+            "path": "prefixPrimary",
+            "type": "boolean",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": false,
+            "redacted": false,
+            "default": false
+          },
+          {
+            "path": "reservedPaths",
+            "type": "array",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": [],
+            "redacted": false,
+            "default": []
+          }
+        ]
       },
       "steps": [
         "site.resolve",
-        "site.resolveLinks"
+        "site.resolveLinks",
+        "site.indexPath",
+        "site.announcePaths",
+        "site.resumePaths",
+        "site.planRebuild",
+        "site.applyRebuild",
+        "site.previewPath",
+        "site.attachPaths"
       ],
       "eventHook": false,
       "atomicScope": false,
-      "emits": []
+      "emits": [
+        "site.pathsMoved"
+      ]
     },
     {
       "name": "references/default",
@@ -7673,6 +7761,317 @@
             }
           },
           "required": []
+        }
+      }
+    },
+    {
+      "name": "site.indexPath",
+      "module": "site/default",
+      "factory": true,
+      "description": {
+        "summary": "Recompute the public paths of the saved <arg> (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group",
+        "reads": [
+          "result.id?",
+          "params.id?"
+        ],
+        "writes": [],
+        "errors": {
+          "400": "the path is reserved or starts with a locale code",
+          "409": "another document holds the path",
+          "503": "the store is unavailable"
+        },
+        "atomicSafe": true
+      }
+    },
+    {
+      "name": "site.announcePaths",
+      "module": "site/default",
+      "factory": false,
+      "description": {
+        "summary": "After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run",
+        "reads": [],
+        "writes": []
+      }
+    },
+    {
+      "name": "site.resumePaths",
+      "module": "site/default",
+      "factory": false,
+      "description": {
+        "summary": "Announce path changes a run left unannounced (patches the in-memory path table from the committed rows and raises site.pathsMoved) and prune announced ones older than 7 days",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "announced": {
+              "type": "integer"
+            },
+            "pruned": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "announced",
+            "pruned"
+          ]
+        },
+        "errors": {
+          "503": "the store is unavailable"
+        }
+      }
+    },
+    {
+      "name": "site.planRebuild",
+      "module": "site/default",
+      "factory": false,
+      "description": {
+        "summary": "Recompute every routed document's paths from content@1 outside any group (adds `rebuild` to the result)",
+        "reads": [],
+        "writes": [
+          "result.rebuild"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "rebuild": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "rebuild"
+          ]
+        },
+        "errors": {
+          "503": "the store is unavailable"
+        }
+      }
+    },
+    {
+      "name": "site.applyRebuild",
+      "module": "site/default",
+      "factory": false,
+      "description": {
+        "summary": "Write the planned paths inside one atomic group; saves committed since the plan are recomputed there",
+        "reads": [
+          "result.rebuild"
+        ],
+        "writes": [
+          "result"
+        ],
+        "output": {
+          "type": "object",
+          "properties": {
+            "indexed": {
+              "type": "integer"
+            },
+            "conflicts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "locale": {
+                    "type": "string"
+                  },
+                  "winner": {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "losers": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "taken",
+                      "reserved",
+                      "locale"
+                    ]
+                  }
+                },
+                "required": [
+                  "path",
+                  "locale",
+                  "winner",
+                  "losers",
+                  "reason"
+                ]
+              }
+            }
+          },
+          "required": [
+            "indexed",
+            "conflicts"
+          ]
+        },
+        "errors": {
+          "503": "the store is unavailable"
+        },
+        "atomicSafe": true
+      }
+    },
+    {
+      "name": "site.previewPath",
+      "module": "site/default",
+      "factory": true,
+      "description": {
+        "summary": "The public path a <arg> would get for payload { id?, locale?, slug }, whether it would be reachable and why not; writes nothing",
+        "reads": [],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "locale": {
+              "type": "string"
+            },
+            "slug": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "slug"
+          ],
+          "additionalProperties": true
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "reachable": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "conflict": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "locale": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "locale",
+                    "type",
+                    "id",
+                    "label"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "shadows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "id",
+                  "label",
+                  "path"
+                ]
+              }
+            },
+            "exposesParentSlug": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "path",
+            "reachable",
+            "reason",
+            "conflict",
+            "shadows",
+            "exposesParentSlug"
+          ]
+        },
+        "errors": {
+          "400": "slug is missing",
+          "503": "the store is unavailable"
+        }
+      }
+    },
+    {
+      "name": "site.attachPaths",
+      "module": "site/default",
+      "factory": true,
+      "description": {
+        "summary": "Add _paths (locale → path) to the <arg> result, every valid path including drafts",
+        "reads": [
+          "result"
+        ],
+        "writes": [
+          "result"
+        ],
+        "extendsItems": {
+          "type": "object",
+          "properties": {
+            "_paths": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": "public path per locale; null where the document is not reachable (site.attachPaths without ?reachable: not valid)"
+            }
+          },
+          "required": [
+            "_paths"
+          ]
         }
       }
     },
