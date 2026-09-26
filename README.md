@@ -53,7 +53,7 @@ running instance with a login, a content type and a step of your own.
 | `@michaelthielemann/kestrel-revisions-default` | revisions@1: a full snapshot per save, branching through a parent pointer, restore as a new save, retention with a prune step. |
 | `@michaelthielemann/kestrel-sanitize-svg` | Step sanitize.svg: strips scripts, event handlers and external references from uploaded SVG files. |
 | `@michaelthielemann/kestrel-site-default` | site@1: path <-> document resolution and internal link rewriting on top of content@1. |
-| `@michaelthielemann/kestrel-upgrade` | 5.8 -> 6.0 upgrade assistant: check, fix and data commands, an exported sandbox helper and a plugin API a host package registers its own rules and project loader through. |
+| `@michaelthielemann/kestrel-upgrade` | The 5.8 -> 6.0 upgrade engine behind `kestrel upgrade`: check, fix and data, an exported sandbox helper and the plugin API host packages register their rules and project loader through. |
 | `@michaelthielemann/kestrel-validate-jsonschema` | Step validate.check:<type>.<field>: validates a payload field against a JSON Schema file (ajv). |
 <!-- kestrel-docs:end -->
 

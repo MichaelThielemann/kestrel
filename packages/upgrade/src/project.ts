@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { BootInput, KestrelConfigInput, ModuleDefinition, PipelineDefinition } from "@michaelthielemann/kestrel";
-import { loadConfig, loadModule, loadPipelineFile, pipelineFiles } from "@michaelthielemann/kestrel/load";
+import * as engineLoad from "@michaelthielemann/kestrel/load";
 import type { LoadIssue, LoadResult, PipelineFile } from "./plugin.ts";
 import { upgradingDocs } from "./ruleHelpers.ts";
 import type { Finding } from "./report.ts";
@@ -14,8 +14,17 @@ function resolveModuleFile(root: string, use: string): string {
   return createRequire(pathToFileURL(resolve(root, "package.json")).href).resolve(use);
 }
 
-/** Loads a backend project's config, modules and pipelines file by file, from the given root; one bad file becomes an issue and loading keeps going. */
-export async function loadBackendProject(root: string, entry?: string): Promise<LoadResult> {
+/** The loader functions `loadBackendProject` runs, in the shape `@michaelthielemann/kestrel/load` exports them. */
+export type ProjectLoaders = Pick<typeof engineLoad, "loadConfig" | "loadModule" | "loadPipelineFile" | "pipelineFiles">;
+
+/**
+ * Loads a backend project's config, modules and pipelines file by file, from the given root; one
+ * bad file becomes an issue and loading keeps going. `load` is the loader to run, by default this
+ * package's own copy of `@michaelthielemann/kestrel/load`; a caller that boots with the project's
+ * own core passes that core's `./load`.
+ */
+export async function loadBackendProject(root: string, entry?: string, load: ProjectLoaders = engineLoad): Promise<LoadResult> {
+  const { loadConfig, loadModule, loadPipelineFile, pipelineFiles } = load;
   const configFile = entry ?? join(root, "kestrel.config.ts");
   let config: KestrelConfigInput;
   try {

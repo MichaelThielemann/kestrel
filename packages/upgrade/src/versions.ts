@@ -32,49 +32,6 @@ function dependencyNames(pkg: unknown): string[] {
   return [...deps, ...devDeps];
 }
 
-const UPGRADE_PACKAGE_NAME = "@michaelthielemann/kestrel-upgrade";
-
-function dependsOnUpgradePackage(pkg: Record<string, unknown>): boolean {
-  return (isRecord(pkg.dependencies) && UPGRADE_PACKAGE_NAME in pkg.dependencies) || (isRecord(pkg.peerDependencies) && UPGRADE_PACKAGE_NAME in pkg.peerDependencies);
-}
-
-function binCommandName(pkg: Record<string, unknown>): string | undefined {
-  const { bin, name } = pkg;
-  if (isRecord(bin)) return Object.keys(bin)[0];
-  if (isString(bin) && isString(name)) return name.split("/").at(-1);
-  return undefined;
-}
-
-/**
- * The command name a project dependency's own `package.json` publishes as its `bin`, for the one
- * dependency (if any) that also depends on `@michaelthielemann/kestrel-upgrade` itself — the
- * generic, documented signal that it ships its own upgrade entry point (running this package's own
- * rules against a project shape only it can load) rather than leaving the standalone `kestrel-upgrade`
- * CLI as the only option. Never keyed on a specific package by name.
- */
-export function hostUpgradeCommand(root: string): string | undefined {
-  const pkgFile = resolve(root, "package.json");
-  let pkg: unknown;
-  try {
-    pkg = boundaryCast<unknown>(JSON.parse(readFileSync(pkgFile, "utf8")), "json");
-  } catch {
-    return undefined;
-  }
-  for (const name of dependencyNames(pkg)) {
-    try {
-      const depFile = findPackageJSON(name, pkgFile);
-      if (depFile === undefined) continue;
-      const dep = boundaryCast<unknown>(JSON.parse(readFileSync(depFile, "utf8")), "json");
-      if (!isRecord(dep) || !dependsOnUpgradePackage(dep)) continue;
-      const command = binCommandName(dep);
-      if (command !== undefined) return command;
-    } catch {
-      continue;
-    }
-  }
-  return undefined;
-}
-
 /**
  * Every `@michaelthielemann/kestrel*` package the project's own `package.json` names, with its
  * installed version where resolvable. `mixedMajors` looks only at this repo's own backend packages

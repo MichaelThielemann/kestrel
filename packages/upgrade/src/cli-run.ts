@@ -21,7 +21,8 @@ import { hookFailedFinding, packageJsonPath, ruleCheckFailedFinding, upgradingDo
 import { sandboxBootInput, type SandboxTable } from "./sandbox.ts";
 import { createScratchCopy, removeScratchCopy, type ScratchCopy } from "./scratch.ts";
 import { verifiesAfterEdit } from "./verify.ts";
-import { hostUpgradeCommand, installedVersions, majorOf, toolVersion } from "./versions.ts";
+import { installedVersions, majorOf, toolVersion } from "./versions.ts";
+import { refusalMessage, scanHosts, type HostScan } from "./hosts.ts";
 
 interface InternalRunOptions extends RunUpgradeCliOptions {
   forceInstalledMajor?: number;
@@ -225,6 +226,7 @@ interface BuildOptions {
   forceMajor?: number | undefined;
   plugins?: readonly UpgradePlugin[] | undefined;
   pluginCache?: Map<string, unknown>;
+  hosts?: HostScan | undefined;
 }
 
 function bootErrorFinding(problem: BootProblem): Finding {
@@ -290,8 +292,38 @@ interface BuildResult {
   previewBoot?: (edits: readonly Edit[]) => Promise<BootPreview | undefined>;
 }
 
-function withHostUpgradeCommand(findings: readonly Finding[], command: string): Finding[] {
-  return findings.map((f) => (f.rule === "load/failed" ? { ...f, suggestion: `this project depends on "${command}", which already runs @michaelthielemann/kestrel-upgrade's own rules against it; run "${command}" instead of this standalone command` } : f));
+function hostFindings(hosts: HostScan): Finding[] {
+  const outdated = hosts.outdated.map(
+    (host): Finding => ({
+      id: `deps/host-outdated:${host.package}`,
+      rule: "deps/host-outdated",
+      severity: "error",
+      tier: "source",
+      where: { module: host.package },
+      message: host.message,
+      suggestion: `install the release of "${host.package}" built for this kestrel version, then run this again`,
+      fix: { kind: "manual" },
+      docs: upgradingDocs("deps-host-outdated"),
+    }),
+  );
+  const refused = hosts.refused.map(
+    (host): Finding => ({
+      id: `deps/host-refused:${host.package}`,
+      rule: "deps/host-refused",
+      severity: "error",
+      tier: "source",
+      where: { module: host.package },
+      message: refusalMessage(host),
+      suggestion: `fix or remove the kestrel field of "${host.package}"`,
+      fix: { kind: "manual" },
+      docs: upgradingDocs("deps-host-outdated"),
+    }),
+  );
+  return [...outdated, ...refused];
+}
+
+function hostsOf(root: string, hosts: HostScan | undefined): HostScan {
+  return hosts ?? scanHosts(root, { cliVersion: TOOL_VERSION });
 }
 
 function envForceMajor(): number | undefined {
@@ -306,7 +338,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
   const versions = installedVersions(root);
   const kestrelVersion = versions.installed["@michaelthielemann/kestrel"];
   const kestrelMajor = options.forceMajor ?? envForceMajor() ?? (kestrelVersion === undefined ? undefined : majorOf(kestrelVersion));
-  const findings: Finding[] = [...loadIssuesAsFindings(detectIssues)];
+  const findings: Finding[] = [...loadIssuesAsFindings(detectIssues), ...hostFindings(hostsOf(root, options.hosts))];
   const scratch = await createScratchCopy(root);
   try {
     if (versions.mixedMajors) {
@@ -338,11 +370,9 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
 
     const pluginCache = options.pluginCache ?? new Map<string, unknown>();
     const { project, issues, findings: resolvedFindings, rules, sandboxEntries, locateSteps, locateModelFields, switchEdits, idempotentPipelines, mediaWiring, reload } = await resolveProject(root, entry, scratch.dir, plugin, pluginCache);
-    const loadFindings = loadIssuesAsFindings(issues);
-    const hostCommand = project === undefined && plugin === undefined ? hostUpgradeCommand(root) : undefined;
-    findings.push(...(hostCommand === undefined ? loadFindings : withHostUpgradeCommand(loadFindings, hostCommand)), ...(resolvedFindings ?? []));
+    findings.push(...loadIssuesAsFindings(issues), ...(resolvedFindings ?? []));
 
-    const sourceCtx: SourceRuleContext = { root: scratch.dir, scratch: scratch.dir, readFile: readFileOrUndefined, answers: options.answers };
+    const sourceCtx: SourceRuleContext & { pluginKind?: string } = { root: scratch.dir, scratch: scratch.dir, readFile: readFileOrUndefined, answers: options.answers, ...(plugin === undefined ? {} : { pluginKind: plugin.kind }) };
     for (const rule of rules) {
       if (rule.needs !== "source") continue;
       try {
@@ -557,7 +587,7 @@ async function runCheck(args: ParsedArgs, stdout: (line: string) => void, option
   const failOn = failOnOf(args);
   const runSetupUses = args.repeated.get("run-setup") ?? [];
   const dataReport = readDataReport(stringFlag(args, "data-report"));
-  const { report } = await buildReport(root, entry, { runSetupUses, answers: new Map(), dataReport, forceMajor: options.forceInstalledMajor, plugins: options.plugins });
+  const { report } = await buildReport(root, entry, { runSetupUses, answers: new Map(), dataReport, forceMajor: options.forceInstalledMajor, plugins: options.plugins, hosts: options.hosts });
   const { rejectedIds, conflictsWith, pathExists, unsafeTargets } = verifyAndApply(report.findings, root);
   const findings = downgradeRejected(report.findings, rejectedIds, conflictsWith, pathExists, unsafeTargets);
   const verifiedReport: UpgradeReport = { ...report, findings, summary: summarize(findings) };
@@ -710,14 +740,14 @@ interface AskLoopResult {
   previewBoot?: (edits: readonly Edit[]) => Promise<BootPreview | undefined>;
 }
 
-async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined, plugins: readonly UpgradePlugin[] | undefined, known: ReadonlyMap<string, string> = new Map()): Promise<AskLoopResult & { unknownIds: string[]; staleIds: string[]; invalidAnswers: Array<{ id: string; value: string }> }> {
+async function resolveQuestions(root: string, entry: string | undefined, runSetupUses: readonly string[], dataReport: Record<string, unknown> | undefined, fromFile: ReadonlyMap<string, string> | undefined, yes: boolean, interactive: boolean, prompt: PromptFn, forceMajor: number | undefined, plugins: readonly UpgradePlugin[] | undefined, hosts: HostScan, known: ReadonlyMap<string, string> = new Map()): Promise<AskLoopResult & { unknownIds: string[]; staleIds: string[]; invalidAnswers: Array<{ id: string; value: string }> }> {
   const answers = new Map<string, string>(known);
   const everAsked = new Set<string>();
   const askedFixes = new Map<string, AskFix>();
   const pluginCache = new Map<string, unknown>();
   let built: BuildResult | undefined;
   for (let round = 0; round < 8; round++) {
-    built = await buildReport(root, entry, { runSetupUses, answers, dataReport, forceMajor, plugins, pluginCache });
+    built = await buildReport(root, entry, { runSetupUses, answers, dataReport, forceMajor, plugins, pluginCache, hosts });
     const asks = askFindings(built.report.findings);
     for (const { fix } of asks) {
       everAsked.add(fix.question);
@@ -774,6 +804,12 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
     stderr("fix --write needs a TTY or --yes; nothing was written");
     return 2;
   }
+  const hosts = hostsOf(root, options.hosts);
+  if (write && hosts.outdated.length > 0) {
+    for (const host of hosts.outdated) stderr(host.message);
+    stderr("fix --write refuses to run while a dependency is not built for this version; nothing was written");
+    return 2;
+  }
 
   const saveAnswersFile = stringFlag(args, "save-answers");
   const skipConfirmation = yes || !interactive;
@@ -789,7 +825,7 @@ async function runFix(args: ParsedArgs, stdout: (line: string) => void, stderr: 
   let staleIds: string[] | undefined;
   let changed: Array<[string, { source: string; current: string }]> = [];
   for (let round = 0; round < (write ? MAX_FIX_PASSES : 1); round++) {
-    pass = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins, answers);
+    pass = await resolveQuestions(root, entry, runSetupUses, dataReport, fromFile, yes, interactive, prompt, options.forceInstalledMajor, options.plugins, hosts, answers);
     for (const [id, value] of pass.answers) answers.set(id, value);
     unknownIds = unknownIds === undefined ? pass.unknownIds : unknownIds.filter((id) => pass!.unknownIds.includes(id));
     staleIds = staleIds === undefined ? pass.staleIds : staleIds.filter((id) => pass!.staleIds.includes(id));
@@ -924,6 +960,12 @@ async function runData(args: ParsedArgs, stdout: (line: string) => void, stderr:
     return 2;
   }
   const root = resolve(stringFlag(args, "root") ?? ".");
+  const hosts = hostsOf(root, options.hosts);
+  if (hosts.outdated.length > 0) {
+    for (const host of hosts.outdated) stderr(host.message);
+    stderr("data refuses to run while a dependency is not built for this version");
+    return 2;
+  }
   const result = await runDataStep(resolve(db), root, options.plugins ?? []);
   if (result.error !== undefined) {
     stderr(result.error);

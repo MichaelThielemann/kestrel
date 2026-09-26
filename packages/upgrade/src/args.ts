@@ -1,3 +1,4 @@
+/** The upgrade commands' parsed flags: `--name value`, or `--name` alone as `true`; `--run-setup` collects every value. */
 export interface ParsedArgs {
   flags: Map<string, string | true>;
   repeated: Map<string, string[]>;
@@ -5,6 +6,7 @@ export interface ParsedArgs {
 
 const REPEATABLE = new Set(["run-setup"]);
 
+/** Parses argv the permissive way the upgrade commands do: positionals and unknown flags are accepted and ignored. */
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   const flags = new Map<string, string | true>();
   const repeated = new Map<string, string[]>();
@@ -33,6 +35,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   return { flags, repeated };
 }
 
+/** The string value of a flag, `undefined` when absent or given without a value. */
 export function stringFlag(args: ParsedArgs, name: string): string | undefined {
   const value = args.flags.get(name);
   return typeof value === "string" ? value : undefined;

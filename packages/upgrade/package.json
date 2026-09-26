@@ -1,20 +1,20 @@
 {
   "name": "@michaelthielemann/kestrel-upgrade",
   "version": "5.8.0",
-  "description": "5.8 -> 6.0 upgrade assistant: check, fix and data commands, an exported sandbox helper and a plugin API a host package registers its own rules and project loader through.",
+  "description": "The 5.8 -> 6.0 upgrade engine behind `kestrel upgrade`: check, fix and data, an exported sandbox helper and the plugin API host packages register their rules and project loader through.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=22.18.0"
   },
-  "bin": {
-    "kestrel-upgrade": "./src/cli.ts"
-  },
   "exports": {
     ".": "./src/index.ts",
     "./codemods": "./src/codemods.ts",
+    "./hosts": "./src/hosts.ts",
     "./plugin": "./src/plugin.ts",
-    "./sandbox": "./src/sandbox.ts"
+    "./project": "./src/project.ts",
+    "./sandbox": "./src/sandbox.ts",
+    "./scratch": "./src/scratch.ts"
   },
   "publishConfig": {
     "exports": {
@@ -26,17 +26,26 @@
         "types": "./dist/codemods.d.ts",
         "default": "./dist/codemods.js"
       },
+      "./hosts": {
+        "types": "./dist/hosts.d.ts",
+        "default": "./dist/hosts.js"
+      },
       "./plugin": {
         "types": "./dist/plugin.d.ts",
         "default": "./dist/plugin.js"
       },
+      "./project": {
+        "types": "./dist/project.d.ts",
+        "default": "./dist/project.js"
+      },
       "./sandbox": {
         "types": "./dist/sandbox.d.ts",
         "default": "./dist/sandbox.js"
+      },
+      "./scratch": {
+        "types": "./dist/scratch.d.ts",
+        "default": "./dist/scratch.js"
       }
-    },
-    "bin": {
-      "kestrel-upgrade": "./dist/cli.js"
     }
   },
   "files": [

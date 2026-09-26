@@ -3,24 +3,16 @@ import type { BootCheck, BootInput, BootProblem } from "@michaelthielemann/kestr
 import type { PromptFn } from "./answers.ts";
 import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import type { Edit, Finding } from "./report.ts";
+import type { HostScan } from "./hosts.ts";
 import { runCli } from "./cli-run.ts";
 import { readFileOrUndefined } from "./rules.ts";
 
 export type { AskFix, Edit, Finding, FindingFix, FindingLocation, Severity, Tier, UpgradeReport } from "./report.ts";
 export type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 
-/**
- * The version of this plugin API. It covers every type `./plugin` exports, the ones a plugin
- * returns to the engine as much as the ones it receives: `UpgradePlugin`, `LoadResult`,
- * `LoadedProject`, `LoadIssue`, `PipelineFile`, `DataContentModel` and its parts,
- * `SwitchEditsResult`, `Rule` with its `needs` values, `RuleContext`/`SourceRuleContext`, the
- * locator types, `Finding`/`Edit` and `RunUpgradeCliOptions`. A member added to any of them is
- * optional, and a new `needs` value is a new variant of `Rule`; each such addition raises this
- * number by one. An engine older than an addition ignores a hook or member it does not know, so a
- * plugin that relies on one compares `PLUGIN_API_VERSION` first. The number only grows: a new major
- * of this package continues from the previous major's value and never resets it.
- */
-export const PLUGIN_API_VERSION = 3;
+export { PLUGIN_API_MIN, PLUGIN_API_VERSION } from "./apiVersion.ts";
+export { parseArgs, stringFlag, type ParsedArgs } from "./args.ts";
+export type { HostScan, LoadableHost, OutdatedHost, RefusedHost } from "./hosts.ts";
 
 /** One file a plugin's own pipeline layout lives in, and the pipeline(s) it defines — more than one when a layout keeps several pipelines in one file; a rule that iterates every pipeline file reports at most once per entry. */
 export interface PipelineFile {
@@ -285,7 +277,35 @@ export interface UpgradePlugin {
    * given project, it keeps its own existing behavior.
    */
   mediaWiring?(project: LoadedProject): MediaWiring | undefined;
+  /**
+   * The checks a host's own server start runs beyond `boot()`, given the loaded project and its
+   * boot check. `kestrel check` reports what this returns next to the boot problems; the upgrade
+   * commands do not call it.
+   */
+  hostChecks?(project: LoadedProject, bootCheck: BootCheck): readonly HostProblem[] | Promise<readonly HostProblem[]>;
 }
+
+/** What the running kestrel CLI passes to a plugin factory. */
+export interface KestrelPluginHost {
+  /** The running engine's `PLUGIN_API_VERSION`; compare this, not the value imported from the plugin's own copy of this package. */
+  pluginApiVersion: number;
+  /** The running kestrel-cli version. */
+  cliVersion: string;
+}
+
+/** One problem a host's own boot finds beyond `boot()`. */
+export interface HostProblem {
+  code: string;
+  severity: "error" | "warning";
+  owner: string;
+  reason: string;
+  pipeline?: string;
+  module?: string;
+  file?: string;
+}
+
+/** The default export of the module a host package's `kestrel.plugin` field names. */
+export type KestrelPluginFactory = (host: KestrelPluginHost) => UpgradePlugin | Promise<UpgradePlugin>;
 
 export interface RunUpgradeCliOptions {
   plugins?: readonly UpgradePlugin[];
@@ -295,9 +315,11 @@ export interface RunUpgradeCliOptions {
   isInteractive?: boolean;
   /** Overrides the real `node:readline` prompt, for a host with its own UI or a test. */
   prompt?: PromptFn;
+  /** Host packages already classified by the caller; the engine classifies the project's direct dependencies itself when this is absent. */
+  hosts?: HostScan;
 }
 
-/** Runs the `check` / `fix` / `data` CLI against `argv`, returning the process exit code. A host package's own bin passes its plugin here instead of shipping a second copy of the engine. */
+/** Runs the `check` / `fix` / `data` commands against `argv`, returning the process exit code. A caller passes the plugins; the kestrel CLI discovers them from the `kestrel` field of the project's direct dependencies. */
 export function runUpgradeCli(argv: readonly string[], options: RunUpgradeCliOptions = {}): Promise<number> {
   return runCli(argv, options);
 }

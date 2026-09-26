@@ -191,6 +191,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`redirects/requires-persistence`](#redirects-requires-persistence) | load | manual | `redirects-default` without a `persistence@1` provider |
 | [`imports/redirects-impl`](#imports-redirects-impl) | load | none (info) | a local module importing `kestrel-redirects-default/impl` |
 | [`deps/kestrel-range`](#deps-kestrel-range), `deps/mixed-majors`, `deps/pre-install` | source | auto / manual / none | a `@michaelthielemann/kestrel*` dependency range |
+| [`deps/host-outdated`](#deps-host-outdated), `deps/host-refused` | source | manual | a direct dependency whose plugin is not built for this version, or whose `kestrel` field is refused |
 | [`offer/event-queue`](#offer-event-queue) | source | none / ask / auto | the switch from `events-direct` to `events-queue` |
 | [`boot/<code>`](#boot-code) | boot | manual | any boot error no rule above claims |
 | `boot/not-checked` | boot | none (warning) | a module or pipeline `checkBoot()` could not check safely |
@@ -578,6 +579,20 @@ still runs — and `fix --write` still bumps the range — even when the project
 at all (a `load/failed` finding alongside it names why); install the bumped range and run `check`
 again to see the rest.
 
+#### deps-host-outdated
+A direct dependency of the project (not one of kestrel's own packages) carries a plugin that is not
+built for the running version: it depends on `@michaelthielemann/kestrel-upgrade` but declares no
+`kestrel` field in its `package.json`, its `kestrel.engine` range does not include the running
+version, or its `kestrel.pluginApi` is below `PLUGIN_API_MIN`. The plugin is never imported. The
+finding is an error, so `check` exits 1; `fix --write` and `data` refuse to run (exit 2) and write
+nothing, since the built-in rules alone would edit a project they cannot load the way its host
+does. Install the dependency's release for the target major first, then run the command again.
+
+`deps/host-refused` names a dependency whose `kestrel` field cannot be used at all: the plugin
+path is absolute, leaves the package directory (also through a symlink), is not a `.mjs`/`.js`
+file or does not exist, `pluginApi` is not an integer or needs a newer engine, or `engine` is not
+of the form `^<major>.<minor>.<patch>`. Nothing of that package runs.
+
 #### offer-event-queue
 See [Switching event delivery to the queue](#5-switching-event-delivery-to-the-queue) above.
 
@@ -589,13 +604,10 @@ A module or pipeline `checkBoot()` left unchecked because a problem it depends o
 consent list, made it unsafe to check. Run with `--run-setup <use>` to include it.
 
 #### load
-A config, module or pipeline file failed to load; the message is the load error itself. Without a
-plugin registered, the suggestion is "fix the file so it loads, then run check again" — unless a
-project dependency's own `package.json` both declares a `bin` and depends on
-`@michaelthielemann/kestrel-upgrade` itself: that dependency ships its own upgrade command, running
-this package's own rules against a project shape only it can load, so the suggestion names that
-command instead. A plugin already registered keeps the generic suggestion, since it is the one
-already trying to load the project this way.
+A config, module or pipeline file failed to load; the message is the load error itself, and the
+suggestion is "fix the file so it loads, then run check again". A project that only loads through
+its host package's plugin gets this finding when the plugin is missing; a host package that is
+installed but not built for this version is reported as [`deps/host-outdated`](#deps-host-outdated).
 
 #### sandbox-blobstore-standin
 A configured module provides `blobstore@1` but the sandbox neither rewrites its config (unlike

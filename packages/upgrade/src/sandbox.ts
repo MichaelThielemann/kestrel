@@ -1,5 +1,6 @@
 import type { BootInput, ModuleDefinition } from "@michaelthielemann/kestrel";
 import { blobstoreStandIn, providesBlobstore } from "./blobstoreStandIn.ts";
+export { mergeSandboxEntries } from "./pluginRules.ts";
 import { BUILT_IN_SANDBOX_ENTRIES, collidingSandboxEntries, KNOWN_SAFE_USES, sandboxKey } from "./sandboxTable.ts";
 
 /**
