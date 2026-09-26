@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "kestrel",
-    "openapi": "kestrel-openapi --out openapi.json --server http://127.0.0.1:4000"
+    "check": "kestrel check",
+    "openapi": "kestrel openapi --out openapi.json --server http://127.0.0.1:4000"
   },
   "dependencies": {
     "@michaelthielemann/kestrel": "workspace:*",
@@ -12,6 +13,7 @@
     "@michaelthielemann/kestrel-authn-multi": "workspace:*",
     "@michaelthielemann/kestrel-authz-roles": "workspace:*",
     "@michaelthielemann/kestrel-blobstore-filesystem": "workspace:*",
+    "@michaelthielemann/kestrel-cli": "workspace:*",
     "@michaelthielemann/kestrel-content-default": "workspace:*",
     "@michaelthielemann/kestrel-contracts": "workspace:*",
     "@michaelthielemann/kestrel-delivery-static": "workspace:*",
