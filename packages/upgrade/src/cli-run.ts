@@ -558,7 +558,7 @@ async function buildReport(root: string, entry: string | undefined, options: Bui
       schema: 1,
       tool: { name: "kestrel-upgrade", version: TOOL_VERSION },
       target: "6.0.0",
-      project: { root, kind: project?.kind ?? "unknown", installed: versions.installed },
+      project: { root, kind: project?.kind ?? plugin?.kind ?? "unknown", installed: versions.installed },
       tiers,
       ...(sandboxInfo === undefined ? {} : { sandbox: sandboxInfo }),
       summary: summarize(remapped),

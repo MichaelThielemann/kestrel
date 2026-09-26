@@ -118,3 +118,15 @@ describe("a rule's own check() failing never aborts the whole run", () => {
     expect(report.findings.some((f) => f.rule === "plugin/ok")).toBe(true);
   });
 });
+
+describe("the report's project kind when the load fails", () => {
+  it("names the detected plugin's kind instead of unknown", async () => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app", dependencies: {} }, null, 2));
+    const plugin: UpgradePlugin = { kind: "custom-host", detect: () => true, load: () => Promise.reject(new Error("the host project does not load")) };
+    const lines: string[] = [];
+    await runCli(["check", "--root", dir, "--json"], { stdout: (l) => lines.push(l), stderr: () => undefined, plugins: [plugin] });
+    const report = boundaryCast<UpgradeReport>(JSON.parse(lines.join("\n")), "json");
+    expect(report.tiers.source).toBe("failed");
+    expect(report.project.kind).toBe("custom-host");
+  });
+});
