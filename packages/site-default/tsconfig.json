@@ -2,6 +2,6 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "rootDir": ".", "outDir": "dist", "declaration": true, "noEmit": false, "allowImportingTsExtensions": false, "rewriteRelativeImportExtensions": true, "composite": true },
   "include": ["."],
-  "exclude": ["dist", "**/*.test.ts", "**/*.contract.test.ts"],
+  "exclude": ["dist", "**/*.test.ts", "**/*.contract.test.ts", "__fixtures__"],
   "references": [{ "path": "../core" }, { "path": "../contracts" }]
 }

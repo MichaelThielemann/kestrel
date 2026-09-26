@@ -6,6 +6,7 @@ import { SITE_TEST_MODEL, siteContractTests } from "@michaelthielemann/kestrel-c
 import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import { createSiteDefault, publicPath, splitPath } from "./impl.ts";
+import { routedSite } from "./__fixtures__/routed.ts";
 
 async function make(model: ContentModel = SITE_TEST_MODEL) {
   const content = await createContentDefault(model, createFakePersistence());
@@ -13,6 +14,13 @@ async function make(model: ContentModel = SITE_TEST_MODEL) {
 }
 
 siteContractTests(() => make());
+
+describe("routed", () => {
+  siteContractTests(async () => {
+    const { site, content } = await routedSite();
+    return { site, content };
+  });
+});
 
 describe("site/default", () => {
   it("computes public paths", () => {
