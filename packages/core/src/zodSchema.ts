@@ -358,9 +358,9 @@ function isSecretPath(schema: ZodTypeAny, path: ReadonlyArray<string | number>):
 }
 
 /**
- * One line per config validation problem that never repeats the value it received: a secret path
- * (a secret schema node, a credential-like key or a path through a union) reports only the issue
- * code, an enum mismatch only what it expected, and any other message has its credential URLs redacted.
+ * One line per config validation problem. A secret path (a secret schema node, a credential-like key
+ * or a path through a union or intersection) reports only the issue code and an enum mismatch only
+ * what it expected; any other message is kept as its check wrote it, with credential URLs redacted.
  */
 export function describeConfigIssue(schema: ZodTypeAny, issue: ZodIssue): string {
   const where = issue.path.join(".") || "(root)";
@@ -492,5 +492,7 @@ function collectVariables(schema: ZodTypeAny, raw: unknown, parsedInput: unknown
 export function describeConfig(schema: ZodTypeAny, raw: unknown, parsed?: unknown, defaults?: ConfigDefaults): ConfigDescription {
   const variables: ConfigVariable[] = [];
   collectVariables(schema, raw, parsed, defaults, [], variables, { optional: false, default: undefined, redacted: false });
-  return { schema: toJsonSchema(schema), variables };
+  const root = toJsonSchema(schema);
+  if (root.writeOnly === true && unwrap(schema).description !== SECRET) delete root.writeOnly;
+  return { schema: root, variables };
 }

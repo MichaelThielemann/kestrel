@@ -432,3 +432,23 @@ describe("rows below a wrapper that changes the value", () => {
     expect(byPath["outer.inner.extra"]).toMatchObject({ status: "default", value: "plain" });
   });
 });
+
+describe("the root of a transformed config schema", () => {
+  it("is not marked writeOnly, since its rows are redacted one by one", () => {
+    const schema = z
+      .object({ password: z.string(), label: z.string() })
+      .strict()
+      .transform((o) => o);
+    const out = describeConfig(schema, { password: "p", label: "l" });
+    expect(out.schema).not.toHaveProperty("writeOnly");
+    expect(out.variables.find((v) => v.path === "password")).toMatchObject({ redacted: true, value: null });
+  });
+
+  it("finds a secret behind a lazy schema inside a transform", () => {
+    const schema = z.object({ outer: z.lazy(() => z.object({ pin: z.string().describe("secret") }).strict()).transform((o) => ({ p: o.pin })) }).strict();
+    const raw = { outer: { pin: "lazy-secret" } };
+    const out = describeConfig(schema, raw, schema.parse(raw));
+    expect(JSON.stringify(out)).not.toContain("lazy-secret");
+    expect(out.variables.find((v) => v.path === "outer")).toMatchObject({ secret: true, redacted: true });
+  });
+});
