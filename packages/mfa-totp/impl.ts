@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import type { Identity } from "@michaelthielemann/kestrel-contracts/authn";
 import type { Authz, AuthzError } from "@michaelthielemann/kestrel-contracts/authz";
-import { err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
+import { customFailure, err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Document, Persistence, PersistenceError } from "@michaelthielemann/kestrel-contracts/persistence";
 
 export const FACTORS = "mfa_factors";
@@ -18,6 +18,8 @@ export interface Config {
   maxFailures: number;
   /** How long the first lock lasts; each further one lasts twice as long, at most a day. */
   lockSeconds: number;
+  /** Whether an account that never had a factor also needs an enrollment code, issued by a reset. */
+  requireEnrollmentCode: boolean;
 }
 
 interface FactorRow extends Document {
@@ -31,6 +33,7 @@ interface FactorRow extends Document {
   locks: number;
   lockedUntil: number;
   rev: number;
+  enrollment: string | null;
 }
 
 /** The answer of a check: pass (with the recovery codes when the check confirmed a new factor), or why not. */
@@ -41,15 +44,20 @@ export interface Setup {
   uri: string;
 }
 
-export type MfaError = KestrelError<"CONFLICT" | "NOT_FOUND" | "TRANSIENT"> | AuthzError;
+export type MfaError = KestrelError<"CONFLICT" | "NOT_FOUND" | "TRANSIENT" | "ENROLLMENT_CODE_REQUIRED"> | AuthzError;
+
+/** The status `startSetup` answers when the account needs an enrollment code it did not give. */
+export const ENROLLMENT_CODE_STATUS = 403;
 
 export interface MfaTotp {
   /** Checks the second factor of a caller whose password was just accepted; `code` is a time-based or a recovery code. */
   check(identity: Identity, code: string | undefined): Promise<Result<Check, MfaError>>;
-  /** Stores a new, unconfirmed secret for the caller; the next check with a code for it confirms it. */
-  startSetup(identity: Identity): Promise<Result<Setup, MfaError>>;
-  /** Removes the user's factor, confirmed or not. */
-  reset(userId: string): Promise<Result<void, MfaError>>;
+  /** Stores a new, unconfirmed secret for the caller; the next check with a code for it confirms it. After a reset, or with `requireEnrollmentCode`, it needs the enrollment code the reset issued. */
+  startSetup(identity: Identity, enrollmentCode?: string): Promise<Result<Setup, MfaError>>;
+  /** Removes the user's factor and answers a one-time code the user needs to set up a new one. */
+  reset(userId: string): Promise<Result<{ enrollmentCode: string }, MfaError>>;
+  /** Removes every trace of the user, e.g. once the account is deleted. */
+  forget(userId: string): Promise<Result<void, MfaError>>;
   /** The ids of the users with a confirmed factor. */
   usersWithFactor(): Promise<Result<ReadonlySet<string>, MfaError>>;
 }
@@ -145,8 +153,9 @@ function labelOf(identity: Identity): string {
 export async function createMfaTotp(config: Config, db: Persistence, now: () => number = Date.now, authz?: Authz): Promise<MfaTotp> {
   const key = keyOf(config.secretKey);
   const recoveryKey = createHmac("sha256", key).update("mfa-totp recovery codes").digest();
+  const enrollmentDigest = (code: string): string => createHmac("sha256", recoveryKey).update(`enrollment:${code.replace(/[\s-]/g, "").toUpperCase()}`).digest("base64url");
   const recoveryDigest = (code: string): string => createHmac("sha256", recoveryKey).update(code.replace(/[\s-]/g, "").toUpperCase()).digest("base64url");
-  const ready = await db.ensureCollection(FACTORS, { userId: { type: "string", unique: true }, secret: "string", confirmed: "boolean", lastStep: "number", recovery: "json", createdAt: "number", failures: "number", locks: "number", lockedUntil: "number", rev: "number" });
+  const ready = await db.ensureCollection(FACTORS, { userId: { type: "string", unique: true }, secret: "string", confirmed: "boolean", lastStep: "number", recovery: "json", createdAt: "number", failures: "number", locks: "number", lockedUntil: "number", rev: "number", enrollment: "string" });
   if (isErr(ready)) throw new Error(`mfa/totp: setup failed: ${ready.error.message}`);
 
   const factorOf = (userId: string): Promise<Result<FactorRow | null, PersistenceError>> => db.findOne<FactorRow>(FACTORS, { userId });
@@ -202,7 +211,7 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
     async check(identity, code) {
       const found = await factorOf(identity.id);
       if (isErr(found)) return found;
-      const row = found.value;
+      const row = found.value !== null && found.value.secret !== "" ? found.value : null;
       const given = code?.trim() ?? "";
 
       if (row !== null && given !== "" && (row.lockedUntil ?? 0) > now()) {
@@ -222,7 +231,7 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
         const step = matchingStep(row, given);
         if (step === undefined) return wrongCode(row);
         const recoveryCodes = Array.from({ length: config.recoveryCodes }, recoveryCode);
-        return passed(row, { confirmed: true, lastStep: step, recovery: recoveryCodes.map(recoveryDigest) }, { kind: "pass", recoveryCodes });
+        return passed(row, { confirmed: true, lastStep: step, recovery: recoveryCodes.map(recoveryDigest), enrollment: null }, { kind: "pass", recoveryCodes });
       }
 
       const needed = await required(identity);
@@ -230,15 +239,23 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
       return ok(needed.value ? { kind: "refuse", reason: "setup-required" } : { kind: "pass" });
     },
 
-    async startSetup(identity) {
+    async startSetup(identity, enrollmentCode) {
       const found = await factorOf(identity.id);
       if (isErr(found)) return found;
-      if (found.value?.confirmed === true) return err(failure("CONFLICT", "mfa/totp: this account already has a second factor; an administrator can reset it"));
+      const row = found.value;
+      if (row?.confirmed === true) return err(failure("CONFLICT", "mfa/totp: this account already has a second factor; an administrator can reset it"));
+      const expected = row?.enrollment ?? null;
+      if (expected !== null || (row === null && config.requireEnrollmentCode)) {
+        const given = enrollmentCode === undefined || enrollmentCode.trim() === "" ? undefined : enrollmentDigest(enrollmentCode);
+        if (expected === null || given === undefined || !sameText(given, expected)) {
+          return err(customFailure("ENROLLMENT_CODE_REQUIRED", ENROLLMENT_CODE_STATUS, "mfa/totp: setting up this account's second factor needs the enrollment code an administrator issued"));
+        }
+      }
       const secret = randomBytes(20);
       const sealed = seal(key, secret);
-      const stored = found.value === null
-        ? await db.createOne<FactorRow>(FACTORS, { userId: identity.id, secret: sealed, confirmed: false, lastStep: 0, recovery: [], createdAt: now(), failures: 0, locks: 0, lockedUntil: 0, rev: 0 })
-        : await db.updateOne<FactorRow>(FACTORS, found.value.id, { secret: sealed, lastStep: 0, recovery: [], rev: (found.value.rev ?? 0) + 1 });
+      const stored = row === null
+        ? await db.createOne<FactorRow>(FACTORS, { userId: identity.id, secret: sealed, confirmed: false, lastStep: 0, recovery: [], createdAt: now(), failures: 0, locks: 0, lockedUntil: 0, rev: 0, enrollment: null })
+        : await db.updateOne<FactorRow>(FACTORS, row.id, { secret: sealed, lastStep: 0, recovery: [], rev: (row.rev ?? 0) + 1 });
       if (isErr(stored)) return stored;
       const encoded = base32Encode(secret);
       const issuer = encodeURIComponent(config.issuer);
@@ -246,6 +263,15 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
     },
 
     async reset(userId) {
+      const removed = await db.deleteMany(FACTORS, { userId });
+      if (isErr(removed)) return removed;
+      const enrollmentCode = recoveryCode();
+      const created = await db.createOne<FactorRow>(FACTORS, { userId, secret: "", confirmed: false, lastStep: 0, recovery: [], createdAt: now(), failures: 0, locks: 0, lockedUntil: 0, rev: 0, enrollment: enrollmentDigest(enrollmentCode) });
+      if (isErr(created)) return created;
+      return ok({ enrollmentCode });
+    },
+
+    async forget(userId) {
       const removed = await db.deleteMany(FACTORS, { userId });
       if (isErr(removed)) return removed;
       return ok();

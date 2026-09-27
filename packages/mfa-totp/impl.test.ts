@@ -12,7 +12,7 @@ const ALICE: Identity = { id: "u-alice", claims: { username: "alice", roles: ["e
 const ROOT: Identity = { id: "u-root", claims: { username: "root", roles: ["admin"] } };
 
 function config(enforce: Config["enforce"] = "all"): Config {
-  return { issuer: "Example CMS", secretKey: KEY, enforce, recoveryCodes: 10, maxFailures: 10, lockSeconds: 900 };
+  return { issuer: "Example CMS", secretKey: KEY, enforce, recoveryCodes: 10, maxFailures: 10, lockSeconds: 900, requireEnrollmentCode: false };
 }
 
 async function setup(enforce: Config["enforce"] = "all", authz?: Authz, db = createFakePersistence()) {
@@ -95,12 +95,33 @@ describe("mfa/totp checks", () => {
     expectErr(await env.mfa.startSetup(ALICE), "CONFLICT");
   });
 
-  it("forgets a reset factor, so the account has to set up a new one", async () => {
+  it("forgets a reset factor, so the account has to set up a new one, and only with the one-time enrollment code the reset issued", async () => {
     const env = await setup();
     await enroll(env);
-    expectOk(await env.mfa.reset(ALICE.id));
-    expect(expectOk(await env.db.count(FACTORS, {}))).toBe(0);
+    const { enrollmentCode } = expectOk(await env.mfa.reset(ALICE.id));
+    expect(enrollmentCode).toMatch(/^[A-Z2-7]{5}(-[A-Z2-7]{5}){4}$/);
+    expect(JSON.stringify(expectOk(await env.db.findMany(FACTORS, {})).items)).not.toContain(enrollmentCode.replaceAll("-", ""));
     expect(expectOk(await env.mfa.check(ALICE, undefined))).toEqual({ kind: "refuse", reason: "setup-required" });
+    expectErr(await env.mfa.startSetup(ALICE), "ENROLLMENT_CODE_REQUIRED");
+    expectErr(await env.mfa.startSetup(ALICE, "AAAAA-AAAAA-AAAAA-AAAAA-AAAAA"), "ENROLLMENT_CODE_REQUIRED");
+    const started = expectOk(await env.mfa.startSetup(ALICE, enrollmentCode.toLowerCase()));
+    expectErr(await env.mfa.startSetup(ALICE), "ENROLLMENT_CODE_REQUIRED");
+    expect(expectOk(await env.mfa.check(ALICE, codeAt(started.secret, env.now()))).kind).toBe("pass");
+  });
+
+  it("with requireEnrollmentCode, an account that never had a factor needs a code an administrator issued", async () => {
+    const env = await setup();
+    const strict = await createMfaTotp({ ...config(), requireEnrollmentCode: true }, env.db, env.now);
+    expectErr(await strict.startSetup(ROOT), "ENROLLMENT_CODE_REQUIRED");
+    const { enrollmentCode } = expectOk(await strict.reset(ROOT.id));
+    expectOk(await strict.startSetup(ROOT, enrollmentCode));
+  });
+
+  it("forgets every trace of a deleted user", async () => {
+    const env = await setup();
+    await enroll(env);
+    expectOk(await env.mfa.forget(ALICE.id));
+    expect(expectOk(await env.db.count(FACTORS, {}))).toBe(0);
   });
 
   it("lets an account without a factor through when none is required", async () => {

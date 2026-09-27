@@ -87,7 +87,9 @@ describe("mfa/totp steps", () => {
     const signedIn = await runPipeline(login, { body: { username: "alice", password: "long-enough" } }, options);
     const headers = { authorization: `Bearer ${tokenOf(signedIn.result)}` };
     expect((await runPipeline(reset, { headers, params: { id: "alice" } }, options)).status).toBe(400);
-    expect((await runPipeline(reset, { headers, params: { id: "bob" } }, options)).status).toBe(200);
+    const reset200 = await runPipeline(reset, { headers, params: { id: "bob" } }, options);
+    expect(reset200.status).toBe(200);
+    expect(boundaryCast<{ enrollmentCode: string }>(reset200.result, "json").enrollmentCode).toMatch(/^[A-Z2-7]{5}(-[A-Z2-7]{5}){4}$/);
   });
 });
 

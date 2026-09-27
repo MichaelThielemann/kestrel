@@ -19,6 +19,7 @@ export const configSchema = z
     recoveryCodes: z.number().int().min(5).max(20).default(10),
     maxFailures: z.number().int().min(3).max(100).default(10).describe("Wrong codes in a row after which the factor is locked"),
     lockSeconds: z.number().int().positive().default(900).describe("How long the first lock lasts; each further one lasts twice as long, at most a day"),
+    requireEnrollmentCode: z.boolean().default(false).describe("Whether an account that never had a factor also needs an enrollment code, issued by a reset, to set one up"),
   })
   .strict();
 
@@ -42,7 +43,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const CREDENTIALS_INPUT = { type: "object", properties: { username: { type: "string", maxLength: 320 }, email: { type: "string", maxLength: 320 }, password: { type: "string" } }, required: ["password"], additionalProperties: false } as const;
+const CREDENTIALS_INPUT = { type: "object", properties: { username: { type: "string", maxLength: 320 }, email: { type: "string", maxLength: 320 }, password: { type: "string" }, enrollmentCode: { type: "string", maxLength: 64 } }, required: ["password"], additionalProperties: false } as const;
 
 export default defineModule({
   name: "mfa/totp",
@@ -83,7 +84,8 @@ export default defineModule({
       if (!session.value) return ctx.fail("UNAUTHENTICATED", "invalid credentials", { username: usernameOf(ctx) });
       const ended = await mfa.authn.logout(session.value.token);
       if (isErr(ended)) return ctx.fail(ended.error);
-      const started = await mfa.startSetup(session.value.identity);
+      const code = typeof ctx.payload.enrollmentCode === "string" ? ctx.payload.enrollmentCode : undefined;
+      const started = await mfa.startSetup(session.value.identity, code);
       if (isErr(started)) return ctx.fail(started.error);
       return ok({ ...ctx, identity: session.value.identity, result: started.value });
     },
@@ -93,13 +95,13 @@ export default defineModule({
       if (ctx.identity?.id === id) return ctx.fail("VALIDATION", "you cannot reset your own second factor; sign in with a recovery code instead");
       const reset = await mfa.reset(id);
       if (isErr(reset)) return ctx.fail(reset.error);
-      return ok({ ...ctx, result: { ok: true } });
+      return ok({ ...ctx, result: { ok: true, enrollmentCode: reset.value.enrollmentCode } });
     },
     forget: async (ctx: Context) => {
       const id = ctx.params.id ?? (typeof ctx.payload.id === "string" ? ctx.payload.id : undefined);
       if (id === undefined) return ctx.fail("VALIDATION", "mfa.forget: no user id in params.id or the event payload");
-      const reset = await mfa.reset(id);
-      if (isErr(reset)) return ctx.fail(reset.error);
+      const forgotten = await mfa.forget(id);
+      if (isErr(forgotten)) return ctx.fail(forgotten.error);
       return ok(ctx);
     },
     listEnrolled: async (ctx: Context) => {
@@ -124,13 +126,13 @@ export default defineModule({
       writes: ["identity", "result"],
       input: CREDENTIALS_INPUT,
       output: { type: "object", properties: { secret: { type: "string" }, uri: { type: "string" } }, required: ["secret", "uri"] },
-      errors: { 401: "invalid credentials", 409: "the account already has a second factor" },
+      errors: { 401: "invalid credentials", 403: "the account needs the enrollment code a reset issued (`ENROLLMENT_CODE_REQUIRED`)", 409: "the account already has a second factor" },
     },
     reset: {
-      summary: "Remove another user's second factor; follow it with a step that ends that user's sessions",
+      summary: "Remove another user's second factor and answer the one-time enrollment code its owner needs to set up a new one; follow it with a step that ends that user's sessions",
       reads: ["identity?", "params.id"],
       writes: ["result"],
-      output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+      output: { type: "object", properties: { ok: { type: "boolean" }, enrollmentCode: { type: "string" } }, required: ["ok", "enrollmentCode"] },
       errors: { 400: "the caller's own account" },
     },
     forget: {
