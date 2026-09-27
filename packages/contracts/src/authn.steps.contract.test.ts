@@ -74,13 +74,14 @@ export function authnStepsContractTests(make: () => Promise<AuthnStepsFixture>) 
       expect(identified.status).toBe(200);
     });
 
-    it("login hands the token over in an HttpOnly, Secure, SameSite=Strict cookie that lives as long as the session", async () => {
+    it("login hands the token over in a __Host- cookie, HttpOnly, Secure and SameSite=Strict, that lives as long as the session", async () => {
       const { credentials, sessionTtlSeconds, ...options } = await make();
       const loggedIn = await runPipeline(loginPipeline, { body: credentials }, options);
       const token = boundaryCast<{ token: string }>(loggedIn.result, "json").token;
       const cookie = loggedIn.headers?.["set-cookie"] ?? "";
       const [pair, ...attributes] = cookie.split(";").map((part) => part.trim());
-      expect(pair).toBe(`kestrel_token=${encodeURIComponent(token)}`);
+      expect(pair).toBe(`__Host-kestrel_token=${encodeURIComponent(token)}`);
+      expect(attributes.some((attribute) => /^domain=/i.test(attribute))).toBe(false);
       expect(attributes).toEqual(expect.arrayContaining(["HttpOnly", "Secure", "SameSite=Strict", "Path=/", `Max-Age=${sessionTtlSeconds}`]));
     });
 
@@ -90,14 +91,14 @@ export function authnStepsContractTests(make: () => Promise<AuthnStepsFixture>) 
       const token = boundaryCast<{ token: string }>(loggedIn.result, "json").token;
       const out = await runPipeline(logoutPipeline, { headers: { authorization: `Bearer ${token}` } }, options);
       expect(out.status).toBe(200);
-      expect(out.headers?.["set-cookie"]).toMatch(/^kestrel_token=;.*Max-Age=0/);
+      expect(out.headers?.["set-cookie"]).toMatch(/^__Host-kestrel_token=;.*Max-Age=0/);
     });
 
     it("a state-changing request authenticated by the cookie needs same-origin proof, a bearer token does not", async () => {
       const { credentials, ...options } = await make();
       const loggedIn = await runPipeline(loginPipeline, { body: credentials }, options);
       const token = boundaryCast<{ token: string }>(loggedIn.result, "json").token;
-      const cookie = `kestrel_token=${encodeURIComponent(token)}`;
+      const cookie = `__Host-kestrel_token=${encodeURIComponent(token)}`;
       const as = (method: string, headers: Record<string, string>) => ({ trigger: { kind: "http" as const, name: `${method} /things` }, headers });
       for (const pipeline of [requirePipeline, identifyPipeline]) {
         for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
@@ -113,6 +114,16 @@ export function authnStepsContractTests(make: () => Promise<AuthnStepsFixture>) 
         }
         expect((await runPipeline(pipeline, as("GET", { cookie }), options)).status).toBe(200);
       }
+    });
+
+    it("ignores a session cookie without the __Host- prefix", async () => {
+      const { credentials, ...options } = await make();
+      const loggedIn = await runPipeline(loginPipeline, { body: credentials }, options);
+      const token = boundaryCast<{ token: string }>(loggedIn.result, "json").token;
+      const headers = { cookie: `kestrel_token=${encodeURIComponent(token)}` };
+      expect((await runPipeline(requirePipeline, { headers }, options)).status).toBe(401);
+      const identified = await runPipeline(identifyPipeline, { headers }, options);
+      expect(identified.status).toBe(200);
     });
 
     it("declares the same writes as the fake for every step of AUTHN_STEPS", async () => {

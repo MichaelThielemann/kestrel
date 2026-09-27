@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Context, Step } from "@michaelthielemann/kestrel/context";
 import { isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import type { Authn, AuthnError, Identity, Session } from "../authn.ts";
-import { clearedSessionCookie, crossOriginRefusal, requestToken, sessionCookie } from "../helpers/session.ts";
+import { clearedSessionCookie, crossOriginRefusal, requestToken, sessionCookie, sessionCookieName } from "../helpers/session.ts";
 
 
 function str(value: unknown): string {
@@ -54,7 +54,7 @@ export function fakeAuthnSteps(authn: Authn): Record<string, Step> {
       return ok({ ...ctx, token: session.value.token, identity: session.value.identity, responseHeaders, result: session.value });
     },
     "authn.identifyUser": async (ctx: Context) => {
-      const found = requestToken(ctx.headers);
+      const found = requestToken(ctx.headers, sessionCookieName(cookie.secure));
       if (!found) return ok(ctx);
       const refused = found.source === "cookie" ? crossOriginRefusal(ctx.trigger, ctx.headers) : undefined;
       if (refused !== undefined) return ctx.fail("FORBIDDEN", refused);
@@ -64,7 +64,7 @@ export function fakeAuthnSteps(authn: Authn): Record<string, Step> {
       return ok(identity.value ? { ...ctx, token, identity: identity.value } : ctx);
     },
     "authn.requireUser": async (ctx: Context) => {
-      const found = requestToken(ctx.headers);
+      const found = requestToken(ctx.headers, sessionCookieName(cookie.secure));
       if (!found) return ctx.fail("UNAUTHENTICATED", "not authenticated");
       const refused = found.source === "cookie" ? crossOriginRefusal(ctx.trigger, ctx.headers) : undefined;
       if (refused !== undefined) return ctx.fail("FORBIDDEN", refused);

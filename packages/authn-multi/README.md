@@ -28,9 +28,10 @@ an observer such as `audit-persistence` can record it; the password is never rep
 `username` or `email` longer than 320 characters is refused with 400 before it is looked up.
 
 **Browser sessions.** `authn.login` answers the token in the body, for a client that sends it as
-`Authorization: Bearer`, and sets it as the `kestrel_token` cookie (`HttpOnly`, `Secure`,
+`Authorization: Bearer`, and sets it as the `__Host-kestrel_token` cookie (`HttpOnly`, `Secure`,
 `SameSite=Strict`, `Path=/`, `Max-Age` = `sessionTtlSeconds`), so a browser holds a session page
-script cannot read; `authn.logout` removes the cookie. `secureCookie: false` drops `Secure`, for
+script cannot read and a sibling origin cannot overwrite; `authn.logout` removes the cookie.
+`secureCookie: false` drops `Secure` and the prefix (the cookie is then `kestrel_token`), for
 signing in over plain HTTP during development only. A `POST`/`PUT`/`PATCH`/`DELETE` authenticated
 by the cookie rather than a bearer token must come from the same origin (`Sec-Fetch-Site:
 same-origin`, or an `Origin` matching `Host`); otherwise `authn.identifyUser` and

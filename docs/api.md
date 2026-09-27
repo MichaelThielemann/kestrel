@@ -132,7 +132,7 @@ without Nuxt: [`../examples/h3`](../examples/h3).
   printable ASCII, max. 200 characters), that value appears in the log of every line of the run and
   is returned as `X-Request-Id`; anything else is discarded.
 - **Auth**: send the token from `POST /login` as `Authorization: Bearer <token>`. A browser can
-  rely on the `kestrel_token` cookie instead, which the login response sets itself (`HttpOnly`,
+  rely on the `__Host-kestrel_token` cookie instead, which the login response sets itself (`HttpOnly`,
   `Secure`, `SameSite=Strict`, `Path=/`, `Max-Age` = the session lifetime) and logout removes; page
   script never sees it. A `POST`, `PUT`, `PATCH` or `DELETE` authenticated by that cookie must come
   from the same origin — `Sec-Fetch-Site: same-origin`, or an `Origin` whose host is the request's

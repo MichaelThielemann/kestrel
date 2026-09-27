@@ -67,7 +67,7 @@ describe("mfa/totp steps", () => {
     const confirmed = await runPipeline(login, { body: { username: "alice", password: "long-enough", code } }, options);
     expect(confirmed.status).toBe(200);
     expect(boundaryCast<{ recoveryCodes: string[] }>(confirmed.result, "json").recoveryCodes).toHaveLength(10);
-    expect(confirmed.headers?.["set-cookie"]).toMatch(/^kestrel_token=/);
+    expect(confirmed.headers?.["set-cookie"]).toMatch(/^__Host-kestrel_token=/);
     expect((await authn.resolve(tokenOf(confirmed.result))).ok).toBe(true);
 
     const needsCode = await runPipeline(login, { body: { username: "alice", password: "long-enough" } }, options);

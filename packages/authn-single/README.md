@@ -14,9 +14,9 @@ A failed login answers 401 with `details.username`, the name that was tried; the
 repeated anywhere. A
 `username` longer than 320 characters is refused with 400 before it is looked up.
 
-`authn.login` answers the token in the body and sets it as the `kestrel_token` cookie (`HttpOnly`,
+`authn.login` answers the token in the body and sets it as the `__Host-kestrel_token` cookie (`HttpOnly`,
 `Secure`, `SameSite=Strict`, `Path=/`, `Max-Age` = `sessionTtlSeconds`); `authn.logout` removes it.
-`secureCookie: false` drops `Secure`, for signing in over plain HTTP during development only. A
+`secureCookie: false` drops `Secure` and the prefix (the cookie is then `kestrel_token`), for signing in over plain HTTP during development only. A
 `POST`/`PUT`/`PATCH`/`DELETE` authenticated by the cookie rather than a bearer token must come from
 the same origin (`Sec-Fetch-Site: same-origin`, or an `Origin` matching `Host`); otherwise
 `authn.identifyUser` and `authn.requireUser` answer `FORBIDDEN` (403).

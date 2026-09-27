@@ -26,7 +26,8 @@ that can change the store between a consumer's calls.
 `helpers/migrations`'s `migrationFailed` normalize a schema field and build a contract's own
 `KestrelError` respectively — runtime functions next to a frozen contract, not part of it.
 `helpers/session` is what an authn module shares with the others for browser sessions:
-`requestToken` reads a request's bearer token or `kestrel_token` cookie and says which it was,
+`requestToken` reads a request's bearer token or session cookie (`__Host-kestrel_token`, or the name
+`sessionCookieName(secure)` gives) and says which it was,
 `sessionCookie`/`clearedSessionCookie` build the `set-cookie` values (`HttpOnly`, `SameSite=Strict`,
 `Path=/`, `Max-Age`, `Secure` unless turned off), and `crossOriginRefusal` answers why a
 state-changing HTTP request authenticated by the cookie may not act — it must show

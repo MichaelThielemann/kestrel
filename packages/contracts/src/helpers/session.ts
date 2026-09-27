@@ -1,7 +1,15 @@
 import type { Trigger } from "@michaelthielemann/kestrel/context";
 
-/** The name of the cookie an authn module sets on login and reads back as the session token. */
+/** The name of the session cookie when it is not marked `Secure` (plain-HTTP development only). */
 export const SESSION_COOKIE = "kestrel_token";
+
+/** The name of the session cookie when it is `Secure`: the `__Host-` prefix makes a browser refuse it with a `Domain` or a narrower `Path`, so a sibling origin cannot plant its own. */
+export const SECURE_SESSION_COOKIE = "__Host-kestrel_token";
+
+/** The session cookie's name for a cookie that is, or is not, marked `Secure`. */
+export function sessionCookieName(secure: boolean): string {
+  return secure ? SECURE_SESSION_COOKIE : SESSION_COOKIE;
+}
 
 /** How the session cookie is written: its lifetime and whether it is marked `Secure`. */
 export interface SessionCookieOptions {
@@ -17,13 +25,13 @@ export interface RequestToken {
 
 const BEARER = /^bearer /i;
 
-/** The session token of a request: a bearer token wins over the session cookie; `undefined` when there is neither. */
-export function requestToken(headers: Record<string, string>): RequestToken | undefined {
+/** The session token of a request: a bearer token wins over the session cookie named `cookieName`; `undefined` when there is neither. */
+export function requestToken(headers: Record<string, string>, cookieName: string = SECURE_SESSION_COOKIE): RequestToken | undefined {
   const auth = headers.authorization;
   if (auth && BEARER.test(auth)) return { token: auth.slice(7).trim(), source: "bearer" };
   for (const pair of (headers.cookie ?? "").split(";")) {
     const eq = pair.indexOf("=");
-    if (eq === -1 || pair.slice(0, eq).trim() !== SESSION_COOKIE) continue;
+    if (eq === -1 || pair.slice(0, eq).trim() !== cookieName) continue;
     const raw = pair.slice(eq + 1).trim();
     if (raw === "") continue;
     try {
@@ -39,14 +47,14 @@ function attributes(maxAgeSeconds: number, secure: boolean): string {
   return `Path=/; Max-Age=${maxAgeSeconds}; HttpOnly;${secure ? " Secure;" : ""} SameSite=Strict`;
 }
 
-/** The `set-cookie` value that hands a session token to a browser: `HttpOnly`, `SameSite=Strict`, `Path=/`, `Secure` unless turned off. */
+/** The `set-cookie` value that hands a session token to a browser: `HttpOnly`, `SameSite=Strict`, `Path=/`, and `Secure` with the `__Host-` name unless turned off. */
 export function sessionCookie(token: string, options: SessionCookieOptions): string {
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; ${attributes(options.maxAgeSeconds, options.secure)}`;
+  return `${sessionCookieName(options.secure)}=${encodeURIComponent(token)}; ${attributes(options.maxAgeSeconds, options.secure)}`;
 }
 
 /** The `set-cookie` value that removes the session cookie from a browser. */
 export function clearedSessionCookie(options: Pick<SessionCookieOptions, "secure">): string {
-  return `${SESSION_COOKIE}=; ${attributes(0, options.secure)}`;
+  return `${sessionCookieName(options.secure)}=; ${attributes(0, options.secure)}`;
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);

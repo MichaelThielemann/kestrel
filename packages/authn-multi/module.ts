@@ -3,7 +3,7 @@ import { AUTHN } from "@michaelthielemann/kestrel-contracts/authn";
 import { AUTHZ } from "@michaelthielemann/kestrel-contracts/authz";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import "@michaelthielemann/kestrel-contracts/verifiedUser";
-import { clearedSessionCookie, crossOriginRefusal, requestToken, sessionCookie } from "@michaelthielemann/kestrel-contracts/helpers/session";
+import { clearedSessionCookie, crossOriginRefusal, requestToken, sessionCookie, sessionCookieName } from "@michaelthielemann/kestrel-contracts/helpers/session";
 import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";
 import { customFailure } from "@michaelthielemann/kestrel/errors";
@@ -71,7 +71,7 @@ export default defineModule({
       return ok({ ...ctx, token: session.value.token, identity: session.value.identity, responseHeaders, result: session.value });
     },
     identifyUser: async (ctx: Context) => {
-      const found = requestToken(ctx.headers);
+      const found = requestToken(ctx.headers, sessionCookieName(authn.sessionCookie.secure));
       if (!found) return ok(ctx);
       const refused = found.source === "cookie" ? crossOriginRefusal(ctx.trigger, ctx.headers) : undefined;
       if (refused !== undefined) return ctx.fail("FORBIDDEN", refused);
@@ -81,7 +81,7 @@ export default defineModule({
       return ok(identity.value ? { ...ctx, token, identity: identity.value } : ctx);
     },
     requireUser: async (ctx: Context) => {
-      const found = requestToken(ctx.headers);
+      const found = requestToken(ctx.headers, sessionCookieName(authn.sessionCookie.secure));
       if (!found) return ctx.fail("UNAUTHENTICATED", "not authenticated");
       const refused = found.source === "cookie" ? crossOriginRefusal(ctx.trigger, ctx.headers) : undefined;
       if (refused !== undefined) return ctx.fail("FORBIDDEN", refused);

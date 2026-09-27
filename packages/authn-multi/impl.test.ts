@@ -146,7 +146,8 @@ describe("authn/multi", () => {
     expect(tokenFromHeaders({ authorization: "Bearer abc" })).toBe("abc");
     expect(tokenFromHeaders({ authorization: "bearer abc" })).toBe("abc");
     expect(tokenFromHeaders({ authorization: "BEARER abc" })).toBe("abc");
-    expect(tokenFromHeaders({ cookie: "x=1; kestrel_token=abc%20d" })).toBe("abc d");
+    expect(tokenFromHeaders({ cookie: "x=1; __Host-kestrel_token=abc%20d" })).toBe("abc d");
+    expect(tokenFromHeaders({ cookie: "kestrel_token=abc" })).toBeUndefined();
     expect(tokenFromHeaders({})).toBeUndefined();
   });
 

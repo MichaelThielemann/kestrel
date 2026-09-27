@@ -627,11 +627,14 @@ Net changes since 5.8.1.
   `415 UNSUPPORTED` before a pipeline runs, by the built-in server and by `kestrel-h3` alike. Send
   `content-type: application/json` with every JSON body.
 - `authn/single` and `authn/multi` set the session cookie themselves: `authn.login` answers with
-  `Set-Cookie: kestrel_token=…; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=<sessionTtlSeconds>`
-  and `authn.logout` removes it. A `POST`, `PUT`, `PATCH` or `DELETE` authenticated by that cookie
+  `Set-Cookie: __Host-kestrel_token=…; Path=/; Max-Age=<sessionTtlSeconds>; HttpOnly; Secure;
+  SameSite=Strict` and `authn.logout` removes it; a cookie named `kestrel_token` is no longer read, so
+  everyone signed in through a browser signs in once more. A `POST`, `PUT`, `PATCH` or `DELETE` authenticated by that cookie
   must come from the same origin (`Sec-Fetch-Site: same-origin`, or an `Origin` matching `Host`), or
   `authn.identifyUser`/`authn.requireUser` answer `403 FORBIDDEN`; bearer requests are unchanged. The
-  new config option `secureCookie` (default `true`) drops `Secure` for plain-HTTP development.
+  new config option `secureCookie` (default `true`) drops `Secure`, and with it the `__Host-` prefix
+  (the cookie is then `kestrel_token`), for development reached over plain HTTP from another host;
+  browsers accept the `Secure` cookie on `http://localhost`.
 - `authn.setPassword` refuses the caller's own account with 400; one's own password changes only
   through `authn.changePassword`, which needs the current one. The step now reads `identity?`.
 - A signed-in account without a configured role may only sign out and read its own identity. New step

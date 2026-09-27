@@ -1,6 +1,6 @@
 import { randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
 import type { Authn, AuthnError, Identity, Session } from "@michaelthielemann/kestrel-contracts/authn";
-import { requestToken, SESSION_COOKIE, type SessionCookieOptions } from "@michaelthielemann/kestrel-contracts/helpers/session";
+import { requestToken, SECURE_SESSION_COOKIE, type SessionCookieOptions } from "@michaelthielemann/kestrel-contracts/helpers/session";
 import { ok, type Result } from "@michaelthielemann/kestrel/result";
 
 export interface Config {
@@ -40,7 +40,7 @@ export async function verifyPasswordAsync(password: string, stored: string): Pro
   return timingSafeEqual(actual, expected);
 }
 
-export const TOKEN_COOKIE = SESSION_COOKIE;
+export const TOKEN_COOKIE = SECURE_SESSION_COOKIE;
 
 export function tokenFromHeaders(headers: Record<string, string>): string | undefined {
   return requestToken(headers)?.token;
