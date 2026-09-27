@@ -3370,6 +3370,24 @@
                     "type": "integer",
                     "exclusiveMinimum": 0,
                     "description": "With it, each further exceeded window doubles the block, up to this many seconds"
+                  },
+                  "field": {
+                    "type": "string",
+                    "enum": [
+                      "username",
+                      "email"
+                    ],
+                    "default": "username",
+                    "description": "For a username bucket: the body field that names the account, the same one the login reads"
+                  },
+                  "counts": {
+                    "type": "string",
+                    "enum": [
+                      "requests",
+                      "failures"
+                    ],
+                    "default": "requests",
+                    "description": "requests counts every request let through; failures counts only runs that fail after the check (400 or 401), and a successful run clears the key"
                   }
                 },
                 "required": [
@@ -3397,7 +3415,9 @@
               "login": {
                 "limit": 5,
                 "windowSeconds": 60,
-                "key": "ip"
+                "key": "ip",
+                "field": "username",
+                "counts": "requests"
               }
             },
             "redacted": false
@@ -6862,10 +6882,12 @@
           "type": "object",
           "properties": {
             "username": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 320
             },
             "email": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 320
             },
             "password": {
               "type": "string"
@@ -11103,15 +11125,18 @@
           "type": "object",
           "properties": {
             "username": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 320
             },
             "email": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 320
             }
           },
           "additionalProperties": true
         },
         "errors": {
+          "400": "an account name longer than 320 characters",
           "429": "too many requests"
         }
       }
@@ -19170,15 +19195,18 @@
               "type": "object",
               "properties": {
                 "username": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 320
                 },
                 "email": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 320
                 }
               },
               "additionalProperties": true
             },
             "errors": {
+              "400": "an account name longer than 320 characters",
               "429": "too many requests"
             }
           }
@@ -19200,10 +19228,12 @@
               "type": "object",
               "properties": {
                 "username": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 320
                 },
                 "email": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 320
                 },
                 "password": {
                   "type": "string"

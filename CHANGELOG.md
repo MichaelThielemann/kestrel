@@ -637,7 +637,7 @@ Net changes since 5.8.1.
 - A signed-in account without a configured role may only sign out and read its own identity. New step
   `authz.requireRole` (401 without an identity, 403 without a configured role); `authz-roles` fails boot
   for every pipeline in which a step declaring `security: "required"` (such as `authn.requireUser`) is not
-  followed by it, unless the new config option `rolelessPipelines` (default `["me", "logout"]`) names the
+  followed by it before the first step outside `authn.*`, `authz.*` and `ratelimit.*`, unless the new config option `rolelessPipelines` (default `["me", "logout"]`) names the
   pipeline. `kestrel upgrade`'s new `pipelines/require-role` inserts the step. On public pipelines such an
   account is served like an anonymous visitor.
 - `media.list` without `ids` and `media.listFolders` need the new `listPermission` (default `media.list`)
@@ -1097,11 +1097,15 @@ Net changes since 5.8.1.
   carries `ip`. `audit-persistence` stores `ip` on every entry, takes the event's `id` into `params.id`,
   and records security entries on its own: `auth.failed` for a failed login or password check (with the
   attempted username), `access.denied` for a 403 and `access.rateLimited` for a 429, each with the client
-  address, pipeline, step and code. New config `securityEvents` (default `true`) and `failedSteps`.
-  `authn.login` answers a failed login with `details.username`.
-- `ratelimit-memory` buckets take a `key` — `ip` (default), `username` (the body's `username` or
-  `email`, normalized) or `identity` (the signed-in user) — and an optional `maxBlockSeconds` that
-  doubles the block after each further exceeded window up to that bound. An `ip` bucket counts an IPv6
+  address, pipeline, step and code; denied and rate-limited entries at most once a minute per address,
+  identity, pipeline and step, with `params.suppressed`. New config `securityEvents` (default `true`) and
+  `failedSteps`. `authn.login` answers a failed login with `details.username`; a username or email over
+  320 characters is refused with 400 at every login and at `mfa.startSetup`.
+- `ratelimit-memory` buckets take a `key` — `ip` (default), `username` (the body field `field` names,
+  `username` or `email`, normalized and kept as a digest; a name over 320 characters is refused with 400)
+  or `identity` (the signed-in user) — an optional `maxBlockSeconds` that doubles the block after each
+  further exceeded window up to that bound, and `counts: "failures"`, which counts only runs that fail
+  after the check and clears the key on a success. An `ip` bucket counts an IPv6
   address by its /64 and an IPv4-mapped address as its IPv4 address. `clientKey` and `usernameKey` are
   exported.
 - New package `@michaelthielemann/kestrel-mfa-totp` (module `mfa/totp`): a second factor for any `authn@1`

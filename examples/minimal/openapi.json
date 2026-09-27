@@ -7588,7 +7588,7 @@
             }
           },
           "400": {
-            "description": "invalid body",
+            "description": "an account name longer than 320 characters",
             "content": {
               "application/json": {
                 "schema": {
@@ -7662,10 +7662,12 @@
                 "type": "object",
                 "properties": {
                   "username": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 320
                   },
                   "email": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 320
                   },
                   "password": {
                     "type": "string"
