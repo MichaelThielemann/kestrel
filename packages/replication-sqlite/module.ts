@@ -54,9 +54,9 @@ export default defineModule({
   async teardown(r) {
     try {
       const result = await r.sync();
-      if (isErr(result)) r.logger.error("replication/sqlite: failed to ship pending WAL frames on teardown; pending frames stay in the local WAL and ship on the next sync", { error: result.error.message });
+      if (isErr(result)) r.logger.error("replication/sqlite: failed to ship pending WAL frames on teardown; the replica lacks them until the next start takes a new snapshot", { error: result.error.message });
     } catch (err) {
-      r.logger.error("replication/sqlite: failed to ship pending WAL frames on teardown; pending frames stay in the local WAL and ship on the next sync", { error: err instanceof Error ? err.message : String(err) });
+      r.logger.error("replication/sqlite: failed to ship pending WAL frames on teardown; the replica lacks them until the next start takes a new snapshot", { error: err instanceof Error ? err.message : String(err) });
     }
     r.close();
   },

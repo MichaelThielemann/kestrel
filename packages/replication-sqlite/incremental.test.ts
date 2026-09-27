@@ -2,6 +2,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync } from "nod
 import type * as FsModule from "node:fs";
 import type * as FsPromisesModule from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { Worker } from "node:worker_threads";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -105,7 +106,7 @@ function setup(overrides: { checkpointBytes?: number; checkpointSeconds?: number
   const file = join(dir, "live.db");
   const app = new DatabaseSync(file);
   apps.push(app);
-  app.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+  app.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
   let t = Date.UTC(2026, 0, 1);
   const clock = { now: () => t, advance: (ms: number) => { t += ms; } };
   const config = { file, prefix: "replica/", checkpointBytes: 1024 * 1024 * 1024, checkpointSeconds: 100_000, snapshotSeconds: 24 * 3600, retentionSeconds: 48 * 3600, restoreOnStart: true, ...overrides };
@@ -253,4 +254,83 @@ describe("replication/sqlite incremental WAL shipping", () => {
     expect((await repl.status()).lastCheckpointAt).not.toBeNull();
     for (const p of points) expect(await restored({ at: p.at })).toMatchObject({ n: p.n, s: p.s, check: "ok" });
   });
+
+  it("a sync called while another is shipping runs once more afterwards, so later commits reach the replica", async () => {
+    const blobs = memoryBlobs();
+    const put = blobs.put.bind(blobs);
+    let release: () => void = () => {};
+    let hold = false;
+    let entered: () => void = () => {};
+    const inPut = new Promise<void>((r) => { entered = r; });
+    blobs.put = async (key, data, options) => {
+      if (hold && key.includes("/wal/")) {
+        hold = false;
+        entered();
+        await new Promise<void>((r) => { release = r; });
+      }
+      return put(key, data, options);
+    };
+    const { repl, insert, restored, live } = setup({}, {}, blobs);
+    insert(5);
+    expectOk(await repl.sync());
+    insert(3);
+    hold = true;
+    const running = repl.sync();
+    await inPut;
+    insert(4);
+    const final = repl.sync();
+    release();
+    expectOk(await running);
+    expectOk(await final);
+    expect(live().n).toBe(12);
+    expect(await restored()).toMatchObject({ ...live(), check: "ok" });
+  });
+
+  it("frames committed by a writer on another thread are never checkpointed away unshipped", async () => {
+    const blobs = memoryBlobs();
+    const put = blobs.put.bind(blobs);
+    blobs.put = async (key, data, options) => {
+      await sleep(1);
+      return put(key, data, options);
+    };
+    const { file, repl, insert, restored, live } = setup({ checkpointBytes: 64 * 1024, checkpointSeconds: 1 }, { checkIntervalMs: 2 }, blobs);
+    insert(10);
+    expectOk(await repl.sync());
+    const source = `
+      const { DatabaseSync } = require("node:sqlite");
+      const { workerData, parentPort } = require("node:worker_threads");
+      const db = new DatabaseSync(workerData.file);
+      db.exec("PRAGMA busy_timeout = 5000");
+      const stmt = db.prepare("INSERT INTO t (v) VALUES (?)");
+      const pause = new Int32Array(new SharedArrayBuffer(4));
+      const until = Date.now() + workerData.ms;
+      let i = 0;
+      while (Date.now() < until) {
+        db.exec("BEGIN IMMEDIATE");
+        for (let k = 0; k < 5; k++) stmt.run(String(i++).padEnd(3000, "w"));
+        db.exec("COMMIT");
+        Atomics.wait(pause, 0, 0, 1);
+      }
+      db.close();
+      parentPort.postMessage(i);
+    `;
+    const worker = new Worker(source, { eval: true, workerData: { file, ms: 800 } });
+    const done = new Promise<number>((resolve, reject) => {
+      worker.once("message", (n: number) => resolve(n));
+      worker.once("error", reject);
+    });
+    let finished = false;
+    void done.then(() => { finished = true; });
+    let checkpoints = 0;
+    while (!finished) {
+      insert(2, 500);
+      if (expectOk(await repl.sync()).checkpointed) checkpoints += 1;
+      await sleep(10);
+    }
+    expect(await done).toBeGreaterThan(0);
+    await worker.terminate();
+    expectOk(await repl.sync());
+    expect(checkpoints + ((await repl.status()).lastCheckpointAt === null ? 0 : 1)).toBeGreaterThan(0);
+    expect(await restored()).toMatchObject({ ...live(), check: "ok" });
+  }, 30_000);
 });

@@ -204,10 +204,11 @@ describe("replication/sqlite", () => {
     insert(10);
     const r = expectOk(await repl.sync());
     expect(r.checkpointed).toBe(true);
-    expect(readFileSync(`${file}-wal`).byteLength).toBe(0);
+    const walAfterCheckpoint = readFileSync(`${file}-wal`).byteLength;
     clock.advance(2_000);
     insert(10);
     expectOk(await repl.sync());
+    expect(readFileSync(`${file}-wal`).byteLength).toBeLessThanOrEqual(walAfterCheckpoint);
     const segments = [...blobs.blobs.keys()].filter((k) => k.includes("/wal/")).sort();
     expect(segments.length).toBeGreaterThanOrEqual(2);
     expect(new Set(segments.map((k) => /wal\/(\d+)-/.exec(k)?.[1])).size).toBeGreaterThanOrEqual(2);

@@ -145,6 +145,8 @@ function readHead(bytes: Uint8Array, length: number): WalHead | null {
   return header && checksum ? { headerBytes: bytes.slice(0, WAL_HEADER_SIZE), header, checksum } : null;
 }
 
+const isBusy = (e: unknown): boolean => typeof e === "object" && e !== null && "errcode" in e && typeof e.errcode === "number" && (e.errcode & 0xff) === 5;
+
 const chunkBytes = (header: WalHeader): number => Math.max(1, Math.floor(READ_CHUNK_BYTES / frameSize(header.pageSize))) * frameSize(header.pageSize);
 
 export function createReplicationSqlite(config: Config, blobs: Blobstore, now: () => number = Date.now, options: ReplicationOptions = {}): Replication {
@@ -161,6 +163,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     conn.exec("COMMIT");
   };
   holdRead();
+  const writeLock = new DatabaseSync(file);
+  const pageSize = boundaryCast<{ page_size: number }>(writeLock.prepare("PRAGMA page_size").get(), "host").page_size;
 
   let generation: string | null = null;
   let lineage = 0;
@@ -174,6 +178,10 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   let pending: Array<{ key: string; data: Uint8Array }> = [];
 
   const walBytes = (): number => (existsSync(walFile) ? statSync(walFile).size : 0);
+  const walContentBytes = (): number => {
+    const row = boundaryCast<{ log: number } | undefined>(writeLock.prepare("PRAGMA wal_checkpoint(PASSIVE)").get(), "host");
+    return row === undefined || row.log <= 0 ? 0 : WAL_HEADER_SIZE + row.log * frameSize(pageSize);
+  };
   const segmentKey = (currentGeneration: string, at: number): string => `${config.prefix}gen/${currentGeneration}/wal/${pad(lineage, 6)}-${pad(seq, 6)}-${stamp(at)}.wal`;
 
   const continueFrom = (head: WalHead): WalCursor => {
@@ -288,14 +296,25 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
   const checkpoint = async (): Promise<Result<{ done: boolean; bytes: number; frames: number }, BlobstoreError>> => {
     const currentGeneration = generation;
     if (currentGeneration === null) return ok({ done: false, bytes: 0, frames: 0 });
-    const tail = readCommittedSync(continueFrom);
-    let done: boolean;
-    release();
     try {
-      const row = boundaryCast<{ busy: number } | undefined>(conn.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get(), "host");
-      done = row !== undefined && row.busy === 0;
+      writeLock.exec("BEGIN IMMEDIATE");
+    } catch (e) {
+      if (isBusy(e)) return ok({ done: false, bytes: 0, frames: 0 });
+      throw e;
+    }
+    let tail: ReturnType<typeof readCommittedSync>;
+    let done: boolean;
+    try {
+      tail = readCommittedSync(continueFrom);
+      release();
+      try {
+        const row = boundaryCast<{ busy: number; log: number; checkpointed: number } | undefined>(conn.prepare("PRAGMA wal_checkpoint(PASSIVE)").get(), "host");
+        done = row !== undefined && row.busy === 0 && row.log === row.checkpointed;
+      } finally {
+        holdRead();
+      }
     } finally {
-      holdRead();
+      writeLock.exec("ROLLBACK");
     }
     if (tail) {
       if (tail.frames > 0) {
@@ -304,10 +323,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       }
       cursor = { ...tail.at, frame: tail.at.frame + tail.frames, checksum: tail.checksum };
     }
-    if (done) {
-      lastCheckpointAt = now();
-      cursor = null;
-    }
+    if (done) lastCheckpointAt = now();
     const flushed = await flushPending();
     if (isErr(flushed)) return flushed;
     return ok({ done, bytes: tail && tail.frames > 0 ? tail.segment.byteLength : 0, frames: tail?.frames ?? 0 });
@@ -331,7 +347,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     await checkpoint();
   };
   const timer = setInterval(() => {
-    if (closed || queued > 0 || generation === null || walBytes() < config.checkpointBytes) return;
+    if (closed || queued > 0 || generation === null) return;
+    if (walContentBytes() < config.checkpointBytes) return;
     exclusive(maintain).catch(() => undefined);
   }, options.checkIntervalMs ?? 1000);
   timer.unref();
@@ -356,7 +373,8 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     return ok(removed);
   };
 
-  const runSync = async (): Promise<Result<{ generation: string; shippedBytes: number; frames: number; checkpointed: boolean; pruned: number }, BlobstoreError>> => {
+  const runSync = async (run: { started: boolean }): Promise<Result<{ generation: string; shippedBytes: number; frames: number; checkpointed: boolean; pruned: number }, BlobstoreError>> => {
+    run.started = true;
     if (generation === null) {
       const existingList = await listPoints(blobs, config.prefix);
       if (isErr(existingList)) return existingList;
@@ -373,7 +391,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     let frames = shipped.value.frames;
     let checkpointed = false;
     const due = lastCheckpointAt === null ? t : t - lastCheckpointAt;
-    if (walBytes() >= config.checkpointBytes || due >= config.checkpointSeconds * 1000) {
+    if (walContentBytes() >= config.checkpointBytes || due >= config.checkpointSeconds * 1000) {
       const result = await checkpoint();
       if (isErr(result)) return result;
       checkpointed = result.value.done;
@@ -390,14 +408,28 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     if (generation === null) throw new Error("replication/sqlite: sync ended without a generation");
     return ok({ generation, shippedBytes, frames, checkpointed, pruned: pruned.value });
   };
-  let inflightSync: ReturnType<typeof runSync> | null = null;
+  let current: { run: { started: boolean }; result: ReturnType<typeof runSync> } | null = null;
+  let followUp: ReturnType<typeof runSync> | null = null;
+  const startSync = (): ReturnType<typeof runSync> => {
+    const run = { started: false };
+    const result = exclusive(() => runSync(run)).finally(() => {
+      if (current?.run === run) current = null;
+    });
+    current = { run, result };
+    return result;
+  };
 
   return {
     sync() {
-      inflightSync ??= exclusive(runSync).finally(() => {
-        inflightSync = null;
+      if (current && !current.run.started) return current.result;
+      if (followUp) return followUp;
+      if (!current) return startSync();
+      const next = current.result.catch(() => undefined).then(() => {
+        followUp = null;
+        return startSync();
       });
-      return inflightSync;
+      followUp = next;
+      return next;
     },
     snapshot: () =>
       exclusive(async () => {
@@ -432,6 +464,7 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
       } catch {
       }
       conn.close();
+      writeLock.close();
     },
   };
 }
