@@ -1,12 +1,18 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { Authn, AuthnError, Identity, Session } from "@michaelthielemann/kestrel-contracts/authn";
+import { requestToken, SESSION_COOKIE, type SessionCookieOptions } from "@michaelthielemann/kestrel-contracts/helpers/session";
 import { ok, type Result } from "@michaelthielemann/kestrel/result";
 
 export interface Config {
   username: string;
   passwordHash: string;
   sessionTtlSeconds: number;
+  secureCookie?: boolean | undefined;
   roles: string[];
+}
+
+export interface AuthnSingle extends Authn {
+  readonly sessionCookie: SessionCookieOptions;
 }
 
 const KEY_LENGTH = 64;
@@ -24,26 +30,19 @@ export function verifyPassword(password: string, stored: string): boolean {
   return timingSafeEqual(actual, expected);
 }
 
-export const TOKEN_COOKIE = "kestrel_token";
-
-const BEARER = /^bearer /i;
+export const TOKEN_COOKIE = SESSION_COOKIE;
 
 export function tokenFromHeaders(headers: Record<string, string>): string | undefined {
-  const auth = headers.authorization;
-  if (auth && BEARER.test(auth)) return auth.slice(7).trim();
-  for (const pair of (headers.cookie ?? "").split(";")) {
-    const [k, v] = pair.trim().split("=");
-    if (k === TOKEN_COOKIE && v) return decodeURIComponent(v);
-  }
-  return undefined;
+  return requestToken(headers)?.token;
 }
 
-export function createAuthnSingle(config: Config, now: () => number = Date.now): Authn {
+export function createAuthnSingle(config: Config, now: () => number = Date.now): AuthnSingle {
   verifyPassword("", config.passwordHash);
   const sessions = new Map<string, number>();
   const identity = (): Identity => ({ id: config.username, claims: { roles: [...config.roles] } });
 
   return {
+    sessionCookie: { maxAgeSeconds: config.sessionTtlSeconds, secure: config.secureCookie ?? true },
     async login(credentials): Promise<Result<Session | null, AuthnError>> {
       const { username, password } = credentials;
       if (username !== config.username || typeof password !== "string" || !verifyPassword(password, config.passwordHash)) return ok(null);

@@ -26,7 +26,7 @@ authnStepsContractTests(async () => {
   const { instance } = await boot();
   const credentials = { username: "alice", password: "long-enough" };
   await runPipeline(definePipeline({ name: "createUser", steps: ["authn.createUser"] }), { body: credentials }, { modules: [{ module, instance }] });
-  return { modules: [{ module, instance }], credentials, writesByStep: writesByStepOf("authn", module.describe!(instance), AUTHN_STEP_KEYS) };
+  return { modules: [{ module, instance }], credentials, sessionTtlSeconds: 86400, writesByStep: writesByStepOf("authn", module.describe!(instance), AUTHN_STEP_KEYS) };
 });
 
 function makeDeps(db: ReturnType<typeof createFakePersistence>): Deps {

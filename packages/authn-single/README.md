@@ -7,13 +7,20 @@ client-visible failure is `UNAUTHENTICATED` (401). `authn.loadIdentity` and `aut
 pipeline that runs `authn.requireUser` first (boot's dataflow check enforces it) and answer
 `UNAUTHENTICATED` when identity or token is missing anyway.
 
+`authn.login` answers the token in the body and sets it as the `kestrel_token` cookie (`HttpOnly`,
+`Secure`, `SameSite=Strict`, `Path=/`, `Max-Age` = `sessionTtlSeconds`); `authn.logout` removes it.
+`secureCookie: false` drops `Secure`, for signing in over plain HTTP during development only. A
+`POST`/`PUT`/`PATCH`/`DELETE` authenticated by the cookie rather than a bearer token must come from
+the same origin (`Sec-Fetch-Site: same-origin`, or an `Origin` matching `Host`); otherwise
+`authn.identifyUser` and `authn.requireUser` answer `FORBIDDEN` (403).
+
 | Step | reads | writes | errors |
 |---|---|---|---|
-| `authn.login` | – | `token`, `identity`, `result` | `UNAUTHENTICATED` |
-| `authn.identifyUser` | – | `token?`, `identity?` | – |
-| `authn.requireUser` | – | `token`, `identity` | `UNAUTHENTICATED` |
+| `authn.login` | – | `token`, `identity`, `responseHeaders`, `result` | `UNAUTHENTICATED` |
+| `authn.identifyUser` | – | `token?`, `identity?` | `FORBIDDEN` |
+| `authn.requireUser` | – | `token`, `identity` | `UNAUTHENTICATED`, `FORBIDDEN` |
 | `authn.loadIdentity` | `identity` | `result` | `UNAUTHENTICATED` |
-| `authn.logout` | `token` | `result` | `UNAUTHENTICATED` |
+| `authn.logout` | `token` | `responseHeaders`, `result` | `UNAUTHENTICATED` |
 
 Generate a hash: `node -e "import('@michaelthielemann/kestrel-authn-single/impl').then(m => console.log(m.hashPassword(process.argv[1])))" -- <password>`
 Not included: multiple users, persistence of sessions across restarts, password change.
@@ -27,14 +34,15 @@ Not included: multiple users, persistence of sessions across restarts, password 
 | `username` | string | yes | – |
 | `passwordHash` | string | yes | *(secret)* |
 | `sessionTtlSeconds` | integer | no | `86400` |
+| `secureCookie` | boolean | no | `true` |
 | `roles` | array | no | `[]` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `authn.login` | Log in with credentials | – | `token`, `identity`, `result` | { username: string, password: string } | { token: string, identity: object, … } | 401 invalid credentials | portable | no |
-| `authn.identifyUser` | Identify the caller if a valid token is present | – | `token?`, `identity?` | – | – | – | portable | no |
-| `authn.requireUser` | Require a valid session | – | `token`, `identity` | – | – | 401 not authenticated | portable | no |
+| `authn.login` | Log in with credentials; the token comes back in the body and in an HttpOnly session cookie | – | `token`, `identity`, `responseHeaders`, `result` | { username: string, password: string } | { token: string, identity: object, … } | 401 invalid credentials | portable | no |
+| `authn.identifyUser` | Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin | – | `token?`, `identity?` | – | – | 403 a state-changing request authenticated by the session cookie is not from the same origin | portable | no |
+| `authn.requireUser` | Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin | – | `token`, `identity` | – | – | 401 not authenticated; 403 a state-changing request authenticated by the session cookie is not from the same origin | portable | no |
 | `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated | portable | no |
-| `authn.logout` | End the current session | `token` | `result` | – | { ok: boolean, … } | 401 not authenticated | portable | no |
+| `authn.logout` | End the current session and remove the session cookie | `token` | `responseHeaders`, `result` | – | { ok: boolean, … } | 401 not authenticated | portable | no |
 
 <!-- kestrel-docs:end -->

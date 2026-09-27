@@ -11,7 +11,7 @@ import module, { configSchema } from "./module.ts";
 
 authnStepsContractTests(async () => {
   const instance = await boot();
-  return { modules: [{ module, instance }], credentials: { username: "admin", password: "secret" }, writesByStep: writesByStepOf("authn", module.describe!(instance), AUTHN_STEP_KEYS) };
+  return { modules: [{ module, instance }], credentials: { username: "admin", password: "secret" }, sessionTtlSeconds: 60, writesByStep: writesByStepOf("authn", module.describe!(instance), AUTHN_STEP_KEYS) };
 });
 
 const deps: Deps = {

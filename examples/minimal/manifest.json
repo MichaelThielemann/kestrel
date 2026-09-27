@@ -891,6 +891,11 @@
               "exclusiveMinimum": 0,
               "default": 86400
             },
+            "secureCookie": {
+              "type": "boolean",
+              "default": true,
+              "description": "Mark the session cookie Secure; turn off only to sign in over plain HTTP during development"
+            },
             "adminPermission": {
               "type": "string",
               "minLength": 1,
@@ -959,6 +964,17 @@
             "value": 86400,
             "redacted": false,
             "default": 86400
+          },
+          {
+            "path": "secureCookie",
+            "type": "boolean",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": true,
+            "redacted": false,
+            "default": true
           },
           {
             "path": "adminPermission",
@@ -6694,11 +6710,12 @@
       "module": "authn/multi",
       "factory": false,
       "description": {
-        "summary": "Log in with credentials",
+        "summary": "Log in with credentials; the token comes back in the body and in an HttpOnly session cookie",
         "reads": [],
         "writes": [
           "token",
           "identity",
+          "responseHeaders",
           "result"
         ],
         "input": {
@@ -6757,13 +6774,16 @@
       "module": "authn/multi",
       "factory": false,
       "description": {
-        "summary": "Identify the caller if a valid token is present",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin",
         "reads": [],
         "writes": [
           "token?",
           "identity?"
         ],
-        "security": "optional"
+        "security": "optional",
+        "errors": {
+          "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+        }
       }
     },
     {
@@ -6771,7 +6791,7 @@
       "module": "authn/multi",
       "factory": false,
       "description": {
-        "summary": "Require a valid session",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
         "reads": [],
         "writes": [
           "token",
@@ -6779,7 +6799,8 @@
         ],
         "security": "required",
         "errors": {
-          "401": "not authenticated"
+          "401": "not authenticated",
+          "403": "a state-changing request authenticated by the session cookie is not from the same origin"
         }
       }
     },
@@ -6821,11 +6842,12 @@
       "module": "authn/multi",
       "factory": false,
       "description": {
-        "summary": "End the current session",
+        "summary": "End the current session and remove the session cookie",
         "reads": [
           "token"
         ],
         "writes": [
+          "responseHeaders",
           "result"
         ],
         "output": {
@@ -11690,7 +11712,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -11698,7 +11720,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -11793,7 +11816,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -11801,7 +11824,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -11944,7 +11968,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -11952,7 +11976,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -12057,7 +12082,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -12065,7 +12090,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -12165,7 +12191,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -12173,7 +12199,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -12300,7 +12327,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -12308,7 +12335,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -12426,7 +12454,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -12434,7 +12462,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -12505,7 +12534,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -12513,7 +12542,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -12989,7 +13019,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -12997,7 +13027,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -13207,7 +13238,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -13215,7 +13246,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -13368,7 +13400,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -13376,7 +13408,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -13559,7 +13592,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -13567,7 +13600,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -13800,7 +13834,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -13808,7 +13842,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -14067,7 +14102,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -14075,7 +14110,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -14422,7 +14458,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -14430,7 +14466,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -14617,13 +14654,16 @@
           "name": "authn.identifyUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Identify the caller if a valid token is present",
+            "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token?",
               "identity?"
             ],
-            "security": "optional"
+            "security": "optional",
+            "errors": {
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
           }
         },
         {
@@ -14697,7 +14737,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -14705,7 +14745,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -14780,7 +14821,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -14788,7 +14829,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -15115,13 +15157,16 @@
           "name": "authn.identifyUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Identify the caller if a valid token is present",
+            "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token?",
               "identity?"
             ],
-            "security": "optional"
+            "security": "optional",
+            "errors": {
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
           }
         },
         {
@@ -15413,13 +15458,16 @@
           "name": "authn.identifyUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Identify the caller if a valid token is present",
+            "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token?",
               "identity?"
             ],
-            "security": "optional"
+            "security": "optional",
+            "errors": {
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
           }
         },
         {
@@ -15513,13 +15561,16 @@
           "name": "authn.identifyUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Identify the caller if a valid token is present",
+            "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token?",
               "identity?"
             ],
-            "security": "optional"
+            "security": "optional",
+            "errors": {
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
           }
         },
         {
@@ -15664,7 +15715,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -15672,7 +15723,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -15748,7 +15800,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -15756,7 +15808,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -16026,7 +16079,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -16034,7 +16087,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -16614,7 +16668,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -16622,7 +16676,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -16905,7 +16960,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -16913,7 +16968,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -17068,7 +17124,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -17076,7 +17132,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -17297,7 +17354,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -17305,7 +17362,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -17380,7 +17438,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -17388,7 +17446,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -17486,13 +17545,16 @@
           "name": "authn.identifyUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Identify the caller if a valid token is present",
+            "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token?",
               "identity?"
             ],
-            "security": "optional"
+            "security": "optional",
+            "errors": {
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
           }
         },
         {
@@ -17831,7 +17893,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -17839,7 +17901,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -17903,7 +17966,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -17911,7 +17974,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -18005,13 +18069,16 @@
           "name": "authn.identifyUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Identify the caller if a valid token is present",
+            "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token?",
               "identity?"
             ],
-            "security": "optional"
+            "security": "optional",
+            "errors": {
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
           }
         },
         {
@@ -18237,7 +18304,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -18245,7 +18312,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -18300,7 +18368,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -18308,7 +18376,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -18395,11 +18464,12 @@
           "name": "authn.login",
           "module": "authn/multi",
           "description": {
-            "summary": "Log in with credentials",
+            "summary": "Log in with credentials; the token comes back in the body and in an HttpOnly session cookie",
             "reads": [],
             "writes": [
               "token",
               "identity",
+              "responseHeaders",
               "result"
             ],
             "input": {
@@ -18557,7 +18627,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -18565,7 +18635,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -18574,11 +18645,12 @@
           "name": "authn.logout",
           "module": "authn/multi",
           "description": {
-            "summary": "End the current session",
+            "summary": "End the current session and remove the session cookie",
             "reads": [
               "token"
             ],
             "writes": [
+              "responseHeaders",
               "result"
             ],
             "output": {
@@ -18701,7 +18773,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -18709,7 +18781,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -18801,7 +18874,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -18809,7 +18882,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -18886,7 +18960,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -18894,7 +18968,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -19022,7 +19097,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -19030,7 +19105,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -19159,7 +19235,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -19167,7 +19243,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -19244,7 +19321,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -19252,7 +19329,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -19335,7 +19413,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -19343,7 +19421,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -19514,7 +19593,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -19522,7 +19601,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -19695,7 +19775,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -19703,7 +19783,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -20003,7 +20084,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -20011,7 +20092,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -20223,7 +20305,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -20231,7 +20313,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -20338,7 +20421,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -20346,7 +20429,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -20609,7 +20693,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -20617,7 +20701,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -20813,13 +20898,16 @@
           "name": "authn.identifyUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Identify the caller if a valid token is present",
+            "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token?",
               "identity?"
             ],
-            "security": "optional"
+            "security": "optional",
+            "errors": {
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
           }
         },
         {
@@ -21132,7 +21220,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -21140,7 +21228,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -21196,7 +21285,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -21204,7 +21293,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -21454,7 +21544,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -21462,7 +21552,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -21518,7 +21609,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -21526,7 +21617,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -21814,7 +21906,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -21822,7 +21914,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -21905,7 +21998,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -21913,7 +22006,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -22066,7 +22160,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -22074,7 +22168,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -22229,7 +22324,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -22237,7 +22332,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -22308,7 +22404,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -22316,7 +22412,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -22403,7 +22500,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -22411,7 +22508,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -22467,7 +22565,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -22475,7 +22573,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -22570,13 +22669,16 @@
           "name": "authn.identifyUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Identify the caller if a valid token is present",
+            "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token?",
               "identity?"
             ],
-            "security": "optional"
+            "security": "optional",
+            "errors": {
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
           }
         },
         {
@@ -22888,7 +22990,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -22896,7 +22998,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -23618,7 +23721,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -23626,7 +23729,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -23688,7 +23792,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -23696,7 +23800,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -23832,7 +23937,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -23840,7 +23945,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -24002,13 +24108,16 @@
           "name": "authn.identifyUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Identify the caller if a valid token is present",
+            "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token?",
               "identity?"
             ],
-            "security": "optional"
+            "security": "optional",
+            "errors": {
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
           }
         },
         {
@@ -24085,13 +24194,16 @@
           "name": "authn.identifyUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Identify the caller if a valid token is present",
+            "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token?",
               "identity?"
             ],
-            "security": "optional"
+            "security": "optional",
+            "errors": {
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
           }
         },
         {
@@ -24167,7 +24279,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -24175,7 +24287,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -24245,7 +24358,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -24253,7 +24366,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -24454,7 +24568,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -24462,7 +24576,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -24803,7 +24918,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -24811,7 +24926,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -25039,7 +25155,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -25047,7 +25163,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -25358,7 +25475,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -25366,7 +25483,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -25860,7 +25978,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -25868,7 +25986,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },
@@ -26074,7 +26193,7 @@
           "name": "authn.requireUser",
           "module": "authn/multi",
           "description": {
-            "summary": "Require a valid session",
+            "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin",
             "reads": [],
             "writes": [
               "token",
@@ -26082,7 +26201,8 @@
             ],
             "security": "required",
             "errors": {
-              "401": "not authenticated"
+              "401": "not authenticated",
+              "403": "a state-changing request authenticated by the session cookie is not from the same origin"
             }
           }
         },

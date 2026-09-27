@@ -3,6 +3,7 @@ import type { Authn, AuthnError, Identity } from "@michaelthielemann/kestrel-con
 import type { Authz } from "@michaelthielemann/kestrel-contracts/authz";
 import { customFailure, err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
 import type { Document, Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
+import { requestToken, type SessionCookieOptions } from "@michaelthielemann/kestrel-contracts/helpers/session";
 
 export const USERS = "authn_users";
 export const SESSIONS = "authn_sessions";
@@ -11,6 +12,7 @@ export interface Config {
   identifier: "username" | "email";
   minPasswordLength: number;
   sessionTtlSeconds: number;
+  secureCookie?: boolean | undefined;
   adminPermission: string;
   bootstrap?: { username: string; passwordHash: string; roles: string[] } | undefined;
 }
@@ -54,8 +56,6 @@ export function verifyPassword(password: string, stored: string): boolean {
   return timingSafeEqual(scryptSync(password, Buffer.from(saltHex, "hex"), expected.length), expected);
 }
 
-const BEARER = /^bearer /i;
-
 const TOKEN_DIGEST = /^[A-Za-z0-9_-]{43}$/;
 
 function sessionId(token: string): string {
@@ -63,13 +63,7 @@ function sessionId(token: string): string {
 }
 
 export function tokenFromHeaders(headers: Record<string, string>): string | undefined {
-  const auth = headers.authorization;
-  if (auth && BEARER.test(auth)) return auth.slice(7).trim();
-  for (const pair of (headers.cookie ?? "").split(";")) {
-    const [k, v] = pair.trim().split("=");
-    if (k === "kestrel_token" && v) return decodeURIComponent(v);
-  }
-  return undefined;
+  return requestToken(headers)?.token;
 }
 
 export interface UserPatch {
@@ -78,6 +72,7 @@ export interface UserPatch {
 }
 
 export interface AuthnMulti extends Authn {
+  readonly sessionCookie: SessionCookieOptions;
   createUser(input: { username: string; password: string; roles?: string[] }): Promise<Result<PublicUser, AuthnMultiError>>;
   listUsers(): Promise<Result<PublicUser[], AuthnMultiError>>;
   getUser(id: string): Promise<Result<PublicUser | null, AuthnMultiError>>;
@@ -185,6 +180,7 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
   }
 
   return {
+    sessionCookie: { maxAgeSeconds: config.sessionTtlSeconds, secure: config.secureCookie ?? true },
     async login(credentials) {
       const username = credentials[config.identifier];
       const password = credentials.password;

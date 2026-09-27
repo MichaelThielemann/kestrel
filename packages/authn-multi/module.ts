@@ -3,10 +3,11 @@ import { AUTHN } from "@michaelthielemann/kestrel-contracts/authn";
 import { AUTHZ } from "@michaelthielemann/kestrel-contracts/authz";
 import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import "@michaelthielemann/kestrel-contracts/verifiedUser";
+import { clearedSessionCookie, crossOriginRefusal, requestToken, sessionCookie } from "@michaelthielemann/kestrel-contracts/helpers/session";
 import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
-import { createAuthnMulti, tokenFromHeaders, type AuthnMulti } from "./impl.ts";
+import { createAuthnMulti, type AuthnMulti } from "./impl.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -27,6 +28,7 @@ export const configSchema = z
     identifier: z.enum(["username", "email"]).default("username"),
     minPasswordLength: z.number().int().min(8).default(12),
     sessionTtlSeconds: z.number().int().positive().default(86400),
+    secureCookie: z.boolean().default(true).describe("Mark the session cookie Secure; turn off only to sign in over plain HTTP during development"),
     adminPermission: z.string().min(1).default("users.manage").describe("The permission that makes a user an admin; the last active holder of it cannot be deactivated, deleted or stripped of it"),
     bootstrap: z.object({ username: z.string().min(1), passwordHash: z.string().startsWith("scrypt$").describe("secret"), roles: z.array(z.string()).default([]) }).strict().optional(),
   })
@@ -56,18 +58,25 @@ export default defineModule({
       const session = await authn.login(credentials(ctx.payload));
       if (isErr(session)) return ctx.fail(session.error);
       if (!session.value) return ctx.fail("UNAUTHENTICATED", "invalid credentials");
-      return ok({ ...ctx, token: session.value.token, identity: session.value.identity, result: session.value });
+      const responseHeaders = { "set-cookie": sessionCookie(session.value.token, authn.sessionCookie) };
+      return ok({ ...ctx, token: session.value.token, identity: session.value.identity, responseHeaders, result: session.value });
     },
     identifyUser: async (ctx: Context) => {
-      const token = tokenFromHeaders(ctx.headers);
-      if (!token) return ok(ctx);
+      const found = requestToken(ctx.headers);
+      if (!found) return ok(ctx);
+      const refused = found.source === "cookie" ? crossOriginRefusal(ctx.trigger, ctx.headers) : undefined;
+      if (refused !== undefined) return ctx.fail("FORBIDDEN", refused);
+      const token = found.token;
       const identity = await authn.resolve(token);
       if (isErr(identity)) return ctx.fail(identity.error);
       return ok(identity.value ? { ...ctx, token, identity: identity.value } : ctx);
     },
     requireUser: async (ctx: Context) => {
-      const token = tokenFromHeaders(ctx.headers);
-      if (!token) return ctx.fail("UNAUTHENTICATED", "not authenticated");
+      const found = requestToken(ctx.headers);
+      if (!found) return ctx.fail("UNAUTHENTICATED", "not authenticated");
+      const refused = found.source === "cookie" ? crossOriginRefusal(ctx.trigger, ctx.headers) : undefined;
+      if (refused !== undefined) return ctx.fail("FORBIDDEN", refused);
+      const token = found.token;
       const identity = await authn.resolve(token);
       if (isErr(identity)) return ctx.fail(identity.error);
       if (!identity.value) return ctx.fail("UNAUTHENTICATED", "not authenticated");
@@ -81,7 +90,7 @@ export default defineModule({
       if (!ctx.token) return ctx.fail("UNAUTHENTICATED", "not authenticated");
       const result = await authn.logout(ctx.token);
       if (isErr(result)) return ctx.fail(result.error);
-      return ok({ ...ctx, result: { ok: true } });
+      return ok({ ...ctx, responseHeaders: { "set-cookie": clearedSessionCookie(authn.sessionCookie) }, result: { ok: true } });
     },
 
     verifyUser: stepFactory((path: string) => async (ctx: Context) => {
@@ -188,15 +197,15 @@ export default defineModule({
 
   describe: () => ({
     login: {
-      summary: "Log in with credentials",
+      summary: "Log in with credentials; the token comes back in the body and in an HttpOnly session cookie",
       reads: [],
-      writes: ["token", "identity", "result"],
+      writes: ["token", "identity", "responseHeaders", "result"],
       input: { type: "object", properties: { username: { type: "string" }, email: { type: "string" }, password: { type: "string" } }, required: ["password"], additionalProperties: false },
       output: { type: "object", properties: { token: { type: "string" }, identity: { type: "object", properties: { id: { type: "string" }, claims: { type: "object", additionalProperties: true } }, required: ["id", "claims"] } }, required: ["token", "identity"] },
       errors: { 401: "invalid credentials" },
     },
-    identifyUser: { summary: "Identify the caller if a valid token is present", reads: [], writes: ["token?", "identity?"], security: "optional" },
-    requireUser: { summary: "Require a valid session", reads: [], writes: ["token", "identity"], security: "required", errors: { 401: "not authenticated" } },
+    identifyUser: { summary: "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin", reads: [], writes: ["token?", "identity?"], security: "optional", errors: { 403: "a state-changing request authenticated by the session cookie is not from the same origin" } },
+    requireUser: { summary: "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin", reads: [], writes: ["token", "identity"], security: "required", errors: { 401: "not authenticated", 403: "a state-changing request authenticated by the session cookie is not from the same origin" } },
     loadIdentity: {
       summary: "Current identity",
       reads: ["identity"],
@@ -204,7 +213,7 @@ export default defineModule({
       output: { type: "object", properties: { id: { type: "string" }, claims: { type: "object", additionalProperties: true } }, required: ["id", "claims"] },
       errors: { 401: "not authenticated" },
     },
-    logout: { summary: "End the current session", reads: ["token"], writes: ["result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 401: "not authenticated" } },
+    logout: { summary: "End the current session and remove the session cookie", reads: ["token"], writes: ["responseHeaders", "result"], output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }, errors: { 401: "not authenticated" } },
     verifyUser: (path: string) => ({
       summary: `Verify the user reference at payload.${path}: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over`,
       reads: [`payload.${path}`],

@@ -8,7 +8,7 @@
     "/admin/content/model": {
       "get": {
         "operationId": "contentModel",
-        "summary": "Require a valid session → The content model: locales, default locale and every type with its fields",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → The content model: locales, default locale and every type with its fields",
         "tags": [
           "admin"
         ],
@@ -127,6 +127,16 @@
               }
             }
           },
+          "403": {
+            "description": "a state-changing request authenticated by the session cookie is not from the same origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "500": {
             "description": "internal error",
             "content": {
@@ -166,7 +176,7 @@
     "/admin/events/delivery": {
       "get": {
         "operationId": "eventsDeliveryStatus",
-        "summary": "Require a valid session → Requires permission system.manage → Failed deliveries of the process that answers, since it started; inline delivery never retries, so each one is final",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission system.manage → Failed deliveries of the process that answers, since it started; inline delivery never retries, so each one is final",
         "tags": [
           "admin"
         ],
@@ -278,7 +288,7 @@
     "/admin/images/prune": {
       "post": {
         "operationId": "pruneImages",
-        "summary": "Require a valid session → Requires permission images.manage → Retire the variants of sizes that are no longer declared: their paths keep answering with the original's bytes until the item is deleted",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission images.manage → Retire the variants of sizes that are no longer declared: their paths keep answering with the original's bytes until the item is deleted",
         "tags": [
           "admin"
         ],
@@ -403,7 +413,7 @@
     "/admin/images/retry-failed": {
       "post": {
         "operationId": "retryFailedImages",
-        "summary": "Require a valid session → Requires permission images.manage → Put every variant that gave up after maxAttempts back to pending with a fresh attempt budget – all of them, or one media item's (id from params.id or payload.id) – and start the work that regenerates them",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission images.manage → Put every variant that gave up after maxAttempts back to pending with a fresh attempt budget – all of them, or one media item's (id from params.id or payload.id) – and start the work that regenerates them",
         "tags": [
           "admin"
         ],
@@ -609,7 +619,7 @@
     "/admin/images/sizes": {
       "get": {
         "operationId": "listImageSizes",
-        "summary": "Require a valid session → Requires permission images.read → Effective sizes (defaults/config merged with the sizes registered in this process)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission images.read → Effective sizes (defaults/config merged with the sizes registered in this process)",
         "tags": [
           "admin"
         ],
@@ -742,7 +752,7 @@
       },
       "put": {
         "operationId": "registerImageSizes",
-        "summary": "Require a valid session → Requires permission images.write → Replace the sizes registered by this instance – code-declared sizes are held in memory, never stored",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission images.write → Replace the sizes registered by this instance – code-declared sizes are held in memory, never stored",
         "tags": [
           "admin"
         ],
@@ -958,7 +968,7 @@
     "/admin/images/status": {
       "get": {
         "operationId": "imagesStatus",
-        "summary": "Require a valid session → Requires permission images.read → Sizes with usage/variant counts, current job, the variants that gave up with their last error, and sizes whose variants are left over from a size the code no longer declares",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission images.read → Sizes with usage/variant counts, current job, the variants that gave up with their last error, and sizes whose variants are left over from a size the code no longer declares",
         "tags": [
           "admin"
         ],
@@ -1265,7 +1275,7 @@
     "/admin/images/sync": {
       "post": {
         "operationId": "syncImages",
-        "summary": "Require a valid session → Requires permission images.manage → Start a sync job, or resume a paused/error/stale one",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission images.manage → Start a sync job, or resume a paused/error/stale one",
         "tags": [
           "admin"
         ],
@@ -1422,7 +1432,7 @@
     "/admin/insights/manifest": {
       "get": {
         "operationId": "insightsManifest",
-        "summary": "Require a valid session → Requires permission insights.read → The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers and boot warnings",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission insights.read → The static manifest of this instance: modules, contracts, config schemas, steps, pipelines, triggers and boot warnings",
         "tags": [
           "admin"
         ],
@@ -2039,7 +2049,7 @@
     "/admin/insights/stats": {
       "get": {
         "operationId": "insightsStats",
-        "summary": "Require a valid session → Requires permission insights.read → Live counters of this process: runs, pipelines, steps, events, and the most recent failed runs",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission insights.read → Live counters of this process: runs, pipelines, steps, events, and the most recent failed runs",
         "tags": [
           "admin"
         ],
@@ -2359,7 +2369,7 @@
     "/admin/links/broken": {
       "get": {
         "operationId": "brokenLinks",
-        "summary": "Require a valid session → Requires permission pages.manage → Broken links",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Broken links",
         "tags": [
           "admin"
         ],
@@ -2504,7 +2514,7 @@
     "/admin/links/rebuild": {
       "post": {
         "operationId": "rebuildLinks",
-        "summary": "Require a valid session → Requires permission pages.manage → Rebuild the link index",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Rebuild the link index",
         "tags": [
           "admin"
         ],
@@ -2607,7 +2617,7 @@
     "/admin/media/export": {
       "post": {
         "operationId": "exportMedia",
-        "summary": "Require a valid session → Requires permission media.manage → Copy every ready media item to ./data/export/<folder>/<filename> → Copy every done variant of a ready media item to ./data/export/<folder>/<filename>.<size>.<ext>",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.manage → Copy every ready media item to ./data/export/<folder>/<filename> → Copy every done variant of a ready media item to ./data/export/<folder>/<filename>.<size>.<ext>",
         "tags": [
           "admin"
         ],
@@ -2735,7 +2745,7 @@
     "/admin/media/repair-public": {
       "post": {
         "operationId": "repairPublicMedia",
-        "summary": "Require a valid session → Requires permission media.manage → Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result) → Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.manage → Reconcile the public copies of every ready item's original with the stored items: fail abandoned uploads, finish interrupted deletes, write missing or mismatched copies, and remove copies of failed or deleted items and foreign files (adds _publicMedia: { written, removed, missing } to the result) → Reconcile the public copies of every ready item's variants and retired paths with the stored rows: place missing sizes, write missing or mismatched copies, and remove copies of deleted items and foreign files (adds _publicVariants: { written, removed, planned, missing } to the result)",
         "tags": [
           "admin"
         ],
@@ -2875,7 +2885,7 @@
     "/admin/migrations": {
       "get": {
         "operationId": "listMigrations",
-        "summary": "Require a valid session → Requires permission migrations.manage → Applied migrations (ledger, oldest first) and still-pending migrations (config order)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission migrations.manage → Applied migrations (ledger, oldest first) and still-pending migrations (config order)",
         "tags": [
           "admin"
         ],
@@ -3006,7 +3016,7 @@
     "/admin/migrations/apply": {
       "post": {
         "operationId": "applyMigrations",
-        "summary": "Require a valid session → Requires permission migrations.manage → Apply every pending migration; payload.dry === true reports the changes without writing",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission migrations.manage → Apply every pending migration; payload.dry === true reports the changes without writing",
         "tags": [
           "admin"
         ],
@@ -3188,7 +3198,7 @@
     "/admin/pages": {
       "get": {
         "operationId": "listAllPages",
-        "summary": "Require a valid session → Requires permission pages.manage → List pages → Add _paths (locale → path) to the pages result, every valid path including drafts",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → List pages → Add _paths (locale → path) to the pages result, every valid path including drafts",
         "tags": [
           "admin"
         ],
@@ -3451,7 +3461,7 @@
     "/admin/pages/{id}": {
       "get": {
         "operationId": "readAnyPage",
-        "summary": "Require a valid session → Requires permission pages.manage → One pages document → Add _paths (locale → path) to the pages result, every valid path including drafts",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → One pages document → Add _paths (locale → path) to the pages result, every valid path including drafts",
         "tags": [
           "admin"
         ],
@@ -3689,7 +3699,7 @@
     "/admin/pages/{id}/revisions": {
       "get": {
         "operationId": "pageRevisions",
-        "summary": "Require a valid session → Requires permission pages.manage → Revisions of one pages document and locale, newest first and without snapshots",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Revisions of one pages document and locale, newest first and without snapshots",
         "tags": [
           "admin"
         ],
@@ -3925,7 +3935,7 @@
     "/admin/pages/{id}/revisions/{revisionId}": {
       "get": {
         "operationId": "pageRevision",
-        "summary": "Require a valid session → Requires permission pages.manage → One revision of a pages document including its snapshot and, where the content model is known, the dry run of its restore under `restore`",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → One revision of a pages document including its snapshot and, where the content model is known, the dry run of its restore under `restore`",
         "tags": [
           "admin"
         ],
@@ -4160,7 +4170,7 @@
       },
       "patch": {
         "operationId": "labelPageRevision",
-        "summary": "Require a valid session → Requires permission pages.write → Name a pages revision, or clear its name with null; a labelled revision is never pruned",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.write → Name a pages revision, or clear its name with null; a labelled revision is never pruned",
         "tags": [
           "admin"
         ],
@@ -4388,7 +4398,7 @@
     "/admin/pages/{id}/revisions/{revisionId}/restore": {
       "post": {
         "operationId": "restorePageRevision",
-        "summary": "Require a valid session → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is → Emit event \"page.restored\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.write → Put a pages revision's snapshot into the body, so the steps behind it save it like any other write and branch the history at that revision; fields the model has dropped since are left out → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Add what the restore of this run left out to the result as `restore`; without a known content model the result stays as it is → Emit event \"page.restored\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "admin"
         ],
@@ -4822,7 +4832,7 @@
     "/admin/pages/path-preview": {
       "post": {
         "operationId": "previewPagePath",
-        "summary": "Require a valid session → Requires permission pages.write → The public path a pages would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.write → The public path a pages would get for payload { id?, locale?, slug, parent? }, whether it would be reachable and why not; writes nothing",
         "tags": [
           "admin"
         ],
@@ -5053,7 +5063,7 @@
     "/admin/pages/tree": {
       "get": {
         "operationId": "pageTree",
-        "summary": "Require a valid session → Requires permission pages.manage → Every pages with its parent, label, valid paths and live state per locale",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Every pages with its parent, label, valid paths and live state per locale",
         "tags": [
           "admin"
         ],
@@ -5175,7 +5185,7 @@
     "/admin/paths/rebuild": {
       "post": {
         "operationId": "rebuildPaths",
-        "summary": "Require a valid session → Requires permission pages.manage → Recompute every routed document's paths from content@1 outside any group (adds `rebuild` to the result) → Write the planned paths inside one atomic group; saves committed since the plan are recomputed there → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Recompute every routed document's paths from content@1 outside any group (adds `rebuild` to the result) → Write the planned paths inside one atomic group; saves committed since the plan are recomputed there → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run",
         "tags": [
           "admin"
         ],
@@ -5318,7 +5328,7 @@
     "/admin/publish-all/pages": {
       "post": {
         "operationId": "publishAllPages",
-        "summary": "Require a valid session → Requires permission pages.manage → Re-render every pages → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Re-render every pages → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result) → Write llms.txt (and llms-full.txt when `llms.full` is set) from the live output of every delivered type (adds `_llms: { entries, full }` to the result)",
         "tags": [
           "admin"
         ],
@@ -5462,7 +5472,7 @@
     "/admin/publish-status/pages/{id}": {
       "get": {
         "operationId": "pagePublishStatus",
-        "summary": "Require a valid session → Requires permission pages.manage → Publish status per locale of a pages",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Publish status per locale of a pages",
         "tags": [
           "admin"
         ],
@@ -5641,7 +5651,7 @@
     "/admin/redirects/auto": {
       "get": {
         "operationId": "listAutoRedirects",
-        "summary": "Require a valid session → Requires permission redirects.read → Effective automatic redirects (a moved document's old path, sorted by from)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission redirects.read → Effective automatic redirects (a moved document's old path, sorted by from)",
         "tags": [
           "admin"
         ],
@@ -5753,7 +5763,7 @@
     "/admin/redirects/auto/{path}": {
       "delete": {
         "operationId": "removeAutoRedirect",
-        "summary": "Require a valid session → Requires permission redirects.write → Turn the automatic redirect at params.path into a removed tombstone; a replay of the move that created it cannot restore it → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission redirects.write → Turn the automatic redirect at params.path into a removed tombstone; a replay of the move that created it cannot restore it → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
         "tags": [
           "admin"
         ],
@@ -5888,7 +5898,7 @@
     "/admin/references/broken": {
       "get": {
         "operationId": "brokenReferences",
-        "summary": "Require a valid session → Requires permission pages.manage → Broken references",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Broken references",
         "tags": [
           "admin"
         ],
@@ -6028,7 +6038,7 @@
     "/admin/references/rebuild": {
       "post": {
         "operationId": "rebuildReferences",
-        "summary": "Require a valid session → Requires permission pages.manage → Rebuild the reference index",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Rebuild the reference index",
         "tags": [
           "admin"
         ],
@@ -6131,7 +6141,7 @@
     "/admin/references/to/media": {
       "get": {
         "operationId": "mediaReferrersMany",
-        "summary": "Require a valid session → Requires permission pages.manage → Documents referencing each of up to 200 media ids",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Documents referencing each of up to 200 media ids",
         "tags": [
           "admin"
         ],
@@ -6261,7 +6271,7 @@
     "/admin/references/to/media/{id}": {
       "get": {
         "operationId": "mediaReferrers",
-        "summary": "Require a valid session → Requires permission pages.manage → Documents referencing a media",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Documents referencing a media",
         "tags": [
           "admin"
         ],
@@ -6388,7 +6398,7 @@
     "/admin/references/to/pages": {
       "get": {
         "operationId": "pageReferrersMany",
-        "summary": "Require a valid session → Requires permission pages.manage → Documents referencing each of up to 200 pages ids",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Documents referencing each of up to 200 pages ids",
         "tags": [
           "admin"
         ],
@@ -6518,7 +6528,7 @@
     "/admin/references/to/pages/{id}": {
       "get": {
         "operationId": "pageReferrers",
-        "summary": "Require a valid session → Requires permission pages.manage → Documents referencing a pages",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.manage → Documents referencing a pages",
         "tags": [
           "admin"
         ],
@@ -6645,7 +6655,7 @@
     "/admin/replication/points": {
       "get": {
         "operationId": "replicationPoints",
-        "summary": "Require a valid session → Requires permission system.manage → Restore points (snapshots and WAL segments)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission system.manage → Restore points (snapshots and WAL segments)",
         "tags": [
           "admin"
         ],
@@ -6753,7 +6763,7 @@
     "/admin/replication/restore": {
       "post": {
         "operationId": "replicationRestore",
-        "summary": "Require a valid session → Requires permission system.manage → Rebuild the database at a point in time next to the live file; applied on next start",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission system.manage → Rebuild the database at a point in time next to the live file; applied on next start",
         "tags": [
           "admin"
         ],
@@ -6900,7 +6910,7 @@
     "/admin/replication/snapshot": {
       "post": {
         "operationId": "replicationSnapshot",
-        "summary": "Require a valid session → Requires permission system.manage → Start a new generation with a full snapshot",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission system.manage → Start a new generation with a full snapshot",
         "tags": [
           "admin"
         ],
@@ -7003,7 +7013,7 @@
     "/admin/replication/status": {
       "get": {
         "operationId": "replicationStatus",
-        "summary": "Require a valid session → Requires permission system.manage → Replication status",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission system.manage → Replication status",
         "tags": [
           "admin"
         ],
@@ -7135,7 +7145,7 @@
     "/admin/users/{id}/audit/anonymize": {
       "post": {
         "operationId": "retryAnonymizeAuditUser",
-        "summary": "Require a valid session → Requires permission users.manage → Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → Strip the user in `params.id` or the event payload's `id` from every audit entry: their identity id and every param naming them go, the event and its time stay",
         "tags": [
           "admin"
         ],
@@ -7254,7 +7264,7 @@
     "/admin/users/{id}/revisions/reassign": {
       "post": {
         "operationId": "retryReassignRevisionAuthor",
-        "summary": "Require a valid session → Requires permission users.manage → Verify the user reference at payload.reassignTo: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over → Replace the author of every revision written by the user in `params.id` or the event payload's `id`, with the canonical `{ id, name }` a preceding step's `verifiedUser` (e.g. `authn.verifyUser`) verified. Without a target, the anonymous author `{ id: null, name: null }`",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → Verify the user reference at payload.reassignTo: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over → Replace the author of every revision written by the user in `params.id` or the event payload's `id`, with the canonical `{ id, name }` a preceding step's `verifiedUser` (e.g. `authn.verifyUser`) verified. Without a target, the anonymous author `{ id: null, name: null }`",
         "tags": [
           "admin"
         ],
@@ -7426,7 +7436,7 @@
     "/login": {
       "post": {
         "operationId": "login",
-        "summary": "Rate limit bucket login → Log in with credentials → Emit event \"auth.loggedIn\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Rate limit bucket login → Log in with credentials; the token comes back in the body and in an HttpOnly session cookie → Emit event \"auth.loggedIn\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "login"
         ],
@@ -7633,7 +7643,7 @@
     "/logout": {
       "post": {
         "operationId": "logout",
-        "summary": "Require a valid session → End the current session → Emit event \"auth.loggedOut\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → End the current session and remove the session cookie → Emit event \"auth.loggedOut\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "logout"
         ],
@@ -7746,6 +7756,16 @@
               }
             }
           },
+          "403": {
+            "description": "a state-changing request authenticated by the session cookie is not from the same origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "500": {
             "description": "a subscribed handler failed",
             "content": {
@@ -7785,7 +7805,7 @@
     "/me": {
       "get": {
         "operationId": "me",
-        "summary": "Require a valid session → Current identity",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Current identity",
         "tags": [
           "me"
         ],
@@ -7821,6 +7841,16 @@
           },
           "401": {
             "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "a state-changing request authenticated by the session cookie is not from the same origin",
             "content": {
               "application/json": {
                 "schema": {
@@ -7868,7 +7898,7 @@
     "/me/password": {
       "post": {
         "operationId": "changePassword",
-        "summary": "Require a valid session → Change own password",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Change own password",
         "tags": [
           "me"
         ],
@@ -7909,6 +7939,16 @@
           },
           "401": {
             "description": "not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "a state-changing request authenticated by the session cookie is not from the same origin",
             "content": {
               "application/json": {
                 "schema": {
@@ -7979,7 +8019,7 @@
     "/media": {
       "get": {
         "operationId": "listMedia",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → List media, newest first; anonymous callers may only fetch by ids → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed → Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.read → List media, newest first; anonymous callers may only fetch by ids → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed → Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -8163,7 +8203,7 @@
       },
       "post": {
         "operationId": "uploadMedia",
-        "summary": "Require a valid session → Requires permission media.write → Sanitize uploaded SVG files, also SVG content declared as another image type (scripts, handlers, external references removed) → Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing → Emit event \"media.uploaded\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.write → Sanitize uploaded SVG files, also SVG content declared as another image type (scripts, handlers, external references removed) → Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing → Emit event \"media.uploaded\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "media"
         ],
@@ -8954,7 +8994,7 @@
     "/media/{id}": {
       "delete": {
         "operationId": "deleteMedia",
-        "summary": "Require a valid session → Requires permission media.delete → Refuse deletion while media is referenced → Delete file and metadata: end the item's readiness, then remove copy, blob and row, then a final sweep → Delete one media item's variants and retired paths (blob + rows) → Emit event \"media.deleted\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.delete → Refuse deletion while media is referenced → Delete file and metadata: end the item's readiness, then remove copy, blob and row, then a final sweep → Delete one media item's variants and retired paths (blob + rows) → Emit event \"media.deleted\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "media"
         ],
@@ -9136,7 +9176,7 @@
       },
       "get": {
         "operationId": "getMedia",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → Media metadata → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed → Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.read → Media metadata → Add available, variants[] and variantCounts to a media item or list (result.id or result.items); a variant whose path has no object yet is never listed → Keep only the media fields the caller may see: anonymousFields.media without an identity or a configured role; otherwise everything when one of its roles has no field grant for media, else the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -9266,7 +9306,7 @@
       },
       "patch": {
         "operationId": "updateMedia",
-        "summary": "Require a valid session → Requires permission media.write → Rename, move, set provenance or texts (alt/title/description per locale); the file's key and path never change → Emit event \"media.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.write → Rename, move, set provenance or texts (alt/title/description per locale); the file's key and path never change → Emit event \"media.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "media"
         ],
@@ -9626,7 +9666,7 @@
     "/media/{id}/{name}": {
       "get": {
         "operationId": "serveMediaFile",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The file at its public URL (params.id, params.name); the name must be the one it was uploaded under → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity or a configured role; otherwise everything when one of its roles has no field grant for mediaFile, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.read → The file at its public URL (params.id, params.name); the name must be the one it was uploaded under → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity or a configured role; otherwise everything when one of its roles has no field grant for mediaFile, else the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -9745,7 +9785,7 @@
     "/media/{id}/file": {
       "get": {
         "operationId": "downloadMedia",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The file itself → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity or a configured role; otherwise everything when one of its roles has no field grant for mediaFile, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.read → The file itself → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity or a configured role; otherwise everything when one of its roles has no field grant for mediaFile, else the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -9856,7 +9896,7 @@
     "/media/{id}/variants/{file}": {
       "get": {
         "operationId": "serveImageVariant",
-        "summary": "Identify the caller if a valid token is present → Requires permission media.read → The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity or a configured role; otherwise everything when one of its roles has no field grant for mediaFile, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.read → The variant at its public URL (params.id, params.file), or the original's bytes when no render is at that path yet; x-kestrel-variant: original marks the fallback → Keep only the mediaFile fields the caller may see: anonymousFields.mediaFile without an identity or a configured role; otherwise everything when one of its roles has no field grant for mediaFile, else the union of its roles' grants and the anonymous one",
         "tags": [
           "media"
         ],
@@ -9985,7 +10025,7 @@
     "/media/folders": {
       "get": {
         "operationId": "listMediaFolders",
-        "summary": "Require a valid session → Requires permission media.read → Folders (persistent and implied) with item counts; anonymous callers are refused",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.read → Folders (persistent and implied) with item counts; anonymous callers are refused",
         "tags": [
           "media"
         ],
@@ -10079,7 +10119,7 @@
       },
       "post": {
         "operationId": "createMediaFolder",
-        "summary": "Require a valid session → Requires permission media.write → Create a folder (idempotent: an existing folder is returned unchanged)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.write → Create a folder (idempotent: an existing folder is returned unchanged)",
         "tags": [
           "media"
         ],
@@ -10201,7 +10241,7 @@
     "/media/folders/{path}": {
       "delete": {
         "operationId": "deleteMediaFolder",
-        "summary": "Require a valid session → Requires permission media.delete → Item ids in a folder, for use with references.guardAll:media before removeFolder → Refuse while any of result.ids of media is referenced → Delete a folder and everything in it (each item as media.remove) → Delete variants for every id in result.ids (from media.listFolderItems or media.removeFolder) → Emit event \"media.deleted\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.delete → Item ids in a folder, for use with references.guardAll:media before removeFolder → Refuse while any of result.ids of media is referenced → Delete a folder and everything in it (each item as media.remove) → Delete variants for every id in result.ids (from media.listFolderItems or media.removeFolder) → Emit event \"media.deleted\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "media"
         ],
@@ -10414,7 +10454,7 @@
       },
       "patch": {
         "operationId": "renameMediaFolder",
-        "summary": "Require a valid session → Requires permission media.write → Rename or move a folder (metadata only: keys and paths do not change)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission media.write → Rename or move a folder (metadata only: keys and paths do not change)",
         "tags": [
           "media"
         ],
@@ -10566,7 +10606,7 @@
     "/pages": {
       "get": {
         "operationId": "listPages",
-        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → List pages → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.read → List pages → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
         "tags": [
           "pages"
         ],
@@ -10709,7 +10749,7 @@
       },
       "post": {
         "operationId": "createPage",
-        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Create a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Emit event \"page.created\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Create a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Emit event \"page.created\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "pages"
         ],
@@ -11074,7 +11114,7 @@
     "/pages/{id}": {
       "delete": {
         "operationId": "deletePage",
-        "summary": "Require a valid session → Requires permission pages.delete → Refuse deletion while pages is referenced → Delete a pages → Drop every revision of a pages document, in every locale → Drop indexed references of a pages document → Drop indexed links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Emit event \"page.deleted\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.delete → Refuse deletion while pages is referenced → Delete a pages → Drop every revision of a pages document, in every locale → Drop indexed references of a pages document → Drop indexed links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Emit event \"page.deleted\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "pages"
         ],
@@ -11268,7 +11308,7 @@
       },
       "get": {
         "operationId": "readPage",
-        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → One pages document → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.read → One pages document → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
         "tags": [
           "pages"
         ],
@@ -11401,7 +11441,7 @@
       },
       "patch": {
         "operationId": "updatePage",
-        "summary": "Require a valid session → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Emit event \"page.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.write → Validate payload field pages.body against its JSON Schema → Sanitize HTML at format:\"html\" positions of payload field pages.body → Validate payload field pages.body against its JSON Schema → Referenced ids of pages must exist → Update a pages → Record the saved pages document from the result as a revision; its parent is the head, or the revision a restore put on the context → Index the references of a pages document → Index external links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Emit event \"page.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "pages"
         ],
@@ -11800,7 +11840,7 @@
     "/pages/{id}/translations/{locale}": {
       "delete": {
         "operationId": "deletePageTranslation",
-        "summary": "Require a valid session → Requires permission pages.write → Remove one translation of a pages (locale from the route or ?locale=); the document stays in its other locales → Drop the revisions of one locale of a pages document → Index the references of a pages document → Index external links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Emit event \"page.translationRemoved\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.write → Remove one translation of a pages (locale from the route or ?locale=); the document stays in its other locales → Drop the revisions of one locale of a pages document → Index the references of a pages document → Index external links of pages → Recompute the public paths of the saved pages (result.id, else params.id) and of every document whose path depends on it; last step of the write's atomic group → After the write's atomic group: patches the in-memory path table from the committed rows and raises site.pathsMoved; never fails the run → Emit event \"page.translationRemoved\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "pages"
         ],
@@ -12109,7 +12149,7 @@
     "/redirects": {
       "get": {
         "operationId": "getRedirects",
-        "summary": "Identify the caller if a valid token is present → Requires permission redirects.read → One redirects document",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission redirects.read → One redirects document",
         "tags": [
           "redirects"
         ],
@@ -12249,7 +12289,7 @@
       },
       "put": {
         "operationId": "setRedirects",
-        "summary": "Require a valid session → Requires permission redirects.write → Validate payload field redirects.rules against its JSON Schema → Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect → Replace the redirects document → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission redirects.write → Validate payload field redirects.rules against its JSON Schema → Compile the redirect rules of the payload; VALIDATION names the offending row, also for a rule that redirects into an active automatic redirect → Replace the redirects document → Write redirects.json to the blobstore: editor rules first, then automatic ones (adds `redirects: { rules, skipped }` to the result)",
         "tags": [
           "redirects"
         ],
@@ -12505,7 +12545,7 @@
     "/roles": {
       "get": {
         "operationId": "listRoles",
-        "summary": "Require a valid session → Requires permission users.manage → The configured role names, in config order",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → The configured role names, in config order",
         "tags": [
           "roles"
         ],
@@ -12597,7 +12637,7 @@
     "/settings": {
       "get": {
         "operationId": "getSettings",
-        "summary": "Identify the caller if a valid token is present → Requires permission settings.read → One settings document → Keep only the settings fields the caller may see: anonymousFields.settings without an identity or a configured role; otherwise everything when one of its roles has no field grant for settings, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission settings.read → One settings document → Keep only the settings fields the caller may see: anonymousFields.settings without an identity or a configured role; otherwise everything when one of its roles has no field grant for settings, else the union of its roles' grants and the anonymous one",
         "tags": [
           "settings"
         ],
@@ -12712,7 +12752,7 @@
       },
       "put": {
         "operationId": "setSettings",
-        "summary": "Require a valid session → Requires permission settings.write → Validate payload field settings.navigation against its JSON Schema → Replace the settings document → Emit event \"settings.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission settings.write → Validate payload field settings.navigation against its JSON Schema → Replace the settings document → Emit event \"settings.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "settings"
         ],
@@ -12970,7 +13010,7 @@
     "/site/{path}": {
       "get": {
         "operationId": "resolvePage",
-        "summary": "Identify the caller if a valid token is present → Requires permission pages.read → End the pipeline with { redirect: { to, status } } on an editor rule or an automatic redirect (a moved document's old path); pass through otherwise → Resolve a site path to a pages document (default locale unprefixed) → Replace internal kestrel:<type>:<id> references in the pages document with public paths (_links map added) → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
+        "summary": "Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission pages.read → End the pipeline with { redirect: { to, status } } on an editor rule or an automatic redirect (a moved document's old path); pass through otherwise → Resolve a site path to a pages document (default locale unprefixed) → Replace internal kestrel:<type>:<id> references in the pages document with public paths (_links map added) → Keep only the pages fields the caller may see: anonymousFields.pages without an identity or a configured role; otherwise everything when one of its roles has no field grant for pages, else the union of its roles' grants and the anonymous one",
         "tags": [
           "site"
         ],
@@ -13094,7 +13134,7 @@
     "/users": {
       "get": {
         "operationId": "listUsers",
-        "summary": "Require a valid session → Requires permission users.manage → List users",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → List users",
         "tags": [
           "users"
         ],
@@ -13203,7 +13243,7 @@
       },
       "post": {
         "operationId": "createUser",
-        "summary": "Require a valid session → Requires permission users.manage → Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept → Create a user → Emit event \"user.created\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept → Create a user → Emit event \"user.created\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "users"
         ],
@@ -13425,7 +13465,7 @@
     "/users/{id}": {
       "delete": {
         "operationId": "deleteUser",
-        "summary": "Require a valid session → Requires permission users.manage → Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised → Emit event \"user.deleted?with=result\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised → Emit event \"user.deleted?with=result\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "users"
         ],
@@ -13653,7 +13693,7 @@
       },
       "get": {
         "operationId": "getUser",
-        "summary": "Require a valid session → Requires permission users.manage → One user",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → One user",
         "tags": [
           "users"
         ],
@@ -13778,7 +13818,7 @@
       },
       "patch": {
         "operationId": "updateUser",
-        "summary": "Require a valid session → Requires permission users.manage → Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept → Rename a user or set their roles (a role change ends their sessions) → Emit event \"user.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → Validate the role names at payload.roles against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept → Rename a user or set their roles (a role change ends their sessions) → Emit event \"user.updated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "users"
         ],
@@ -14012,7 +14052,7 @@
     "/users/{id}/activate": {
       "post": {
         "operationId": "activateUser",
-        "summary": "Require a valid session → Requires permission users.manage → Activate a user",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → Activate a user",
         "tags": [
           "users"
         ],
@@ -14130,7 +14170,7 @@
     "/users/{id}/deactivate": {
       "post": {
         "operationId": "deactivateUser",
-        "summary": "Require a valid session → Requires permission users.manage → Deactivate a user (ends their sessions) → Emit event \"user.deactivated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → Deactivate a user (ends their sessions) → Emit event \"user.deactivated\" to every subscribed handler pipeline and wait for them → Report how the events this run raised were delivered (adds `_events` to the result)",
         "tags": [
           "users"
         ],
@@ -14322,7 +14362,7 @@
     "/users/{id}/password": {
       "put": {
         "operationId": "setPassword",
-        "summary": "Require a valid session → Requires permission users.manage → Set a user's password (ends their sessions)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → Set a user's password (ends their sessions)",
         "tags": [
           "users"
         ],

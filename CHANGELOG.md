@@ -622,6 +622,16 @@ Net changes since 5.8.1.
   holds no token that authenticates. Sessions stored in the earlier plain format are removed when the
   module starts, so everyone signed in logs in once more after the upgrade. `authn/single` issues
   tokens of the same shape.
+- A request body is parsed as JSON only when its `Content-Type` says so (`application/json` or
+  `application/*+json`); a non-empty body of any other type, or without one, is answered
+  `415 UNSUPPORTED` before a pipeline runs, by the built-in server and by `kestrel-h3` alike. Send
+  `content-type: application/json` with every JSON body.
+- `authn/single` and `authn/multi` set the session cookie themselves: `authn.login` answers with
+  `Set-Cookie: kestrel_token=…; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=<sessionTtlSeconds>`
+  and `authn.logout` removes it. A `POST`, `PUT`, `PATCH` or `DELETE` authenticated by that cookie
+  must come from the same origin (`Sec-Fetch-Site: same-origin`, or an `Origin` matching `Host`), or
+  `authn.identifyUser`/`authn.requireUser` answer `403 FORBIDDEN`; bearer requests are unchanged. The
+  new config option `secureCookie` (default `true`) drops `Secure` for plain-HTTP development.
 
 ### Added
 
@@ -1061,6 +1071,13 @@ Net changes since 5.8.1.
 - `kestrel-upgrade` rules `site/routed-slug-unique` (removes `unique` from a routed type's slug
   field), `site/path-wiring`, `site/path-events`, `redirects/requires-persistence` and
   `imports/redirects-impl`.
+- A step can set response headers: `Context.responseHeaders` (declared in the step's `writes`) goes
+  out with the HTTP response of a successful run, beneath the mandatory headers, and `RunResult`
+  carries it as `headers`. `UnsupportedMediaType` is exported next to `BodyTooLarge`.
+- `@michaelthielemann/kestrel-contracts/helpers/session`: `requestToken`, `sessionCookie`,
+  `clearedSessionCookie`, `crossOriginRefusal` and `SESSION_COOKIE`, shared by the authn modules. The
+  shared `authn@1` step suite checks the session cookie and the same-origin rule, and its fixture
+  takes the module's `sessionTtlSeconds`.
 
 ### Changed
 

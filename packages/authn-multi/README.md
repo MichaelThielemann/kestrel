@@ -6,7 +6,7 @@ signs anyone in. It does hold the password hashes: keep those copies as private 
 `bootstrap` creates the first user when the user collection is empty so a fresh install is not
 locked out. Identity claims: `{ username, roles }`.
 Config: `identifier` (`username` | `email` – the credential field), `minPasswordLength`,
-`sessionTtlSeconds`, `adminPermission`, `bootstrap { username, passwordHash, roles }`.
+`sessionTtlSeconds`, `secureCookie`, `adminPermission`, `bootstrap { username, passwordHash, roles }`.
 
 The username is the identity – there is no e-mail field on a user. Roles are plain strings: the
 module never learns which ones a site defines, because `authz@1` maps roles to permissions and
@@ -16,6 +16,15 @@ dependency before every change that could remove the last one: deactivating, del
 the permission away from the last active holder is `LAST_ADMIN` (409). Without an authz module
 nobody is known to be an admin and the guard stays silent.
 
+**Browser sessions.** `authn.login` answers the token in the body, for a client that sends it as
+`Authorization: Bearer`, and sets it as the `kestrel_token` cookie (`HttpOnly`, `Secure`,
+`SameSite=Strict`, `Path=/`, `Max-Age` = `sessionTtlSeconds`), so a browser holds a session page
+script cannot read; `authn.logout` removes the cookie. `secureCookie: false` drops `Secure`, for
+signing in over plain HTTP during development only. A `POST`/`PUT`/`PATCH`/`DELETE` authenticated
+by the cookie rather than a bearer token must come from the same origin (`Sec-Fetch-Site:
+same-origin`, or an `Origin` matching `Host`); otherwise `authn.identifyUser` and
+`authn.requireUser` answer `FORBIDDEN` (403).
+
 Every step returns a `Result`; `authn@1`'s own `login`/`resolve`/`logout` only ever answer
 `Err(TRANSIENT)` (wrong credentials are `Ok(null)`). `createUser`, `setPassword`, `changePassword`,
 `setActive`, `updateUser`, `deleteUser`, `getUser`, `listUsers` and `cleanupSessions` beyond the
@@ -24,11 +33,11 @@ username is `CONFLICT` (409), the last admin guard is `LAST_ADMIN` (409).
 
 | Step | reads | writes | errors |
 |---|---|---|---|
-| `authn.login` | – | `token`, `identity`, `result` | `UNAUTHENTICATED`, `TRANSIENT` |
-| `authn.identifyUser` | – | `token?`, `identity?` | `TRANSIENT` |
-| `authn.requireUser` | – | `token`, `identity` | `UNAUTHENTICATED`, `TRANSIENT` |
+| `authn.login` | – | `token`, `identity`, `responseHeaders`, `result` | `UNAUTHENTICATED`, `TRANSIENT` |
+| `authn.identifyUser` | – | `token?`, `identity?` | `FORBIDDEN`, `TRANSIENT` |
+| `authn.requireUser` | – | `token`, `identity` | `UNAUTHENTICATED`, `FORBIDDEN`, `TRANSIENT` |
 | `authn.loadIdentity` | `identity` | `result` | `UNAUTHENTICATED` |
-| `authn.logout` | `token` | `result` | `UNAUTHENTICATED`, `TRANSIENT` |
+| `authn.logout` | `token` | `responseHeaders`, `result` | `UNAUTHENTICATED`, `TRANSIENT` |
 | `authn.createUser` | – | `result` | `VALIDATION`, `CONFLICT`, `TRANSIENT` |
 | `authn.listUsers` | – | `result` | `TRANSIENT` |
 | `authn.getUser` | `params.id` | `result` | `NOT_FOUND`, `TRANSIENT` |
@@ -62,6 +71,7 @@ concerns), an e-mail field.
 | `identifier` | enum | no | `"username"` |
 | `minPasswordLength` | integer | no | `12` |
 | `sessionTtlSeconds` | integer | no | `86400` |
+| `secureCookie` | boolean | no | `true` |
 | `adminPermission` | string | no | `"users.manage"` |
 | `bootstrap` | object | no | – |
 | `bootstrap.username` | string | no | – |
@@ -70,11 +80,11 @@ concerns), an e-mail field.
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `authn.login` | Log in with credentials | – | `token`, `identity`, `result` | { username?: string, email?: string, password: string } | { token: string, identity: object, … } | 401 invalid credentials | portable | no |
-| `authn.identifyUser` | Identify the caller if a valid token is present | – | `token?`, `identity?` | – | – | – | portable | no |
-| `authn.requireUser` | Require a valid session | – | `token`, `identity` | – | – | 401 not authenticated | portable | no |
+| `authn.login` | Log in with credentials; the token comes back in the body and in an HttpOnly session cookie | – | `token`, `identity`, `responseHeaders`, `result` | { username?: string, email?: string, password: string } | { token: string, identity: object, … } | 401 invalid credentials | portable | no |
+| `authn.identifyUser` | Identify the caller if a valid token is present; a state-changing request authenticated by the session cookie must come from the same origin | – | `token?`, `identity?` | – | – | 403 a state-changing request authenticated by the session cookie is not from the same origin | portable | no |
+| `authn.requireUser` | Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin | – | `token`, `identity` | – | – | 401 not authenticated; 403 a state-changing request authenticated by the session cookie is not from the same origin | portable | no |
 | `authn.loadIdentity` | Current identity | `identity` | `result` | – | { id: string, claims: object, … } | 401 not authenticated | portable | no |
-| `authn.logout` | End the current session | `token` | `result` | – | { ok: boolean, … } | 401 not authenticated | portable | no |
+| `authn.logout` | End the current session and remove the session cookie | `token` | `responseHeaders`, `result` | – | { ok: boolean, … } | 401 not authenticated | portable | no |
 | `authn.verifyUser:<arg>` | Verify the user reference at payload.<arg>: it must be a user id, { id }, or null. Writes its canonical { id, name } to verifiedUser, or null when there was none to verify. authn.verifyUser:reassignTo reads payload.reassignTo; authn.verifyUser:result.reassignTo reads payload.result.reassignTo, the shape an event hands over | `payload.<arg>` | `verifiedUser` | { <arg>?: string \| object \| null, … } | – | 400 the value is neither a user id, { id } nor null, or the user is not active; 404 user not found | beside | yes |
 | `authn.createUser` | Create a user | – | `result` | { username: string, password: string, roles?: string[] } | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 400 invalid input; 409 username already exists | beside | no |
 | `authn.listUsers` | List users | – | `result` | – | object[] | – | beside | no |

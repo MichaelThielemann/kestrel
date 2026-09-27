@@ -55,6 +55,7 @@ import { PERSISTENCE } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
+import { crossOriginRefusal, requestToken } from "@michaelthielemann/kestrel-contracts/helpers/session";
 import { createAuthnMulti } from "./impl";
 
 export const configSchema = z.object({
@@ -91,8 +92,11 @@ export default defineModule({
   // the contract. throw is reserved for wiring errors.
   steps: (authn) => ({
     requireUser: async (ctx: Context) => {
-      const token = tokenFromHeaders(ctx.headers);          // bearer or cookie, the submodule's concern
-      if (!token) return ctx.fail("UNAUTHENTICATED", "not authenticated");
+      const found = requestToken(ctx.headers);              // bearer or cookie, from kestrel-contracts/helpers/session
+      if (!found) return ctx.fail("UNAUTHENTICATED", "not authenticated");
+      const refused = found.source === "cookie" ? crossOriginRefusal(ctx.trigger, ctx.headers) : undefined;
+      if (refused !== undefined) return ctx.fail("FORBIDDEN", refused);
+      const token = found.token;
       const identity = await authn.resolve(token);
       if (isErr(identity)) return ctx.fail(identity.error);
       if (!identity.value) return ctx.fail("UNAUTHENTICATED", "not authenticated");
@@ -144,8 +148,9 @@ event-trigger pipelines is a separate module's job (also `events-queue`, an outb
 import type { Authn, AuthnError, Session } from "@michaelthielemann/kestrel-contracts/authn";
 import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import { isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
-import { scryptSync, timingSafeEqual, randomBytes } from "node:crypto";   // or argon2 as a package.json dep
-import { randomUUID } from "node:crypto";
+import { createHash, scrypt, timingSafeEqual, randomBytes } from "node:crypto";   // or argon2 as a package.json dep
+
+const digest = (token: string) => createHash("sha256").update(token).digest("base64url");   // a copy of the table holds no usable token
 
 type Config = { identifier: "username" | "email"; minPasswordLength: number; sessionTtlSeconds: number };
 
@@ -159,19 +164,19 @@ export async function createAuthnMulti(config: Config, db: Persistence): Promise
       const user = await db.findOne<{ id: string; passwordHash: string }>("authn_users", { [id]: creds[id] });
       if (isErr(user)) return user;   // pass TRANSIENT through — no Err on wrong credentials
       if (!user.value || !verify(creds.password, user.value.passwordHash)) return ok(null);
-      const token = randomUUID();
-      const created = await db.createOne("authn_sessions", { id: token, userId: user.value.id, expiresAt: Date.now() + config.sessionTtlSeconds * 1000 });
+      const token = randomBytes(32).toString("base64url");
+      const created = await db.createOne("authn_sessions", { id: digest(token), userId: user.value.id, expiresAt: Date.now() + config.sessionTtlSeconds * 1000 });
       if (isErr(created)) return created;
       return ok({ token, identity: { id: user.value.id, claims: {} } });
     },
     async resolve(token) {
-      const s = await db.findOne<{ id: string; userId: string; expiresAt: number }>("authn_sessions", { id: token });
+      const s = await db.findOne<{ id: string; userId: string; expiresAt: number }>("authn_sessions", { id: digest(token) });
       if (isErr(s)) return s;
       if (!s.value || s.value.expiresAt < Date.now()) return ok(null);
       return ok({ id: s.value.userId, claims: {} });
     },
     async logout(token) {
-      return db.deleteOne("authn_sessions", token);
+      return db.deleteOne("authn_sessions", digest(token));
     },
   };
 }

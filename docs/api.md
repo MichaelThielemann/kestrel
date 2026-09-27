@@ -80,8 +80,10 @@ without Nuxt: [`../examples/h3`](../examples/h3).
 
 ## Ground rules
 
-- **JSON in, JSON out.** Bodies are JSON objects (`content-type: application/json`), and so are
-  responses; exceptions: file downloads (raw bytes) and multipart uploads.
+- **JSON in, JSON out.** Bodies are JSON objects (`content-type: application/json`, or any
+  `application/*+json`), and so are responses; exceptions: file downloads (raw bytes) and multipart
+  uploads. A non-empty body of any other type, or without a type, is refused with `415 UNSUPPORTED`
+  before a pipeline runs.
 - **Query parameters** land in the payload just like body fields (`?locale=en&limit=10`).
 - **Every step validates its input.** Before a step runs, the body is checked against the
   step's declared JSON Schema and the declared query parameters against their types (query
@@ -129,8 +131,13 @@ without Nuxt: [`../examples/h3`](../examples/h3).
   public media file at `/media/:id/:name` is `immutable`. If the caller sends `X-Request-Id` (short
   printable ASCII, max. 200 characters), that value appears in the log of every line of the run and
   is returned as `X-Request-Id`; anything else is discarded.
-- **Auth**: send the token from `POST /login` as `Authorization: Bearer <token>` (alternatively the
-  `kestrel_token` cookie, impractical for cross-origin use). Sessions expire after 24 h.
+- **Auth**: send the token from `POST /login` as `Authorization: Bearer <token>`. A browser can
+  rely on the `kestrel_token` cookie instead, which the login response sets itself (`HttpOnly`,
+  `Secure`, `SameSite=Strict`, `Path=/`, `Max-Age` = the session lifetime) and logout removes; page
+  script never sees it. A `POST`, `PUT`, `PATCH` or `DELETE` authenticated by that cookie must come
+  from the same origin — `Sec-Fetch-Site: same-origin`, or an `Origin` whose host is the request's
+  `Host` — or it is answered `403 FORBIDDEN`; a bearer request is not checked. Sessions expire after
+  24 h.
 - **Permissions**: anonymous callers may read (`pages.read`, `settings.read`, `media.read`), and so
   may every signed-in caller, whatever its role; anything that writes needs a login and a role. Roles: `admin` (everything), `editor`
   (`pages.*`, `media.*`, `images.read`, `settings.read`, `redirects.*`).
