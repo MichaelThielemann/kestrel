@@ -415,6 +415,12 @@ describe("http server", () => {
     expect(res.headers.getSetCookie()).toEqual(["a=1; HttpOnly", "b=2; HttpOnly", "c=3; HttpOnly"]);
   });
 
+  it("sends a run's only cookie when its headers carry no set-cookie", async () => {
+    const cookieOnly: Runner = async () => ({ runId: "run-1", status: 200, result: { ok: true }, cookies: ["b=2; HttpOnly"] });
+    const base = await serve(cookieOnly);
+    expect((await fetch(`${base}/echo`)).headers.getSetCookie()).toEqual(["b=2; HttpOnly"]);
+  });
+
   it("closes the server to addresses outside http.allow, trusting X-Forwarded-For only with trustProxy", async () => {
     let base = await serve(ok, { allow: ["127.0.0.1"] });
     expect((await fetch(`${base}/echo`)).status).toBe(200);

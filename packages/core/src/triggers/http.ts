@@ -412,7 +412,7 @@ function sendError(res: ServerResponse, status: number, error: string, requestId
 
 function write(res: ServerResponse, response: HttpResponse): void {
   const cookies = responseCookies(response);
-  res.writeHead(response.status, cookies.length > 1 ? { ...response.headers, "set-cookie": cookies } : response.headers);
+  res.writeHead(response.status, cookies.length > 0 ? { ...response.headers, "set-cookie": cookies } : response.headers);
   res.end(typeof response.body === "string" ? response.body : Buffer.from(response.body));
 }
 
