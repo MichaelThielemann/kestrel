@@ -41,8 +41,9 @@ Net changes since 5.8.1.
   `fix --write` and `data` refuse to run (exit 2) until its matching release is installed. A
   malformed field is `deps/host-refused`: it stops the kestrel commands with exit 2, and the engine
   refuses `fix --write` and `data` for it too. `--no-plugins` loads no plugin but keeps both guards.
-  `PLUGIN_API_VERSION` is `4`; the new `PLUGIN_API_MIN` (`4`) is the lowest `pluginApi` the engine
-  runs.
+  `PLUGIN_API_VERSION` is `5`; the new `PLUGIN_API_MIN` (`4`) is the lowest `pluginApi` the engine
+  runs. Plugin API `5` adds the optional `UpgradePlugin.dataFindings` hook, through which a host
+  package reports what only its stored data can show in `kestrel upgrade data`.
 
 - The pipeline grammar gains an atomic group: `steps` accepts `{ atomic: [...] }` next to a plain
   step name, and the runner wraps such a group in one all-or-nothing scope it obtains from a

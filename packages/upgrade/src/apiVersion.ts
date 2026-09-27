@@ -10,7 +10,7 @@
  * number it receives in `KestrelPluginHost.pluginApiVersion` first. The number only grows: a new
  * major of this package continues from the previous major's value and never resets it.
  */
-export const PLUGIN_API_VERSION = 4;
+export const PLUGIN_API_VERSION = 5;
 
 /** The lowest `pluginApi` a host package may declare for this engine to run its plugin; a major that removes an API member raises it. */
 export const PLUGIN_API_MIN = 4;

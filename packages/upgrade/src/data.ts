@@ -183,17 +183,24 @@ async function builtInDataModel(root: string, pluginKind: string | undefined): P
   }
 }
 
-async function activeDataModel(root: string, plugins: readonly UpgradePlugin[]): Promise<{ model?: DataContentModel | undefined; issues: Finding[] }> {
-  const { plugin, issues: detectIssues } = await detectPlugin(plugins, root);
-  const issues = loadIssuesAsFindings(detectIssues);
+async function activeDataModel(root: string, plugin: UpgradePlugin | undefined): Promise<{ model?: DataContentModel | undefined; issues: Finding[] }> {
   if (plugin?.dataModel === undefined) {
     const { model, issue } = await builtInDataModel(root, plugin?.kind);
-    return { model, issues: issue ? [...issues, issue] : issues };
+    return { model, issues: issue ? [issue] : [] };
   }
   try {
-    return { model: await plugin.dataModel(root), issues };
+    return { model: await plugin.dataModel(root), issues: [] };
   } catch (err) {
-    return { issues: [...issues, hookFailedFinding(plugin.kind, "dataModel", err)] };
+    return { issues: [hookFailedFinding(plugin.kind, "dataModel", err)] };
+  }
+}
+
+async function pluginDataFindings(db: Persistence, root: string, plugin: UpgradePlugin | undefined, model: DataContentModel | undefined): Promise<Finding[]> {
+  if (plugin?.dataFindings === undefined) return [];
+  try {
+    return [...(await plugin.dataFindings(db, root, model))];
+  } catch (err) {
+    return [hookFailedFinding(plugin.kind, "dataFindings", err)];
   }
 }
 
@@ -478,18 +485,21 @@ export async function runDataStep(dbFile: string, root: string, plugins: readonl
     let counts: Record<string, Record<string, number | null>>;
     let mediaLayout: Finding[];
     let dataModelIssues: Finding[];
+    let fromPlugin: Finding[];
     try {
       queued = await queueFindings(db);
       if (queued.error !== undefined) return { exitCode: 2, error: queued.error };
-      const { model: contentModel, issues } = await activeDataModel(root, plugins);
-      dataModelIssues = issues;
+      const { plugin, issues: detectIssues } = await detectPlugin(plugins, root);
+      const { model: contentModel, issues } = await activeDataModel(root, plugin);
+      dataModelIssues = [...loadIssuesAsFindings(detectIssues), ...issues];
       counts = contentModel === undefined ? {} : await underscoreFieldCounts(copy, db, contentModel);
       mediaLayout = await mediaLayoutFindings(root, db);
+      fromPlugin = await pluginDataFindings(db, root, plugin, contentModel);
     } finally {
       db.close();
     }
     const [siteMediaLeftovers, blobstoreTmpSuffix] = await Promise.all([siteMediaLeftoversFindings(root), blobstoreTmpSuffixFindings(root)]);
-    const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...siteMediaLeftovers, ...blobstoreTmpSuffix, ...dataModelIssues];
+    const findings = [...queued.findings, ...underscoreFieldFindings(counts), ...mediaLayout, ...siteMediaLeftovers, ...blobstoreTmpSuffix, ...dataModelIssues, ...fromPlugin];
     const report: UpgradeReport = {
       schema: 1,
       tool: { name: "kestrel-upgrade", version: toolVersion() },

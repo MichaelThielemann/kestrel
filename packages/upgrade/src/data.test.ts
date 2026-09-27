@@ -525,3 +525,43 @@ describe("runDataStep: data/site-media-leftovers and data/blobstore-tmp-suffix",
     expect(result.report?.findings.filter((f) => f.rule === "data/blobstore-tmp-suffix" || f.rule === "data/site-media-leftovers")).toEqual([]);
   });
 });
+
+describe("runDataStep: findings a plugin reads from stored data", () => {
+  it("adds what the plugin's dataFindings hook reports from the verified copy", async () => {
+    const root = await pluginProjectRoot();
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    await db.ensureCollection("page", { note: "string" });
+    await db.createOne("page", { id: "1", note: "stored" });
+    db.close();
+    const plugin: UpgradePlugin = {
+      kind: "test-plugin",
+      detect: (candidate) => candidate === root,
+      load: () => Promise.resolve({ issues: [] }),
+      dataModel: () => Promise.resolve({ types: { page: { fields: { note: {} } } } }),
+      async dataFindings(copy, projectRoot, model) {
+        await copy.ensureCollection("page", { note: "string" });
+        const rows = await copy.findMany<{ id: string; note: string }>("page", {});
+        const count = rows.ok ? rows.value.items.length : -1;
+        return [{ id: "plugin-data-1", rule: "data/plugin-stored", severity: "error", tier: "data", where: { path: projectRoot }, message: `${count} row(s) of ${Object.keys(model?.types ?? {}).join(",")}`, suggestion: "", fix: { kind: "manual" }, docs: "" }];
+      },
+    };
+    const result = await runDataStep(file, root, [plugin]);
+    expect(result.exitCode).toBe(1);
+    expect(result.report?.findings).toEqual([expect.objectContaining({ rule: "data/plugin-stored", message: "1 row(s) of page", where: { path: root } })]);
+  });
+
+  it("reports a throwing dataFindings hook as a finding instead of failing the step", async () => {
+    const root = await pluginProjectRoot();
+    const file = join(dir, "kestrel.db");
+    await makeDb(file, [{ id: "1", name: "page.created", pipeline: "publishPage", state: "done" }]);
+    const plugin: UpgradePlugin = {
+      kind: "test-plugin",
+      detect: (candidate) => candidate === root,
+      load: () => Promise.resolve({ issues: [] }),
+      dataFindings: () => Promise.reject(new Error("broken hook")),
+    };
+    const result = await runDataStep(file, root, [plugin]);
+    expect(result.report?.findings).toEqual([expect.objectContaining({ message: expect.stringContaining("broken hook") as unknown })]);
+  });
+});

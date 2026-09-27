@@ -1,5 +1,6 @@
 import { dirname } from "node:path";
 import type { BootCheck, BootInput, BootProblem } from "@michaelthielemann/kestrel";
+import type { Persistence } from "@michaelthielemann/kestrel-contracts/persistence";
 import type { PromptFn } from "./answers.ts";
 import type { ModelFieldsLocator, StepListLocator } from "./edits.ts";
 import type { Edit, Finding } from "./report.ts";
@@ -249,6 +250,15 @@ export interface UpgradePlugin {
    * `model/underscore-field` sees the same model without the plugin declaring it twice.
    */
   dataModel?(root: string): Promise<DataContentModel | undefined>;
+  /**
+   * Findings only the stored data can answer about what this plugin's host adds to a project (a stored
+   * value shape its fields write, say), run by the `data` command after its built-in checks. `db` reads
+   * the verified copy through the project's own `persistence-sqlite` (declare a collection's columns with
+   * `ensureCollection` before querying it); the hook only reads. `model` is
+   * the content model `dataModel` supplied, or `undefined`. A throw becomes a `plugin/hook-failed`
+   * finding and the rest of the `data` command still reports.
+   */
+  dataFindings?(db: Persistence, root: string, model: DataContentModel | undefined): Promise<readonly Finding[]>;
   /**
    * Supplies `offer/event-queue`'s switch for a project layout where events-direct is not a
    * `kestrel.config.ts` module-list entry: the edits that replace it with events-queue (as

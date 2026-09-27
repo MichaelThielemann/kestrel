@@ -881,6 +881,12 @@ classification never imports a plugin.
   file `model/underscore-field` reads and splices a verified-zero-count rename into; `LoadedProject.configFile`
   is used when absent, so a plugin whose content model does not live there (unlike the built-in
   `content-default`-on-`kestrel.config.ts` layout) still gets an automatic rename, not a manual one.
+- `dataFindings?(db, root, model): Promise<readonly Finding[]>` — findings the `data` command adds for
+  what the host package itself stores, a value shape its own fields write for example. `db` reads the
+  verified copy through the project's own `persistence-sqlite`; declare a collection's columns with
+  `ensureCollection` before querying it, and only read. `model` is what `dataModel` supplied, or
+  `undefined`. A throw becomes a `plugin/hook-failed` finding and the rest of the `data` report still
+  comes out. Available from plugin API `5`.
 - `switchEdits?(ctx, relayPipelines): Promise<{ parts, blockers }>` — supplies `offer/event-queue`'s
   switch for a project layout where events-direct is not a `kestrel.config.ts` module-list entry:
   `parts` is the switch's edits as the same all-or-nothing `Record<label, Edit[] | undefined>` shape
@@ -946,7 +952,7 @@ without running the CLI: `root` and `scratch` default to the directory of `proje
 `overrides` replaces any of them. A member `RuleContext` gains later gets its default there, so a
 test built on it keeps compiling.
 
-`PLUGIN_API_VERSION` is the version of this plugin API, `4` as 6.0.0 ships it. It covers every type
+`PLUGIN_API_VERSION` is the version of this plugin API, `5` as 6.0.0 ships it. It covers every type
 `./plugin` exports, the ones a plugin returns to the engine as much as the ones it receives:
 `UpgradePlugin`, `LoadResult`, `LoadedProject`, `LoadIssue`, `PipelineFile`, `DataContentModel` and
 its parts, `SwitchEditsResult`, `Rule` with its `needs` values, `RuleContext`/`SourceRuleContext`, the
