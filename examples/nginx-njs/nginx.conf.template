@@ -21,6 +21,7 @@ http {
   # 127.0.0.11 is Docker's embedded DNS; adjust for your runtime (e.g. a
   # cluster DNS address, or point REDIRECTS_URL at a literal IP to skip DNS).
   resolver 127.0.0.11 valid=10s ipv6=off;
+  js_fetch_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
 
   server {
     listen 8080;
@@ -58,7 +59,13 @@ http {
       # Routing through a variable defers resolution to request time via the
       # `resolver` directive above - the idiomatic fix for this nginx gotcha.
       set $origin_upstream "${ORIGIN_UPSTREAM}";
-      proxy_pass http://$origin_upstream;
+      proxy_pass https://$origin_upstream;
+      proxy_ssl_verify on;
+      proxy_ssl_server_name on;
+      proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+      proxy_set_header Host $host;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
     }
   }
 }

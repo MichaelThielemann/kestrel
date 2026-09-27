@@ -1,12 +1,18 @@
 # blobstore/s3
 `blobstore@1` on Amazon S3 or any S3-compatible store (MinIO, Cloud Foundry object storage)
-via `@aws-sdk/client-s3`. Config: `bucket`, optional `prefix` (`"site/"`), `region`, `endpoint`,
-`forcePathStyle`, `accessKeyId`/`secretAccessKey` (omit to use the SDK's default credential chain:
+via `@aws-sdk/client-s3`. Config: `bucket`, optional `prefix` (a key prefix for everything this store
+holds, such as `"kestrel/"`), `region`, `endpoint`, `allowInsecureEndpoint`, `forcePathStyle`, `accessKeyId`/`secretAccessKey` (omit to use the SDK's default credential chain:
 environment, profile, instance role), `timeoutMs` (default 10000, used for both the connection and
 the request timeout, so a silent socket never hangs a pipeline step) and `maxAttempts` (default 3,
 the SDK's retry limit including the first try). `put` stores the `contentType` hint as the object's
 `Content-Type`, so a bucket served directly answers with the right type; `get` returns bytes only
 and `list` reports key and size. The store never wrote sidecar files.
+
+`endpoint` must be `https://`, or plain `http://` on a loopback address (`localhost`, `127.0.0.0/8`,
+`[::1]`), for example a MinIO next to the app. Any other plain `http://` endpoint is a config error at
+boot, since the access keys' signatures, every stored object and every replica snapshot would cross
+the network unencrypted; `allowInsecureEndpoint: true` accepts it for a network you trust, and the
+module then logs a warning at every boot.
 
 `move` copies through `CopyObject`, whose `CopySource` is a path: the segments are percent-encoded,
 the slashes separating them are not.
@@ -36,6 +42,7 @@ is missing. Once the SDK's own `maxAttempts` are spent, `put`/`get`/`remove`/`mo
 | `prefix` | string | no | `""` |
 | `region` | string | no | – |
 | `endpoint` | string | no | – |
+| `allowInsecureEndpoint` | boolean | no | `false` |
 | `forcePathStyle` | boolean | no | – |
 | `accessKeyId` | string | no | *(secret)* |
 | `secretAccessKey` | string | no | *(secret)* |

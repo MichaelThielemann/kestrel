@@ -558,6 +558,11 @@ Net changes since 5.8.1.
   import of one of the seven split paths, and a file it cannot parse at all. The contracts package's
   own README states which of its exports are frozen contracts and which are helpers, additive-only
   within a major.
+- `blobstore-s3` refuses a plain `http://` `endpoint` outside loopback (`localhost`, `127.0.0.0/8`,
+  `[::1]`) with a config error at boot. The new option `allowInsecureEndpoint: true` accepts it for a
+  trusted network and logs a warning at every boot.
+- `examples/nginx-njs` proxies to the origin over `https://` with certificate verification and passes
+  `Host`, `X-Forwarded-For` and `X-Forwarded-Proto`; `ORIGIN_UPSTREAM` defaults to `origin` (port 443).
 
 ### Added
 

@@ -37,14 +37,21 @@ NGINX reverse proxy in front of a static bucket periodically fetches `redirects.
   `nginx.conf.template` (Docker: `127.0.0.11`).
 - `REDIRECTS_INTERVAL_MS` (default `60000`): steady-state interval in ms, substituted via
   `envsubst`.
-- `ORIGIN_UPSTREAM` (default `origin:3000`): target of `proxy_pass` in `@origin`, via an nginx
-  variable rather than a literal – otherwise startup fails if the host isn't resolvable yet.
+- `ORIGIN_UPSTREAM` (default `origin`): host (and port, default 443) of the origin that `@origin`
+  proxies to over `https://`, via an nginx variable rather than a literal – otherwise startup fails if
+  the host isn't resolvable yet. The origin's certificate is verified against the system CAs
+  (`proxy_ssl_verify on`) with the host as SNI name, and the proxy passes `Host`, `X-Forwarded-For`
+  and `X-Forwarded-Proto`, so the origin sees the client address when it trusts one proxy hop.
+  Admin tokens, session cookies and login passwords cross this hop: keep it on TLS unless the origin
+  listens on the same machine (loopback), and only then switch the scheme to `http://`.
+- `REDIRECTS_URL` should be `https://` as well; `ngx.fetch` verifies the certificate against the
+  same CA bundle (`js_fetch_trusted_certificate`).
 - The artifact should be served with `Cache-Control: public, max-age=0, must-revalidate`.
 
 ## Smoke test
 
 ```
 podman build -t kestrel-nginx-njs examples/nginx-njs
-podman run --rm -e REDIRECTS_URL=http://<origin>:4000/redirects.json -p 8080:8080 kestrel-nginx-njs
+podman run --rm -e REDIRECTS_URL=https://<bucket-origin>/site/redirects.json -e ORIGIN_UPSTREAM=<origin-host> -p 8080:8080 kestrel-nginx-njs
 curl -i localhost:8080/old/x   # expected: 30x + Location: /new/x
 ```
