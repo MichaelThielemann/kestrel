@@ -24,7 +24,8 @@ otherwise, and image processing shares it; raise it on a busy instance. `verifyP
 synchronous form for scripts.
 
 **Failed logins.** `authn.login` answers 401 with `details.username`, the name that was tried, so
-an observer such as `audit-persistence` can record it; the password is never repeated anywhere.
+an observer such as `audit-persistence` can record it; the password is never repeated anywhere. A
+`username` or `email` longer than 320 characters is refused with 400 before it is looked up.
 
 **Browser sessions.** `authn.login` answers the token in the body, for a client that sends it as
 `Authorization: Bearer`, and sets it as the `kestrel_token` cookie (`HttpOnly`, `Secure`,

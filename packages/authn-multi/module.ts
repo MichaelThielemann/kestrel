@@ -236,7 +236,7 @@ export default defineModule({
       summary: "Log in with credentials; the token comes back in the body and in an HttpOnly session cookie",
       reads: [],
       writes: ["token", "identity", "responseHeaders", "result"],
-      input: { type: "object", properties: { username: { type: "string" }, email: { type: "string" }, password: { type: "string" }, code: { type: "string" } }, required: ["password"], additionalProperties: false },
+      input: { type: "object", properties: { username: { type: "string", maxLength: 320 }, email: { type: "string", maxLength: 320 }, password: { type: "string" }, code: { type: "string" } }, required: ["password"], additionalProperties: false },
       output: { type: "object", properties: { token: { type: "string" }, identity: { type: "object", properties: { id: { type: "string" }, claims: { type: "object", additionalProperties: true } }, required: ["id", "claims"] } }, required: ["token", "identity"] },
       errors: { 401: "invalid credentials" },
     },

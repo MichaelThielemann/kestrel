@@ -11,7 +11,8 @@ Login derives the scrypt key on the libuv thread pool (`verifyPasswordAsync`) an
 username, so a wrong username takes as long as a wrong password.
 
 A failed login answers 401 with `details.username`, the name that was tried; the password is never
-repeated anywhere.
+repeated anywhere. A
+`username` longer than 320 characters is refused with 400 before it is looked up.
 
 `authn.login` answers the token in the body and sets it as the `kestrel_token` cookie (`HttpOnly`,
 `Secure`, `SameSite=Strict`, `Path=/`, `Max-Age` = `sessionTtlSeconds`); `authn.logout` removes it.

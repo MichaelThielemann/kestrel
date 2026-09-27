@@ -121,3 +121,10 @@ describe("mfa/totp at boot", () => {
     await kestrel.stop();
   });
 });
+
+describe("mfa/totp account names", () => {
+  it("refuses an account name longer than 320 characters at setup", async () => {
+    const { options } = await boot();
+    expect(await runPipeline(setup, { body: { username: "x".repeat(321), password: "long-enough" } }, options)).toMatchObject({ status: 400, code: "VALIDATION" });
+  });
+});

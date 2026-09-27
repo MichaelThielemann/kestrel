@@ -91,3 +91,11 @@ describe("authn/single module steps via runPipeline", () => {
     expect(problems(res.details)[0]?.path).toBe("$.extra");
   });
 });
+
+describe("authn/single account names at sign-in", () => {
+  it("refuses a username longer than 320 characters", async () => {
+    const instance = await boot();
+    const run = await runPipeline(loginPipeline, { body: { username: "x".repeat(321), password: "secret" } }, { modules: [{ module, instance }] });
+    expect(run).toMatchObject({ status: 400, code: "VALIDATION" });
+  });
+});

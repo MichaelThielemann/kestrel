@@ -40,7 +40,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const CREDENTIALS_INPUT = { type: "object", properties: { username: { type: "string" }, email: { type: "string" }, password: { type: "string" } }, required: ["password"], additionalProperties: false } as const;
+const CREDENTIALS_INPUT = { type: "object", properties: { username: { type: "string", maxLength: 320 }, email: { type: "string", maxLength: 320 }, password: { type: "string" } }, required: ["password"], additionalProperties: false } as const;
 
 export default defineModule({
   name: "mfa/totp",

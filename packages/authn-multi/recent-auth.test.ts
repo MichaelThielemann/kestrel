@@ -94,3 +94,14 @@ describe("authn/multi ending a user's sessions and a second factor's code", () =
     expect((await runPipeline(login, { body: { username: "admin", password: "long-enough", code: "123456" } }, options)).status).toBe(200);
   });
 });
+
+describe("authn/multi account names at sign-in", () => {
+  it("refuses a username or email longer than 320 characters before it is looked up or repeated", async () => {
+    const { options } = await setup();
+    for (const field of ["username", "email"]) {
+      const run = await runPipeline(login, { body: { [field]: "x".repeat(321), password: "long-enough" } }, options);
+      expect(run).toMatchObject({ status: 400, code: "VALIDATION" });
+      expect(JSON.stringify(run).length).toBeLessThan(2000);
+    }
+  });
+});
