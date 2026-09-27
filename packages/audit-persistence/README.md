@@ -16,10 +16,12 @@ entry is never moved to another user: a login belongs to nobody else. Run it fro
 without any pipeline: `auth.failed` when one of `failedSteps` failed (default: `authn.login`,
 `authn.confirmPassword`, `authn.changePassword`, `mfa.check`, `mfa.startSetup`), with the attempted
 `username` when the step reported one;
-`access.denied` for any 403; `access.rateLimited` for a 429, at most once a minute per address and
-pipeline. Each carries `at`, `ip`, the `identityId` known when the run ended and `params`
+`access.denied` for a 403 and `access.rateLimited` for a 429, each at most once a minute per
+address, identity, pipeline and step — the entry after a quiet minute says in `params.suppressed` how
+many it left out. Each carries `at`, `ip`, the `identityId` known when the run ended and `params`
 `{ pipeline, step, code }`; never a body, a password or a token. The attempted username of a failed
-sign-in is kept as sent — it may name nobody — so `audit.anonymize` does not remove it; retention does.
+sign-in is kept as sent — at most 256 characters, control characters replaced by spaces; it may
+name nobody — so `audit.anonymize` does not remove it; retention does.
 
 **Retention.** `retentionDays` (no default) is how long an entry is kept. `audit.prune` deletes
 everything older than that and reports `{ removed }`; without the config key it fails 400, because

@@ -4,7 +4,7 @@ import type { Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
-import { createAuditPersistence, DEFAULT_FAILED_STEPS, entryFromEventData, rateLimitedThrottle, securityEntry, type Audit } from "./impl.ts";
+import { createAuditPersistence, DEFAULT_FAILED_STEPS, entryFromEventData, securityThrottle, securityEntry, type Audit } from "./impl.ts";
 
 export const configSchema = z
   .object({
@@ -34,7 +34,7 @@ export default defineModule({
 
   attach(audit, kestrel) {
     if (!audit.securityEvents) return;
-    const keep = rateLimitedThrottle();
+    const keep = securityThrottle();
     return kestrel.observe({
       runEnd(event) {
         const entry = securityEntry(event, audit.failedSteps);

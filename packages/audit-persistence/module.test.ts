@@ -142,6 +142,54 @@ describe("audit/persistence security events", () => {
   });
 });
 
+describe("audit/persistence security entries stay small", () => {
+  function attach(db: ReturnType<typeof createFakePersistence>, instance: Audit) {
+    let observer: RunObserver | undefined;
+    const kestrel: Introspection = {
+      describe: () => { throw new Error("not needed"); },
+      observe: (o) => { observer = o; return () => { observer = undefined; }; },
+      health: () => ({ ok: true, restartRequired: false, modules: [] }),
+    };
+    module.attach?.(instance, kestrel);
+    const end = (event: Partial<RunEndEvent>) => observer?.runEnd?.({ runId: "r", pipeline: "login", trigger: { kind: "http", name: "POST /login" }, at: 1_000, ms: 1, status: 200, outcome: "ok", ...event });
+    const entries = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return expectOk(await db.findMany<Record<string, unknown> & { id: string; params: Record<string, string> }>(COLLECTION, {})).items;
+    };
+    return { end, entries };
+  }
+
+  it("keeps at most 256 characters of a tried username and no control characters", async () => {
+    const { instance, db } = await boot();
+    const { end, entries } = attach(db, instance);
+    end({ status: 401, outcome: "fail", code: "UNAUTHENTICATED", step: "authn.login", ip: "198.51.100.4", details: { username: `evil\nuser\r\n${"x".repeat(1000)}` } });
+    const [entry] = await entries();
+    const username = entry?.params.username ?? "";
+    expect(username.length).toBeLessThanOrEqual(256);
+    expect([...username].some((char) => (char.codePointAt(0) ?? 0) < 0x20)).toBe(false);
+    expect(username.startsWith("evil user")).toBe(true);
+    expect(username.includes("  ")).toBe(true);
+  });
+
+  it("records a burst of 403 answers of one caller once a minute, with how many it left out", async () => {
+    const { instance, db } = await boot();
+    const { end, entries } = attach(db, instance);
+    const denied = { pipeline: "listUsers", trigger: { kind: "http" as const, name: "GET /users" }, status: 403, outcome: "fail" as const, code: "FORBIDDEN", step: "authz.requireRole", ip: "198.51.100.5", identityId: "u9" };
+    for (let i = 0; i < 500; i++) end({ ...denied, at: 1_000 + i });
+    end({ ...denied, at: 70_000 });
+    const found = (await entries()).filter((row) => row.event === "access.denied");
+    expect(found).toHaveLength(2);
+    expect(found[1]?.params.suppressed).toBe("499");
+  });
+
+  it("counts a failed second-factor check as a failed sign-in by default", async () => {
+    const { instance, db } = await boot();
+    const { end, entries } = attach(db, instance);
+    end({ status: 401, outcome: "fail", code: "UNAUTHENTICATED", step: "mfa.check", ip: "198.51.100.6", details: { username: "alice" } });
+    expect((await entries())[0]).toMatchObject({ event: "auth.failed", params: { step: "mfa.check", username: "alice" } });
+  });
+});
+
 describe("audit/persistence entries from events", () => {
   it("keeps the client address and the id the event is about", async () => {
     const { instance, db } = await boot();

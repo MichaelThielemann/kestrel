@@ -93,10 +93,22 @@ export function entryFromEventData(data: Record<string, unknown>): AuditEntry {
   return { eventId: typeof eventId === "string" ? eventId : null, event, at, identityId, ip: typeof ip === "string" ? ip : null, params: withId };
 }
 
+const LOGGED_TEXT_LENGTH = 256;
+
+function loggable(text: string): string {
+  let out = "";
+  for (const char of text) {
+    if (out.length >= LOGGED_TEXT_LENGTH) break;
+    const code = char.codePointAt(0) ?? 0;
+    out += code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029 ? " " : char;
+  }
+  return out.slice(0, LOGGED_TEXT_LENGTH);
+}
+
 /** The steps whose failure `auth.failed` records by default: every check of a password or a second factor. */
 export const DEFAULT_FAILED_STEPS: readonly string[] = ["authn.login", "authn.confirmPassword", "authn.changePassword", "mfa.check", "mfa.startSetup"];
 
-const RATE_LIMITED_EVERY_MS = 60_000;
+const THROTTLE_MS = 60_000;
 
 /**
  * Turns the end of an HTTP run into a security entry, or `null` when it is none: `auth.failed` when one of
@@ -111,20 +123,27 @@ export function securityEntry(event: RunEndEvent, failedSteps: readonly string[]
   if (name === null) return null;
   const params: Record<string, string> = { pipeline: event.pipeline, step, code: event.code ?? "" };
   const username = event.details?.username;
-  if (name === "auth.failed" && typeof username === "string") params.username = username;
+  if (name === "auth.failed" && typeof username === "string") params.username = loggable(username);
   return { eventId: null, event: name, at: event.at, identityId: event.identityId ?? null, ip: event.ip ?? null, params };
 }
 
-/** Keeps a flood of rate-limited answers from one address and pipeline to one entry a minute. */
-export function rateLimitedThrottle(): (entry: AuditEntry) => boolean {
-  const last = new Map<string, number>();
+/**
+ * Keeps a flood of denied or rate-limited answers to one entry a minute per address, identity, pipeline and
+ * step; the entry that ends a quiet minute carries in `params.suppressed` how many it left out.
+ */
+export function securityThrottle(): (entry: AuditEntry) => boolean {
+  const seen = new Map<string, { at: number; suppressed: number }>();
   return (entry) => {
-    if (entry.event !== "access.rateLimited") return true;
-    const key = `${entry.ip ?? ""} ${entry.params.pipeline ?? ""}`;
-    const previous = last.get(key);
-    if (previous !== undefined && entry.at - previous < RATE_LIMITED_EVERY_MS) return false;
-    last.set(key, entry.at);
-    if (last.size > 10_000) last.clear();
+    if (entry.event !== "access.rateLimited" && entry.event !== "access.denied") return true;
+    const key = [entry.event, entry.ip ?? "", entry.identityId ?? "", entry.params.pipeline ?? "", entry.params.step ?? ""].join(" ");
+    const previous = seen.get(key);
+    if (previous !== undefined && entry.at - previous.at < THROTTLE_MS) {
+      previous.suppressed += 1;
+      return false;
+    }
+    if (previous !== undefined && previous.suppressed > 0) entry.params.suppressed = String(previous.suppressed);
+    seen.set(key, { at: entry.at, suppressed: 0 });
+    if (seen.size > 10_000) seen.clear();
     return true;
   };
 }
