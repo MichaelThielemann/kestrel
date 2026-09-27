@@ -63,4 +63,17 @@ describe("ratelimit/memory", () => {
     expect(second.error.code).toBe("RATE_LIMITED");
     expect(isErr(await check(createContext({ trigger: { kind: "http", name: "t" }, ip: "1.2.3.4" })))).toBe(false);
   });
+
+  it("reserve counts an attempt up front, refund gives it back and fail blocks the key once the failures reach the limit", () => {
+    const limit = createRateLimitMemory({ buckets: { account: { limit: 2, windowSeconds: 60, counts: "failures" } } }, () => 1000);
+    expect(limit.reserve("account", "k").allowed).toBe(true);
+    expect(limit.reserve("account", "k").allowed).toBe(true);
+    expect(limit.reserve("account", "k").allowed).toBe(false);
+    limit.refund("account", "k");
+    expect(limit.reserve("account", "k").allowed).toBe(true);
+    limit.fail("account", "k");
+    limit.refund("account", "k");
+    expect(limit.reserve("account", "k").allowed).toBe(false);
+  });
 });
+

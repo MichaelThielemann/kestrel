@@ -23,11 +23,13 @@ bucket name is validated at boot. `ratelimit.sweep` (cron) drops expired windows
   `authn.changePassword` or `authn.confirmPassword`, so a stolen session cannot guess the current
   password.
 
-**Counting failures only.** With `counts: "failures"` the check lets a request through without
-counting it and counts the run only when it ends in 400 or 401 (a refusal that asks for a second
-factor does not count); a run that succeeds clears the key. The owner's own sign-ins never use up an
-account's budget, and a correct sign-in resets it. It needs a booted instance, since the module
-learns how a run ended from the run observer.
+**Counting failures only.** With `counts: "failures"` the check counts each request it lets through
+as an attempt in progress and settles it when the run ends: a run that ends in 400 or 401 keeps the
+attempt as a failure, a run that succeeds clears the key, and any other end (a refusal that asks for a
+second factor, a server error) gives the attempt back. Parallel requests therefore never get more than
+`limit` attempts through at once, while the owner's own sign-ins never use up an account's budget and a
+correct sign-in resets it. It needs a booted instance, since the module learns how a run ended from the
+run observer.
 
 **Backoff.** Without `maxBlockSeconds` a key that exceeded its limit waits for the end of its window.
 With it, the first block lasts one window, and every further window the key exceeds right after a

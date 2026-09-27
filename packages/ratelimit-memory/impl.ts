@@ -28,9 +28,11 @@ export interface Decision {
 
 export interface RateLimit {
   hit(bucket: string, key: string): Decision;
-  /** The decision for the next request without counting it. */
-  peek(bucket: string, key: string): Decision;
-  /** Counts one failed attempt; the key is blocked once it reaches the limit. */
+  /** Counts the next attempt before it runs, so parallel attempts cannot pass the limit together; `refund` gives it back and `fail` keeps it. */
+  reserve(bucket: string, key: string): Decision;
+  /** Gives back an attempt `reserve` counted, for a run that turned out not to count. */
+  refund(bucket: string, key: string): void;
+  /** Keeps an attempt `reserve` counted as a failure; the key is blocked once its failures reach the limit. */
   fail(bucket: string, key: string): void;
   /** Forgets the key, e.g. after a successful sign-in. */
   reset(bucket: string, key: string): void;
@@ -109,31 +111,33 @@ export function createRateLimitMemory(config: Config, now: () => number = Date.n
       state.blockedUntil = bucket.maxBlockSeconds === undefined ? state.start + windowMs : t + blockMs(bucket, state.strikes);
       return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil((state.blockedUntil - t) / 1000)) };
     },
-    peek(name, key) {
-      const bucket = bucketOf(name);
-      const t = now();
-      const state = states.get(`${name}:${key}`);
-      if (state && t < state.blockedUntil) return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil((state.blockedUntil - t) / 1000)) };
-      const windowMs = bucket.windowSeconds * 1000;
-      const count = state && t - state.start < windowMs ? state.count : 0;
-      if (count >= bucket.limit && state) return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil((state.start + windowMs - t) / 1000)) };
-      return { allowed: true, remaining: bucket.limit - count, retryAfterSeconds: 0 };
-    },
-    fail(name, key) {
+    reserve(name, key) {
       const bucket = bucketOf(name);
       const windowMs = bucket.windowSeconds * 1000;
       const t = now();
       const id = `${name}:${key}`;
       let state = states.get(id);
-      if (!state || t - state.start >= windowMs || (state.blockedUntil > 0 && t >= state.blockedUntil)) {
+      if (state && t < state.blockedUntil) return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil((state.blockedUntil - t) / 1000)) };
+      if (!state || t - state.start >= windowMs || state.blockedUntil > 0) {
         const strikes = state && state.blockedUntil > 0 && t - state.blockedUntil < quietMs(bucket) ? state.strikes : 0;
         state = { start: t, count: 0, blockedUntil: 0, strikes };
         states.set(id, state);
       }
+      if (state.count >= bucket.limit) return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil((state.start + windowMs - t) / 1000)) };
       state.count += 1;
-      if (state.count < bucket.limit) return;
+      return { allowed: true, remaining: bucket.limit - state.count, retryAfterSeconds: 0 };
+    },
+    refund(name, key) {
+      const state = states.get(`${name}:${key}`);
+      if (state && state.count > 0) state.count -= 1;
+    },
+    fail(name, key) {
+      const bucket = bucketOf(name);
+      const t = now();
+      const state = states.get(`${name}:${key}`);
+      if (!state || state.count < bucket.limit || t < state.blockedUntil) return;
       state.strikes += 1;
-      state.blockedUntil = bucket.maxBlockSeconds === undefined ? state.start + windowMs : t + blockMs(bucket, state.strikes);
+      state.blockedUntil = bucket.maxBlockSeconds === undefined ? state.start + bucket.windowSeconds * 1000 : t + blockMs(bucket, state.strikes);
     },
     reset(name, key) {
       states.delete(`${name}:${key}`);

@@ -61,6 +61,7 @@ export default defineModule({
         for (const { bucket, key } of checked) {
           if (event.status < 400) limit.reset(bucket, key);
           else if ((event.status === 400 || event.status === 401) && !NOT_COUNTED_CODES.has(event.code ?? "")) limit.fail(bucket, key);
+          else limit.refund(bucket, key);
         }
       },
     }),
@@ -71,7 +72,7 @@ export default defineModule({
       return async (ctx: Context) => {
         const key = keyFor(config, ctx);
         const failuresOnly = config.counts === "failures";
-        const decision = failuresOnly ? limit.peek(bucket, key) : limit.hit(bucket, key);
+        const decision = failuresOnly ? limit.reserve(bucket, key) : limit.hit(bucket, key);
         if (!decision.allowed) {
           return ctx.fail("RATE_LIMITED", `too many requests, retry in ${decision.retryAfterSeconds}s`, { retryAfterSeconds: decision.retryAfterSeconds });
         }

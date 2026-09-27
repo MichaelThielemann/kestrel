@@ -157,4 +157,74 @@ describe("ratelimit/memory account keys", () => {
     expect(await run()).toBe(429);
     await kestrel.stop();
   });
+
+  it("with counts: failures, lets no more attempts through at once than the limit, however many run in parallel", async () => {
+    let outcome: "fail" | "pass" = "fail";
+    const slow = defineModule({
+      name: "slow/test",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}),
+      async setup() {
+        return {};
+      },
+      steps: () => ({
+        decide: async (ctx: Context) => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return outcome === "fail" ? ctx.fail("UNAUTHENTICATED", "invalid credentials") : ok({ ...ctx, result: { ok: true } });
+        },
+      }),
+      describe: () => ({ decide: { summary: "Answers after a while", reads: [], writes: ["result?"], output: { type: "object" } } }),
+    });
+    const kestrel = await bootKestrel({
+      config: {
+        modules: [{ use: "./slow.ts", config: {} }, { use: "@michaelthielemann/kestrel-ratelimit-memory", config: { buckets: { account: { limit: 3, windowSeconds: 300, key: "username", counts: "failures" } } } }],
+        triggers: [],
+        http: null,
+      },
+      modules: [slow, module],
+      pipelines: [definePipeline({ name: "login", steps: ["ratelimit.check:account", "slow.decide"] })],
+      logger: silentLogger,
+    });
+    const run = (i: number) => kestrel.run("login", { trigger: { kind: "http", name: "POST /login" }, ip: `192.0.2.${i}`, body: { username: "victim" } }).then((r) => r.status);
+    const wave = await Promise.all(Array.from({ length: 50 }, (_, i) => run(i)));
+    expect(wave.filter((status) => status === 401)).toHaveLength(3);
+    expect(wave.filter((status) => status === 429)).toHaveLength(47);
+    outcome = "pass";
+    expect(await run(99)).toBe(429);
+    await kestrel.stop();
+  });
+
+  it("with counts: failures, gives back the attempts of parallel sign-ins that succeed", async () => {
+    let outcome: "fail" | "pass" = "pass";
+    const slow = defineModule({
+      name: "slow/test",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}),
+      async setup() {
+        return {};
+      },
+      steps: () => ({
+        decide: async (ctx: Context) => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return outcome === "fail" ? ctx.fail("UNAUTHENTICATED", "invalid credentials") : ok({ ...ctx, result: { ok: true } });
+        },
+      }),
+      describe: () => ({ decide: { summary: "Answers after a while", reads: [], writes: ["result?"], output: { type: "object" } } }),
+    });
+    const kestrel = await bootKestrel({
+      config: { modules: [{ use: "./slow.ts", config: {} }, { use: "@michaelthielemann/kestrel-ratelimit-memory", config: { buckets: { account: { limit: 3, windowSeconds: 300, key: "username", counts: "failures" } } } }], triggers: [], http: null },
+      modules: [slow, module],
+      pipelines: [definePipeline({ name: "login", steps: ["ratelimit.check:account", "slow.decide"] })],
+      logger: silentLogger,
+    });
+    const run = () => kestrel.run("login", { trigger: { kind: "http", name: "POST /login" }, ip: "192.0.2.1", body: { username: "owner" } }).then((r) => r.status);
+    for (let round = 0; round < 3; round++) expect(await Promise.all([run(), run(), run()])).toEqual([200, 200, 200]);
+    outcome = "fail";
+    expect(await Promise.all([run(), run(), run()])).toEqual([401, 401, 401]);
+    expect(await run()).toBe(429);
+    await kestrel.stop();
+  });
 });
+
