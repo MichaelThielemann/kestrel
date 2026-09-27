@@ -52,7 +52,7 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(getRequestHeaders(event))) if (typeof v === "string") headers[k] = v;
     const requestId = requestIdOf(headers["x-request-id"]);
-    if (hasDotSegment(event.node.req.originalUrl ?? event.path) || hasDotSegment(event.path)) return respond(event, errorResponse(400, "invalid path: dot segment", requestId));
+    if (hasDotSegment(event.node.req.originalUrl ?? event.path)) return respond(event, errorResponse(400, "invalid path: dot segment", requestId));
     const url = getRequestURL(event);
     const pathname = stripMount(url.pathname, mountPath);
 

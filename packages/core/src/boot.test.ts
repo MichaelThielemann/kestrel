@@ -433,6 +433,31 @@ describe("boot", () => {
     await expect(boot({ config: config({ trustedProxies: ["proxy.example.org"] }), modules: [spy], pipelines: [ipPipeline], logger: silentLogger })).rejects.toThrow(/http\.trustedProxies: ip allowlist: invalid entry "proxy.example.org"/);
   });
 
+  it("marks a route as taking files when a step of its pipeline reads files, files? or a member of files", async () => {
+    const reader = defineModule({
+      name: "reader/files",
+      provides: [],
+      requires: [],
+      configSchema: z.object({}),
+      async setup() { return {}; },
+      steps: () => ({ all: async (ctx: Context) => ok(ctx), optional: async (ctx: Context) => ok(ctx), member: async (ctx: Context) => ok(ctx), size: async (ctx: Context) => ok(ctx) }),
+      describe: () => ({
+        all: { summary: "reads files", reads: ["files"], writes: [] },
+        optional: { summary: "reads files if present", reads: ["files?"], writes: [] },
+        member: { summary: "reads one member of files", reads: ["files.first"], writes: [] },
+        size: { summary: "reads a payload value named like files", reads: ["filesize?"], writes: [] },
+      }),
+    });
+    const names = ["all", "optional", "member", "size"];
+    kestrel = await boot({
+      config: { modules: [{ use: "./reader", config: {} }], triggers: names.map((name) => ({ http: `POST /${name}`, pipeline: name })), http: null },
+      modules: [reader],
+      pipelines: names.map((name) => definePipeline({ name, steps: [`reader.${name}`] })),
+      logger: silentLogger,
+    });
+    expect(Object.fromEntries(kestrel.triggers.http.map((route) => [route.pipeline, route.files]))).toEqual({ all: true, optional: true, member: true, size: false });
+  });
+
   it("rejects an http.allow entry that is neither an address nor a CIDR range at boot", async () => {
     await expect(boot({ config: { ...baseConfig, http: { port: 0, allow: ["10.0.0.0/8", "example.org"] } }, modules, pipelines, logger: silentLogger })).rejects.toThrow(/http\.allow: ip allowlist: invalid entry "example.org"/);
     kestrel = await boot({ config: { ...baseConfig, http: { port: 0, allow: ["10.0.0.0/8"] } }, modules, pipelines, logger: silentLogger });
