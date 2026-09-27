@@ -615,11 +615,13 @@ the same edit.
 | `npx [-y] kestrel …`, `npx [-y] kestrel-cli …` | `kestrel …` (an error) |
 
 The unscoped npm names `kestrel`, `kestrel-cli`, `kestrel-openapi` and `kestrel-upgrade` do not
-belong to this project. A runner that installs a missing package on the fly (`npx`, `npm exec`
-without `--no`, `pnpm dlx`, `yarn dlx`, `bunx`) fetches whatever the registry holds under such a
+belong to this project. A runner that installs a missing package on the fly (`npx` or `pnpx` without
+`--no`, `npm exec`/`npm x` without `--no`, `pnpm dlx`, `yarn dlx`, `bunx`, with any flags before the name,
+or naming the package through `-p`/`--package`) fetches whatever the registry holds under such a
 name when the project's own `@michaelthielemann/kestrel-cli` is not installed, and runs it with
 access to the project and its `.env`. Every such command is an error; in a script the runner is
-dropped, since a script finds the locally installed `kestrel` on its `PATH`.
+dropped, since a script finds the locally installed `kestrel` on its `PATH`; a `-p`/`--package` form
+is reported without an edit.
 
 Only a command token is rewritten: at the start of the script, after `&&`, `;` or `|`, after
 `node_modules/.bin/`, or behind a runner (`pnpm`, `pnpm exec`, `yarn`) or an environment prefix

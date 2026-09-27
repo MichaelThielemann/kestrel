@@ -10,12 +10,17 @@ const DOCS = upgradingDocs("scripts-kestrel-binaries");
 const DLX = /(^|[;&|]|\n)(\s*)(pnpm\s+dlx|npx(?:\s+(?:-y|--yes))?)\s+@michaelthielemann\/kestrel-upgrade(@[^\s"'`;&|]+)?(?=\s|$|[;&|])/g;
 const NPM_EXEC = /(^|[;&|]|\n)(\s*)npm\s+exec\s+(?:(?:-y|--yes)\s+)?@michaelthielemann\/kestrel-upgrade(@[^\s"'`;&|]+)?(?:\s+--)?(?=\s|$|[;&|])/g;
 const ENV_PREFIX = String.raw`(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:cross-env\s+(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*)?`;
-const FETCHING_RUNNER = String.raw`(?:npx\s+(?:(?:-y|--yes)\s+)?|npm\s+exec\s+(?:(?:-y|--yes)\s+)?(?:--\s+)?|pnpm\s+dlx\s+|yarn\s+dlx\s+|bunx\s+)`;
+const RUNNER_COMMAND = String.raw`(?:npx|pnpx|bunx|npm\s+(?:exec|x)|pnpm\s+dlx|yarn\s+dlx)`;
+const RUNNER_FLAG = String.raw`(?:--(?!no(?:-install)?\b|package\b)[a-z][\w-]*(?:=\S+)?|-(?!p\b)[a-zA-Z]+)\s+`;
+const FETCHING_RUNNER = String.raw`${RUNNER_COMMAND}\s+(?:${RUNNER_FLAG})*(?:--\s+)?`;
+const NAME_END = String.raw`(?![\w@/-]|\.\w)`;
+const FETCHING_RUNNER_ONLY = new RegExp(String.raw`^${FETCHING_RUNNER}$`);
 const RUNNER = String.raw`(?:pnpm\s+(?:exec\s+)?|yarn\s+(?:run\s+)?|${FETCHING_RUNNER})?`;
-const SCRIPT_TOKEN = new RegExp(String.raw`(^|[;&|]|\n)(\s*${ENV_PREFIX})(${RUNNER})(kestrel-openapi|kestrel-upgrade)(?![\w@./-])|(node_modules\/\.bin\/)(kestrel-openapi|kestrel-upgrade)(?![\w@./-])`, "g");
-const UNSCOPED_NAME = String.raw`(?:kestrel|kestrel-cli|kestrel-openapi|kestrel-upgrade)(?:@[^\s"'\`;&|]*)?(?![\w@./-])`;
+const SCRIPT_TOKEN = new RegExp(String.raw`(^|[;&|]|\n)(\s*${ENV_PREFIX})(${RUNNER})(kestrel-openapi|kestrel-upgrade)${NAME_END}|(node_modules\/\.bin\/)(kestrel-openapi|kestrel-upgrade)${NAME_END}`, "g");
+const UNSCOPED_NAME = String.raw`(?:kestrel|kestrel-cli|kestrel-openapi|kestrel-upgrade)(?:@[^\s"'\`;&|]*)?${NAME_END}`;
 const UNSCOPED_FETCH = new RegExp(String.raw`(?:^|[^\w@./-])${ENV_PREFIX}${FETCHING_RUNNER}${UNSCOPED_NAME}`);
-const UNSCOPED_KESTREL = new RegExp(String.raw`(^|[;&|]|\n)(\s*${ENV_PREFIX})${FETCHING_RUNNER}kestrel(?:-cli)?(?:@[^\s"'\`;&|]*)?(?![\w@./-])`, "g");
+const UNSCOPED_PACKAGE = new RegExp(String.raw`(?:^|[^\w@./-])${RUNNER_COMMAND}\s+(?:\S+\s+)*?(?:-p\s+|--package[=\s]\s*)${UNSCOPED_NAME}`);
+const UNSCOPED_KESTREL = new RegExp(String.raw`(^|[;&|]|\n)(\s*${ENV_PREFIX})${FETCHING_RUNNER}kestrel(?:-cli)?(?:@[^\s"'\`;&|]*)?${NAME_END}`, "g");
 const SAFE_COMMANDS = "run the locally installed command (pnpm exec kestrel …, npm exec --no -- kestrel …, yarn kestrel …) or the scoped package (npx -y @michaelthielemann/kestrel-cli@6 …); the unscoped name belongs to an unrelated registry package";
 const FILE_TOKEN = /(^|[\s"'`;&|(=]|node_modules\/\.bin\/)(kestrel-openapi|kestrel-upgrade)(?![\w@./-])/;
 const BIN_FILE = /kestrel-(?:openapi|upgrade)\/(?:dist\/|src\/)?cli\.(?:js|ts)\b/;
@@ -38,14 +43,14 @@ export function rewriteCommand(command: string): string {
     .replace(NPM_EXEC, (_m, sep: string, space: string, version: string | undefined) => `${sep}${space}npm exec @michaelthielemann/kestrel-cli${version ?? ""} -- upgrade`)
     .replace(SCRIPT_TOKEN, (_m, sep: string | undefined, prefix: string | undefined, runner: string | undefined, bin: string | undefined, binDir: string | undefined, binInDir: string | undefined) => {
       if (binDir !== undefined && binInDir !== undefined) return `${binDir}${replacement(binInDir)}`;
-      const keep = runner !== undefined && new RegExp(`^${FETCHING_RUNNER}$`).test(runner) ? "" : (runner ?? "");
+      const keep = runner !== undefined && FETCHING_RUNNER_ONLY.test(runner) ? "" : (runner ?? "");
       return `${sep ?? ""}${prefix ?? ""}${keep}${replacement(bin ?? "")}`;
     });
 }
 
 /** Whether `command` runs `kestrel`, `kestrel-cli` or a removed binary through a runner that fetches an unscoped package of that name from the registry when it is not installed locally; those names belong to unrelated packages. */
 export function runsUnscopedNpx(command: string): boolean {
-  return UNSCOPED_FETCH.test(command);
+  return UNSCOPED_FETCH.test(command) || UNSCOPED_PACKAGE.test(command);
 }
 
 /** Whether `command` still runs a removed binary by name or by the path of its deleted bin file. */
@@ -127,7 +132,10 @@ function packageScriptFindings(ctx: SourceRuleContext): Finding[] {
     if (stillRunsRemovedBinary(rewritten)) {
       findings.push(finding(`${RULE}:unrewritten:${value.name}`, RULE, `script "${value.name}" still runs kestrel-openapi or kestrel-upgrade, which 6.0.0 removed, in a form this rule cannot rewrite: ${rewritten}`, "run the kestrel command instead: kestrel openapi … or kestrel upgrade …", { file }, undefined, DOCS, "warning"));
     }
-    if (rewritten === value.raw) continue;
+    if (rewritten === value.raw) {
+      if (runsUnscopedNpx(value.raw)) findings.push(finding(`${RULE}:script:${value.name}`, RULE, `script "${value.name}" runs an unscoped package name through a runner that can fetch it, in a form this rule cannot rewrite; the name belongs to an unrelated registry package: ${value.raw}`, SAFE_COMMANDS, { file }, undefined, DOCS));
+      continue;
+    }
     const edit: Edit = { file, start: value.start, end: value.end, text: rewritten };
     if (runsUnscopedNpx(value.raw)) {
       findings.push(finding(`${RULE}:script:${value.name}`, RULE, `script "${value.name}" runs an unscoped package name through a runner that can fetch it; the name belongs to an unrelated registry package, which would run with access to the project: ${value.raw}`, `run "${rewritten}" instead`, { file }, [edit], DOCS));

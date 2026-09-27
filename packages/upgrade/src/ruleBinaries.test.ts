@@ -174,8 +174,8 @@ describe("scripts/kestrel-binaries behind runner prefixes", () => {
 });
 
 describe("scripts/kestrel-binaries and the unscoped kestrel name", () => {
-  const unscoped = ["npx kestrel check", "npx -y kestrel check", "npx --yes kestrel@6 check", "FOO=1 npx kestrel check", "cross-env FOO=1 npx kestrel check", "npx kestrel-cli check", "npm exec kestrel check", "pnpm dlx kestrel check", "yarn dlx kestrel check", "bunx kestrel check"];
-  const scoped = ["npx -y @michaelthielemann/kestrel-cli@6 check", "pnpm exec kestrel check", "npm exec --no -- kestrel check", "kestrel check", "yarn kestrel check"];
+  const unscoped = ["npm x kestrel check", "pnpx kestrel check", "npx -q kestrel check", "npx --quiet kestrel check", "npx --yes --quiet kestrel check", "npx -p kestrel kestrel check", "npx --package=kestrel-cli kestrel check", "bunx --bun kestrel check", "pnpm dlx --silent kestrel check", "run npx kestrel.", "npx kestrel check", "npx -y kestrel check", "npx --yes kestrel@6 check", "FOO=1 npx kestrel check", "cross-env FOO=1 npx kestrel check", "npx kestrel-cli check", "npm exec kestrel check", "pnpm dlx kestrel check", "yarn dlx kestrel check", "bunx kestrel check"];
+  const scoped = ["npx --no kestrel check", "npx --no-install kestrel check", "npx -p @michaelthielemann/kestrel-cli kestrel check", "npx kestrel.config.ts", "npx -y @michaelthielemann/kestrel-cli@6 check", "pnpm exec kestrel check", "npm exec --no -- kestrel check", "kestrel check", "yarn kestrel check"];
 
   it("recognises every runner that fetches the unscoped name from the registry, and none that runs the local or scoped command", async () => {
     const { runsUnscopedNpx } = await import("./ruleBinaries.ts");
@@ -227,6 +227,22 @@ describe("scripts/kestrel-binaries and the unscoped kestrel name", () => {
       expect(f.suggestion).toContain("npm exec --no -- kestrel");
       expect(f.suggestion).toContain("npx -y @michaelthielemann/kestrel-cli@6");
     }
+  });
+
+  it("rewrites npm x, pnpx and flagged runners in scripts, and reports a form it cannot rewrite as an error", async () => {
+    await writePackage({
+      scripts: { a: "npm x kestrel check", b: "pnpx kestrel check", c: "npx --yes --quiet kestrel check", d: "npx -p kestrel kestrel check" },
+      dependencies: { "@michaelthielemann/kestrel": "^6.0.0" },
+      devDependencies: { [CLI]: "^6.0.0" },
+    });
+    const findings = (await check()).filter((f) => f.rule === "scripts/kestrel-binaries");
+    expect(findings.map((f) => [f.id.split(":").at(-1), f.severity, f.fix.kind]).sort()).toEqual([
+      ["a", "error", "auto"],
+      ["b", "error", "auto"],
+      ["c", "error", "auto"],
+      ["d", "error", "manual"],
+    ]);
+    expect((await fixWrite()).scripts).toMatchObject({ a: "kestrel check", b: "kestrel check", c: "kestrel check", d: "npx -p kestrel kestrel check" });
   });
 
   it("reports an unscoped npx of a removed binary in another project file as an error", async () => {

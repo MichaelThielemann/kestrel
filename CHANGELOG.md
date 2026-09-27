@@ -27,7 +27,8 @@ Net changes since 5.8.1.
   command, including the `pnpm dlx`/`npx` form.
 - `scripts/kestrel-binaries` reports every command that runs the unscoped name `kestrel`,
   `kestrel-cli`, `kestrel-openapi` or `kestrel-upgrade` through a runner that installs a missing
-  package on the fly (`npx`, `npm exec` without `--no`, `pnpm dlx`, `yarn dlx`, `bunx`) as an error,
+  package on the fly (`npx`/`pnpx` and `npm exec`/`npm x` without `--no`, `pnpm dlx`, `yarn dlx`, `bunx`,
+  with any flags, or through `-p`/`--package`) as an error,
   in `package.json` scripts, other project files and Markdown: those names belong to unrelated
   registry packages. In a script it drops the runner (`npx kestrel check` becomes `kestrel check`);
   elsewhere it names `pnpm exec kestrel …`, `npm exec --no -- kestrel …` or
