@@ -617,6 +617,11 @@ Net changes since 5.8.1.
   server and in the h3 adapter instead of being routed to the resolved path (new export
   `hasDotSegment`). The h3 adapter exports `routedPipeline(event)`, the pipeline a request was routed
   to, for a handler that wraps it.
+- `authn/multi` stores a session under the SHA-256 digest of its token instead of the token itself,
+  and issues tokens of 32 random bytes (base64url). A copy of the database — a replica, a backup —
+  holds no token that authenticates. Sessions stored in the earlier plain format are removed when the
+  module starts, so everyone signed in logs in once more after the upgrade. `authn/single` issues
+  tokens of the same shape.
 
 ### Added
 

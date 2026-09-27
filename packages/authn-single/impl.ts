@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { Authn, AuthnError, Identity, Session } from "@michaelthielemann/kestrel-contracts/authn";
 import { ok, type Result } from "@michaelthielemann/kestrel/result";
 
@@ -47,7 +47,7 @@ export function createAuthnSingle(config: Config, now: () => number = Date.now):
     async login(credentials): Promise<Result<Session | null, AuthnError>> {
       const { username, password } = credentials;
       if (username !== config.username || typeof password !== "string" || !verifyPassword(password, config.passwordHash)) return ok(null);
-      const token = randomUUID();
+      const token = randomBytes(32).toString("base64url");
       sessions.set(token, now() + config.sessionTtlSeconds * 1000);
       return ok({ token, identity: identity() });
     },

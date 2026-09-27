@@ -100,6 +100,48 @@ describe("authn/multi", () => {
     expect(expectOk(await a.resolve(session?.token ?? ""))).toBeNull();
   });
 
+  it("stores only a digest of the session token, never the token itself", async () => {
+    const db = createFakePersistence();
+    const a = await createAuthnMulti(config, db);
+    expectOk(await a.createUser({ username: "bob", password: "long-enough" }));
+    const session = expectOk(await a.login({ username: "bob", password: "long-enough" }));
+    const token = session?.token ?? "";
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const rows = expectOk(await db.findMany<Record<string, unknown> & { id: string }>(SESSIONS, {})).items;
+    expect(rows).toHaveLength(1);
+    for (const row of rows) for (const value of Object.values(row)) expect(JSON.stringify(value)).not.toContain(token);
+    expect(expectOk(await a.resolve(token))?.claims).toMatchObject({ username: "bob" });
+    expect(expectOk(await a.resolve(rows[0]?.id ?? ""))).toBeNull();
+  });
+
+  it("logout, changePassword and cleanup work on the stored digest", async () => {
+    let t = 1_000_000;
+    const db = createFakePersistence();
+    const a = await createAuthnMulti(config, db, () => t);
+    const user = expectOk(await a.createUser({ username: "bob", password: "long-enough" }));
+    const first = expectOk(await a.login({ username: "bob", password: "long-enough" }));
+    expectOk(await a.logout(first?.token ?? ""));
+    expect(expectOk(await db.count(SESSIONS, {}))).toBe(0);
+    const kept = expectOk(await a.login({ username: "bob", password: "long-enough" }));
+    expectOk(await a.login({ username: "bob", password: "long-enough" }));
+    expectOk(await a.changePassword(user.id, "long-enough", "another-one", kept?.token));
+    expect(expectOk(await db.count(SESSIONS, {}))).toBe(1);
+    expect(expectOk(await a.resolve(kept?.token ?? ""))).not.toBeNull();
+    t += 61_000;
+    expect(expectOk(await a.cleanupSessions())).toBe(1);
+  });
+
+  it("drops sessions stored in the earlier plain-token format at setup, so their tokens stop working", async () => {
+    const db = createFakePersistence();
+    const before = await createAuthnMulti(config, db);
+    const user = expectOk(await before.createUser({ username: "bob", password: "long-enough" }));
+    const legacyToken = "2f1c6a7e-0b3d-4c1e-9a55-7d0e4b2c9f10";
+    expectOk(await db.createOne(SESSIONS, { id: legacyToken, userId: user.id, expiresAt: Date.now() + 60_000 }));
+    const after = await createAuthnMulti(config, db);
+    expect(expectOk(await db.count(SESSIONS, {}))).toBe(0);
+    expect(expectOk(await after.resolve(legacyToken))).toBeNull();
+  });
+
   it("reads the token from the bearer header case-insensitively, or from the cookie", () => {
     expect(tokenFromHeaders({ authorization: "Bearer abc" })).toBe("abc");
     expect(tokenFromHeaders({ authorization: "bearer abc" })).toBe("abc");

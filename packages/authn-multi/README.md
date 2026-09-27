@@ -1,7 +1,10 @@
 # authn/multi
 `authn@1` with users and sessions in `persistence@1` (`authn_users`, `authn_sessions`) – sessions
-survive restarts. Passwords are scrypt hashes; `bootstrap` creates the first user when the user
-collection is empty so a fresh install is not locked out. Identity claims: `{ username, roles }`.
+survive restarts. Passwords are scrypt hashes; a session row is keyed by the SHA-256 digest of its
+token, never the token itself, so a copy of the database (a replica, a backup) holds no token that
+signs anyone in. It does hold the password hashes: keep those copies as private as the database.
+`bootstrap` creates the first user when the user collection is empty so a fresh install is not
+locked out. Identity claims: `{ username, roles }`.
 Config: `identifier` (`username` | `email` – the credential field), `minPasswordLength`,
 `sessionTtlSeconds`, `adminPermission`, `bootstrap { username, passwordHash, roles }`.
 

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { Authn, AuthnError, Identity } from "@michaelthielemann/kestrel-contracts/authn";
 import type { Authz } from "@michaelthielemann/kestrel-contracts/authz";
 import { customFailure, err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
@@ -55,6 +55,12 @@ export function verifyPassword(password: string, stored: string): boolean {
 }
 
 const BEARER = /^bearer /i;
+
+const TOKEN_DIGEST = /^[A-Za-z0-9_-]{43}$/;
+
+function sessionId(token: string): string {
+  return createHash("sha256").update(token).digest("base64url");
+}
 
 export function tokenFromHeaders(headers: Record<string, string>): string | undefined {
   const auth = headers.authorization;
@@ -113,6 +119,13 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
   if (isErr(usersReady)) throw new Error(`authn/multi: setup failed: ${usersReady.error.message}`);
   const sessionsReady = await db.ensureCollection(SESSIONS, { userId: "string", expiresAt: "number" });
   if (isErr(sessionsReady)) throw new Error(`authn/multi: setup failed: ${sessionsReady.error.message}`);
+  const stored = await db.findMany<SessionRow>(SESSIONS, {});
+  if (isErr(stored)) throw new Error(`authn/multi: setup failed: ${stored.error.message}`);
+  const plain = stored.value.items.filter((row) => !TOKEN_DIGEST.test(row.id)).map((row) => row.id);
+  if (plain.length > 0) {
+    const dropped = await db.deleteMany(SESSIONS, { id: { in: plain } });
+    if (isErr(dropped)) throw new Error(`authn/multi: setup failed: ${dropped.error.message}`);
+  }
 
   const identity = (user: User): Identity => ({ id: user.id, claims: { username: user.username, roles: user.roles } });
   const userById = async (id: string): Promise<Result<User, AuthnMultiError>> => {
@@ -180,18 +193,19 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
       if (isErr(userResult)) return err(transientOnly(userResult.error));
       const user = userResult.value;
       if (!user || !user.active || !verifyPassword(password, user.passwordHash)) return ok(null);
-      const token = randomUUID();
-      const created = await db.createOne<SessionRow>(SESSIONS, { id: token, userId: user.id, expiresAt: now() + config.sessionTtlSeconds * 1000 });
+      const token = randomBytes(32).toString("base64url");
+      const created = await db.createOne<SessionRow>(SESSIONS, { id: sessionId(token), userId: user.id, expiresAt: now() + config.sessionTtlSeconds * 1000 });
       if (isErr(created)) return err(transientOnly(created.error));
       return ok({ token, identity: identity(user) });
     },
     async resolve(token) {
-      const sessionResult = await db.findOne<SessionRow>(SESSIONS, { id: token });
+      const id = sessionId(token);
+      const sessionResult = await db.findOne<SessionRow>(SESSIONS, { id });
       if (isErr(sessionResult)) return err(transientOnly(sessionResult.error));
       const session = sessionResult.value;
       if (!session) return ok(null);
       if (session.expiresAt <= now()) {
-        const deleted = await db.deleteOne(SESSIONS, token);
+        const deleted = await db.deleteOne(SESSIONS, id);
         if (isErr(deleted)) return err(transientOnly(deleted.error));
         return ok(null);
       }
@@ -201,7 +215,7 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
       return ok(user && user.active ? identity(user) : null);
     },
     async logout(token) {
-      const deleted = await db.deleteOne(SESSIONS, token);
+      const deleted = await db.deleteOne(SESSIONS, sessionId(token));
       if (isErr(deleted)) return err(transientOnly(deleted.error));
       return ok();
     },
@@ -274,7 +288,7 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
       if (isErr(passwordCheck)) return passwordCheck;
       const updated = await db.updateOne<User>(USERS, id, { passwordHash: hashPassword(next) });
       if (isErr(updated)) return updated;
-      const cleared = await db.deleteMany(SESSIONS, keepToken === undefined ? { userId: id } : { userId: id, id: { ne: keepToken } });
+      const cleared = await db.deleteMany(SESSIONS, keepToken === undefined ? { userId: id } : { userId: id, id: { ne: sessionId(keepToken) } });
       if (isErr(cleared)) return cleared;
       return ok();
     },
