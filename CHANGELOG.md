@@ -1059,6 +1059,10 @@ Net changes since 5.8.1.
 
 ### Changed
 
+- `media-default`: `media.list` without `limit` answers at most `defaultLimit` items (new config keys
+  `maxLimit`, default 200, and `defaultLimit`, default `maxLimit`) with the full `total`, instead of the
+  whole library; a `limit` above `maxLimit` answers 400, and a list by `ids` reads at most `maxLimit` of
+  them (200 before).
 - `content-default`: `content.list:<t>` without `limit` answers at most `defaultLimit` items (new config
   key, default `maxLimit`, 200 unless configured) instead of every match; `total` still counts every
   match. A client that relied on one unbounded page reads further pages with `offset`. `content@1`'s own

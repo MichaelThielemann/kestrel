@@ -25,8 +25,11 @@ export const configSchema = z
       .optional(),
     uploadStaleAfterMs: z.number().int().min(60000).default(900000),
     anonymousList: z.enum(["ids", "all"]).default("ids"),
+    maxLimit: z.number().int().min(1).default(200),
+    defaultLimit: z.number().int().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .refine((config) => config.defaultLimit === undefined || config.defaultLimit <= config.maxLimit, { message: "defaultLimit must not exceed maxLimit", path: ["defaultLimit"] });
 
 function localeOf(ctx: Context): string | undefined {
   return ctx.params.locale ?? first(ctx.payload.locale);
@@ -45,8 +48,8 @@ function idsFrom(value: unknown): string[] {
   return [...new Set(raw.flatMap((v) => v.split(",")).map((s) => s.trim()).filter(Boolean))];
 }
 
-function listOptions(payload: Record<string, unknown>): ListOptions & { locale?: string } {
-  const options: ListOptions & { locale?: string } = {};
+function listOptions(payload: Record<string, unknown>, fallback: number): ListOptions & { locale?: string } {
+  const options: ListOptions & { locale?: string } = { limit: fallback };
   const locale = first(payload.locale);
   if (locale !== undefined) options.locale = locale;
   const folder = first(payload.folder);
@@ -193,11 +196,11 @@ export default defineModule({
         return ctx.fail("UNAUTHENTICATED", ANONYMOUS_LIST_MESSAGE);
       }
       if (ids.length > 0) {
-        const items = await media.byIds(ids.slice(0, 200), localeOf(ctx));
+        const items = await media.byIds(ids.slice(0, media.listLimits().max), localeOf(ctx));
         if (isErr(items)) return ctx.fail(items.error);
         return ok({ ...ctx, result: { items: items.value.map((i) => media.toPublicItem(i)), total: items.value.length } });
       }
-      const page = await media.list(listOptions(ctx.payload));
+      const page = await media.list(listOptions(ctx.payload, media.listLimits().fallback));
       if (isErr(page)) return ctx.fail(page.error);
       return ok({ ...ctx, result: { items: page.value.items.map((i) => media.toPublicItem(i)), total: page.value.total } });
     },
@@ -298,7 +301,7 @@ export default defineModule({
       errors: { 400: "no file or invalid folder/provenance (per-file for a multi-file request)", 409: "the folder already has a file with that name, `details.field: \"location\"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict", 413: "file exceeds maxBytes (per-file for a multi-file request)", 415: "type not allowed (per-file for a multi-file request)" },
     },
     get: { summary: "Media metadata", reads: ["params.id"], writes: ["result"], query: { locale: { type: "string" } }, output: MEDIA_ITEM_SCHEMA, errors: { 400: "unknown locale", 404: "not found" } },
-    list: { summary: "List media, newest first; anonymous callers may only fetch by ids", reads: ["identity?"], writes: ["result"], query: { folder: { type: "string" }, recursive: { type: "boolean" }, q: { type: "string" }, sort: { type: "string" }, type: { type: "string", enum: [...MEDIA_KINDS] }, limit: { type: "integer" }, offset: { type: "integer" }, ids: { type: "string" }, locale: { type: "string" } }, output: { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, total: { type: "number" } }, required: ["items", "total"] }, errors: { 400: "invalid folder, unknown locale or invalid type", 401: "no identity and no ids (unless anonymousList is \"all\")" } },
+    list: { summary: "List media, newest first; anonymous callers may only fetch by ids", reads: ["identity?"], writes: ["result"], query: { folder: { type: "string" }, recursive: { type: "boolean" }, q: { type: "string" }, sort: { type: "string" }, type: { type: "string", enum: [...MEDIA_KINDS] }, limit: { type: "integer", minimum: 1, maximum: media.listLimits().max }, offset: { type: "integer", minimum: 0 }, ids: { type: "string" }, locale: { type: "string" } }, output: { type: "object", properties: { items: { type: "array", items: MEDIA_ITEM_SCHEMA }, total: { type: "number" } }, required: ["items", "total"] }, errors: { 400: "invalid folder, unknown locale, invalid type, or limit above maxLimit", 401: "no identity and no ids (unless anonymousList is \"all\")" } },
     download: { summary: "The file itself", reads: ["params.id"], writes: ["result"], binary: true, errors: { 404: "not found" } },
     serve: media.publicCopyEnabled()
       ? {

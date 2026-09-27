@@ -8042,7 +8042,9 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
             }
           },
           {
@@ -8050,7 +8052,8 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 0
             }
           },
           {
@@ -8094,7 +8097,7 @@
             }
           },
           "400": {
-            "description": "invalid folder, unknown locale or invalid type",
+            "description": "invalid folder, unknown locale, invalid type, or limit above maxLimit",
             "content": {
               "application/json": {
                 "schema": {

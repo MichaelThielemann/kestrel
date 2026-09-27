@@ -425,6 +425,15 @@
                 "all"
               ],
               "default": "ids"
+            },
+            "maxLimit": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 200
+            },
+            "defaultLimit": {
+              "type": "integer",
+              "minimum": 1
             }
           },
           "additionalProperties": false
@@ -565,6 +574,27 @@
             "value": "ids",
             "redacted": false,
             "default": "ids"
+          },
+          {
+            "path": "maxLimit",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": 200,
+            "redacted": false,
+            "default": 200
+          },
+          {
+            "path": "defaultLimit",
+            "type": "integer",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "missing",
+            "value": null,
+            "redacted": false
           }
         ]
       },
@@ -4601,10 +4631,13 @@
             ]
           },
           "limit": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
           },
           "offset": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 0
           },
           "ids": {
             "type": "string"
@@ -4733,7 +4766,7 @@
           ]
         },
         "errors": {
-          "400": "invalid folder, unknown locale or invalid type",
+          "400": "invalid folder, unknown locale, invalid type, or limit above maxLimit",
           "401": "no identity and no ids (unless anonymousList is \"all\")"
         }
       }
@@ -17511,10 +17544,13 @@
                 ]
               },
               "limit": {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200
               },
               "offset": {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 0
               },
               "ids": {
                 "type": "string"
@@ -17643,7 +17679,7 @@
               ]
             },
             "errors": {
-              "400": "invalid folder, unknown locale or invalid type",
+              "400": "invalid folder, unknown locale, invalid type, or limit above maxLimit",
               "401": "no identity and no ids (unless anonymousList is \"all\")"
             }
           }

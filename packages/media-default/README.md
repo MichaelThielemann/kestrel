@@ -225,7 +225,10 @@ Config: `allowedTypes` (`image/*`, `application/pdf`, `*` or `*/*`), `deniedType
 patterns matched against the media type without parameters, ignoring case, see above), `maxBytes`,
 `prefix` (default `media/`, must end with `/`), `publicPath` (default `/media`), `publicCopy`
 (optional `{ prefix }`), `uploadStaleAfterMs` (default 15 minutes), `anonymousList` (`"ids"` default,
-or `"all"` for a public catalogue), `locales`/`defaultLocale`.
+or `"all"` for a public catalogue), `maxLimit` (default 200) and `defaultLimit` (default `maxLimit`, never
+above it, or setup fails), `locales`/`defaultLocale`. `media.list` without `limit` answers at most
+`defaultLimit` items with the full `total`, refuses a `limit` above `maxLimit` (400), and reads at most
+`maxLimit` of the `ids` it is given.
 
 ## Anonymous reads
 
@@ -321,13 +324,15 @@ Not included: image resizing, tags, linking media to content documents.
 | `publicCopy.prefix` | string | no | – |
 | `uploadStaleAfterMs` | integer | no | `900000` |
 | `anonymousList` | enum | no | `"ids"` |
+| `maxLimit` | integer | no | `200` |
+| `defaultLimit` | integer | no | – |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
 | `media.upload` | Upload one or more files (multipart field `file`, repeatable). A single file returns the item; multiple files return per-file results. Idempotent: same folder, same filename and same bytes return the item that is already there, and the step then ends the pipeline itself (200), so no following step – notably events.emit:media.uploaded – runs for an upload that stored nothing | `files` | `result` | { folder?: string, provenance?: string } | object \| object (ends: object \| object) | 400 no file or invalid folder/provenance (per-file for a multi-file request); 409 the folder already has a file with that name, `details.field: "location"` (per-file for a multi-file request); the same bytes again are idempotent, not a conflict; 413 file exceeds maxBytes (per-file for a multi-file request); 415 type not allowed (per-file for a multi-file request) | – | no |
 | `media.update` | Rename, move, set provenance or texts (alt/title/description per locale); the file's key and path never change | `params.id` | `result` | { filename?: string, folder?: string, provenance?: object, locale?: string, alt?: string \| null, title?: string \| null, description?: string \| null } ?locale: string | { id: string, path: string, filename: string, folder: string, contentType: string, size: number, createdAt: number, updatedAt: number, provenance: object, width: number \| null, height: number \| null, alt: string \| null, title: string \| null, description: string \| null } | 400 invalid name, folder or text (texts are plain text, max 2000 chars); 404 not found; 409 the folder already has a file with that name, `details.field: "location"` | – | no |
 | `media.get` | Media metadata | `params.id` | `result` | ?locale: string | { id: string, path: string, filename: string, folder: string, contentType: string, size: number, createdAt: number, updatedAt: number, provenance: object, width: number \| null, height: number \| null, alt: string \| null, title: string \| null, description: string \| null } | 400 unknown locale; 404 not found | – | no |
-| `media.list` | List media, newest first; anonymous callers may only fetch by ids | `identity?` | `result` | ?folder: string, recursive: boolean, q: string, sort: string, type: "image" \| "video" \| "other", limit: integer, offset: integer, ids: string, locale: string | { items: object[], total: number, … } | 400 invalid folder, unknown locale or invalid type; 401 no identity and no ids (unless anonymousList is "all") | – | no |
+| `media.list` | List media, newest first; anonymous callers may only fetch by ids | `identity?` | `result` | ?folder: string, recursive: boolean, q: string, sort: string, type: "image" \| "video" \| "other", limit: integer, offset: integer, ids: string, locale: string | { items: object[], total: number, … } | 400 invalid folder, unknown locale, invalid type, or limit above maxLimit; 401 no identity and no ids (unless anonymousList is "all") | – | no |
 | `media.listFolders` | Folders (persistent and implied) with item counts; anonymous callers are refused | `identity?` | `result` | – | object[] | 401 no identity (unless anonymousList is "all") | – | no |
 | `media.createFolder` | Create a folder (idempotent: an existing folder is returned unchanged) | – | `result` | { path: string } | { folder: string, count: number, … } | 400 missing or invalid path | – | no |
 | `media.renameFolder` | Rename or move a folder (metadata only: keys and paths do not change) | `params.path` | `result` | { path: string } | { folder: string, moved: number, … } | 400 missing or invalid path; 404 folder not found; 409 target folder already exists | – | no |

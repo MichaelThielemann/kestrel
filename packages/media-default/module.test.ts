@@ -447,7 +447,7 @@ describe("media/default steps via runPipeline", () => {
   });
 
   it("upload's terminalOutput requires ids on the list-result branch", () => {
-    const description = module.describe!({ publicCopyEnabled: () => false }).upload;
+    const description = module.describe!({ publicCopyEnabled: () => false, listLimits: () => ({ max: 200, fallback: 200 }) }).upload;
     const schema = description.terminalOutput;
     expect(schema).toBeDefined();
     expect(validateSchema(schema ?? {}, { items: [], errors: [] })).not.toEqual([]);
@@ -584,5 +584,23 @@ describe("media/default steps via runPipeline", () => {
     const res = await runPipeline(pipeline("media.removeFolder"), { params: { path: "x" } }, { modules: [{ module, instance: media }] });
     expect(res.status).toBe(200);
     expect(res.result).toMatchObject({ ok: true });
+  });
+});
+
+describe("media/default list: page size", () => {
+  it("answers at most defaultLimit items without limit, with the full total, and refuses a limit above maxLimit", async () => {
+    const { media } = await makeInstance({ maxLimit: 3, defaultLimit: 2 });
+    for (const name of ["a.png", "b.png", "c.png", "d.png"]) await media.upload({ filename: name, contentType: "image/png", data: new Uint8Array([name.charCodeAt(0)]) });
+    const run = (query: Record<string, string>) => runPipeline(pipeline("identity.set", "media.list"), { query }, { modules: [{ module, instance: media }], steps: setsIdentity, writes: identityWrite });
+    const page = await run({});
+    expect(page.status).toBe(200);
+    expect(boundaryCast<{ items: unknown[]; total: number }>(page.result, "host")).toMatchObject({ total: 4, items: [expect.anything(), expect.anything()] });
+    expect(boundaryCast<{ items: unknown[] }>((await run({ limit: "3" })).result, "host").items).toHaveLength(3);
+    expect((await run({ limit: "4" })).status).toBe(400);
+  });
+
+  it("uses maxLimit as the page size when defaultLimit is not set, and refuses a defaultLimit above maxLimit", async () => {
+    expect(configSchema.parse(config()).maxLimit).toBe(200);
+    expect(() => configSchema.parse(config({ maxLimit: 5, defaultLimit: 6 }))).toThrow(/defaultLimit/);
   });
 });

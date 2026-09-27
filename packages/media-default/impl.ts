@@ -93,6 +93,10 @@ export interface Config {
   prefix: string;
   publicPath: string;
   publicCopy?: PublicCopyConfig | undefined;
+  /** The largest `limit` a list accepts, and the most ids one list by ids reads. */
+  maxLimit?: number | undefined;
+  /** The page size of a list without `limit`; `maxLimit` when absent. */
+  defaultLimit?: number | undefined;
   uploadStaleAfterMs: number;
   anonymousList: "ids" | "all";
 }
@@ -206,6 +210,8 @@ export interface Media extends MediaFiles {
   toPublicItem(item: MediaItem): PublicMediaItem;
   publicCopyEnabled(): boolean;
   anonymousListAllowed(): boolean;
+  /** The configured page limits of a list: `max` for `limit` and ids, `fallback` without `limit`. */
+  listLimits(): { max: number; fallback: number };
   /**
    * Whether the run is at a `media.upload` step of a pipeline that runs `sanitize.svg` before it, with no
    * step in between that declares a write to `files`. Known from `attach()` and the run's step events, so
@@ -1216,6 +1222,10 @@ export async function createMediaDefault(config: Config, blobs: Blobstore, db: P
     },
     anonymousListAllowed() {
       return config.anonymousList === "all";
+    },
+    listLimits() {
+      const max = config.maxLimit ?? 200;
+      return { max, fallback: config.defaultLimit ?? max };
     },
     sanitizesSvg(runId) {
       return sanitizedRuns.has(runId);
