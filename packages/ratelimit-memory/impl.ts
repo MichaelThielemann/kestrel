@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isIPv4, isIPv6 } from "node:net";
 
 /** What a bucket counts by: the client address (an IPv6 address by its /64), the username a request names, or the signed-in identity. */
@@ -9,6 +10,10 @@ export interface Bucket {
   key?: BucketKey | undefined;
   /** The longest a key stays blocked once it exceeded the limit; each further exceeded window doubles the block up to this. Without it every block lasts one window. */
   maxBlockSeconds?: number | undefined;
+  /** For a `username` bucket: the body field that names the account, the same one the login reads. */
+  field?: "username" | "email" | undefined;
+  /** `requests` counts every request the check lets through; `failures` counts only the runs that fail after it, and a successful run clears the key. */
+  counts?: "requests" | "failures" | undefined;
 }
 
 export interface Config {
@@ -23,8 +28,15 @@ export interface Decision {
 
 export interface RateLimit {
   hit(bucket: string, key: string): Decision;
+  /** The decision for the next request without counting it. */
+  peek(bucket: string, key: string): Decision;
+  /** Counts one failed attempt; the key is blocked once it reaches the limit. */
+  fail(bucket: string, key: string): void;
+  /** Forgets the key, e.g. after a successful sign-in. */
+  reset(bucket: string, key: string): void;
   sweep(): number;
   keyOf(bucket: string): BucketKey;
+  bucketOf(bucket: string): Bucket;
 }
 
 interface KeyState {
@@ -54,10 +66,10 @@ export function clientKey(ip: string | undefined): string {
   return groups === undefined ? bare : `${groups.slice(0, 4).join(":")}::/64`;
 }
 
-/** The key a `username` bucket counts a request by: the named user, trimmed and lower-cased, so spelling variants share one budget. */
+/** The key a `username` bucket counts a request by: a digest of the named user, trimmed, lower-cased and NFKC-normalized, so spelling variants share one budget and a long name costs no more memory than a short one. */
 export function usernameKey(name: string | undefined): string {
   const normalized = (name ?? "").normalize("NFKC").trim().toLowerCase();
-  return normalized === "" ? "unknown" : normalized;
+  return normalized === "" ? "unknown" : createHash("sha256").update(normalized).digest("base64url");
 }
 
 export function createRateLimitMemory(config: Config, now: () => number = Date.now): RateLimit {
@@ -97,6 +109,36 @@ export function createRateLimitMemory(config: Config, now: () => number = Date.n
       state.blockedUntil = bucket.maxBlockSeconds === undefined ? state.start + windowMs : t + blockMs(bucket, state.strikes);
       return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil((state.blockedUntil - t) / 1000)) };
     },
+    peek(name, key) {
+      const bucket = bucketOf(name);
+      const t = now();
+      const state = states.get(`${name}:${key}`);
+      if (state && t < state.blockedUntil) return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil((state.blockedUntil - t) / 1000)) };
+      const windowMs = bucket.windowSeconds * 1000;
+      const count = state && t - state.start < windowMs ? state.count : 0;
+      if (count >= bucket.limit && state) return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil((state.start + windowMs - t) / 1000)) };
+      return { allowed: true, remaining: bucket.limit - count, retryAfterSeconds: 0 };
+    },
+    fail(name, key) {
+      const bucket = bucketOf(name);
+      const windowMs = bucket.windowSeconds * 1000;
+      const t = now();
+      const id = `${name}:${key}`;
+      let state = states.get(id);
+      if (!state || t - state.start >= windowMs || (state.blockedUntil > 0 && t >= state.blockedUntil)) {
+        const strikes = state && state.blockedUntil > 0 && t - state.blockedUntil < quietMs(bucket) ? state.strikes : 0;
+        state = { start: t, count: 0, blockedUntil: 0, strikes };
+        states.set(id, state);
+      }
+      state.count += 1;
+      if (state.count < bucket.limit) return;
+      state.strikes += 1;
+      state.blockedUntil = bucket.maxBlockSeconds === undefined ? state.start + windowMs : t + blockMs(bucket, state.strikes);
+    },
+    reset(name, key) {
+      states.delete(`${name}:${key}`);
+    },
+    bucketOf,
     sweep() {
       const t = now();
       let removed = 0;
