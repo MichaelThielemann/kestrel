@@ -128,10 +128,8 @@ export function prefixSource(f: Formatter, base: Pick<Base, "type" | "parent">, 
 }
 
 /** The base a stored row stands for, so a save can recompute every other document without reading content. */
-export function baseOfRows(rows: readonly DocRow[], defaultLocale: string): Base[] {
-  const fallback = new Map<string, string | null>();
-  for (const row of rows) if (row.locale === defaultLocale) fallback.set(docKey(row.type, row.docId), row.own);
-  return rows.map((row) => ({ type: row.type, docId: row.docId, locale: row.locale, own: row.own, slug: row.own ?? fallback.get(docKey(row.type, row.docId)) ?? null, live: row.live, parent: row.parent, createdAt: row.createdAt, updatedAt: row.updatedAt }));
+export function baseOfRows(rows: readonly DocRow[]): Base[] {
+  return rows.map((row) => ({ type: row.type, docId: row.docId, locale: row.locale, own: row.own, slug: row.own, live: row.live, parent: row.parent, createdAt: row.createdAt, updatedAt: row.updatedAt }));
 }
 
 interface Claim {

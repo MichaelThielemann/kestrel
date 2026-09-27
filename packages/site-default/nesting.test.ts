@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ContentModel } from "@michaelthielemann/kestrel-contracts/content";
 import { expectErr, expectOk } from "@michaelthielemann/kestrel-contracts/testing/result";
+import { createContentDefault } from "@michaelthielemann/kestrel-content-default/impl";
+import { createFakePersistence } from "@michaelthielemann/kestrel-contracts/testing/fakePersistence";
 import { routedSite } from "./__fixtures__/routed.ts";
 import { routeWith } from "./routes.ts";
 import { DOCS, type DocRow } from "./table.ts";
@@ -153,14 +155,14 @@ describe("site/default nested pages: moving a section", () => {
   });
 
   it("rejects a change of more than maxCascade rows with a field error naming the config key, and writes nothing", async () => {
-    const s = await site({ maxCascade: 6 });
+    const s = await site({ maxCascade: 4 });
     const root = await s.page({ slug: "wurzel" });
     await s.page({ slug: "k1", parent: root });
     await s.page({ slug: "k2", parent: root });
     expectOk(await s.content.update("pages", root, { slug: "wurzel-2" }));
     await s.page({ slug: "k3", parent: root });
     const error = expectErr(await s.content.update("pages", root, { slug: "wurzel-3" }), "VALIDATION");
-    expect(error.details?.fields).toEqual([{ field: "slug", message: expect.stringContaining("more than the limit of 6 (config key maxCascade") as unknown }]);
+    expect(error.details?.fields).toEqual([{ field: "slug", message: expect.stringContaining("more than the limit of 4 (config key maxCascade") as unknown }]);
     expect(await s.resolve("wurzel-2")).toBe(root);
   });
 });
@@ -191,12 +193,11 @@ describe("site/default nested pages: independent reachability", () => {
   });
 });
 
-describe("site/default nested pages: a page without a slug in a locale", () => {
-  it("is not reachable there itself, and a rival with a slug of its own takes that path once it is live", async () => {
+describe("site/default nested pages: path segments come only from slugs of the same locale", () => {
+  it("a page without a slug in a locale is not reachable there, and a rival with a slug of its own takes that path once it is live", async () => {
     const s = await site();
     const parent = await s.page({ slug: "eltern" }, { slug: "parent" });
     const child = await s.page({ slug: "kind", parent });
-    expect(await s.resolve("kind", published)).toBeNull();
     expect(await s.resolve("eltern/kind")).toBe(child);
     expect(await s.resolve("en/parent/kind")).toBeNull();
     const rival = await s.page({ slug: "anderes", parent });
@@ -206,55 +207,41 @@ describe("site/default nested pages: a page without a slug in a locale", () => {
     expect(await s.resolve("en/parent/kind")).toBe(rival);
   });
 
-  it("gives its subpages its default-locale slug as their segment, and a rival's draft translation moves only the rival's own subpages", async () => {
+  it("refuses to publish a subpage in a locale where a page above it has no slug, naming that page on the parent field", async () => {
     const s = await site();
-    const p = await s.page({ slug: "p" });
-    const pChild = await s.page({ slug: "c", parent: p }, { slug: "c-en" });
-    const q = expectOk(await s.content.create("pages", { slug: "q", title: "Q", status: "published" })).id;
-    const qChild = await s.page({ slug: "d", parent: q }, { slug: "d-en" });
-    s.emitted.length = 0;
-    expectOk(await s.content.update("pages", q, { slug: "p", title: "Q en", status: "draft" }, { locale: "en" }));
-    expect(s.moves()).toEqual([{ id: qChild, locale: "en", from: "/en/q/d-en", to: "/en/p/d-en" }]);
-    expect(await s.resolve("en/p")).toBeNull();
-    expect(await s.resolve("en/p/c-en")).toBe(pChild);
-    expect(await s.resolve("en/p/d-en")).toBe(qChild);
+    const p = expectOk(await s.content.create("pages", { slug: "geheim", title: "Geheimer Titel", status: "draft" })).id;
+    const child = await s.page({ slug: "kind", parent: p });
+    const error = expectErr(await s.content.update("pages", child, { slug: "kid", title: "Kid", status: "published" }, { locale: "en" }), "VALIDATION");
+    expect(error.details?.fields).toEqual([{ field: "parent", message: expect.stringContaining('pages "Geheimer Titel"') as unknown }]);
+    expectOk(await s.content.update("pages", child, { slug: "kid", title: "Kid", status: "draft" }, { locale: "en" }));
+    expect(s.paths.pathsOf("pages", child, "valid")).toEqual({ de: "/geheim/kind", en: null });
+    expectOk(await s.content.update("pages", p, { slug: "secret", title: "Secret", status: "draft" }, { locale: "en" }));
+    expectOk(await s.content.update("pages", child, { status: "published" }, { locale: "en" }));
+    expect(await s.resolve("en/secret/kid")).toBe(child);
+    expect(await s.resolve("en/geheim/kid")).toBeNull();
   });
 
-  it("publishing a rival on that segment moves only the rival, never the page's subpages", async () => {
+  it("refuses to clear a page's slug or remove its translation while subpages are published below it in that locale, and names them", async () => {
     const s = await site();
-    const p = await s.page({ slug: "p" });
-    const pChild = await s.page({ slug: "c", parent: p }, { slug: "c-en" });
-    const q = expectOk(await s.content.create("pages", { slug: "q", title: "Q", status: "published" })).id;
-    const qChild = await s.page({ slug: "d", parent: q }, { slug: "d-en" });
-    expectOk(await s.content.update("pages", q, { slug: "p", title: "Q en", status: "draft" }, { locale: "en" }));
-    s.emitted.length = 0;
-    expectOk(await s.content.update("pages", q, { status: "published" }, { locale: "en" }));
-    expect(s.moves()).toEqual([{ id: q, locale: "en", from: null, to: "/en/p" }]);
-    expect(await s.resolve("en/p")).toBe(q);
-    expect(await s.resolve("en/p/c-en")).toBe(pChild);
-    expect(await s.resolve("en/p/d-en")).toBe(qChild);
+    const p = await s.page({ slug: "p" }, { slug: "p-en" });
+    await s.page({ slug: "c", parent: p }, { slug: "c-en" });
+    const cleared = expectErr(await s.content.update("pages", p, { slug: null, status: "draft" }, { locale: "en" }), "VALIDATION");
+    expect(cleared.details?.fields).toEqual([{ field: "slug", message: expect.stringContaining('pages "c en" (en) is published below') as unknown }]);
+    expectErr(await s.content.removeTranslation("pages", p, "en"), "VALIDATION");
+    expect(await s.resolve("en/p-en/c-en")).not.toBeNull();
   });
 
-  it("keeps a published grandchild reachable under that segment while a rival holds the path", async () => {
-    const s = await site();
-    const p = await s.page({ slug: "p" });
-    const child = await s.page({ slug: "c", parent: p }, { slug: "c-en" });
-    const grandchild = await s.page({ slug: "g", parent: child }, { slug: "g-en" });
-    await s.page({ slug: "rival" }, { slug: "p" });
-    expect(await s.resolve("en/p")).not.toBe(p);
-    expect(await s.resolve("en/p/c-en/g-en")).toBe(grandchild);
-    expect(s.paths.pathsOf("pages", grandchild, "reachable")).toEqual({ de: "/p/c/g", en: "/en/p/c-en/g-en" });
-  });
-
-  it("refuses two subpages with the same slug of their own under two holders of that segment", async () => {
-    const s = await site();
-    const p = await s.page({ slug: "p" });
-    const q = expectOk(await s.content.create("pages", { slug: "q", title: "Q", status: "draft" })).id;
-    expectOk(await s.content.update("pages", q, { slug: "p", title: "Q en", status: "draft" }, { locale: "en" }));
-    await s.page({ slug: "c", parent: p }, { slug: "c" });
-    const other = expectOk(await s.content.create("pages", { slug: "c", title: "C", status: "published", parent: q })).id;
-    const error = expectErr(await s.content.update("pages", other, { slug: "c", title: "C en", status: "draft" }, { locale: "en" }), "CONFLICT");
-    expect(error.message).toContain("/en/p/c (en)");
+  it("keeps a subpage stored under a page without a slug in its locale unreachable, with no path, no move and no refusal of other saves", async () => {
+    const db = createFakePersistence();
+    const raw = await createContentDefault(MODEL, db);
+    const p = expectOk(await raw.create("pages", { slug: "geheim", title: "Geheim", status: "draft" })).id;
+    const child = expectOk(await raw.create("pages", { slug: "kind", title: "Kind", status: "published", parent: p })).id;
+    expectOk(await raw.update("pages", child, { slug: "kid", title: "Kid", status: "published" }, { locale: "en" }));
+    const s = await routedSite({ model: MODEL, routes: ROUTES, db });
+    expect(s.paths.pathsOf("pages", child, "reachable")).toEqual({ de: "/geheim/kind", en: null });
+    expect(expectOk(await s.site.resolve("pages", "en/geheim/kid", { rules: published }))).toBeNull();
+    expectOk(await s.content.update("pages", p, { title: "Geheim 2" }));
+    expect(s.emitted.flat().filter((m) => m.to?.startsWith("/en/") === true)).toEqual([]);
   });
 });
 

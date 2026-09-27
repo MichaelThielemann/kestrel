@@ -165,3 +165,26 @@ describe("site/default mounted collections", () => {
     expect(expectOk(await again.site.resolve("posts", "blog/a", { rules: published }))?.id).toBe(post);
   });
 });
+
+describe("site/default mounted collections: segments only from slugs of the same locale", () => {
+  it("refuses to publish a document in a locale where its mount page has no slug, naming the page", async () => {
+    const s = await site();
+    const blog = await s.create("pages", { slug: "blog" });
+    expectOk(await s.mount(blog));
+    const post = await s.create("posts", { slug: "hallo" });
+    const error = expectErr(await s.content.update("posts", post, { slug: "hello", title: "Hello", status: "published" }, { locale: "en" }), "VALIDATION");
+    expect(error.details?.fields).toEqual([{ field: "slug", message: expect.stringContaining('pages "blog"') as unknown }]);
+    expect(s.paths.pathsOf("posts", post, "reachable")).toEqual({ de: "/blog/hallo", en: null });
+  });
+
+  it("refuses to move a collection to a page without a slug in a locale where its documents are published", async () => {
+    const s = await site();
+    const news = await s.create("pages", { slug: "news" }, { slug: "news" });
+    const archiv = await s.create("pages", { slug: "archiv" });
+    expectOk(await s.mount(news));
+    await s.create("posts", { slug: "hallo" }, { slug: "hello" });
+    const error = expectErr(await s.mount(archiv), "VALIDATION");
+    expect(error.details?.fields).toEqual([{ field: "mounts", message: expect.stringContaining('posts "hallo en" (en) is published below') as unknown }]);
+    expect(await s.resolve("posts", "en/news/hello")).not.toBeNull();
+  });
+});

@@ -57,14 +57,8 @@ describe("site/default routed paths: uniqueness", () => {
     const page = expectOk(await content.create("pages", { slug: "news", title: "News", status: "published" }));
     const error = expectErr(await content.create("posts", { permalink: "news", title: "Hallo", status: "draft" }), "CONFLICT");
     expect(error.message).toContain('/news (de) is taken by pages "News"');
-    expect(error.details?.conflicts).toEqual([
-      { path: "/news", locale: "de", type: "pages", id: page.id, label: "News", moving: { type: "posts", id: expect.any(String) as unknown } },
-      { path: "/en/news", locale: "en", type: "pages", id: page.id, label: "News", moving: { type: "posts", id: expect.any(String) as unknown } },
-    ]);
-    expect(error.details?.fields).toEqual([
-      { field: "permalink", message: '/news (de) is taken by pages "News"' },
-      { field: "permalink", message: '/en/news (en) is taken by pages "News"' },
-    ]);
+    expect(error.details?.conflicts).toEqual([{ path: "/news", locale: "de", type: "pages", id: page.id, label: "News", moving: { type: "posts", id: expect.any(String) as unknown } }]);
+    expect(error.details?.fields).toEqual([{ field: "permalink", message: '/news (de) is taken by pages "News"' }]);
     expect(expectOk(await content.list("posts", {})).total).toBe(0);
   });
 
@@ -273,7 +267,7 @@ describe("site/default routed paths: rebuild", () => {
     const errors: unknown[] = [];
     const logger = { ...silentLogger, error: (_m: string, data?: Record<string, unknown>) => void errors.push(data?.conflicts) };
     const { site, paths } = await routedSite({ model: MODEL, db, logger });
-    expect(errors).toEqual([[{ path: "/x", locale: "de", winner: { type: "pages", id: older.id }, losers: [{ type: "pages", id: younger.id }], reason: "taken" }, { path: "/en/x", locale: "en", winner: { type: "pages", id: older.id }, losers: [{ type: "pages", id: younger.id }], reason: "taken" }]]);
+    expect(errors).toEqual([[{ path: "/x", locale: "de", winner: { type: "pages", id: older.id }, losers: [{ type: "pages", id: younger.id }], reason: "taken" }]]);
     expect(expectOk(await site.resolve("pages", "x", { rules: published }))).toMatchObject({ id: older.id });
     expect((await runs(db)).flatMap((r) => r.moves)).toEqual([]);
     expect(paths.pathsOf("pages", younger.id, "valid")).toEqual({ de: null, en: null });
@@ -286,10 +280,7 @@ describe("site/default routed paths: rebuild", () => {
     expectOk(await raw.update("pages", older.id, { slug: "x" }));
     const plan = expectOk(await paths.planRebuild());
     const report = expectOk(await paths.applyRebuild(plan, "rebuild-run"));
-    expect(report.conflicts).toEqual([
-      { path: "/x", locale: "de", winner: { type: "pages", id: holder.id }, losers: [{ type: "pages", id: older.id }], reason: "taken" },
-      { path: "/en/x", locale: "en", winner: { type: "pages", id: holder.id }, losers: [{ type: "pages", id: older.id }], reason: "taken" },
-    ]);
+    expect(report.conflicts).toEqual([{ path: "/x", locale: "de", winner: { type: "pages", id: holder.id }, losers: [{ type: "pages", id: older.id }], reason: "taken" }]);
     await paths.announce("rebuild-run");
     expect(expectOk(await site.resolve("pages", "x", { rules: published }))).toMatchObject({ id: holder.id });
     expect(expectOk(await site.resolve("pages", "alt", { rules: published }))).toBeNull();
@@ -461,6 +452,7 @@ describe("site/default routed paths: a translation without a slug of its own", (
     const { content, paths } = await routedSite({ model: shared });
     const page = expectOk(await content.create("pages", { slug: "nur-de", title: "Nur DE", status: "published" }));
     expect(paths.pathsOf("pages", page.id, "reachable")).toEqual({ de: "/nur-de", en: null });
+    expectOk(await content.update("pages", page.id, { status: "published" }, { locale: "en" }));
     expectErr(await content.update("pages", page.id, { title: "Only DE" }, { locale: "en" }), "VALIDATION");
   });
 });

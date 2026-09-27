@@ -15,10 +15,15 @@ Net changes since 5.8.1.
   a slug of its own either. In routed mode `site.indexPath` refuses a save (`VALIDATION` on the slug
   field) that leaves the written locale published, translated and without a slug of its own; the
   written locale is `params.locale`, else `payload.locale`, else the default locale, so a pipeline
-  writing a translation passes its locale that way. A page without a slug in a locale still gives
-  its subpages its default-locale slug as their segment there. The shared `site@1` suite tests it.
-  `kestrel upgrade data` reports stored translations that are published without a slug of their
-  own (`data/translation-slug`, an error).
+  writing a translation passes its locale that way. Every path segment comes from a slug of the path's
+  own locale: a page without a slug in a locale gives nothing below it a path there, publishing a
+  document below such a page is refused (`VALIDATION` on the parent field, the slug field for a mounted
+  document, naming the page), and so are clearing a page's slug, removing its translation or moving a
+  mounted collection while documents below are published in that locale (naming them). The shared
+  `site@1` suite tests it, and `pathOf` answers `null` for a document whose slug came from another
+  locale. `kestrel upgrade data` reports stored translations that are published without a slug of
+  their own, and published documents below a page without a slug in their locale
+  (`data/translation-slug`, an error).
 - One command, `kestrel`, from the new package `@michaelthielemann/kestrel-cli`, replaces the three
   binaries. `@michaelthielemann/kestrel` no longer ships the `kestrel` binary: add
   `@michaelthielemann/kestrel-cli` at the same version, in `dependencies` for a backend project,

@@ -247,12 +247,11 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
       own.set(locale, slugValue(doc[route.slugField]));
     }
     if (!stamp) return null;
-    const fallback = own.get(defaultLocale) ?? null;
     const bases: Base[] = [];
     for (const locale of locales) {
       const live = need(await satisfiesFilter(content, type, id, locale === "" ? undefined : locale, route.liveWhen), "content@1");
       const ownSlug = own.get(locale) ?? null;
-      bases.push({ type, docId: id, locale, own: ownSlug, slug: ownSlug ?? fallback, live, ...stamp });
+      bases.push({ type, docId: id, locale, own: ownSlug, slug: ownSlug, live, ...stamp });
     }
     return bases;
   }
@@ -286,10 +285,9 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
         live.set(locale, liveIds);
       }
       for (const [id, stamp] of stamps) {
-        const fallback = own.get(defaultLocale)?.get(id) ?? null;
         for (const locale of locales) {
           const ownSlug = own.get(locale)?.get(id) ?? null;
-          bases.push({ type, docId: id, locale, own: ownSlug, slug: ownSlug ?? fallback, live: live.get(locale)?.has(id) ?? false, ...stamp });
+          bases.push({ type, docId: id, locale, own: ownSlug, slug: ownSlug, live: live.get(locale)?.has(id) ?? false, ...stamp });
         }
       }
     }
@@ -419,7 +417,41 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     return out;
   }
 
-  async function settleMoving(current: DocRow[], bases: Base[], mounts: Mounts, moving: Set<string>, field: (key: string) => string, cascade: { field: string; publishing: boolean }, runId: string): Promise<Move[]> {
+  async function ancestorWithoutSlug(rows: ReadonlyMap<string, DocRow>, row: DocRow, mounts: Mounts): Promise<string> {
+    for (let at: DocRow | undefined = row, guard = 0; at && guard <= config.maxDepth; guard++) {
+      const source = prefixSource(format, at, mounts);
+      if (source === undefined) break;
+      const above = rows.get(`${source}/${row.locale}`);
+      if (!above || above.own === null) {
+        const slash = source.indexOf("/");
+        const type = source.slice(0, slash);
+        const id = source.slice(slash + 1);
+        return `${type} "${await labelOf(type, id, defaultLocale)}"`;
+      }
+      at = above;
+    }
+    return "a page above it";
+  }
+
+  async function refuseLostPaths(rows: readonly DocRow[], current: readonly DocRow[], mounts: Mounts, moving: ReadonlySet<string>, saved: { key: string; locale: string; field: string } | undefined, field: string): Promise<void> {
+    const before = new Map(current.map((r) => [r.id, r]));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const lost = rows.filter((r) => {
+      if (!moving.has(docKey(r.type, r.docId)) || !r.live || r.own === null || r.tail !== null) return false;
+      const own = saved !== undefined && docKey(r.type, r.docId) === saved.key && r.locale === saved.locale;
+      return own || (before.get(r.id)?.tail ?? null) !== null;
+    });
+    if (lost.length === 0) return;
+    const self = saved === undefined ? undefined : lost.find((r) => docKey(r.type, r.docId) === saved.key);
+    if (self && saved) {
+      const where = self.locale === "" ? "" : ` in "${self.locale}"`;
+      throw fieldError(saved.field, `publishing${where} needs a slug${where} on ${await ancestorWithoutSlug(byId, self, mounts)} above it; a path takes its segments only from slugs of its own locale`);
+    }
+    const named = await Promise.all(lost.map(async (r) => `${r.type} "${await labelOf(r.type, r.docId, r.locale)}" (${r.locale === "" ? "no locale" : r.locale})`));
+    throw fieldError(field, `${[...new Set(named)].join(", ")} ${lost.length === 1 ? "is" : "are"} published below and would lose ${lost.length === 1 ? "its" : "their"} path; give the page a slug in that locale or withdraw them first`);
+  }
+
+  async function settleMoving(current: DocRow[], bases: Base[], mounts: Mounts, moving: Set<string>, field: (key: string) => string, cascade: { field: string; publishing: boolean }, runId: string, saved?: { key: string; locale: string; field: string }): Promise<Move[]> {
     const { rows, conflicts } = derive(format, bases, current, mounts);
     const pathConflicts: PathConflict[] = [];
     const fieldErrors: Array<{ field: string; message: string }> = [];
@@ -442,6 +474,7 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     const text = [...new Set(fieldErrors.map((e) => e.message))].join("; ");
     if (pathConflicts.length > 0) throw new Abort(failure("CONFLICT", text, { details: { fields: fieldErrors, conflicts: pathConflicts } }));
     if (fieldErrors.length > 0) throw new Abort(failure("VALIDATION", text, { details: { fields: fieldErrors } }));
+    await refuseLostPaths(rows, current, mounts, moving, saved, saved === undefined ? cascade.field : field(saved.key));
     const change = diff(current, current.flatMap((r) => claimOf(r) ?? []), rows);
     if (change.changed.length > config.maxCascade) {
       const stall = `this change moves ${change.changed.length} paths (documents × locales), more than the limit of ${config.maxCascade} (config key maxCascade, preset option paths.maxCascade); a larger change blocks every request while it runs`;
@@ -508,7 +541,7 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
 
     if (fresh) await refuseLiveWithoutSlug(type, id, fresh, written, route);
 
-    const bases = [...baseOfRows(current.filter((r) => docKey(r.type, r.docId) !== key), defaultLocale), ...(fresh ?? [])];
+    const bases = [...baseOfRows(current.filter((r) => docKey(r.type, r.docId) !== key)), ...(fresh ?? [])];
     const moving = fresh ? descendants(bases, mounts, [key]) : new Set<string>();
     const slugChanged = fresh !== null && fresh.some((b) => (current.find((r) => r.id === rowId(type, id, b.locale))?.own ?? null) !== b.own);
     const parentChanged = fresh !== null && before !== undefined && before.parent !== parent;
@@ -517,7 +550,9 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     const structural = parentChanged && route.parentField !== null ? route.parentField : route.slugField;
     const publishing = !slugChanged && !parentChanged && liveChanged && liveField !== undefined;
     const cascade = { field: publishing ? liveField : structural, publishing };
-    return { moves: await settleMoving(current, bases, mounts, moving, () => structural, cascade, runId) };
+    const aboveField = route.parentField !== null && parent !== null ? route.parentField : route.slugField;
+    const saved = fresh ? { key, locale: written, field: aboveField } : undefined;
+    return { moves: await settleMoving(current, bases, mounts, moving, () => structural, cascade, runId, saved) };
   }
 
   async function indexMounts(runId: string): Promise<{ moves: Move[] }> {
@@ -545,7 +580,7 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
     const previous = await readMounts();
     const changedTypes = Object.keys(next).filter((t) => next[t] !== previous[t]);
     if (changedTypes.length === 0) return { moves: [] };
-    const bases = baseOfRows(current, defaultLocale);
+    const bases = baseOfRows(current);
     const moving = new Set(bases.filter((b) => changedTypes.includes(b.type)).map((b) => docKey(b.type, b.docId)));
     const moves = await settleMoving(current, bases, next, moving, () => settings.field, { field: settings.field, publishing: false }, runId);
     await writeMounts(next);
@@ -722,7 +757,7 @@ export async function createSitePaths(config: RoutesConfig, deps: SitePathsDeps)
         const source = sourceKey === undefined ? undefined : table.row(sourceKey.slice(0, sourceKey.indexOf("/")), sourceKey.slice(sourceKey.indexOf("/") + 1), locale);
         const prefix = sourceKey === undefined ? undefined : (source?.tail ?? null);
         const tail = prefix === undefined ? tailOf(input.slug, route) : prefix === null ? null : prefix === "" ? input.slug : `${prefix}/${input.slug}`;
-        if (tail === null) return { path: "", reachable: false, reason: "the parent has no path in this locale", conflict: null, shadows: [], exposesParentSlug: null };
+        if (tail === null) return { path: "", reachable: false, reason: "a page above has no slug in this locale", conflict: null, shadows: [], exposesParentSlug: null };
         const path = pathOfTail(format, tail, locale);
         const bad = violation(format, tail, locale);
         const claim = table.claim(locale, tail);

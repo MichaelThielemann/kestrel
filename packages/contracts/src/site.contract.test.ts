@@ -165,9 +165,19 @@ export function siteContractTests(make: () => Promise<{ site: Site; content: Con
       });
 
       it("honours an explicit locale and prefixPrimary", async () => {
-        const doc = (await resolve("kontakt"))!;
-        expect(site.pathOf("pages", doc, { locale: "en", rules })).toBe("/en/kontakt");
-        expect(site.pathOf("pages", doc, { rules: { ...rules, prefixPrimary: true } })).toBe("/de/kontakt");
+        const en = (await resolve("en/kontakt"))!;
+        expect(site.pathOf("pages", en, { locale: "en", rules })).toBe("/en/kontakt");
+        expect(site.pathOf("pages", en, { locale: "en", rules: { ...rules, prefixPrimary: true } })).toBe("/en/kontakt");
+        expect(site.pathOf("pages", (await resolve("kontakt"))!, { rules: { ...rules, prefixPrimary: true } })).toBe("/de/kontakt");
+      });
+
+      it("is null for a locale whose slug in the document came from another locale", async () => {
+        const doc = expectOk(await content.create("pages", { slug: "herbst-de", title: "Herbst", status: "published" }));
+        expectOk(await content.update("pages", doc.id, { title: "Autumn", status: "draft" }, { locale: "en" }));
+        const filled = expectOk(await content.get("pages", doc.id, { locale: "en", fallback: true }));
+        expect(filled?.slug).toBe("herbst-de");
+        expect(site.pathOf("pages", filled!, { locale: "en", rules })).toBeNull();
+        expect(site.pathOf("pages", (await resolve("herbst-de"))!, { locale: "en", rules })).toBeNull();
       });
 
       it("is null without a slug", async () => {

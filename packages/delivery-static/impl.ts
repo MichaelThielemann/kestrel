@@ -863,9 +863,7 @@ export async function createDeliveryStatic(config: Config, deps: DeliveryDeps, n
     const linked = linkScope.result.value;
     if (isErr(linked)) return err(transientOnly(linked.error, "site@1"));
     const doc = linked.value;
-    const slugOrigin = isRecord(view._locales) ? view._locales[tc.slugField] : undefined;
-    const ownSlug = locale === undefined || slugOrigin === undefined || slugOrigin === locale;
-    const path = ownSlug ? site.pathOf(type, doc, options) : null;
+    const path = site.pathOf(type, doc, options);
     const keptPath = before !== null && (before.state === "live" || before.state === "error") ? before.path : null;
     const failed = (message: string, work: Omit<Work, "failure" | "set">, reads: ObservedRead[]): Promise<Result<RenderOutcome, DeliveryError>> =>
       commit(flight, output, before, renderId, { state: "error", path: keptPath, error: message }, { ...work, set: { kind: "failure", reads }, failure: message });

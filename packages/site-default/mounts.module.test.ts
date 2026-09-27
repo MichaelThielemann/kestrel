@@ -29,6 +29,7 @@ const PIPELINES = [
   definePipeline({ name: "createPage", steps: [{ atomic: ["content.create:pages", "site.indexPath:pages"] }, "site.announcePaths"] }),
   definePipeline({ name: "updatePage", steps: [{ atomic: ["content.update:pages", "site.indexPath:pages"] }, "site.announcePaths"] }),
   definePipeline({ name: "createPost", steps: [{ atomic: ["content.create:posts", "site.indexPath:posts"] }, "site.announcePaths"] }),
+  definePipeline({ name: "updatePost", steps: [{ atomic: ["content.update:posts", "site.indexPath:posts"] }, "site.announcePaths"] }),
   definePipeline({ name: "setSettings", steps: [{ atomic: ["content.set:settings", "site.indexMounts"] }, "site.announcePaths"] }),
   definePipeline({ name: "resolvePage", steps: ["site.route:pages", "site.resolve:pages?home=home&status=published&fallback=true"] }),
   definePipeline({ name: "resolvePost", steps: ["site.resolve:posts?status=published&fallback=true"] }),
@@ -74,22 +75,32 @@ describe("site/default mounted collections in pipelines", () => {
     await kestrel.stop();
   });
 
-  it("renaming a mount page that moves exactly maxCascade rows (200 documents in 5 locales) finishes its group well under a second; one more document is refused", async () => {
+  it("moving a collection to another page that moves exactly maxCascade rows (200 documents in 5 locales) finishes its group well under a second; one more document is refused", async () => {
     const steps: StepLog[] = [];
     const kestrel = await bootMounted({ locales: ["de", "en", "fr", "it", "es"], logger: { ...silentLogger, step: (entry) => steps.push(entry) } });
-    const blog = idOf((await kestrel.run("createPage", { trigger, payload: { slug: "blog", title: "Blog", status: "published" } })).result);
+    const others = ["en", "fr", "it", "es"];
+    const page = async (slug: string): Promise<string> => {
+      const id = idOf((await kestrel.run("createPage", { trigger, payload: { slug, title: slug, status: "published" } })).result);
+      for (const locale of others) expect((await kestrel.run("updatePage", { trigger, params: { id }, payload: { locale, slug } })).status).toBe(200);
+      return id;
+    };
+    const [blog, journal, magazin] = [await page("blog"), await page("journal"), await page("magazin")];
     expect((await kestrel.run("setSettings", { trigger, payload: { mounts: { posts: blog } } })).status).toBe(200);
-    for (let i = 0; i < 199; i++) expect((await kestrel.run("createPost", { trigger, payload: { slug: `beitrag-${i}`, title: `Beitrag ${i}`, status: "published" } })).status).toBe(200);
+    const post = async (i: number): Promise<void> => {
+      const id = idOf((await kestrel.run("createPost", { trigger, payload: { slug: `beitrag-${i}`, title: `Beitrag ${i}`, status: "published" } })).result);
+      for (const locale of others) expect((await kestrel.run("updatePost", { trigger, params: { id }, payload: { locale, slug: `beitrag-${i}` } })).status).toBe(200);
+    };
+    for (let i = 0; i < 200; i++) await post(i);
 
     steps.length = 0;
-    const renamed = await kestrel.run("updatePage", { trigger, params: { id: blog }, payload: { slug: "journal" } });
-    expect(renamed.status).toBe(200);
-    const group = steps.filter((s) => s.runId === renamed.runId && (s.step.startsWith("content.update") || s.step.startsWith("site.indexPath"))).reduce((sum, s) => sum + s.ms, 0);
+    const moved = await kestrel.run("setSettings", { trigger, payload: { mounts: { posts: journal } } });
+    expect(moved.status).toBe(200);
+    const group = steps.filter((s) => s.runId === moved.runId && (s.step.startsWith("content.set") || s.step.startsWith("site.indexMounts"))).reduce((sum, s) => sum + s.ms, 0);
     expect(group).toBeLessThan(1000);
     expect((await kestrel.run("resolvePost", { trigger, params: { path: "journal/beitrag-7" } })).status).toBe(200);
 
-    await kestrel.run("createPost", { trigger, payload: { slug: "beitrag-199", title: "Beitrag 199", status: "published" } });
-    const refused = await kestrel.run("updatePage", { trigger, params: { id: blog }, payload: { slug: "magazin" } });
+    await post(200);
+    const refused = await kestrel.run("setSettings", { trigger, payload: { mounts: { posts: magazin } } });
     expect(refused.status).toBe(400);
     expect(refused.error).toContain("more than the limit of 1000 (config key maxCascade");
     await kestrel.stop();

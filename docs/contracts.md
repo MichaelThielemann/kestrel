@@ -34,8 +34,9 @@ may define its own contracts with the same `defineContract`; the core treats the
   never served, and no path, link or answer uses another locale's slug for it. A provider may refuse
   to save such a translation as published (`site-default`'s routed mode does). One deliberate exception,
   outside the contract: in `site-default`'s routed mode a published document keeps its path under an
-  ancestor that is not published, so the ancestor's slug — and only its slug — appears as a segment
-  of that path; no other field of the ancestor is served. Boot cannot tell a
+  ancestor that is not published, so the ancestor's slug in that locale — and only that slug — appears
+  as a segment of that path; no other field of the ancestor is served, and no slug of another locale
+  ever appears in a path. Boot cannot tell a
   provider written against the looser suite, so a provider runs the new major's suite before it
   widens its dependency range to that major.
 - The query vocabulary types (`Filter`, `Condition`, `FindOptions`, `Page`) live in

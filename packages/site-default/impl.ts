@@ -217,6 +217,9 @@ export function createSiteDefault(content: Content, paths?: SitePaths): SiteDefa
       const model = content.model();
       const locale = options.locale ?? document._locale ?? model.defaultLocale;
       if (paths && route) return pathOfRouted(paths, type, document, locale ?? "", rules, route);
+      if (locale !== undefined && typeof document._locale === "string" && document._locale !== locale) return null;
+      const origin = isRecord(document._locales) ? document._locales[rules.slugField] : undefined;
+      if (locale !== undefined && typeof origin === "string" && origin !== locale) return null;
       const slug = document[rules.slugField];
       if (typeof slug !== "string" || slug === "") return null;
       return publicPath(slug, locale, model.defaultLocale, rules.home, rules.prefixPrimary);

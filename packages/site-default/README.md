@@ -50,8 +50,13 @@ at its own start.
 `mountTarget`, default `pages`) a document's path is its parent's path plus its own slug:
 `/ueber-uns/team`, `/en/about-us/team`. The slug is unique only where the whole path collides, so
 `/ueber-uns/team` and `/projekte/team` both save; a routed type with parents must not have a `unique`
-slug field, and setup fails if it does. In a locale where a page has no slug of its own, the page itself
-has no path there, and its segment in its subpages' paths is its default-locale slug. A parent that is the page itself or one of its subpages, a chain deeper
+slug field, and setup fails if it does. Every segment of a path comes from a slug of the path's own
+locale: in a locale where a page has no slug of its own, neither it nor anything below it has a path
+there. Publishing a document in a locale where a page above it (its parent chain or its mount page) has
+no slug is a field error on the parent field (the slug field for a mounted document) naming that page;
+clearing a page's slug or removing its translation while documents below it are published in that
+locale is a field error naming them, and so is moving a mounted collection to a page without a slug in
+a locale where its documents are published. A parent that is the page itself or one of its subpages, a chain deeper
 than `maxDepth`, a missing parent and the home page as a parent or with a parent are field errors on
 the parent field; deleting a page that still has subpages is a `CONFLICT` naming them. Renaming or
 re-parenting a page moves every subpage in every locale; a subpage whose new path is taken rejects the
@@ -84,18 +89,13 @@ One deliberate consequence: the slug of an unpublished parent appears as a segme
 subpages' paths. No other field of the parent is served: links to it are broken, it has no output, and
 a caller only learns its id through fields the caller is granted. `site.previewPath` reports such a
 parent as `exposesParentSlug`. A subpage is placed structurally: its path is valid when it holds a slug
-of its own in the locale and every page above it holds its segment, whatever those pages' publication
-or claim strength. So when a page has no slug in `en` and its segment `/en/p` comes from its
-default-locale slug while another page takes `/en/p` with a slug of its own, both pages' subpages keep
-their full paths below `/en/p/`; full paths stay unique, so two documents never answer one path.
-Publishing or unpublishing a page moves only that page, never its subpages.
+of its own in the locale and every page above it holds its path there, whatever those pages'
+publication. Publishing or unpublishing a page moves only that page, never its subpages.
 
 **One path, one document.** The public path is unique per locale across every routed type; the slug
-alone need not be. A document's path in a locale comes from its own slug there (a strong claim); a
-document without one holds its default-locale slug only as the segment below which its subpages sit (a
-weak claim), which is never a path of its own. Two strong claims on one path conflict whatever either
-document's status, so drafts block each other, and so do two weak claims on one segment; a strong claim
-meets a weak one without a conflict. A path equal to or below a `reservedPaths` entry, or starting
+alone need not be. A document's path in a locale comes from its own slug there; a document without one
+claims nothing in that locale. Two claims on one path conflict whatever either document's status, so
+drafts block each other. A path equal to or below a `reservedPaths` entry, or starting
 with a locale code, is a slug field error. A `unique` slug field is not needed and logs a warning at
 setup, because it rejects the same slug without naming the occupant.
 
