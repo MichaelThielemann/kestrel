@@ -1043,6 +1043,9 @@ Net changes since 5.8.1.
 
 ### Changed
 
+- `validate-jsonschema`: the HTML sanitizer keeps an element's `id` only when it starts with an ASCII
+  letter and holds at most 64 ASCII letters, digits, `-` and `_`; any other `id` is dropped and the
+  element kept. Stored content keeps such an id until its next save through `validate.sanitize`.
 - `delivery-static`: a type's `home` is optional and has no default; without it the render passes no
   `home` to `site@1`, whose own rule applies (`site-default`: `"home"` for an unrouted type, the route's
   `home`, possibly none, for a routed one). A config that relied on the `"home"` default with a

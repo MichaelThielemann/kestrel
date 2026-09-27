@@ -2,6 +2,14 @@ import { declaresType, isSchemaNode, resolveSchema, typeTag, type SchemaNode } f
 import { boundaryCast } from "@michaelthielemann/kestrel/cast";
 import sanitizeHtml from "sanitize-html";
 
+/** The ids the HTML sanitizer keeps: an ASCII letter, then up to 63 ASCII letters, digits, `-` or `_`. Any other `id` is dropped, so stored content cannot take an id that starts like a framework's own (`__…`). */
+export const HTML_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+
+function withoutBadId(attribs: Record<string, string>): Record<string, string> {
+  if (attribs.id === undefined || HTML_ID_PATTERN.test(attribs.id)) return attribs;
+  return Object.fromEntries(Object.entries(attribs).filter(([name]) => name !== "id"));
+}
+
 export const HTML_ALLOWLIST = {
   allowedTags: [
     "p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "code", "em", "strong", "b", "i", "u", "s", "sub", "sup", "small", "mark",
@@ -20,7 +28,10 @@ export const HTML_ALLOWLIST = {
   allowProtocolRelative: false,
   disallowedTagsMode: "discard" as const,
   transformTags: {
-    a: (tagName: string, attribs: Record<string, string>) => ({ tagName, attribs: attribs.target === "_blank" ? { ...attribs, rel: "noopener noreferrer" } : attribs }),
+    "*": (tagName: string, attribs: Record<string, string>) => {
+      const kept = withoutBadId(attribs);
+      return { tagName, attribs: tagName === "a" && kept.target === "_blank" ? { ...kept, rel: "noopener noreferrer" } : kept };
+    },
   },
 };
 

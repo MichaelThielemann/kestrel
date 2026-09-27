@@ -344,3 +344,17 @@ describe("inline schemas", () => {
     v.close();
   });
 });
+
+describe("sanitize: element ids", () => {
+  it.each(["__NUXT_DATA__", "__nuxt", "_private", "1-intro", "-x", "a b", "a:b", "ä-umlaut", `a${"b".repeat(64)}`])("drops the id %j and keeps the element", (id) => {
+    expect(sanitize(`<div id="${id}">Text</div>`)).toBe("<div>Text</div>");
+  });
+
+  it("keeps an id that starts with a letter and uses letters, digits, hyphens and underscores", () => {
+    expect(sanitize('<h2 id="team-2026_de">Team</h2><p><a href="#team-2026_de" id="Back">up</a></p>')).toBe('<h2 id="team-2026_de">Team</h2><p><a href="#team-2026_de" id="Back">up</a></p>');
+  });
+
+  it("keeps the rel it adds to a link opening a new tab while dropping a bad id on it", () => {
+    expect(sanitize('<a href="https://ok.example" target="_blank" id="__x">ok</a>')).toBe('<a href="https://ok.example" target="_blank" rel="noopener noreferrer">ok</a>');
+  });
+});
