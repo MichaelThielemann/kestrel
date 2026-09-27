@@ -216,10 +216,10 @@ is not per file, and fails the whole request. Other steps: `media.get`, `media.l
 `media.remove`, `media.reconcile`, `media.reconcileDelete`, `media.syncPublic`, `media.export:<dir>`.
 
 `media.list`'s `image`/`video` kind filters at the store, one content-type prefix, with a store-counted
-total. Its text query (`q`) and its `other` kind cannot be expressed as a store filter, so each scans the
-newest `MAX_UNINDEXED_SCAN` (5000) ready items in scope instead, in memory, before paging and counting —
-an older match beyond that is not found; the recursive-folder branch scans its whole subtree the same
-way, unbounded.
+total. Its text query (`q`) and its `other` kind cannot be expressed as a store filter, so each scans
+every ready item in scope instead, in batches of 500 (the same pattern `folders()` and the
+recursive-folder branch already use), before paging and counting in memory: bounded memory, O(N) time,
+a correct total.
 
 Error codes per step (every step can also answer `TRANSIENT` when the blobstore or the database is
 unavailable):

@@ -585,6 +585,34 @@ describe("media/default", () => {
     expect(otherPage.items).toHaveLength(1);
   });
 
+  it("an other filter counts and pages correctly past several scan batches, not just the first one", async () => {
+    const blobs = fakeBlobstore();
+    const persistence = createFakePersistence();
+    const media = await createMediaDefault({ ...BASE_CONFIG, allowedTypes: ["*"], deniedTypes: [], maxBytes: 100, locales: [], defaultLocale: undefined }, blobs, persistence, noLogger, () => 0);
+    const total = 5200;
+    const rows: NewDocument<Document>[] = Array.from({ length: total }, (_, i) => ({
+      id: `other-${String(i).padStart(5, "0")}`,
+      filename: `file-${i}.pdf`,
+      folder: "",
+      location: `/file-${i}.pdf`,
+      contentType: "application/pdf",
+      size: 10,
+      key: `key-${i}`,
+      checksum: `sum-${i}`,
+      status: "ready",
+      createdAt: i,
+      updatedAt: i,
+    }));
+    expectOk(await persistence.createMany(COLLECTION, rows));
+
+    const page = expectOk(await media.list({ mediaKind: "other", limit: 10, offset: 0 }));
+    expect(page.total).toBe(total);
+    expect(page.items).toHaveLength(10);
+
+    const lastPage = expectOk(await media.list({ mediaKind: "other", limit: 10, offset: total - 5 }));
+    expect(lastPage.items).toHaveLength(5);
+  }, 30000);
+
   it("recursive list matches the exact subtree, not a LIKE prefix or byte range", async () => {
     const blobs = fakeBlobstore();
     let t = 0;
