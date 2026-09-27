@@ -151,6 +151,14 @@ import { isErr, ok, type Result } from "@michaelthielemann/kestrel/result";
 import { createHash, scrypt, timingSafeEqual, randomBytes } from "node:crypto";   // or argon2 as a package.json dep
 
 const digest = (token: string) => createHash("sha256").update(token).digest("base64url");   // a copy of the table holds no usable token
+const derive = (password: string, salt: Buffer, length: number) =>
+  new Promise<Buffer>((resolve, reject) => scrypt(password, salt, length, (e, key) => (e ? reject(e) : resolve(key))));   // thread pool, not the event loop
+async function verify(password: string, stored: string): Promise<boolean> {
+  const [, salt, hash] = stored.split("$");
+  const expected = Buffer.from(hash, "hex");
+  return timingSafeEqual(await derive(password, Buffer.from(salt, "hex"), expected.length), expected);
+}
+const DUMMY_HASH = `scrypt$${randomBytes(16).toString("hex")}$${randomBytes(64).toString("hex")}`;
 
 type Config = { identifier: "username" | "email"; minPasswordLength: number; sessionTtlSeconds: number };
 
@@ -163,7 +171,8 @@ export async function createAuthnMulti(config: Config, db: Persistence): Promise
     async login(creds): Promise<Result<Session | null, AuthnError>> {
       const user = await db.findOne<{ id: string; passwordHash: string }>("authn_users", { [id]: creds[id] });
       if (isErr(user)) return user;   // pass TRANSIENT through — no Err on wrong credentials
-      if (!user.value || !verify(creds.password, user.value.passwordHash)) return ok(null);
+      const matches = await verify(creds.password ?? "", user.value?.passwordHash ?? DUMMY_HASH);   // same work for an unknown user
+      if (!user.value || !matches) return ok(null);
       const token = randomBytes(32).toString("base64url");
       const created = await db.createOne("authn_sessions", { id: digest(token), userId: user.value.id, expiresAt: Date.now() + config.sessionTtlSeconds * 1000 });
       if (isErr(created)) return created;

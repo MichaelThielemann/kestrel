@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
 import type { Authn, AuthnError, Identity, Session } from "@michaelthielemann/kestrel-contracts/authn";
 import { requestToken, SESSION_COOKIE, type SessionCookieOptions } from "@michaelthielemann/kestrel-contracts/helpers/session";
 import { ok, type Result } from "@michaelthielemann/kestrel/result";
@@ -22,11 +22,21 @@ export function hashPassword(password: string): string {
   return `scrypt$${salt.toString("hex")}$${scryptSync(password, salt, KEY_LENGTH).toString("hex")}`;
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
+function parseHash(stored: string): { salt: Buffer; expected: Buffer } {
   const [algorithm, saltHex, hashHex] = stored.split("$");
   if (algorithm !== "scrypt" || !saltHex || !hashHex) throw new Error(`authn/single: passwordHash must look like "scrypt$<salt>$<hash>" (use hashPassword())`);
-  const expected = Buffer.from(hashHex, "hex");
-  const actual = scryptSync(password, Buffer.from(saltHex, "hex"), expected.length);
+  return { salt: Buffer.from(saltHex, "hex"), expected: Buffer.from(hashHex, "hex") };
+}
+
+export function verifyPassword(password: string, stored: string): boolean {
+  const { salt, expected } = parseHash(stored);
+  return timingSafeEqual(scryptSync(password, salt, expected.length), expected);
+}
+
+/** `verifyPassword` without blocking the event loop: the key is derived on the libuv thread pool. */
+export async function verifyPasswordAsync(password: string, stored: string): Promise<boolean> {
+  const { salt, expected } = parseHash(stored);
+  const actual = await new Promise<Buffer>((resolve, reject) => scrypt(password, salt, expected.length, (error, key) => (error ? reject(error) : resolve(key))));
   return timingSafeEqual(actual, expected);
 }
 
@@ -37,7 +47,7 @@ export function tokenFromHeaders(headers: Record<string, string>): string | unde
 }
 
 export function createAuthnSingle(config: Config, now: () => number = Date.now): AuthnSingle {
-  verifyPassword("", config.passwordHash);
+  parseHash(config.passwordHash);
   const sessions = new Map<string, number>();
   const identity = (): Identity => ({ id: config.username, claims: { roles: [...config.roles] } });
 
@@ -45,7 +55,8 @@ export function createAuthnSingle(config: Config, now: () => number = Date.now):
     sessionCookie: { maxAgeSeconds: config.sessionTtlSeconds, secure: config.secureCookie ?? true },
     async login(credentials): Promise<Result<Session | null, AuthnError>> {
       const { username, password } = credentials;
-      if (username !== config.username || typeof password !== "string" || !verifyPassword(password, config.passwordHash)) return ok(null);
+      const matches = await verifyPasswordAsync(typeof password === "string" ? password : "", config.passwordHash);
+      if (username !== config.username || typeof password !== "string" || !matches) return ok(null);
       const token = randomBytes(32).toString("base64url");
       sessions.set(token, now() + config.sessionTtlSeconds * 1000);
       return ok({ token, identity: identity() });

@@ -7,6 +7,9 @@ client-visible failure is `UNAUTHENTICATED` (401). `authn.loadIdentity` and `aut
 pipeline that runs `authn.requireUser` first (boot's dataflow check enforces it) and answer
 `UNAUTHENTICATED` when identity or token is missing anyway.
 
+Login derives the scrypt key on the libuv thread pool (`verifyPasswordAsync`) and does so for any
+username, so a wrong username takes as long as a wrong password.
+
 `authn.login` answers the token in the body and sets it as the `kestrel_token` cookie (`HttpOnly`,
 `Secure`, `SameSite=Strict`, `Path=/`, `Max-Age` = `sessionTtlSeconds`); `authn.logout` removes it.
 `secureCookie: false` drops `Secure`, for signing in over plain HTTP during development only. A

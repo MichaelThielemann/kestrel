@@ -16,6 +16,13 @@ dependency before every change that could remove the last one: deactivating, del
 the permission away from the last active holder is `LAST_ADMIN` (409). Without an authz module
 nobody is known to be an admin and the guard stays silent.
 
+**Password checks.** Login and `changePassword` derive the scrypt key on the libuv thread pool
+(`verifyPasswordAsync`), so a login never stalls other requests. An unknown or deactivated username is
+checked against a throwaway hash made at start with the same parameters, so the answer takes as long
+as for a real user with a wrong password. The pool has four threads unless `UV_THREADPOOL_SIZE` says
+otherwise, and image processing shares it; raise it on a busy instance. `verifyPassword` stays the
+synchronous form for scripts.
+
 **Browser sessions.** `authn.login` answers the token in the body, for a client that sends it as
 `Authorization: Bearer`, and sets it as the `kestrel_token` cookie (`HttpOnly`, `Secure`,
 `SameSite=Strict`, `Path=/`, `Max-Age` = `sessionTtlSeconds`), so a browser holds a session page

@@ -1175,6 +1175,10 @@ Net changes since 5.8.1.
   underlying data was always there — but the generated OpenAPI document now describes them
   precisely: a consumer's generated types stop marking an always-present field as optional (media
   item lists, folder listings, delivery, replication and link/reference reports, among others).
+- `authn/single` and `authn/multi` check a password on the thread pool instead of blocking the event
+  loop, and a login for an unknown or deactivated username derives a key against a throwaway hash of
+  the same parameters, so it takes as long as one with a wrong password. Both packages export
+  `verifyPasswordAsync`; `verifyPassword` is unchanged.
 
 ### Fixed
 

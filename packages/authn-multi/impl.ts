@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
 import type { Authn, AuthnError, Identity } from "@michaelthielemann/kestrel-contracts/authn";
 import type { Authz } from "@michaelthielemann/kestrel-contracts/authz";
 import { customFailure, err, failure, isErr, ok, type KestrelError, type Result } from "@michaelthielemann/kestrel-contracts/errors";
@@ -49,12 +49,33 @@ export function hashPassword(password: string): string {
   return `scrypt$${salt.toString("hex")}$${scryptSync(password, salt, KEY_LENGTH).toString("hex")}`;
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
+function parseHash(stored: string): { salt: Buffer; expected: Buffer } {
   const [algorithm, saltHex, hashHex] = stored.split("$");
   if (algorithm !== "scrypt" || !saltHex || !hashHex) throw new Error('authn/multi: passwordHash must look like "scrypt$<salt>$<hash>" (use hashPassword())');
-  const expected = Buffer.from(hashHex, "hex");
-  return timingSafeEqual(scryptSync(password, Buffer.from(saltHex, "hex"), expected.length), expected);
+  return { salt: Buffer.from(saltHex, "hex"), expected: Buffer.from(hashHex, "hex") };
 }
+
+function derive(password: string, salt: Buffer, length: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => scrypt(password, salt, length, (error, key) => (error ? reject(error) : resolve(key))));
+}
+
+export function verifyPassword(password: string, stored: string): boolean {
+  const { salt, expected } = parseHash(stored);
+  return timingSafeEqual(scryptSync(password, salt, expected.length), expected);
+}
+
+/** `verifyPassword` without blocking the event loop: the key is derived on the libuv thread pool. */
+export async function verifyPasswordAsync(password: string, stored: string): Promise<boolean> {
+  const { salt, expected } = parseHash(stored);
+  return timingSafeEqual(await derive(password, salt, expected.length), expected);
+}
+
+async function hashPasswordAsync(password: string): Promise<string> {
+  const salt = randomBytes(16);
+  return `scrypt$${salt.toString("hex")}$${(await derive(password, salt, KEY_LENGTH)).toString("hex")}`;
+}
+
+const DUMMY_HASH = hashPassword(randomBytes(16).toString("hex"));
 
 const TOKEN_DIGEST = /^[A-Za-z0-9_-]{43}$/;
 
@@ -164,7 +185,7 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
     const existing = await db.findOne<User>(USERS, { username });
     if (isErr(existing)) return existing;
     if (existing.value) return err(failure("CONFLICT", `authn/multi: user "${username}" already exists`));
-    const created = await db.createOne<User>(USERS, { username, passwordHash: hashPassword(password), roles, active: true, createdAt: now() });
+    const created = await db.createOne<User>(USERS, { username, passwordHash: await hashPasswordAsync(password), roles, active: true, createdAt: now() });
     if (isErr(created)) return created.error.code === "CONFLICT" && created.error.details?.field === "username" ? err(failure("CONFLICT", `authn/multi: user "${username}" already exists`)) : created;
     return ok(publicUser(created.value));
   };
@@ -173,7 +194,7 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
     const userCount = await db.count(USERS, {});
     if (isErr(userCount)) throw new Error(`authn/multi: setup failed: ${userCount.error.message}`);
     if (userCount.value === 0) {
-      verifyPassword("", config.bootstrap.passwordHash);
+      parseHash(config.bootstrap.passwordHash);
       const created = await db.createOne<User>(USERS, { username: config.bootstrap.username, passwordHash: config.bootstrap.passwordHash, roles: config.bootstrap.roles, active: true, createdAt: now() });
       if (isErr(created)) throw new Error(`authn/multi: setup failed: ${created.error.message}`);
     }
@@ -188,7 +209,9 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
       const userResult = await db.findOne<User>(USERS, { username });
       if (isErr(userResult)) return err(transientOnly(userResult.error));
       const user = userResult.value;
-      if (!user || !user.active || !verifyPassword(password, user.passwordHash)) return ok(null);
+      const usable = user !== null && user.active;
+      const matches = await verifyPasswordAsync(password, usable ? user.passwordHash : DUMMY_HASH);
+      if (!usable || !matches) return ok(null);
       const token = randomBytes(32).toString("base64url");
       const created = await db.createOne<SessionRow>(SESSIONS, { id: sessionId(token), userId: user.id, expiresAt: now() + config.sessionTtlSeconds * 1000 });
       if (isErr(created)) return err(transientOnly(created.error));
@@ -270,7 +293,7 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
       if (isErr(user)) return user;
       const passwordCheck = checkPassword(config, password);
       if (isErr(passwordCheck)) return passwordCheck;
-      const updated = await db.updateOne<User>(USERS, id, { passwordHash: hashPassword(password) });
+      const updated = await db.updateOne<User>(USERS, id, { passwordHash: await hashPasswordAsync(password) });
       if (isErr(updated)) return updated;
       const cleared = await db.deleteMany(SESSIONS, { userId: id });
       if (isErr(cleared)) return cleared;
@@ -279,10 +302,10 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
     async changePassword(id, current, next, keepToken) {
       const user = await userById(id);
       if (isErr(user)) return user;
-      if (!verifyPassword(current, user.value.passwordHash)) return err(failure("VALIDATION", "authn/multi: current password is wrong"));
+      if (!(await verifyPasswordAsync(current, user.value.passwordHash))) return err(failure("VALIDATION", "authn/multi: current password is wrong"));
       const passwordCheck = checkPassword(config, next);
       if (isErr(passwordCheck)) return passwordCheck;
-      const updated = await db.updateOne<User>(USERS, id, { passwordHash: hashPassword(next) });
+      const updated = await db.updateOne<User>(USERS, id, { passwordHash: await hashPasswordAsync(next) });
       if (isErr(updated)) return updated;
       const cleared = await db.deleteMany(SESSIONS, keepToken === undefined ? { userId: id } : { userId: id, id: { ne: sessionId(keepToken) } });
       if (isErr(cleared)) return cleared;
