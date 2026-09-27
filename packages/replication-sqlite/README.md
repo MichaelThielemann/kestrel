@@ -10,8 +10,10 @@ restore = snapshot + segments up to the requested time, applied page by page; th
 opened and passes `PRAGMA quick_check` before it is handed over, otherwise the restore fails with
 `TRANSIENT` naming the generation.
 
-A generation is named by the time its snapshot was taken plus 32 random hex digits
-(`20260927T101500Z-9f…`), and every key of it lives under `<prefix>gen/<generation>/`, so a snapshot
+A generation is named by the time its snapshot was taken, then 12 hex digits of its millisecond
+timestamp (kept strictly increasing within a process, so generations of the same second sort in the
+order they were taken and a restore without a target picks the newest), then 32 random hex digits
+(`20260927T101500Z-0192…9f…`), and every key of it lives under `<prefix>gen/<generation>/`, so a snapshot
 key cannot be derived from the time it was taken. A generation named by the time alone is listed and
 restored as well. The snapshot holds the whole database, sessions and
 password hashes included: `prefix` must lie outside anything a bucket or static host serves publicly.

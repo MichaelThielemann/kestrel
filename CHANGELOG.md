@@ -562,8 +562,9 @@ Net changes since 5.8.1.
 - `blobstore-s3` refuses a plain `http://` `endpoint` outside loopback (`localhost`, `127.0.0.0/8`,
   `[::1]`) with a config error at boot. The new option `allowInsecureEndpoint: true` accepts it for a
   trusted network and logs a warning at every boot.
-- `replication-sqlite` names a new generation by its time plus 32 random hex digits
-  (`<prefix>gen/<time>-<random>/…`), so a snapshot key cannot be guessed from the time it was taken;
+- `replication-sqlite` names a new generation by its time, an order key and 32 random hex digits
+  (`<prefix>gen/<time>-<order><random>/…`); generations of the same second sort in the order they were
+  taken, so a snapshot key cannot be guessed from the time it was taken;
   generations named by the time alone are still listed, restored and pruned. The READMEs of
   `media-default` and `blobstore-s3` list every key family on the blobstore and which of them may be
   public (`site/*` only), with an example bucket policy.

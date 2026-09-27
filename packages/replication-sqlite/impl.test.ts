@@ -114,7 +114,7 @@ describe("replication/sqlite", () => {
     const { repl, blobs, insert, count, restoredCount, clock } = setup();
     insert(5);
     const first = expectOk(await repl.sync());
-    expect(first.generation).toMatch(/^\d{8}T\d{6}Z-[0-9a-f]{32}$/);
+    expect(first.generation).toMatch(/^\d{8}T\d{6}Z-[0-9a-f]{44}$/);
     expect([...blobs.blobs.keys()].some((k) => k.endsWith("/snapshot.db"))).toBe(true);
     expect((await restoredCount({})).n).toBe(5);
 
@@ -140,6 +140,15 @@ describe("replication/sqlite", () => {
     const points = expectOk(await repl.points());
     expect(points).toHaveLength(2);
     expect(points.every((point) => Number.isFinite(point.at))).toBe(true);
+  });
+
+  it("orders generations taken within the same second by when they were taken, so a restore picks the newest", async () => {
+    const { repl, insert, restoreResult } = setup();
+    insert(1);
+    const generations: string[] = [];
+    for (let i = 0; i < 20; i++) generations.push(expectOk(await repl.snapshot()).generation);
+    expect(expectOk(await repl.points()).map((point) => point.generation)).toEqual(generations);
+    expect(expectOk(await restoreResult({})).generation).toBe(generations.at(-1));
   });
 
   it("still lists and restores a generation named by its time alone", async () => {
@@ -189,7 +198,7 @@ describe("replication/sqlite", () => {
     insert(3);
     expectErr(await repl.prepareRestore({}), "NOT_FOUND");
     const snap = expectOk(await repl.snapshot());
-    expect(snap.generation).toMatch(/^\d{8}T\d{6}Z-[0-9a-f]{32}$/);
+    expect(snap.generation).toMatch(/^\d{8}T\d{6}Z-[0-9a-f]{44}$/);
     expect([...blobs.blobs.keys()].filter((k) => k.includes("/gen/null/"))).toEqual([]);
     expect([...blobs.blobs.keys()]).toEqual([`replica/gen/${snap.generation}/snapshot.db`]);
     clock.advance(30_000);

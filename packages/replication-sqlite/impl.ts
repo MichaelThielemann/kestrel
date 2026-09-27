@@ -228,12 +228,14 @@ export function createReplicationSqlite(config: Config, blobs: Blobstore, now: (
     return ok();
   };
 
+  let snapshotOrder = 0;
   const takeSnapshot = async (): Promise<Result<{ generation: string; bytes: number }, BlobstoreError>> => {
     const at = now();
     let data: Uint8Array = new Uint8Array(readFileSync(file));
     const wal = readCommittedSync(fromStart);
     if (wal && wal.frames > 0) data = applySegment(data, wal.segment);
-    const gen = `${stamp(at)}-${randomBytes(16).toString("hex")}`;
+    snapshotOrder = Math.max(at, snapshotOrder + 1);
+    const gen = `${stamp(at)}-${snapshotOrder.toString(16).padStart(12, "0")}${randomBytes(16).toString("hex")}`;
     const put = await blobs.put(`${config.prefix}gen/${gen}/snapshot.db`, data, { contentType: "application/vnd.sqlite3" });
     if (isErr(put)) return put;
     generation = gen;
