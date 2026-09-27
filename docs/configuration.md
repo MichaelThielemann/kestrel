@@ -126,6 +126,9 @@ event and cron triggers still run.
 | `host` | string | `"127.0.0.1"` | Interface to bind |
 | `corsOrigin` | string | – | Single allowed origin; omitted means no CORS headers |
 | `maxBodyBytes` | integer | `10485760` | A larger body answers 413, checked against `Content-Length` and while reading |
+| `multipart.maxParts` | integer | `120` | Parts per `multipart/form-data` body; one more answers 413 |
+| `multipart.maxFiles` | integer | `20` | Parts with a `filename` per body; one more answers 413 |
+| `multipart.maxFields` | integer | `100` | Parts without a `filename` per body; one more answers 413 |
 | `trustProxy` | boolean | `false` | Read the client address from `X-Forwarded-For` of a trusted proxy |
 | `proxyHops` | integer | `1` | Which `X-Forwarded-For` entry, counted from the right |
 | `trustedHeader` | string | – | A header the trusted proxy sets to the client address; wins over `trustProxy` |

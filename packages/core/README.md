@@ -69,7 +69,7 @@ Binary results are served `inline` for a built-in safe set of content types plus
 (`sanitize-svg`), otherwise boot fails.
 
 ## HTTP config
-`http` takes `port`, `host`, `corsOrigin`, `maxBodyBytes`, `trustProxy`, `proxyHops`, `trustedHeader`,
+`http` takes `port`, `host`, `corsOrigin`, `maxBodyBytes`, `multipart`, `trustProxy`, `proxyHops`, `trustedHeader`,
 `trustedProxies`, `allow`, `healthPath`, `inlineTypes`
 and `timeouts: { requestMs, headersMs, keepAliveMs }` (defaults 30000 / 10000 / 5000), which map to
 `server.requestTimeout`, `server.headersTimeout` and `server.keepAliveTimeout`. An incoming

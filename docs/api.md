@@ -443,7 +443,9 @@ builds a media URL from an id; it always reads `path` from the response.
 **POST `/media`.** The body is `multipart/form-data` with a repeatable `file` field (send several
 for a multi-file upload), an optional `folder`, and an optional `provenance` (`human`/`ai`/`mixed`/
 `unknown`, or `{ origin, tool?, model?, at? }`; applies to every file in the request; defaults to
-`unknown` if omitted). A request with no `file` field answers 400.
+`unknown` if omitted). A request with no `file` field answers 400. One request carries at most
+`http.multipart.maxFiles` files (default 20) and `maxFields` other fields (default 100); one more
+answers 413 before any file is stored, so a bulk upload is split over several requests.
 
 A single file returns `{ id, path, filename, folder, contentType, size, createdAt, updatedAt,
 provenance, width, height, alt, title, description }` (needs `media.write`) — no internal field

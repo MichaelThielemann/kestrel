@@ -2,7 +2,7 @@ import { afterEach, describe, it, expect } from "vitest";
 import { binaryResult } from "../context.ts";
 import { silentLogger } from "../logger.ts";
 import type { RunResult, Runner } from "../runner.ts";
-import { BodyTooLarge, buildResponse, clientIpResolver, createHttpServer, disposition, errorResponse, listen, matchRoute, parseQuery, parseRoute, readRequestBody, responseForRun, routePattern } from "./http.ts";
+import { BodyTooLarge, buildResponse, clientIpResolver, createHttpServer, disposition, errorResponse, listen, matchRoute, parseQuery, parseRequestBody, parseRoute, readRequestBody, responseForRun, routePattern } from "./http.ts";
 
 describe("http routes", () => {
   const routes = [parseRoute("GET /pages/:id", "readPage"), parseRoute("POST /pages", "createPage"), parseRoute("GET /", "home")];
@@ -186,6 +186,33 @@ describe("request body reading", () => {
   it("returns a body of exactly the limit", async () => {
     const body = source(10, 1024);
     expect((await readRequestBody(body.stream, 10 * 1024, "10240")).byteLength).toBe(10 * 1024);
+  });
+});
+
+describe("multipart parsing", () => {
+  function multipart(files: number, fields: number): { contentType: string; body: Uint8Array } {
+    const boundary = "test-boundary";
+    let text = "";
+    for (let i = 0; i < files; i++) text += `--${boundary}\r\ncontent-disposition: form-data; name="file"; filename="f${i}.txt"\r\ncontent-type: text/plain\r\n\r\nf${i}\r\n`;
+    for (let i = 0; i < fields; i++) text += `--${boundary}\r\ncontent-disposition: form-data; name="field${i}"\r\n\r\nv${i}\r\n`;
+    return { contentType: `multipart/form-data; boundary="${boundary}"`, body: new TextEncoder().encode(`${text}--${boundary}--\r\n`) };
+  }
+
+  it("takes 20 files and 100 fields by default and refuses one more of either", async () => {
+    const within = multipart(20, 100);
+    const parsed = await parseRequestBody(within.contentType, within.body);
+    expect([parsed.files.length, Object.keys(parsed.payload).length]).toEqual([20, 100]);
+    const files = multipart(21, 0);
+    await expect(parseRequestBody(files.contentType, files.body)).rejects.toThrow(/more than 20 files/);
+    const fields = multipart(0, 101);
+    await expect(parseRequestBody(fields.contentType, fields.body)).rejects.toThrow(/more than 100 fields/);
+  });
+
+  it("refuses a body of many empty parts without decoding them", async () => {
+    const many = multipart(0, 50_000);
+    const started = performance.now();
+    await expect(parseRequestBody(many.contentType, many.body, { maxParts: 10, maxFiles: 10, maxFields: 10 })).rejects.toBeInstanceOf(BodyTooLarge);
+    expect(performance.now() - started).toBeLessThan(50);
   });
 });
 

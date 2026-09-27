@@ -266,7 +266,11 @@ own, it only starts a pipeline with the body as `payload` and the route paramete
 `multipart/form-data` puts text fields in `payload` and files in `files`
 (`http.maxBodyBytes`, default 10 MB, otherwise 413: a declared `Content-Length` over the limit is
 refused before any byte of the body is read, and a body without one stops being read the moment it
-passes the limit). If `ctx.result` is a
+passes the limit). A multipart body is counted part by part before any part is decoded, and the first
+part past `http.multipart` (`maxParts` 120, `maxFiles` 20, `maxFields` 100 by default) answers 413.
+Multipart is accepted only by a route whose pipeline has a step that reads `files`; any other route
+answers 415 (`UNSUPPORTED`) to a `multipart/form-data` body without reading it, so a request that
+fails authentication later never has its parts parsed. If `ctx.result` is a
 `binaryResult(data, contentType, filename?)`, the HTTP trigger responds with the raw bytes
 instead of JSON — with `nosniff` and a sandboxed CSP; `inline` only for known image/audio/
 video types plus `http.inlineTypes` from the config, otherwise `attachment` (uploads run on

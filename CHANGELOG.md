@@ -580,6 +580,12 @@ Net changes since 5.8.1.
   proxy without the trusted header, with or without `http.allow`; the h3 adapter leaves `ctx.ip`
   absent for it. New exports: `clientIpResolver`, `LOOPBACK_PROXIES`, `ClientAddress`, `PeerRequest`;
   `clientIp` accepts any request with `headers` and `socket`.
+- A `multipart/form-data` body is limited per request by the new `http.multipart`
+  (`maxParts` 120, `maxFiles` 20, `maxFields` 100; the h3 adapter's `multipart` option): it is counted
+  part by part before any part is decoded, and the first part past a limit answers 413. A route whose
+  pipeline has no step reading `files` answers 415 (`UNSUPPORTED`) to a multipart body without reading
+  it. Boot marks each route with `files`; new exports `MultipartLimits`, `DEFAULT_MULTIPART_LIMITS`,
+  `isMultipart`, `multipartRefusal`, and `parseRequestBody` takes the limits as a third argument.
 
 ### Added
 

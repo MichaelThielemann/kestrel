@@ -127,6 +127,10 @@ const BARREL = new Set(["module", "index", "src", "dist"]);
 
 const DUMMY_STEP: ResolvedStep = { name: "", fn: async (ctx) => ok(ctx), description: { summary: "", reads: [], writes: [] } };
 
+function readsFiles(path: string): boolean {
+  return path === "files" || path === "files?" || path.startsWith("files.");
+}
+
 function useTokens(use: string): string[] {
   const parts = (use.split(/[?#]/)[0] ?? use).split("/").filter((p) => p !== "" && p !== "." && p !== "..");
   if (parts[0]?.startsWith("@")) parts.shift();
@@ -612,6 +616,11 @@ async function runEngine(input: BootInput, sink: Sink, setup: SetupSelector, err
     routes.push(route);
   }
 
+  for (const route of routes) {
+    const pipeline = pipelines.get(route.pipeline);
+    if (pipeline !== undefined) route.files = pipeline.steps.some((step) => step.description.reads.some(readsFiles));
+  }
+
   for (const [name, pipeline] of pipelines) {
     const pipelineRoutes = routes.filter((r) => r.pipeline === name);
     const hasCron = crons.some((c) => c.pipeline === name);
@@ -737,6 +746,7 @@ export async function boot(input: BootInput): Promise<Kestrel> {
       if (http !== null) {
         server = createHttpServer(routes, run, logger, {
           maxBodyBytes: http.maxBodyBytes,
+          multipart: http.multipart,
           trustProxy: http.trustProxy,
           proxyHops: http.proxyHops,
           ...(http.trustedHeader === undefined ? {} : { trustedHeader: http.trustedHeader }),

@@ -14,6 +14,11 @@ export interface Route {
   method: string;
   segments: readonly string[];
   pipeline: string;
+  /**
+   * Whether the pipeline reads `ctx.files`. `false` makes both HTTP paths answer 415 to a multipart body
+   * before reading it; boot sets it for every route, and a route without it accepts multipart.
+   */
+  files?: boolean;
 }
 
 export function parseRoute(http: string, pipeline: string): Route {
@@ -116,14 +121,74 @@ export interface ParsedBody {
   files: UploadedFile[];
 }
 
-export async function parseRequestBody(contentType: string, body: Uint8Array): Promise<ParsedBody> {
-  if (contentType.startsWith("multipart/form-data")) {
+/** Caps on the parts of one `multipart/form-data` body; a part with a `filename` is a file, any other a field. */
+export interface MultipartLimits {
+  maxParts: number;
+  maxFiles: number;
+  maxFields: number;
+}
+
+/** The default `MultipartLimits`. */
+export const DEFAULT_MULTIPART_LIMITS: MultipartLimits = { maxParts: 120, maxFiles: 20, maxFields: 100 };
+
+/** Whether a `Content-Type` announces a `multipart/form-data` body. */
+export function isMultipart(contentType: string): boolean {
+  return contentType.trim().toLowerCase().startsWith("multipart/form-data");
+}
+
+function boundaryOf(contentType: string): string | undefined {
+  const match = /;\s*boundary\s*=\s*(?:"([^"]+)"|([^;\s]+))/i.exec(contentType);
+  return match?.[1] ?? match?.[2];
+}
+
+function tooMany(count: number, limit: number, what: string): void {
+  if (count > limit) throw new BodyTooLarge(`multipart body has more than ${limit} ${what}`);
+}
+
+function countParts(body: Uint8Array, contentType: string, limits: MultipartLimits): void {
+  const boundary = boundaryOf(contentType);
+  if (boundary === undefined) return;
+  const buf = Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+  const opening = Buffer.from(`--${boundary}`);
+  const delimiter = Buffer.from(`\r\n--${boundary}`);
+  let parts = 0;
+  let files = 0;
+  let at = buf.indexOf(opening);
+  let length = opening.length;
+  while (at !== -1) {
+    const start = at + length;
+    if (buf[start] === 0x2d && buf[start + 1] === 0x2d) return;
+    parts += 1;
+    tooMany(parts, limits.maxParts, "parts");
+    const headersEnd = buf.indexOf("\r\n\r\n", start);
+    const headers = buf.subarray(start, headersEnd === -1 ? buf.length : headersEnd).toString("latin1");
+    if (/;\s*filename\*?\s*=/i.test(headers)) files += 1;
+    tooMany(files, limits.maxFiles, "files");
+    tooMany(parts - files, limits.maxFields, "fields");
+    if (headersEnd === -1) return;
+    at = buf.indexOf(delimiter, headersEnd);
+    length = delimiter.length;
+  }
+}
+
+/**
+ * Parses a JSON or `multipart/form-data` body. A multipart body is scanned part by part first and
+ * rejected with `BodyTooLarge` at the first part past `limits`, before any part is decoded.
+ */
+export async function parseRequestBody(contentType: string, body: Uint8Array, limits: MultipartLimits = DEFAULT_MULTIPART_LIMITS): Promise<ParsedBody> {
+  if (isMultipart(contentType)) {
+    countParts(body, contentType, limits);
     const copy = new Uint8Array(body.byteLength);
     copy.set(body);
     const form = await new Response(copy.buffer, { headers: { "content-type": contentType } }).formData();
     const payload: Record<string, unknown> = {};
     const files: UploadedFile[] = [];
-    for (const [field, value] of form) {
+    const entries = [...form];
+    const fileCount = entries.filter(([, value]) => typeof value !== "string").length;
+    tooMany(entries.length, limits.maxParts, "parts");
+    tooMany(fileCount, limits.maxFiles, "files");
+    tooMany(entries.length - fileCount, limits.maxFields, "fields");
+    for (const [field, value] of entries) {
       if (typeof value === "string") payload[field] = value;
       else files.push({ field, filename: value.name, contentType: value.type || "application/octet-stream", data: new Uint8Array(await value.arrayBuffer()) });
     }
@@ -207,8 +272,15 @@ const EDGE_CODE_BY_STATUS: Readonly<Record<number, CoreCode>> = {
   403: "FORBIDDEN",
   404: "NOT_FOUND",
   413: "PAYLOAD_TOO_LARGE",
+  415: "UNSUPPORTED",
   500: "INTERNAL",
 };
+
+/** The 415 answer, before any body is read, to a multipart body for a route whose pipeline reads no files. */
+export function multipartRefusal(route: Route, contentType: string, requestId?: string): HttpResponse | undefined {
+  if (route.files !== false || !isMultipart(contentType)) return undefined;
+  return errorResponse(415, "this route does not accept multipart/form-data", requestId);
+}
 
 /** The one shape for errors raised before a pipeline runs (unknown route, unreadable body). */
 export function errorResponse(status: number, error: string, requestId?: string): HttpResponse {
@@ -279,6 +351,7 @@ export interface HttpOptions extends ClientIpOptions {
   allow?: readonly string[];
   corsOrigin?: string;
   maxBodyBytes?: number;
+  multipart?: MultipartLimits;
   healthPath?: string | null;
   health?: () => Pick<InstanceHealth, "ok" | "restartRequired">;
   inlineTypes?: readonly string[];
@@ -367,9 +440,12 @@ export function createHttpServer(routes: readonly Route[], run: Runner, logger: 
     const match = matchRoute(routes, req.method ?? "GET", url.pathname);
     if (!match) return sendError(res, 404, `no route for ${req.method} ${url.pathname}`, requestId);
 
+    const contentType = req.headers["content-type"] ?? "";
+    const refusal = multipartRefusal(match.route, contentType, requestId);
+    if (refusal !== undefined) return write(res, refusal);
     let body: ParsedBody;
     try {
-      body = await parseRequestBody(req.headers["content-type"] ?? "", await readRequestBody(req, options.maxBodyBytes ?? 10 * 1024 * 1024, req.headers["content-length"]));
+      body = await parseRequestBody(contentType, await readRequestBody(req, options.maxBodyBytes ?? 10 * 1024 * 1024, req.headers["content-length"]), options.multipart);
     } catch (err) {
       if (err instanceof BodyTooLarge) return sendError(res, 413, err.message, requestId);
       return sendError(res, 400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId);

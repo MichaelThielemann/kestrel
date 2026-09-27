@@ -27,6 +27,14 @@ export const configSchema = z
         host: z.string().default("127.0.0.1"),
         corsOrigin: z.string().min(1).optional(),
         maxBodyBytes: z.number().int().positive().default(10 * 1024 * 1024),
+            multipart: z
+              .object({
+                maxParts: z.number().int().positive().default(120),
+                maxFiles: z.number().int().nonnegative().default(20),
+                maxFields: z.number().int().nonnegative().default(100),
+              })
+              .strict()
+              .default({}),
         trustProxy: z.boolean().default(false),
             proxyHops: z.number().int().positive().default(1),
             trustedHeader: z.string().min(1).optional(),

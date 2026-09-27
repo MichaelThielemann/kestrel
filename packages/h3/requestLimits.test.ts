@@ -31,6 +31,8 @@ function watch(server: Server): () => number {
   return () => bytes;
 }
 
+const PARTS = { maxParts: 5, maxFiles: 3, maxFields: 4 };
+
 async function bootProbe(http: { port: number; maxBodyBytes: number } | null): Promise<{ kestrel: Kestrel; runs: () => number }> {
   let runs = 0;
   const probe = defineModule({
@@ -39,13 +41,23 @@ async function bootProbe(http: { port: number; maxBodyBytes: number } | null): P
     requires: [],
     configSchema: z.object({}),
     async setup() { return {}; },
-    steps: () => ({ count: async (ctx: Context) => { runs += 1; return ok({ ...ctx, result: { ok: true } }); } }),
-    describe: () => ({ count: { summary: "Counts the runs.", reads: [], writes: ["result"], output: { type: "object" } } }),
+    steps: () => ({
+      count: async (ctx: Context) => { runs += 1; return ok({ ...ctx, result: { ok: true } }); },
+      files: async (ctx: Context) => { runs += 1; return ok({ ...ctx, result: { files: ctx.files.length, fields: Object.keys(ctx.body).length } }); },
+    }),
+    describe: () => ({
+      count: { summary: "Counts the runs.", reads: [], writes: ["result"], output: { type: "object" } },
+      files: { summary: "Counts the runs and the uploaded files.", reads: ["files", "body"], writes: ["result"], output: { type: "object" } },
+    }),
   });
   const kestrel = await boot({
-    config: { modules: [{ use: "./probe", config: {} }], triggers: [{ http: "POST /upload", pipeline: "upload" }], http },
+    config: {
+      modules: [{ use: "./probe", config: {} }],
+      triggers: [{ http: "POST /upload", pipeline: "upload" }, { http: "POST /files", pipeline: "files" }],
+      http: http === null ? null : { ...http, multipart: PARTS },
+    },
     modules: [probe],
-    pipelines: [definePipeline({ name: "upload", steps: ["probe.count"] })],
+    pipelines: [definePipeline({ name: "upload", steps: ["probe.count"] }), definePipeline({ name: "files", steps: ["probe.files"] })],
     logger: silentLogger,
   });
   return { kestrel, runs: () => runs };
@@ -60,7 +72,7 @@ async function coreServer(): Promise<Served> {
 async function h3Adapter(): Promise<Served> {
   const { kestrel, runs } = await bootProbe(null);
   const app = createApp();
-  app.use(createKestrelHandler(kestrel, { maxBodyBytes: LIMIT }));
+  app.use(createKestrelHandler(kestrel, { maxBodyBytes: LIMIT, multipart: PARTS }));
   const server = createServer(toNodeListener(app));
   const bytesRead = watch(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -69,6 +81,13 @@ async function h3Adapter(): Promise<Served> {
     await kestrel.stop({ timeoutMs: 100 });
   };
   return { base: `http://127.0.0.1:${boundaryCast<AddressInfo>(server.address(), "host").port}`, bytesRead, runs, close };
+}
+
+function form(files: number, fields: number): FormData {
+  const data = new FormData();
+  for (let i = 0; i < files; i++) data.append("file", new Blob([`f${i}`], { type: "text/plain" }), `f${i}.txt`);
+  for (let i = 0; i < fields; i++) data.append(`field${i}`, `v${i}`);
+  return data;
 }
 
 interface Upload {
@@ -141,6 +160,53 @@ describe.each([
     const answer = await upload(served.base, { contentLength: LIMIT, send: LIMIT });
     expect(answer.status).toBe(200);
     expect(served.runs()).toBe(1);
+  });
+});
+
+describe.each([
+  ["core server", coreServer],
+  ["h3 adapter", h3Adapter],
+])("multipart limits: %s", (_name, start) => {
+  let served: Served | undefined;
+  afterEach(async () => {
+    await served?.close();
+    served = undefined;
+  });
+
+  it("accepts files and fields up to the limits", async () => {
+    served = await start();
+    const answer = await fetch(`${served.base}/files`, { method: "POST", body: form(3, 2) });
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toEqual({ files: 3, fields: 2 });
+  });
+
+  it("answers 413 past maxFiles, maxFields or maxParts without running the pipeline", async () => {
+    served = await start();
+    for (const body of [form(4, 0), form(0, 5), form(3, 3)]) {
+      const answer = await fetch(`${served.base}/files`, { method: "POST", body });
+      expect(answer.status).toBe(413);
+      expect(await answer.json()).toMatchObject({ code: "PAYLOAD_TOO_LARGE" });
+    }
+    expect(served.runs()).toBe(0);
+  });
+
+  it("stops at the first part past the limit instead of parsing the rest", async () => {
+    served = await start();
+    const boundary = "limit-boundary";
+    const part = (i: number) => `--${boundary}\r\ncontent-disposition: form-data; name="field${i}"\r\n\r\nv${i}\r\n`;
+    const body = [0, 1, 2, 3, 4].map(part).join("") + `--${boundary}\r\nnot a part header` + "x".repeat(1024);
+    const answer = await fetch(`${served.base}/files`, { method: "POST", headers: { "content-type": `multipart/form-data; boundary=${boundary}` }, body });
+    expect(answer.status).toBe(413);
+  });
+
+  it("refuses a multipart body for a pipeline that reads no files, before reading it", async () => {
+    served = await start();
+    const answer = await fetch(`${served.base}/upload`, { method: "POST", body: form(1, 1) });
+    expect(answer.status).toBe(415);
+    expect(await answer.json()).toMatchObject({ code: "UNSUPPORTED" });
+    expect(served.runs()).toBe(0);
+    const json = await fetch(`${served.base}/upload`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    expect(json.status).toBe(200);
   });
 });
 

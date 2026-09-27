@@ -1,5 +1,6 @@
 # media/default
-Uploads: bytes go to `blobstore@1` under `<prefix><id>/<name>` — one blob key per item, fixed at
+Uploads: one `POST /media` takes as many files as the HTTP trigger's `http.multipart.maxFiles`
+allows (default 20; the h3 adapter's `multipart` option), a bulk upload sends several requests. Bytes go to `blobstore@1` under `<prefix><id>/<name>` — one blob key per item, fixed at
 upload and never touched again by a rename or a move. Metadata (`filename`, `folder`, `location`,
 `contentType`, `size`, `key`, `checksum`, `status`, `createdAt`, `provenance`) goes into the
 persistence collection `media_items`; only a public projection of it ever leaves the API (see

@@ -1,9 +1,10 @@
 import { eventHandler, getRequestHeaders, getRequestURL, readRawBody, setResponseHeaders, setResponseStatus, type EventHandler, type H3Event } from "h3";
-import { BodyTooLarge, clientIpResolver, errorResponse, matchRoute, parseQuery, parseRequestBody, readRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type HttpResponse, type Kestrel } from "@michaelthielemann/kestrel";
+import { BodyTooLarge, clientIpResolver, errorResponse, matchRoute, multipartRefusal, parseQuery, parseRequestBody, readRequestBody, requestIdOf, responseForRun, type ClientIpOptions, type ContextInput, type MultipartLimits, type HttpResponse, type Kestrel } from "@michaelthielemann/kestrel";
 
 export interface KestrelHandlerOptions extends ClientIpOptions {
   mountPath?: string;
   maxBodyBytes?: number;
+  multipart?: MultipartLimits;
   inlineTypes?: readonly string[];
 }
 
@@ -50,6 +51,9 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
     const match = pathname === null ? undefined : matchRoute(kestrel.triggers.http, event.method, pathname);
     if (!match) return respond(event, errorResponse(404, `no route for ${event.method} ${url.pathname}`, requestId));
 
+    const contentType = headers["content-type"] ?? "";
+    const refusal = multipartRefusal(match.route, contentType, requestId);
+    if (refusal !== undefined) return respond(event, refusal);
     let raw: Uint8Array | undefined;
     try {
       raw = WITH_BODY.has(event.method) ? await readBody(event, maxBodyBytes) : undefined;
@@ -59,8 +63,9 @@ export function createKestrelHandler(kestrel: KestrelRunner, options: KestrelHan
     }
     let parsed;
     try {
-      parsed = await parseRequestBody(headers["content-type"] ?? "", raw ?? new Uint8Array());
+      parsed = await parseRequestBody(contentType, raw ?? new Uint8Array(), options.multipart);
     } catch (err) {
+      if (err instanceof BodyTooLarge) return respond(event, errorResponse(413, err.message, requestId));
       return respond(event, errorResponse(400, `invalid body: ${err instanceof Error ? err.message : String(err)}`, requestId));
     }
 
