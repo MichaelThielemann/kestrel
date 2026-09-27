@@ -14362,7 +14362,7 @@
     "/users/{id}/password": {
       "put": {
         "operationId": "setPassword",
-        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → Set a user's password (ends their sessions)",
+        "summary": "Require a valid session; a state-changing request authenticated by the session cookie must come from the same origin → Requires permission users.manage → Set another user's password (ends their sessions); one's own password changes only through changePassword",
         "tags": [
           "users"
         ],
@@ -14402,7 +14402,7 @@
             }
           },
           "400": {
-            "description": "password missing or too short",
+            "description": "password missing or too short, or the caller's own account",
             "content": {
               "application/json": {
                 "schema": {

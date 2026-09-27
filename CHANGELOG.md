@@ -632,6 +632,8 @@ Net changes since 5.8.1.
   must come from the same origin (`Sec-Fetch-Site: same-origin`, or an `Origin` matching `Host`), or
   `authn.identifyUser`/`authn.requireUser` answer `403 FORBIDDEN`; bearer requests are unchanged. The
   new config option `secureCookie` (default `true`) drops `Secure` for plain-HTTP development.
+- `authn.setPassword` refuses the caller's own account with 400; one's own password changes only
+  through `authn.changePassword`, which needs the current one. The step now reads `identity?`.
 
 ### Added
 
@@ -1078,6 +1080,11 @@ Net changes since 5.8.1.
   `clearedSessionCookie`, `crossOriginRefusal` and `SESSION_COOKIE`, shared by the authn modules. The
   shared `authn@1` step suite checks the session cookie and the same-origin rule, and its fixture
   takes the module's `sessionTtlSeconds`.
+- `authn/multi` records when a session's password was last checked and adds
+  `authn.requireRecentAuth:<seconds>`, which answers `403 REAUTH_REQUIRED` (with
+  `details.maxAgeSeconds`) when that is longer ago than the window, and `authn.confirmPassword`, which
+  checks the caller's password and renews the time. `changePassword` renews it for the session that
+  made the change.
 
 ### Changed
 

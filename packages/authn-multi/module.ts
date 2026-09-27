@@ -6,6 +6,7 @@ import "@michaelthielemann/kestrel-contracts/verifiedUser";
 import { clearedSessionCookie, crossOriginRefusal, requestToken, sessionCookie } from "@michaelthielemann/kestrel-contracts/helpers/session";
 import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule, type JsonSchema } from "@michaelthielemann/kestrel/defineModule";
+import { customFailure } from "@michaelthielemann/kestrel/errors";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { createAuthnMulti, type AuthnMulti } from "./impl.ts";
 
@@ -40,6 +41,14 @@ function credentials(payload: Record<string, unknown>): Record<string, string> {
 
 function str(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+/** The status `authn.requireRecentAuth` answers when the session's last password check is too old. */
+export const REAUTH_REQUIRED_STATUS = 403;
+
+function windowSeconds(arg: string): number {
+  if (!/^[1-9]\d*$/.test(arg)) throw new Error(`authn.requireRecentAuth:${arg}: the window must be a positive whole number of seconds`);
+  return Number(arg);
 }
 
 export default defineModule({
@@ -158,6 +167,7 @@ export default defineModule({
     setPassword: async (ctx: Context) => {
       const id = ctx.params.id;
       if (id === undefined) throw new Error("authn.setPassword: no params.id (boot's dataflow check already proved this route always provides it)");
+      if (ctx.identity?.id === id) return ctx.fail("VALIDATION", "change your own password with changePassword, which needs the current one");
       const password = str(ctx.payload.password);
       if (!password) return ctx.fail("VALIDATION", "password is required");
       const result = await authn.setPassword(id, password);
@@ -192,6 +202,25 @@ export default defineModule({
       const removed = await authn.cleanupSessions();
       if (isErr(removed)) return ctx.fail(removed.error);
       return ok({ ...ctx, result: { removed: removed.value } });
+    },
+    requireRecentAuth: stepFactory((arg: string) => {
+      const seconds = windowSeconds(arg);
+      return async (ctx: Context) => {
+        if (!ctx.token) return ctx.fail("UNAUTHENTICATED", "not authenticated");
+        const recent = await authn.recentlyAuthenticated(ctx.token, seconds);
+        if (isErr(recent)) return ctx.fail(recent.error);
+        if (!recent.value) return ctx.fail(customFailure("REAUTH_REQUIRED", REAUTH_REQUIRED_STATUS, "confirm your password to continue", { details: { maxAgeSeconds: seconds } }));
+        return ok(ctx);
+      };
+    }),
+    confirmPassword: async (ctx: Context) => {
+      if (!ctx.token) return ctx.fail("UNAUTHENTICATED", "not authenticated");
+      const password = str(ctx.payload.password);
+      if (!password) return ctx.fail("VALIDATION", "password is required");
+      const confirmed = await authn.confirmPassword(ctx.token, password);
+      if (isErr(confirmed)) return ctx.fail(confirmed.error);
+      if (!confirmed.value) return ctx.fail("VALIDATION", "the password is wrong");
+      return ok({ ...ctx, result: { ok: true } });
     },
   }),
 
@@ -269,12 +298,12 @@ export default defineModule({
       atomicSafe: true,
     },
     setPassword: {
-      summary: "Set a user's password (ends their sessions)",
-      reads: ["params.id"],
+      summary: "Set another user's password (ends their sessions); one's own password changes only through changePassword",
+      reads: ["identity?", "params.id"],
       writes: ["result"],
       input: { type: "object", properties: { password: { type: "string" } }, required: ["password"], additionalProperties: false },
       output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
-      errors: { 400: "password missing or too short", 404: "user not found" },
+      errors: { 400: "password missing or too short, or the caller's own account", 404: "user not found" },
     },
     changePassword: {
       summary: "Change own password",
@@ -299,5 +328,19 @@ export default defineModule({
       errors: { 404: "user not found" },
     },
     cleanupSessions: { summary: "Remove expired sessions", reads: [], writes: ["result"], output: { type: "object", properties: { removed: { type: "number" } }, required: ["removed"] } },
+    requireRecentAuth: (arg: string) => ({
+      summary: `Require that the session's password was checked within the last ${arg} seconds, at login or through authn.confirmPassword; otherwise 403 REAUTH_REQUIRED`,
+      reads: ["token"],
+      writes: [],
+      errors: { 401: "not authenticated", 403: "the last password check is older than the window (`REAUTH_REQUIRED`)" },
+    }),
+    confirmPassword: {
+      summary: "Confirm the caller's password; marks the session as freshly authenticated for authn.requireRecentAuth",
+      reads: ["token"],
+      writes: ["result"],
+      input: { type: "object", properties: { password: { type: "string" } }, required: ["password"], additionalProperties: false },
+      output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+      errors: { 400: "the password is missing or wrong", 401: "not authenticated" },
+    },
   }),
 });

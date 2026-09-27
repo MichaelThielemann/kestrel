@@ -36,6 +36,7 @@ export interface PublicUser {
 interface SessionRow extends Document {
   userId: string;
   expiresAt: number;
+  authTime?: number | null;
 }
 
 export type AuthnMultiError = KestrelError<"VALIDATION" | "CONFLICT" | "NOT_FOUND" | "TRANSIENT" | "LAST_ADMIN">;
@@ -103,6 +104,10 @@ export interface AuthnMulti extends Authn {
   changePassword(id: string, current: string, next: string, keepToken?: string): Promise<Result<void, AuthnMultiError>>;
   setActive(id: string, active: boolean): Promise<Result<void, AuthnMultiError>>;
   cleanupSessions(): Promise<Result<number, AuthnMultiError>>;
+  /** Whether the session's password was last checked within `maxAgeSeconds`; `false` for an unknown session. */
+  recentlyAuthenticated(token: string, maxAgeSeconds: number): Promise<Result<boolean, AuthnMultiError>>;
+  /** Checks the password of the session's user and, when it matches, marks the session as authenticated now. */
+  confirmPassword(token: string, password: string): Promise<Result<boolean, AuthnMultiError>>;
 }
 
 function publicUser(user: User): PublicUser {
@@ -133,7 +138,7 @@ function sameRoles(a: readonly string[], b: readonly string[]): boolean {
 export async function createAuthnMulti(config: Config, db: Persistence, now: () => number = Date.now, authz?: Authz): Promise<AuthnMulti> {
   const usersReady = await db.ensureCollection(USERS, { username: { type: "string", unique: true }, passwordHash: "string", roles: "json", active: "boolean", createdAt: "number" });
   if (isErr(usersReady)) throw new Error(`authn/multi: setup failed: ${usersReady.error.message}`);
-  const sessionsReady = await db.ensureCollection(SESSIONS, { userId: "string", expiresAt: "number" });
+  const sessionsReady = await db.ensureCollection(SESSIONS, { userId: "string", expiresAt: "number", authTime: "number" });
   if (isErr(sessionsReady)) throw new Error(`authn/multi: setup failed: ${sessionsReady.error.message}`);
   const stored = await db.findMany<SessionRow>(SESSIONS, {});
   if (isErr(stored)) throw new Error(`authn/multi: setup failed: ${stored.error.message}`);
@@ -213,7 +218,7 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
       const matches = await verifyPasswordAsync(password, usable ? user.passwordHash : DUMMY_HASH);
       if (!usable || !matches) return ok(null);
       const token = randomBytes(32).toString("base64url");
-      const created = await db.createOne<SessionRow>(SESSIONS, { id: sessionId(token), userId: user.id, expiresAt: now() + config.sessionTtlSeconds * 1000 });
+      const created = await db.createOne<SessionRow>(SESSIONS, { id: sessionId(token), userId: user.id, expiresAt: now() + config.sessionTtlSeconds * 1000, authTime: now() });
       if (isErr(created)) return err(transientOnly(created.error));
       return ok({ token, identity: identity(user) });
     },
@@ -309,6 +314,10 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
       if (isErr(updated)) return updated;
       const cleared = await db.deleteMany(SESSIONS, keepToken === undefined ? { userId: id } : { userId: id, id: { ne: sessionId(keepToken) } });
       if (isErr(cleared)) return cleared;
+      if (keepToken !== undefined) {
+        const refreshed = await db.updateMany<SessionRow>(SESSIONS, { id: sessionId(keepToken) }, { authTime: now() });
+        if (isErr(refreshed)) return refreshed;
+      }
       return ok();
     },
     async setActive(id, active) {
@@ -330,6 +339,26 @@ export async function createAuthnMulti(config: Config, db: Persistence, now: () 
       const removed = await db.deleteMany(SESSIONS, { expiresAt: { lte: now() } });
       if (isErr(removed)) return removed;
       return ok(removed.value);
+    },
+    async recentlyAuthenticated(token, maxAgeSeconds) {
+      const found = await db.findOne<SessionRow>(SESSIONS, { id: sessionId(token) });
+      if (isErr(found)) return found;
+      const authTime = found.value?.authTime;
+      return ok(typeof authTime === "number" && now() - authTime <= maxAgeSeconds * 1000);
+    },
+    async confirmPassword(token, password) {
+      const id = sessionId(token);
+      const session = await db.findOne<SessionRow>(SESSIONS, { id });
+      if (isErr(session)) return session;
+      if (!session.value || session.value.expiresAt <= now()) return ok(false);
+      const user = await db.findOne<User>(USERS, { id: session.value.userId });
+      if (isErr(user)) return user;
+      const usable = user.value !== null && user.value.active;
+      const matches = await verifyPasswordAsync(password, usable && user.value ? user.value.passwordHash : DUMMY_HASH);
+      if (!usable || !matches) return ok(false);
+      const updated = await db.updateOne<SessionRow>(SESSIONS, id, { authTime: now() });
+      if (isErr(updated)) return updated;
+      return ok(true);
     },
   };
 }

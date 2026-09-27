@@ -55,6 +55,18 @@ username is `CONFLICT` (409), the last admin guard is `LAST_ADMIN` (409).
 | `authn.deactivateUser` | `params.id` | `result` | `VALIDATION` (self), `NOT_FOUND`, `LAST_ADMIN`, `TRANSIENT` |
 | `authn.activateUser` | `params.id` | `result` | `NOT_FOUND`, `TRANSIENT` |
 | `authn.cleanupSessions` | – | `result` | `TRANSIENT` |
+| `authn.requireRecentAuth:<seconds>` | `token` | – | `UNAUTHENTICATED`, `REAUTH_REQUIRED`, `TRANSIENT` |
+| `authn.confirmPassword` | `token` | `result` | `VALIDATION`, `UNAUTHENTICATED`, `TRANSIENT` |
+
+**Recent authentication.** A session remembers when its password was last checked: at login, on
+`changePassword` for the session that made the change, and through `authn.confirmPassword`
+(`{ password }`, 400 when it is wrong). Put `authn.requireRecentAuth:<seconds>` after
+`authn.requireUser` in front of an action that must not ride on a stolen or forgotten session —
+creating, changing, deactivating or deleting users, setting a password, restoring a backup: when the
+last check is older than the window it answers `403 REAUTH_REQUIRED` with `details.maxAgeSeconds`,
+and the client asks for the password, calls the confirming pipeline and repeats the action.
+Rate-limit that pipeline like the login. `authn.setPassword` refuses the caller's own account (400);
+one's own password changes only through `changePassword`, which needs the current one.
 
 **Deleting and the authored history.** `authn.deleteUser` takes an optional `reassignTo` in the
 body: the id of an existing, active user who is not the one being deleted. An unknown id is 404, an
@@ -98,11 +110,13 @@ concerns), an e-mail field.
 | `authn.getUser` | One user | `params.id` | `result` | – | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 404 user not found | beside | no |
 | `authn.updateUser` | Rename a user or set their roles (a role change ends their sessions) | `params.id` | `result` | { username?: string, roles?: string[] } | { id: string, username: string, roles: string[], active: boolean, createdAt: number, … } | 400 neither username nor roles given, or an empty one; 404 user not found; 409 username already exists (`CONFLICT`), or the last active admin would lose the admin permission (`LAST_ADMIN`) | beside | no |
 | `authn.deleteUser` | Delete a user and their sessions for good; `reassignTo` names the active user their authored history moves to, without it the history is anonymised | `identity`, `params.id`, `payload.reassignTo` | `result` | { reassignTo?: string \| null } | { ok: boolean, reassignTo: object \| null, … } | 400 cannot delete yourself, or a `reassignTo` that is the deleted user, inactive or not a user id; 404 user not found, or `reassignTo` names no user; 409 the last active admin cannot be deleted (`LAST_ADMIN`) | beside | yes |
-| `authn.setPassword` | Set a user's password (ends their sessions) | `params.id` | `result` | { password: string } | { ok: boolean, … } | 400 password missing or too short; 404 user not found | beside | no |
+| `authn.setPassword` | Set another user's password (ends their sessions); one's own password changes only through changePassword | `identity?`, `params.id` | `result` | { password: string } | { ok: boolean, … } | 400 password missing or too short, or the caller's own account; 404 user not found | beside | no |
 | `authn.changePassword` | Change own password | `identity` | `result` | { currentPassword: string, newPassword: string } | { ok: boolean, … } | 400 wrong current password, missing fields, or new one too short; 401 not authenticated | beside | no |
 | `authn.deactivateUser` | Deactivate a user (ends their sessions) | `params.id` | `result` | – | { ok: boolean, … } | 400 cannot deactivate yourself; 404 user not found; 409 the last active admin cannot be deactivated (`LAST_ADMIN`) | beside | no |
 | `authn.activateUser` | Activate a user | `params.id` | `result` | – | { ok: boolean, … } | 404 user not found | beside | no |
 | `authn.cleanupSessions` | Remove expired sessions | – | `result` | – | { removed: number, … } | – | beside | no |
+| `authn.requireRecentAuth:<arg>` | Require that the session's password was checked within the last <arg> seconds, at login or through authn.confirmPassword; otherwise 403 REAUTH_REQUIRED | `token` | – | – | – | 401 not authenticated; 403 the last password check is older than the window (`REAUTH_REQUIRED`) | beside | no |
+| `authn.confirmPassword` | Confirm the caller's password; marks the session as freshly authenticated for authn.requireRecentAuth | `token` | `result` | { password: string } | { ok: boolean, … } | 400 the password is missing or wrong; 401 not authenticated | beside | no |
 
 Used by 79 of 102 pipelines in `examples/minimal`.
 

@@ -1054,7 +1054,9 @@
         "authn.changePassword",
         "authn.deactivateUser",
         "authn.activateUser",
-        "authn.cleanupSessions"
+        "authn.cleanupSessions",
+        "authn.requireRecentAuth",
+        "authn.confirmPassword"
       ],
       "eventHook": false,
       "atomicScope": false,
@@ -7202,8 +7204,9 @@
       "module": "authn/multi",
       "factory": false,
       "description": {
-        "summary": "Set a user's password (ends their sessions)",
+        "summary": "Set another user's password (ends their sessions); one's own password changes only through changePassword",
         "reads": [
+          "identity?",
           "params.id"
         ],
         "writes": [
@@ -7233,7 +7236,7 @@
           ]
         },
         "errors": {
-          "400": "password missing or too short",
+          "400": "password missing or too short, or the caller's own account",
           "404": "user not found"
         }
       }
@@ -7361,6 +7364,63 @@
           "required": [
             "removed"
           ]
+        }
+      }
+    },
+    {
+      "name": "authn.requireRecentAuth",
+      "module": "authn/multi",
+      "factory": true,
+      "description": {
+        "summary": "Require that the session's password was checked within the last <arg> seconds, at login or through authn.confirmPassword; otherwise 403 REAUTH_REQUIRED",
+        "reads": [
+          "token"
+        ],
+        "writes": [],
+        "errors": {
+          "401": "not authenticated",
+          "403": "the last password check is older than the window (`REAUTH_REQUIRED`)"
+        }
+      }
+    },
+    {
+      "name": "authn.confirmPassword",
+      "module": "authn/multi",
+      "factory": false,
+      "description": {
+        "summary": "Confirm the caller's password; marks the session as freshly authenticated for authn.requireRecentAuth",
+        "reads": [
+          "token"
+        ],
+        "writes": [
+          "result"
+        ],
+        "input": {
+          "type": "object",
+          "properties": {
+            "password": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "password"
+          ],
+          "additionalProperties": false
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ok"
+          ]
+        },
+        "errors": {
+          "400": "the password is missing or wrong",
+          "401": "not authenticated"
         }
       }
     },
@@ -24312,8 +24372,9 @@
           "name": "authn.setPassword",
           "module": "authn/multi",
           "description": {
-            "summary": "Set a user's password (ends their sessions)",
+            "summary": "Set another user's password (ends their sessions); one's own password changes only through changePassword",
             "reads": [
+              "identity?",
               "params.id"
             ],
             "writes": [
@@ -24343,7 +24404,7 @@
               ]
             },
             "errors": {
-              "400": "password missing or too short",
+              "400": "password missing or too short, or the caller's own account",
               "404": "user not found"
             }
           }
