@@ -613,6 +613,39 @@ describe("runDataStep: translations published without a slug of their own", () =
     expect(findings[0]?.suggestion).not.toContain("geheimer-plan");
   });
 
+  it("reports a document published below a page without a slug in its locale, and a mounted one under such a page", async () => {
+    const nested = {
+      ...contentConfig,
+      types: {
+        pages: { kind: "multi", fields: { ...contentConfig.types.pages.fields, parent: { type: "ref", to: "pages" } } },
+        posts: contentConfig.types.pages,
+        settings: { kind: "single", fields: { mounts: { type: "json" } } },
+      },
+    };
+    const root = await moduleProjectRoot([
+      { use: "@michaelthielemann/kestrel-content-default", config: nested },
+      { use: "@michaelthielemann/kestrel-site-default", config: { routes: { pages: { home: "home", liveWhen: { status: "published" }, parentField: "parent" }, posts: { liveWhen: { status: "published" }, mount: true } }, mounts: { type: "settings", field: "mounts" } } },
+    ]);
+    const file = join(dir, "kestrel.db");
+    const db = createPersistenceSqlite({ file });
+    const columns = { slug__de: "string", slug__en: "string", title__de: "string", title__en: "string", status__de: "string", status__en: "string" } as const;
+    await db.ensureCollection("pages", { ...columns, parent: "string" });
+    await db.ensureCollection("posts", columns);
+    await db.ensureCollection("settings", { mounts: "json" });
+    await db.createOne("pages", { id: "geheim", slug__de: "geheim", title__de: "Geheim", status__de: "draft", parent: null });
+    await db.createOne("pages", { id: "kind", slug__de: "kind", title__de: "Kind", status__de: "published", slug__en: "kid", title__en: "Kid", status__en: "published", parent: "geheim" });
+    await db.createOne("pages", { id: "blog", slug__de: "blog", title__de: "Blog", status__de: "published", parent: null });
+    await db.createOne("posts", { id: "hallo", slug__de: "hallo", title__de: "Hallo", status__de: "published", slug__en: "hello", title__en: "Hello", status__en: "published" });
+    await db.createOne("settings", { id: "settings", mounts: { posts: "blog" } });
+    db.close();
+    const result = await runDataStep(file, root);
+    const below = result.report?.findings.filter((f) => f.id.endsWith(":below")) ?? [];
+    expect(below.map((f) => f.where.path)).toEqual(["pages", "posts"]);
+    expect(below[0]?.message).toContain("kind (en) below pages/geheim");
+    expect(below[1]?.message).toContain("hallo (en) below pages/blog");
+    expect(result.report?.findings.some((f) => f.message.includes("kind (de)"))).toBe(false);
+  });
+
   it("reports nothing without a routed type", async () => {
     const root = await moduleProjectRoot([{ use: "@michaelthielemann/kestrel-content-default", config: contentConfig }]);
     const file = join(dir, "kestrel.db");

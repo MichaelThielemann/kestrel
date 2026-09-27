@@ -147,14 +147,21 @@ function contentDefaultModel(config: unknown): DataContentModel | undefined {
   };
 }
 
-function siteDefaultRoutes(config: unknown): Record<string, DataRoute> | undefined {
+function siteDefaultRoutes(config: unknown): Pick<DataContentModel, "routes" | "mounts"> | undefined {
   if (!isRecord(config) || !isRecord(config.routes)) return undefined;
   const routes: Record<string, DataRoute> = {};
   for (const [type, route] of Object.entries(config.routes)) {
     if (!isRecord(route)) continue;
-    routes[type] = { ...(typeof route.slugField === "string" ? { slugField: route.slugField } : {}), ...(isRecord(route.liveWhen) ? { liveWhen: route.liveWhen } : {}) };
+    routes[type] = {
+      ...(typeof route.slugField === "string" ? { slugField: route.slugField } : {}),
+      ...(isRecord(route.liveWhen) ? { liveWhen: route.liveWhen } : {}),
+      ...(typeof route.parentField === "string" ? { parentField: route.parentField } : {}),
+      ...(route.mount === true ? { mount: true } : {}),
+    };
   }
-  return routes;
+  const mounts = config.mounts;
+  const target = typeof config.mountTarget === "string" ? { target: config.mountTarget } : {};
+  return { routes, ...(isRecord(mounts) && typeof mounts.type === "string" && typeof mounts.field === "string" ? { mounts: { type: mounts.type, field: mounts.field, ...target } } : {}) };
 }
 
 function configLoadFailedFinding(err: unknown, pluginKind: string | undefined): Finding {
@@ -194,7 +201,7 @@ async function builtInDataModel(root: string, pluginKind: string | undefined): P
     const model = contentDefaultModel(entry === undefined ? undefined : effectiveModuleConfig(entry));
     const site = config.modules.find((m) => useToken(m.use) === "site-default");
     const routes = site === undefined ? undefined : siteDefaultRoutes(effectiveModuleConfig(site));
-    return { model: model === undefined || routes === undefined ? model : { ...model, routes } };
+    return { model: model === undefined || routes === undefined ? model : { ...model, ...routes } };
   } catch (err) {
     return { issue: configLoadFailedFinding(err, pluginKind) };
   }
@@ -231,69 +238,143 @@ interface SlugHit {
   copyable: string | null;
 }
 
-async function translationSlugHits(db: Persistence, typeName: string, fields: Record<string, { localized?: boolean }>, route: DataRoute, locales: readonly string[], defaultLocale: string): Promise<SlugHit[]> {
-  const slugField = route.slugField ?? "slug";
-  if (fields[slugField]?.localized !== true) return [];
-  const liveWhen = Object.entries(route.liveWhen ?? {});
-  const column = (field: string, locale: string): string => (fields[field]?.localized === true ? `${field}__${locale}` : field);
-  const localized = Object.keys(fields).filter((field) => fields[field]?.localized === true);
+interface SegmentHit {
+  id: string;
+  locale: string;
+  below: string;
+}
+
+interface RoutedRows {
+  typeName: string;
+  route: DataRoute;
+  fields: Record<string, { localized?: boolean }>;
+  rows: Map<string, Document>;
+}
+
+function columnOf(fields: Record<string, { localized?: boolean }>, field: string, locale: string): string {
+  return fields[field]?.localized === true ? `${field}__${locale}` : field;
+}
+
+async function readRouted(db: Persistence, typeName: string, fields: Record<string, { localized?: boolean }>, route: DataRoute, locales: readonly string[]): Promise<Map<string, Document>> {
   const columns: Record<string, "string"> = {};
-  for (const locale of locales) {
-    for (const field of localized) columns[column(field, locale)] = "string";
-    for (const [field] of liveWhen) columns[column(field, locale)] = "string";
-  }
+  const wanted = [...Object.keys(fields).filter((field) => fields[field]?.localized === true), route.slugField ?? "slug", ...Object.keys(route.liveWhen ?? {})];
+  for (const locale of locales) for (const field of wanted) columns[columnOf(fields, field, locale)] = "string";
+  if (route.parentField !== undefined) columns[route.parentField] = "string";
+  const rows = new Map<string, Document>();
   try {
-    if (isErr(await db.ensureCollection(typeName, columns))) return [];
+    if (isErr(await db.ensureCollection(typeName, columns))) return rows;
   } catch {
-    return [];
+    return rows;
   }
-  const live = (row: Document, locale: string): boolean => liveWhen.every(([field, expected]) => matches(row[column(field, locale)], expected));
-  const hits: SlugHit[] = [];
   for (let offset = 0; ; offset += SLUG_PAGE) {
     const page = await db.findMany<Document>(typeName, {}, { sort: { id: "asc" }, limit: SLUG_PAGE, offset });
-    if (isErr(page)) return hits;
-    for (const row of page.value.items) {
-      const source = row[column(slugField, defaultLocale)];
-      const copyable = live(row, defaultLocale) && typeof source === "string" && source !== "" ? source : null;
-      for (const locale of locales) {
-        if (locale === defaultLocale || !live(row, locale) || present(row[column(slugField, locale)])) continue;
-        if (!localized.some((field) => present(row[column(field, locale)]))) continue;
-        hits.push({ id: row.id, locale, copyable });
-      }
-    }
-    if (page.value.items.length < SLUG_PAGE) return hits;
+    if (isErr(page)) return rows;
+    for (const row of page.value.items) rows.set(row.id, row);
+    if (page.value.items.length < SLUG_PAGE) return rows;
   }
+}
+
+async function mountAssignments(db: Persistence, mounts: DataContentModel["mounts"]): Promise<Record<string, string>> {
+  if (mounts === undefined) return {};
+  try {
+    if (isErr(await db.ensureCollection(mounts.type, { [mounts.field]: "json" }))) return {};
+    const page = await db.findMany<Document>(mounts.type, {}, { limit: 1 });
+    const value = isErr(page) ? undefined : page.value.items[0]?.[mounts.field];
+    return isRecord(value) ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "")) : {};
+  } catch {
+    return {};
+  }
+}
+
+function listed<T>(items: readonly T[], text: (item: T) => string): string {
+  return `${items.slice(0, SLUG_SHOWN).map(text).join(", ")}${items.length > SLUG_SHOWN ? `, and ${items.length - SLUG_SHOWN} more` : ""}`;
 }
 
 async function translationSlugFindings(db: Persistence, model: DataContentModel | undefined): Promise<Finding[]> {
   const locales = model?.locales ?? [];
-  if (model?.routes === undefined || locales.length < 2) return [];
+  if (model?.routes === undefined || locales.length === 0) return [];
   const defaultLocale = model.defaultLocale ?? locales[0] ?? "";
-  const findings: Finding[] = [];
+  const routed: RoutedRows[] = [];
   for (const [typeName, route] of Object.entries(model.routes)) {
     const type = model.types[typeName];
     if (type === undefined) continue;
-    const hits = await translationSlugHits(db, typeName, type.fields, route, locales, defaultLocale);
-    if (hits.length === 0) continue;
-    const name = (hit: SlugHit): string => `${hit.id} (${hit.locale})`;
-    const listed = (items: SlugHit[], text: (hit: SlugHit) => string): string => `${items.slice(0, SLUG_SHOWN).map(text).join(", ")}${items.length > SLUG_SHOWN ? `, and ${items.length - SLUG_SHOWN} more` : ""}`;
-    const copyable = hits.filter((hit) => hit.copyable !== null);
-    const manual = hits.filter((hit) => hit.copyable === null);
-    const parts = [
-      ...(copyable.length === 0 ? [] : [`the default locale is published, so its slug is public already and can be copied: ${listed(copyable, (hit) => `${name(hit)}: "${hit.copyable ?? ""}"`)}`]),
-      ...(manual.length === 0 ? [] : [`the default locale is not published, so give each a new slug or withdraw it: ${listed(manual, name)}`]),
-    ];
-    findings.push({
-      id: `data/translation-slug:${typeName}`,
-      rule: "data/translation-slug",
-      severity: "error",
-      tier: "data",
-      where: { path: typeName },
-      message: `${hits.length} translation(s) of "${typeName}" are published without a slug of their own, so 6.0.0 serves none of them and refuses to save them published: ${listed(hits, name)}`,
-      suggestion: `set a slug in that locale or withdraw the translation; ${parts.join("; ")}`,
-      fix: { kind: "manual" },
-      docs: upgradingDocs("data-translation-slug"),
-    });
+    routed.push({ typeName, route, fields: type.fields, rows: await readRouted(db, typeName, type.fields, route, locales) });
+  }
+  const mounted = await mountAssignments(db, model.mounts);
+  const mountTarget = routed.find((r) => r.typeName === (model.mounts?.target ?? "pages"));
+  const findings: Finding[] = [];
+  for (const { typeName, route, fields, rows } of routed) {
+    const slugField = route.slugField ?? "slug";
+    const localized = Object.keys(fields).filter((field) => fields[field]?.localized === true);
+    const live = (row: Document, locale: string): boolean => Object.entries(route.liveWhen ?? {}).every(([field, expected]) => matches(row[columnOf(fields, field, locale)], expected));
+    const own = (row: Document | undefined, locale: string, of = fields, slug = slugField): boolean => row !== undefined && present(row[columnOf(of, slug, locale)]);
+    const missingAbove = (row: Document, locale: string): string | undefined => {
+      let at: Document | undefined = row;
+      for (let depth = 0; at !== undefined && depth < 64; depth++) {
+        const parentId: unknown = route.parentField === undefined ? undefined : at[route.parentField];
+        if (typeof parentId === "string" && parentId !== "") {
+          const parent = rows.get(parentId);
+          if (!own(parent, locale)) return `${typeName}/${parentId}`;
+          at = parent;
+          continue;
+        }
+        const page = at === row && route.mount === true ? mounted[typeName] : undefined;
+        if (page !== undefined && mountTarget !== undefined) {
+          const holder = mountTarget.rows.get(page);
+          if (!own(holder, locale, mountTarget.fields, mountTarget.route.slugField ?? "slug")) return `${mountTarget.typeName}/${page}`;
+        }
+        return undefined;
+      }
+      return undefined;
+    };
+    const slugHits: SlugHit[] = [];
+    const segmentHits: SegmentHit[] = [];
+    for (const row of rows.values()) {
+      const source = row[columnOf(fields, slugField, defaultLocale)];
+      const copyable = live(row, defaultLocale) && typeof source === "string" && source !== "" ? source : null;
+      for (const locale of locales) {
+        if (!live(row, locale)) continue;
+        if (!own(row, locale)) {
+          if (fields[slugField]?.localized === true && locale !== defaultLocale && localized.some((field) => present(row[columnOf(fields, field, locale)]))) slugHits.push({ id: row.id, locale, copyable });
+          continue;
+        }
+        const below = missingAbove(row, locale);
+        if (below !== undefined) segmentHits.push({ id: row.id, locale, below });
+      }
+    }
+    const name = (hit: { id: string; locale: string }): string => `${hit.id} (${hit.locale})`;
+    if (slugHits.length > 0) {
+      const copyable = slugHits.filter((hit) => hit.copyable !== null);
+      const manual = slugHits.filter((hit) => hit.copyable === null);
+      const parts = [
+        ...(copyable.length === 0 ? [] : [`the default locale is published, so its slug is public already and can be copied: ${listed(copyable, (hit) => `${name(hit)}: "${hit.copyable ?? ""}"`)}`]),
+        ...(manual.length === 0 ? [] : [`the default locale is not published, so give each a new slug or withdraw it: ${listed(manual, name)}`]),
+      ];
+      findings.push({
+        id: `data/translation-slug:${typeName}`,
+        rule: "data/translation-slug",
+        severity: "error",
+        tier: "data",
+        where: { path: typeName },
+        message: `${slugHits.length} translation(s) of "${typeName}" are published without a slug of their own, so 6.0.0 serves none of them and refuses to save them published: ${listed(slugHits, name)}`,
+        suggestion: `set a slug in that locale or withdraw the translation; ${parts.join("; ")}`,
+        fix: { kind: "manual" },
+        docs: upgradingDocs("data-translation-slug"),
+      });
+    }
+    if (segmentHits.length > 0) {
+      findings.push({
+        id: `data/translation-slug:${typeName}:below`,
+        rule: "data/translation-slug",
+        severity: "error",
+        tier: "data",
+        where: { path: typeName },
+        message: `${segmentHits.length} document(s) of "${typeName}" are published below a page without a slug in their locale, so 6.0.0 gives them no path there: ${listed(segmentHits, (hit) => `${name(hit)} below ${hit.below}`)}`,
+        suggestion: "give the page above a slug in that locale, or withdraw the documents below it in that locale",
+        fix: { kind: "manual" },
+        docs: upgradingDocs("data-translation-slug"),
+      });
+    }
   }
   return findings;
 }

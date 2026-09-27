@@ -77,6 +77,10 @@ export interface DataContentType {
 export interface DataRoute {
   slugField?: string;
   liveWhen?: Record<string, unknown>;
+  /** The field naming a document's parent of the same type, when documents of this type nest. */
+  parentField?: string;
+  /** Whether the type's documents live under the page `DataContentModel.mounts` assigns to it. */
+  mount?: boolean;
 }
 
 /** The content model the `data` command's underscore-field counter needs: every type's fields and whether each is localized, plus the project's locales. */
@@ -87,6 +91,8 @@ export interface DataContentModel {
   defaultLocale?: string;
   /** The types whose public paths come from a slug per locale, for `data/translation-slug`; none are checked when absent. */
   routes?: Record<string, DataRoute>;
+  /** Where the page a mounted type lives under is stored: the single `type`'s `field`, a map of type name to page id; `target` is the routed type of those pages (default `pages`). */
+  mounts?: { type: string; field: string; target?: string };
   /** The identifier `RuleContext.locateModelFields` receives as `use` when `model/underscore-field` renames a field here, for a project with no `kestrel.config.ts` module-list entry to name instead. */
   use?: string;
   /**

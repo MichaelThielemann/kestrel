@@ -192,7 +192,7 @@ old entry's `defaults`, because they belong to the module being removed.
 | [`responses/breaking-step-shapes`](#responses-breaking-step-shapes) | source | none (info) | a pipeline running a step whose response or manifest shape changed |
 | [`responses/binary-cache-control`](#responses-binary-cache-control) | source | none (info) | a local module mentioning `cache-control` near a binary step result |
 | [`pipelines/images-plan`](#pipelines-images-plan) | source | manual (warning) | a pipeline calling `images.plan` directly |
-| [`data/translation-slug`](#data-translation-slug) | data | manual (error) | a stored translation of a routed type that is published without a slug of its own |
+| [`data/translation-slug`](#data-translation-slug) | data | manual (error) | a stored translation of a routed type that is published without a slug of its own, or below a page without a slug in its locale |
 | [`data/media-layout`](#data-media-layout) | data | none (error) | a stored `media_items` key off-layout, or a pre-6.0 `images_variants`/`images_retired` row with no `slot` |
 | [`data/site-media-leftovers`](#data-site-media-leftovers) | data | manual (warning) | a leftover 5.x static export copy `media.syncPublic` never touches |
 | [`data/blobstore-tmp-suffix`](#data-blobstore-tmp-suffix) | data | none (info) | a stored filesystem-blobstore key already ending in `.kestrel-tmp` |
@@ -519,7 +519,10 @@ plugin's `dataModel` names) and reports each translation that passes the route's
 locale, holds at least one localized value there and has no slug there. Set a slug in that locale, or
 withdraw the translation. Where the default locale is published, the finding names its slug, which is
 public already and may be copied; where it is not, the finding names only the document and locale, since
-that slug is not public. The tool does not change the database: make the change in the admin or through
+that slug is not public. It also reports every document published with a slug of its own in a locale
+where a page above it (its parent chain, or the page its mounted collection lives under) has no slug:
+6.0.0 takes every path segment from a slug of the path's own locale, so such a document has no path
+there. Give that page a slug in the locale, or withdraw the documents below it. The tool does not change the database: make the change in the admin or through
 the API, or with a migration on the running instance, then run `data` again.
 
 #### data-media-layout
@@ -884,8 +887,9 @@ classification never imports a plugin.
   the layouts it actually recognizes.
 - `dataModel?(root): Promise<DataContentModel | undefined>` — supplies the content model the `data`
   command's underscore-field counter needs (`types`, each with a `fields` map of `{ localized? }`,
-  plus optional `locales`, `defaultLocale`, `routes`, `use` and `file`; `routes` names the types whose
-  paths come from a slug per locale, with `slugField` and `liveWhen`, for `data/translation-slug`), for
+  plus optional `locales`, `defaultLocale`, `routes`, `mounts`, `use` and `file`; `routes` names the
+  types whose paths come from a slug per locale, with `slugField`, `liveWhen`, `parentField` and
+  `mount`, and `mounts` where the pages of mounted types are assigned, for `data/translation-slug`), for
   a project layout where it cannot be read from a
   `content-default` module's config on `kestrel.config.ts`. Consulted through the same `detect()` used
   for `check`/`fix`; `undefined`, from the hook or its result, skips underscore-field counting for
