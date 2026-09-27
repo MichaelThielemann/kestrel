@@ -69,8 +69,8 @@ describe("examples/minimal redirects wiring", () => {
     const resolve = pipelines.get("resolvePage")!;
     expect(resolve.indexOf("redirects.lookup")).toBeGreaterThan(-1);
     expect(resolve.indexOf("redirects.lookup")).toBeLessThan(resolve.findIndex((s) => s.startsWith("site.resolve:pages")));
-    expect(pipelines.get("setRedirects")).toEqual(["authn.requireUser", "authz.require:redirects.write", "validate.check:redirects.rules", "redirects.validate", "content.set:redirects", "redirects.export"]);
-    expect(pipelines.get("publishAllPages")).toEqual(["authn.requireUser", "authz.require:pages.manage", "delivery.publishAll:pages", "redirects.export", "delivery.exportLlms"]);
+    expect(pipelines.get("setRedirects")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:redirects.write", "validate.check:redirects.rules", "redirects.validate", "content.set:redirects", "redirects.export"]);
+    expect(pipelines.get("publishAllPages")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:pages.manage", "delivery.publishAll:pages", "redirects.export", "delivery.exportLlms"]);
     expect(pipelines.get("renderRedirects")).toEqual(["redirects.render", "authz.fields:redirectRules?shape=array"]);
   });
 });
@@ -80,7 +80,7 @@ describe("examples/minimal single translation removal", () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
     expect(config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline])).toContainEqual(["DELETE /pages/:id/translations/:locale", "deletePageTranslation"]);
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("deletePageTranslation")).toEqual(["authn.requireUser", "authz.require:pages.write", "content.removeTranslation:pages", "revisions.removeTranslation:pages", "references.index:pages", "links.extract:pages", "site.indexPath:pages", "site.announcePaths", "events.emit:page.translationRemoved", "events.relay"]);
+    expect(pipelines.get("deletePageTranslation")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:pages.write", "content.removeTranslation:pages", "revisions.removeTranslation:pages", "references.index:pages", "links.extract:pages", "site.indexPath:pages", "site.announcePaths", "events.emit:page.translationRemoved", "events.relay"]);
   });
 });
 
@@ -114,12 +114,12 @@ describe("examples/minimal revisions wiring", () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
     const restore = pipelines.get("restorePageRevision")!;
     const update = pipelines.get("updatePage")!;
-    expect(restore.indexOf("revisions.restore:pages")).toBe(2);
-    expect(restore.slice(3, -3)).toEqual(update.slice(2, -2));
+    expect(restore.indexOf("revisions.restore:pages")).toBe(3);
+    expect(restore.slice(4, -3)).toEqual(update.slice(3, -2));
     expect(restore.slice(-3)).toEqual(["revisions.reportRestore", "events.emit:page.restored", "events.relay"]);
-    expect(pipelines.get("pageRevisions")).toEqual(["authn.requireUser", "authz.require:pages.manage", "revisions.list:pages"]);
-    expect(pipelines.get("pageRevision")).toEqual(["authn.requireUser", "authz.require:pages.manage", "revisions.read:pages"]);
-    expect(pipelines.get("labelPageRevision")).toEqual(["authn.requireUser", "authz.require:pages.write", "revisions.label:pages"]);
+    expect(pipelines.get("pageRevisions")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:pages.manage", "revisions.list:pages"]);
+    expect(pipelines.get("pageRevision")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:pages.manage", "revisions.read:pages"]);
+    expect(pipelines.get("labelPageRevision")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:pages.write", "revisions.label:pages"]);
     expect(pipelines.get("pruneRevisions")).toEqual(["revisions.prune"]);
   });
 
@@ -209,6 +209,7 @@ describe("write pipelines validate their payload", () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
     expect(pipelines.get("setSettings")).toEqual([
       "authn.requireUser",
+      "authz.requireRole",
       "authz.require:settings.write",
       "validate.check:settings.navigation",
       "content.set:settings",
@@ -219,7 +220,7 @@ describe("write pipelines validate their payload", () => {
 
   it("leaves the media texts to the plain-text check in media.update", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("updateMedia")).toEqual(["authn.requireUser", "authz.require:media.write", "media.update", "events.emit:media.updated", "events.relay"]);
+    expect(pipelines.get("updateMedia")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:media.write", "media.update", "events.emit:media.updated", "events.relay"]);
   });
 });
 
@@ -235,8 +236,8 @@ describe("references batch wiring", () => {
   });
   it("wires the batch pipelines like the single ones", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("pageReferrersMany")).toEqual(["authn.requireUser", "authz.require:pages.manage", "references.referrersMany:pages"]);
-    expect(pipelines.get("mediaReferrersMany")).toEqual(["authn.requireUser", "authz.require:pages.manage", "references.referrersMany:media"]);
+    expect(pipelines.get("pageReferrersMany")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:pages.manage", "references.referrersMany:pages"]);
+    expect(pipelines.get("mediaReferrersMany")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:pages.manage", "references.referrersMany:media"]);
   });
 });
 
@@ -254,9 +255,9 @@ describe("media folders wiring", () => {
   });
   it("wires the folder pipelines", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("createMediaFolder")).toEqual(["authn.requireUser", "authz.require:media.write", "media.createFolder"]);
-    expect(pipelines.get("renameMediaFolder")).toEqual(["authn.requireUser", "authz.require:media.write", "media.renameFolder"]);
-    expect(pipelines.get("deleteMediaFolder")).toEqual(["authn.requireUser", "authz.require:media.delete", "media.listFolderItems", "references.guardAll:media", "media.removeFolder", "images.removeMany", "events.emit:media.deleted", "events.relay"]);
+    expect(pipelines.get("createMediaFolder")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:media.write", "media.createFolder"]);
+    expect(pipelines.get("renameMediaFolder")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:media.write", "media.renameFolder"]);
+    expect(pipelines.get("deleteMediaFolder")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:media.delete", "media.listFolderItems", "references.guardAll:media", "media.removeFolder", "images.removeMany", "events.emit:media.deleted", "events.relay"]);
   });
 });
 
@@ -292,12 +293,12 @@ describe("image variants wiring", () => {
 
   it("wires the image pipelines", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("registerImageSizes")).toEqual(["authn.requireUser", "authz.require:images.write", "images.register"]);
+    expect(pipelines.get("registerImageSizes")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:images.write", "images.register"]);
     expect(pipelines.get("registerImageSizesBoot")).toEqual(["images.register"]);
-    expect(pipelines.get("listImageSizes")).toEqual(["authn.requireUser", "authz.require:images.read", "images.listSizes"]);
-    expect(pipelines.get("syncImages")).toEqual(["authn.requireUser", "authz.require:images.manage", "images.sync"]);
-    expect(pipelines.get("pruneImages")).toEqual(["authn.requireUser", "authz.require:images.manage", "images.prune"]);
-    expect(pipelines.get("imagesStatus")).toEqual(["authn.requireUser", "authz.require:images.read", "images.readStatus"]);
+    expect(pipelines.get("listImageSizes")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:images.read", "images.listSizes"]);
+    expect(pipelines.get("syncImages")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:images.manage", "images.sync"]);
+    expect(pipelines.get("pruneImages")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:images.manage", "images.prune"]);
+    expect(pipelines.get("imagesStatus")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:images.read", "images.readStatus"]);
     expect(pipelines.get("serveImageVariant")).toEqual(["authn.identifyUser", "authz.require:media.read", "images.serve", "authz.fields:mediaFile?shape=file"]);
     expect(pipelines.get("serveMediaFile")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.serve", "authz.fields:mediaFile?shape=file"]);
     expect(pipelines.get("generateImageVariants")).toEqual(["images.generate"]);
@@ -311,8 +312,8 @@ describe("image variants wiring", () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
     expect(pipelines.get("getMedia")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.get", "images.attach", "authz.fields:media?shape=item"]);
     expect(pipelines.get("listMedia")).toEqual(["authn.identifyUser", "authz.require:media.read", "media.list", "images.attach", "authz.fields:media?shape=list"]);
-    expect(pipelines.get("deleteMedia")).toEqual(["authn.requireUser", "authz.require:media.delete", "references.guard:media", "media.remove", "images.remove", "events.emit:media.deleted", "events.relay"]);
-    expect(pipelines.get("exportMedia")).toEqual(["authn.requireUser", "authz.require:media.manage", "media.export:./data/export", "images.export:./data/export"]);
+    expect(pipelines.get("deleteMedia")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:media.delete", "references.guard:media", "media.remove", "images.remove", "events.emit:media.deleted", "events.relay"]);
+    expect(pipelines.get("exportMedia")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:media.manage", "media.export:./data/export", "images.export:./data/export"]);
   });
   it("leaves resolvePage untouched", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
@@ -420,8 +421,8 @@ describe("content migrations wiring", () => {
   });
   it("wires the migrations pipelines", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("listMigrations")).toEqual(["authn.requireUser", "authz.require:migrations.manage", "migrations.list"]);
-    expect(pipelines.get("applyMigrations")).toEqual(["authn.requireUser", "authz.require:migrations.manage", "migrations.apply"]);
+    expect(pipelines.get("listMigrations")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:migrations.manage", "migrations.list"]);
+    expect(pipelines.get("applyMigrations")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:migrations.manage", "migrations.apply"]);
   });
 });
 
@@ -434,8 +435,8 @@ describe("insights wiring", () => {
   });
   it("guards both pipelines with a login and insights.read", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("insightsManifest")).toEqual(["authn.requireUser", "authz.require:insights.read", "insights.readManifest"]);
-    expect(pipelines.get("insightsStats")).toEqual(["authn.requireUser", "authz.require:insights.read", "insights.readStats"]);
+    expect(pipelines.get("insightsManifest")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:insights.read", "insights.readManifest"]);
+    expect(pipelines.get("insightsStats")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:insights.read", "insights.readStats"]);
   });
   it("shows the effective config values in the committed manifest and keeps the secrets out", () => {
     const manifest = boundaryCast<{ modules: { name: string; version: string | null; config: { variables: { path: string; secret: boolean; default?: unknown; value: unknown; redacted: boolean }[] } }[] }>(
@@ -459,7 +460,7 @@ describe("content model wiring", () => {
     const config = await loadConfig(join(root, "kestrel.config.ts"));
     expect(config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline])).toContainEqual(["GET /admin/content/model", "contentModel"]);
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("contentModel")).toEqual(["authn.requireUser", "content.describeModel"]);
+    expect(pipelines.get("contentModel")).toEqual(["authn.requireUser", "authz.requireRole", "content.describeModel"]);
   });
 });
 
@@ -650,8 +651,8 @@ async function failedPipelines(kestrel: Instance, admin: Session): Promise<strin
 describe("user pipelines validate role names", () => {
   it("declares authz.validateRoles:roles right after authz.require:users.manage on create and update", async () => {
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("createUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authz.validateRoles:roles", "authn.createUser", "events.emit:user.created", "events.relay"]);
-    expect(pipelines.get("updateUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authz.validateRoles:roles", "authn.updateUser", "events.emit:user.updated", "events.relay"]);
+    expect(pipelines.get("createUser")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:users.manage", "authz.validateRoles:roles", "authn.createUser", "events.emit:user.created", "events.relay"]);
+    expect(pipelines.get("updateUser")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:users.manage", "authz.validateRoles:roles", "authn.updateUser", "events.emit:user.updated", "events.relay"]);
   });
 
   it("rejects an unknown role on create, creating no user", async () => {
@@ -733,11 +734,11 @@ describe("user deletion wiring", () => {
     expect(config.triggers.filter((t) => "cron" in t).map((t) => t.pipeline)).toContain("pruneAudit");
 
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("deleteUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "authn.deleteUser", "events.emit:user.deleted?with=result", "events.relay"]);
+    expect(pipelines.get("deleteUser")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:users.manage", "authn.deleteUser", "events.emit:user.deleted?with=result", "events.relay"]);
     expect(pipelines.get("reassignRevisionAuthor")).toEqual(["authn.verifyUser:result.reassignTo", "revisions.reassignAuthor"]);
     expect(pipelines.get("anonymizeAuditUser")).toEqual(["audit.anonymize"]);
-    expect(pipelines.get("retryReassignRevisionAuthor")).toEqual(["authn.requireUser", "authz.require:users.manage", "authn.verifyUser:reassignTo", "revisions.reassignAuthor"]);
-    expect(pipelines.get("retryAnonymizeAuditUser")).toEqual(["authn.requireUser", "authz.require:users.manage", "audit.anonymize"]);
+    expect(pipelines.get("retryReassignRevisionAuthor")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:users.manage", "authn.verifyUser:reassignTo", "revisions.reassignAuthor"]);
+    expect(pipelines.get("retryAnonymizeAuditUser")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:users.manage", "audit.anonymize"]);
     expect(pipelines.get("pruneAudit")).toEqual(["audit.prune"]);
   });
 
@@ -928,7 +929,7 @@ describe("events delivery status wiring", () => {
     const routes = config.triggers.filter((t) => "http" in t).map((t) => [(t as { http: string }).http, t.pipeline]);
     expect(routes).toContainEqual(["GET /admin/events/delivery", "eventsDeliveryStatus"]);
     const pipelines = new Map((await loadPipelines(root, "pipelines")).map((p) => [p.name, pipelineSteps(p.steps)]));
-    expect(pipelines.get("eventsDeliveryStatus")).toEqual(["authn.requireUser", "authz.require:system.manage", "events.readDeliveryStatus"]);
+    expect(pipelines.get("eventsDeliveryStatus")).toEqual(["authn.requireUser", "authz.requireRole", "authz.require:system.manage", "events.readDeliveryStatus"]);
   });
 });
 

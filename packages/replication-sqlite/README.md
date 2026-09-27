@@ -106,9 +106,9 @@ Not included: multi-process setups, encryption, restore without restart.
 Pipelines in `examples/minimal` using these steps:
 
 - **replicate** (cron * * * * *): **`replication.sync`**
-- **replicationPoints** (GET /admin/replication/points): `authn.requireUser` → `authz.require:system.manage` → **`replication.listPoints`**
-- **replicationRestore** (POST /admin/replication/restore): `authn.requireUser` → `authz.require:system.manage` → **`replication.prepareRestore`**
-- **replicationSnapshot** (POST /admin/replication/snapshot): `authn.requireUser` → `authz.require:system.manage` → **`replication.snapshot`**
-- **replicationStatus** (GET /admin/replication/status): `authn.requireUser` → `authz.require:system.manage` → **`replication.readStatus`**
+- **replicationPoints** (GET /admin/replication/points): `authn.requireUser` → `authz.requireRole` → `authz.require:system.manage` → **`replication.listPoints`**
+- **replicationRestore** (POST /admin/replication/restore): `authn.requireUser` → `authz.requireRole` → `authz.require:system.manage` → **`replication.prepareRestore`**
+- **replicationSnapshot** (POST /admin/replication/snapshot): `authn.requireUser` → `authz.requireRole` → `authz.require:system.manage` → **`replication.snapshot`**
+- **replicationStatus** (GET /admin/replication/status): `authn.requireUser` → `authz.requireRole` → `authz.require:system.manage` → **`replication.readStatus`**
 
 <!-- kestrel-docs:end -->

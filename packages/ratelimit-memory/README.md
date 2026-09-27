@@ -41,7 +41,7 @@ Not included: shared limits across processes (needs a store-backed module).
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
-| `ratelimit.check:<arg>` | Rate limit bucket <arg>, counted by client address | `ip?` | – | – | – | 429 too many requests | – | no |
+| `ratelimit.check:<arg>` | Rate limit bucket <arg>, counted by client address | `ip?`, `payload.username?`, `payload.email?` | – | { username?: string, email?: string, … } | – | 429 too many requests | – | no |
 | `ratelimit.sweep` | Drop expired rate-limit windows | – | `result` | – | { removed: number, … } | – | – | no |
 
 Pipelines in `examples/minimal` using these steps:

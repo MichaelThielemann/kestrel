@@ -2,5 +2,5 @@ import { definePipeline } from "../modules.ts";
 
 export default definePipeline({
   name: "rebuildLinks",
-  steps: ["authn.requireUser", "authz.require:pages.manage", "links.rebuild"],
+  steps: ["authn.requireUser", "authz.requireRole", "authz.require:pages.manage", "links.rebuild"],
 });

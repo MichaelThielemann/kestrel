@@ -63,7 +63,7 @@ discovery of migration modules, a CLI — all a consumer concern.
 
 Pipelines in `examples/minimal` using these steps:
 
-- **applyMigrations** (POST /admin/migrations/apply): `authn.requireUser` → `authz.require:migrations.manage` → **`migrations.apply`**
-- **listMigrations** (GET /admin/migrations): `authn.requireUser` → `authz.require:migrations.manage` → **`migrations.list`**
+- **applyMigrations** (POST /admin/migrations/apply): `authn.requireUser` → `authz.requireRole` → `authz.require:migrations.manage` → **`migrations.apply`**
+- **listMigrations** (GET /admin/migrations): `authn.requireUser` → `authz.requireRole` → `authz.require:migrations.manage` → **`migrations.list`**
 
 <!-- kestrel-docs:end -->

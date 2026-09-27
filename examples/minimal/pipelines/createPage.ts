@@ -4,6 +4,7 @@ export default definePipeline({
   name: "createPage",
   steps: [
     "authn.requireUser",
+    "authz.requireRole",
     "authz.require:pages.write",
     "validate.check:pages.body",
     "validate.sanitize:pages.body",

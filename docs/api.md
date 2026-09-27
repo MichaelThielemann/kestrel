@@ -139,7 +139,9 @@ without Nuxt: [`../examples/h3`](../examples/h3).
   `Host` — or it is answered `403 FORBIDDEN`; a bearer request is not checked. Sessions expire after
   24 h.
 - **Permissions**: anonymous callers may read (`pages.read`, `settings.read`, `media.read`), and so
-  may every signed-in caller, whatever its role; anything that writes needs a login and a role. Roles: `admin` (everything), `editor`
+  may every signed-in caller, whatever its role; anything that writes needs a login and a role. An
+  account without a configured role may only read its own identity (`GET /me`) and sign out; every
+  other route behind a login answers it 403, and listing the media library needs `media.list`. Roles: `admin` (everything), `editor`
   (`pages.*`, `media.*`, `images.read`, `settings.read`, `redirects.*`).
 - **What an anonymous caller receives**: the fields `anonymousFields` grants, cut by the last step of
   every public read (`authz.fields`). A document comes without `createdAt` and `updatedAt`; a media

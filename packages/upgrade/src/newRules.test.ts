@@ -15,6 +15,7 @@ import { emitsRule, eventPayloadRule } from "./ruleEmitsEvents.ts";
 import { dependencyCycleRule, optionalReadOrderRule, outputFoldRule, terminalOutputRule, undeclaredOutputRule, undeclaredRequiredRule } from "./ruleBootWraps.ts";
 import { underscoreFieldRule } from "./ruleUnderscoreField.ts";
 import { verifiedUserRule } from "./ruleVerifiedUser.ts";
+import { requireRoleRule } from "./ruleRequireRole.ts";
 
 function fakeModule(name: string, emits: readonly string[] = []): ModuleDefinition {
   return { name, provides: [], requires: [], emits, configSchema: z.object({}), async setup() { return {}; } };
@@ -787,5 +788,46 @@ describe("info rules", () => {
     await writeFile(file, 'exports.steps = () => ({ create: async (ctx) => ctx.done({ id: "x" }) });\n');
     const p = await project({ moduleFiles: { "events/direct": file } });
     expect(await ctxDoneTerminalOutputRule.check(contextFor(p))).toEqual([]);
+  });
+});
+
+describe("pipelines/require-role", () => {
+  const AUTHZ = { use: "@michaelthielemann/kestrel-authz-roles", config: { roles: { admin: ["*"] } } };
+
+  it("inserts authz.requireRole right after authn.requireUser, and leaves me and logout alone", async () => {
+    const file = join(dir, "pipelines.ts");
+    const source = [
+      'definePipeline({ name: "listUsers", steps: ["authn.requireUser", "authz.require:users.manage", "authn.listUsers"] });',
+      'definePipeline({ name: "me", steps: ["authn.requireUser", "authn.loadIdentity"] });',
+      'definePipeline({ name: "readPage", steps: ["authn.identifyUser", "authz.require:pages.read", "content.get:pages"] });',
+      "",
+    ].join("\n");
+    await writeFile(file, source);
+    const p = await project({
+      configModules: [AUTHZ],
+      pipelines: [
+        { name: "listUsers", steps: ["authn.requireUser", "authz.require:users.manage", "authn.listUsers"] },
+        { name: "me", steps: ["authn.requireUser", "authn.loadIdentity"] },
+        { name: "readPage", steps: ["authn.identifyUser", "authz.require:pages.read", "content.get:pages"] },
+      ],
+      pipelineFiles: { listUsers: file, me: file, readPage: file },
+    });
+    const findings = await requireRoleRule.check(contextFor(p));
+    expect(findings.map((f) => f.where.pipeline)).toEqual(["listUsers"]);
+    expect(findings[0]?.fix.kind).toBe("auto");
+    const edits = findings[0]!.fix.kind === "auto" ? findings[0]!.fix.edits : [];
+    const { text } = applyEdits(source, edits);
+    expect(text).toContain('"authn.requireUser", "authz.requireRole", "authz.require:users.manage"');
+    expect(text).toContain('name: "me", steps: ["authn.requireUser", "authn.loadIdentity"]');
+    expect(findings[0]?.docs).toBe(upgradingDocs("pipelines-require-role"));
+  });
+
+  it("finds nothing once the step is there, without authz-roles, or for a pipeline the config names in rolelessPipelines", async () => {
+    const done = await project({ configModules: [AUTHZ], pipelines: [{ name: "listUsers", steps: ["authn.requireUser", "authz.requireRole", "authn.listUsers"] }] });
+    expect(await requireRoleRule.check(contextFor(done))).toEqual([]);
+    const withoutAuthz = await project({ configModules: [], pipelines: [{ name: "listUsers", steps: ["authn.requireUser", "authn.listUsers"] }] });
+    expect(await requireRoleRule.check(contextFor(withoutAuthz))).toEqual([]);
+    const named = await project({ configModules: [{ ...AUTHZ, config: { ...AUTHZ.config, rolelessPipelines: ["profile"] } }], pipelines: [{ name: "profile", steps: ["authn.requireUser", "authn.loadIdentity"] }] });
+    expect(await requireRoleRule.check(contextFor(named))).toEqual([]);
   });
 });

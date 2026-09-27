@@ -5,7 +5,7 @@ import { stepFactory, type Context } from "@michaelthielemann/kestrel/context";
 import { defineModule } from "@michaelthielemann/kestrel/defineModule";
 import { isErr, ok } from "@michaelthielemann/kestrel/result";
 import { cutAnswer, FIELD_PATH, parseFieldsArgument, RESOURCE } from "./fields.ts";
-import { createAuthzRoles, type AuthzRoles } from "./impl.ts";
+import { createAuthzRoles, DEFAULT_ROLELESS_PIPELINES, type AuthzRoles } from "./impl.ts";
 
 const fieldGrants = z.record(
   z.string().regex(RESOURCE, 'a resource is a name such as "media"'),
@@ -19,6 +19,7 @@ export const configSchema = z
     anonymous: z.array(z.string()).default([]),
     anonymousFields: fieldGrants.default({}),
     fields: z.record(fieldGrants).default({}),
+    rolelessPipelines: z.array(z.string().min(1)).default([...DEFAULT_ROLELESS_PIPELINES]).describe("Pipelines that need a signed-in caller but serve an account without a configured role; every other such pipeline must run authz.requireRole"),
   })
   .strict()
   .superRefine((config, issues) => {
@@ -68,6 +69,12 @@ export default defineModule({
       return ok(ctx);
     }),
 
+    requireRole: async (ctx: Context) => {
+      if (!ctx.identity) return ctx.fail("UNAUTHENTICATED", "not authenticated");
+      if (!authz.hasRole(ctx.identity)) return ctx.fail("FORBIDDEN", "this account has no role");
+      return ok(ctx);
+    },
+
     describePipelineAccess: async (ctx: Context) => {
       const base = resultBase(ctx, "describePipelineAccess");
       return ok({ ...ctx, result: { ...base, pipelineAccess: authz.describePipelineAccess(ctx.identity) } });
@@ -104,6 +111,12 @@ export default defineModule({
 
   describe: (authz: AuthzRoles) => ({
     require: (permission: string) => ({ summary: `Requires permission ${permission}`, reads: [], writes: [], security: "required" as const, errors: { 401: "not authenticated", 403: `missing permission ${permission}` } }),
+    requireRole: {
+      summary: "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+      reads: ["identity?"],
+      writes: [],
+      errors: { 401: "not authenticated", 403: "this account has no role" },
+    },
     describePipelineAccess: {
       summary: "Per booted pipeline, whether the caller passes its authz.require steps",
       reads: ["identity?"],

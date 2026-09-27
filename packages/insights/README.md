@@ -44,7 +44,7 @@ ratelimit contract exists), numbers across processes.
 
 Pipelines in `examples/minimal` using these steps:
 
-- **insightsManifest** (GET /admin/insights/manifest): `authn.requireUser` → `authz.require:insights.read` → **`insights.readManifest`**
-- **insightsStats** (GET /admin/insights/stats): `authn.requireUser` → `authz.require:insights.read` → **`insights.readStats`**
+- **insightsManifest** (GET /admin/insights/manifest): `authn.requireUser` → `authz.requireRole` → `authz.require:insights.read` → **`insights.readManifest`**
+- **insightsStats** (GET /admin/insights/stats): `authn.requireUser` → `authz.requireRole` → `authz.require:insights.read` → **`insights.readStats`**
 
 <!-- kestrel-docs:end -->

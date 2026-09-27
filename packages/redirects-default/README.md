@@ -112,12 +112,12 @@ on every request.
 
 Pipelines in `examples/minimal` using these steps:
 
-- **listAutoRedirects** (GET /admin/redirects/auto): `authn.requireUser` → `authz.require:redirects.read` → **`redirects.listAuto`**
+- **listAutoRedirects** (GET /admin/redirects/auto): `authn.requireUser` → `authz.requireRole` → `authz.require:redirects.read` → **`redirects.listAuto`**
 - **pathsMovedRedirects** (event site.pathsMoved): **`redirects.recordMoves`** → **`redirects.export`**
-- **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.require:pages.manage` → `delivery.publishAll:pages` → **`redirects.export`** → `delivery.exportLlms`
-- **removeAutoRedirect** (DELETE /admin/redirects/auto/*path): `authn.requireUser` → `authz.require:redirects.write` → **`redirects.removeAuto`** → **`redirects.export`**
+- **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.requireRole` → `authz.require:pages.manage` → `delivery.publishAll:pages` → **`redirects.export`** → `delivery.exportLlms`
+- **removeAutoRedirect** (DELETE /admin/redirects/auto/*path): `authn.requireUser` → `authz.requireRole` → `authz.require:redirects.write` → **`redirects.removeAuto`** → **`redirects.export`**
 - **renderRedirects** (GET /redirects.json): **`redirects.render`** → `authz.fields:redirectRules?shape=array`
 - **resolvePage** (GET /site/*path): `authn.identifyUser` → `authz.require:pages.read` → **`redirects.lookup`** → `site.resolve:pages?home=home&status=published&fallback=true` → `site.resolveLinks:pages?home=home&status=published&fallback=true` → `authz.fields:pages?shape=item`
-- **setRedirects** (PUT /redirects): `authn.requireUser` → `authz.require:redirects.write` → `validate.check:redirects.rules` → **`redirects.validate`** → `content.set:redirects` → **`redirects.export`**
+- **setRedirects** (PUT /redirects): `authn.requireUser` → `authz.requireRole` → `authz.require:redirects.write` → `validate.check:redirects.rules` → **`redirects.validate`** → `content.set:redirects` → **`redirects.export`**
 
 <!-- kestrel-docs:end -->

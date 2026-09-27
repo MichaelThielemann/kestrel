@@ -5,9 +5,9 @@
   "contracts": [
     "blobstore@1",
     "persistence@1",
+    "authz@1",
     "media@1",
     "events@1",
-    "authz@1",
     "authn@1",
     "content@1",
     "site@1",
@@ -345,7 +345,9 @@
         "blobstore@1",
         "persistence@1"
       ],
-      "optional": [],
+      "optional": [
+        "authz@1"
+      ],
       "config": {
         "schema": {
           "type": "object",
@@ -434,6 +436,12 @@
             "defaultLimit": {
               "type": "integer",
               "minimum": 1
+            },
+            "listPermission": {
+              "type": "string",
+              "minLength": 1,
+              "default": "media.list",
+              "description": "The permission a signed-in caller needs to list the library or its folders when an authz module is loaded"
             }
           },
           "additionalProperties": false
@@ -595,6 +603,17 @@
             "status": "missing",
             "value": null,
             "redacted": false
+          },
+          {
+            "path": "listPermission",
+            "type": "string",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": "media.list",
+            "redacted": false,
+            "default": "media.list"
           }
         ]
       },
@@ -1123,6 +1142,18 @@
                 }
               },
               "default": {}
+            },
+            "rolelessPipelines": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "default": [
+                "me",
+                "logout"
+              ],
+              "description": "Pipelines that need a signed-in caller but serve an account without a configured role; every other such pipeline must run authz.requireRole"
             }
           },
           "required": [
@@ -1252,11 +1283,29 @@
             "value": {},
             "redacted": false,
             "default": {}
+          },
+          {
+            "path": "rolelessPipelines",
+            "type": "array",
+            "required": false,
+            "secret": false,
+            "set": false,
+            "status": "default",
+            "value": [
+              "me",
+              "logout"
+            ],
+            "redacted": false,
+            "default": [
+              "me",
+              "logout"
+            ]
           }
         ]
       },
       "steps": [
         "authz.require",
+        "authz.requireRole",
         "authz.describePipelineAccess",
         "authz.listRoles",
         "authz.fields",
@@ -3821,6 +3870,133 @@
       }
     },
     {
+      "name": "authz.require",
+      "module": "authz/roles",
+      "factory": true,
+      "description": {
+        "summary": "Requires permission <arg>",
+        "reads": [],
+        "writes": [],
+        "security": "required",
+        "errors": {
+          "401": "not authenticated",
+          "403": "missing permission <arg>"
+        }
+      }
+    },
+    {
+      "name": "authz.requireRole",
+      "module": "authz/roles",
+      "factory": false,
+      "description": {
+        "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+        "reads": [
+          "identity?"
+        ],
+        "writes": [],
+        "errors": {
+          "401": "not authenticated",
+          "403": "this account has no role"
+        }
+      }
+    },
+    {
+      "name": "authz.describePipelineAccess",
+      "module": "authz/roles",
+      "factory": false,
+      "description": {
+        "summary": "Per booted pipeline, whether the caller passes its authz.require steps",
+        "reads": [
+          "identity?"
+        ],
+        "writes": [
+          "result.pipelineAccess"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "pipelineAccess": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "enum": [
+                  "granted",
+                  "denied",
+                  "unknown"
+                ]
+              }
+            }
+          },
+          "required": [
+            "pipelineAccess"
+          ]
+        }
+      }
+    },
+    {
+      "name": "authz.listRoles",
+      "module": "authz/roles",
+      "factory": false,
+      "description": {
+        "summary": "The configured role names, in config order",
+        "reads": [],
+        "writes": [
+          "result.roles"
+        ],
+        "extendsOutput": {
+          "type": "object",
+          "properties": {
+            "roles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "roles"
+          ]
+        }
+      }
+    },
+    {
+      "name": "authz.fields",
+      "module": "authz/roles",
+      "factory": true,
+      "description": {
+        "summary": "Keep only the <arg> fields the caller may see: anonymousFields.<arg> without an identity or a configured role; otherwise everything when one of its roles has no field grant for <arg>, else the union of its roles' grants and the anonymous one",
+        "reads": [
+          "identity?",
+          "result?"
+        ],
+        "writes": [
+          "result?"
+        ],
+        "errors": {
+          "403": "no field grant on <arg> for a caller without an identity or a configured role"
+        }
+      }
+    },
+    {
+      "name": "authz.validateRoles",
+      "module": "authz/roles",
+      "factory": true,
+      "description": {
+        "summary": "Validate the role names at payload.<arg> against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept",
+        "reads": [
+          "payload.<arg>"
+        ],
+        "writes": [],
+        "input": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "errors": {
+          "400": "the value is not an array of known role names"
+        }
+      }
+    },
+    {
       "name": "media.upload",
       "module": "media/default",
       "factory": false,
@@ -4855,7 +5031,8 @@
         },
         "errors": {
           "400": "invalid folder, unknown locale, invalid type, or limit above maxLimit",
-          "401": "no identity and no ids (unless anonymousList is \"all\")"
+          "401": "no identity and no ids (unless anonymousList is \"all\")",
+          "403": "no ids and, with an authz module, no listPermission"
         }
       }
     },
@@ -4890,7 +5067,8 @@
           }
         },
         "errors": {
-          "401": "no identity (unless anonymousList is \"all\")"
+          "401": "no identity (unless anonymousList is \"all\")",
+          "403": "with an authz module, no listPermission"
         }
       }
     },
@@ -6663,117 +6841,6 @@
           "required": [
             "variants"
           ]
-        }
-      }
-    },
-    {
-      "name": "authz.require",
-      "module": "authz/roles",
-      "factory": true,
-      "description": {
-        "summary": "Requires permission <arg>",
-        "reads": [],
-        "writes": [],
-        "security": "required",
-        "errors": {
-          "401": "not authenticated",
-          "403": "missing permission <arg>"
-        }
-      }
-    },
-    {
-      "name": "authz.describePipelineAccess",
-      "module": "authz/roles",
-      "factory": false,
-      "description": {
-        "summary": "Per booted pipeline, whether the caller passes its authz.require steps",
-        "reads": [
-          "identity?"
-        ],
-        "writes": [
-          "result.pipelineAccess"
-        ],
-        "extendsOutput": {
-          "type": "object",
-          "properties": {
-            "pipelineAccess": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string",
-                "enum": [
-                  "granted",
-                  "denied",
-                  "unknown"
-                ]
-              }
-            }
-          },
-          "required": [
-            "pipelineAccess"
-          ]
-        }
-      }
-    },
-    {
-      "name": "authz.listRoles",
-      "module": "authz/roles",
-      "factory": false,
-      "description": {
-        "summary": "The configured role names, in config order",
-        "reads": [],
-        "writes": [
-          "result.roles"
-        ],
-        "extendsOutput": {
-          "type": "object",
-          "properties": {
-            "roles": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "required": [
-            "roles"
-          ]
-        }
-      }
-    },
-    {
-      "name": "authz.fields",
-      "module": "authz/roles",
-      "factory": true,
-      "description": {
-        "summary": "Keep only the <arg> fields the caller may see: anonymousFields.<arg> without an identity or a configured role; otherwise everything when one of its roles has no field grant for <arg>, else the union of its roles' grants and the anonymous one",
-        "reads": [
-          "identity?",
-          "result?"
-        ],
-        "writes": [
-          "result?"
-        ],
-        "errors": {
-          "403": "no field grant on <arg> for a caller without an identity or a configured role"
-        }
-      }
-    },
-    {
-      "name": "authz.validateRoles",
-      "module": "authz/roles",
-      "factory": true,
-      "description": {
-        "summary": "Validate the role names at payload.<arg> against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept",
-        "reads": [
-          "payload.<arg>"
-        ],
-        "writes": [],
-        "input": {
-          "type": "object",
-          "additionalProperties": true
-        },
-        "errors": {
-          "400": "the value is not an array of known role names"
         }
       }
     },
@@ -10998,9 +11065,23 @@
       "description": {
         "summary": "Rate limit bucket <arg>, counted by client address",
         "reads": [
-          "ip?"
+          "ip?",
+          "payload.username?",
+          "payload.email?"
         ],
         "writes": [],
+        "input": {
+          "type": "object",
+          "properties": {
+            "username": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
         "errors": {
           "429": "too many requests"
         }
@@ -11858,6 +11939,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:users.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -11958,6 +12055,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -12114,6 +12227,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:pages.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -12228,6 +12357,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:pages.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -12333,6 +12478,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -12473,6 +12634,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "content.describeModel",
           "name": "content.describeModel",
           "module": "content/default",
@@ -12600,6 +12777,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:media.write",
           "name": "authz.require",
           "module": "authz/roles",
@@ -12676,6 +12869,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -13165,6 +13374,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:users.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -13384,6 +13609,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:users.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -13542,6 +13783,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -13734,6 +13991,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -13976,6 +14249,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -14244,6 +14533,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -14604,6 +14909,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:users.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -14883,6 +15204,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:system.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -14963,6 +15300,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -15861,6 +16214,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:users.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -15942,6 +16311,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -16221,6 +16606,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -16814,6 +17215,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:insights.read",
           "name": "authz.require",
           "module": "authz/roles",
@@ -17106,6 +17523,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:pages.write",
           "name": "authz.require",
           "module": "authz/roles",
@@ -17266,6 +17699,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -17500,6 +17949,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:redirects.read",
           "name": "authz.require",
           "module": "authz/roles",
@@ -17580,6 +18045,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -17874,7 +18355,8 @@
             },
             "errors": {
               "400": "invalid folder, unknown locale, invalid type, or limit above maxLimit",
-              "401": "no identity and no ids (unless anonymousList is \"all\")"
+              "401": "no identity and no ids (unless anonymousList is \"all\")",
+              "403": "no ids and, with an authz module, no listPermission"
             }
           }
         },
@@ -18039,6 +18521,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:media.read",
           "name": "authz.require",
           "module": "authz/roles",
@@ -18084,7 +18582,8 @@
               }
             },
             "errors": {
-              "401": "no identity (unless anonymousList is \"all\")"
+              "401": "no identity (unless anonymousList is \"all\")",
+              "403": "with an authz module, no listPermission"
             }
           }
         }
@@ -18108,6 +18607,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -18450,6 +18965,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:users.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -18510,6 +19041,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -18585,9 +19132,23 @@
           "description": {
             "summary": "Rate limit bucket login, counted by client address",
             "reads": [
-              "ip?"
+              "ip?",
+              "payload.username?",
+              "payload.email?"
             ],
             "writes": [],
+            "input": {
+              "type": "object",
+              "properties": {
+                "username": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
             "errors": {
               "429": "too many requests"
             }
@@ -19022,6 +19583,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:pages.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -19104,6 +19681,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -19241,6 +19834,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -19383,6 +19992,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:pages.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -19465,6 +20090,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -19557,6 +20198,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -19741,6 +20398,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:pages.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -19919,6 +20592,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -20232,6 +20921,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:pages.write",
           "name": "authz.require",
           "module": "authz/roles",
@@ -20453,6 +21158,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:images.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -20565,6 +21286,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -20837,6 +21574,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -21368,6 +22121,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:pages.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -21429,6 +22198,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -21692,6 +22477,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:pages.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -21753,6 +22554,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -22054,6 +22871,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:redirects.write",
           "name": "authz.require",
           "module": "authz/roles",
@@ -22142,6 +22975,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -22304,6 +23153,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -22472,6 +23337,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:system.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -22548,6 +23429,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -22648,6 +23545,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:system.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -22709,6 +23622,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -23134,6 +24063,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -23869,6 +24814,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:users.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -23936,6 +24897,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -24081,6 +25058,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -24427,6 +25420,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:users.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -24503,6 +25512,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -24713,6 +25738,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -25067,6 +26108,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:images.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -25300,6 +26357,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -25620,6 +26693,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },
@@ -26127,6 +27216,22 @@
           }
         },
         {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
+            }
+          }
+        },
+        {
           "spec": "authz.require:users.manage",
           "name": "authz.require",
           "module": "authz/roles",
@@ -26338,6 +27443,22 @@
             "errors": {
               "401": "not authenticated",
               "403": "a state-changing request authenticated by the session cookie is not from the same origin"
+            }
+          }
+        },
+        {
+          "spec": "authz.requireRole",
+          "name": "authz.requireRole",
+          "module": "authz/roles",
+          "description": {
+            "summary": "Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names",
+            "reads": [
+              "identity?"
+            ],
+            "writes": [],
+            "errors": {
+              "401": "not authenticated",
+              "403": "this account has no role"
             }
           }
         },

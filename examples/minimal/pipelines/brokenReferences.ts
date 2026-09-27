@@ -2,5 +2,5 @@ import { definePipeline } from "../modules.ts";
 
 export default definePipeline({
   name: "brokenReferences",
-  steps: ["authn.requireUser", "authz.require:pages.manage", "references.report"],
+  steps: ["authn.requireUser", "authz.requireRole", "authz.require:pages.manage", "references.report"],
 });

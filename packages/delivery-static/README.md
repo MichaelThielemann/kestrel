@@ -279,9 +279,9 @@ Pipelines in `examples/minimal` using these steps:
 
 - **mediaDependents** (event media.updated, event media.deleted, event images.variantsChanged): **`delivery.markDependents:media`**
 - **pageDependents** (event page.created, event page.updated, event page.restored, event page.translationRemoved, event page.deleted): **`delivery.markDependents:pages`**
-- **pagePublishStatus** (GET /admin/publish-status/pages/:id): `authn.requireUser` → `authz.require:pages.manage` → **`delivery.readStatus:pages`**
+- **pagePublishStatus** (GET /admin/publish-status/pages/:id): `authn.requireUser` → `authz.requireRole` → `authz.require:pages.manage` → **`delivery.readStatus:pages`**
 - **pathsMovedDelivery** (event site.pathsMoved): **`delivery.markMoved`**
-- **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.require:pages.manage` → **`delivery.publishAll:pages`** → `redirects.export` → **`delivery.exportLlms`**
+- **publishAllPages** (POST /admin/publish-all/pages): `authn.requireUser` → `authz.requireRole` → `authz.require:pages.manage` → **`delivery.publishAll:pages`** → `redirects.export` → **`delivery.exportLlms`**
 - **publishPage** (event page.created, event page.updated, event page.restored, event page.translationRemoved): **`delivery.publish:pages`** → **`delivery.requestLlms`**
 - **resumeStalePages** (cron */5 * * * *): **`delivery.resumeStale`**
 - **settingsDependents** (event settings.updated): **`delivery.markDependents:settings`** → **`delivery.requestLlms`**

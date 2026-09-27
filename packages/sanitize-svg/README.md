@@ -33,6 +33,6 @@ the file header, not from this module).
 
 Pipelines in `examples/minimal` using these steps:
 
-- **uploadMedia** (POST /media): `authn.requireUser` → `authz.require:media.write` → **`sanitize.svg`** → `media.upload` → `events.emit:media.uploaded` → `events.relay`
+- **uploadMedia** (POST /media): `authn.requireUser` → `authz.requireRole` → `authz.require:media.write` → **`sanitize.svg`** → `media.upload` → `events.emit:media.uploaded` → `events.relay`
 
 <!-- kestrel-docs:end -->

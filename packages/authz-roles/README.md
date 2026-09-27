@@ -5,6 +5,15 @@ authn module. Permissions are dotted names; `x.*` grants everything below `x`.
 `anonymous: ["pages.read"]` lists what a request without identity may do, and every signed-in
 caller may do it too, whatever its roles: `can` answers true when the roles or `anonymous` grant the
 permission.
+
+**Accounts without a role.** A signed-in account none of whose roles the config defines may sign out
+and read its own identity, and is otherwise served like an anonymous visitor: on a public pipeline
+(`authn.identifyUser`) it gets what `anonymous` grants, and a pipeline that needs a signed-in caller
+refuses it. Step: `authz.requireRole` – `UNAUTHENTICATED` without an identity, `FORBIDDEN` for an
+account without a configured role. At `attach()` boot fails for every pipeline in which a step other
+than an `authz.*` one declares `security: "required"` (such as `authn.requireUser`) and no
+`authz.requireRole` follows it, unless `rolelessPipelines` names it (default `["me", "logout"]`).
+`kestrel upgrade`'s `pipelines/require-role` inserts the step.
 Step: `authz.require:<permission>` – passes without identity if `anonymous` grants it, else
 `UNAUTHENTICATED`; `FORBIDDEN` when neither the identity's roles nor `anonymous` grant the permission.
 Step: `authz.describePipelineAccess` – writes `result.pipelineAccess`: for every booted pipeline,
@@ -81,15 +90,17 @@ Not included: ownership/resource checks (the `resource` argument is ignored), ro
 | `anonymous` | array | no | `[]` |
 | `anonymousFields` | record | no | `{}` |
 | `fields` | record | no | `{}` |
+| `rolelessPipelines` | array | no | `["me","logout"]` |
 
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
 | `authz.require:<arg>` | Requires permission <arg> | – | – | – | – | 401 not authenticated; 403 missing permission <arg> | – | no |
+| `authz.requireRole` | Requires a signed-in caller holding at least one configured role; an account without one may only run the pipelines rolelessPipelines names | `identity?` | – | – | – | 401 not authenticated; 403 this account has no role | – | no |
 | `authz.describePipelineAccess` | Per booted pipeline, whether the caller passes its authz.require steps | `identity?` | `result.pipelineAccess` | – | { pipelineAccess: object, … } | – | – | no |
 | `authz.listRoles` | The configured role names, in config order | – | `result.roles` | – | { roles: string[], … } | – | – | no |
 | `authz.fields:<arg>` | Keep only the <arg> fields the caller may see: anonymousFields.<arg> without an identity or a configured role; otherwise everything when one of its roles has no field grant for <arg>, else the union of its roles' grants and the anonymous one | `identity?`, `result?` | `result?` | – | – | 403 no field grant on <arg> for a caller without an identity or a configured role | – | no |
 | `authz.validateRoles:<arg>` | Validate the role names at payload.<arg> against the configured roles; an absent value passes. authz.validateRoles:roles reads payload.roles, the shape authn.createUser and authn.updateUser accept | `payload.<arg>` | – | object | – | 400 the value is not an array of known role names | – | no |
 
-Used by 73 of 102 pipelines in `examples/minimal`.
+Used by 75 of 102 pipelines in `examples/minimal`.
 
 <!-- kestrel-docs:end -->

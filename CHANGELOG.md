@@ -634,6 +634,14 @@ Net changes since 5.8.1.
   new config option `secureCookie` (default `true`) drops `Secure` for plain-HTTP development.
 - `authn.setPassword` refuses the caller's own account with 400; one's own password changes only
   through `authn.changePassword`, which needs the current one. The step now reads `identity?`.
+- A signed-in account without a configured role may only sign out and read its own identity. New step
+  `authz.requireRole` (401 without an identity, 403 without a configured role); `authz-roles` fails boot
+  for every pipeline in which a step declaring `security: "required"` (such as `authn.requireUser`) is not
+  followed by it, unless the new config option `rolelessPipelines` (default `["me", "logout"]`) names the
+  pipeline. `kestrel upgrade`'s new `pipelines/require-role` inserts the step. On public pipelines such an
+  account is served like an anonymous visitor.
+- `media.list` without `ids` and `media.listFolders` need the new `listPermission` (default `media.list`)
+  when an `authz@1` module is loaded, instead of any signed-in identity; 403 otherwise. `media.*` grants it.
 
 ### Added
 

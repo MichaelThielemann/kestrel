@@ -4,6 +4,7 @@ export default definePipeline({
   name: "restorePageRevision",
   steps: [
     "authn.requireUser",
+    "authz.requireRole",
     "authz.require:pages.write",
     "revisions.restore:pages",
     "validate.check:pages.body",

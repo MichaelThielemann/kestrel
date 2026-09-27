@@ -420,7 +420,7 @@ describe("authz/roles: authz.fields cuts the answer to the caller's field grant"
     await kestrel.stop();
     const { anonymousFields: _anonymousFields, ...withoutAnonymousGrant } = grants;
     void _anonymousFields;
-    const signedInOnly = [definePipeline({ name: "getRecord", steps: ["records.signIn", "authn.requireUser", "authz.require:records.read", "records.get", "authz.fields:records?shape=item"] })];
+    const signedInOnly = [definePipeline({ name: "getRecord", steps: ["records.signIn", "authn.requireUser", "authz.requireRole", "authz.require:records.read", "records.get", "authz.fields:records?shape=item"] })];
     const signedInOnlyKestrel = await bootRecordsSignedIn(withoutAnonymousGrant, signedInOnly);
     const res = await signedInOnlyKestrel.run("getRecord", as("ghost"));
     expect(res).toMatchObject({ status: 403, code: "FORBIDDEN" });

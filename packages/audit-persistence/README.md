@@ -52,6 +52,6 @@ Pipelines in `examples/minimal` using these steps:
 - **anonymizeAuditUser** (event user.deleted): **`audit.anonymize`**
 - **auditAuth** (event auth.loggedIn, event auth.loggedOut): **`audit.record`**
 - **pruneAudit** (cron 45 3 * * *): **`audit.prune`**
-- **retryAnonymizeAuditUser** (POST /admin/users/:id/audit/anonymize): `authn.requireUser` → `authz.require:users.manage` → **`audit.anonymize`**
+- **retryAnonymizeAuditUser** (POST /admin/users/:id/audit/anonymize): `authn.requireUser` → `authz.requireRole` → `authz.require:users.manage` → **`audit.anonymize`**
 
 <!-- kestrel-docs:end -->

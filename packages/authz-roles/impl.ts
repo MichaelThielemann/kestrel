@@ -16,6 +16,29 @@ export interface Config {
   anonymousFields?: FieldGrants;
   /** Per role, what a caller holding it keeps of each resource's answers; a role without a grant for a resource keeps everything. */
   fields?: Record<string, FieldGrants>;
+  /** Pipelines a signed-in account without a configured role may run although they need a signed-in caller; every other one must run `authz.requireRole`. */
+  rolelessPipelines?: readonly string[];
+}
+
+/** The pipelines open to any signed-in account unless config says otherwise: reading one's own identity and signing out. */
+export const DEFAULT_ROLELESS_PIPELINES: readonly string[] = ["me", "logout"];
+
+/**
+ * One problem per pipeline that needs a signed-in caller (a step other than an `authz.*` one declares
+ * `security: "required"`) but does not run `authz.requireRole` after that step, unless config names it in
+ * `rolelessPipelines`. Such a pipeline would serve an account whose roles grant nothing.
+ */
+export function roleGateProblems(config: Config, manifest: Pick<Manifest, "pipelines">): string[] {
+  const open = new Set(config.rolelessPipelines ?? DEFAULT_ROLELESS_PIPELINES);
+  const problems: string[] = [];
+  for (const pipeline of manifest.pipelines) {
+    if (open.has(pipeline.name)) continue;
+    const signIn = pipeline.steps.findIndex((step) => step.description.security === "required" && !step.name.startsWith("authz."));
+    if (signIn === -1) continue;
+    if (pipeline.steps.slice(signIn + 1).some((step) => step.name === "authz.requireRole")) continue;
+    problems.push(`authz/roles: pipeline "${pipeline.name}" needs a signed-in caller (${pipeline.steps[signIn]!.spec}) but does not run authz.requireRole after it – add the step, so that an account without a configured role is refused, or name the pipeline in rolelessPipelines`);
+  }
+  return problems;
 }
 
 function own<T>(record: Readonly<Record<string, T>> | undefined, key: string): T | undefined {
@@ -280,6 +303,8 @@ export function fieldGrantProblems(config: Config, manifest: Pick<Manifest, "pip
 
 export interface AuthzRoles extends Authz {
   canAnonymous(permission: string): boolean;
+  /** Whether the identity holds at least one role the config defines. */
+  hasRole(identity: Identity): boolean;
   /** The field tree `identity` keeps of `resource`, `"all"`, or `undefined` for an anonymous caller without a grant; see {@link fieldSet}. */
   fieldsFor(identity: Identity | undefined, resource: string): "all" | FieldTree | undefined;
   /** See {@link answersOf}. */
@@ -307,6 +332,9 @@ export function createAuthzRoles(config: Config): AuthzRoles {
     canAnonymous(permission) {
       return anonymousCan(config, permission);
     },
+    hasRole(identity) {
+      return rolesOf(identity, config.roleClaim).some((role) => roles.has(role));
+    },
     fieldsFor(identity, resource) {
       const paths = fieldSet(config, identity, resource);
       if (paths === "all" || paths === undefined) return paths;
@@ -324,7 +352,7 @@ export function createAuthzRoles(config: Config): AuthzRoles {
     attach(kestrel) {
       const manifest = kestrel.describe();
       assertAnonymousAccess(config, manifest);
-      const problems = fieldGrantProblems(config, manifest);
+      const problems = [...roleGateProblems(config, manifest), ...fieldGrantProblems(config, manifest)];
       if (problems.length > 0) throw new Error(problems.join("\n"));
       gates = new Map(manifest.pipelines.map((p): [string, readonly string[]] => [p.name, requiredPermissions(p)]));
       return () => {
