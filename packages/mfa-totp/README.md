@@ -23,12 +23,17 @@ it and adds `result.recoveryCodes` to the login answer, once: ten codes of 25 ba
 digest); until the new factor is confirmed, `mfa.startSetup` refuses with 403 `ENROLLMENT_CODE_REQUIRED`
 unless the body carries it, so knowing the password alone does not let anyone bind a device to a reset
 account. The administrator hands the code to the owner on another channel. With `requireEnrollmentCode`
-an account that never had a factor needs one too — issue it with a reset. Without that option the first
-setup of such an account needs only the password: add the module to an installation whose passwords
-are sound.
+an account that never had a factor needs one too — issue it with a reset — once any account has a
+confirmed factor; until then the first account sets up by password alone, so the first administrator
+is not locked out. Without that option the first setup of any account needs only the password: add the
+module to an installation whose passwords are sound.
 
 **What is stored.** The secret is sealed with AES-256-GCM under `secretKey` (32 bytes, 64 hex digits or 43
 base64url characters, kept outside the database), so a copy of the database holds no usable secret.
+To change the key, set the new one as `secretKey` and list the old one in `previousSecretKeys`: stored
+secrets and codes keep working, and each secret is sealed under the new key the next time its code
+passes. A factor no key opens answers every code as wrong — its owner needs a reset or a recovery
+code stored under a listed key — while accounts without a factor sign in as before.
 Recovery codes are stored only as HMAC-SHA-256 digests under a key derived from `secretKey`, so a copy of
 the database gives nothing to compute. A code is accepted for the current time step and one on either side,
 and never twice: the last accepted step is kept per account, and every change to a factor is conditional on
@@ -36,9 +41,16 @@ the version it read, so two requests with the same code cannot both pass.
 
 **Wrong codes.** After `maxFailures` (default 10) wrong codes in a row the factor is locked for
 `lockSeconds` (default 900); every further lock lasts twice as long, at most a day. While it is locked,
-`mfa.check` answers 429 `RATE_LIMITED` with `details.retryAfterSeconds`, even for the right code. The count
-lives in `mfa_factors`, so it survives a restart and holds without any rate-limit module; a correct code
-clears it, and so does a reset.
+`mfa.check` answers 429 `RATE_LIMITED` with `details.retryAfterSeconds`, even for the right code. Each code
+is counted before it is checked, so a burst of parallel requests gets no more than `maxFailures` codes
+checked either. The count lives in `mfa_factors`, so it survives a restart and holds without any
+rate-limit module; a correct code clears it, and so does a reset.
+
+**Locked out.** When the only administrator has lost the device and the recovery codes, or is locked,
+someone with access to the database clears it directly. With `persistence-sqlite`, stop the server and
+run `DELETE FROM mfa_factors WHERE "userId" = '<id>';` to remove the factor (the account then sets up a
+new one; with `requireEnrollmentCode` that needs no code while no other account has a confirmed factor),
+or `UPDATE mfa_factors SET "failures" = 0, "lockedUntil" = 0 WHERE "userId" = '<id>';` to lift a lock.
 
 **Resetting.** `mfa.reset` (`params.id`) removes another user's factor and answers
 `{ ok, enrollmentCode }` — not the caller's own (400); a user who lost the device signs in with a recovery
@@ -47,7 +59,8 @@ step that ends that user's sessions, e.g. `authn-multi`'s `authn.endSessions`, s
 the answer. `mfa.forget` removes the factor of a deleted user (event `user.deleted`). `mfa.listEnrolled`
 answers the ids of the users with a confirmed factor.
 
-Config: `issuer` (the name an app shows, default `Kestrel`), `secretKey` (required, secret), `enforce`
+Config: `issuer` (the name an app shows, default `Kestrel`), `secretKey` (required, secret),
+`previousSecretKeys` (default `[]`, secret), `enforce`
 (`"all"` default, `"none"`, or `{ permissions: [...] }` for the accounts holding one of them),
 `recoveryCodes` (default 10), `maxFailures` (default 10), `lockSeconds` (default 900),
 `requireEnrollmentCode` (default `false`).
@@ -64,6 +77,7 @@ from a running session.
 |---|---|---|---|
 | `issuer` | string | no | `"Kestrel"` |
 | `secretKey` | string | yes | *(secret)* |
+| `previousSecretKeys` | array | no | *(secret)* |
 | `enforce` | union | no | `"all"` |
 | `recoveryCodes` | integer | no | `10` |
 | `maxFailures` | integer | no | `10` |

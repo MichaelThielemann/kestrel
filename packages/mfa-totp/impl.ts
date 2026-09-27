@@ -12,13 +12,15 @@ export type Enforce = "all" | "none" | { permissions: string[] };
 export interface Config {
   issuer: string;
   secretKey: string;
+  /** Keys `secretKey` replaced; a secret or code stored under one of them still works, and a secret is sealed again under `secretKey` once its code passes. */
+  previousSecretKeys?: string[] | undefined;
   enforce: Enforce;
   recoveryCodes: number;
   /** Wrong codes in a row after which the factor is locked. */
   maxFailures: number;
   /** How long the first lock lasts; each further one lasts twice as long, at most a day. */
   lockSeconds: number;
-  /** Whether an account that never had a factor also needs an enrollment code, issued by a reset. */
+  /** Whether an account that never had a factor also needs an enrollment code, issued by a reset; it applies once some account has a confirmed factor. */
   requireEnrollmentCode: boolean;
 }
 
@@ -123,16 +125,21 @@ function seal(key: Buffer, plain: Buffer): string {
   return ["v1", iv.toString("base64url"), cipher.getAuthTag().toString("base64url"), data.toString("base64url")].join(".");
 }
 
-function unseal(key: Buffer, sealed: string): Buffer {
+function unseal(key: Buffer, sealed: string): Buffer | undefined {
   const [version, iv, tag, data] = sealed.split(".");
-  if (version !== "v1" || iv === undefined || tag === undefined || data === undefined) throw new Error("mfa/totp: a stored secret has an unknown format");
-  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"));
-  decipher.setAuthTag(Buffer.from(tag, "base64url"));
-  return Buffer.concat([decipher.update(Buffer.from(data, "base64url")), decipher.final()]);
+  if (version !== "v1" || iv === undefined || tag === undefined || data === undefined) return undefined;
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"));
+    decipher.setAuthTag(Buffer.from(tag, "base64url"));
+    return Buffer.concat([decipher.update(Buffer.from(data, "base64url")), decipher.final()]);
+  } catch {
+    return undefined;
+  }
 }
 
 const RECOVERY_GROUPS = 5;
 const MAX_LOCK_SECONDS = 86_400;
+const MAX_RETRIES = 50;
 
 function recoveryCode(): string {
   const raw = Array.from({ length: RECOVERY_GROUPS * 5 }, () => BASE32[randomInt(32)]).join("");
@@ -152,9 +159,15 @@ function labelOf(identity: Identity): string {
 
 export async function createMfaTotp(config: Config, db: Persistence, now: () => number = Date.now, authz?: Authz): Promise<MfaTotp> {
   const key = keyOf(config.secretKey);
-  const recoveryKey = createHmac("sha256", key).update("mfa-totp recovery codes").digest();
-  const enrollmentDigest = (code: string): string => createHmac("sha256", recoveryKey).update(`enrollment:${code.replace(/[\s-]/g, "").toUpperCase()}`).digest("base64url");
-  const recoveryDigest = (code: string): string => createHmac("sha256", recoveryKey).update(code.replace(/[\s-]/g, "").toUpperCase()).digest("base64url");
+  const keys = [key, ...(config.previousSecretKeys ?? []).map(keyOf)];
+  const recoveryKeyOf = (k: Buffer): Buffer => createHmac("sha256", k).update("mfa-totp recovery codes").digest();
+  const recoveryKey = recoveryKeyOf(key);
+  const recoveryKeys = keys.map(recoveryKeyOf);
+  const normalized = (code: string): string => code.replace(/[\s-]/g, "").toUpperCase();
+  const enrollmentDigests = (code: string): string[] => recoveryKeys.map((k) => createHmac("sha256", k).update(`enrollment:${normalized(code)}`).digest("base64url"));
+  const recoveryDigests = (code: string): string[] => recoveryKeys.map((k) => createHmac("sha256", k).update(normalized(code)).digest("base64url"));
+  const recoveryDigest = (code: string): string => createHmac("sha256", recoveryKey).update(normalized(code)).digest("base64url");
+  const enrollmentDigest = (code: string): string => createHmac("sha256", recoveryKey).update(`enrollment:${normalized(code)}`).digest("base64url");
   const ready = await db.ensureCollection(FACTORS, { userId: { type: "string", unique: true }, secret: "string", confirmed: "boolean", lastStep: "number", recovery: "json", createdAt: "number", failures: "number", locks: "number", lockedUntil: "number", rev: "number", enrollment: "string" });
   if (isErr(ready)) throw new Error(`mfa/totp: setup failed: ${ready.error.message}`);
 
@@ -173,39 +186,70 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
     return ok(false);
   };
 
-  const matchingStep = (row: FactorRow, code: string): number | undefined => {
-    if (!/^\d{6}$/.test(code)) return undefined;
-    const secret = unseal(key, row.secret);
-    const current = Math.floor(now() / 1000 / STEP_SECONDS);
-    for (let offset = -WINDOW; offset <= WINDOW; offset++) {
-      const step = current + offset;
-      if (step > row.lastStep && sameText(totp(secret, step), code)) return step;
+  const opened = (row: FactorRow): { secret: Buffer; current: boolean } | undefined => {
+    for (const [index, k] of keys.entries()) {
+      const secret = unseal(k, row.secret);
+      if (secret !== undefined) return { secret, current: index === 0 };
     }
     return undefined;
   };
 
-  const change = async (row: FactorRow, patch: Partial<Omit<FactorRow, "id">>): Promise<Result<boolean, PersistenceError>> => {
+  const matchingStep = (secret: Buffer, lastStep: number, code: string): number | undefined => {
+    if (!/^\d{6}$/.test(code)) return undefined;
+    const current = Math.floor(now() / 1000 / STEP_SECONDS);
+    for (let offset = -WINDOW; offset <= WINDOW; offset++) {
+      const step = current + offset;
+      if (step > lastStep && sameText(totp(secret, step), code)) return step;
+    }
+    return undefined;
+  };
+
+  const change = async (row: FactorRow, patch: Partial<Omit<FactorRow, "id">>): Promise<Result<FactorRow | undefined, PersistenceError>> => {
     const rev = row.rev ?? 0;
     const changed = await db.updateMany<FactorRow>(FACTORS, { id: row.id, rev }, { ...patch, rev: rev + 1 });
     if (isErr(changed)) return changed;
-    return ok(changed.value === 1);
+    return ok(changed.value === 1 ? { ...row, ...patch, rev: rev + 1 } : undefined);
   };
 
-  const wrongCode = async (row: FactorRow): Promise<Result<Check, MfaError>> => {
-    const failures = (row.failures ?? 0) + 1;
-    const locking = failures >= config.maxFailures;
-    const locks = (row.locks ?? 0) + (locking ? 1 : 0);
-    const lockedUntil = locking ? now() + Math.min(config.lockSeconds * 2 ** (locks - 1), MAX_LOCK_SECONDS) * 1000 : (row.lockedUntil ?? 0);
-    const counted = await change(row, { failures: locking ? 0 : failures, locks, lockedUntil });
-    if (isErr(counted)) return counted;
-    return ok({ kind: "refuse", reason: "wrong" });
+  const busy = (): Result<never, MfaError> => err(failure("TRANSIENT", "mfa/totp: the factor kept changing while it was checked"));
+
+  const update = async (first: FactorRow, plan: (row: FactorRow) => Partial<Omit<FactorRow, "id">> | undefined): Promise<Result<FactorRow | undefined, MfaError>> => {
+    let row: FactorRow | null = first;
+    for (let attempt = 0; attempt < MAX_RETRIES && row !== null; attempt++) {
+      const patch = plan(row);
+      if (patch === undefined) return ok(undefined);
+      const changed = await change(row, patch);
+      if (isErr(changed)) return changed;
+      if (changed.value !== undefined) return ok(changed.value);
+      const fresh = await factorOf(first.userId);
+      if (isErr(fresh)) return fresh;
+      row = fresh.value;
+    }
+    return row === null ? ok(undefined) : busy();
   };
 
-  const passed = async (row: FactorRow, patch: Partial<Omit<FactorRow, "id">>, answer: Check): Promise<Result<Check, MfaError>> => {
-    const changed = await change(row, { ...patch, failures: 0, locks: 0, lockedUntil: 0 });
-    if (isErr(changed)) return changed;
-    return ok(changed.value ? answer : { kind: "refuse", reason: "wrong" });
+  const lockedFor = (row: FactorRow): number => Math.ceil(((row.lockedUntil ?? 0) - now()) / 1000);
+
+  const countAttempt = (row: FactorRow): Promise<Result<FactorRow | undefined, MfaError>> =>
+    update(row, (current) => {
+      if (current.secret === "" || (current.lockedUntil ?? 0) > now()) return undefined;
+      const failures = (current.failures ?? 0) + 1;
+      const locking = failures >= config.maxFailures;
+      const locks = (current.locks ?? 0) + (locking ? 1 : 0);
+      const lockedUntil = locking ? now() + Math.min(config.lockSeconds * 2 ** (locks - 1), MAX_LOCK_SECONDS) * 1000 : (current.lockedUntil ?? 0);
+      return { failures: locking ? 0 : failures, locks, lockedUntil };
+    });
+
+  const settle = async (row: FactorRow, plan: (row: FactorRow) => Partial<Omit<FactorRow, "id">> | undefined, answer: Check): Promise<Result<Check, MfaError>> => {
+    const settled = await update(row, (current) => {
+      const patch = plan(current);
+      return patch === undefined ? undefined : { ...patch, failures: 0, locks: 0, lockedUntil: 0 };
+    });
+    if (isErr(settled)) return settled;
+    return ok(settled.value !== undefined ? answer : { kind: "refuse", reason: "wrong" });
   };
+
+  const WRONG: Check = { kind: "refuse", reason: "wrong" };
 
   return {
     async check(identity, code) {
@@ -214,26 +258,45 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
       const row = found.value !== null && found.value.secret !== "" ? found.value : null;
       const given = code?.trim() ?? "";
 
-      if (row !== null && given !== "" && (row.lockedUntil ?? 0) > now()) {
-        return ok({ kind: "refuse", reason: "locked", retryAfterSeconds: Math.ceil(((row.lockedUntil ?? 0) - now()) / 1000) });
-      }
-
-      if (row !== null && row.confirmed) {
-        if (given === "") return ok({ kind: "refuse", reason: "required" });
-        const step = matchingStep(row, given);
-        if (step !== undefined) return passed(row, { lastStep: step }, { kind: "pass" });
-        const hashed = recoveryDigest(given);
-        if (!row.recovery.some((stored) => sameText(stored, hashed))) return wrongCode(row);
-        return passed(row, { recovery: row.recovery.filter((stored) => stored !== hashed) }, { kind: "pass" });
-      }
-
       if (row !== null && given !== "") {
-        const step = matchingStep(row, given);
-        if (step === undefined) return wrongCode(row);
+        const counted = await countAttempt(row);
+        if (isErr(counted)) return counted;
+        const attempt = counted.value;
+        if (attempt === undefined) {
+          const fresh = await factorOf(identity.id);
+          if (isErr(fresh)) return fresh;
+          const lockedRow = fresh.value;
+          return ok(lockedRow !== null && (lockedRow.lockedUntil ?? 0) > now() ? { kind: "refuse", reason: "locked", retryAfterSeconds: lockedFor(lockedRow) } : WRONG);
+        }
+        const secret = opened(attempt);
+        const step = secret === undefined ? undefined : matchingStep(secret.secret, attempt.lastStep, given);
+        const resealed = secret !== undefined && !secret.current ? { secret: seal(key, secret.secret) } : {};
+        const sameSecret = (current: FactorRow): boolean => current.secret === attempt.secret;
+
+        if (attempt.confirmed) {
+          if (step !== undefined) return settle(attempt, (current) => (sameSecret(current) && step > current.lastStep ? { lastStep: step, ...resealed } : undefined), { kind: "pass" });
+          const digests = new Set(recoveryDigests(given));
+          if (!attempt.recovery.some((stored) => digests.has(stored))) return ok(WRONG);
+          return settle(
+            attempt,
+            (current) => {
+              const kept = current.recovery.filter((stored) => !digests.has(stored));
+              return kept.length < current.recovery.length ? { recovery: kept } : undefined;
+            },
+            { kind: "pass" },
+          );
+        }
+
+        if (step === undefined) return ok(WRONG);
         const recoveryCodes = Array.from({ length: config.recoveryCodes }, recoveryCode);
-        return passed(row, { confirmed: true, lastStep: step, recovery: recoveryCodes.map(recoveryDigest), enrollment: null }, { kind: "pass", recoveryCodes });
+        return settle(
+          attempt,
+          (current) => (!current.confirmed && sameSecret(current) && step > current.lastStep ? { confirmed: true, lastStep: step, recovery: recoveryCodes.map(recoveryDigest), enrollment: null, ...resealed } : undefined),
+          { kind: "pass", recoveryCodes },
+        );
       }
 
+      if (row !== null && row.confirmed) return ok({ kind: "refuse", reason: "required" });
       const needed = await required(identity);
       if (isErr(needed)) return needed;
       return ok(needed.value ? { kind: "refuse", reason: "setup-required" } : { kind: "pass" });
@@ -245,9 +308,15 @@ export async function createMfaTotp(config: Config, db: Persistence, now: () => 
       const row = found.value;
       if (row?.confirmed === true) return err(failure("CONFLICT", "mfa/totp: this account already has a second factor; an administrator can reset it"));
       const expected = row?.enrollment ?? null;
-      if (expected !== null || (row === null && config.requireEnrollmentCode)) {
-        const given = enrollmentCode === undefined || enrollmentCode.trim() === "" ? undefined : enrollmentDigest(enrollmentCode);
-        if (expected === null || given === undefined || !sameText(given, expected)) {
+      let codeNeeded = expected !== null;
+      if (!codeNeeded && row === null && config.requireEnrollmentCode) {
+        const anyFactor = await db.findOne<FactorRow>(FACTORS, { confirmed: true });
+        if (isErr(anyFactor)) return anyFactor;
+        codeNeeded = anyFactor.value !== null;
+      }
+      if (codeNeeded) {
+        const given = enrollmentCode === undefined || enrollmentCode.trim() === "" ? [] : enrollmentDigests(enrollmentCode);
+        if (expected === null || !given.some((digest) => sameText(digest, expected))) {
           return err(customFailure("ENROLLMENT_CODE_REQUIRED", ENROLLMENT_CODE_STATUS, "mfa/totp: setting up this account's second factor needs the enrollment code an administrator issued"));
         }
       }

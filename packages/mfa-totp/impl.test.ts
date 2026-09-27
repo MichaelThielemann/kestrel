@@ -10,6 +10,7 @@ import { base32Decode, createMfaTotp, FACTORS, totp, type Config } from "./impl.
 const KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const ALICE: Identity = { id: "u-alice", claims: { username: "alice", roles: ["editor"] } };
 const ROOT: Identity = { id: "u-root", claims: { username: "root", roles: ["admin"] } };
+const BOB: Identity = { id: "u-bob", claims: { username: "bob", roles: ["editor"] } };
 
 function config(enforce: Config["enforce"] = "all"): Config {
   return { issuer: "Example CMS", secretKey: KEY, enforce, recoveryCodes: 10, maxFailures: 10, lockSeconds: 900, requireEnrollmentCode: false };
@@ -109,12 +110,45 @@ describe("mfa/totp checks", () => {
     expect(expectOk(await env.mfa.check(ALICE, codeAt(started.secret, env.now()))).kind).toBe("pass");
   });
 
-  it("with requireEnrollmentCode, an account that never had a factor needs a code an administrator issued", async () => {
+  it("with requireEnrollmentCode, lets the first account set up by password alone and asks every later one for a code an administrator issued", async () => {
     const env = await setup();
     const strict = await createMfaTotp({ ...config(), requireEnrollmentCode: true }, env.db, env.now);
+    const first = expectOk(await strict.startSetup(ALICE));
+    expect(expectOk(await strict.check(ALICE, codeAt(first.secret, env.now()))).kind).toBe("pass");
     expectErr(await strict.startSetup(ROOT), "ENROLLMENT_CODE_REQUIRED");
     const { enrollmentCode } = expectOk(await strict.reset(ROOT.id));
     expectOk(await strict.startSetup(ROOT, enrollmentCode));
+  });
+
+  it("counts every wrong code of a parallel wave, so no more than maxFailures of them are checked before the lock", async () => {
+    const env = await setup();
+    const { secret } = await enroll(env);
+    const wave = await Promise.all(Array.from({ length: 60 }, (_, i) => env.mfa.check(ALICE, String(i).padStart(6, "0"))));
+    const answers = wave.map((result) => expectOk(result));
+    expect(answers.filter((answer) => answer.kind === "refuse" && answer.reason === "wrong")).toHaveLength(10);
+    expect(answers.filter((answer) => answer.kind === "refuse" && answer.reason === "locked")).toHaveLength(50);
+    expect(expectOk(await env.mfa.check(ALICE, codeAt(secret, env.now(), 1))).kind).toBe("refuse");
+  });
+
+  it("answers a wrong code, not an error, when the secret key no longer opens a stored factor", async () => {
+    const env = await setup();
+    const { secret, recoveryCodes } = await enroll(env);
+    const other = await createMfaTotp({ ...config(), secretKey: "f".repeat(64) }, env.db, env.now);
+    expect(expectOk(await other.check(ALICE, codeAt(secret, env.now(), 1)))).toEqual({ kind: "refuse", reason: "wrong" });
+    expect(expectOk(await other.check(ALICE, recoveryCodes[0]))).toEqual({ kind: "refuse", reason: "wrong" });
+    expect(expectOk(await other.check(BOB, undefined))).toEqual({ kind: "refuse", reason: "setup-required" });
+  });
+
+  it("keeps factors working across a key rotation and seals a secret under the new key once its code passes", async () => {
+    const env = await setup();
+    const { secret, recoveryCodes } = await enroll(env);
+    const rotated = await createMfaTotp({ ...config(), secretKey: "f".repeat(64), previousSecretKeys: [KEY] }, env.db, env.now);
+    expect(expectOk(await rotated.check(ALICE, recoveryCodes[0])).kind).toBe("pass");
+    env.advance(30_000);
+    expect(expectOk(await rotated.check(ALICE, codeAt(secret, env.now()))).kind).toBe("pass");
+    const onlyNew = await createMfaTotp({ ...config(), secretKey: "f".repeat(64) }, env.db, env.now);
+    env.advance(30_000);
+    expect(expectOk(await onlyNew.check(ALICE, codeAt(secret, env.now()))).kind).toBe("pass");
   });
 
   it("forgets every trace of a deleted user", async () => {

@@ -12,6 +12,7 @@ export const configSchema = z
   .object({
     issuer: z.string().min(1).default("Kestrel").describe("The name an authenticator app shows next to the account"),
     secretKey: z.string().min(1).describe("secret"),
+    previousSecretKeys: z.array(z.string().min(1)).default([]).describe("secret"),
     enforce: z
       .union([z.enum(["all", "none"]), z.object({ permissions: z.array(z.string().min(1)).min(1) }).strict()])
       .default("all")

@@ -1108,18 +1108,21 @@ Net changes since 5.8.1.
   `username` or `email`, normalized and kept as a digest; a name over 320 characters is refused with 400)
   or `identity` (the signed-in user) — an optional `maxBlockSeconds` that doubles the block after each
   further exceeded window up to that bound, and `counts: "failures"`, which counts only runs that fail
-  after the check and clears the key on a success. An `ip` bucket counts an IPv6
+  after the check and clears the key on a success; it holds each attempt while it runs, so parallel
+  requests get no more than `limit` through. An `ip` bucket counts an IPv6
   address by its /64 and an IPv4-mapped address as its IPv4 address. `clientKey` and `usernameKey` are
   exported.
 - New package `@michaelthielemann/kestrel-mfa-totp` (module `mfa/totp`): a second factor for any `authn@1`
   module — time-based one-time codes (RFC 6238) with ten single-use recovery codes of 125 bits, kept as
   keyed digests, the secret sealed with AES-256-GCM under a configured key, each code accepted once, and
-  the factor locked after ten wrong codes in a row (429, for longer each time; `maxFailures`,
-  `lockSeconds`). A reset answers a one-time enrollment code that setting up the new factor requires
-  (`requireEnrollmentCode` extends that to accounts that never had one). Steps `mfa.check` (after
+  the factor locked after ten wrong codes in a row, each counted before it is checked (429, for longer
+  each time; `maxFailures`, `lockSeconds`). A reset answers a one-time enrollment code that setting up
+  the new factor requires (`requireEnrollmentCode` extends that to accounts that never had one, once any
+  account has a confirmed factor). `previousSecretKeys` keeps factors working across a key change; a
+  factor no key opens answers codes as wrong instead of failing the login. Steps `mfa.check` (after
   `authn.login`; 401 `SECOND_FACTOR_REQUIRED` / `SECOND_FACTOR_SETUP_REQUIRED`, ending the session the
   login opened), `mfa.startSetup`, `mfa.reset`, `mfa.forget` and `mfa.listEnrolled`; config `issuer`,
-  `secretKey`, `enforce`, `recoveryCodes`, `maxFailures`, `lockSeconds`, `requireEnrollmentCode`.
+  `secretKey`, `previousSecretKeys`, `enforce`, `recoveryCodes`, `maxFailures`, `lockSeconds`, `requireEnrollmentCode`.
   `authn-multi` adds `authn.endSessions`, and both authn modules accept a `code` in the login body for
   such a step.
 
