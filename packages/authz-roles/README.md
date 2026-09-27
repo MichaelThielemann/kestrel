@@ -12,7 +12,8 @@ and read its own identity, and is otherwise served like an anonymous visitor: on
 refuses it. Step: `authz.requireRole` – `UNAUTHENTICATED` without an identity, `FORBIDDEN` for an
 account without a configured role. At `attach()` boot fails for every pipeline in which a step other
 than an `authz.*` one declares `security: "required"` (such as `authn.requireUser`) and no
-`authz.requireRole` follows it, unless `rolelessPipelines` names it (default `["me", "logout"]`).
+`authz.requireRole` follows it before the first step outside `authn.*`, `authz.*` and `ratelimit.*`,
+unless `rolelessPipelines` names it (default `["me", "logout"]`).
 `kestrel upgrade`'s `pipelines/require-role` inserts the step.
 Step: `authz.require:<permission>` – passes without identity if `anonymous` grants it, else
 `UNAUTHENTICATED`; `FORBIDDEN` when neither the identity's roles nor `anonymous` grant the permission.

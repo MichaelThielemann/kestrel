@@ -23,9 +23,12 @@ export interface Config {
 /** The pipelines open to any signed-in account unless config says otherwise: reading one's own identity and signing out. */
 export const DEFAULT_ROLELESS_PIPELINES: readonly string[] = ["me", "logout"];
 
+const GATE_PREFIXES = ["authn.", "authz.", "ratelimit."];
+
 /**
  * One problem per pipeline that needs a signed-in caller (a step other than an `authz.*` one declares
- * `security: "required"`) but does not run `authz.requireRole` after that step, unless config names it in
+ * `security: "required"`) but does not run `authz.requireRole` after that step and before the first step outside
+ * `authn.*`, `authz.*` and `ratelimit.*`, unless config names it in
  * `rolelessPipelines`. Such a pipeline would serve an account whose roles grant nothing.
  */
 export function roleGateProblems(config: Config, manifest: Pick<Manifest, "pipelines">): string[] {
@@ -35,8 +38,11 @@ export function roleGateProblems(config: Config, manifest: Pick<Manifest, "pipel
     if (open.has(pipeline.name)) continue;
     const signIn = pipeline.steps.findIndex((step) => step.description.security === "required" && !step.name.startsWith("authz."));
     if (signIn === -1) continue;
-    if (pipeline.steps.slice(signIn + 1).some((step) => step.name === "authz.requireRole")) continue;
-    problems.push(`authz/roles: pipeline "${pipeline.name}" needs a signed-in caller (${pipeline.steps[signIn]!.spec}) but does not run authz.requireRole after it – add the step, so that an account without a configured role is refused, or name the pipeline in rolelessPipelines`);
+    const after = pipeline.steps.slice(signIn + 1);
+    const firstWork = after.findIndex((step) => !GATE_PREFIXES.some((prefix) => step.name.startsWith(prefix)));
+    const gate = after.findIndex((step) => step.name === "authz.requireRole");
+    if (gate !== -1 && (firstWork === -1 || gate < firstWork)) continue;
+    problems.push(`authz/roles: pipeline "${pipeline.name}" needs a signed-in caller (${pipeline.steps[signIn]!.spec}) but does not run authz.requireRole after it and before its first step outside authn, authz and ratelimit – add the step there, so that an account without a configured role is refused, or name the pipeline in rolelessPipelines`);
   }
   return problems;
 }

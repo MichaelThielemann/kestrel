@@ -106,6 +106,11 @@ describe("authz/roles: an account without a configured role", () => {
     await expect(start(EDITOR, [beforeAuthn])).rejects.toThrow(/listUsers/);
   });
 
+  it("fails boot when authz.requireRole comes only after a step that does the work", async () => {
+    const late = definePipeline({ name: "listUsers", steps: ["probe.requireUser", "probe.answer", "authz.requireRole"] });
+    await expect(start(EDITOR, [late])).rejects.toThrow(/pipeline "listUsers".*authz\.requireRole/);
+  });
+
   it("lets config name further pipelines open to any signed-in account", async () => {
     const own = definePipeline({ name: "myProfile", steps: ["probe.requireUser", "probe.answer"] });
     const kestrel = await start(ROLELESS, [own], { rolelessPipelines: ["myProfile"] });
