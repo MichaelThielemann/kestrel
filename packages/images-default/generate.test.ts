@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { mediaTypeAllowed } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
@@ -112,4 +113,19 @@ describe("render", () => {
     const truncated = data.slice(0, Math.floor(data.byteLength * 0.6));
     await expect(render(truncated, medium, { width: 1024, height: 683, format: "webp" })).rejects.toThrow();
   });
+});
+
+describe("render time limit", () => {
+  it("stops a render that runs past the limit inside the image library", async () => {
+    const side = 5000;
+    const noisy = await sharp(randomBytes(side * side * 3), { raw: { width: side, height: side, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer();
+    const size: Size = { name: "big", width: side - 10, fit: "inside", format: "webp", quality: 80 };
+    const started = performance.now();
+    const outcome = await render(noisy, size, { width: side - 10, height: side - 10, format: "webp" }, { timeoutSeconds: 1 }).then(
+      () => "finished",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    expect(outcome).toMatch(/timeout/);
+    expect(performance.now() - started).toBeLessThan(2500);
+  }, 30_000);
 });

@@ -286,7 +286,7 @@ describe("sync step's job", () => {
   it("counts the ready items that get variants, not every media item", async () => {
     const { images, media } = await make({ chunk: 1 });
     addImage(media, "a", await jpeg(200, 200));
-    addImage(media, "b", await jpeg(200, 200), "image/png");
+    addImage(media, "b", await sharp({ create: { width: 200, height: 200, channels: 3, background: "#336699" } }).png().toBuffer(), "image/png");
     addImage(media, "c", new Uint8Array([1]), "image/gif");
     addImage(media, "d", new TextEncoder().encode("<svg/>"), "image/svg+xml");
     addImage(media, "e", new Uint8Array([1]), "application/pdf");

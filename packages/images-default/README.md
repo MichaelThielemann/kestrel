@@ -51,7 +51,11 @@ delivery module, an upload's placing runs in its own short pipeline (`images.pla
 subscribes to `images.planned` and can run in its own lane. With inline event delivery,
 `images.generate` alone does both in the upload request, and a size it could not render there is
 left `planned` and picked up by this module's own background loop right after the request — never
-inside it. An image sharp cannot decode gets its rows too (dimensions from the media item, error
+inside it. An original is handed to sharp only when its leading bytes identify it as the media type it is
+stored with (`contentMatchesMediaType`), so a file of another format, SVG among them, never reaches a
+decoder through a raster type; such an original counts as one sharp cannot decode, and a row whose
+original changed its content fails its attempt with `the original's content does not match its media
+type <type>`. An image sharp cannot decode gets its rows too (dimensions from the media item, error
 `cannot decode`): they stay `planned` until the original's bytes are at every path, and turn
 `failed` only then, so such an item becomes available like any other and never lists a path without
 a file.
@@ -191,10 +195,12 @@ stalled job is resumed regardless. The sync job skips such an item the same way 
 failed; only a `TRANSIENT` failure stops the job, which `images.resume` then resumes.
 
 **A render that hangs** (a pathological image that keeps sharp busy, a blocked file descriptor) is
-given up on after `renderTimeoutMs`. sharp cannot be aborted, so the render is left to finish in the
-background and its result is dropped: the variant already carries the failed attempt, and writing
-the late result would resurrect a variant the admin was told had failed. The timeout counts as a
-normal failed attempt with the error text `render timed out after <n>ms`. Without it the render
+given up on after `renderTimeoutMs`. sharp gets the same limit, rounded up to whole seconds, and stops
+its own processing when it passes; an encoder that reports no progress (AVIF) runs to its end in the
+background regardless, and its result is dropped: the variant already carries the failed attempt, and
+writing the late result would resurrect a variant the admin was told had failed. The timeout counts as
+a normal failed attempt with the error text `render timed out after <n>ms`, and the remaining sizes of
+the same item are not rendered in that run; they stay as they are for the next one. Without it the render
 would hold its slot for good and the sync job would never reach the next image. A `planned` row
 whose render fails this way is left `planned`, not counted as an attempt, and handed to the
 background loop to place right after the request.

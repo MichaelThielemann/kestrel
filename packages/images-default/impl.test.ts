@@ -723,3 +723,64 @@ describe("images/default resume repair pass", () => {
   });
 });
 
+
+describe("images/default content checks before decoding", () => {
+  const svgBytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>');
+
+  it("never decodes or renders a file whose content is not the stored image type", async () => {
+    const calls: string[] = [];
+    const spy: Renderer = async (data, size, planned) => {
+      calls.push(size.name);
+      return fixedRenderer(data, size, planned);
+    };
+    const { images, media } = await make({}, undefined, spy);
+    const id = addMedia(media, "m1", svgBytes, { contentType: "image/png", filename: "a.png", width: 10, height: 10 });
+    expectOk(await images.plan([id]));
+    expectOk(await images.generate(id));
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((row) => row.state === "failed")).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it("fails a pending variant whose original no longer matches the stored type, without rendering it", async () => {
+    const calls: string[] = [];
+    const spy: Renderer = async (data, size, planned) => {
+      calls.push(size.name);
+      return fixedRenderer(data, size, planned);
+    };
+    const config = { ...baseConfig, sizes: [{ name: "thumb", width: 320, fit: "inside" as const, format: "webp" as const, quality: 82 }] };
+    const blobs = fakeBlobstore();
+    const db = createFakePersistence();
+    const planned = createFakeMedia();
+    const id = addMedia(planned, "m1", await jpeg(400, 200));
+    expectOk(await (await createImages(config, { blobs, db, media: planned, logger: noLogger, render: spy }, () => 1000)).plan([id]));
+    const replaced = createFakeMedia();
+    addMedia(replaced, id, svgBytes);
+    const images = await createImages(config, { blobs, db, media: replaced, logger: noLogger, render: spy }, () => 1000);
+    expectOk(await images.generate(id));
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    expect(rows[0]?.state).toBe("error");
+    expect(rows[0]?.error).toMatch(/does not match/);
+    expect(calls).toEqual([]);
+  });
+
+  it("stops rendering further sizes of an item in a run once one render ran out of time", async () => {
+    const calls: string[] = [];
+    const slow: Renderer = async (_data, size, _planned, options) => {
+      calls.push(`${size.name}:${options?.timeoutSeconds ?? "-"}`);
+      throw new Error("timeout: 42% complete");
+    };
+    const { images, media } = await make({ renderTimeoutMs: 1500 }, undefined, slow);
+    const id = addMedia(media, "m1", await jpeg(2000, 1000));
+    expectOk(await images.plan([id]));
+    await images.generate(id);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/:2$/);
+    const rows = expectOk(await images.variantsOf([id])).get(id) ?? [];
+    const failed = rows.filter((row) => row.state === "error");
+    expect(failed).toHaveLength(1);
+    expect(failed[0]?.error).toMatch(/timed out/);
+    expect(rows.filter((row) => row.state === "pending")).toHaveLength(rows.length - 1);
+  });
+});

@@ -34,11 +34,18 @@ export interface Planned {
   format: string;
 }
 
-export type Renderer = (data: Uint8Array, size: Size, planned: Planned) => Promise<Rendered>;
+export interface RenderOptions {
+  /** Whole seconds after which the image library abandons the render and it rejects with a message starting `timeout`. */
+  timeoutSeconds?: number;
+}
+
+export type Renderer = (data: Uint8Array, size: Size, planned: Planned, options?: RenderOptions) => Promise<Rendered>;
 
 /** Renders to exactly `planned.width`x`planned.height` in `planned.format`: the plan, not the decoder, decides the output shape. */
-export async function render(data: Uint8Array, size: Size, planned: Planned): Promise<Rendered> {
-  const pipeline = sharp(data, { failOn: "error" })
+export async function render(data: Uint8Array, size: Size, planned: Planned, options: RenderOptions = {}): Promise<Rendered> {
+  const decoder = sharp(data, { failOn: "error" });
+  const limited = options.timeoutSeconds === undefined ? decoder : decoder.timeout({ seconds: options.timeoutSeconds });
+  const pipeline = limited
     .rotate()
     .resize({ width: planned.width, height: planned.height, fit: size.fit === "cover" ? "cover" : "fill" });
   const output = size.format === "webp" ? pipeline.webp({ quality: size.quality }) : pipeline.toFormat(boundaryCast<keyof FormatEnum>(planned.format, "host"));

@@ -5,7 +5,7 @@ import type { Blobstore } from "@michaelthielemann/kestrel-contracts/blobstore";
 import type { Events } from "@michaelthielemann/kestrel-contracts/events";
 import { withEventIdentity } from "@michaelthielemann/kestrel-contracts/helpers/events.envelope";
 import type { MediaFile, MediaFiles, MediaFilter, MediaScan } from "@michaelthielemann/kestrel-contracts/media";
-import { publicFormOf } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
+import { contentMatchesMediaType, publicFormOf } from "@michaelthielemann/kestrel-contracts/helpers/mediaType";
 import type { Document, Filter, Persistence, Schema } from "@michaelthielemann/kestrel-contracts/persistence";
 import { failure, type KestrelError } from "@michaelthielemann/kestrel/errors";
 import type { Logger } from "@michaelthielemann/kestrel/logger";
@@ -37,6 +37,7 @@ const PAGE = 500;
 const EVENT_CHUNK = 200;
 const VARIANTS_CHANGED = "images.variantsChanged";
 const UNDECODABLE = "cannot decode";
+const TIMED_OUT = "render timed out";
 
 export type Config = z.output<typeof configSchema>;
 
@@ -471,8 +472,10 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     return exclusive(mediaId, () => planItem(mediaId));
   }
 
-  async function renderWithin(original: Uint8Array, size: Size, planned: { width: number; height: number; format: string }): Promise<Result<Rendered, KestrelError>> {
-    const settled = renderImage(original, size, planned).then(
+  async function renderWithin(original: Uint8Array, contentType: string, size: Size, planned: { width: number; height: number; format: string }): Promise<Result<Rendered, KestrelError>> {
+    if (!contentMatchesMediaType(original, contentType)) return err(failure("VALIDATION", `the original's content does not match its media type ${contentType}`));
+    const timedOut = (): Result<Rendered, KestrelError> => err(failure("TRANSIENT", `${TIMED_OUT} after ${config.renderTimeoutMs}ms`));
+    const settled = renderImage(original, size, planned, { timeoutSeconds: Math.max(1, Math.ceil(config.renderTimeoutMs / 1000)) }).then(
       (rendered) => ({ rendered }),
       (cause: unknown) => ({ cause }),
     );
@@ -482,7 +485,8 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     });
     try {
       const outcome = await Promise.race([settled, expiry]);
-      if (outcome === "timeout") return err(failure("TRANSIENT", `render timed out after ${config.renderTimeoutMs}ms`));
+      if (outcome === "timeout") return timedOut();
+      if ("cause" in outcome && outcome.cause instanceof Error && outcome.cause.message.startsWith("timeout")) return timedOut();
       if ("cause" in outcome) return err(failure("VALIDATION", errorMessage(outcome.cause), { cause: outcome.cause }));
       return ok(outcome.rendered);
     } finally {
@@ -494,7 +498,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     const original = await loadOriginal(item.id);
     if (isErr(original)) return original;
     if (original.value === null) return ok(null);
-    const oriented = await orientedOriginalDimensions(original.value.data);
+    const oriented = contentMatchesMediaType(original.value.data, item.contentType) ? await orientedOriginalDimensions(original.value.data) : null;
     return ok(oriented ? { decodable: true, ow: oriented.width, oh: oriented.height, original: original.value } : { decodable: false, ow: 0, oh: 0, original: original.value });
   }
 
@@ -718,10 +722,11 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
     }
 
     const results: Variant[] = [];
+    let outOfTime = false;
     for (const size of effective) {
       const row = byName.get(size.name);
       if (row === undefined) continue;
-      if (original === null || !renderable(row, size) || removing.has(mediaId)) {
+      if (original === null || outOfTime || !renderable(row, size) || removing.has(mediaId)) {
         results.push(row);
         continue;
       }
@@ -731,6 +736,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
         return rendered;
       }
       if (rendered.value !== null) results.push(rendered.value);
+      if (rendered.value?.error?.startsWith(TIMED_OUT) === true) outOfTime = true;
     }
 
     if (results.some((row) => row.state === "planned")) schedulePlacement(mediaId);
@@ -739,7 +745,7 @@ export async function createImages(config: Config, deps: { blobs: Blobstore; db:
 
   async function renderVariant(item: MediaFile, size: Size, row: Variant, original: Original, touch: () => void): Promise<Result<Variant | null, KestrelError>> {
     const mediaId = item.id;
-    const attempt = await renderWithin(original.data, size, { width: row.width, height: row.height, format: row.format });
+    const attempt = await renderWithin(original.data, item.contentType, size, { width: row.width, height: row.height, format: row.format });
     const attempts = row.attempts + 1;
     const recordFailure = async (message: string): Promise<Result<Variant, KestrelError>> => {
       const patch: Partial<Variant> = row.state === "planned" ? { error: message } : { state: attempts >= maxAttempts ? "failed" : "error", attempts, error: message, updatedAt: now() };
