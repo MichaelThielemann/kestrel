@@ -52,6 +52,8 @@ README), `knownDevice` is on the context and `mfa.check` treats the request as c
 owner's device: its codes neither count towards the lock nor wait for it, and a pass leaves a lock
 set from other devices in place. Each code is still accepted once. The device's own rate-limit
 budget bounds its wrong codes instead; once that is used up, the device counts as unknown again.
+That budget lives in memory, so a restart gives a known device a fresh one, while the factor's own
+lock survives it.
 
 **Locked out.** When the only administrator has lost the device and the recovery codes, or is locked,
 someone with access to the database clears it directly. With `persistence-sqlite`, stop the server and

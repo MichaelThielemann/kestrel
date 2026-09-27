@@ -45,12 +45,15 @@ block.
 **Known devices.** A `username` bucket blocks the account for everyone once its budget is used up,
 so a third party can keep its owner from signing in. `knownDevices` gives every device the account
 signed in from before a budget of its own. `ratelimit.rememberDevice:<bucket>`, placed after the
-login and any second-factor step, hands the device a signed cookie bound to the account the bucket
-counts by. A request that carries a valid cookie for the account it names is counted in that
-device's budget instead of the account's, so it is neither stopped by nor adds to the account's
-block. Without the cookie, with one for another account, or once the device has used up its own
-budget, a request is counted against the account as before. A stolen cookie therefore only helps
-with the one account, and only for the device's own budget.
+login and any second-factor step, hands the device a signed cookie bound to the exact name of the
+account that signed in: the identity's `claims.username`, or its `id` without one, and only when it is
+the very value the bucket's `field` holds in the body, so a login that reads another field gets no
+cookie. A request that carries a valid cookie for the exact name it gives is counted in that device's
+budget instead of the account's, so it is neither stopped by nor adds to the account's block. Without
+the cookie, with one for another account (including one whose name differs only in case, width or
+spaces, which shares the account's budget), or once the device has used up its own budget, a request
+is counted against the account as before. A stolen cookie therefore only helps with the one account,
+and only for the device's own budget.
 
 ```ts
 {
@@ -81,7 +84,9 @@ code). To change the key, set the new one as `secretKey` and list the old one in
 `previousSecretKeys`: cookies signed under it stay valid until they expire. Dropping a key ends
 every cookie it signed; the devices sign in against the account budget again until their next
 successful sign-in. The budgets live in memory like every other key, so a restart forgets them,
-while the cookies stay valid.
+while the cookies stay valid. Nothing but the lifetime or a key change ends a cookie: signing out,
+a new password or a reset second factor leave it valid, and an account created later under the same
+name inherits it. It only ever grants a sign-in budget, never a session.
 
 `knownDevices` needs `deviceCookies` and a `username` bucket, and `ratelimit.rememberDevice` needs a
 bucket with `knownDevices` and an earlier step that signs the caller in; the boot refuses anything
@@ -105,7 +110,7 @@ Not included: shared limits across processes (needs a store-backed module).
 | Step | Summary | Reads | Writes | Input | Output | Errors | Portable | Atomic-safe |
 |---|---|---|---|---|---|---|---|---|
 | `ratelimit.check:<arg>` | Rate limit bucket <arg>, counted by client address | `ip?`, `payload.username?`, `payload.email?`, `headers.cookie?` | – | { username?: string, email?: string, … } | – | 400 an account name longer than 320 characters; 429 too many requests | – | no |
-| `ratelimit.rememberDevice:<arg>` | After a successful sign-in: hand the device a signed device cookie bound to the account bucket <arg> counts by, so its next sign-ins count against the device's own budget | `identity`, `payload.username?`, `payload.email?` | `responseCookies?` | { username?: string, email?: string, … } | – | – | – | no |
+| `ratelimit.rememberDevice:<arg>` | After a successful sign-in: hand the device a signed device cookie bound to the exact name of the signed-in account, when the body field bucket <arg> reads names it, so the device's next sign-ins to that account count against its own budget | `identity`, `payload.username?`, `payload.email?` | `responseCookies?` | { username?: string, email?: string, … } | – | – | – | no |
 | `ratelimit.sweep` | Drop expired rate-limit windows | – | `result` | – | { removed: number, … } | – | – | no |
 
 Pipelines in `examples/minimal` using these steps:

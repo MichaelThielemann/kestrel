@@ -6,7 +6,6 @@ import { definePipeline } from "@michaelthielemann/kestrel/definePipeline";
 import { silentLogger } from "@michaelthielemann/kestrel/logger";
 import { ok } from "@michaelthielemann/kestrel/result";
 import { createDeviceCookies, DEVICE_COOKIE, SECURE_DEVICE_COOKIE } from "./device.ts";
-import { usernameKey } from "./impl.ts";
 import module from "./module.ts";
 
 const KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -18,14 +17,13 @@ function cookieHeader(setCookie: string): Record<string, string> {
 }
 
 describe("device cookies", () => {
-  it("are HttpOnly, SameSite=Strict, Secure with the __Host- name, limited in lifetime, and valid only for the account they were issued for", () => {
+  it("are HttpOnly, SameSite=Strict, Secure with the __Host- name, limited in lifetime, and valid only for the exact account name they were issued for", () => {
     const cookies = createDeviceCookies({ secretKey: KEY, maxAgeSeconds: 3600, secure: true });
-    const issued = cookies.issue(usernameKey("owner"));
+    const issued = cookies.issue("owner");
     expect(issued).toMatch(new RegExp(`^${SECURE_DEVICE_COOKIE}=[^;]+; Path=/; Max-Age=3600; HttpOnly; Secure; SameSite=Strict$`));
-    expect(cookies.verify(cookieHeader(issued), usernameKey("owner"))).toBeDefined();
-    expect(cookies.verify(cookieHeader(issued), usernameKey(" OWNER "))).toBeDefined();
-    expect(cookies.verify(cookieHeader(issued), usernameKey("someone-else"))).toBeUndefined();
-    expect(cookies.verify({}, usernameKey("owner"))).toBeUndefined();
+    expect(cookies.verify(cookieHeader(issued), "owner")).toBeDefined();
+    for (const lookalike of [" OWNER ", "Owner", "ｏｗｎｅｒ", "owner ", "someone-else"]) expect(cookies.verify(cookieHeader(issued), lookalike)).toBeUndefined();
+    expect(cookies.verify({}, "owner")).toBeUndefined();
   });
 
   it("drop the Secure flag and the __Host- name only when told to", () => {
@@ -76,19 +74,24 @@ const signIn = defineModule({
   async setup() {
     return {};
   },
-  steps: () => ({
-    login: async (ctx: Context) => {
+  steps: () => {
+    const signInBy = (field: "username" | "email") => async (ctx: Context) => {
       await new Promise((resolve) => setTimeout(resolve, 10));
-      if (ctx.payload.password !== PASSWORD) return ctx.fail("UNAUTHENTICATED", "invalid credentials");
-      return ok({ ...ctx, identity: { id: String(ctx.payload.username), claims: {} }, result: { ok: true } });
-    },
+      const name = ctx.payload[field];
+      if (typeof name !== "string" || ctx.payload.password !== PASSWORD) return ctx.fail("UNAUTHENTICATED", "invalid credentials");
+      return ok({ ...ctx, identity: { id: `user-${name}`, claims: { username: name } }, result: { ok: true } });
+    };
+    return { login: signInBy("username"), loginByEmail: signInBy("email") };
+  },
+  describe: () => ({
+    login: { summary: "Signs in to the account named exactly by payload.username, with one fixed password", reads: [], writes: ["identity", "result"], output: { type: "object" } },
+    loginByEmail: { summary: "Signs in to the account named exactly by payload.email, with one fixed password", reads: [], writes: ["identity", "result"], output: { type: "object" } },
   }),
-  describe: () => ({ login: { summary: "Signs in with one fixed password", reads: [], writes: ["identity", "result"], output: { type: "object" } } }),
 });
 
 const ACCOUNT = { limit: 3, windowSeconds: 300, key: "username", counts: "failures", maxBlockSeconds: 900, knownDevices: { limit: 4, windowSeconds: 300, maxBlockSeconds: 900 } };
 
-async function bootLogin(buckets: Record<string, unknown> = { account: ACCOUNT }) {
+async function bootLogin(buckets: Record<string, unknown> = { account: ACCOUNT }, signInStep = "signin.login") {
   const kestrel = await bootKestrel({
     config: {
       modules: [{ use: "./signin.ts", config: {} }, { use: "@michaelthielemann/kestrel-ratelimit-memory", config: { buckets, deviceCookies: { secretKey: KEY } } }],
@@ -96,11 +99,12 @@ async function bootLogin(buckets: Record<string, unknown> = { account: ACCOUNT }
       http: null,
     },
     modules: [signIn, module],
-    pipelines: [definePipeline({ name: "login", steps: ["ratelimit.check:account", "signin.login", "ratelimit.rememberDevice:account"] })],
+    pipelines: [definePipeline({ name: "login", steps: ["ratelimit.check:account", signInStep, "ratelimit.rememberDevice:account"] })],
     logger: silentLogger,
   });
   const attempt = (username: string, password: string, headers: Record<string, string> = {}) => kestrel.run("login", { trigger: { kind: "http", name: "POST /login" }, ip: "192.0.2.1", headers, body: { username, password } });
-  return { kestrel, attempt };
+  const send = (body: Record<string, unknown>, headers: Record<string, string> = {}) => kestrel.run("login", { trigger: { kind: "http", name: "POST /login" }, ip: "192.0.2.1", headers, body });
+  return { kestrel, attempt, send };
 }
 
 type Attempt = Awaited<ReturnType<typeof bootLogin>>["attempt"];
@@ -181,6 +185,37 @@ describe("known devices at sign-in", () => {
     expect((await attempt("owner", PASSWORD, device)).status).toBe(200);
     for (let i = 0; i < 4; i++) expect((await attempt("owner", "guess", device)).status).toBe(401);
     expect((await attempt("owner", PASSWORD)).status).toBe(429);
+    await kestrel.stop();
+  });
+});
+
+describe("device cookies of look-alike accounts", () => {
+  it("do not help against an account whose name only differs in case, width or surrounding space, however many of them are collected", async () => {
+    const { kestrel, attempt } = await bootLogin();
+    const cookies: Record<string, string>[] = [];
+    for (const lookalike of ["OWNER", "Owner", "ｏｗｎｅｒ", " owner "]) for (let i = 0; i < 5; i++) cookies.push(await deviceOf(attempt, lookalike));
+    const wave = await Promise.all(cookies.flatMap((cookie) => Array.from({ length: 3 }, () => attempt("owner", "guess", cookie))));
+    expect(wave.filter((result) => result.status === 401)).toHaveLength(3);
+    expect(wave.filter((result) => result.status === 429)).toHaveLength(57);
+    expect(wave.every((result) => result.cookies === undefined)).toBe(true);
+    await kestrel.stop();
+  });
+
+  it("are not issued for a name the request only claims when the login reads another field", async () => {
+    const { kestrel, send } = await bootLogin({ account: ACCOUNT }, "signin.loginByEmail");
+    const decoy = await send({ email: "someone@example.org", username: "owner", password: PASSWORD });
+    expect(decoy.status).toBe(200);
+    expect(decoy.cookies).toBeUndefined();
+    await kestrel.stop();
+  });
+
+  it("bind to the exact e-mail address, so a variant spelling of it gets no budget of the other account's", async () => {
+    const { kestrel, send } = await bootLogin({ account: { ...ACCOUNT, field: "email" } }, "signin.loginByEmail");
+    const issued = await send({ email: "Alice@example.org", password: PASSWORD });
+    expect(issued.status).toBe(200);
+    const cookie = cookieHeader(issued.cookies?.[0] ?? "");
+    const guesses = await Promise.all(Array.from({ length: 10 }, () => send({ email: "alice@example.org", password: "guess" }, cookie)));
+    expect(guesses.filter((result) => result.status === 401)).toHaveLength(3);
     await kestrel.stop();
   });
 });

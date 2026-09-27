@@ -18,13 +18,13 @@ export interface DeviceCookieConfig {
   secure: boolean;
 }
 
-/** Issues and checks device cookies, each bound to one account key. */
+/** Issues and checks device cookies, each bound to one exact account name. */
 export interface DeviceCookies {
   /** The cookie's name. */
   readonly name: string;
-  /** The `set-cookie` value of a new device cookie for `account`. */
+  /** The `set-cookie` value of a new device cookie for the account named exactly `account`. */
   issue(account: string): string;
-  /** The device a request's cookie names when one of its device cookies is valid for `account`; `undefined` otherwise. */
+  /** The device a request's cookie names when one of its device cookies is valid for the account named exactly `account`; `undefined` otherwise. */
   verify(headers: Record<string, string>, account: string): string | undefined;
 }
 

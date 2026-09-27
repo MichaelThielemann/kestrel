@@ -1118,7 +1118,8 @@ Net changes since 5.8.1.
   own for each device holding a valid device cookie for the account it names, counted in place of the
   account's, so a third party who blocks an account for unknown devices no longer locks its owner out.
   The new step `ratelimit.rememberDevice:<bucket>`, after the login, hands out that cookie:
-  `__Host-kestrel_device`, `HttpOnly`, `Secure`, `SameSite=Strict`, bound to the account, signed with
+  `__Host-kestrel_device`, `HttpOnly`, `Secure`, `SameSite=Strict`, bound to the exact name of the
+  signed-in account (only when the body field of the bucket names it), signed with
   HMAC-SHA-256 under the new module config `deviceCookies` (`secretKey`, `previousSecretKeys`,
   `maxAgeSeconds` default 30 days, `secure`). A device that uses up its budget, a cookie for another
   account or an expired one counts against the account as before. The check leaves `knownDevice` on the

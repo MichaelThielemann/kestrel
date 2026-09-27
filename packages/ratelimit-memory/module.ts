@@ -52,6 +52,20 @@ export const configSchema = z
   })
   .strict();
 
+function namedAccount(bucket: Bucket, ctx: Context): string | undefined {
+  const name = ctx.payload[bucket.field ?? "username"];
+  return typeof name === "string" && name !== "" ? name : undefined;
+}
+
+function signedInAccount(ctx: Context): string | undefined {
+  const identity: unknown = Reflect.get(ctx, "identity");
+  if (typeof identity !== "object" || identity === null) return undefined;
+  const claims: unknown = Reflect.get(identity, "claims");
+  const claimed: unknown = typeof claims === "object" && claims !== null ? Reflect.get(claims, "username") : undefined;
+  const id: unknown = Reflect.get(identity, "id");
+  return typeof claimed === "string" ? claimed : typeof id === "string" ? id : undefined;
+}
+
 function keyFor(bucket: Bucket, ctx: Context): string {
   const kind = bucket.key ?? "ip";
   if (kind === "identity") {
@@ -105,7 +119,8 @@ export default defineModule({
       };
       return async (ctx: Context) => {
         const key = keyFor(config, ctx);
-        const device = devices === undefined || key === "unknown" ? undefined : limit.devices?.verify(ctx.headers, key);
+        const named = devices === undefined ? undefined : namedAccount(config, ctx);
+        const device = named === undefined ? undefined : limit.devices?.verify(ctx.headers, named);
         if (devices !== undefined && device !== undefined && take(devices, device, ctx.runId).allowed) return ok({ ...ctx, knownDevice: { id: deviceId(device) } });
         const decision = take(bucket, key, ctx.runId);
         if (!decision.allowed) {
@@ -119,9 +134,9 @@ export default defineModule({
       const devices = limit.devices;
       if (limit.deviceBucketOf(bucket) === undefined || devices === undefined) throw new Error(`ratelimit.rememberDevice:${bucket}: the bucket has no knownDevices`);
       return async (ctx: Context) => {
-        const key = keyFor(config, ctx);
-        if (Reflect.get(ctx, "identity") === undefined || key === "unknown") return ok(ctx);
-        return ok({ ...ctx, responseCookies: [...(ctx.responseCookies ?? []), devices.issue(key)] });
+        const named = namedAccount(config, ctx);
+        if (named === undefined || named !== signedInAccount(ctx)) return ok(ctx);
+        return ok({ ...ctx, responseCookies: [...(ctx.responseCookies ?? []), devices.issue(named)] });
       };
     }),
     sweep: async (ctx: Context) => ok({ ...ctx, result: { removed: limit.sweep() } }),
@@ -140,7 +155,7 @@ export default defineModule({
       };
     },
     rememberDevice: (bucket: string) => ({
-      summary: `After a successful sign-in: hand the device a signed device cookie bound to the account bucket ${bucket} counts by, so its next sign-ins count against the device's own budget`,
+      summary: `After a successful sign-in: hand the device a signed device cookie bound to the exact name of the signed-in account, when the body field bucket ${bucket} reads names it, so the device's next sign-ins to that account count against its own budget`,
       reads: ["identity", "payload.username?", "payload.email?"],
       writes: ["responseCookies?"],
       input: { type: "object", properties: { username: { type: "string", maxLength: MAX_ACCOUNT_NAME }, email: { type: "string", maxLength: MAX_ACCOUNT_NAME } }, additionalProperties: true },

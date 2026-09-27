@@ -11257,7 +11257,7 @@
       "module": "ratelimit/memory",
       "factory": true,
       "description": {
-        "summary": "After a successful sign-in: hand the device a signed device cookie bound to the account bucket <arg> counts by, so its next sign-ins count against the device's own budget",
+        "summary": "After a successful sign-in: hand the device a signed device cookie bound to the exact name of the signed-in account, when the body field bucket <arg> reads names it, so the device's next sign-ins to that account count against its own budget",
         "reads": [
           "identity",
           "payload.username?",
